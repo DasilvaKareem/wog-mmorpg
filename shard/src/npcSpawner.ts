@@ -104,6 +104,15 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
     teachesProfession: "skinning",
   },
+  {
+    zoneId: "human-meadow",
+    type: "profession-trainer",
+    name: "Chef Gastron",
+    x: 460,
+    y: 420,
+    hp: 999,
+    teachesProfession: "cooking",
+  },
   // Crafting Stations
   {
     zoneId: "human-meadow",
@@ -126,6 +135,14 @@ const NPC_DEFS: NpcDef[] = [
     type: "enchanting-altar",
     name: "Enchanter's Altar",
     x: 320,
+    y: 460,
+    hp: 9999,
+  },
+  {
+    zoneId: "human-meadow",
+    type: "campfire",
+    name: "Cooking Campfire",
+    x: 400,
     y: 460,
     hp: 9999,
   },

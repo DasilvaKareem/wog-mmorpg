@@ -3,6 +3,7 @@ import { getTechniquesByClass, getLearnedTechniques, getTechniqueById } from "./
 import { getOrCreateZone } from "./zoneRuntime.js";
 import { getAvailableGold, recordGoldSpend } from "./goldLedger.js";
 import { getGoldBalance } from "./blockchain.js";
+import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -69,7 +70,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
   );
 
-  // Learn a technique from a trainer
+  // Learn a technique from a trainer (PROTECTED)
   server.post<{
     Body: {
       zoneId: string;
@@ -77,8 +78,11 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       techniqueId: string;
       trainerEntityId: string;
     };
-  }>("/techniques/learn", async (req, reply) => {
+  }>("/techniques/learn", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { zoneId, playerEntityId, techniqueId, trainerEntityId } = req.body;
+    const authenticatedWallet = (req as any).walletAddress;
 
     const zone = getOrCreateZone(zoneId);
     const player = zone.entities.get(playerEntityId);
@@ -86,6 +90,11 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
 
     if (!player) {
       return reply.status(404).send({ error: "Player entity not found" });
+    }
+
+    // Verify ownership
+    if (!verifyEntityOwnership(player.walletAddress, authenticatedWallet)) {
+      return reply.status(403).send({ error: "Not authorized to control this player" });
     }
 
     if (!trainer || trainer.type !== "trainer") {
@@ -158,7 +167,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     });
   });
 
-  // Use a technique
+  // Use a technique (PROTECTED)
   server.post<{
     Body: {
       zoneId: string;
@@ -166,14 +175,22 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       techniqueId: string;
       targetEntityId?: string;
     };
-  }>("/techniques/use", async (req, reply) => {
+  }>("/techniques/use", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { zoneId, casterEntityId, techniqueId, targetEntityId } = req.body;
+    const authenticatedWallet = (req as any).walletAddress;
 
     const zone = getOrCreateZone(zoneId);
     const caster = zone.entities.get(casterEntityId);
 
     if (!caster) {
       return reply.status(404).send({ error: "Caster entity not found" });
+    }
+
+    // Verify ownership
+    if (!verifyEntityOwnership(caster.walletAddress, authenticatedWallet)) {
+      return reply.status(403).send({ error: "Not authorized to control this caster" });
     }
 
     const technique = getTechniqueById(techniqueId);

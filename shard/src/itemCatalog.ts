@@ -36,10 +36,10 @@ export const ITEM_CATALOG: ItemDefinition[] = [
   },
   {
     tokenId: 1n,
-    name: "Mana Potion",
-    description: "Restores 30 MP instantly.",
-    goldPrice: 15,
-    category: "consumable",
+    name: "Raw Meat",
+    description: "Uncooked meat from slain beasts. Can be cooked for better nutrition.",
+    goldPrice: 3,
+    category: "material",
   },
   // --- Weapons ---
   {
@@ -693,6 +693,52 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 120,
+  },
+
+  // --- Mana Potion (moved from tokenId 1) ---
+  {
+    tokenId: 80n,
+    name: "Mana Potion",
+    description: "Restores 30 essence instantly.",
+    goldPrice: 15,
+    category: "consumable",
+  },
+
+  // --- Cooked Food (Cooking Profession) ---
+  {
+    tokenId: 81n,
+    name: "Cooked Meat",
+    description: "Grilled meat that restores 30 HP.",
+    goldPrice: 8,
+    category: "consumable",
+  },
+  {
+    tokenId: 82n,
+    name: "Hearty Stew",
+    description: "A filling stew that restores 60 HP.",
+    goldPrice: 18,
+    category: "consumable",
+  },
+  {
+    tokenId: 83n,
+    name: "Roasted Boar",
+    description: "Succulent roasted boar that restores 100 HP.",
+    goldPrice: 35,
+    category: "consumable",
+  },
+  {
+    tokenId: 84n,
+    name: "Bear Feast",
+    description: "A luxurious feast that restores 150 HP.",
+    goldPrice: 60,
+    category: "consumable",
+  },
+  {
+    tokenId: 85n,
+    name: "Hero's Banquet",
+    description: "An epic meal that restores 250 HP and grants +5 STR for 5 minutes.",
+    goldPrice: 120,
+    category: "consumable",
   },
 ];
 

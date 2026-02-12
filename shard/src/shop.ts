@@ -3,6 +3,7 @@ import { getGoldBalance, mintItem } from "./blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemsByTokenIds } from "./itemCatalog.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { authenticateRequest } from "./auth.js";
 
 export function registerShopRoutes(server: FastifyInstance) {
   /**
@@ -67,15 +68,25 @@ export function registerShopRoutes(server: FastifyInstance) {
   /**
    * POST /shop/buy { buyerAddress, tokenId, quantity }
    * Server-authoritative purchase: checks available wallet gold, records spend, mints item.
+   * PROTECTED - Requires authentication
    */
   server.post<{
     Body: { buyerAddress: string; tokenId: number; quantity: number };
-  }>("/shop/buy", async (request, reply) => {
+  }>("/shop/buy", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { buyerAddress, tokenId, quantity } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!buyerAddress || !/^0x[a-fA-F0-9]{40}$/.test(buyerAddress)) {
       reply.code(400);
       return { error: "Invalid buyer address" };
+    }
+
+    // Verify authenticated wallet matches buyer
+    if (buyerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to purchase for this wallet" };
     }
 
     if (quantity < 1 || quantity > 100) {

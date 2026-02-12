@@ -29,7 +29,9 @@ import { registerEnchantingRoutes } from "./enchanting.js";
 import { registerEventRoutes } from "./eventRoutes.js";
 import { registerTerrainRoutes } from "./terrainRoutes.js";
 import { registerSkinningRoutes } from "./skinning.js";
+import { registerCookingRoutes } from "./cooking.js";
 import { registerPartyRoutes } from "./partySystem.js";
+import { registerAuthRoutes } from "./auth.js";
 
 const server = Fastify({ logger: true });
 
@@ -38,6 +40,7 @@ server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
 
 // Register subsystems
 server.register(cors, { origin: true });
+registerAuthRoutes(server);
 registerZoneRuntime(server);
 registerSpawnOrders(server);
 registerCommands(server);
@@ -63,6 +66,7 @@ registerEnchantingRoutes(server);
 registerEventRoutes(server);
 registerTerrainRoutes(server);
 registerSkinningRoutes(server);
+registerCookingRoutes(server);
 registerPartyRoutes(server);
 spawnNpcs();
 spawnOreNodes();

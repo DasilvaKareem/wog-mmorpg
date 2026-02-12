@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getOrCreateZone, type Order } from "./zoneRuntime.js";
+import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
 
 interface CommandBody {
   zoneId: string;
@@ -11,14 +12,23 @@ interface CommandBody {
 }
 
 export function registerCommands(server: FastifyInstance) {
-  server.post<{ Body: CommandBody }>("/command", async (request, reply) => {
+  server.post<{ Body: CommandBody }>("/command", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, entityId, action, x, y, targetId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     const zone = getOrCreateZone(zoneId);
     const entity = zone.entities.get(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+
+    // Verify the authenticated user owns this entity
+    if (!verifyEntityOwnership(entity.walletAddress, authenticatedWallet)) {
+      reply.code(403);
+      return { error: "Not authorized to control this entity" };
     }
 
     let order: Order;

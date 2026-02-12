@@ -198,7 +198,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     goldMin: 50,
     goldMax: 80,
     autoDrops: [
-      { tokenId: 2n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
+      { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
       { tokenId: 24n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Copper Ore
     ],
     skinningDrops: [
@@ -253,7 +253,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     goldMin: 150,
     goldMax: 250,
     autoDrops: [
-      { tokenId: 2n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Mana Potion
+      { tokenId: 80n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Mana Potion
       { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
       { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Dragon's Breath
     ],

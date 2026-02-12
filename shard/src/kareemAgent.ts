@@ -1,7 +1,8 @@
 #!/usr/bin/env tsx
 /**
- * KAREEM AUTONOMOUS AGENT - Party-enabled AI
+ * KAREEM AUTONOMOUS AGENT - Party-enabled AI with Authentication
  * - Loads Kareem character NFT
+ * - Authenticates with wallet signature
  * - Seeks nearby players to party with
  * - Uses advanced techniques in combat
  * - Coordinates with party members
@@ -9,23 +10,16 @@
  */
 
 import "dotenv/config";
+import { authenticateWithWallet, createAuthenticatedAPI } from "./authHelper.js";
 
 const API = "http://localhost:3000";
 const WALLET = "0xf6f0f8ca2ef85deb9eEBdBc4BC541d2D57832D4b";
+const PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY!;
 
 let agentId: string;
 let currentZone = "human-meadow";
 let partyId: string | null = null;
-
-async function api(method: string, path: string, body?: any) {
-  const res = await fetch(`${API}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`API Error: ${await res.text()}`);
-  return res.json();
-}
+let api: ReturnType<typeof createAuthenticatedAPI>;
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -394,6 +388,12 @@ async function playAutonomously() {
 ║        Party-Seeking AI with Advanced Combat System          ║
 ╚══════════════════════════════════════════════════════════════╝
   `);
+
+  // Authenticate
+  console.log("🔐 Authenticating with wallet signature...\n");
+  const token = await authenticateWithWallet(PRIVATE_KEY);
+  api = createAuthenticatedAPI(token);
+  console.log();
 
   // Load & Spawn
   const character = await loadCharacterNFT();

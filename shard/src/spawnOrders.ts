@@ -8,6 +8,7 @@ import {
 import { randomUUID } from "crypto";
 import { computeStatsAtLevel } from "./leveling.js";
 import { getItemByTokenId, type EquipmentSlot } from "./itemCatalog.js";
+import { authenticateRequest } from "./auth.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -32,16 +33,28 @@ interface SpawnOrderBody {
 }
 
 export function registerSpawnOrders(server: FastifyInstance) {
-  // POST /spawn — inject an entity into a zone
-  server.post<{ Body: SpawnOrderBody }>("/spawn", async (request, reply) => {
+  // POST /spawn — inject an entity into a zone (PROTECTED)
+  server.post<{ Body: SpawnOrderBody }>("/spawn", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
       walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, equipment,
     } = request.body;
 
+    const authenticatedWallet = (request as any).walletAddress;
+
     if (!zoneId || !type || !name) {
       reply.code(400);
       return { error: "zoneId, type, and name are required" };
+    }
+
+    // Verify authenticated wallet matches the entity's wallet (for players)
+    if (type === "player" && walletAddress) {
+      if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+        reply.code(403);
+        return { error: "Not authorized to spawn entity for this wallet" };
+      }
     }
 
     const zone = getOrCreateZone(zoneId);

@@ -14,9 +14,12 @@
     "dotenv": "^17.2.4",
     "ethers": "^6.16.0",
     "fastify": "^5.2.1",
-    "thirdweb": "^5.118.1"
+    "jsonwebtoken": "^9.0.3",
+    "thirdweb": "^5.118.1",
+    "viem": "^2.45.3"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.0",
     "solc": "^0.8.33",
     "tsx": "^4.7.0",
