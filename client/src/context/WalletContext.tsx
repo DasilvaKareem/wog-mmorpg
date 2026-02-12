@@ -3,7 +3,9 @@ import * as React from "react";
 import {
   fetchCharacters,
   fetchWalletCharacterInZone,
+  fetchProfessions,
   type WalletCharacterProgress,
+  type ProfessionsResponse,
 } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance } from "@/lib/walletManager";
@@ -15,9 +17,12 @@ interface WalletContextValue {
   loading: boolean;
   characterProgress: WalletCharacterProgress | null;
   characterLoading: boolean;
+  professions: ProfessionsResponse | null;
+  professionsLoading: boolean;
   connect: () => Promise<void>;
   refreshBalance: () => Promise<void>;
   refreshCharacterProgress: () => Promise<void>;
+  refreshProfessions: () => Promise<void>;
   buyItem: (tokenId: number, quantity: number) => Promise<boolean>;
   equipItem: (tokenId: number) => Promise<boolean>;
   unequipSlot: (slot: EquipmentSlot) => Promise<boolean>;
@@ -58,6 +63,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const [zoneId, setZoneId] = React.useState("human-meadow");
   const [characterProgress, setCharacterProgress] = React.useState<WalletCharacterProgress | null>(null);
   const [characterLoading, setCharacterLoading] = React.useState(false);
+  const [professions, setProfessions] = React.useState<ProfessionsResponse | null>(null);
+  const [professionsLoading, setProfessionsLoading] = React.useState(false);
   const lastCharacterFetchRef = React.useRef<number>(0);
   const characterCacheDuration = 3000; // 3 seconds
 
@@ -99,17 +106,35 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     }
   }, [walletManager, zoneId, characterCacheDuration]);
 
+  const refreshProfessions = React.useCallback(async () => {
+    if (!walletManager.address) {
+      setProfessions(null);
+      return;
+    }
+
+    setProfessionsLoading(true);
+    try {
+      const professionsData = await fetchProfessions(walletManager.address);
+      setProfessions(professionsData);
+    } finally {
+      setProfessionsLoading(false);
+    }
+  }, [walletManager]);
+
   const connect = React.useCallback(async () => {
     setLoading(true);
     try {
       await walletManager.connect();
       setAddress(walletManager.address);
       setBalance(walletManager.balance);
-      await refreshCharacterProgress();
+      await Promise.all([
+        refreshCharacterProgress(),
+        refreshProfessions(),
+      ]);
     } finally {
       setLoading(false);
     }
-  }, [walletManager, refreshCharacterProgress]);
+  }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
   const buyItem = React.useCallback(
     async (tokenId: number, quantity: number) => {
@@ -150,20 +175,23 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   React.useEffect(() => {
     if (!address) {
       setCharacterProgress(null);
+      setProfessions(null);
       return;
     }
 
     void refreshCharacterProgress();
+    void refreshProfessions();
 
     // Poll less frequently (15s) - the wallet manager now caches responses for 3s
     // so rapid UI updates won't cause excessive API calls
     const interval = window.setInterval(() => {
       void refreshBalance();
       void refreshCharacterProgress();
+      void refreshProfessions();
     }, 15000);
 
     return () => window.clearInterval(interval);
-  }, [address, refreshBalance, refreshCharacterProgress]);
+  }, [address, refreshBalance, refreshCharacterProgress, refreshProfessions]);
 
   const value = React.useMemo(
     () => ({
@@ -173,9 +201,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       loading,
       characterProgress,
       characterLoading,
+      professions,
+      professionsLoading,
       connect,
       refreshBalance,
       refreshCharacterProgress,
+      refreshProfessions,
       buyItem,
       equipItem,
       unequipSlot,
@@ -186,9 +217,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       loading,
       characterProgress,
       characterLoading,
+      professions,
+      professionsLoading,
       connect,
       refreshBalance,
       refreshCharacterProgress,
+      refreshProfessions,
       buyItem,
       equipItem,
       unequipSlot,

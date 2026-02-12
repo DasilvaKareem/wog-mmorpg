@@ -193,15 +193,47 @@ export class TilemapRenderer {
     tx: number,
     tz: number,
   ): number {
-    // Create 2×1 "tuft" shapes using a second noise sample
-    const n2 = this.noise(tx * 97 + lx, tz * 131 + ly);
-    // Tufts: check if this pixel AND its right neighbor are both "dark noise"
-    if (n < 0.20 && n2 < 0.40) return pal.dark;
-    // Small bright flower-like dots
-    if (n > 0.96 && (lx & 3) === 1 && (ly & 3) === 2) return pal.light;
-    if (n < 0.22) return pal.dark;
-    if (n < 0.88) return pal.base;
-    return pal.light;
+    // Smoother grass with subtle variation - no harsh grid lines
+    // Use multiple noise samples at different scales for organic look
+    const n2 = this.noise(tx * 7 + (lx >> 2), tz * 11 + (ly >> 2));
+    const n3 = this.noise(tx * 13 + (lx >> 1), tz * 17 + (ly >> 1));
+
+    // Blend noise samples for smooth variation
+    const blend = (n * 0.4 + n2 * 0.35 + n3 * 0.25);
+
+    // Very subtle darker grass tufts (5% coverage)
+    if (blend < 0.05) return pal.dark;
+
+    // Tiny bright highlights (2% coverage)
+    if (blend > 0.98) return pal.light;
+
+    // Most pixels use base color with very subtle variation
+    // Mix base and light colors smoothly
+    if (blend > 0.55) {
+      // Lighter grass (30% of pixels)
+      return this.blendColors(pal.base, pal.light, (blend - 0.55) / 0.45);
+    }
+
+    // Base grass (majority)
+    return pal.base;
+  }
+
+  /** Blend two RGB colors by a factor (0 = color1, 1 = color2) */
+  private blendColors(color1: number, color2: number, factor: number): number {
+    const r1 = (color1 >> 16) & 0xff;
+    const g1 = (color1 >> 8) & 0xff;
+    const b1 = color1 & 0xff;
+
+    const r2 = (color2 >> 16) & 0xff;
+    const g2 = (color2 >> 8) & 0xff;
+    const b2 = color2 & 0xff;
+
+    const f = Math.max(0, Math.min(1, factor));
+    const r = Math.round(r1 + (r2 - r1) * f);
+    const g = Math.round(g1 + (g2 - g1) * f);
+    const b = Math.round(b1 + (b2 - b1) * f);
+
+    return (r << 16) | (g << 8) | b;
   }
 
   private waterPattern(

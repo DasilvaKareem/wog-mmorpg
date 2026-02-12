@@ -170,3 +170,31 @@ export async function fetchTerrainGrid(
     return null;
   }
 }
+
+export interface ProfessionInfo {
+  professionType: string;
+  name: string;
+  description: string;
+  cost: number;
+}
+
+export interface ProfessionsResponse {
+  learned: string[];
+  available: ProfessionInfo[];
+}
+
+export async function fetchProfessions(
+  walletAddress: string
+): Promise<ProfessionsResponse> {
+  try {
+    const res = await fetch(`/professions/${walletAddress}`);
+    if (!res.ok) return { learned: [], available: [] };
+    const data = await res.json();
+    return {
+      learned: data.learned || [],
+      available: data.available || [],
+    };
+  } catch {
+    return { learned: [], available: []};
+  }
+}

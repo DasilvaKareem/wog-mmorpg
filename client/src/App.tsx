@@ -5,6 +5,7 @@ import { GameCanvas } from "@/components/GameCanvas";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
+import { ProfessionPanel } from "@/components/ProfessionPanel";
 import { ZoneSelector } from "@/components/ZoneSelector";
 import { ChatLog } from "@/components/ChatLog";
 import { LobbyViewer } from "@/components/LobbyViewer";
@@ -42,8 +43,9 @@ function AppShell(): React.ReactElement {
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
       <WalletPanel />
+      <ProfessionPanel />
       <ZoneSelector />
-      <LobbyViewer className="absolute top-4 left-4 z-30 w-96" />
+      <LobbyViewer className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-96" />
       <ChatLog
         zoneId={currentZone}
         className="absolute bottom-4 right-4 z-30 w-96"
