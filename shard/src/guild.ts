@@ -32,6 +32,7 @@ import {
   type ProposalData,
 } from "./guildChain.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { authenticateRequest } from "./auth.js";
 
 const RANK_NAMES = ["Member", "Officer", "Founder"];
 const STATUS_NAMES = ["active", "disbanded"];
@@ -147,12 +148,20 @@ export function registerGuildRoutes(server: FastifyInstance) {
       description: string;
       initialDeposit: number;
     };
-  }>("/guild/create", async (request, reply) => {
+  }>("/guild/create", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { founderAddress, name, description, initialDeposit } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!founderAddress || !/^0x[a-fA-F0-9]{40}$/.test(founderAddress)) {
       reply.code(400);
       return { error: "Invalid founder address" };
+    }
+
+    if (founderAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     if (!name || name.length < 3 || name.length > 32) {
@@ -333,13 +342,22 @@ export function registerGuildRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { memberAddress: string };
-  }>("/guild/:guildId/join", async (request, reply) => {
+  }>("/guild/:guildId/join", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { memberAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!memberAddress || !/^0x[a-fA-F0-9]{40}$/.test(memberAddress)) {
       reply.code(400);
       return { error: "Invalid member address" };
+    }
+
+    // Verify authenticated wallet matches member address
+    if (memberAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     try {

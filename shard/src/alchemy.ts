@@ -3,6 +3,7 @@ import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
+import { authenticateRequest } from "./auth.js";
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -305,13 +306,22 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       alchemyLabId: string; // Alchemy Lab NPC entity ID
       recipeId: string;
     };
-  }>("/alchemy/brew", async (request, reply) => {
+  }>("/alchemy/brew", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, alchemyLabId, recipeId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     // Find recipe

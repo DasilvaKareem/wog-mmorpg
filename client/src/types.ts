@@ -91,3 +91,13 @@ export interface TerrainGridData {
   tileSize: number;
   tiles: string[];
 }
+
+export interface TerrainGridDataV2 {
+  zoneId: string;
+  width: number;
+  height: number;
+  tileSize: number;
+  ground: number[];
+  overlay: number[];
+  biome: string;
+}

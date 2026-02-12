@@ -1,9 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { getTechniquesByClass, getLearnedTechniques, getTechniqueById } from "./techniques.js";
-import { getOrCreateZone } from "./zoneRuntime.js";
+import type { TechniqueDefinition } from "./techniques.js";
+import { getOrCreateZone, recalculateEntityVitals } from "./zoneRuntime.js";
+import type { Entity, ActiveEffect, ZoneState } from "./zoneRuntime.js";
 import { getAvailableGold, recordGoldSpend } from "./goldLedger.js";
 import { getGoldBalance } from "./blockchain.js";
 import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
+import { randomUUID } from "crypto";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -222,6 +225,19 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Not enough essence" });
     }
 
+    // Validate cooldown
+    if (caster.cooldowns) {
+      const cooldownExpires = caster.cooldowns.get(techniqueId);
+      if (cooldownExpires != null && zone.tick < cooldownExpires) {
+        const remainingTicks = cooldownExpires - zone.tick;
+        return reply.status(400).send({
+          error: `Technique on cooldown. ${remainingTicks}s remaining.`,
+          cooldownExpiresAtTick: cooldownExpires,
+          remainingSeconds: remainingTicks,
+        });
+      }
+    }
+
     // Get target if needed
     let target = caster; // Default to self
     if (technique.targetType === "enemy" || technique.targetType === "ally") {
@@ -238,6 +254,13 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     // Deduct essence cost
     caster.essence = currentEssence - technique.essenceCost;
 
+    // Set cooldown
+    const cooldownExpiresAtTick = zone.tick + technique.cooldown;
+    if (!caster.cooldowns) {
+      caster.cooldowns = new Map();
+    }
+    caster.cooldowns.set(techniqueId, cooldownExpiresAtTick);
+
     // Apply technique effects
     const result = applyTechniqueEffects(caster, target, technique, zone);
 
@@ -245,16 +268,26 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       success: true,
       technique: technique.name,
       casterEssence: caster.essence,
+      cooldownExpiresAtTick,
       result,
     });
   });
 }
 
+function addActiveEffect(entity: Entity, effect: ActiveEffect): void {
+  if (!entity.activeEffects) {
+    entity.activeEffects = [];
+  }
+  // Same techniqueId refreshes (replaces), different techniques stack
+  entity.activeEffects = entity.activeEffects.filter(e => e.techniqueId !== effect.techniqueId);
+  entity.activeEffects.push(effect);
+}
+
 function applyTechniqueEffects(
-  caster: any,
-  target: any,
-  technique: any,
-  zone: any
+  caster: Entity,
+  target: Entity,
+  technique: TechniqueDefinition,
+  zone: ZoneState
 ): any {
   const { effects, type } = technique;
   const result: any = {};
@@ -267,7 +300,7 @@ function applyTechniqueEffects(
     if (effects.maxTargets && effects.maxTargets > 1) {
       // Multi-target attack
       const targets = findNearbyEnemies(target, zone, effects.maxTargets, effects.areaRadius);
-      result.targets = targets.map((t: any) => {
+      result.targets = targets.map((t: Entity) => {
         const actualDamage = Math.min(damage, t.hp);
         t.hp = Math.max(0, t.hp - damage);
         if (t.hp === 0) {
@@ -297,47 +330,129 @@ function applyTechniqueEffects(
     }
   }
 
-  // Healing techniques
+  // Healing techniques — instant vs HoT
   if (type === "healing" && effects.healAmount) {
-    const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100));
-    const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
-    target.hp = Math.min(target.maxHp, target.hp + actualHeal);
-    result.healing = actualHeal;
-    result.targetHp = target.hp;
+    if (effects.duration && effects.duration > 0) {
+      // Heal-over-time (Renew, Nature's Blessing, Meditation)
+      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
+      const hotEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: technique.id,
+        name: technique.name,
+        type: "hot",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        hotHealPerTick: healPerTick,
+      };
+      addActiveEffect(target, hotEffect);
+      result.hotApplied = true;
+      result.healPerTick = healPerTick;
+      result.duration = effects.duration;
+    } else {
+      // Instant heal (Holy Light, Lay on Hands)
+      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
+      target.hp = Math.min(target.maxHp, target.hp + actualHeal);
+      result.healing = actualHeal;
+      result.targetHp = target.hp;
+    }
   }
 
-  // Buffs and debuffs (simplified - would need proper buff/debuff system)
-  if (type === "buff" && effects.statBonus) {
+  // Buffs with stat bonuses
+  if (type === "buff" && effects.statBonus && effects.duration) {
+    const buffEffect: ActiveEffect = {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: "buff",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      statModifiers: effects.statBonus,
+    };
+    addActiveEffect(target, buffEffect);
+    recalculateEntityVitals(target);
     result.buffs = effects.statBonus;
     result.duration = effects.duration;
   }
 
-  if (type === "debuff" && effects.statReduction) {
+  // Debuffs with stat reductions
+  if (type === "debuff" && effects.statReduction && effects.duration) {
+    const debuffEffect: ActiveEffect = {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: "debuff",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      statModifiers: effects.statReduction,
+    };
+    addActiveEffect(target, debuffEffect);
+    recalculateEntityVitals(target);
     result.debuffs = effects.statReduction;
     result.duration = effects.duration;
   }
 
-  if (effects.shield) {
-    const shieldAmount = Math.floor(target.maxHp * (effects.shield / 100));
-    result.shield = shieldAmount;
+  // DoTs (Poison Blade, Consecration, Corruption)
+  if (effects.dotDamage && effects.duration) {
+    const dotEffect: ActiveEffect = {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: "dot",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      dotDamage: effects.dotDamage,
+    };
+    addActiveEffect(target, dotEffect);
+    result.dotApplied = true;
+    result.dotDamage = effects.dotDamage;
+    result.duration = effects.duration;
+  }
+
+  // Shields (Divine Protection, Soul Shield)
+  if (effects.shield && effects.duration) {
+    const shieldHp = Math.floor(target.maxHp * (effects.shield / 100));
+    const shieldEffect: ActiveEffect = {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: "shield",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      shieldHp,
+      shieldMaxHp: shieldHp,
+    };
+    addActiveEffect(target, shieldEffect);
+    result.shield = shieldHp;
     result.duration = effects.duration;
   }
 
   return result;
 }
 
-function calculateBaseDamage(caster: any): number {
+function calculateBaseDamage(caster: Entity): number {
   const str = caster.effectiveStats?.str ?? caster.stats?.str ?? 10;
   const int = caster.effectiveStats?.int ?? caster.stats?.int ?? 10;
 
   // Use STR for physical classes, INT for casters
-  const primaryStat = ["mage", "cleric", "warlock"].includes(caster.classId) ? int : str;
+  const primaryStat = ["mage", "cleric", "warlock"].includes(caster.classId ?? "") ? int : str;
 
   return Math.floor(5 + primaryStat * 0.5);
 }
 
-function findNearbyEnemies(origin: any, zone: any, maxTargets: number, radius: number = 50): any[] {
-  const enemies: any[] = [];
+function findNearbyEnemies(origin: Entity, zone: ZoneState, maxTargets: number, radius: number = 50): Entity[] {
+  const enemies: Entity[] = [];
 
   for (const entity of zone.entities.values()) {
     if (entity.type !== "mob" && entity.type !== "player") continue;

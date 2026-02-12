@@ -23,6 +23,7 @@ export default defineConfig({
       "/events": "http://localhost:3000",
       "/techniques": "http://localhost:3000",
       "/v1": "http://localhost:3000",
+      "/v2": "http://localhost:3000",
     },
   },
 });

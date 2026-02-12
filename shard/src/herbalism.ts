@@ -4,6 +4,7 @@ import { mintItem } from "./blockchain.js";
 import { FLOWER_CATALOG } from "./flowerCatalog.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
+import { authenticateRequest } from "./auth.js";
 
 const GATHER_RANGE = 50;
 
@@ -67,13 +68,22 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       entityId: string;
       flowerNodeId: string;
     };
-  }>("/herbalism/gather", async (request, reply) => {
+  }>("/herbalism/gather", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, flowerNodeId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     const zone = getAllZones().get(zoneId);

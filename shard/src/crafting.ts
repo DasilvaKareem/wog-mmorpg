@@ -3,6 +3,7 @@ import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
+import { authenticateRequest } from "./auth.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -10,7 +11,7 @@ export interface CraftingRecipe {
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
   goldCost: number;
-  requiredProfession: "blacksmithing" | "alchemy";
+  requiredProfession: "blacksmithing" | "alchemy" | "leatherworking" | "jewelcrafting";
   craftingTime: number; // seconds (for future use)
 }
 
@@ -207,13 +208,22 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       forgeId: string; // Forge NPC entity ID
       recipeId: string;
     };
-  }>("/crafting/forge", async (request, reply) => {
+  }>("/crafting/forge", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, forgeId, recipeId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     // Find recipe

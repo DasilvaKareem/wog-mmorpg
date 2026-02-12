@@ -32,6 +32,8 @@ import { registerSkinningRoutes } from "./skinning.js";
 import { registerCookingRoutes } from "./cooking.js";
 import { registerPartyRoutes } from "./partySystem.js";
 import { registerAuthRoutes } from "./auth.js";
+import { registerZoneTransitionRoutes } from "./zoneTransition.js";
+import { registerLeaderboardRoutes } from "./leaderboard.js";
 
 const server = Fastify({ logger: true });
 
@@ -68,6 +70,8 @@ registerTerrainRoutes(server);
 registerSkinningRoutes(server);
 registerCookingRoutes(server);
 registerPartyRoutes(server);
+registerZoneTransitionRoutes(server);
+registerLeaderboardRoutes(server);
 spawnNpcs();
 spawnOreNodes();
 spawnFlowerNodes();

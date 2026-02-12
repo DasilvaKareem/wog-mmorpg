@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import fs from "fs";
 import path from "path";
+import { getGeneratedMap, generateAllMaps } from "./mapGenerator.js";
 
 interface ZoneConfig {
   id: string;
@@ -13,13 +14,12 @@ interface ZoneConfig {
 
 const TILE_SIZE = 10; // Server tile size in game units
 
-// Simple terrain generation based on biome
+// Simple terrain generation based on biome (v1 legacy)
 function generateTerrain(zoneConfig: ZoneConfig): string[] {
   const tilesX = Math.floor(zoneConfig.width / TILE_SIZE);
   const tilesY = Math.floor(zoneConfig.height / TILE_SIZE);
   const tiles: string[] = [];
 
-  // Generate terrain based on biome
   const biomeMap: Record<string, string[]> = {
     grassland: ["grass", "grass", "grass", "dirt", "forest"],
     forest: ["forest", "forest", "grass", "dirt"],
@@ -32,10 +32,7 @@ function generateTerrain(zoneConfig: ZoneConfig): string[] {
 
   for (let y = 0; y < tilesY; y++) {
     for (let x = 0; x < tilesX; x++) {
-      // Simple pseudo-random terrain based on position
-      const seed = x * 7 + y * 13;
-      const index = seed % terrainTypes.length;
-      tiles.push(terrainTypes[index]);
+      tiles.push(terrainTypes[0]);
     }
   }
 
@@ -43,13 +40,16 @@ function generateTerrain(zoneConfig: ZoneConfig): string[] {
 }
 
 export function registerTerrainRoutes(server: FastifyInstance): void {
+  // Generate v2 tile maps on startup
+  generateAllMaps();
+
+  // ── v1 (legacy) ──────────────────────────────────────────────────
   server.get<{ Params: { zoneId: string } }>(
     "/v1/terrain/zone/:zoneId",
     async (req, reply) => {
       const { zoneId } = req.params;
 
       try {
-        // Load zone config
         const zonePath = path.join(
           process.cwd(),
           "../world/content/zones",
@@ -79,6 +79,21 @@ export function registerTerrainRoutes(server: FastifyInstance): void {
         server.log.error(error);
         return reply.status(500).send({ error: "Failed to load terrain" });
       }
+    }
+  );
+
+  // ── v2 (tile-atlas indexed) ──────────────────────────────────────
+  server.get<{ Params: { zoneId: string } }>(
+    "/v2/terrain/zone/:zoneId",
+    async (req, reply) => {
+      const { zoneId } = req.params;
+
+      const map = getGeneratedMap(zoneId);
+      if (!map) {
+        return reply.status(404).send({ error: "Zone not found" });
+      }
+
+      return reply.send(map);
     }
   );
 }

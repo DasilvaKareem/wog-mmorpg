@@ -9,6 +9,7 @@ import {
   type Entity,
   type ZoneState,
 } from "./zoneRuntime.js";
+import { authenticateRequest } from "./auth.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -19,6 +20,8 @@ const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "shoulders",
   "gloves",
   "belt",
+  "ring",
+  "amulet",
 ];
 
 function isEquipmentSlot(value: string): value is EquipmentSlot {
@@ -145,8 +148,11 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       entityId?: string;
       walletAddress?: string;
     };
-  }>("/equipment/equip", async (request, reply) => {
+  }>("/equipment/equip", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, tokenId, entityId, walletAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!zoneId || !Number.isFinite(tokenId)) {
       reply.code(400);
@@ -165,6 +171,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: resolved.error ?? "Player not found" };
     }
     const entity = resolved.entity;
+
+    // Verify wallet ownership
+    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to control this entity" };
+    }
 
     const item = getItemByTokenId(BigInt(tokenId));
     if (!item) {
@@ -232,8 +244,11 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       entityId?: string;
       walletAddress?: string;
     };
-  }>("/equipment/unequip", async (request, reply) => {
+  }>("/equipment/unequip", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, slot, entityId, walletAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!zoneId || !slot || !isEquipmentSlot(slot)) {
       reply.code(400);
@@ -252,6 +267,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: resolved.error ?? "Player not found" };
     }
     const entity = resolved.entity;
+
+    // Verify wallet ownership
+    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to control this entity" };
+    }
 
     if (entity.equipment) {
       delete entity.equipment[slot];
@@ -276,8 +297,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       entityId?: string;
       walletAddress?: string;
     };
-  }>("/equipment/repair", async (request, reply) => {
+  }>("/equipment/repair", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, npcId, slot, entityId, walletAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
     if (!zoneId || !npcId) {
       reply.code(400);
       return { error: "zoneId and npcId are required" };
@@ -310,6 +335,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: resolved.error ?? "Player not found" };
     }
     const entity = resolved.entity;
+
+    // Verify wallet ownership
+    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to control this entity" };
+    }
 
     const owner = walletAddress ?? entity.walletAddress;
     if (!owner || !/^0x[a-fA-F0-9]{40}$/.test(owner)) {

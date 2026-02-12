@@ -1,0 +1,44 @@
+{
+  "id": "human-meadow",
+  "name": "Human Meadow",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 1000, "z": 1000 } },
+  "budget": { "maxPopulation": 50, "maxThreat": 20 },
+  "pois": [
+    {
+      "id": "town-center",
+      "name": "Town Center",
+      "type": "landmark",
+      "position": { "x": 200, "z": 400 },
+      "radius": 30,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "meadow-exit",
+      "name": "Road to Wild Meadow",
+      "type": "portal",
+      "position": { "x": 900, "z": 500 },
+      "radius": 20,
+      "tags": [],
+      "portal": {
+        "destinationZone": "wild-meadow",
+        "destinationPoi": "village-gate",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "merchant-square",
+      "name": "Merchant Square",
+      "type": "landmark",
+      "position": { "x": 200, "z": 420 },
+      "radius": 25,
+      "tags": ["safe-zone", "trading"]
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-road",
+      "name": "Main Road",
+      "nodes": ["town-center", "merchant-square", "meadow-exit"]
+    }
+  ]
+}

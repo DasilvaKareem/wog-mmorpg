@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getAllZones } from "./zoneRuntime.js";
 
-export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking";
+export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
 export interface ProfessionInfo {
   name: string;
@@ -40,6 +40,16 @@ export const PROFESSION_CATALOG: Record<ProfessionType, ProfessionInfo> = {
     name: "Cooking",
     description: "Prepare nourishing meals from raw ingredients to restore health.",
     cost: 40,
+  },
+  leatherworking: {
+    name: "Leatherworking",
+    description: "Craft leather armor from tanned hides and pelts.",
+    cost: 75,
+  },
+  jewelcrafting: {
+    name: "Jewelcrafting",
+    description: "Cut gems and forge rings and amulets of power.",
+    cost: 100,
   },
 };
 

@@ -6,6 +6,7 @@ import type {
   CharacterCreateResponse,
   OwnedCharacter,
   TerrainGridData,
+  TerrainGridDataV2,
 } from "./types.js";
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
@@ -166,6 +167,18 @@ export async function fetchTerrainGrid(
     const res = await fetch(`/v1/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridData;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchTerrainGridV2(
+  zoneId: string
+): Promise<TerrainGridDataV2 | null> {
+  try {
+    const res = await fetch(`/v2/terrain/zone/${zoneId}`);
+    if (!res.ok) return null;
+    return (await res.json()) as TerrainGridDataV2;
   } catch {
     return null;
   }

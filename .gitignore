@@ -4,6 +4,9 @@ dist/
 .env
 .DS_Store
 
+# Astro generated
+docs/.astro/
+
 # pnpm
 .pnpm-store/
 pnpm-lock.yaml

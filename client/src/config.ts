@@ -1,11 +1,12 @@
-/** Client-side tile size in pixels (each server tile renders as this many px) */
-export const CLIENT_TILE_PX = 32;
+/** Client-side tile size in pixels — 16px for Pokemon aesthetic */
+export const CLIENT_TILE_PX = 16;
 
 export const POLL_INTERVAL = 1000; // ms
 
-export const ZOOM_MIN = 0.25;
-export const ZOOM_MAX = 3;
-export const ZOOM_STEP = 0.1;
+export const ZOOM_MIN = 0.5;
+export const ZOOM_MAX = 6;
+export const ZOOM_STEP = 0.15;
+export const ZOOM_DEFAULT = 2.0;
 
 export const ENTITY_COLORS: Record<string, number> = {
   player: 0x44ddff,
@@ -20,6 +21,19 @@ export const ENTITY_COLORS: Record<string, number> = {
 export const DEFAULT_ENTITY_COLOR = 0xcccccc;
 
 export const CAMERA_SPEED = 8;
+
+/** Entity sprite palettes — RGB arrays for programmatic sprite generation */
+export const ENTITY_SPRITE_PALETTES: Record<string, { body: number[]; outline: number[]; detail: number[] }> = {
+  player:              { body: [68, 221, 255],  outline: [30, 100, 140],  detail: [255, 255, 255] },
+  mob:                 { body: [224, 64, 64],   outline: [120, 30, 30],   detail: [255, 180, 180] },
+  npc:                 { body: [68, 136, 255],  outline: [30, 60, 140],   detail: [200, 220, 255] },
+  merchant:            { body: [255, 204, 0],   outline: [140, 100, 0],   detail: [255, 240, 180] },
+  trainer:             { body: [136, 255, 68],  outline: [60, 140, 30],   detail: [220, 255, 200] },
+  "profession-trainer":{ body: [68, 255, 136],  outline: [30, 140, 60],   detail: [200, 255, 220] },
+  boss:                { body: [170, 68, 255],  outline: [80, 30, 140],   detail: [220, 180, 255] },
+  "guild-registrar":   { body: [200, 180, 50],  outline: [120, 100, 20],  detail: [255, 240, 150] },
+  auctioneer:          { body: [180, 130, 50],  outline: [100, 70, 20],   detail: [240, 210, 150] },
+};
 
 /** SNES-style terrain color palettes — { base, dark, light } as 0xRRGGBB */
 export interface TilePalette {

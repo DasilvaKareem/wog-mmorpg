@@ -4,6 +4,7 @@ import { mintItem } from "./blockchain.js";
 import { getLootTable, rollDrops } from "./lootTables.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
+import { authenticateRequest } from "./auth.js";
 
 const SKINNING_RANGE = 50;
 
@@ -50,13 +51,22 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       entityId: string;
       corpseId: string;
     };
-  }>("/skinning/harvest", async (request, reply) => {
+  }>("/skinning/harvest", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, corpseId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     // Check profession

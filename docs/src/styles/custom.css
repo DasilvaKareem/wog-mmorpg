@@ -1,0 +1,40 @@
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+
+:root {
+  --sl-font: "Press Start 2P", "Courier New", monospace;
+  --sl-font-system-mono: "Press Start 2P", monospace;
+  --sl-color-accent-low: #1a1a2e;
+  --sl-color-accent: #ffcc00;
+  --sl-color-accent-high: #ffd84d;
+  --sl-color-text-accent: #ffcc00;
+  --sl-text-xs: 0.625rem;
+  --sl-text-sm: 0.7rem;
+  --sl-text-base: 0.75rem;
+  --sl-text-lg: 0.85rem;
+  --sl-text-xl: 1rem;
+  --sl-text-2xl: 1.15rem;
+  --sl-text-3xl: 1.35rem;
+  --sl-text-4xl: 1.6rem;
+}
+
+[data-theme="dark"] {
+  --sl-color-bg: #05060a;
+  --sl-color-bg-nav: #0b0f18;
+  --sl-color-bg-sidebar: #0b0f18;
+  --sl-color-hairline-light: #1e2740;
+  --sl-color-hairline: #2a3450;
+  --sl-color-text: #ecf2ff;
+  --sl-color-text-accent: #ffcc00;
+  --sl-color-white: #ecf2ff;
+  --sl-color-gray-1: #d6deff;
+  --sl-color-gray-2: #9aa7cc;
+  --sl-color-gray-3: #565f89;
+  --sl-color-gray-4: #2a3450;
+  --sl-color-gray-5: #1e2740;
+  --sl-color-gray-6: #0b0f18;
+}
+
+/* Hero banner accent */
+.hero .sl-flex {
+  text-shadow: 3px 3px 0 #000;
+}

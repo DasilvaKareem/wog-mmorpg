@@ -12,7 +12,7 @@
       "radius": 12,
       "tags": [],
       "portal": {
-        "destinationZone": "village-square",
+        "destinationZone": "human-meadow",
         "destinationPoi": "meadow-exit",
         "bidirectional": true
       }

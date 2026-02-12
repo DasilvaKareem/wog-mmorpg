@@ -40,6 +40,22 @@ export interface EquippedItemState {
   }>;
 }
 
+export interface ActiveEffect {
+  id: string;
+  techniqueId: string;
+  name: string;
+  type: "buff" | "debuff" | "dot" | "shield" | "hot";
+  casterId: string;
+  appliedAtTick: number;
+  durationTicks: number;
+  remainingTicks: number;
+  statModifiers?: Partial<Record<string, number>>; // % modifiers for buffs/debuffs
+  dotDamage?: number;
+  hotHealPerTick?: number;
+  shieldHp?: number;
+  shieldMaxHp?: number;
+}
+
 export interface Entity {
   id: string;
   type: string;
@@ -89,6 +105,12 @@ export interface Entity {
   completedQuests?: string[];
   /** Learned techniques (players only). */
   learnedTechniques?: string[]; // Array of technique IDs
+  /** Cumulative kill count (players only). */
+  kills?: number;
+  /** Active effects (buffs, debuffs, DoTs, shields, HoTs). */
+  activeEffects?: ActiveEffect[];
+  /** Technique cooldowns: techniqueId → tick when cooldown expires. */
+  cooldowns?: Map<string, number>;
   /** Corpse fields. */
   mobName?: string; // Original mob name for loot table lookup
   skinned?: boolean; // Whether corpse has been skinned
@@ -100,6 +122,9 @@ function toSerializableEntity(entity: Entity): Record<string, unknown> {
     ...entity,
     ...(entity.characterTokenId != null && {
       characterTokenId: entity.characterTokenId.toString(),
+    }),
+    ...(entity.cooldowns && {
+      cooldowns: Object.fromEntries(entity.cooldowns),
     }),
   };
 }
@@ -135,6 +160,8 @@ const ARMOR_SLOTS: ArmorSlot[] = [
   "shoulders",
   "gloves",
   "belt",
+  "ring",
+  "amulet",
 ];
 
 // Graveyard spawn locations per zone
@@ -195,9 +222,30 @@ function getEquipmentBonuses(entity: Entity): CharacterStats {
   return total;
 }
 
+function applyActiveEffectModifiers(base: CharacterStats, effects: ActiveEffect[]): CharacterStats {
+  const result = { ...base };
+  for (const effect of effects) {
+    if ((effect.type !== "buff" && effect.type !== "debuff") || !effect.statModifiers) continue;
+    for (const [stat, pct] of Object.entries(effect.statModifiers)) {
+      if (pct == null || !(stat in result)) continue;
+      const key = stat as keyof CharacterStats;
+      if (effect.type === "buff") {
+        result[key] = Math.round(result[key] + base[key] * (pct / 100));
+      } else {
+        result[key] = Math.max(0, Math.round(result[key] - base[key] * (pct / 100)));
+      }
+    }
+  }
+  return result;
+}
+
 export function getEffectiveStats(entity: Entity): CharacterStats | undefined {
   if (!entity.stats) return undefined;
-  return addStats(entity.stats, getEquipmentBonuses(entity));
+  const baseWithGear = addStats(entity.stats, getEquipmentBonuses(entity));
+  if (entity.activeEffects && entity.activeEffects.length > 0) {
+    return applyActiveEffectModifiers(baseWithGear, entity.activeEffects);
+  }
+  return baseWithGear;
 }
 
 export function recalculateEntityVitals(entity: Entity): void {
@@ -261,6 +309,22 @@ function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
   }
 }
 
+function applyDamageWithShield(entity: Entity, rawDamage: number): number {
+  let remaining = rawDamage;
+  if (entity.activeEffects) {
+    for (const effect of entity.activeEffects) {
+      if (effect.type === "shield" && effect.shieldHp != null && effect.shieldHp > 0) {
+        const absorbed = Math.min(effect.shieldHp, remaining);
+        effect.shieldHp -= absorbed;
+        remaining -= absorbed;
+        if (remaining <= 0) break;
+      }
+    }
+  }
+  entity.hp -= remaining;
+  return remaining;
+}
+
 function canRetaliate(entity: Entity): boolean {
   return entity.type === "player" || entity.type === "mob" || entity.type === "boss";
 }
@@ -286,6 +350,14 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
 
   // Clear any pending orders
   player.order = undefined;
+
+  // Clear all active effects and cooldowns on death
+  player.activeEffects = [];
+  player.cooldowns = undefined;
+
+  // Recalculate vitals without buff/debuff modifiers
+  recalculateEntityVitals(player);
+  player.hp = player.maxHp;
 
   console.log(`[death] ${player.name} respawned at graveyard (${spawn.x}, ${spawn.y})`);
 
@@ -380,6 +452,69 @@ async function worldTick() {
       }
     }
 
+    // Process active effects (DoTs, HoTs, expiration)
+    for (const entity of zone.entities.values()) {
+      if (!entity.activeEffects || entity.activeEffects.length === 0) continue;
+
+      let needsRecalc = false;
+      const expiredIds: string[] = [];
+
+      for (const effect of entity.activeEffects) {
+        effect.remainingTicks--;
+
+        // DoT damage
+        if (effect.type === "dot" && effect.dotDamage != null && effect.dotDamage > 0) {
+          entity.hp -= effect.dotDamage;
+          if (entity.hp <= 0) {
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "death",
+              tick: zone.tick,
+              message: `${entity.name} has been slain by ${effect.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+            });
+            if (entity.type === "player") {
+              handlePlayerDeath(entity, zone.zoneId);
+            } else {
+              const caster = zone.entities.get(effect.casterId);
+              await handleMobDeath(entity, caster, zone);
+            }
+            break; // Entity is dead, stop processing effects
+          }
+        }
+
+        // HoT healing
+        if (effect.type === "hot" && effect.hotHealPerTick != null && effect.hotHealPerTick > 0) {
+          entity.hp = Math.min(entity.maxHp, entity.hp + effect.hotHealPerTick);
+        }
+
+        // Remove depleted shields
+        if (effect.type === "shield" && effect.shieldHp != null && effect.shieldHp <= 0) {
+          expiredIds.push(effect.id);
+        }
+
+        // Remove expired effects
+        if (effect.remainingTicks <= 0) {
+          expiredIds.push(effect.id);
+          if (effect.type === "buff" || effect.type === "debuff") {
+            needsRecalc = true;
+          }
+        }
+      }
+
+      // Skip cleanup if entity was killed by DoT and deleted
+      if (entity.hp <= 0) continue;
+
+      if (expiredIds.length > 0) {
+        entity.activeEffects = entity.activeEffects.filter(e => !expiredIds.includes(e.id));
+      }
+
+      if (needsRecalc) {
+        recalculateEntityVitals(entity);
+      }
+    }
+
     for (const entity of zone.entities.values()) {
       if (!entity.order) continue;
 
@@ -399,9 +534,9 @@ async function worldTick() {
           moveToward(entity, target.x, target.y);
         } else {
           const dealt = computeDamage(entity, target);
-          target.hp -= dealt;
-          applyDurabilityLoss(entity, ["weapon"]);
-          applyDurabilityLoss(target, ARMOR_SLOTS);
+          applyDamageWithShield(target, dealt);
+          applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
+          applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
 
           // Log combat event
           logZoneEvent({
@@ -419,9 +554,9 @@ async function worldTick() {
           // Basic retaliation: combatants trade hits while in range.
           if (target.hp > 0 && canRetaliate(target)) {
             const retaliation = computeDamage(target, entity);
-            entity.hp -= retaliation;
-            applyDurabilityLoss(target, ["weapon"]);
-            applyDurabilityLoss(entity, ARMOR_SLOTS);
+            applyDamageWithShield(entity, retaliation);
+            applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
+            applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
 
             // Log retaliation
             logZoneEvent({
@@ -473,6 +608,11 @@ async function worldTick() {
               targetName: target.name,
               data: { xpReward: target.xpReward ?? 0 },
             });
+
+            // Increment kill count for player killers
+            if (entity.type === "player") {
+              entity.kills = (entity.kills ?? 0) + 1;
+            }
 
             // Handle target death based on type
             if (target.type === "player") {

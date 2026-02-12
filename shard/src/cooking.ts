@@ -4,6 +4,7 @@ import { burnItem, mintItem } from "./blockchain.js";
 import { hasLearnedProfession } from "./professions.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { getItemBalance } from "./blockchain.js";
+import { authenticateRequest } from "./auth.js";
 
 const COOKING_RANGE = 50;
 
@@ -103,13 +104,22 @@ export function registerCookingRoutes(server: FastifyInstance) {
       campfireId: string;
       recipeId: string;
     };
-  }>("/cooking/cook", async (request, reply) => {
+  }>("/cooking/cook", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, campfireId, recipeId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     // Check cooking profession
@@ -213,13 +223,22 @@ export function registerCookingRoutes(server: FastifyInstance) {
       entityId: string;
       foodTokenId: number;
     };
-  }>("/cooking/consume", async (request, reply) => {
+  }>("/cooking/consume", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, foodTokenId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     const zone = getOrCreateZone(zoneId);

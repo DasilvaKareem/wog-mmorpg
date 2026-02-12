@@ -7,6 +7,9 @@ function serializeEntity(entity: any): any {
     ...(entity.characterTokenId != null && {
       characterTokenId: entity.characterTokenId.toString(),
     }),
+    ...(entity.cooldowns instanceof Map && {
+      cooldowns: Object.fromEntries(entity.cooldowns),
+    }),
   };
 }
 

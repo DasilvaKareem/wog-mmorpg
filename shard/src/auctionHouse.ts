@@ -18,6 +18,7 @@ import {
   type AuctionData,
 } from "./auctionHouseChain.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { authenticateRequest } from "./auth.js";
 
 const STATUS_NAMES = ["active", "ended", "cancelled"];
 
@@ -113,13 +114,22 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       durationMinutes: number;
       buyoutPrice?: number;
     };
-  }>("/auctionhouse/:zoneId/create", async (request, reply) => {
+  }>("/auctionhouse/:zoneId/create", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId } = request.params;
     const { sellerAddress, tokenId, quantity, startPrice, durationMinutes, buyoutPrice } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!sellerAddress || !/^0x[a-fA-F0-9]{40}$/.test(sellerAddress)) {
       reply.code(400);
       return { error: "Invalid seller address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (sellerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     if (quantity < 1) {
@@ -193,13 +203,22 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
   server.post<{
     Params: { zoneId: string };
     Body: { auctionId: number; bidderAddress: string; bidAmount: number };
-  }>("/auctionhouse/:zoneId/bid", async (request, reply) => {
+  }>("/auctionhouse/:zoneId/bid", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId } = request.params;
     const { auctionId, bidderAddress, bidAmount } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!bidderAddress || !/^0x[a-fA-F0-9]{40}$/.test(bidderAddress)) {
       reply.code(400);
       return { error: "Invalid bidder address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (bidderAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     if (bidAmount <= 0) {
@@ -293,13 +312,22 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
   server.post<{
     Params: { zoneId: string };
     Body: { auctionId: number; buyerAddress: string };
-  }>("/auctionhouse/:zoneId/buyout", async (request, reply) => {
+  }>("/auctionhouse/:zoneId/buyout", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId } = request.params;
     const { auctionId, buyerAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!buyerAddress || !/^0x[a-fA-F0-9]{40}$/.test(buyerAddress)) {
       reply.code(400);
       return { error: "Invalid buyer address" };
+    }
+
+    // Verify authenticated wallet matches request wallet
+    if (buyerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     try {
@@ -377,12 +405,21 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
    */
   server.post<{
     Params: { zoneId: string };
-    Body: { auctionId: number };
-  }>("/auctionhouse/:zoneId/cancel", async (request, reply) => {
+    Body: { auctionId: number; sellerAddress: string };
+  }>("/auctionhouse/:zoneId/cancel", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId } = request.params;
-    const { auctionId } = request.body;
+    const { auctionId, sellerAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
-    try {
+    // Verify seller address if provided
+    if (sellerAddress && sellerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
+
+    try{
       // Verify auction exists and is in the correct zone
       const auction = await getAuctionFromChain(auctionId);
       if (auction.zoneId !== zoneId) {
