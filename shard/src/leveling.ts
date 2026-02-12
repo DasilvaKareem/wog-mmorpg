@@ -39,5 +39,6 @@ export function computeStatsAtLevel(
     mp: Math.round(classDef.baseStats.mp * race.statModifiers.mp * scale),
     faith: Math.round(classDef.baseStats.faith * race.statModifiers.faith * scale),
     luck: Math.round(classDef.baseStats.luck * race.statModifiers.luck * scale),
+    essence: Math.round(classDef.baseStats.essence * race.statModifiers.mp * scale), // Essence scales like MP
   };
 }

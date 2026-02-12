@@ -1,4 +1,6 @@
 import * as React from "react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useZoneEvents, type ZoneEvent } from "@/hooks/useZoneEvents";
 import { cn } from "@/lib/utils";
 
@@ -10,31 +12,31 @@ interface ChatLogProps {
 function getEventColor(type: ZoneEvent["type"]): string {
   switch (type) {
     case "combat":
-      return "text-orange-400";
+      return "text-[#ff9e64]"; // orange
     case "death":
-      return "text-red-500 font-bold";
+      return "text-[#ff4d6d] font-bold"; // danger red
     case "kill":
-      return "text-green-400 font-bold";
+      return "text-[#54f28b] font-bold"; // success green
     case "levelup":
-      return "text-yellow-300 font-bold animate-pulse";
+      return "text-[#ffdd57] font-bold"; // yellow highlight
     case "chat":
-      return "text-cyan-300";
+      return "text-[#7dcfff]"; // cyan blue
     case "loot":
-      return "text-purple-400";
+      return "text-[#bb9af7]"; // purple
     case "trade":
     case "shop":
-      return "text-blue-300";
+      return "text-[#7aa2f7]"; // blue
     case "quest":
-      return "text-yellow-400";
+      return "text-[#e0af68]"; // gold
     case "system":
-      return "text-gray-400";
+      return "text-[#9aa7cc]"; // gray
     default:
-      return "text-white";
+      return "text-[#edf2ff]";
   }
 }
 
 export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement {
-  const { events, loading, error } = useZoneEvents(zoneId, { limit: 100, pollInterval: 2000 });
+  const { events, loading } = useZoneEvents(zoneId, { limit: 100, pollInterval: 2000 });
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
 
@@ -56,62 +58,41 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
 
   if (!zoneId) {
     return (
-      <div
-        className={cn(
-          "flex items-center justify-center bg-black/90 border-2 border-green-500 p-4",
-          className
-        )}
-      >
-        <p className="text-green-400 font-mono text-sm">Select a zone to view events</p>
-      </div>
+      <Card className={cn("pointer-events-auto flex items-center justify-center", className)}>
+        <p className="text-[9px] text-[#9aa7cc]">Select a zone to view events</p>
+      </Card>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "flex flex-col bg-black/90 border-2 border-green-500 shadow-lg",
-        className
-      )}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between bg-green-500/20 border-b-2 border-green-500 px-3 py-2">
-        <h3 className="text-green-400 font-mono text-sm font-bold uppercase tracking-wider">
-          ▶ Zone Log
-        </h3>
-        {loading && (
-          <span className="text-green-400 font-mono text-xs animate-pulse">...</span>
-        )}
-      </div>
-
-      {/* Events */}
-      <div
+    <Card className={cn("pointer-events-auto flex flex-col", className)}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center justify-between">
+          Zone Log
+          {loading && <span className="text-[8px] text-[#9aa7cc]">...</span>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-green-500 scrollbar-track-black"
-        style={{ minHeight: 0 }}
+        className="flex-1 space-y-0.5 overflow-y-auto pt-0 text-[8px]"
+        style={{ minHeight: 0, maxHeight: "200px" }}
       >
-        {error && (
-          <div className="text-red-400 font-mono text-xs p-2 border border-red-500 bg-red-500/10">
-            Error: {error.message}
-          </div>
-        )}
-
-        {events.length === 0 && !loading && !error && (
-          <div className="text-gray-500 font-mono text-xs text-center py-4">
-            No events yet... waiting for action
-          </div>
+        {events.length === 0 && (
+          <p className="text-center text-[8px] text-[#9aa7cc] py-4">
+            No events yet...
+          </p>
         )}
 
         {events.map((event) => (
           <div
             key={event.id}
             className={cn(
-              "font-mono text-xs leading-relaxed px-2 py-1 hover:bg-green-500/10 transition-colors rounded",
+              "leading-tight px-1 py-0.5 hover:bg-[#1a2338] transition-colors",
               getEventColor(event.type)
             )}
           >
-            <span className="text-gray-500 mr-2">
+            <span className="text-[#565f89] mr-1">
               [{new Date(event.timestamp).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -121,9 +102,9 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
             {event.message}
           </div>
         ))}
-      </div>
+      </CardContent>
 
-      {/* Auto-scroll indicator */}
+      {/* Auto-scroll button */}
       {!autoScroll && (
         <button
           onClick={() => {
@@ -132,11 +113,11 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
               scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
             }
           }}
-          className="absolute bottom-4 right-4 bg-green-500 text-black font-mono text-xs px-3 py-1 rounded border-2 border-green-400 hover:bg-green-400 transition-colors shadow-lg"
+          className="absolute bottom-2 right-2 border-2 border-black bg-[#ffcc00] px-2 py-0.5 text-[8px] uppercase text-black shadow-[2px_2px_0_0_#000] hover:bg-[#ffdd57] transition-colors"
         >
-          ↓ New Events
+          ↓ New
         </button>
       )}
-    </div>
+    </Card>
   );
 }

@@ -7,6 +7,8 @@
  * - Uses strategic combat
  */
 
+import "dotenv/config";
+
 const API = "http://localhost:3000";
 const AGENT_WALLET = "0xf6f0f8ca2ef85deb9eEBdBc4BC541d2D57832D4b";
 
@@ -74,19 +76,23 @@ async function buyFromMerchant(merchantName: string, itemName: string, quantity:
       return false;
     }
 
+    const price = item.goldPrice ?? item.price ?? 0;
+    if (price === 0) {
+      console.log(`⚠️  Item "${itemName}" has no price`);
+      return false;
+    }
+
     // Mint gold for purchasing (simulating earned gold)
     const { mintGold } = await import("./blockchain.js");
-    await mintGold(AGENT_WALLET, (item.price * quantity).toString());
+    await mintGold(AGENT_WALLET, (price * quantity).toString());
 
     await api("POST", "/shop/buy", {
-      buyerWallet: AGENT_WALLET,
-      npcEntityId: (merchant as any).id,
-      zoneId: currentZone,
-      tokenId: item.tokenId,
+      buyerAddress: AGENT_WALLET,
+      tokenId: parseInt(item.tokenId),
       quantity,
     });
 
-    console.log(`✅ Purchased ${quantity}x ${itemName} for ${item.price * quantity}g`);
+    console.log(`✅ Purchased ${quantity}x ${itemName} for ${price * quantity}g`);
     return true;
   } catch (err: any) {
     console.log(`⚠️  Failed to buy ${itemName}: ${err.message}`);
@@ -145,6 +151,81 @@ async function learnProfession(professionType: string) {
   }
 }
 
+async function moveTo(x: number, y: number) {
+  await api("POST", "/command", {
+    zoneId: currentZone,
+    entityId: agentId,
+    action: "move",
+    x,
+    y,
+  });
+}
+
+async function learnTechniques() {
+  console.log("\n⚔️  LEARNING COMBAT TECHNIQUES...");
+
+  try {
+    const agent = await getAgentState();
+    const className = agent.classId;
+
+    // Find class trainer
+    const state = await api("GET", "/state");
+    const trainer = Object.entries(state.zones[currentZone].entities)
+      .find(([_, e]: any) => e.type === "trainer");
+
+    if (!trainer) {
+      console.log("⚠️  No class trainer found");
+      return false;
+    }
+
+    const trainerId = trainer[0];
+    const trainerEntity: any = trainer[1];
+
+    // Move to trainer
+    console.log(`   📍 Moving to trainer at (${trainerEntity.x}, ${trainerEntity.y})...`);
+    await moveTo(trainerEntity.x, trainerEntity.y);
+    await sleep(1000); // Wait for movement
+
+    // Get available techniques
+    const availableData = await api("GET", `/techniques/available/${currentZone}/${agentId}`);
+    const techniques = availableData.techniques.filter((t: any) => !t.isLearned);
+
+    if (techniques.length === 0) {
+      console.log("✅ All available techniques already learned\n");
+      return true;
+    }
+
+    // Learn all affordable techniques
+    let learned = 0;
+    for (const tech of techniques) {
+      try {
+        // Mint gold for technique learning
+        const { mintGold } = await import("./blockchain.js");
+        await mintGold(AGENT_WALLET, tech.goldCost.toString());
+
+        await api("POST", "/techniques/learn", {
+          zoneId: currentZone,
+          playerEntityId: agentId,
+          techniqueId: tech.id,
+          trainerEntityId: trainerId,
+        });
+
+        console.log(`✅ Learned ${tech.name} (${tech.essenceCost} essence, ${tech.cooldown}s cooldown)`);
+        learned++;
+        await sleep(500);
+      } catch (err: any) {
+        console.log(`⚠️  Failed to learn ${tech.name}: ${err.message}`);
+      }
+    }
+
+    console.log(`\n🎓 Learned ${learned} technique(s)!\n`);
+    return true;
+  } catch (err: any) {
+    console.log(`⚠️  Failed to learn techniques: ${err.message}`);
+    return false;
+  }
+}
+
 async function craftHealthPotions() {
   console.log("⚗️  CRAFTING HEALTH POTIONS...");
 
@@ -170,6 +251,68 @@ async function checkHealth(): Promise<boolean> {
   return true;
 }
 
+async function useBestTechnique(targetId: string): Promise<boolean> {
+  try {
+    const agent = await getAgentState();
+    const essence = agent.essence ?? 0;
+    const maxEssence = agent.maxEssence ?? 100;
+    const essencePercent = (essence / maxEssence) * 100;
+
+    // Get learned techniques
+    const learnedData = await api("GET", `/techniques/learned/${currentZone}/${agentId}`);
+    const techniques = learnedData.techniques;
+
+    if (techniques.length === 0) {
+      // No techniques learned, use basic attack
+      return false;
+    }
+
+    // Filter techniques by essence cost and type
+    const attackTechniques = techniques
+      .filter((t: any) => t.type === "attack" && t.essenceCost <= essence)
+      .sort((a: any, b: any) => (b.effects.damageMultiplier || 0) - (a.effects.damageMultiplier || 0));
+
+    // Use high-damage technique if we have good essence
+    if (essencePercent > 40 && attackTechniques.length > 0) {
+      const technique = attackTechniques[0];
+
+      await api("POST", "/techniques/use", {
+        zoneId: currentZone,
+        casterEntityId: agentId,
+        techniqueId: technique.id,
+        targetEntityId: targetId,
+      });
+
+      console.log(`   🔥 Used ${technique.name} (${technique.essenceCost} essence)`);
+      return true;
+    }
+
+    // Use cheap technique if essence is low
+    if (essencePercent > 20 && attackTechniques.length > 0) {
+      const cheapTechnique = techniques
+        .filter((t: any) => t.type === "attack" && t.essenceCost <= essence)
+        .sort((a: any, b: any) => a.essenceCost - b.essenceCost)[0];
+
+      if (cheapTechnique) {
+        await api("POST", "/techniques/use", {
+          zoneId: currentZone,
+          casterEntityId: agentId,
+          techniqueId: cheapTechnique.id,
+          targetEntityId: targetId,
+        });
+
+        console.log(`   ⚡ Used ${cheapTechnique.name} (${cheapTechnique.essenceCost} essence)`);
+        return true;
+      }
+    }
+
+    return false;
+  } catch (err: any) {
+    // Technique failed, will fall back to basic attack
+    return false;
+  }
+}
+
 async function findAndAttackMob(mobName: string): Promise<boolean> {
   const state = await api("GET", "/state");
   const mobs = Object.entries(state.zones[currentZone].entities)
@@ -182,12 +325,18 @@ async function findAndAttackMob(mobName: string): Promise<boolean> {
 
   console.log(`⚔️  Engaging ${mobName} (Level ${mob.level || '?'}, HP ${mob.hp}/${mob.maxHp})`);
 
-  await api("POST", "/command", {
-    zoneId: currentZone,
-    entityId: agentId,
-    action: "attack",
-    targetId: mobId,
-  });
+  // Try to use technique first, fall back to basic attack
+  const usedTechnique = await useBestTechnique(mobId);
+
+  if (!usedTechnique) {
+    await api("POST", "/command", {
+      zoneId: currentZone,
+      entityId: agentId,
+      action: "attack",
+      targetId: mobId,
+    });
+    console.log(`   🗡️  Basic attack (conserving essence)`);
+  }
 
   return true;
 }
@@ -205,6 +354,13 @@ async function intelligentCombat(targetMobName: string, killCount: number) {
       await sleep(3000); // Simulate healing
       console.log("✅ Health restored\n");
     }
+
+    // Show essence status
+    const agent = await getAgentState();
+    const essence = agent.essence ?? 0;
+    const maxEssence = agent.maxEssence ?? 100;
+    const essencePercent = ((essence / maxEssence) * 100).toFixed(0);
+    console.log(`   💧 Essence: ${essence}/${maxEssence} (${essencePercent}%)`);
 
     // Find and attack mob
     const found = await findAndAttackMob(targetMobName);
@@ -230,8 +386,8 @@ async function intelligentCombat(targetMobName: string, killCount: number) {
       }
 
       // Check if we're still alive
-      const agent = await getAgentState();
-      if (agent.hp <= 0) {
+      const currentAgent = await getAgentState();
+      if (currentAgent.hp <= 0) {
         console.log("💀 AGENT DIED! Respawning...");
         await sleep(5000);
         combatActive = false;
@@ -239,7 +395,7 @@ async function intelligentCombat(targetMobName: string, killCount: number) {
       }
     }
 
-    await sleep(2000); // Recovery time between fights
+    await sleep(2000); // Recovery time between fights (essence regenerates)
   }
 }
 
@@ -286,7 +442,7 @@ async function playSmartly() {
   await equipGear();
   await stockUpPotions();
 
-  // Phase 3: Learn professions
+  // Phase 3: Learn professions & techniques
   console.log("=".repeat(60));
   console.log("PHASE 2: SKILL DEVELOPMENT");
   console.log("=".repeat(60) + "\n");
@@ -294,6 +450,8 @@ async function playSmartly() {
   await learnProfession("alchemy");
   await sleep(1000);
   await learnProfession("mining");
+  await sleep(1000);
+  await learnTechniques();
   await sleep(1000);
 
   // Phase 4: Quest - Rat Extermination

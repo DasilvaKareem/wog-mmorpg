@@ -1,4 +1,6 @@
 import * as React from "react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useZonePlayers, type ZoneLobby, type PlayerInfo } from "@/hooks/useZonePlayers";
 import { cn } from "@/lib/utils";
 
@@ -6,55 +8,48 @@ interface LobbyViewerProps {
   className?: string;
 }
 
-function getHealthBarColor(hp: number, maxHp: number): string {
-  const percent = maxHp > 0 ? (hp / maxHp) * 100 : 0;
-  if (percent > 66) return "bg-green-500";
-  if (percent > 33) return "bg-yellow-500";
-  return "bg-red-500";
+function getLevelBadgeVariant(level: number): "default" | "secondary" | "success" | "danger" {
+  if (level >= 30) return "success";
+  if (level >= 15) return "default";
+  return "secondary";
 }
 
-function getLevelColor(level: number): string {
-  if (level >= 50) return "text-purple-400";
-  if (level >= 30) return "text-blue-400";
-  if (level >= 15) return "text-green-400";
-  return "text-gray-400";
+function getHealthBarColor(hp: number, maxHp: number): string {
+  const percent = maxHp > 0 ? (hp / maxHp) * 100 : 0;
+  if (percent > 66) return "bg-[#54f28b]";
+  if (percent > 33) return "bg-[#ffcc00]";
+  return "bg-[#ff4d6d]";
 }
 
 function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
   const healthPercent = player.maxHp > 0 ? (player.hp / player.maxHp) * 100 : 0;
 
   return (
-    <div className="flex items-center gap-2 px-2 py-1 hover:bg-green-500/10 transition-colors border-b border-green-500/20">
+    <div className="flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 hover:bg-[#1a2338] transition-colors">
       {/* Level badge */}
-      <div
-        className={cn(
-          "flex items-center justify-center w-10 h-8 font-mono text-xs font-bold border-2 rounded",
-          getLevelColor(player.level),
-          "border-current"
-        )}
-      >
+      <Badge variant={getLevelBadgeVariant(player.level)} className="w-10 justify-center">
         {player.level}
-      </div>
+      </Badge>
 
-      {/* Player name */}
+      {/* Player info */}
       <div className="flex-1 min-w-0">
-        <div className="font-mono text-xs text-green-300 truncate">{player.name}</div>
+        <div className="text-[9px] text-[#edf2ff] truncate">{player.name}</div>
         {player.raceId && player.classId && (
-          <div className="font-mono text-[10px] text-gray-500 truncate">
+          <div className="text-[8px] text-[#9aa7cc] truncate">
             {player.raceId} • {player.classId}
           </div>
         )}
       </div>
 
       {/* HP bar */}
-      <div className="w-16">
-        <div className="h-2 bg-gray-800 border border-gray-600 rounded-sm overflow-hidden">
+      <div className="w-20">
+        <div className="h-2 border-2 border-black bg-[#0f1830] shadow-[2px_2px_0_0_#000] overflow-hidden">
           <div
             className={cn("h-full transition-all", getHealthBarColor(player.hp, player.maxHp))}
             style={{ width: `${Math.max(0, Math.min(100, healthPercent))}%` }}
           />
         </div>
-        <div className="font-mono text-[9px] text-gray-500 text-center mt-0.5">
+        <div className="text-[8px] text-[#9aa7cc] text-center mt-0.5">
           {player.hp}/{player.maxHp}
         </div>
       </div>
@@ -62,49 +57,38 @@ function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
   );
 }
 
-function ZoneLobbyCard({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
+function ZoneLobbySection({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
   const [expanded, setExpanded] = React.useState(true);
 
   return (
-    <div className="border-2 border-green-500/50 bg-black/80 rounded">
-      {/* Zone header */}
+    <div className="space-y-1">
+      {/* Zone header button */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-3 py-2 bg-green-500/20 hover:bg-green-500/30 transition-colors border-b-2 border-green-500/50"
+        className="flex w-full items-center justify-between border-2 border-black bg-[#283454] px-2 py-1.5 text-left text-[9px] shadow-[2px_2px_0_0_#000] transition hover:bg-[#324165]"
+        type="button"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-green-400 font-mono text-xs">
-            {expanded ? "▼" : "▶"}
-          </span>
-          <span className="text-green-300 font-mono text-sm font-bold uppercase">
-            {lobby.zoneId}
-          </span>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-cyan-400 font-mono text-xs">
-            {lobby.players.length} player{lobby.players.length !== 1 ? "s" : ""}
-          </span>
-          <span className="text-gray-500 font-mono text-xs">
-            {lobby.totalEntities} entities
-          </span>
+        <span className="truncate text-[#edf2ff] uppercase tracking-wide">
+          {expanded ? "▼" : "▶"} {lobby.zoneId}
+        </span>
+        <div className="inline-flex items-center gap-2">
+          <Badge variant="default">{lobby.players.length}</Badge>
+          <span className="text-[8px] text-[#9aa7cc]">{lobby.totalEntities} ents</span>
         </div>
       </button>
 
       {/* Player list */}
-      {expanded && (
-        <div className="max-h-48 overflow-y-auto">
-          {lobby.players.length === 0 ? (
-            <div className="px-3 py-4 text-center text-gray-500 font-mono text-xs">
-              No players in this zone
-            </div>
-          ) : (
-            <div>
-              {lobby.players.map((player) => (
-                <PlayerRow key={player.id} player={player} />
-              ))}
-            </div>
-          )}
+      {expanded && lobby.players.length > 0 && (
+        <div className="border-2 border-black bg-[#0f1830] shadow-[2px_2px_0_0_#000]">
+          {lobby.players.map((player) => (
+            <PlayerRow key={player.id} player={player} />
+          ))}
+        </div>
+      )}
+
+      {expanded && lobby.players.length === 0 && (
+        <div className="border-2 border-black bg-[#0f1830] px-2 py-3 text-center text-[8px] text-[#9aa7cc] shadow-[2px_2px_0_0_#000]">
+          No players in zone
         </div>
       )}
     </div>
@@ -112,58 +96,29 @@ function ZoneLobbyCard({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
 }
 
 export function LobbyViewer({ className }: LobbyViewerProps): React.ReactElement {
-  const { lobbies, loading, error } = useZonePlayers({ pollInterval: 3000 });
+  const { lobbies, loading } = useZonePlayers({ pollInterval: 3000 });
 
   const totalPlayers = lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0);
 
   return (
-    <div
-      className={cn(
-        "flex flex-col bg-black/90 border-2 border-green-500 shadow-lg",
-        className
-      )}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between bg-green-500/20 border-b-2 border-green-500 px-3 py-2">
-        <h3 className="text-green-400 font-mono text-sm font-bold uppercase tracking-wider">
-          ▶ Zone Lobbies
-        </h3>
-        <div className="flex items-center gap-3">
-          <span className="text-cyan-400 font-mono text-xs">
-            {totalPlayers} online
-          </span>
-          {loading && (
-            <span className="text-green-400 font-mono text-xs animate-pulse">...</span>
-          )}
-        </div>
-      </div>
-
-      {/* Lobbies */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-2" style={{ minHeight: 0 }}>
-        {error && (
-          <div className="text-red-400 font-mono text-xs p-2 border border-red-500 bg-red-500/10">
-            Error: {error.message}
-          </div>
-        )}
-
-        {!loading && lobbies.length === 0 && !error && (
-          <div className="text-gray-500 font-mono text-xs text-center py-4">
-            No zones found
-          </div>
-        )}
-
+    <Card className={cn("pointer-events-auto", className)}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center justify-between">
+          Zone Lobbies
+          <Badge variant="success">{totalPlayers} online</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="max-h-[320px] space-y-2 overflow-auto pt-0 text-[9px]">
+        {loading && lobbies.length === 0 ? (
+          <p className="text-[8px] text-[#9aa7cc]">Loading lobbies...</p>
+        ) : null}
+        {!loading && lobbies.length === 0 ? (
+          <p className="text-[8px] text-[#9aa7cc]">No zones found.</p>
+        ) : null}
         {lobbies.map((lobby) => (
-          <ZoneLobbyCard key={lobby.zoneId} lobby={lobby} />
+          <ZoneLobbySection key={lobby.zoneId} lobby={lobby} />
         ))}
-      </div>
-
-      {/* Footer stats */}
-      <div className="border-t-2 border-green-500/50 bg-green-500/10 px-3 py-2">
-        <div className="flex items-center justify-between font-mono text-[10px] text-gray-400">
-          <span>{lobbies.length} zone{lobbies.length !== 1 ? "s" : ""}</span>
-          <span>Updates every 3s</span>
-        </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }

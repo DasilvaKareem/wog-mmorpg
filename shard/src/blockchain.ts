@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { getContract, prepareTransaction, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { mintTo as mintERC20 } from "thirdweb/extensions/erc20";

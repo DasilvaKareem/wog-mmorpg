@@ -43,10 +43,10 @@ function AppShell(): React.ReactElement {
       <GameCanvas />
       <WalletPanel />
       <ZoneSelector />
-      <LobbyViewer className="pointer-events-auto absolute top-4 right-4 z-30 w-96 h-96" />
+      <LobbyViewer className="absolute top-4 left-4 z-30 w-96" />
       <ChatLog
         zoneId={currentZone}
-        className="pointer-events-auto absolute bottom-4 right-4 z-30 w-96 h-64"
+        className="absolute bottom-4 right-4 z-30 w-96"
       />
       <ShopDialog />
       <GuildDialog />

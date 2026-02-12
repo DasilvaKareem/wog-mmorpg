@@ -10,7 +10,7 @@ import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import type { CharacterCreateResponse, CharacterStats } from "@/types";
 
-type View = "list" | "create" | "result";
+type View = "list" | "create" | "result" | "detail";
 
 interface CharacterDialogProps {
   open: boolean;
@@ -36,6 +36,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   const [classId, setClassId] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [result, setResult] = React.useState<CharacterCreateResponse | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = React.useState<typeof characters[number] | null>(null);
 
   React.useEffect(() => {
     if (!open || !address) return;
@@ -107,6 +108,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                       <TableHead>Race</TableHead>
                       <TableHead>Class</TableHead>
                       <TableHead>Lvl</TableHead>
+                      <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -116,6 +118,19 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                         <TableCell>{character.properties.race}</TableCell>
                         <TableCell>{character.properties.class}</TableCell>
                         <TableCell>{character.properties.level}</TableCell>
+                        <TableCell>
+                          <Button
+                            className="h-6 px-2 text-[7px]"
+                            onClick={() => {
+                              setSelectedCharacter(character);
+                              setView("detail");
+                            }}
+                            type="button"
+                            variant="secondary"
+                          >
+                            View
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -261,6 +276,86 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                 type="button"
               >
                 Done
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : null}
+
+        {isConnected && view === "detail" && selectedCharacter ? (
+          <div className="space-y-3">
+            {/* Character header */}
+            <div className="border-2 border-[#2a3450] bg-[#11192d] p-3">
+              <p className="text-[10px] text-[#f1f5ff] font-bold">{selectedCharacter.name}</p>
+              <div className="flex gap-2 mt-1">
+                <Badge variant="secondary">{selectedCharacter.properties.race}</Badge>
+                <Badge variant="secondary">{selectedCharacter.properties.class}</Badge>
+                <Badge variant="default">Lvl {selectedCharacter.properties.level}</Badge>
+              </div>
+              <p className="mt-2 text-[8px] text-[#9aa7cc]">XP: {selectedCharacter.properties.xp ?? 0}</p>
+              <p className="text-[7px] text-[#565f89] mt-1">Token ID: {selectedCharacter.tokenId}</p>
+            </div>
+
+            {/* Stats */}
+            <div>
+              <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Base Stats</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(selectedCharacter.properties.stats || {}).map(([key, value]) => (
+                  <Badge key={key} variant="secondary">
+                    {key.toUpperCase()}: {value}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Equipment */}
+            {selectedCharacter.properties.equipment && Object.keys(selectedCharacter.properties.equipment).length > 0 ? (
+              <div>
+                <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Equipped Items</p>
+                <div className="space-y-1 max-h-32 overflow-auto">
+                  {Object.entries(selectedCharacter.properties.equipment).map(([slot, item]: [string, any]) => (
+                    <div
+                      key={slot}
+                      className="border-2 border-[#29334d] bg-[#11182b] px-2 py-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-[8px] text-[#9aa7cc] uppercase">{slot}</span>
+                        <Badge variant="secondary">#{item.tokenId}</Badge>
+                      </div>
+                      <p className="text-[8px] text-[#f1f5ff] mt-0.5">
+                        Durability: {item.durability}/{item.maxDurability}
+                        {item.broken && <span className="text-[#ff4d6d] ml-2">BROKEN</span>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="border-2 border-[#29334d] bg-[#11182b] p-2 text-center text-[8px] text-[#9aa7cc]">
+                No equipment equipped
+              </div>
+            )}
+
+            {/* Active quests */}
+            {selectedCharacter.properties.activeQuests && selectedCharacter.properties.activeQuests.length > 0 ? (
+              <div>
+                <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Active Quests</p>
+                <div className="space-y-1">
+                  {selectedCharacter.properties.activeQuests.map((quest: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className="border-2 border-[#29334d] bg-[#11182b] px-2 py-1 text-[8px]"
+                    >
+                      <p className="text-[#f1f5ff]">{quest.questId}</p>
+                      <p className="text-[#9aa7cc]">Progress: {quest.progress}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <DialogFooter>
+              <Button onClick={() => setView("list")} type="button" variant="secondary">
+                Back to List
               </Button>
             </DialogFooter>
           </div>

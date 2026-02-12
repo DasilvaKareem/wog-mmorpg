@@ -59,6 +59,33 @@ interface Proposal {
   targetAmount: number;
 }
 
+interface VaultItem {
+  tokenId: number;
+  name: string;
+  description: string;
+  category: string;
+  quantity: number;
+  available: number;
+}
+
+interface Loan {
+  loanId: number;
+  tokenId: number;
+  itemName: string;
+  quantity: number;
+  borrower: string;
+  lentAt: number;
+  dueAt: number;
+  isOverdue: boolean;
+  timeRemaining: number;
+}
+
+interface VaultResponse {
+  guildId: number;
+  items: VaultItem[];
+  loans: Loan[];
+}
+
 interface RegistrarResponse {
   npcId: string;
   npcName: string;
@@ -103,6 +130,7 @@ export function GuildDialog(): React.ReactElement {
   const [guilds, setGuilds] = React.useState<Guild[]>([]);
   const [selectedGuild, setSelectedGuild] = React.useState<Guild | null>(null);
   const [proposals, setProposals] = React.useState<Proposal[]>([]);
+  const [vaultData, setVaultData] = React.useState<VaultResponse | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [loadingDetails, setLoadingDetails] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("guilds");
@@ -140,6 +168,13 @@ export function GuildDialog(): React.ReactElement {
         const proposalsData: Proposal[] = await proposalsRes.json();
         setProposals(proposalsData);
       }
+
+      // Load vault data for this guild
+      const vaultRes = await fetch(`/guild/${guildId}/vault`);
+      if (vaultRes.ok) {
+        const vaultData: VaultResponse = await vaultRes.json();
+        setVaultData(vaultData);
+      }
     } catch (error) {
       console.error("Failed to load guild details:", error);
     } finally {
@@ -157,6 +192,7 @@ export function GuildDialog(): React.ReactElement {
     setOpen(true);
     setSelectedGuild(null);
     setProposals([]);
+    setVaultData(null);
     setActiveTab("guilds");
     void loadRegistrar(zoneId, entity.id);
   });
@@ -170,6 +206,7 @@ export function GuildDialog(): React.ReactElement {
   const handleBackToGuilds = () => {
     setSelectedGuild(null);
     setProposals([]);
+    setVaultData(null);
     setActiveTab("guilds");
   };
 
@@ -253,12 +290,15 @@ export function GuildDialog(): React.ReactElement {
                 </CardContent>
               </Card>
 
-              {/* Tabs for Members and Proposals */}
+              {/* Tabs for Members, Proposals, and Vault */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 bg-[#1a2340]">
+                <TabsList className="grid w-full grid-cols-3 bg-[#1a2340]">
                   <TabsTrigger value="details">Members</TabsTrigger>
                   <TabsTrigger value="proposals">
                     Proposals {proposals.length > 0 && `(${proposals.length})`}
+                  </TabsTrigger>
+                  <TabsTrigger value="vault">
+                    Vault {vaultData && (vaultData.items.length + vaultData.loans.length) > 0 && `(${vaultData.items.length + vaultData.loans.length})`}
                   </TabsTrigger>
                 </TabsList>
 
@@ -360,6 +400,117 @@ export function GuildDialog(): React.ReactElement {
                           </CardContent>
                         </Card>
                       ))}
+                    </div>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="vault" className="mt-4">
+                  {loadingDetails ? (
+                    <div className="text-center text-[9px] text-[#9aa7cc]">Loading vault...</div>
+                  ) : !vaultData ? (
+                    <div className="text-center text-[9px] text-[#9aa7cc]">
+                      Failed to load vault data
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* Vault Items */}
+                      <Card className="border-2 border-[#29334d] bg-[#1a2340]">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm text-[#00ff88]">Stored Items</CardTitle>
+                          <CardDescription className="text-[9px]">
+                            Items available in the guild vault
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {vaultData.items.length === 0 ? (
+                            <p className="text-center text-[9px] text-[#9aa7cc]">Vault is empty</p>
+                          ) : (
+                            <Table>
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead className="text-[8px]">Item</TableHead>
+                                  <TableHead className="text-[8px]">Category</TableHead>
+                                  <TableHead className="text-[8px]">Quantity</TableHead>
+                                  <TableHead className="text-[8px]">Available</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
+                                {vaultData.items.map((item) => (
+                                  <TableRow key={item.tokenId}>
+                                    <TableCell className="text-[9px]">
+                                      <div>
+                                        <div className="font-semibold text-[#00ff88]">{item.name}</div>
+                                        <div className="text-[8px] text-[#9aa7cc]">{item.description}</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge size="sm" variant="secondary">{item.category}</Badge>
+                                    </TableCell>
+                                    <TableCell className="text-[9px]">{item.quantity}</TableCell>
+                                    <TableCell className="text-[9px] text-[#00ff88]">{item.available}</TableCell>
+                                  </TableRow>
+                                ))}
+                              </TableBody>
+                            </Table>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      {/* Active Loans */}
+                      <Card className="border-2 border-[#29334d] bg-[#1a2340]">
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-sm text-[#00ff88]">Active Loans</CardTitle>
+                          <CardDescription className="text-[9px]">
+                            Items currently lent to guild members
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          {vaultData.loans.length === 0 ? (
+                            <p className="text-center text-[9px] text-[#9aa7cc]">No active loans</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {vaultData.loans.map((loan) => (
+                                <Card
+                                  key={loan.loanId}
+                                  className="border-2 border-[#29334d] bg-[#11182b]"
+                                >
+                                  <CardContent className="p-3">
+                                    <div className="space-y-2 text-[9px]">
+                                      <div className="flex items-start justify-between">
+                                        <div>
+                                          <div className="font-semibold text-[#00ff88]">
+                                            {loan.itemName} x{loan.quantity}
+                                          </div>
+                                          <div className="text-[8px] text-[#9aa7cc]">
+                                            Loan #{loan.loanId}
+                                          </div>
+                                        </div>
+                                        <Badge variant={loan.isOverdue ? "destructive" : "success"}>
+                                          {loan.isOverdue ? "Overdue" : "Active"}
+                                        </Badge>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2 border-t-2 border-[#29334d] pt-2">
+                                        <div>
+                                          <span className="text-[#9aa7cc]">Borrower:</span>
+                                          <div className="font-mono text-[8px]">
+                                            {truncateAddress(loan.borrower)}
+                                          </div>
+                                        </div>
+                                        <div>
+                                          <span className="text-[#9aa7cc]">Due:</span>
+                                          <div className={loan.isOverdue ? "text-[#ff6b6b]" : "text-[#00ff88]"}>
+                                            {loan.isOverdue ? "Overdue" : formatTimeRemaining(loan.timeRemaining)}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              ))}
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
                     </div>
                   )}
                 </TabsContent>

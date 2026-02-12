@@ -126,6 +126,7 @@ export class WalletManager {
   async equipItem(tokenId: number, zoneId: string): Promise<boolean> {
     if (!this._address) return false;
 
+    console.log("[equipItem] Request:", { zoneId, tokenId, walletAddress: this._address });
     const res = await fetch("/equipment/equip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -136,7 +137,11 @@ export class WalletManager {
       }),
     });
 
-    if (!res.ok) return false;
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error("[equipItem] Failed:", res.status, errorText);
+      return false;
+    }
     await this.fetchBalance(true); // Force refresh after equip
     return true;
   }
