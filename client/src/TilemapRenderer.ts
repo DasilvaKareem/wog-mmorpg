@@ -193,28 +193,27 @@ export class TilemapRenderer {
     tx: number,
     tz: number,
   ): number {
-    // Smoother grass with subtle variation - no harsh grid lines
-    // Use multiple noise samples at different scales for organic look
-    const n2 = this.noise(tx * 7 + (lx >> 2), tz * 11 + (ly >> 2));
-    const n3 = this.noise(tx * 13 + (lx >> 1), tz * 17 + (ly >> 1));
+    // Use absolute pixel coordinates for seamless noise across tiles
+    const worldX = tx * CLIENT_TILE_PX + lx;
+    const worldY = tz * CLIENT_TILE_PX + ly;
 
-    // Blend noise samples for smooth variation
-    const blend = (n * 0.4 + n2 * 0.35 + n3 * 0.25);
+    // Multiple octaves of noise at different frequencies
+    const n1 = this.noise(worldX >> 3, worldY >> 3); // Large features
+    const n2 = this.noise(worldX >> 1, worldY >> 1); // Medium details
+    const n3 = this.noise(worldX, worldY);           // Fine grain
 
-    // Very subtle darker grass tufts (5% coverage)
-    if (blend < 0.05) return pal.dark;
+    // Weighted blend for natural variation
+    const combined = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
 
-    // Tiny bright highlights (2% coverage)
-    if (blend > 0.98) return pal.light;
+    // Very subtle variation - mostly base color
+    if (combined < 0.15) return pal.dark;   // Sparse dark tufts
+    if (combined > 0.90) return pal.light;  // Rare light spots
 
-    // Most pixels use base color with very subtle variation
-    // Mix base and light colors smoothly
-    if (blend > 0.55) {
-      // Lighter grass (30% of pixels)
-      return this.blendColors(pal.base, pal.light, (blend - 0.55) / 0.45);
+    // Smooth transition between base and light
+    if (combined > 0.60) {
+      return this.blendColors(pal.base, pal.light, (combined - 0.60) / 0.30);
     }
 
-    // Base grass (majority)
     return pal.base;
   }
 
