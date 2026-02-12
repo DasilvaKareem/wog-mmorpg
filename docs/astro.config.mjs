@@ -15,6 +15,11 @@ export default defineConfig({
           label: "GitHub",
           href: "https://github.com/DasilvaKareem/wog-mmorpg",
         },
+        {
+          icon: "external",
+          label: "Homepage",
+          href: "/",
+        },
       ],
       sidebar: [
         {
