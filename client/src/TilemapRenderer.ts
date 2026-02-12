@@ -193,28 +193,7 @@ export class TilemapRenderer {
     tx: number,
     tz: number,
   ): number {
-    // Use absolute pixel coordinates for seamless noise across tiles
-    const worldX = tx * CLIENT_TILE_PX + lx;
-    const worldY = tz * CLIENT_TILE_PX + ly;
-
-    // Multiple octaves of noise at different frequencies
-    const n1 = this.noise(worldX >> 3, worldY >> 3); // Large features
-    const n2 = this.noise(worldX >> 1, worldY >> 1); // Medium details
-    const n3 = this.noise(worldX, worldY);           // Fine grain
-
-    // Weighted blend for natural variation
-    const combined = n1 * 0.5 + n2 * 0.3 + n3 * 0.2;
-
-    // Very subtle variation - mostly base color
-    if (combined < 0.15) return pal.dark;   // Sparse dark tufts
-    if (combined > 0.90) return pal.light;  // Rare light spots
-
-    // Smooth transition between base and light
-    if (combined > 0.60) {
-      return this.blendColors(pal.base, pal.light, (combined - 0.60) / 0.30);
-    }
-
-    return pal.base;
+    return pal.base; // Solid color - no variation
   }
 
   /** Blend two RGB colors by a factor (0 = color1, 1 = color2) */

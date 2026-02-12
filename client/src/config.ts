@@ -1,5 +1,5 @@
 /** Client-side tile size in pixels (each server tile renders as this many px) */
-export const CLIENT_TILE_PX = 64; // Larger tiles = smoother appearance
+export const CLIENT_TILE_PX = 32;
 
 export const POLL_INTERVAL = 1000; // ms
 
