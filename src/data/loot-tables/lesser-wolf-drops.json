@@ -1,0 +1,8 @@
+{
+  "tableId": "lesser-wolf-drops",
+  "rolls": 1,
+  "entries": [
+    { "itemId": "wolf-pelt", "weight": 70, "minQuantity": 1, "maxQuantity": 1 },
+    { "itemId": "health-potion", "weight": 30, "minQuantity": 1, "maxQuantity": 1 }
+  ]
+}

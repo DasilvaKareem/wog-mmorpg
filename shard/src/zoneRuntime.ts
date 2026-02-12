@@ -1,0 +1,640 @@
+import type { FastifyInstance } from "fastify";
+import type { CharacterStats } from "./classes.js";
+import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "./itemCatalog.js";
+import { mintGold, mintItem, updateCharacterMetadata } from "./blockchain.js";
+import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
+import type { OreType } from "./oreCatalog.js";
+import { QUEST_CATALOG, doesKillCountForQuest } from "./questSystem.js";
+import type { ProfessionType } from "./professions.js";
+import type { FlowerType } from "./flowerCatalog.js";
+import { logZoneEvent } from "./zoneEvents.js";
+import { getLootTable, rollDrops, rollGold } from "./lootTables.js";
+import { randomUUID } from "crypto";
+
+export interface ZoneState {
+  zoneId: string;
+  entities: Map<string, Entity>;
+  tick: number;
+}
+
+export type Order =
+  | { action: "move"; x: number; y: number }
+  | { action: "attack"; targetId: string };
+
+export interface EquippedItemState {
+  tokenId: number;
+  durability: number;
+  maxDurability: number;
+  broken?: boolean;
+  enchantments?: Array<{
+    type: string;
+    name: string;
+    statBonus?: {
+      str?: number;
+      def?: number;
+      agi?: number;
+      int?: number;
+    };
+    specialEffect?: string;
+    appliedAt: number;
+  }>;
+}
+
+export interface Entity {
+  id: string;
+  type: string;
+  name: string;
+  x: number;
+  y: number;
+  hp: number;
+  maxHp: number;
+  essence?: number;
+  maxEssence?: number;
+  createdAt: number;
+  order?: Order;
+  walletAddress?: string;
+  /** Token IDs this NPC sells — present only on merchant entities. */
+  shopItems?: number[];
+  /** Current level (1-60), players + mobs. */
+  level?: number;
+  /** Cumulative XP (players only). */
+  xp?: number;
+  /** XP granted on death (mobs only). */
+  xpReward?: number;
+  /** ERC-721 token ID (players only). */
+  characterTokenId?: bigint;
+  /** Race identifier for stat recalc on level-up. */
+  raceId?: string;
+  /** Class identifier for stat recalc on level-up. */
+  classId?: string;
+  /** Live computed stats (players only). */
+  stats?: CharacterStats;
+  /** Equipped item state by slot (players only). */
+  equipment?: Partial<Record<EquipmentSlot, EquippedItemState>>;
+  /** Base stats + equipment bonuses. */
+  effectiveStats?: CharacterStats;
+  /** Ore node fields. */
+  oreType?: OreType;
+  charges?: number;
+  maxCharges?: number;
+  depletedAtTick?: number;
+  respawnTicks?: number;
+  /** Flower node fields. */
+  flowerType?: FlowerType;
+  /** Profession trainer fields. */
+  teachesProfession?: ProfessionType;
+  /** Active quests (players only). */
+  activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
+  /** Completed quest IDs (players only) - used for quest chain prerequisites. */
+  completedQuests?: string[];
+  /** Learned techniques (players only). */
+  learnedTechniques?: string[]; // Array of technique IDs
+  /** Corpse fields. */
+  mobName?: string; // Original mob name for loot table lookup
+  skinned?: boolean; // Whether corpse has been skinned
+  skinnableUntil?: number; // Timestamp when corpse decays
+}
+
+function toSerializableEntity(entity: Entity): Record<string, unknown> {
+  return {
+    ...entity,
+    ...(entity.characterTokenId != null && {
+      characterTokenId: entity.characterTokenId.toString(),
+    }),
+  };
+}
+
+// In-memory zone state — this is the living world
+const zones = new Map<string, ZoneState>();
+
+export function getOrCreateZone(zoneId: string): ZoneState {
+  let zone = zones.get(zoneId);
+  if (!zone) {
+    zone = { zoneId, entities: new Map(), tick: 0 };
+    zones.set(zoneId, zone);
+  }
+  return zone;
+}
+
+export function getAllZones(): Map<string, ZoneState> {
+  return zones;
+}
+
+// Tick loop — advances the world every interval
+let tickInterval: ReturnType<typeof setInterval> | null = null;
+const TICK_MS = 1000; // 1 tick per second
+const MOVE_SPEED = 30; // units per tick
+const ATTACK_RANGE = 40; // units
+const MIN_DAMAGE = 3;
+const FALLBACK_ATTACK = 15;
+const ARMOR_SLOTS: ArmorSlot[] = [
+  "chest",
+  "legs",
+  "boots",
+  "helm",
+  "shoulders",
+  "gloves",
+  "belt",
+];
+
+// Graveyard spawn locations per zone
+const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
+  "human-meadow": { x: 100, y: 100 }, // Safe corner near merchants
+  "wild-meadow": { x: 50, y: 50 },
+  "dark-forest": { x: 50, y: 50 },
+  "village-square": { x: 150, y: 150 },
+};
+
+const DEATH_XP_LOSS_PERCENT = 0.1; // Lose 10% of current XP on death
+
+function emptyStats(): CharacterStats {
+  return {
+    str: 0,
+    def: 0,
+    hp: 0,
+    agi: 0,
+    int: 0,
+    mp: 0,
+    faith: 0,
+    luck: 0,
+  };
+}
+
+function addStats(base: CharacterStats, bonus: Partial<CharacterStats>): CharacterStats {
+  return {
+    str: base.str + (bonus.str ?? 0),
+    def: base.def + (bonus.def ?? 0),
+    hp: base.hp + (bonus.hp ?? 0),
+    agi: base.agi + (bonus.agi ?? 0),
+    int: base.int + (bonus.int ?? 0),
+    mp: base.mp + (bonus.mp ?? 0),
+    faith: base.faith + (bonus.faith ?? 0),
+    luck: base.luck + (bonus.luck ?? 0),
+  };
+}
+
+function getEquipmentBonuses(entity: Entity): CharacterStats {
+  const total = emptyStats();
+  if (!entity.equipment) return total;
+
+  for (const equipped of Object.values(entity.equipment)) {
+    if (!equipped || equipped.broken || equipped.durability <= 0) continue;
+    const item = getItemByTokenId(BigInt(equipped.tokenId));
+    if (!item?.statBonuses) continue;
+
+    total.str += item.statBonuses.str ?? 0;
+    total.def += item.statBonuses.def ?? 0;
+    total.hp += item.statBonuses.hp ?? 0;
+    total.agi += item.statBonuses.agi ?? 0;
+    total.int += item.statBonuses.int ?? 0;
+    total.mp += item.statBonuses.mp ?? 0;
+    total.faith += item.statBonuses.faith ?? 0;
+    total.luck += item.statBonuses.luck ?? 0;
+  }
+
+  return total;
+}
+
+export function getEffectiveStats(entity: Entity): CharacterStats | undefined {
+  if (!entity.stats) return undefined;
+  return addStats(entity.stats, getEquipmentBonuses(entity));
+}
+
+export function recalculateEntityVitals(entity: Entity): void {
+  const effective = getEffectiveStats(entity);
+  entity.effectiveStats = effective;
+  if (!effective) return;
+
+  const previousMaxHp = entity.maxHp > 0 ? entity.maxHp : effective.hp;
+  const ratio = previousMaxHp > 0 ? entity.hp / previousMaxHp : 1;
+
+  entity.maxHp = Math.max(1, effective.hp);
+  entity.hp = Math.max(1, Math.min(entity.maxHp, Math.round(entity.maxHp * ratio)));
+}
+
+function getAttackPower(entity: Entity): number {
+  const stats = entity.effectiveStats ?? getEffectiveStats(entity);
+  if (stats) {
+    return Math.max(
+      5,
+      Math.round(
+        stats.str * 0.32 +
+          stats.agi * 0.1 +
+          stats.int * 0.22 +
+          stats.faith * 0.08
+      )
+    );
+  }
+  return Math.max(5, FALLBACK_ATTACK + Math.max(0, (entity.level ?? 1) - 1) * 2);
+}
+
+function getDefensePower(entity: Entity): number {
+  const stats = entity.effectiveStats ?? getEffectiveStats(entity);
+  if (stats) {
+    return Math.max(0, Math.round(stats.def * 0.45 + stats.agi * 0.06));
+  }
+  return Math.max(0, Math.round((entity.level ?? 1) * 2));
+}
+
+function computeDamage(attacker: Entity, defender: Entity): number {
+  const raw = getAttackPower(attacker) - getDefensePower(defender) * 0.35;
+  return Math.max(MIN_DAMAGE, Math.round(raw));
+}
+
+function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
+  if (!entity.equipment) return;
+
+  let changed = false;
+  for (const slot of slots) {
+    const equipped = entity.equipment[slot];
+    if (!equipped || equipped.durability <= 0) continue;
+
+    equipped.durability = Math.max(0, equipped.durability - 1);
+    if (equipped.durability === 0) {
+      equipped.broken = true;
+    }
+    changed = true;
+  }
+
+  if (changed) {
+    recalculateEntityVitals(entity);
+  }
+}
+
+function canRetaliate(entity: Entity): boolean {
+  return entity.type === "player" || entity.type === "mob" || entity.type === "boss";
+}
+
+/**
+ * Handle player death: respawn at graveyard, apply XP penalty, restore HP.
+ */
+function handlePlayerDeath(player: Entity, zoneId: string): void {
+  // Apply death penalty: lose 10% of current XP (min 0)
+  if (player.xp != null && player.xp > 0) {
+    const xpLoss = Math.floor(player.xp * DEATH_XP_LOSS_PERCENT);
+    player.xp = Math.max(0, player.xp - xpLoss);
+    console.log(`[death] ${player.name} lost ${xpLoss} XP (${player.xp} remaining)`);
+  }
+
+  // Teleport to graveyard spawn point
+  const spawn = GRAVEYARD_SPAWNS[zoneId] ?? { x: 100, y: 100 };
+  player.x = spawn.x;
+  player.y = spawn.y;
+
+  // Restore HP to full
+  player.hp = player.maxHp;
+
+  // Clear any pending orders
+  player.order = undefined;
+
+  console.log(`[death] ${player.name} respawned at graveyard (${spawn.x}, ${spawn.y})`);
+
+  // Sync death + XP loss to NFT (async, non-blocking)
+  if (player.characterTokenId != null && player.raceId && player.classId && player.level != null) {
+    updateCharacterMetadata(player as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+      .catch((err) => console.error(`[death] NFT update failed for ${player.name}:`, err));
+  }
+}
+
+/**
+ * Handle mob death: auto-loot drops, create corpse for skinning
+ */
+async function handleMobDeath(
+  mob: Entity,
+  killer: Entity | undefined,
+  zone: ZoneState
+): Promise<void> {
+  const lootTable = getLootTable(mob.name);
+
+  // Auto-loot: mint gold + common drops to killer's wallet
+  if (killer?.walletAddress && lootTable) {
+    // Roll gold
+    const goldAmount = rollGold(lootTable.goldMin, lootTable.goldMax);
+    mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
+      console.error(`[loot] Failed to mint ${goldAmount} gold to ${killer.walletAddress}:`, err);
+    });
+
+    // Roll auto-drops
+    const autoDrops = rollDrops(lootTable.autoDrops);
+    for (const drop of autoDrops) {
+      mintItem(killer.walletAddress, drop.tokenId, BigInt(drop.quantity)).catch((err) => {
+        console.error(
+          `[loot] Failed to mint tokenId ${drop.tokenId} to ${killer.walletAddress}:`,
+          err
+        );
+      });
+    }
+
+    if (autoDrops.length > 0 || goldAmount > 0) {
+      console.log(
+        `[loot] ${killer.name} auto-looted ${goldAmount}g + ${autoDrops.length} items from ${mob.name}`
+      );
+    }
+  }
+
+  // Create corpse entity for skinning (if mob has skinning drops)
+  if (lootTable && lootTable.skinningDrops.length > 0) {
+    const corpse: Entity = {
+      id: randomUUID(),
+      type: "corpse",
+      name: `${mob.name} Corpse`,
+      x: mob.x,
+      y: mob.y,
+      hp: 0,
+      maxHp: 0,
+      createdAt: Date.now(),
+      mobName: mob.name,
+      skinned: false,
+      skinnableUntil: Date.now() + 60000, // 60 seconds to skin
+    };
+
+    zone.entities.set(corpse.id, corpse);
+    console.log(`[corpse] ${mob.name} corpse created at (${mob.x}, ${mob.y}) - skinnable for 60s`);
+  }
+
+  // Delete the original mob entity
+  zone.entities.delete(mob.id);
+}
+
+function moveToward(entity: Entity, tx: number, ty: number): boolean {
+  const dx = tx - entity.x;
+  const dy = ty - entity.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist <= 5) return true; // arrived
+  const step = Math.min(MOVE_SPEED, dist);
+  entity.x += (dx / dist) * step;
+  entity.y += (dy / dist) * step;
+  return false;
+}
+
+async function worldTick() {
+  for (const zone of zones.values()) {
+    zone.tick++;
+
+    // Regenerate essence for all player entities
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "player" && entity.essence != null && entity.maxEssence != null) {
+        // Regenerate 2% of max essence per tick (500ms), or 4% per second
+        const regenAmount = Math.ceil(entity.maxEssence * 0.02);
+        entity.essence = Math.min(entity.maxEssence, entity.essence + regenAmount);
+      }
+    }
+
+    for (const entity of zone.entities.values()) {
+      if (!entity.order) continue;
+
+      if (entity.order.action === "move") {
+        const arrived = moveToward(entity, entity.order.x, entity.order.y);
+        if (arrived) entity.order = undefined;
+      } else if (entity.order.action === "attack") {
+        const target = zone.entities.get(entity.order.targetId);
+        if (!target) {
+          entity.order = undefined;
+          continue;
+        }
+        const dx = target.x - entity.x;
+        const dy = target.y - entity.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > ATTACK_RANGE) {
+          moveToward(entity, target.x, target.y);
+        } else {
+          const dealt = computeDamage(entity, target);
+          target.hp -= dealt;
+          applyDurabilityLoss(entity, ["weapon"]);
+          applyDurabilityLoss(target, ARMOR_SLOTS);
+
+          // Log combat event
+          logZoneEvent({
+            zoneId: zone.zoneId,
+            type: "combat",
+            tick: zone.tick,
+            message: `${entity.name} hits ${target.name} for ${dealt} damage!`,
+            entityId: entity.id,
+            entityName: entity.name,
+            targetId: target.id,
+            targetName: target.name,
+            data: { damage: dealt, targetHp: target.hp },
+          });
+
+          // Basic retaliation: combatants trade hits while in range.
+          if (target.hp > 0 && canRetaliate(target)) {
+            const retaliation = computeDamage(target, entity);
+            entity.hp -= retaliation;
+            applyDurabilityLoss(target, ["weapon"]);
+            applyDurabilityLoss(entity, ARMOR_SLOTS);
+
+            // Log retaliation
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${target.name} retaliates for ${retaliation} damage!`,
+              entityId: target.id,
+              entityName: target.name,
+              targetId: entity.id,
+              targetName: entity.name,
+              data: { damage: retaliation, targetHp: entity.hp },
+            });
+            if (entity.hp <= 0) {
+              // Log death
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "death",
+                tick: zone.tick,
+                message: `${entity.name} has been slain by ${target.name}!`,
+                entityId: entity.id,
+                entityName: entity.name,
+                targetId: target.id,
+                targetName: target.name,
+              });
+
+              // Handle death based on entity type
+              if (entity.type === "player") {
+                handlePlayerDeath(entity, zone.zoneId);
+                continue;
+              } else {
+                // Mobs/bosses: auto-loot + create corpse
+                await handleMobDeath(entity, target, zone);
+                continue;
+              }
+            }
+          }
+
+          if (target.hp <= 0) {
+            // Log kill
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "kill",
+              tick: zone.tick,
+              message: `${entity.name} has slain ${target.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { xpReward: target.xpReward ?? 0 },
+            });
+
+            // Handle target death based on type
+            if (target.type === "player") {
+              handlePlayerDeath(target, zone.zoneId);
+            } else {
+              // Mobs/bosses: auto-loot + create corpse
+              await handleMobDeath(target, entity, zone);
+
+              // Track quest progress for kills (players only)
+              if (entity.type === "player" && entity.activeQuests) {
+                for (const activeQuest of entity.activeQuests) {
+                  const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
+                  if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
+                    activeQuest.progress++;
+                    console.log(
+                      `[quest] ${entity.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
+                    );
+                  }
+                }
+              }
+            }
+
+            entity.order = undefined;
+
+            // Grant XP on kill (only if target was mob/boss, not player)
+            const xpReward = target.xpReward ?? 0;
+            if (xpReward > 0 && entity.level != null && entity.characterTokenId != null) {
+              entity.xp = (entity.xp ?? 0) + xpReward;
+
+              // Check for level-up(s)
+              let leveled = false;
+              while (entity.level < MAX_LEVEL && entity.xp >= xpForLevel(entity.level + 1)) {
+                entity.level++;
+                leveled = true;
+              }
+
+              if (leveled && entity.raceId && entity.classId) {
+                const newStats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level);
+                entity.stats = newStats;
+                recalculateEntityVitals(entity);
+
+                // Log level-up event
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "levelup",
+                  tick: zone.tick,
+                  message: `*** ${entity.name} reached level ${entity.level}! ***`,
+                  entityId: entity.id,
+                  entityName: entity.name,
+                  data: { level: entity.level, xp: entity.xp },
+                });
+
+                // Async on-chain sync (non-blocking)
+                updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                  .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Auto-attack AI: players with no order auto-target nearest mob
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player") continue;
+      if (entity.order) continue; // already has an order
+      if (entity.hp <= 0) continue; // dead
+
+      // Find nearest mob
+      let nearestMob: Entity | null = null;
+      let nearestDist = Infinity;
+
+      for (const other of zone.entities.values()) {
+        if (other.type !== "mob" && other.type !== "boss") continue;
+        if (other.hp <= 0) continue;
+
+        const dx = other.x - entity.x;
+        const dy = other.y - entity.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestMob = other;
+        }
+      }
+
+      // Auto-attack nearest mob
+      if (nearestMob) {
+        entity.order = { action: "attack", targetId: nearestMob.id };
+      }
+    }
+
+    // Respawn depleted ore nodes
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "ore-node" && entity.depletedAtTick != null) {
+        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
+        if (ticksSinceDepleted >= (entity.respawnTicks ?? 120)) {
+          entity.charges = entity.maxCharges;
+          entity.depletedAtTick = undefined;
+        }
+      }
+    }
+
+    // Respawn depleted flower nodes
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "flower-node" && entity.depletedAtTick != null) {
+        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
+        if (ticksSinceDepleted >= (entity.respawnTicks ?? 100)) {
+          entity.charges = entity.maxCharges;
+          entity.depletedAtTick = undefined;
+        }
+      }
+    }
+
+    // Cleanup expired corpses
+    const now = Date.now();
+    const corpsesToRemove: string[] = [];
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "corpse" && entity.skinnableUntil && now > entity.skinnableUntil) {
+        corpsesToRemove.push(entity.id);
+      }
+    }
+    for (const corpseId of corpsesToRemove) {
+      zone.entities.delete(corpseId);
+    }
+  }
+}
+
+export function registerZoneRuntime(server: FastifyInstance) {
+  // Start the tick loop
+  tickInterval = setInterval(worldTick, TICK_MS);
+
+  server.addHook("onClose", () => {
+    if (tickInterval) clearInterval(tickInterval);
+  });
+
+  server.get("/zones", async () => {
+    const result: Record<string, { entityCount: number; tick: number }> = {};
+    for (const [id, zone] of zones) {
+      result[id] = { entityCount: zone.entities.size, tick: zone.tick };
+    }
+    return result;
+  });
+
+  server.get<{ Params: { zoneId: string } }>(
+    "/zones/:zoneId",
+    async (request, reply) => {
+      const zone = zones.get(request.params.zoneId);
+      if (!zone) {
+        reply.code(404);
+        return { error: "Zone not found" };
+      }
+      return {
+        zoneId: zone.zoneId,
+        tick: zone.tick,
+        entities: Object.fromEntries(
+          Array.from(zone.entities.entries()).map(([id, entity]) => [
+            id,
+            toSerializableEntity(entity),
+          ])
+        ),
+      };
+    }
+  );
+}

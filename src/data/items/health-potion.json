@@ -1,0 +1,10 @@
+{
+  "itemId": "health-potion",
+  "name": "Health Potion",
+  "category": "consumable",
+  "rarity": "common",
+  "stackable": true,
+  "maxStack": 20,
+  "healAmount": 30,
+  "description": "A small red vial. Restores 30 health."
+}

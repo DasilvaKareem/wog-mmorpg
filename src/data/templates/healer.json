@@ -1,0 +1,15 @@
+{
+  "templateId": "healer",
+  "name": "Meadow Healer",
+  "category": "friendly",
+  "threat": 0,
+  "health": 120,
+  "speed": 0,
+  "leashRadius": 5,
+  "perceptionRadius": 25,
+  "ttlTicks": 0,
+  "behavior": "idle",
+  "attack": 4,
+  "defense": 8,
+  "battleSpeed": 20
+}

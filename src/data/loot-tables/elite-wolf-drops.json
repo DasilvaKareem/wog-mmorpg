@@ -1,0 +1,10 @@
+{
+  "tableId": "elite-wolf-drops",
+  "rolls": 4,
+  "entries": [
+    { "itemId": "wolf-pelt", "weight": 35, "minQuantity": 1, "maxQuantity": 3 },
+    { "itemId": "health-potion", "weight": 25, "minQuantity": 2, "maxQuantity": 4 },
+    { "itemId": "iron-sword", "weight": 25, "minQuantity": 1, "maxQuantity": 1 },
+    { "itemId": "wooden-staff", "weight": 15, "minQuantity": 1, "maxQuantity": 1 }
+  ]
+}

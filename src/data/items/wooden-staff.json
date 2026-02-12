@@ -1,0 +1,10 @@
+{
+  "itemId": "wooden-staff",
+  "name": "Wooden Staff",
+  "category": "weapon",
+  "rarity": "common",
+  "stackable": false,
+  "maxStack": 1,
+  "damage": 8,
+  "description": "A gnarled branch shaped into a staff. Better than bare hands."
+}

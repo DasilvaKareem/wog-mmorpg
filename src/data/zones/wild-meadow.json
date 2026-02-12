@@ -1,0 +1,111 @@
+{
+  "id": "wild-meadow",
+  "name": "Wild Meadow",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 500, "z": 500 } },
+  "budget": { "maxPopulation": 20, "maxThreat": 50 },
+  "pois": [
+    {
+      "id": "village-gate",
+      "name": "Village Gate",
+      "type": "portal",
+      "position": { "x": 50, "z": 250 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "village-square",
+        "destinationPoi": "meadow-exit",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "crossroads",
+      "name": "Crossroads",
+      "type": "road-node",
+      "position": { "x": 150, "z": 250 },
+      "radius": 20,
+      "tags": []
+    },
+    {
+      "id": "traders-hut",
+      "name": "Trader's Hut",
+      "type": "structure",
+      "position": { "x": 170, "z": 310 },
+      "radius": 8,
+      "tags": [],
+      "structure": {
+        "kind": "shop",
+        "capacity": 5,
+        "services": ["buy", "sell"],
+        "npcs": ["merchant"]
+      }
+    },
+    {
+      "id": "healers-tent",
+      "name": "Healer's Tent",
+      "type": "structure",
+      "position": { "x": 130, "z": 310 },
+      "radius": 8,
+      "tags": [],
+      "structure": {
+        "kind": "temple",
+        "capacity": 3,
+        "services": ["heal", "revive"],
+        "npcs": ["healer"]
+      }
+    },
+    {
+      "id": "meadow-center",
+      "name": "Meadow Center",
+      "type": "landmark",
+      "position": { "x": 250, "z": 250 },
+      "radius": 50,
+      "tags": []
+    },
+    {
+      "id": "wolf-den",
+      "name": "Wolf Den",
+      "type": "spawn-point",
+      "position": { "x": 350, "z": 200 },
+      "radius": 40,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "wolf-clearing",
+      "name": "Wolf Clearing",
+      "type": "spawn-point",
+      "position": { "x": 400, "z": 350 },
+      "radius": 30,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "forest-gate",
+      "name": "Forest Gate",
+      "type": "portal",
+      "position": { "x": 480, "z": 250 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "dark-forest",
+        "destinationPoi": "meadow-entrance",
+        "bidirectional": true
+      }
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-path",
+      "name": "Main Path",
+      "nodes": ["village-gate", "crossroads", "meadow-center", "forest-gate"]
+    },
+    {
+      "id": "traders-lane",
+      "name": "Trader's Lane",
+      "nodes": ["crossroads", "traders-hut", "healers-tent"]
+    },
+    {
+      "id": "hunters-trail",
+      "name": "Hunter's Trail",
+      "nodes": ["meadow-center", "wolf-den", "wolf-clearing"]
+    }
+  ]
+}

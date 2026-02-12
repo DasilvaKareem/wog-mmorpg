@@ -1,0 +1,97 @@
+{
+  "id": "village-square",
+  "name": "Village Square",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 300, "z": 300 } },
+  "budget": { "maxPopulation": 10, "maxThreat": 0 },
+  "pois": [
+    {
+      "id": "fountain",
+      "name": "Village Fountain",
+      "type": "landmark",
+      "position": { "x": 150, "z": 150 },
+      "radius": 20,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "elders-hall",
+      "name": "Elder's Hall",
+      "type": "structure",
+      "position": { "x": 150, "z": 80 },
+      "radius": 15,
+      "tags": [],
+      "structure": {
+        "kind": "house",
+        "capacity": 8,
+        "services": ["quest"],
+        "npcs": ["elder"]
+      }
+    },
+    {
+      "id": "general-store",
+      "name": "General Store",
+      "type": "structure",
+      "position": { "x": 80, "z": 150 },
+      "radius": 10,
+      "tags": [],
+      "structure": {
+        "kind": "shop",
+        "capacity": 6,
+        "services": ["buy", "sell", "repair"],
+        "npcs": ["merchant"]
+      }
+    },
+    {
+      "id": "guard-post",
+      "name": "Guard Post",
+      "type": "structure",
+      "position": { "x": 220, "z": 150 },
+      "radius": 10,
+      "tags": [],
+      "structure": {
+        "kind": "barracks",
+        "capacity": 4,
+        "services": ["train"],
+        "npcs": ["guard"]
+      }
+    },
+    {
+      "id": "tavern",
+      "name": "The Rusty Flagon",
+      "type": "structure",
+      "position": { "x": 150, "z": 220 },
+      "radius": 12,
+      "tags": [],
+      "structure": {
+        "kind": "tavern",
+        "capacity": 10,
+        "services": ["rest", "rumor"],
+        "npcs": []
+      }
+    },
+    {
+      "id": "meadow-exit",
+      "name": "Meadow Road",
+      "type": "portal",
+      "position": { "x": 290, "z": 150 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "wild-meadow",
+        "destinationPoi": "village-gate",
+        "bidirectional": true
+      }
+    }
+  ],
+  "roads": [
+    {
+      "id": "square-ring",
+      "name": "Square Ring",
+      "nodes": ["elders-hall", "general-store", "fountain", "guard-post", "tavern"]
+    },
+    {
+      "id": "east-road",
+      "name": "East Road",
+      "nodes": ["fountain", "meadow-exit"]
+    }
+  ]
+}

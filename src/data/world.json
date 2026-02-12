@@ -1,0 +1,7 @@
+{
+  "zones": ["village-square", "wild-meadow", "dark-forest"],
+  "connections": [
+    { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
+    { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "templateId": "elder",
+  "name": "Village Elder",
+  "category": "friendly",
+  "threat": 0,
+  "health": 200,
+  "speed": 0,
+  "leashRadius": 5,
+  "perceptionRadius": 30,
+  "ttlTicks": 0,
+  "behavior": "idle",
+  "attack": 5,
+  "defense": 10,
+  "battleSpeed": 15
+}

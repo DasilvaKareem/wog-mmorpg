@@ -1,0 +1,9 @@
+{
+  "itemId": "gold-ore",
+  "name": "Gold Ore",
+  "category": "quest",
+  "rarity": "epic",
+  "stackable": true,
+  "maxStack": 99,
+  "description": "A heavy nugget of raw gold, exceedingly rare and valuable."
+}

@@ -1,0 +1,10 @@
+{
+  "itemId": "iron-sword",
+  "name": "Iron Sword",
+  "category": "weapon",
+  "rarity": "common",
+  "stackable": false,
+  "maxStack": 1,
+  "damage": 12,
+  "description": "A basic iron blade. Reliable if unexciting."
+}

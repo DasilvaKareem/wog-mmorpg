@@ -1,0 +1,9 @@
+{
+  "itemId": "copper-ore",
+  "name": "Copper Ore",
+  "category": "quest",
+  "rarity": "uncommon",
+  "stackable": true,
+  "maxStack": 99,
+  "description": "A rough piece of copper ore with a greenish tint."
+}

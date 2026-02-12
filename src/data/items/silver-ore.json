@@ -1,0 +1,9 @@
+{
+  "itemId": "silver-ore",
+  "name": "Silver Ore",
+  "category": "quest",
+  "rarity": "rare",
+  "stackable": true,
+  "maxStack": 99,
+  "description": "A glinting fragment of silver ore, prized by smiths."
+}

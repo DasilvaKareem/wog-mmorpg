@@ -1,0 +1,15 @@
+{
+  "templateId": "wolf",
+  "name": "Meadow Wolf",
+  "category": "hostile",
+  "threat": 3,
+  "health": 50,
+  "speed": 2.0,
+  "leashRadius": 40,
+  "perceptionRadius": 25,
+  "ttlTicks": 600,
+  "behavior": "patrol",
+  "attack": 12,
+  "defense": 4,
+  "battleSpeed": 35
+}

@@ -1,0 +1,63 @@
+@import url("https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap");
+@import "tailwindcss";
+
+:root {
+  --bg-0: #05060a;
+  --bg-1: #10131f;
+  --bg-2: #171d2d;
+  --ink: #ecf2ff;
+  --accent: #ffcc00;
+  --danger: #ff4d6d;
+  --success: #54f28b;
+  font-family: "Press Start 2P", "Courier New", monospace;
+  color: var(--ink);
+  background-color: var(--bg-0);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at 15% 20%, #5b1625 0%, transparent 35%),
+    radial-gradient(circle at 85% 80%, #1b3456 0%, transparent 40%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.04) 0px,
+      rgba(255, 255, 255, 0.04) 1px,
+      transparent 1px,
+      transparent 6px
+    ),
+    linear-gradient(180deg, var(--bg-1), var(--bg-0) 70%);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2b344c;
+  border: 2px solid #0b0f18;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0f18;
+}

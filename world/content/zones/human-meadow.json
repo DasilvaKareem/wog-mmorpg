@@ -1,0 +1,8 @@
+{
+  "id": "human-meadow",
+  "name": "The Human Meadow",
+  "biome": "grassland",
+  "width": 1000,
+  "height": 1000,
+  "pois": ["meadow-village", "old-well", "wolf-den"]
+}

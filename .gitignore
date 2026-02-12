@@ -1,0 +1,25 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+
+# pnpm
+.pnpm-store/
+pnpm-lock.yaml
+
+# Temporary files
+*.bak
+*.bak2
+*.bak3
+run-demo-agent.ts
+
+# Test scripts
+test-*.sh
+
+# Local data
+shard/data/
+
+# Logs
+/tmp/
+*.output

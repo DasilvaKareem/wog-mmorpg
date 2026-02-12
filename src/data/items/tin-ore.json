@@ -1,0 +1,9 @@
+{
+  "itemId": "tin-ore",
+  "name": "Tin Ore",
+  "category": "quest",
+  "rarity": "common",
+  "stackable": true,
+  "maxStack": 99,
+  "description": "A lump of tin ore, useful for smelting into bronze."
+}

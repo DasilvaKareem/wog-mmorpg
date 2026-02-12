@@ -1,0 +1,9 @@
+{
+  "itemId": "wolf-pelt",
+  "name": "Wolf Pelt",
+  "category": "quest",
+  "rarity": "common",
+  "stackable": true,
+  "maxStack": 10,
+  "description": "A coarse grey pelt. The Village Elder may have use for it."
+}

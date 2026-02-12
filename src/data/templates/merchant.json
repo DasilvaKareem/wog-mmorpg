@@ -1,0 +1,15 @@
+{
+  "templateId": "merchant",
+  "name": "Wandering Merchant",
+  "category": "friendly",
+  "threat": 0,
+  "health": 100,
+  "speed": 0,
+  "leashRadius": 3,
+  "perceptionRadius": 20,
+  "ttlTicks": 0,
+  "behavior": "idle",
+  "attack": 3,
+  "defense": 5,
+  "battleSpeed": 10
+}
