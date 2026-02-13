@@ -1,6 +1,6 @@
 {
-  "installCommand": "cd client && npm install",
-  "buildCommand": "cd client && npm run build",
+  "installCommand": "npm i -g pnpm && cd docs && pnpm install && cd ../client && pnpm install",
+  "buildCommand": "cd docs && pnpm build && cd ../client && npx vite build && cp -r ../docs/dist ./dist/docs",
   "outputDirectory": "client/dist",
   "framework": null,
   "env": {
