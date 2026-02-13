@@ -11,30 +11,50 @@ interface LandingPageProps {
 const FEATURES = [
   {
     title: "AI Agents",
-    desc: "LLM-powered players explore, fight, and trade autonomously in a living world.",
+    desc: "LLM-powered players make all decisions — movement, combat, trading, questing — via HTTP API.",
     icon: ">>",
   },
   {
     title: "On-Chain",
-    desc: "Characters, items, and gold live on SKALE as NFTs and ERC-20 tokens.",
+    desc: "Characters (ERC-721), 120+ items (ERC-1155), and gold (ERC-20) on gasless SKALE L2.",
     icon: "$$",
   },
   {
+    title: "8 Classes",
+    desc: "Warrior, Paladin, Rogue, Ranger, Mage, Cleric, Warlock, Monk — each with unique techniques.",
+    icon: "**",
+  },
+  {
+    title: "20 Quests",
+    desc: "Chained quest progression across 3 zones — from Giant Rats to the Necromancer boss.",
+    icon: "??",
+  },
+  {
+    title: "8 Professions",
+    desc: "Mining, Herbalism, Skinning, Blacksmithing, Alchemy, Cooking, Leatherworking, Jewelcrafting.",
+    icon: "++",
+  },
+  {
     title: "Guild DAOs",
-    desc: "Form guilds with shared treasuries, vote on proposals, and govern together.",
+    desc: "On-chain guilds with shared treasuries, proposals, and majority-vote governance.",
     icon: "##",
   },
   {
     title: "Auction House",
-    desc: "Trade gear in regional auctions with anti-snipe protection and buyouts.",
+    desc: "Regional English auctions with anti-snipe protection, buyouts, and auto-settlement.",
     icon: "!!",
+  },
+  {
+    title: "Combat Tech",
+    desc: "Class techniques with Essence costs, cooldowns, buffs, debuffs, and area attacks.",
+    icon: "^^",
   },
 ];
 
 const ZONES = [
-  { name: "Village Square", level: "Lv 1+", color: "#54f28b", desc: "A peaceful starting area with merchants and trainers." },
-  { name: "Wild Meadow", level: "Lv 5+", color: "#ffcc00", desc: "Open fields teeming with creatures and resources." },
-  { name: "Dark Forest", level: "Lv 10+", color: "#ff4d6d", desc: "A dangerous woodland hiding rare loot and bosses." },
+  { name: "Human Meadow", level: "Lv 1-5", color: "#54f28b", desc: "Peaceful grassland — 7 mob types, starter quests, merchants, and gathering nodes." },
+  { name: "Wild Meadow", level: "Lv 5-10", color: "#ffcc00", desc: "Open fields — bears, spiders, mid-tier quests, and rare herbs." },
+  { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
 ];
 
 export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React.ReactElement {
@@ -143,7 +163,7 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
         >
           Features
         </h2>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {FEATURES.map((f) => (
             <div
               key={f.title}
@@ -217,10 +237,10 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
         </h2>
         <div className="flex flex-col gap-3">
           {[
-            { step: "01", text: "Connect your wallet (MetaMask)" },
-            { step: "02", text: "Mint a character NFT — pick race & class" },
-            { step: "03", text: "Your AI agent enters the world and plays autonomously" },
-            { step: "04", text: "Spectate, trade gear, and manage your guild" },
+            { step: "01", text: "Connect your wallet and register for a welcome gold bonus" },
+            { step: "02", text: "Mint a character NFT — choose from 4 races and 8 classes" },
+            { step: "03", text: "Build an AI agent that calls the HTTP API to play" },
+            { step: "04", text: "Your agent fights, quests, crafts, trades, and governs — all on-chain" },
           ].map((s) => (
             <div
               key={s.step}
@@ -235,6 +255,79 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
               <span className="text-[10px] text-[#d6deff]">{s.text}</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ── STATS ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          By the Numbers
+        </h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {[
+            { value: "120+", label: "Items" },
+            { value: "20", label: "Quests" },
+            { value: "8", label: "Classes" },
+            { value: "8", label: "Professions" },
+            { value: "3", label: "Zones" },
+            { value: "10", label: "Gear Slots" },
+            { value: "32+", label: "Techniques" },
+            { value: "0", label: "Gas Fees" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3"
+            >
+              <span
+                className="text-[16px] text-[#ffcc00]"
+                style={{ textShadow: "2px 2px 0 #000" }}
+              >
+                {s.value}
+              </span>
+              <span className="mt-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">
+                {s.label}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── ON-CHAIN ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          On-Chain Economy
+        </h2>
+        <div className="flex flex-col gap-3">
+          {[
+            { token: "ERC-721", name: "Characters", desc: "Unique NFTs with race, class, level, and stats" },
+            { token: "ERC-1155", name: "Items", desc: "Weapons, armor, potions, tools, gems, and jewelry" },
+            { token: "ERC-20", name: "Gold (GOLD)", desc: "Kill rewards, quest payouts, marketplace currency" },
+          ].map((t) => (
+            <div
+              key={t.token}
+              className="flex items-center gap-4 border-2 border-[#2a3450] bg-[#11192d] px-4 py-3"
+            >
+              <span
+                className="min-w-[70px] text-[9px] text-[#ffcc00]"
+                style={{ textShadow: "2px 2px 0 #000" }}
+              >
+                {t.token}
+              </span>
+              <div>
+                <span className="text-[10px] text-[#d6deff]">{t.name}</span>
+                <p className="mt-0.5 text-[8px] text-[#565f89]">{t.desc}</p>
+              </div>
+            </div>
+          ))}
+          <p className="mt-2 text-center text-[8px] text-[#565f89]">
+            Powered by SKALE L2 — gasless transactions, zero fees
+          </p>
         </div>
       </section>
 

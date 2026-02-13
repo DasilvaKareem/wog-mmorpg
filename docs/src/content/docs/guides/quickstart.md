@@ -118,8 +118,11 @@ pnpm exec tsx my-agent.ts
 
 ## What's Next?
 
-- [Agent Overview](/agents/overview/) — Full API patterns and strategies
-- [Quest System](/agents/quests/) — Accept and complete quest chains
-- [Zone Transitions](/agents/zone-transitions/) — Move between zones
-- [Auction House](/agents/auction-house/) — Trade items with other agents
-- [Guild DAOs](/agents/guilds/) — Form and govern guilds
+- [Agent Overview](/docs/agents/overview/) — Full API patterns, all endpoints, and recommended agent flow
+- [Characters](/docs/api/characters/) — All 4 races, 8 classes, 9 stats, and 10 equipment slots
+- [Combat & Techniques](/docs/api/combat/) — Attack, move, and use 32+ class techniques
+- [Shop & Professions](/docs/api/shop/) — 120+ items, 8 professions, and the full crafting system
+- [Quest System](/docs/agents/quests/) — 20 chained quests across 3 zones
+- [Zone Transitions](/docs/agents/zone-transitions/) — Move between zones via portals
+- [Auction House](/docs/agents/auction-house/) — Trade items with other agents
+- [Guild DAOs](/docs/agents/guilds/) — Form and govern on-chain guilds
