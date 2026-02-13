@@ -8,10 +8,11 @@ import type {
   TerrainGridData,
   TerrainGridDataV2,
 } from "./types.js";
+import { API_URL } from "./config.js";
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   try {
-    const res = await fetch(`/zones/${zoneId}`);
+    const res = await fetch(`${API_URL}/zones/${zoneId}`);
     if (res.status === 404) {
       // Zone doesn't exist yet — treat as empty
       return { zoneId, tick: 0, entities: {} };
@@ -25,7 +26,7 @@ export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
 
 export async function fetchZoneList(): Promise<ZoneListEntry[]> {
   try {
-    const res = await fetch("/zones");
+    const res = await fetch(`${API_URL}/zones`);
     if (!res.ok) return [];
     const data: Record<string, { entityCount: number; tick: number }> =
       await res.json();
@@ -41,7 +42,7 @@ export async function fetchZoneList(): Promise<ZoneListEntry[]> {
 
 export async function fetchClasses(): Promise<ClassInfo[]> {
   try {
-    const res = await fetch("/character/classes");
+    const res = await fetch(`${API_URL}/character/classes`);
     if (!res.ok) return [];
     return (await res.json()) as ClassInfo[];
   } catch {
@@ -51,7 +52,7 @@ export async function fetchClasses(): Promise<ClassInfo[]> {
 
 export async function fetchRaces(): Promise<RaceInfo[]> {
   try {
-    const res = await fetch("/character/races");
+    const res = await fetch(`${API_URL}/character/races`);
     if (!res.ok) return [];
     return (await res.json()) as RaceInfo[];
   } catch {
@@ -66,7 +67,7 @@ export async function createCharacter(
   className: string
 ): Promise<CharacterCreateResponse | { error: string }> {
   try {
-    const res = await fetch("/character/create", {
+    const res = await fetch(`${API_URL}/character/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ walletAddress, name, race, className }),
@@ -81,7 +82,7 @@ export async function fetchCharacters(
   walletAddress: string
 ): Promise<OwnedCharacter[]> {
   try {
-    const res = await fetch(`/character/${walletAddress}`);
+    const res = await fetch(`${API_URL}/character/${walletAddress}`);
     if (!res.ok) {
       let detail = "";
       try {
@@ -164,7 +165,7 @@ export async function fetchTerrainGrid(
   zoneId: string
 ): Promise<TerrainGridData | null> {
   try {
-    const res = await fetch(`/v1/terrain/zone/${zoneId}`);
+    const res = await fetch(`${API_URL}/v1/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridData;
   } catch {
@@ -176,7 +177,7 @@ export async function fetchTerrainGridV2(
   zoneId: string
 ): Promise<TerrainGridDataV2 | null> {
   try {
-    const res = await fetch(`/v2/terrain/zone/${zoneId}`);
+    const res = await fetch(`${API_URL}/v2/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridDataV2;
   } catch {
@@ -200,7 +201,7 @@ export async function fetchProfessions(
   walletAddress: string
 ): Promise<ProfessionsResponse> {
   try {
-    const res = await fetch(`/professions/${walletAddress}`);
+    const res = await fetch(`${API_URL}/professions/${walletAddress}`);
     if (!res.ok) return { learned: [], available: [] };
     const data = await res.json();
     return {

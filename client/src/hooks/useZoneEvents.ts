@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { API_URL } from "../config.js";
 
 export interface ZoneEvent {
   id: string;
@@ -35,8 +36,8 @@ export function useZoneEvents(
       const since = events.length > 0 ? events[events.length - 1].timestamp : undefined;
 
       const url = since
-        ? `/events/${zoneId}?limit=${limit}&since=${since}`
-        : `/events/${zoneId}?limit=${limit}`;
+        ? `${API_URL}/events/${zoneId}?limit=${limit}&since=${since}`
+        : `${API_URL}/events/${zoneId}?limit=${limit}`;
 
       const response = await fetch(url);
 

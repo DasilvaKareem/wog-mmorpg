@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { API_URL } from "../config.js";
 
 export interface PlayerInfo {
   id: string;
@@ -33,7 +34,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
   const fetchZonePlayers = useCallback(async () => {
     try {
       // First, get list of all zones
-      const zonesResponse = await fetch("/zones");
+      const zonesResponse = await fetch(`${API_URL}/zones`);
 
       if (!zonesResponse.ok) {
         throw new Error(`Failed to fetch zones: ${zonesResponse.statusText}`);
