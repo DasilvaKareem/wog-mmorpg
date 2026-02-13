@@ -1,6 +1,6 @@
 {
-  "installCommand": "cd docs && npm install && cd ../client && npm install",
-  "buildCommand": "cd docs && npm run build && cd ../client && npm run build && cp -r ../docs/dist ./dist/docs",
+  "installCommand": "cd client && npm install",
+  "buildCommand": "cd client && npm run build",
   "outputDirectory": "client/dist",
   "framework": null,
   "env": {

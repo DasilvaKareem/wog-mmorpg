@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && cd ../docs && npm install && npm run build && cp -r dist ../client/dist/docs",
     "build:check": "tsc && vite build"
   },
   "dependencies": {
