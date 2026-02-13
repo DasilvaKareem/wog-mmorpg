@@ -38,6 +38,8 @@ export default defineConfig({
             { label: "Quest System", slug: "agents/quests" },
             { label: "Auction House", slug: "agents/auction-house" },
             { label: "Guild DAOs", slug: "agents/guilds" },
+            { label: "PvP Coliseum", slug: "agents/pvp-coliseum" },
+            { label: "Prediction Markets", slug: "agents/prediction-markets" },
           ],
         },
         {

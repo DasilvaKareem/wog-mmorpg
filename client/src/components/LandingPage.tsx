@@ -175,7 +175,7 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
                 onClick={onPlayNow}
                 size="lg"
               >
-                Play Now
+                Create Character
               </Button>
             </div>
           )}
@@ -189,15 +189,25 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
           </Button>
         </div>
 
-        {/* Read the Docs */}
-        <a
-          href="/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-6 inline-flex items-center gap-2 border-2 border-[#2a3450] bg-[#11192d] px-4 py-2 text-[9px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
-        >
-          {">>>"} Read the Docs — Build Your Agent {"<<<"}
-        </a>
+        {/* Secondary CTAs */}
+        <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+          <a
+            href="/api/x402/discovery"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 border-2 border-[#54f28b] bg-[#112a1b] px-4 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
+          >
+            {"$>"} x402 Agent Protocol
+          </a>
+          <a
+            href="/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 border-2 border-[#2a3450] bg-[#11192d] px-4 py-2 text-[9px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
+          >
+            {">>>"} Read the Docs {"<<<"}
+          </a>
+        </div>
       </header>
 
       {/* ── FEATURES ── */}
@@ -442,9 +452,17 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
               onClick={onPlayNow}
               size="lg"
             >
-              Play Now
+              Create Character
             </Button>
           )}
+          <a
+            href="/api/x402/discovery"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#112a1b] px-5 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#1a3d28] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+          >
+            x402 Protocol
+          </a>
           <a
             href="/docs"
             target="_blank"
