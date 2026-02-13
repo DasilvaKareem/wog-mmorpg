@@ -34,6 +34,9 @@ import { registerPartyRoutes } from "./partySystem.js";
 import { registerAuthRoutes } from "./auth.js";
 import { registerZoneTransitionRoutes } from "./zoneTransition.js";
 import { registerLeaderboardRoutes } from "./leaderboard.js";
+import { registerLeatherworkingRoutes } from "./leatherworking.js";
+import { registerUpgradingRoutes } from "./upgrading.js";
+import { registerJewelcraftingRoutes } from "./jewelcrafting.js";
 
 const server = Fastify({ logger: true });
 
@@ -72,6 +75,9 @@ registerCookingRoutes(server);
 registerPartyRoutes(server);
 registerZoneTransitionRoutes(server);
 registerLeaderboardRoutes(server);
+registerLeatherworkingRoutes(server);
+registerUpgradingRoutes(server);
+registerJewelcraftingRoutes(server);
 spawnNpcs();
 spawnOreNodes();
 spawnFlowerNodes();

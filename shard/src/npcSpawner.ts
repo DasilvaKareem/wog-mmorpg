@@ -46,8 +46,8 @@ const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    // Sells advanced weapons, heavy armor, pickaxes, sickles, and skinning knives
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79],
+    // Sells advanced weapons, heavy armor, pickaxes, sickles, skinning knives, disenchanting scroll
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
   // Auctioneer - Regional Auction House
   {
@@ -145,6 +145,42 @@ const NPC_DEFS: NpcDef[] = [
     x: 400,
     y: 460,
     hp: 9999,
+  },
+  // Leatherworking & Jewelcrafting Stations
+  {
+    zoneId: "human-meadow",
+    type: "tanning-rack",
+    name: "Sturdy Tanning Rack",
+    x: 440,
+    y: 460,
+    hp: 9999,
+  },
+  {
+    zoneId: "human-meadow",
+    type: "jewelers-bench",
+    name: "Jeweler's Workbench",
+    x: 480,
+    y: 460,
+    hp: 9999,
+  },
+  // Leatherworking & Jewelcrafting Trainers
+  {
+    zoneId: "human-meadow",
+    type: "profession-trainer",
+    name: "Tanner Hilda",
+    x: 500,
+    y: 420,
+    hp: 999,
+    teachesProfession: "leatherworking",
+  },
+  {
+    zoneId: "human-meadow",
+    type: "profession-trainer",
+    name: "Gemcutter Orik",
+    x: 540,
+    y: 420,
+    hp: 999,
+    teachesProfession: "jewelcrafting",
   },
   // Class Trainers
   {

@@ -426,13 +426,22 @@ export function registerGuildRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { memberAddress: string; amount: number };
-  }>("/guild/:guildId/deposit", async (request, reply) => {
+  }>("/guild/:guildId/deposit", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { memberAddress, amount } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!memberAddress || !/^0x[a-fA-F0-9]{40}$/.test(memberAddress)) {
       reply.code(400);
       return { error: "Invalid member address" };
+    }
+
+    // Verify authenticated wallet matches member address
+    if (memberAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     if (amount <= 0) {
@@ -489,13 +498,22 @@ export function registerGuildRoutes(server: FastifyInstance) {
       targetAddress?: string;
       targetAmount?: number;
     };
-  }>("/guild/:guildId/propose", async (request, reply) => {
+  }>("/guild/:guildId/propose", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { proposerAddress, proposalType, description, targetAddress, targetAmount } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!proposerAddress || !/^0x[a-fA-F0-9]{40}$/.test(proposerAddress)) {
       reply.code(400);
       return { error: "Invalid proposer address" };
+    }
+
+    // Verify authenticated wallet matches proposer address
+    if (proposerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     const typeIndex = PROPOSAL_TYPE_NAMES.indexOf(proposalType);

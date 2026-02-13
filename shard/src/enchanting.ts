@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "./zoneRuntime.js";
+import { getAllZones, recalculateEntityVitals } from "./zoneRuntime.js";
 import { burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
@@ -315,6 +315,120 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       enchantments: equippedItem.enchantments ?? [],
       totalStatBonus: calculateTotalEnchantmentBonus(equippedItem.enchantments ?? []),
     };
+  });
+
+  // POST /enchanting/remove - remove all enchantments from an equipped item
+  server.post<{
+    Body: {
+      walletAddress: string;
+      zoneId: string;
+      entityId: string;
+      altarId: string;
+      equipmentSlot: string;
+    };
+  }>("/enchanting/remove", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const { walletAddress, zoneId, entityId, altarId, equipmentSlot } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      reply.code(400);
+      return { error: "Invalid wallet address" };
+    }
+
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
+
+    const zone = getAllZones().get(zoneId);
+    if (!zone) {
+      reply.code(404);
+      return { error: "Zone not found" };
+    }
+
+    const entity = zone.entities.get(entityId);
+    if (!entity) {
+      reply.code(404);
+      return { error: "Entity not found" };
+    }
+
+    const altar = zone.entities.get(altarId);
+    if (!altar || altar.type !== "enchanting-altar") {
+      reply.code(404);
+      return { error: "Enchanting Altar not found" };
+    }
+
+    // Check range
+    const dx = altar.x - entity.x;
+    const dy = altar.y - entity.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 100) {
+      reply.code(400);
+      return { error: "Too far from Enchanting Altar", distance: Math.round(dist), maxRange: 100 };
+    }
+
+    if (!entity.equipment) {
+      reply.code(400);
+      return { error: "You have no equipment" };
+    }
+
+    const equippedItem = entity.equipment[equipmentSlot as keyof typeof entity.equipment];
+    if (!equippedItem) {
+      reply.code(400);
+      return { error: `No item equipped in ${equipmentSlot} slot` };
+    }
+
+    if (!equippedItem.enchantments || equippedItem.enchantments.length === 0) {
+      reply.code(400);
+      return { error: "This item has no enchantments to remove" };
+    }
+
+    // CRITICAL: Burn 1x Disenchanting Scroll (tokenId 115)
+    try {
+      const burnTx = await burnItem(walletAddress, 115n, 1n);
+
+      // Revert durability enchantment if present
+      const hadDurabilityEnchant = equippedItem.enchantments.some(e => e.type === "durability");
+      if (hadDurabilityEnchant) {
+        const item = getItemByTokenId(BigInt(equippedItem.tokenId));
+        if (item?.maxDurability) {
+          equippedItem.maxDurability = item.maxDurability;
+          equippedItem.durability = Math.min(equippedItem.durability, equippedItem.maxDurability);
+        }
+      }
+
+      const removedEnchantments = [...equippedItem.enchantments];
+      equippedItem.enchantments = [];
+
+      recalculateEntityVitals(entity);
+
+      const itemInfo = getItemByTokenId(BigInt(equippedItem.tokenId));
+
+      server.log.info(
+        `[enchanting] ${entity.name} removed enchantments from ${itemInfo?.name} → ${burnTx}`
+      );
+
+      return {
+        ok: true,
+        removedEnchantments,
+        item: {
+          name: itemInfo?.name ?? "Unknown",
+          slot: equipmentSlot,
+          tokenId: equippedItem.tokenId,
+          durability: equippedItem.durability,
+          maxDurability: equippedItem.maxDurability,
+        },
+        scrollBurnTx: burnTx,
+      };
+    } catch (err) {
+      server.log.error(err, `[enchanting] Failed to burn Disenchanting Scroll for ${walletAddress}`);
+      reply.code(500);
+      return {
+        error: "Failed to consume Disenchanting Scroll - you may not have one in your wallet",
+      };
+    }
   });
 }
 

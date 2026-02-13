@@ -10,7 +10,20 @@ const thirdwebClient = createThirdwebClient({
 
 const skaleBaseSepolia = defineChain({
   id: SKALE_CHAIN_ID,
+  name: "SKALE Base Sepolia Testnet",
   rpc: "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
+  nativeCurrency: {
+    name: "sFUEL",
+    symbol: "sFUEL",
+    decimals: 18,
+  },
+  blockExplorers: [
+    {
+      name: "SKALE Explorer",
+      url: "https://base-sepolia-testnet.skalenodes.com",
+    },
+  ],
+  testnet: true,
 });
 
 export interface WalletBalance {

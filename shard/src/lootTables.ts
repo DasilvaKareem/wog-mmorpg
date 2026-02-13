@@ -185,6 +185,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Raw Meat
       { tokenId: 39n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, // Starbloom (shadow essence)
+      { tokenId: 116n, minQuantity: 1, maxQuantity: 1, chance: 0.08 }, // Rough Ruby
     ],
     skinningDrops: [
       { tokenId: 70n, minQuantity: 1, maxQuantity: 2, chance: 0.7 }, // Heavy Leather
@@ -200,6 +201,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     autoDrops: [
       { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
       { tokenId: 24n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Copper Ore
+      { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Sapphire
     ],
     skinningDrops: [
       { tokenId: 70n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Heavy Leather (robes)
@@ -213,6 +215,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     autoDrops: [
       { tokenId: 24n, minQuantity: 1, maxQuantity: 3, chance: 0.4 }, // Copper Ore
       { tokenId: 25n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Silver Ore
+      { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Rough Emerald
+      { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.05 }, // Flawed Diamond
     ],
     skinningDrops: [
       { tokenId: 72n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Ancient Bone
@@ -226,6 +230,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     goldMax: 110,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Raw Meat
+      { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.08 }, // Shadow Opal
     ],
     skinningDrops: [
       { tokenId: 70n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Heavy Leather
@@ -241,6 +246,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     autoDrops: [
       { tokenId: 25n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Silver Ore
       { tokenId: 26n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Gold Ore
+      { tokenId: 119n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Flawed Diamond
+      { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.05 }, // Arcane Crystal
     ],
     skinningDrops: [
       { tokenId: 74n, minQuantity: 1, maxQuantity: 3, chance: 0.6 }, // Golem Core
@@ -256,6 +263,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
       { tokenId: 80n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Mana Potion
       { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
       { tokenId: 40n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Dragon's Breath
+      { tokenId: 121n, minQuantity: 1, maxQuantity: 1, chance: 0.25 }, // Arcane Crystal
+      { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
     skinningDrops: [
       { tokenId: 75n, minQuantity: 1, maxQuantity: 1, chance: 0.8 }, // Necromancer's Essence (rare)

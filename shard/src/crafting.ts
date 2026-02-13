@@ -127,6 +127,154 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     requiredProfession: "blacksmithing",
     craftingTime: 30,
   },
+
+  // --- Smelting Recipes (Ore → Bars) ---
+  {
+    recipeId: "smelt-tin-bar",
+    outputTokenId: 86n, // Tin Bar
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 23n, quantity: 2 }, // 2x Tin Ore
+      { tokenId: 22n, quantity: 1 }, // 1x Coal Ore (fuel)
+    ],
+    goldCost: 5,
+    requiredProfession: "blacksmithing",
+    craftingTime: 3,
+  },
+  {
+    recipeId: "smelt-copper-bar",
+    outputTokenId: 87n, // Copper Bar
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 24n, quantity: 2 }, // 2x Copper Ore
+      { tokenId: 22n, quantity: 1 }, // 1x Coal Ore (fuel)
+    ],
+    goldCost: 8,
+    requiredProfession: "blacksmithing",
+    craftingTime: 4,
+  },
+  {
+    recipeId: "smelt-silver-bar",
+    outputTokenId: 88n, // Silver Bar
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 25n, quantity: 2 }, // 2x Silver Ore
+      { tokenId: 22n, quantity: 2 }, // 2x Coal Ore (fuel)
+    ],
+    goldCost: 15,
+    requiredProfession: "blacksmithing",
+    craftingTime: 6,
+  },
+  {
+    recipeId: "smelt-gold-bar",
+    outputTokenId: 89n, // Gold Bar
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 26n, quantity: 2 }, // 2x Gold Ore
+      { tokenId: 22n, quantity: 3 }, // 3x Coal Ore (fuel)
+    ],
+    goldCost: 30,
+    requiredProfession: "blacksmithing",
+    craftingTime: 8,
+  },
+  {
+    recipeId: "smelt-steel-alloy",
+    outputTokenId: 90n, // Steel Alloy
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
+      { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
+      { tokenId: 22n, quantity: 3 }, // 3x Coal Ore
+    ],
+    goldCost: 40,
+    requiredProfession: "blacksmithing",
+    craftingTime: 10,
+  },
+
+  // --- Bar-based Blacksmithing (advanced armor) ---
+  {
+    recipeId: "bar-iron-helm",
+    outputTokenId: 10n, // Iron Helm
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
+    ],
+    goldCost: 15,
+    requiredProfession: "blacksmithing",
+    craftingTime: 6,
+  },
+  {
+    recipeId: "bar-bronze-shoulders",
+    outputTokenId: 14n, // Bronze Shoulders
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
+      { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
+    ],
+    goldCost: 20,
+    requiredProfession: "blacksmithing",
+    craftingTime: 8,
+  },
+  {
+    recipeId: "bar-knight-gauntlets",
+    outputTokenId: 19n, // Knight Gauntlets
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
+      { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
+    ],
+    goldCost: 50,
+    requiredProfession: "blacksmithing",
+    craftingTime: 12,
+  },
+  {
+    recipeId: "bar-steel-pauldrons",
+    outputTokenId: 21n, // Steel Pauldrons
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
+      { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
+    ],
+    goldCost: 60,
+    requiredProfession: "blacksmithing",
+    craftingTime: 14,
+  },
+  {
+    recipeId: "bar-war-belt",
+    outputTokenId: 20n, // War Belt
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
+      { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
+    ],
+    goldCost: 45,
+    requiredProfession: "blacksmithing",
+    craftingTime: 10,
+  },
+  {
+    recipeId: "bar-chainmail-shirt",
+    outputTokenId: 9n, // Chainmail Shirt (bar version)
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 87n, quantity: 3 }, // 3x Copper Bar
+      { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
+    ],
+    goldCost: 70,
+    requiredProfession: "blacksmithing",
+    craftingTime: 18,
+  },
+  {
+    recipeId: "bar-apprentice-staff",
+    outputTokenId: 6n, // Apprentice Staff
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 88n, quantity: 2 }, // 2x Silver Bar
+      { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
+    ],
+    goldCost: 55,
+    requiredProfession: "blacksmithing",
+    craftingTime: 12,
+  },
 ];
 
 export function getRecipeById(recipeId: string): CraftingRecipe | undefined {

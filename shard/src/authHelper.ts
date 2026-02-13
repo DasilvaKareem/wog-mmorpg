@@ -5,8 +5,6 @@
  */
 
 import { privateKeyToAccount } from "viem/accounts";
-import { createWalletClient, http } from "viem";
-import { skaleBaseSepolia } from "./chain.js";
 
 const API = process.env.API_URL || "http://localhost:3000";
 
@@ -25,14 +23,8 @@ export async function authenticateWithWallet(privateKey: string): Promise<string
     throw new Error("Failed to get authentication challenge");
   }
 
-  // Step 2: Sign the message
-  const walletClient = createWalletClient({
-    account,
-    chain: skaleBaseSepolia,
-    transport: http(),
-  });
-
-  const signature = await walletClient.signMessage({
+  // Step 2: Sign the message (local signing — no chain needed)
+  const signature = await account.signMessage({
     message: challenge.message,
   });
 

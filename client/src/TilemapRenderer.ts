@@ -72,16 +72,34 @@ export class TilemapRenderer {
     }
 
     // Create Phaser tilemap from data
+    if (!this.scene || !this.scene.make || !this.scene.textures) {
+      console.error("[TilemapRenderer] Scene not properly initialized");
+      return false;
+    }
+
     this.tilemap = this.scene.make.tilemap({
       data: groundData,
       tileWidth: T,
       tileHeight: T,
     });
 
-    const tileset = this.tilemap.addTilesetImage("tile-atlas")!;
+    if (!this.tilemap) {
+      console.error("[TilemapRenderer] Failed to create tilemap");
+      return false;
+    }
+
+    const tileset = this.tilemap.addTilesetImage("tile-atlas");
+    if (!tileset) {
+      console.error("[TilemapRenderer] Failed to add tileset image 'tile-atlas'");
+      return false;
+    }
 
     // Ground layer
-    this.groundLayer = this.tilemap.createLayer(0, tileset, 0, 0)!;
+    this.groundLayer = this.tilemap.createLayer(0, tileset, 0, 0);
+    if (!this.groundLayer) {
+      console.error("[TilemapRenderer] Failed to create ground layer");
+      return false;
+    }
     this.groundLayer.setDepth(0);
 
     // Overlay layer — create blank, then populate
@@ -90,8 +108,22 @@ export class TilemapRenderer {
       tileWidth: T,
       tileHeight: T,
     });
-    const overlayTileset = overlayMap.addTilesetImage("tile-atlas")!;
-    this.overlayLayer = overlayMap.createLayer(0, overlayTileset, 0, 0)!;
+    if (!overlayMap) {
+      console.error("[TilemapRenderer] Failed to create overlay map");
+      return false;
+    }
+
+    const overlayTileset = overlayMap.addTilesetImage("tile-atlas");
+    if (!overlayTileset) {
+      console.error("[TilemapRenderer] Failed to add overlay tileset");
+      return false;
+    }
+
+    this.overlayLayer = overlayMap.createLayer(0, overlayTileset, 0, 0);
+    if (!this.overlayLayer) {
+      console.error("[TilemapRenderer] Failed to create overlay layer");
+      return false;
+    }
     this.overlayLayer.setDepth(20);
 
     // Start water animation

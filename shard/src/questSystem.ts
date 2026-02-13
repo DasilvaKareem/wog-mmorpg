@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
-import { mintGold } from "./blockchain.js";
+import { mintGold, mintItem } from "./blockchain.js";
 
 // Quest definition
 export interface Quest {
@@ -10,14 +10,16 @@ export interface Quest {
   npcId: string; // Entity ID of quest giver
   prerequisiteQuestId?: string; // Optional: Quest that must be completed first
   objective: {
-    type: "kill";
-    targetMobType: string; // e.g. "mob" or specific name
-    targetMobName?: string; // Optional: specific mob name like "Hungry Wolf"
+    type: "kill" | "talk";
+    targetMobType?: string; // kill quests: e.g. "mob" or specific name
+    targetMobName?: string; // kill quests: specific mob name like "Hungry Wolf"
+    targetNpcName?: string; // talk quests: NPC name to visit
     count: number;
   };
   rewards: {
     gold: number;
     xp: number;
+    items?: Array<{ tokenId: number; quantity: number }>; // minted to player on completion
   };
 }
 
@@ -30,7 +32,159 @@ export interface ActiveQuest {
 
 // Predefined quests offered by NPCs
 export const QUEST_CATALOG: Quest[] = [
-  // === HUMAN MEADOW QUESTS (Levels 1-5) ===
+  // === NEWCOMER'S WELCOME — Talk Quest Chain (human-meadow, 8 quests, 900 XP → L3) ===
+
+  {
+    id: "welcome_adventurer",
+    title: "Welcome, Adventurer",
+    description:
+      "Guard Captain Marcus wants to greet every new arrival. Speak with him to learn about the meadow.",
+    npcId: "Guard Captain Marcus",
+    objective: {
+      type: "talk",
+      targetNpcName: "Guard Captain Marcus",
+      count: 1,
+    },
+    rewards: {
+      gold: 10,
+      xp: 40,
+      items: [{ tokenId: 0, quantity: 3 }], // 3x Health Potion
+    },
+  },
+  {
+    id: "traders_bargain",
+    title: "The Trader's Bargain",
+    description:
+      "Grimwald the Trader has a welcome gift for newcomers. Visit his stall near the market square.",
+    npcId: "Grimwald the Trader",
+    prerequisiteQuestId: "welcome_adventurer",
+    objective: {
+      type: "talk",
+      targetNpcName: "Grimwald the Trader",
+      count: 1,
+    },
+    rewards: {
+      gold: 15,
+      xp: 60,
+      items: [{ tokenId: 2, quantity: 1 }], // 1x Iron Sword
+    },
+  },
+  {
+    id: "blacksmiths_offer",
+    title: "The Blacksmith's Offer",
+    description:
+      "Bron the Blacksmith forged a leather vest for you. Pick it up at his anvil.",
+    npcId: "Bron the Blacksmith",
+    prerequisiteQuestId: "traders_bargain",
+    objective: {
+      type: "talk",
+      targetNpcName: "Bron the Blacksmith",
+      count: 1,
+    },
+    rewards: {
+      gold: 15,
+      xp: 80,
+      items: [{ tokenId: 8, quantity: 1 }], // 1x Leather Vest
+    },
+  },
+  {
+    id: "warriors_wisdom",
+    title: "Warrior's Wisdom",
+    description:
+      "Thrain Ironforge wants to share combat wisdom with every new recruit. Find him at the training grounds.",
+    npcId: "Thrain Ironforge - Warrior Trainer",
+    prerequisiteQuestId: "blacksmiths_offer",
+    objective: {
+      type: "talk",
+      targetNpcName: "Thrain Ironforge - Warrior Trainer",
+      count: 1,
+    },
+    rewards: {
+      gold: 10,
+      xp: 100,
+      items: [{ tokenId: 10, quantity: 1 }], // 1x Iron Helm
+    },
+  },
+  {
+    id: "foragers_knowledge",
+    title: "Forager's Knowledge",
+    description:
+      "Herbalist Willow knows every plant in the meadow. She has protective leggings woven from enchanted fibers.",
+    npcId: "Herbalist Willow",
+    prerequisiteQuestId: "warriors_wisdom",
+    objective: {
+      type: "talk",
+      targetNpcName: "Herbalist Willow",
+      count: 1,
+    },
+    rewards: {
+      gold: 10,
+      xp: 120,
+      items: [{ tokenId: 12, quantity: 1 }], // 1x Leather Leggings
+    },
+  },
+  {
+    id: "cooks_secret",
+    title: "The Cook's Secret",
+    description:
+      "Chef Gastron insists every adventurer needs good boots. He has a pair waiting at the campfire.",
+    npcId: "Chef Gastron",
+    prerequisiteQuestId: "foragers_knowledge",
+    objective: {
+      type: "talk",
+      targetNpcName: "Chef Gastron",
+      count: 1,
+    },
+    rewards: {
+      gold: 15,
+      xp: 140,
+      items: [{ tokenId: 13, quantity: 1 }], // 1x Traveler Boots
+    },
+  },
+  {
+    id: "miners_greeting",
+    title: "Miner's Greeting",
+    description:
+      "Grizzled Miner Torvik rewards those brave enough to descend into the mines. Visit him for padded gloves and a sturdy belt.",
+    npcId: "Grizzled Miner Torvik",
+    prerequisiteQuestId: "cooks_secret",
+    objective: {
+      type: "talk",
+      targetNpcName: "Grizzled Miner Torvik",
+      count: 1,
+    },
+    rewards: {
+      gold: 15,
+      xp: 160,
+      items: [
+        { tokenId: 15, quantity: 1 }, // 1x Padded Gloves
+        { tokenId: 16, quantity: 1 }, // 1x Guard Belt
+      ],
+    },
+  },
+  {
+    id: "ready_for_battle",
+    title: "Ready for Battle",
+    description:
+      "Return to Guard Captain Marcus fully equipped. He'll award your shoulder guard and send you to fight.",
+    npcId: "Guard Captain Marcus",
+    prerequisiteQuestId: "miners_greeting",
+    objective: {
+      type: "talk",
+      targetNpcName: "Guard Captain Marcus",
+      count: 1,
+    },
+    rewards: {
+      gold: 20,
+      xp: 200,
+      items: [
+        { tokenId: 14, quantity: 1 }, // 1x Bronze Shoulders
+        { tokenId: 0, quantity: 3 },  // 3x Health Potion
+      ],
+    },
+  },
+
+  // === HUMAN MEADOW KILL QUESTS (Levels 1-5) ===
 
   // Tutorial Quest - Level 1 (No prerequisite - starting quest)
   {
@@ -501,10 +655,26 @@ export async function awardQuestRewards(
     await mintGold(player.walletAddress, quest.rewards.gold.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)
     );
+
+    // Award item rewards
+    if (quest.rewards.items) {
+      for (const item of quest.rewards.items) {
+        await mintItem(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
+          (err) =>
+            console.error(
+              `[quest] Failed to mint item ${item.tokenId} x${item.quantity} for ${player.name}:`,
+              err
+            )
+        );
+      }
+    }
   }
 
   console.log(
-    `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.gold} gold + ${quest.rewards.xp} XP`
+    `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.gold} gold + ${quest.rewards.xp} XP` +
+      (quest.rewards.items
+        ? ` + ${quest.rewards.items.map((i) => `${i.quantity}x tokenId:${i.tokenId}`).join(", ")}`
+        : "")
   );
 }
 
@@ -705,6 +875,109 @@ export function registerQuestRoutes(server: FastifyInstance) {
       completed: true,
       rewards: quest.rewards,
       questTitle: quest.title,
+      totalCompleted: player.completedQuests.length,
+    };
+  });
+
+  // POST /quests/talk - Auto-accept + auto-complete a talk quest by visiting an NPC
+  server.post<{
+    Body: { zoneId: string; playerId: string; npcEntityId: string };
+  }>("/quests/talk", async (request, reply) => {
+    const { zoneId, playerId, npcEntityId } = request.body;
+    const zone = getOrCreateZone(zoneId);
+    const player = zone.entities.get(playerId);
+
+    if (!player || player.type !== "player") {
+      reply.code(404);
+      return { error: "Player not found" };
+    }
+
+    const npc = zone.entities.get(npcEntityId);
+    if (!npc) {
+      reply.code(404);
+      return { error: "NPC not found" };
+    }
+
+    // Range check (50 units)
+    const dx = (player.x ?? 0) - (npc.x ?? 0);
+    const dz = (player.y ?? 0) - (npc.y ?? 0);
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist > 50) {
+      reply.code(400);
+      return { error: "Too far from NPC", distance: Math.round(dist), maxRange: 50 };
+    }
+
+    // Initialize quest tracking
+    if (!player.activeQuests) player.activeQuests = [];
+    if (!player.completedQuests) player.completedQuests = [];
+
+    const npcName = npc.name;
+
+    // Find a talk quest targeting this NPC that the player can do:
+    // 1. First check active talk quests for this NPC
+    const activeEntry = player.activeQuests.find((aq) => {
+      const q = QUEST_CATALOG.find((c) => c.id === aq.questId);
+      return q && q.objective.type === "talk" && q.objective.targetNpcName === npcName;
+    });
+
+    let quest: Quest | undefined;
+
+    if (activeEntry) {
+      quest = QUEST_CATALOG.find((q) => q.id === activeEntry.questId);
+    } else {
+      // 2. Auto-accept the next available talk quest for this NPC
+      quest = QUEST_CATALOG.find(
+        (q) =>
+          q.objective.type === "talk" &&
+          q.objective.targetNpcName === npcName &&
+          !player.completedQuests!.includes(q.id) &&
+          !player.activeQuests!.some((aq) => aq.questId === q.id) &&
+          isQuestAvailable(q, player.completedQuests!)
+      );
+
+      if (quest) {
+        // Auto-accept
+        player.activeQuests.push({
+          questId: quest.id,
+          progress: 0,
+          startedAt: Date.now(),
+        });
+        console.log(`[quest] ${player.name} auto-accepted talk quest "${quest.title}"`);
+      }
+    }
+
+    if (!quest) {
+      reply.code(400);
+      return { error: "No talk quest available from this NPC" };
+    }
+
+    // Find the active quest entry (may have just been pushed)
+    const aqIndex = player.activeQuests.findIndex((aq) => aq.questId === quest!.id);
+    const aq = player.activeQuests[aqIndex];
+
+    // Complete: set progress = count
+    aq.progress = quest.objective.count;
+
+    // Award rewards
+    await awardQuestRewards(player, quest);
+
+    // Move to completed
+    player.activeQuests.splice(aqIndex, 1);
+    player.completedQuests.push(quest.id);
+
+    console.log(
+      `[quest] ${player.name} completed talk quest "${quest.title}" (${player.completedQuests.length} total completed)`
+    );
+
+    return {
+      completed: true,
+      quest: {
+        id: quest.id,
+        title: quest.title,
+        description: quest.description,
+        objective: quest.objective,
+      },
+      rewards: quest.rewards,
       totalCompleted: player.completedQuests.length,
     };
   });

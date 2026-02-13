@@ -11,6 +11,11 @@ export interface Entity {
   walletAddress?: string;
   level?: number;
   xp?: number;
+  raceId?: string;
+  classId?: string;
+  essence?: number;
+  maxEssence?: number;
+  xpReward?: number;
   equipment?: Partial<
     Record<
       "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt",

@@ -1,11 +1,19 @@
 import Phaser from "phaser";
 
-import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_MIN, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
+import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
 import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
 import { fetchZone } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites } from "@/EntitySpriteGenerator";
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function pad(n: number): string {
+  return String(n).padStart(3, " ");
+}
 
 export class WorldScene extends Phaser.Scene {
   private entityRenderer!: EntityRenderer;
@@ -20,8 +28,14 @@ export class WorldScene extends Phaser.Scene {
   private zoneId = "human-meadow";
   private unsubscribeSwitchZone: (() => void) | null = null;
 
+  /** Dynamic min zoom — ensures the map always fills the viewport */
+  private minZoom = 0.5;
+
   /** Spectate camera: follows this entity id, null = free cam */
   private followTarget: string | null = null;
+  private isDragging = false;
+  private dragStartX = 0;
+  private dragStartY = 0;
   private escKey!: Phaser.Input.Keyboard.Key;
 
   constructor() {
@@ -44,13 +58,27 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("auctioneerClick", entity);
       }
 
-      // Spectate: click any entity to follow
+      // Spectate: click any entity → snap camera immediately, then follow
       this.followTarget = entity.id;
+      this.isDragging = false;
+      const px = entity.x * this.tilemapRenderer.coordScale;
+      const py = entity.y * this.tilemapRenderer.coordScale;
+      this.cameras.main.centerOn(px, py);
     });
 
-    // Camera + input
+    // Camera + input — only treat as drag after moving 4+ pixels
+    this.input.on("pointerdown", () => {
+      this.isDragging = false;
+      this.dragStartX = this.input.activePointer.x;
+      this.dragStartY = this.input.activePointer.y;
+    });
+
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
       if (!pointer.isDown) return;
+      const movedX = Math.abs(pointer.x - this.dragStartX);
+      const movedY = Math.abs(pointer.y - this.dragStartY);
+      if (!this.isDragging && movedX < 4 && movedY < 4) return;
+      this.isDragging = true;
       // Dragging releases spectate
       this.followTarget = null;
       const cam = this.cameras.main;
@@ -69,7 +97,7 @@ export class WorldScene extends Phaser.Scene {
         const cam = this.cameras.main;
         const nextZoom = Phaser.Math.Clamp(
           cam.zoom - Math.sign(dy) * ZOOM_STEP,
-          ZOOM_MIN,
+          this.minZoom,
           ZOOM_MAX,
         );
         cam.setZoom(nextZoom);
@@ -92,22 +120,23 @@ export class WorldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(100);
 
-    // Tooltip background (hidden by default)
+    // Tooltip background (hidden by default) — 8-bit dark box with green border
     this.tooltipBg = this.add
-      .rectangle(0, 0, 200, 100, 0x000000, 0.85)
+      .rectangle(0, 0, 200, 100, 0x0a0e1a, 0.92)
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(200)
+      .setStrokeStyle(2, 0x00ff88)
       .setVisible(false);
 
     // Tooltip text (hidden by default)
     this.tooltip = this.add
       .text(0, 0, "", {
-        fontSize: "11px",
+        fontSize: "10px",
         fontFamily: "monospace",
-        color: "#ffffff",
-        lineSpacing: 3,
-        padding: { x: 6, y: 4 },
+        color: "#e0e8ff",
+        lineSpacing: 2,
+        padding: { x: 8, y: 6 },
       })
       .setOrigin(0, 0)
       .setScrollFactor(0)
@@ -165,13 +194,11 @@ export class WorldScene extends Phaser.Scene {
       if (this.cursors.down.isDown) cam.scrollY += CAMERA_SPEED / cam.zoom;
     }
 
-    // Follow target entity
+    // Follow target entity — use sprite's current visual position (smooth during tweens)
     if (this.followTarget) {
-      const ent = this.entityRenderer.getEntity(this.followTarget);
-      if (ent) {
-        const px = ent.x * this.tilemapRenderer.coordScale;
-        const py = ent.y * this.tilemapRenderer.coordScale;
-        cam.centerOn(px, py);
+      const spritePos = this.entityRenderer.getSpritePosition(this.followTarget);
+      if (spritePos) {
+        cam.centerOn(spritePos.x, spritePos.y);
       } else {
         // Entity left zone — release
         this.followTarget = null;
@@ -207,42 +234,97 @@ export class WorldScene extends Phaser.Scene {
     const pointer = this.input.activePointer;
     const cam = this.cameras.main;
 
-    // Convert screen coords to world coords
-    const worldX = (pointer.x / cam.zoom) + cam.scrollX;
-    const worldY = (pointer.y / cam.zoom) + cam.scrollY;
+    // Use Phaser's built-in screen-to-world conversion (handles zoom, scroll, viewport)
+    const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
 
-    // Find entity under cursor (within 20px radius for smaller sprites)
-    const hoveredEntity = this.entityRenderer.getEntityAt(worldX, worldY, 20);
+    // Find entity under cursor (within 16px world-space radius)
+    const hoveredEntity = this.entityRenderer.getEntityAt(worldPoint.x, worldPoint.y, 16);
 
     if (hoveredEntity) {
-      const lines = [
-        `${hoveredEntity.name}`,
-        `Type: ${hoveredEntity.type}`,
-        `HP: ${hoveredEntity.hp}/${hoveredEntity.maxHp}`,
-      ];
+      const lines: string[] = [];
+      const e = hoveredEntity;
 
-      if (hoveredEntity.level) {
-        lines.push(`Level: ${hoveredEntity.level}`);
+      // ── Header: name + type tag ──
+      const typeTag = this.entityTypeTag(e.type);
+      lines.push(e.name);
+      lines.push(typeTag);
+
+      // ── Race / Class (players + agents) ──
+      if (e.raceId || e.classId) {
+        const race = e.raceId ? capitalize(e.raceId) : "";
+        const cls = e.classId ? capitalize(e.classId) : "";
+        lines.push(`${race} ${cls}`.trim());
       }
-      if (hoveredEntity.xp !== undefined) {
-        lines.push(`XP: ${hoveredEntity.xp}`);
+
+      lines.push(""); // separator
+
+      // ── HP bar (text-art) ──
+      const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+      const hpBarFill = Math.round(hpRatio * 10);
+      const hpBar = "#".repeat(hpBarFill) + "-".repeat(10 - hpBarFill);
+      lines.push(`HP [${hpBar}] ${e.hp}/${e.maxHp}`);
+
+      // ── Essence bar (if present) ──
+      if (e.essence !== undefined && e.maxEssence && e.maxEssence > 0) {
+        const esRatio = e.essence / e.maxEssence;
+        const esFill = Math.round(esRatio * 10);
+        const esBar = "*".repeat(esFill) + "-".repeat(10 - esFill);
+        lines.push(`ES [${esBar}] ${e.essence}/${e.maxEssence}`);
       }
-      if (hoveredEntity.type === "merchant") {
-        lines.push(``, `Click to shop`);
+
+      // ── Level + XP ──
+      if (e.level) {
+        let lvlLine = `Lv.${e.level}`;
+        if (e.xp !== undefined) lvlLine += `  XP:${e.xp}`;
+        lines.push(lvlLine);
       }
-      if (hoveredEntity.type === "trainer") {
-        lines.push(``, `Class Trainer`);
+
+      // ── Stats (if available) ──
+      if (e.effectiveStats) {
+        const s = e.effectiveStats;
+        lines.push("");
+        lines.push(`STR ${pad(s.str)} DEF ${pad(s.def)}`);
+        lines.push(`INT ${pad(s.int)} AGI ${pad(s.agi)}`);
+        lines.push(`FAI ${pad(s.faith)} LCK ${pad(s.luck)}`);
       }
-      if (hoveredEntity.type === "profession-trainer") {
-        lines.push(``, `Profession Trainer`);
+
+      // ── Equipment summary ──
+      if (e.equipment) {
+        const equipped = Object.keys(e.equipment).filter(
+          (slot) => e.equipment![slot as keyof typeof e.equipment] != null
+        );
+        if (equipped.length > 0) {
+          lines.push("");
+          lines.push(`Gear: ${equipped.length} items`);
+        }
+      }
+
+      // ── NPC-specific hints ──
+      if (e.type === "merchant") {
+        lines.push("", "[Click] Browse shop");
+      } else if (e.type === "trainer") {
+        lines.push("", "[Click] Train skills");
+      } else if (e.type === "profession-trainer") {
+        lines.push("", "[Click] Learn profession");
+      } else if (e.type === "guild-registrar") {
+        lines.push("", "[Click] Guild hall");
+      } else if (e.type === "auctioneer") {
+        lines.push("", "[Click] Auction house");
+      } else if (e.type === "mob" || e.type === "boss") {
+        if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
+      }
+
+      // ── Spectate hint for players ──
+      if (e.type === "player") {
+        lines.push("", "[Click] Spectate");
       }
 
       const text = lines.join("\n");
       this.tooltip.setText(text);
 
-      // Position tooltip near pointer
+      // Position tooltip near pointer, clamped to screen
       const tooltipX = Math.min(pointer.x + 15, cam.width - 220);
-      const tooltipY = Math.min(pointer.y + 15, cam.height - 150);
+      const tooltipY = Math.min(pointer.y + 15, cam.height - 200);
 
       this.tooltip.setPosition(tooltipX, tooltipY);
 
@@ -257,6 +339,22 @@ export class WorldScene extends Phaser.Scene {
       this.tooltip.setVisible(false);
       this.tooltipBg.setVisible(false);
     }
+  }
+
+  private entityTypeTag(type: string): string {
+    const tags: Record<string, string> = {
+      player: "[PLAYER]",
+      mob: "[MOB]",
+      boss: "[BOSS]",
+      merchant: "[MERCHANT]",
+      trainer: "[TRAINER]",
+      "profession-trainer": "[PROF TRAINER]",
+      "guild-registrar": "[GUILD]",
+      auctioneer: "[AUCTIONEER]",
+      "ore-node": "[ORE]",
+      "herb-node": "[HERB]",
+    };
+    return tags[type] ?? `[${type.toUpperCase()}]`;
   }
 
   switchZone(zoneId: string): void {
@@ -280,21 +378,29 @@ export class WorldScene extends Phaser.Scene {
     this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
     this.updateCameraBounds();
 
-    // Center and apply default zoom
+    // Center and apply default zoom (never below minZoom)
     const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
     const cam = this.cameras.main;
-    cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, ZOOM_MIN, ZOOM_MAX));
+    cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
     cam.centerOn(w / 2, h / 2);
   }
 
   private updateCameraBounds(): void {
     const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
+    if (w <= 0 || h <= 0) return;
+
     const cam = this.cameras.main;
 
-    // Loose bounds — allow panning a half-viewport beyond the terrain edges
-    const padX = cam.width;
-    const padY = cam.height;
-    cam.setBounds(-padX / 2, -padY / 2, w + padX, h + padY);
+    // Calculate min zoom so the map always fills the viewport entirely
+    this.minZoom = Math.max(cam.width / w, cam.height / h);
+
+    // Clamp current zoom if it's now below the new minimum
+    if (cam.zoom < this.minZoom) {
+      cam.setZoom(this.minZoom);
+    }
+
+    // Tight bounds — map edges exactly, no black space visible
+    cam.setBounds(0, 0, w, h);
   }
 
   private async pollZone(): Promise<void> {

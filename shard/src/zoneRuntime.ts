@@ -9,6 +9,7 @@ import type { ProfessionType } from "./professions.js";
 import type { FlowerType } from "./flowerCatalog.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollGold } from "./lootTables.js";
+import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "./techniques.js";
 import { randomUUID } from "crypto";
 
 export interface ZoneState {
@@ -19,7 +20,8 @@ export interface ZoneState {
 
 export type Order =
   | { action: "move"; x: number; y: number }
-  | { action: "attack"; targetId: string };
+  | { action: "attack"; targetId: string }
+  | { action: "technique"; targetId: string; techniqueId: string };
 
 export interface EquippedItemState {
   tokenId: number;
@@ -184,6 +186,7 @@ function emptyStats(): CharacterStats {
     mp: 0,
     faith: 0,
     luck: 0,
+    essence: 0,
   };
 }
 
@@ -197,6 +200,7 @@ function addStats(base: CharacterStats, bonus: Partial<CharacterStats>): Charact
     mp: base.mp + (bonus.mp ?? 0),
     faith: base.faith + (bonus.faith ?? 0),
     luck: base.luck + (bonus.luck ?? 0),
+    essence: base.essence + (bonus.essence ?? 0),
   };
 }
 
@@ -426,6 +430,218 @@ async function handleMobDeath(
 
   // Delete the original mob entity
   zone.entities.delete(mob.id);
+}
+
+// ── Smart Combat AI Helpers ────────────────────────────────────────────
+
+/**
+ * Ensure an entity's learnedTechniques list includes everything they qualify
+ * for by class + level. Called by the server-side auto-combat AI so that
+ * server-controlled entities can actually use their spells.
+ * (Real AI agents still learn techniques via POST /techniques/learn at trainers.)
+ */
+function ensureTechniquesForAutoCombat(entity: Entity): void {
+  if (!entity.classId || !entity.level) return;
+  const classTechniques = getTechniquesByClass(entity.classId);
+  if (!entity.learnedTechniques) entity.learnedTechniques = [];
+  const learned = new Set(entity.learnedTechniques);
+  for (const tech of classTechniques) {
+    if (tech.levelRequired <= entity.level && !learned.has(tech.id)) {
+      entity.learnedTechniques.push(tech.id);
+      learned.add(tech.id);
+    }
+  }
+}
+
+/**
+ * Pick the best technique for a player to use in combat.
+ * Priority order:
+ *   1. Self-buff if not already active (e.g. Frost Armor, Shield Wall)
+ *   2. Self-heal if HP < 40%
+ *   3. Debuff on target if not already debuffed by us
+ *   4. Attack technique (highest damage multiplier first)
+ *   5. null → fall back to basic attack
+ *
+ * Only picks techniques that are: learned, off cooldown, affordable (essence).
+ */
+function pickTechnique(
+  entity: Entity,
+  target: Entity,
+  zone: ZoneState,
+): TechniqueDefinition | null {
+  const learned = entity.learnedTechniques ?? [];
+  if (learned.length === 0) return null;
+
+  const currentEssence = entity.essence ?? 0;
+  const tick = zone.tick;
+
+  // Filter to usable techniques (learned, off cooldown, enough essence)
+  const usable: TechniqueDefinition[] = [];
+  for (const techId of learned) {
+    const tech = getTechniqueById(techId);
+    if (!tech) continue;
+    if (tech.essenceCost > currentEssence) continue;
+    if (entity.cooldowns) {
+      const cdExpires = entity.cooldowns.get(techId);
+      if (cdExpires != null && tick < cdExpires) continue;
+    }
+    usable.push(tech);
+  }
+
+  if (usable.length === 0) return null;
+
+  // 1. Self-buff if we don't have one active
+  const hasBuff = entity.activeEffects?.some(e => e.type === "buff" && e.casterId === entity.id);
+  if (!hasBuff) {
+    const buff = usable.find(t => t.type === "buff" && t.targetType === "self");
+    if (buff) return buff;
+  }
+
+  // 2. Self-heal if low HP
+  const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
+  if (hpRatio < 0.4) {
+    const heal = usable.find(t => t.type === "healing");
+    if (heal) return heal;
+  }
+
+  // 3. Debuff on target if we haven't already debuffed them
+  const hasDebuff = target.activeEffects?.some(
+    e => (e.type === "debuff" || e.type === "dot") && e.casterId === entity.id,
+  );
+  if (!hasDebuff) {
+    const debuff = usable.find(t => t.type === "debuff");
+    if (debuff) return debuff;
+  }
+
+  // 4. Attack technique — pick highest damage multiplier
+  const attacks = usable
+    .filter(t => t.type === "attack")
+    .sort((a, b) => (b.effects.damageMultiplier ?? 0) - (a.effects.damageMultiplier ?? 0));
+  if (attacks.length > 0) return attacks[0];
+
+  // 5. Nothing good — basic attack
+  return null;
+}
+
+/**
+ * Apply technique effects during the tick loop (mirrors techniqueRoutes.applyTechniqueEffects).
+ * Returns { damage } for attack techniques.
+ */
+function applyTechniqueInCombat(
+  caster: Entity,
+  target: Entity,
+  technique: TechniqueDefinition,
+  zone: ZoneState,
+): { damage?: number } {
+  const { effects, type } = technique;
+  const result: { damage?: number } = {};
+
+  // Attack techniques
+  if (type === "attack" && effects.damageMultiplier) {
+    const stats = caster.effectiveStats ?? getEffectiveStats(caster);
+    const isCaster = ["mage", "cleric", "warlock"].includes(caster.classId ?? "");
+    const primaryStat = isCaster
+      ? (stats?.int ?? caster.stats?.int ?? 10)
+      : (stats?.str ?? caster.stats?.str ?? 10);
+    const baseDmg = Math.floor(5 + primaryStat * 0.5);
+    const damage = Math.floor(baseDmg * effects.damageMultiplier);
+
+    if (effects.maxTargets && effects.maxTargets > 1) {
+      // AoE — hit multiple targets
+      const nearby: Entity[] = [];
+      for (const e of zone.entities.values()) {
+        if (e.type !== "mob" && e.type !== "boss") continue;
+        if (e.hp <= 0 || e.id === caster.id) continue;
+        const dx = e.x - target.x;
+        const dy = e.y - target.y;
+        if (Math.sqrt(dx * dx + dy * dy) <= (effects.areaRadius ?? 50)) {
+          nearby.push(e);
+          if (nearby.length >= effects.maxTargets) break;
+        }
+      }
+      for (const t of nearby) {
+        applyDamageWithShield(t, damage);
+      }
+      result.damage = damage;
+    } else {
+      applyDamageWithShield(target, damage);
+      result.damage = damage;
+    }
+
+    // Lifesteal
+    if (effects.healAmount && type === "attack") {
+      const heal = Math.floor(damage * (effects.healAmount / 100));
+      caster.hp = Math.min(caster.maxHp, caster.hp + heal);
+    }
+  }
+
+  // Healing techniques
+  if (type === "healing" && effects.healAmount) {
+    if (effects.duration && effects.duration > 0) {
+      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
+      addActiveEffectInternal(target, {
+        id: randomUUID(),
+        techniqueId: technique.id,
+        name: technique.name,
+        type: "hot",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        hotHealPerTick: healPerTick,
+      });
+    } else {
+      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
+      target.hp = Math.min(target.maxHp, target.hp + actualHeal);
+    }
+  }
+
+  // Buffs
+  if (type === "buff" && effects.duration) {
+    addActiveEffectInternal(target, {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: effects.shield ? "shield" : "buff",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      statModifiers: effects.statBonus,
+      shieldHp: effects.shield ? Math.floor(target.maxHp * (effects.shield / 100)) : undefined,
+      shieldMaxHp: effects.shield ? Math.floor(target.maxHp * (effects.shield / 100)) : undefined,
+    });
+    if (effects.statBonus) recalculateEntityVitals(target);
+  }
+
+  // Debuffs
+  if (type === "debuff" && effects.duration) {
+    addActiveEffectInternal(target, {
+      id: randomUUID(),
+      techniqueId: technique.id,
+      name: technique.name,
+      type: effects.dotDamage ? "dot" : "debuff",
+      casterId: caster.id,
+      appliedAtTick: zone.tick,
+      durationTicks: effects.duration,
+      remainingTicks: effects.duration,
+      statModifiers: effects.statReduction,
+      dotDamage: effects.dotDamage,
+    });
+    if (effects.statReduction) recalculateEntityVitals(target);
+  }
+
+  return result;
+}
+
+/** Add an active effect (same logic as techniqueRoutes, but accessible from zoneRuntime) */
+function addActiveEffectInternal(entity: Entity, effect: ActiveEffect): void {
+  if (!entity.activeEffects) entity.activeEffects = [];
+  // Same technique refreshes (replaces), different techniques stack
+  entity.activeEffects = entity.activeEffects.filter(e => e.techniqueId !== effect.techniqueId);
+  entity.activeEffects.push(effect);
 }
 
 function moveToward(entity: Entity, tx: number, ty: number): boolean {
@@ -672,35 +888,206 @@ async function worldTick() {
             }
           }
         }
+      } else if (entity.order.action === "technique") {
+        // ── Technique order processing ─────────────────────────────
+        const target = zone.entities.get(entity.order.targetId);
+        const technique = getTechniqueById(entity.order.techniqueId);
+        if (!target || !technique) {
+          entity.order = undefined;
+          continue;
+        }
+        const dx = target.x - entity.x;
+        const dy = target.y - entity.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > ATTACK_RANGE) {
+          moveToward(entity, target.x, target.y);
+        } else {
+          // Deduct essence
+          const currentEssence = entity.essence ?? 0;
+          entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+
+          // Set cooldown
+          if (!entity.cooldowns) entity.cooldowns = new Map();
+          entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+
+          // Apply technique effects inline (mirrors techniqueRoutes logic)
+          const techResult = applyTechniqueInCombat(entity, target, technique, zone);
+
+          // Log the technique use
+          if (technique.type === "attack") {
+            const dmg = techResult.damage ?? 0;
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${entity.name} casts ${technique.name} on ${target.name} for ${dmg} damage!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { damage: dmg, technique: technique.name, targetHp: target.hp },
+            });
+          } else if (technique.type === "buff" || technique.type === "healing") {
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${entity.name} casts ${technique.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              data: { technique: technique.name },
+            });
+          } else if (technique.type === "debuff") {
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${entity.name} casts ${technique.name} on ${target.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { technique: technique.name },
+            });
+          }
+
+          // Retaliation from target (same as basic attack)
+          if (technique.type === "attack" && target.hp > 0 && canRetaliate(target)) {
+            const retaliation = computeDamage(target, entity);
+            applyDamageWithShield(entity, retaliation);
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${target.name} retaliates for ${retaliation} damage!`,
+              entityId: target.id,
+              entityName: target.name,
+              targetId: entity.id,
+              targetName: entity.name,
+              data: { damage: retaliation, targetHp: entity.hp },
+            });
+            if (entity.hp <= 0) {
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "death",
+                tick: zone.tick,
+                message: `${entity.name} has been slain by ${target.name}!`,
+                entityId: entity.id,
+                entityName: entity.name,
+                targetId: target.id,
+                targetName: target.name,
+              });
+              if (entity.type === "player") {
+                handlePlayerDeath(entity, zone.zoneId);
+                continue;
+              } else {
+                await handleMobDeath(entity, target, zone);
+                continue;
+              }
+            }
+          }
+
+          // Handle target death from technique damage
+          if (target.hp <= 0) {
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "kill",
+              tick: zone.tick,
+              message: `${entity.name} has slain ${target.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { xpReward: target.xpReward ?? 0 },
+            });
+
+            if (entity.type === "player") {
+              entity.kills = (entity.kills ?? 0) + 1;
+            }
+
+            if (target.type === "player") {
+              handlePlayerDeath(target, zone.zoneId);
+            } else {
+              await handleMobDeath(target, entity, zone);
+              if (entity.type === "player" && entity.activeQuests) {
+                for (const activeQuest of entity.activeQuests) {
+                  const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
+                  if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
+                    activeQuest.progress++;
+                  }
+                }
+              }
+            }
+
+            entity.order = undefined;
+
+            // Grant XP on kill
+            const xpReward = target.xpReward ?? 0;
+            if (xpReward > 0 && entity.level != null && entity.characterTokenId != null) {
+              entity.xp = (entity.xp ?? 0) + xpReward;
+              let leveled = false;
+              while (entity.level < MAX_LEVEL && entity.xp >= xpForLevel(entity.level + 1)) {
+                entity.level++;
+                leveled = true;
+              }
+              if (leveled && entity.raceId && entity.classId) {
+                const newStats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level);
+                entity.stats = newStats;
+                recalculateEntityVitals(entity);
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "levelup",
+                  tick: zone.tick,
+                  message: `*** ${entity.name} reached level ${entity.level}! ***`,
+                  entityId: entity.id,
+                  entityName: entity.name,
+                  data: { level: entity.level, xp: entity.xp },
+                });
+                updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                  .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+              }
+            }
+          } else {
+            // Technique fired — clear order so AI picks next action
+            entity.order = undefined;
+          }
+        }
       }
     }
 
-    // Auto-attack AI: players with no order auto-target nearest mob
+    // Smart auto-combat AI: players pick techniques or basic attack
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
-      if (entity.order) continue; // already has an order
-      if (entity.hp <= 0) continue; // dead
+      if (entity.order) continue;
+      if (entity.hp <= 0) continue;
 
       // Find nearest mob
       let nearestMob: Entity | null = null;
       let nearestDist = Infinity;
-
       for (const other of zone.entities.values()) {
         if (other.type !== "mob" && other.type !== "boss") continue;
         if (other.hp <= 0) continue;
-
         const dx = other.x - entity.x;
         const dy = other.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-
         if (dist < nearestDist) {
           nearestDist = dist;
           nearestMob = other;
         }
       }
 
-      // Auto-attack nearest mob
-      if (nearestMob) {
+      if (!nearestMob) continue;
+
+      // Auto-grant qualifying techniques for server-controlled auto-combat
+      ensureTechniquesForAutoCombat(entity);
+
+      // Try to pick a technique
+      const chosenTech = pickTechnique(entity, nearestMob, zone);
+      if (chosenTech) {
+        const techTarget = chosenTech.targetType === "self" ? entity.id : nearestMob.id;
+        entity.order = { action: "technique", targetId: techTarget, techniqueId: chosenTech.id };
+      } else {
+        // Fall back to basic attack
         entity.order = { action: "attack", targetId: nearestMob.id };
       }
     }

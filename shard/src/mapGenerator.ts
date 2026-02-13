@@ -80,10 +80,13 @@ interface RoadDef {
 interface ZoneData {
   id: string;
   name: string;
-  bounds: { min: Vec2; max: Vec2 };
-  budget: { maxPopulation: number; maxThreat: number };
-  pois: PoiDef[];
-  roads: RoadDef[];
+  bounds?: { min: Vec2; max: Vec2 };
+  width?: number;
+  height?: number;
+  budget?: { maxPopulation: number; maxThreat: number };
+  pois?: PoiDef[] | string[];
+  roads?: RoadDef[];
+  biome?: string;
 }
 
 export interface GeneratedMap {
@@ -105,8 +108,11 @@ export function getGeneratedMap(zoneId: string): GeneratedMap | null {
 }
 
 export function generateAllMaps(): void {
-  const zonesDir = path.join(process.cwd(), "..", "src", "data", "zones");
-  if (!fs.existsSync(zonesDir)) return;
+  const zonesDir = path.join(process.cwd(), "..", "world", "content", "zones");
+  if (!fs.existsSync(zonesDir)) {
+    console.warn(`[mapGenerator] Zones directory not found: ${zonesDir}`);
+    return;
+  }
 
   const files = fs.readdirSync(zonesDir).filter((f) => f.endsWith(".json"));
   for (const file of files) {
@@ -121,24 +127,38 @@ export function generateAllMaps(): void {
 // ── Main generator ───────────────────────────────────────────────────
 
 function generateMap(zone: ZoneData): GeneratedMap {
-  const w = Math.floor(
-    (zone.bounds.max.x - zone.bounds.min.x) / TILE_SIZE,
-  );
-  const h = Math.floor(
-    (zone.bounds.max.z - zone.bounds.min.z) / TILE_SIZE,
-  );
+  // Handle both bounds-based and width/height-based zone formats
+  let w: number, h: number;
+  if (zone.bounds) {
+    w = Math.floor((zone.bounds.max.x - zone.bounds.min.x) / TILE_SIZE);
+    h = Math.floor((zone.bounds.max.z - zone.bounds.min.z) / TILE_SIZE);
+  } else if (zone.width && zone.height) {
+    w = Math.floor(zone.width / TILE_SIZE);
+    h = Math.floor(zone.height / TILE_SIZE);
+  } else {
+    throw new Error(`Zone ${zone.id} missing bounds or width/height`);
+  }
 
   const ground = new Array(w * h).fill(TILE.GRASS_PLAIN);
   const overlay = new Array(w * h).fill(TILE.EMPTY);
 
   const biome = detectBiome(zone);
 
-  // Build POI lookup
+  // Build POI lookup (handle both full POI objects and POI ID strings)
   const poiMap = new Map<string, PoiDef>();
-  for (const poi of zone.pois) poiMap.set(poi.id, poi);
+  const validPois: PoiDef[] = [];
+  if (zone.pois && Array.isArray(zone.pois)) {
+    for (const poi of zone.pois) {
+      if (typeof poi === 'object' && 'id' in poi) {
+        poiMap.set(poi.id, poi);
+        validPois.push(poi);
+      }
+      // Skip string POI IDs - we can't render them without full data
+    }
+  }
 
   // 1. Build exclusion zones (POI areas where we don't scatter trees)
-  const exclusion = buildExclusionGrid(w, h, zone.pois);
+  const exclusion = buildExclusionGrid(w, h, validPois);
 
   // 2. Base fill based on biome
   baseFill(ground, w, h, biome, zone.id);
@@ -149,27 +169,29 @@ function generateMap(zone: ZoneData): GeneratedMap {
   // 4. Place trees
   placeTrees(ground, overlay, w, h, biome, exclusion, zone.id);
 
-  // 5. Draw roads
-  for (const road of zone.roads) {
-    drawRoad(ground, w, h, road, poiMap, zone);
+  // 5. Draw roads (if zone has roads defined)
+  if (zone.roads && Array.isArray(zone.roads)) {
+    for (const road of zone.roads) {
+      drawRoad(ground, w, h, road, poiMap, zone);
+    }
   }
 
   // 6. Stamp structures
-  for (const poi of zone.pois) {
+  for (const poi of validPois) {
     if (poi.type === "structure" && poi.structure) {
       stampStructure(ground, overlay, w, h, poi, zone);
     }
   }
 
   // 7. Place landmarks
-  for (const poi of zone.pois) {
+  for (const poi of validPois) {
     if (poi.type === "landmark") {
       placeLandmark(ground, w, h, poi, zone);
     }
   }
 
   // 8. Place portals
-  for (const poi of zone.pois) {
+  for (const poi of validPois) {
     if (poi.type === "portal") {
       placePortal(ground, overlay, w, h, poi, zone);
     }

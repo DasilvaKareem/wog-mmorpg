@@ -69,7 +69,7 @@ export function registerEntitySprites(scene: Phaser.Scene): void {
   }
 }
 
-/** Register a canvas as a spritesheet texture with frame parsing */
+/** Register a canvas as a spritesheet texture with manually defined frames */
 function addCanvasSpriteSheet(
   scene: Phaser.Scene,
   key: string,
@@ -77,13 +77,14 @@ function addCanvasSpriteSheet(
 ): void {
   const tex = scene.textures.addCanvas(key, canvas);
   if (tex) {
-    Phaser.Textures.Parsers.SpriteSheet(
-      tex,
-      0,
-      0, 0,
-      canvas.width, canvas.height,
-      { frameWidth: SPRITE_PX, frameHeight: SPRITE_PX },
-    );
+    const cols = canvas.width / SPRITE_PX;
+    const rows = canvas.height / SPRITE_PX;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const frameIdx = r * cols + c;
+        tex.add(frameIdx, 0, c * SPRITE_PX, r * SPRITE_PX, SPRITE_PX, SPRITE_PX);
+      }
+    }
   }
 }
 

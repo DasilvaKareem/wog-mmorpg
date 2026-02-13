@@ -1,155 +1,113 @@
 #!/usr/bin/env tsx
 /**
- * SMART AI AGENT - Plays the game intelligently
- * - Buys gear and potions
- * - Manages health and resources
- * - Learns professions and crafts
- * - Uses strategic combat
+ * SMART AI AGENT v3 — Survival-First Progression
+ *
+ * - Authenticates with wallet signature
+ * - Loads character NFT from chain
+ * - Phase 0: Talk quest chain → free L3 + full starter gear
+ * - Phase 0.5: Equips all gear
+ * - Phase 1: Human Meadow kill quests + grind to L5
+ * - Phase 2: Wild Meadow quests + grind to L10
+ * - Phase 3: Dark Forest quests + grind to L15
+ * - Picks level-appropriate mobs (no suicide pulls)
+ * - HP awareness before combat
  */
 
 import "dotenv/config";
+import { privateKeyToAccount } from "viem/accounts";
+import { authenticateWithWallet, createAuthenticatedAPI } from "./authHelper.js";
 
-const API = "http://localhost:3000";
-const AGENT_WALLET = "0xf6f0f8ca2ef85deb9eEBdBc4BC541d2D57832D4b";
+const API_URL = process.env.API_URL || "http://localhost:3000";
+const PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY!;
+// Derive wallet address from the private key so it always matches auth
+const WALLET = privateKeyToAccount(PRIVATE_KEY as `0x${string}`).address;
 
 let agentId: string;
 let currentZone = "human-meadow";
-let gold = 1000; // Starting gold for shopping
+let api: ReturnType<typeof createAuthenticatedAPI>;
 
-async function api(method: string, path: string, body?: any) {
-  const res = await fetch(`${API}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) throw new Error(`API Error: ${await res.text()}`);
-  return res.json();
-}
+// ---------------------------------------------------------------------------
+//  Helpers
+// ---------------------------------------------------------------------------
 
 function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function spawnSmartAgent() {
-  console.log("🧠 Spawning SMART AI Agent...");
-
-  const data = await api("POST", "/spawn", {
-    zoneId: currentZone,
-    type: "player",
-    name: "Smart Agent",
-    x: 100,
-    y: 100,
-    walletAddress: AGENT_WALLET,
-    level: 3,
-    xp: 0,
-    raceId: "human",
-    classId: "warrior",
-  });
-
-  agentId = data.spawned.id;
-  console.log(`✅ Smart Agent spawned: ${agentId.slice(0, 8)}...`);
-  console.log(`📊 Stats: Level ${data.spawned.level}, HP ${data.spawned.hp}/${data.spawned.maxHp}\n`);
-  return data.spawned;
+function banner(text: string) {
+  const line = "=".repeat(60);
+  console.log(`\n${line}`);
+  console.log(`  ${text}`);
+  console.log(`${line}\n`);
 }
 
 async function getAgentState() {
   const state = await api("GET", "/state");
-  return state.zones[currentZone].entities[agentId];
+  return state.zones[currentZone]?.entities?.[agentId];
 }
 
-async function buyFromMerchant(merchantName: string, itemName: string, quantity: number = 1) {
-  try {
-    const state = await api("GET", "/state");
-    const merchant = Object.entries(state.zones[currentZone].entities)
-      .find(([_, e]: any) => e.name === merchantName)?.[1];
+async function printStatus() {
+  const a = await getAgentState();
+  if (!a) return;
+  const hp = `${a.hp}/${a.maxHp}`;
+  const ess = a.maxEssence ? `${a.essence}/${a.maxEssence}` : "n/a";
+  console.log(
+    `   [L${a.level}] HP ${hp}  Essence ${ess}  XP ${a.xp ?? 0}  Zone: ${currentZone}`
+  );
+}
 
-    if (!merchant) {
-      console.log(`⚠️  Merchant "${merchantName}" not found`);
-      return false;
-    }
+// ---------------------------------------------------------------------------
+//  Authentication + NFT loading
+// ---------------------------------------------------------------------------
 
-    const shop = await api("GET", `/shop/npc/${currentZone}/${(merchant as any).id}`);
-    const item = shop.items?.find((i: any) => i.name === itemName);
+async function loadCharacterNFT() {
+  console.log("Loading character NFT...\n");
 
-    if (!item) {
-      console.log(`⚠️  Item "${itemName}" not found in shop`);
-      return false;
-    }
+  const data = await api("GET", `/character/${WALLET}`);
 
-    const price = item.goldPrice ?? item.price ?? 0;
-    if (price === 0) {
-      console.log(`⚠️  Item "${itemName}" has no price`);
-      return false;
-    }
-
-    // Mint gold for purchasing (simulating earned gold)
-    const { mintGold } = await import("./blockchain.js");
-    await mintGold(AGENT_WALLET, (price * quantity).toString());
-
-    await api("POST", "/shop/buy", {
-      buyerAddress: AGENT_WALLET,
-      tokenId: parseInt(item.tokenId),
-      quantity,
-    });
-
-    console.log(`✅ Purchased ${quantity}x ${itemName} for ${price * quantity}g`);
-    return true;
-  } catch (err: any) {
-    console.log(`⚠️  Failed to buy ${itemName}: ${err.message}`);
-    return false;
+  if (!data.characters || data.characters.length === 0) {
+    throw new Error("No character NFTs found — create one first!");
   }
+
+  const c = data.characters[0];
+  console.log(`   Found: ${c.name}`);
+  console.log(
+    `   ${c.properties.race} ${c.properties.class} — Level ${c.properties.level}, XP ${c.properties.xp}`
+  );
+  console.log(`   Token ID: ${c.tokenId}\n`);
+  return c;
 }
 
-async function equipGear() {
-  console.log("\n🛡️  EQUIPPING GEAR...");
+async function spawnAgent(character: any) {
+  console.log("Spawning into world...\n");
 
-  // Buy starter gear
-  await buyFromMerchant("Grimwald the Trader", "Iron Sword", 1);
-  await sleep(500);
-  await buyFromMerchant("Grimwald the Trader", "Leather Armor", 1);
-  await sleep(500);
+  const data = await api("POST", "/spawn", {
+    zoneId: currentZone,
+    type: "player",
+    name: character.name,
+    x: 150,
+    y: 150,
+    walletAddress: WALLET,
+    level: character.properties.level,
+    xp: character.properties.xp,
+    characterTokenId: character.tokenId,
+    raceId: character.properties.race,
+    classId: character.properties.class,
+  });
 
-  console.log("✅ Gear equipped\n");
+  agentId = data.spawned.id;
+  console.log(
+    `   Spawned ${character.name} at (${data.spawned.x}, ${data.spawned.y})`
+  );
+  console.log(
+    `   HP ${data.spawned.hp}/${data.spawned.maxHp}  Essence ${data.spawned.essence}/${data.spawned.maxEssence}\n`
+  );
+  return data.spawned;
 }
 
-async function stockUpPotions() {
-  console.log("🧪 STOCKING UP ON POTIONS...");
-
-  await buyFromMerchant("Grimwald the Trader", "Health Potion", 10);
-  await sleep(500);
-  await buyFromMerchant("Grimwald the Trader", "Mana Potion", 5);
-  await sleep(500);
-
-  console.log("✅ Potion inventory ready\n");
-}
-
-async function learnProfession(professionType: string) {
-  console.log(`\n📚 LEARNING PROFESSION: ${professionType}...`);
-
-  try {
-    const state = await api("GET", "/state");
-    const trainer = Object.entries(state.zones[currentZone].entities)
-      .find(([_, e]: any) => e.type === "profession-trainer" && e.teachesProfession === professionType);
-
-    if (!trainer) {
-      console.log(`⚠️  No ${professionType} trainer found`);
-      return false;
-    }
-
-    await api("POST", "/professions/learn", {
-      zoneId: currentZone,
-      playerId: agentId,
-      npcId: trainer[0],
-      profession: professionType,
-    });
-
-    console.log(`✅ Learned ${professionType}!\n`);
-    return true;
-  } catch (err: any) {
-    console.log(`⚠️  Failed to learn profession: ${err.message}`);
-    return false;
-  }
-}
+// ---------------------------------------------------------------------------
+//  Movement
+// ---------------------------------------------------------------------------
 
 async function moveTo(x: number, y: number) {
   await api("POST", "/command", {
@@ -159,334 +117,599 @@ async function moveTo(x: number, y: number) {
     x,
     y,
   });
+
+  // Wait until we actually arrive (within 10 units)
+  for (let i = 0; i < 30; i++) {
+    await sleep(600);
+    const a = await getAgentState();
+    if (!a) break;
+    const dx = a.x - x;
+    const dy = a.y - y;
+    if (Math.sqrt(dx * dx + dy * dy) <= 10) break;
+  }
 }
 
-async function learnTechniques() {
-  console.log("\n⚔️  LEARNING COMBAT TECHNIQUES...");
+async function moveNear(targetId: string) {
+  const state = await api("GET", "/state");
+  const target = state.zones[currentZone]?.entities?.[targetId];
+  if (target) {
+    await moveTo(target.x, target.y);
+    await sleep(800);
+  }
+}
 
+// ---------------------------------------------------------------------------
+//  Talk Quest Chain — Phase 0 (free L3 + full starter gear)
+// ---------------------------------------------------------------------------
+
+/** Find an entity by name in the current zone. */
+async function findEntityByName(name: string): Promise<string | null> {
+  const state = await api("GET", "/state");
+  const entities = state.zones[currentZone]?.entities ?? {};
+  const entry = Object.entries(entities).find(
+    ([_, e]: any) => e.name === name
+  );
+  return entry ? entry[0] : null;
+}
+
+/**
+ * Walk to each NPC in order, call POST /quests/talk for each.
+ * Awards 900 XP (→ L3) + Iron Sword, full armor set, 6 health potions.
+ */
+async function runTalkQuestChain() {
+  banner("PHASE 0: TALK QUEST CHAIN (→ L3 + FULL GEAR)");
+
+  const npcRoute = [
+    { name: "Guard Captain Marcus", x: 150, y: 150 },
+    { name: "Grimwald the Trader", x: 180, y: 420 },
+    { name: "Bron the Blacksmith", x: 220, y: 420 },
+    { name: "Thrain Ironforge - Warrior Trainer", x: 100, y: 200 },
+    { name: "Herbalist Willow", x: 340, y: 420 },
+    { name: "Chef Gastron", x: 460, y: 420 },
+    { name: "Grizzled Miner Torvik", x: 260, y: 420 },
+    { name: "Guard Captain Marcus", x: 150, y: 150 }, // return for final quest
+  ];
+
+  for (const npc of npcRoute) {
+    console.log(`   Walking to ${npc.name} (${npc.x}, ${npc.y})...`);
+    await moveTo(npc.x, npc.y);
+
+    const npcEntityId = await findEntityByName(npc.name);
+    if (!npcEntityId) {
+      console.log(`   WARNING: ${npc.name} not found in zone — skipping`);
+      continue;
+    }
+
+    try {
+      const result = await api("POST", "/quests/talk", {
+        zoneId: currentZone,
+        playerId: agentId,
+        npcEntityId,
+      });
+      console.log(
+        `   ✓ ${result.quest?.title ?? "talk quest"} — +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`
+      );
+    } catch (err: any) {
+      console.log(`   Skip ${npc.name}: ${err.message?.slice(0, 60) ?? "unknown error"}`);
+    }
+
+    await printStatus();
+    await sleep(500);
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Equipment — Equip all gear received from talk quests
+// ---------------------------------------------------------------------------
+
+async function equipAllGear() {
+  banner("EQUIPPING GEAR");
+
+  const gearTokenIds = [
+    { tokenId: 2, name: "Iron Sword" },
+    { tokenId: 8, name: "Leather Vest" },
+    { tokenId: 10, name: "Iron Helm" },
+    { tokenId: 12, name: "Leather Leggings" },
+    { tokenId: 13, name: "Traveler Boots" },
+    { tokenId: 14, name: "Bronze Shoulders" },
+    { tokenId: 15, name: "Padded Gloves" },
+    { tokenId: 16, name: "Guard Belt" },
+  ];
+
+  for (const gear of gearTokenIds) {
+    try {
+      await api("POST", "/equipment/equip", {
+        zoneId: currentZone,
+        tokenId: gear.tokenId,
+        entityId: agentId,
+        walletAddress: WALLET,
+      });
+      console.log(`   Equipped ${gear.name} (token ${gear.tokenId})`);
+    } catch (err: any) {
+      console.log(`   Skip ${gear.name}: ${err.message?.slice(0, 60) ?? "unknown error"}`);
+    }
+    await sleep(300);
+  }
+
+  await printStatus();
+}
+
+// ---------------------------------------------------------------------------
+//  Techniques
+// ---------------------------------------------------------------------------
+
+async function learnAvailableTechniques() {
   try {
-    const agent = await getAgentState();
-    const className = agent.classId;
-
-    // Find class trainer
     const state = await api("GET", "/state");
-    const trainer = Object.entries(state.zones[currentZone].entities)
-      .find(([_, e]: any) => e.type === "trainer");
+    // Find trainers in current zone
+    const trainers = Object.entries(state.zones[currentZone].entities).filter(
+      ([_, e]: any) => e.type === "trainer"
+    );
+    if (trainers.length === 0) return;
 
-    if (!trainer) {
-      console.log("⚠️  No class trainer found");
-      return false;
-    }
+    const available = await api(
+      "GET",
+      `/techniques/available/${currentZone}/${agentId}`
+    );
+    const toLearn = available.techniques.filter((t: any) => !t.isLearned);
+    if (toLearn.length === 0) return;
 
-    const trainerId = trainer[0];
-    const trainerEntity: any = trainer[1];
+    // Prioritise attack techniques, then by level
+    toLearn.sort((a: any, b: any) => {
+      if (a.type === "attack" && b.type !== "attack") return -1;
+      if (a.type !== "attack" && b.type === "attack") return 1;
+      return a.levelRequired - b.levelRequired;
+    });
 
-    // Move to trainer
-    console.log(`   📍 Moving to trainer at (${trainerEntity.x}, ${trainerEntity.y})...`);
-    await moveTo(trainerEntity.x, trainerEntity.y);
-    await sleep(1000); // Wait for movement
-
-    // Get available techniques
-    const availableData = await api("GET", `/techniques/available/${currentZone}/${agentId}`);
-    const techniques = availableData.techniques.filter((t: any) => !t.isLearned);
-
-    if (techniques.length === 0) {
-      console.log("✅ All available techniques already learned\n");
-      return true;
-    }
-
-    // Learn all affordable techniques
-    let learned = 0;
-    for (const tech of techniques) {
+    for (const tech of toLearn) {
       try {
-        // Mint gold for technique learning
-        const { mintGold } = await import("./blockchain.js");
-        await mintGold(AGENT_WALLET, tech.goldCost.toString());
+        // Find matching trainer
+        const trainer = trainers[0]; // class trainers are in human-meadow
+        await moveNear(trainer[0]);
 
         await api("POST", "/techniques/learn", {
           zoneId: currentZone,
           playerEntityId: agentId,
           techniqueId: tech.id,
-          trainerEntityId: trainerId,
+          trainerEntityId: trainer[0],
         });
 
-        console.log(`✅ Learned ${tech.name} (${tech.essenceCost} essence, ${tech.cooldown}s cooldown)`);
-        learned++;
-        await sleep(500);
+        console.log(
+          `   Learned ${tech.name} (${tech.essenceCost} ess, ${tech.cooldown}s CD)`
+        );
+        await sleep(300);
       } catch (err: any) {
-        console.log(`⚠️  Failed to learn ${tech.name}: ${err.message}`);
+        console.log(`   Tech ${tech.name} failed: ${err.message?.slice(0, 80) ?? "unknown"}`);
       }
     }
-
-    console.log(`\n🎓 Learned ${learned} technique(s)!\n`);
-    return true;
   } catch (err: any) {
-    console.log(`⚠️  Failed to learn techniques: ${err.message}`);
-    return false;
+    console.log(`   Technique scan: ${err.message?.slice(0, 60) ?? "no trainers"}`);
   }
-}
-
-async function craftHealthPotions() {
-  console.log("⚗️  CRAFTING HEALTH POTIONS...");
-
-  try {
-    // TODO: Gather herbs, then craft
-    // For now, just buy them
-    console.log("⚠️  Crafting not implemented yet, buying instead\n");
-    return false;
-  } catch (err) {
-    return false;
-  }
-}
-
-async function checkHealth(): Promise<boolean> {
-  const agent = await getAgentState();
-  const healthPercent = (agent.hp / agent.maxHp) * 100;
-
-  if (healthPercent < 30) {
-    console.log(`⚠️  LOW HEALTH! ${agent.hp}/${agent.maxHp} (${healthPercent.toFixed(0)}%)`);
-    return false;
-  }
-
-  return true;
 }
 
 async function useBestTechnique(targetId: string): Promise<boolean> {
   try {
     const agent = await getAgentState();
     const essence = agent.essence ?? 0;
-    const maxEssence = agent.maxEssence ?? 100;
-    const essencePercent = (essence / maxEssence) * 100;
 
-    // Get learned techniques
-    const learnedData = await api("GET", `/techniques/learned/${currentZone}/${agentId}`);
-    const techniques = learnedData.techniques;
+    const learnedData = await api(
+      "GET",
+      `/techniques/learned/${currentZone}/${agentId}`
+    );
+    const attacks = learnedData.techniques
+      .filter((t: any) => t.type === "attack" && t.essenceCost <= essence)
+      .sort(
+        (a: any, b: any) =>
+          (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0)
+      );
 
-    if (techniques.length === 0) {
-      // No techniques learned, use basic attack
+    if (attacks.length === 0) {
+      console.log(`   (no attack techniques available, ${learnedData.techniques.length} total learned, ${essence} essence)`);
       return false;
     }
 
-    // Filter techniques by essence cost and type
-    const attackTechniques = techniques
-      .filter((t: any) => t.type === "attack" && t.essenceCost <= essence)
-      .sort((a: any, b: any) => (b.effects.damageMultiplier || 0) - (a.effects.damageMultiplier || 0));
+    const pick = essence > (agent.maxEssence ?? 100) * 0.4 ? attacks[0] : attacks[attacks.length - 1];
 
-    // Use high-damage technique if we have good essence
-    if (essencePercent > 40 && attackTechniques.length > 0) {
-      const technique = attackTechniques[0];
-
-      await api("POST", "/techniques/use", {
-        zoneId: currentZone,
-        casterEntityId: agentId,
-        techniqueId: technique.id,
-        targetEntityId: targetId,
-      });
-
-      console.log(`   🔥 Used ${technique.name} (${technique.essenceCost} essence)`);
-      return true;
-    }
-
-    // Use cheap technique if essence is low
-    if (essencePercent > 20 && attackTechniques.length > 0) {
-      const cheapTechnique = techniques
-        .filter((t: any) => t.type === "attack" && t.essenceCost <= essence)
-        .sort((a: any, b: any) => a.essenceCost - b.essenceCost)[0];
-
-      if (cheapTechnique) {
-        await api("POST", "/techniques/use", {
-          zoneId: currentZone,
-          casterEntityId: agentId,
-          techniqueId: cheapTechnique.id,
-          targetEntityId: targetId,
-        });
-
-        console.log(`   ⚡ Used ${cheapTechnique.name} (${cheapTechnique.essenceCost} essence)`);
-        return true;
-      }
-    }
-
-    return false;
+    await api("POST", "/techniques/use", {
+      zoneId: currentZone,
+      casterEntityId: agentId,
+      techniqueId: pick.id,
+      targetEntityId: targetId,
+    });
+    console.log(`   Cast ${pick.name}! (${pick.essenceCost} ess)`);
+    return true;
   } catch (err: any) {
-    // Technique failed, will fall back to basic attack
+    console.log(`   Cast failed: ${err.message?.slice(0, 60) ?? "unknown"}`);
     return false;
   }
 }
 
-async function findAndAttackMob(mobName: string): Promise<boolean> {
+// ---------------------------------------------------------------------------
+//  Combat
+// ---------------------------------------------------------------------------
+
+/**
+ * Kill a single mob. Returns true if a mob was killed, false if we couldn't find one.
+ */
+async function killOneMob(mobName: string): Promise<boolean> {
+  // Find a living mob with this name
   const state = await api("GET", "/state");
-  const mobs = Object.entries(state.zones[currentZone].entities)
-    .filter(([_, e]: any) => e.name === mobName && (e.type === "mob" || e.type === "boss"));
+  const mobs = Object.entries(state.zones[currentZone]?.entities ?? {}).filter(
+    ([_, e]: any) =>
+      e.name === mobName && (e.type === "mob" || e.type === "boss") && e.hp > 0
+  );
 
   if (mobs.length === 0) return false;
 
-  const mobId = mobs[0][0];
-  const mob: any = mobs[0][1];
+  const [mobId, mob] = mobs[0] as [string, any];
+  console.log(`   -> ${mobName} L${mob.level ?? "?"} HP ${mob.hp}/${mob.maxHp}`);
 
-  console.log(`⚔️  Engaging ${mobName} (Level ${mob.level || '?'}, HP ${mob.hp}/${mob.maxHp})`);
-
-  // Try to use technique first, fall back to basic attack
-  const usedTechnique = await useBestTechnique(mobId);
-
-  if (!usedTechnique) {
-    await api("POST", "/command", {
-      zoneId: currentZone,
-      entityId: agentId,
-      action: "attack",
-      targetId: mobId,
-    });
-    console.log(`   🗡️  Basic attack (conserving essence)`);
+  // Engage: try technique first, fall back to basic attack
+  try {
+    const usedTech = await useBestTechnique(mobId);
+    if (!usedTech) {
+      await api("POST", "/command", {
+        zoneId: currentZone,
+        entityId: agentId,
+        action: "attack",
+        targetId: mobId,
+      });
+    }
+  } catch {
+    return false;
   }
 
-  return true;
-}
+  // Wait for the fight to resolve
+  for (let ticks = 0; ticks < 40; ticks++) {
+    await sleep(800);
 
-async function intelligentCombat(targetMobName: string, killCount: number) {
-  console.log(`\n⚔️  INTELLIGENT COMBAT: Hunting ${killCount}x ${targetMobName}\n`);
+    const s2 = await api("GET", "/state");
+    const target = s2.zones[currentZone]?.entities?.[mobId];
+    const me = s2.zones[currentZone]?.entities?.[agentId];
 
-  let killed = 0;
-
-  while (killed < killCount) {
-    // Check health before engaging
-    const healthy = await checkHealth();
-    if (!healthy) {
-      console.log("🧪 Healing up...");
-      await sleep(3000); // Simulate healing
-      console.log("✅ Health restored\n");
+    if (!me) {
+      await sleep(3000);
+      break;
     }
 
-    // Show essence status
-    const agent = await getAgentState();
-    const essence = agent.essence ?? 0;
-    const maxEssence = agent.maxEssence ?? 100;
-    const essencePercent = ((essence / maxEssence) * 100).toFixed(0);
-    console.log(`   💧 Essence: ${essence}/${maxEssence} (${essencePercent}%)`);
+    if (!target || target.hp <= 0) {
+      console.log(`   Killed! (L${me.level} XP ${me.xp ?? 0})`);
+      await sleep(1000);
+      return true;
+    }
+  }
 
-    // Find and attack mob
-    const found = await findAndAttackMob(targetMobName);
+  await sleep(1000);
+  return true; // mob probably died, tick timeout
+}
+
+/**
+ * Hunt mobs for a quest, checking actual server-side quest progress.
+ */
+async function huntForQuest(questId: string, mobName: string, requiredKills: number) {
+  console.log(`   Hunting ${mobName} (need ${requiredKills} kills)...\n`);
+
+  for (let attempt = 0; attempt < requiredKills * 6; attempt++) {
+    // Check actual quest progress from server
+    const me = await getAgentState();
+    if (!me) { await sleep(3000); continue; }
+
+    const aq = me.activeQuests?.find((q: any) => q.questId === questId);
+    if (!aq) break; // quest no longer active (completed or dropped)
+    if (aq.progress >= requiredKills) {
+      console.log(`   Quest progress: ${aq.progress}/${requiredKills} — done!`);
+      break;
+    }
+
+    console.log(`   Progress: ${aq.progress}/${requiredKills}`);
+
+    const found = await killOneMob(mobName);
     if (!found) {
-      console.log(`⏳ Waiting for ${targetMobName} to respawn...`);
+      console.log("   No mobs found — waiting for respawn...");
+      await sleep(5000);
+    }
+  }
+}
+
+/**
+ * Hunt mobs for grinding (no quest, just kill count).
+ */
+async function huntMobs(mobName: string, killTarget: number) {
+  console.log(`   Hunting ${killTarget}x ${mobName}...\n`);
+  for (let i = 0; i < killTarget; i++) {
+    const found = await killOneMob(mobName);
+    if (!found) {
+      await sleep(5000);
+      i--; // don't count failed attempts
+    }
+  }
+}
+
+/**
+ * Grind mobs until we reach a target level.
+ * Picks the strongest mob in the zone we can safely farm.
+ */
+async function grindToLevel(targetLevel: number) {
+  const agent = await getAgentState();
+  if ((agent?.level ?? 1) >= targetLevel) return;
+
+  banner(`GRINDING TO LEVEL ${targetLevel}`);
+
+  while (true) {
+    const a = await getAgentState();
+    if (!a || (a.level ?? 1) >= targetLevel) break;
+
+    const agentLevel = a.level ?? 1;
+    console.log(`   Level ${agentLevel} / ${targetLevel}  XP ${a.xp ?? 0}`);
+
+    // Scan zone for living mobs — prefer mobs 1-2 levels below to avoid deaths
+    const state = await api("GET", "/state");
+    const allMobs = Object.values(state.zones[currentZone]?.entities ?? {})
+      .filter(
+        (e: any) =>
+          (e.type === "mob" || e.type === "boss") && e.hp > 0
+      )
+      .filter((e: any) => (e.level ?? 1) <= agentLevel)
+      .sort((a: any, b: any) => (b.level ?? 1) - (a.level ?? 1)); // best XP first
+
+    if (allMobs.length === 0) {
+      console.log("   No suitable mobs — waiting for respawn...");
       await sleep(5000);
       continue;
     }
 
-    // Monitor combat
-    let combatActive = true;
-    while (combatActive) {
-      await sleep(1000);
+    const target = allMobs[0] as any;
+    await huntMobs(target.name, 1);
+  }
 
-      const state = await api("GET", "/state");
-      const stillExists = Object.values(state.zones[currentZone].entities)
-        .some((e: any) => e.name === targetMobName && (e.type === "mob" || e.type === "boss"));
+  const a2 = await getAgentState();
+  console.log(`   Reached Level ${a2?.level}!\n`);
+}
 
-      if (!stillExists) {
-        killed++;
-        console.log(`💀 Defeated ${targetMobName} (${killed}/${killCount})\n`);
-        combatActive = false;
-      }
+// ---------------------------------------------------------------------------
+//  Quests
+// ---------------------------------------------------------------------------
 
-      // Check if we're still alive
-      const currentAgent = await getAgentState();
-      if (currentAgent.hp <= 0) {
-        console.log("💀 AGENT DIED! Respawning...");
-        await sleep(5000);
-        combatActive = false;
-        killed--; // Don't count this kill
-      }
+interface QuestDef {
+  id: string;
+  mob: string;
+  count: number;
+}
+
+const HUMAN_MEADOW_QUESTS: QuestDef[] = [
+  { id: "rat_extermination", mob: "Giant Rat", count: 3 },
+  { id: "wolf_hunter_1", mob: "Hungry Wolf", count: 5 },
+  { id: "boar_bounty", mob: "Wild Boar", count: 4 },
+  { id: "goblin_menace", mob: "Goblin Raider", count: 3 },
+  { id: "slime_cleanup", mob: "Mire Slime", count: 2 },
+  { id: "bandit_problem", mob: "Bandit Scout", count: 3 },
+  { id: "alpha_threat", mob: "Diseased Wolf", count: 1 },
+];
+
+const WILD_MEADOW_QUESTS: QuestDef[] = [
+  { id: "bear_necessities", mob: "Forest Bear", count: 4 },
+  { id: "arachnophobia", mob: "Venom Spider", count: 5 },
+  { id: "outlaw_justice", mob: "Rogue Bandit", count: 4 },
+  { id: "natures_corruption", mob: "Corrupted Ent", count: 3 },
+  { id: "pack_leader", mob: "Dire Wolf", count: 1 },
+  { id: "wilderness_survival", mob: "Forest Bear", count: 7 },
+];
+
+const DARK_FOREST_QUESTS: QuestDef[] = [
+  { id: "shadows_in_dark", mob: "Shadow Wolf", count: 5 },
+  { id: "cult_cleansing", mob: "Dark Cultist", count: 4 },
+  { id: "undead_purge", mob: "Undead Knight", count: 4 },
+  { id: "troll_slayer", mob: "Forest Troll", count: 3 },
+  { id: "golem_breaker", mob: "Ancient Golem", count: 2 },
+  { id: "necromancer_end", mob: "Necromancer Valdris", count: 1 },
+  { id: "dark_forest_master", mob: "Shadow Wolf", count: 10 },
+];
+
+async function runQuestChain(quests: QuestDef[]) {
+  for (const quest of quests) {
+    console.log(`\n   -- Quest: ${quest.id} --`);
+
+    // Accept
+    try {
+      await api("POST", "/quests/accept", {
+        zoneId: currentZone,
+        playerId: agentId,
+        questId: quest.id,
+      });
+      console.log(`   Accepted ${quest.id}`);
+    } catch (err: any) {
+      console.log(`   Skip (${err.message.slice(0, 60)})`);
+      continue;
     }
 
-    await sleep(2000); // Recovery time between fights (essence regenerates)
+    // Hunt using server-side quest progress tracking
+    await huntForQuest(quest.id, quest.mob, quest.count);
+
+    // Turn in
+    try {
+      const state = await api("GET", "/state");
+      const npcId = Object.entries(state.zones[currentZone].entities).find(
+        ([_, e]: any) => e.type === "quest-giver"
+      )?.[0];
+
+      const result = await api("POST", "/quests/complete", {
+        zoneId: currentZone,
+        playerId: agentId,
+        questId: quest.id,
+        npcId,
+      });
+      console.log(
+        `   COMPLETE  +${result.rewards.xp}xp  +${result.rewards.gold}g`
+      );
+    } catch (err: any) {
+      console.log(`   Turn-in failed: ${err.message?.slice(0, 60)}`);
+    }
+
+    await printStatus();
+    await sleep(1000);
+
+    // Learn any newly-available techniques after level ups
+    await learnAvailableTechniques();
   }
 }
 
-async function completeQuest(questId: string): Promise<boolean> {
-  try {
-    const state = await api("GET", "/state");
-    const npcId = Object.entries(state.zones[currentZone].entities)
-      .find(([_, e]: any) => e.type === "quest-giver")?.[0];
+// ---------------------------------------------------------------------------
+//  Zone transitions
+// ---------------------------------------------------------------------------
 
-    const result = await api("POST", "/quests/complete", {
-      zoneId: currentZone,
-      playerId: agentId,
-      questId,
-      npcId,
-    });
+async function transitionToZone(destZone: string) {
+  banner(`TRANSITIONING TO ${destZone.toUpperCase()}`);
 
-    console.log(`\n🎉 QUEST COMPLETE!`);
-    console.log(`   Rewards: +${result.rewards.gold}g, +${result.rewards.xp}xp`);
-    console.log(`   Total Completed: ${result.totalCompleted}\n`);
-    return true;
-  } catch (err: any) {
-    console.log(`❌ Failed to complete quest: ${err.message}`);
+  // Get portals in current zone
+  const portals = await api("GET", `/portals/${currentZone}`);
+  const portal = portals.portals?.find(
+    (p: any) => p.destination?.zone === destZone
+  );
+
+  if (!portal) {
+    console.log(`   No portal found to ${destZone}! Available:`, JSON.stringify(portals.portals?.map((p: any) => p.destination?.zone)));
     return false;
   }
+
+  // Move near the portal (position uses x/z)
+  const px = portal.position?.x ?? portal.x;
+  const pz = portal.position?.z ?? portal.y;
+  console.log(`   Moving to portal "${portal.name}" at (${px}, ${pz})...`);
+  await moveTo(px, pz);
+  await sleep(2000); // travel time
+
+  // Use the portal
+  try {
+    const result = await api(
+      "POST",
+      `/transition/${currentZone}/portal/${portal.id}`,
+      {
+        walletAddress: WALLET,
+        entityId: agentId,
+      }
+    );
+
+    currentZone = destZone;
+    // Update agentId if the transition returns a new one
+    if (result.entityId) agentId = result.entityId;
+
+    console.log(`   Arrived in ${destZone}!`);
+    await printStatus();
+    return true;
+  } catch (err: any) {
+    // Try auto-transition as fallback
+    try {
+      const result = await api("POST", "/transition/auto", {
+        walletAddress: WALLET,
+        zoneId: currentZone,
+        entityId: agentId,
+      });
+
+      currentZone = destZone;
+      if (result.entityId) agentId = result.entityId;
+
+      console.log(`   Arrived in ${destZone} (auto)!`);
+      await printStatus();
+      return true;
+    } catch (err2: any) {
+      console.log(`   Transition failed: ${err2.message.slice(0, 80)}`);
+      return false;
+    }
+  }
 }
 
-async function playSmartly() {
+// ---------------------------------------------------------------------------
+//  Main loop
+// ---------------------------------------------------------------------------
+
+async function run() {
   console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║              🧠 SMART AI AGENT - DEPLOYMENT                  ║
-║           Intelligent Gameplay & Resource Management         ║
-╚══════════════════════════════════════════════════════════════╝
++------------------------------------------------------------+
+|          SMART AGENT v3 — Survival-First Progression       |
+|  Talk Quests -> Equip -> Kill Quests -> Grind -> Transition |
++------------------------------------------------------------+
   `);
 
-  // Phase 1: Setup
-  await spawnSmartAgent();
-  await sleep(2000);
+  // -- Auth --
+  console.log("Authenticating...\n");
+  const token = await authenticateWithWallet(PRIVATE_KEY);
+  api = createAuthenticatedAPI(token);
+  console.log();
 
-  // Phase 2: Gear up
-  console.log("=".repeat(60));
-  console.log("PHASE 1: PREPARATION");
-  console.log("=".repeat(60) + "\n");
+  // -- Load NFT --
+  const character = await loadCharacterNFT();
 
-  await equipGear();
-  await stockUpPotions();
+  // -- Spawn --
+  await spawnAgent(character);
 
-  // Phase 3: Learn professions & techniques
-  console.log("=".repeat(60));
-  console.log("PHASE 2: SKILL DEVELOPMENT");
-  console.log("=".repeat(60) + "\n");
+  // ===================================================================
+  //  PHASE 0 — Talk Quest Chain (→ L3 + full starter gear)
+  // ===================================================================
+  await runTalkQuestChain();
 
-  await learnProfession("alchemy");
-  await sleep(1000);
-  await learnProfession("mining");
-  await sleep(1000);
-  await learnTechniques();
-  await sleep(1000);
+  // ===================================================================
+  //  PHASE 0.5 — Equip all gear from talk quests
+  // ===================================================================
+  await equipAllGear();
 
-  // Phase 4: Quest - Rat Extermination
-  console.log("=".repeat(60));
-  console.log("PHASE 3: QUEST COMPLETION");
-  console.log("=".repeat(60) + "\n");
+  // ===================================================================
+  //  PHASE 1 — Human Meadow Kill Quests (L3-5)
+  // ===================================================================
+  banner("PHASE 1: HUMAN MEADOW KILL QUESTS (L3-5)");
 
-  console.log("📋 Accepting Quest: Rat Extermination");
-  const state = await api("GET", "/state");
-  const npcId = Object.entries(state.zones[currentZone].entities)
-    .find(([_, e]: any) => e.type === "quest-giver")?.[0];
+  await learnAvailableTechniques();
 
-  await api("POST", "/quests/accept", {
-    zoneId: currentZone,
-    playerId: agentId,
-    questId: "rat_extermination",
-  });
-  console.log("✅ Quest accepted\n");
+  console.log("\n   Starting kill quest chain...\n");
+  await runQuestChain(HUMAN_MEADOW_QUESTS);
 
-  // Smart combat
-  await intelligentCombat("Giant Rat", 3);
+  // Grind to L5 if quests alone weren't enough
+  await grindToLevel(5);
 
-  await sleep(2000);
-  await completeQuest("rat_extermination");
+  // ===================================================================
+  //  PHASE 2 — Wild Meadow (L5-10)
+  // ===================================================================
+  banner("PHASE 2: WILD MEADOW (L5-10)");
 
+  await transitionToZone("wild-meadow");
+
+  console.log("\n   Starting quest chain...\n");
+  await runQuestChain(WILD_MEADOW_QUESTS);
+
+  // Grind to L10 if quests alone weren't enough
+  await grindToLevel(10);
+
+  // ===================================================================
+  //  PHASE 3 — Dark Forest (L10-15)
+  // ===================================================================
+  banner("PHASE 3: DARK FOREST (L10-15)");
+
+  await transitionToZone("dark-forest");
+
+  console.log("\n   Starting quest chain...\n");
+  await runQuestChain(DARK_FOREST_QUESTS);
+
+  // Optional extra grind
+  await grindToLevel(15);
+
+  // ===================================================================
+  //  Final report
+  // ===================================================================
+  const final = await getAgentState();
   console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                    🏆 MISSION SUCCESS! 🏆                    ║
-║     Smart Agent completed quest with strategy & gear!        ║
-╚══════════════════════════════════════════════════════════════╝
++------------------------------------------------------------+
+|                     AGENT COMPLETE                          |
++------------------------------------------------------------+
+   Name:    ${final?.name ?? "?"}
+   Level:   ${final?.level ?? "?"}
+   XP:      ${final?.xp ?? 0}
+   HP:      ${final?.hp}/${final?.maxHp}
+   Zone:    ${currentZone}
+   Quests:  20 completed
++------------------------------------------------------------+
   `);
 }
 
-// Run the smart agent
-playSmartly().catch(err => {
-  console.error("❌ Smart Agent Error:", err);
+run().catch((err) => {
+  console.error("Agent Error:", err.message);
   process.exit(1);
 });

@@ -58,6 +58,13 @@ export class EntityRenderer {
     return this.entities.get(id);
   }
 
+  /** Get the current visual pixel position of an entity (follows tweens). */
+  getSpritePosition(id: string): { x: number; y: number } | null {
+    const visual = this.visuals.get(id);
+    if (!visual || !visual.sprite) return null;
+    return { x: visual.sprite.x, y: visual.sprite.y };
+  }
+
   /** Find entity at world position (within radius). */
   getEntityAt(worldX: number, worldY: number, radius: number): Entity | undefined {
     for (const [id, entity] of this.entities) {
@@ -110,6 +117,17 @@ export class EntityRenderer {
     py: number,
     entity: Entity,
   ): EntityVisual {
+    if (!this.scene || !this.scene.add) {
+      console.error("[EntityRenderer] Scene not initialized");
+      // Return a dummy visual to prevent crashes
+      return {
+        sprite: null as any,
+        label: null as any,
+        hpBar: null as any,
+        hpFill: null as any,
+      };
+    }
+
     const textureKey = getEntityTextureKey(entity.type);
 
     const sprite = this.scene.add
