@@ -1,6 +1,6 @@
 {
-  "installCommand": "npm i -g pnpm && cd client && pnpm install",
-  "buildCommand": "cd client && VITE_API_URL=http://35.239.126.131:3000 pnpm run build",
+  "installCommand": "cd client && npm install",
+  "buildCommand": "cd client && VITE_API_URL=http://35.239.126.131:3000 npm run build",
   "outputDirectory": "client/dist",
   "framework": null
 }
