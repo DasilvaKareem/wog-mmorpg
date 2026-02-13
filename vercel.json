@@ -4,11 +4,11 @@
   "outputDirectory": "client/dist",
   "framework": null,
   "env": {
-    "VITE_API_URL": "http://35.239.126.131:3000"
+    "VITE_API_URL": "https://private-accessible-asia-qualified.trycloudflare.com"
   },
   "build": {
     "env": {
-      "VITE_API_URL": "http://35.239.126.131:3000"
+      "VITE_API_URL": "https://private-accessible-asia-qualified.trycloudflare.com"
     }
   }
 }
