@@ -39,6 +39,7 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
   const { events, loading } = useZoneEvents(zoneId, { limit: 100, pollInterval: 2000 });
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
+  const [collapsed, setCollapsed] = React.useState(false);
 
   // Auto-scroll to bottom when new events arrive
   React.useEffect(() => {
@@ -68,11 +69,20 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
     <Card className={cn("pointer-events-auto flex flex-col", className)}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between">
-          Zone Log
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+              type="button"
+            >
+              {collapsed ? "+" : "−"}
+            </button>
+            Zone Log
+          </div>
           {loading && <span className="text-[8px] text-[#9aa7cc]">...</span>}
         </CardTitle>
       </CardHeader>
-      <CardContent
+      {!collapsed && <CardContent
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 space-y-0.5 overflow-y-auto pt-0 text-[8px]"
@@ -102,10 +112,10 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
             {event.message}
           </div>
         ))}
-      </CardContent>
+      </CardContent>}
 
       {/* Auto-scroll button */}
-      {!autoScroll && (
+      {!collapsed && !autoScroll && (
         <button
           onClick={() => {
             setAutoScroll(true);

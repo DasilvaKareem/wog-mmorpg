@@ -10,6 +10,7 @@ interface EntityVisual {
   label: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Rectangle;
   hpBg: Phaser.GameObjects.Rectangle;
+  partyRing: Phaser.GameObjects.Arc | null;
   lastX: number;
   lastY: number;
   facing: "down" | "left" | "right" | "up";
@@ -21,10 +22,27 @@ const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
 
+const PARTY_COLORS = [
+  0x54f28b, 0xffcc00, 0x9ab9ff, 0xff8800,
+  0xff4d6d, 0xcc66ff, 0x66ffcc, 0xff66aa,
+];
+
 function hpColor(ratio: number): number {
   if (ratio > 0.6) return 0x54f28b; // green
   if (ratio > 0.3) return 0xff8800; // orange
   return 0xff2222; // red
+}
+
+function partyColor(partyId: string): number {
+  let hash = 0;
+  for (let i = 0; i < partyId.length; i++) {
+    hash = ((hash << 5) - hash + partyId.charCodeAt(i)) | 0;
+  }
+  return PARTY_COLORS[Math.abs(hash) % PARTY_COLORS.length];
+}
+
+function colorToHex(color: number): string {
+  return `#${color.toString(16).padStart(6, "0")}`;
 }
 
 export class EntityRenderer {
@@ -56,6 +74,11 @@ export class EntityRenderer {
   /** Look up a stored entity by id. */
   getEntity(id: string): Entity | undefined {
     return this.entities.get(id);
+  }
+
+  /** Iterate all tracked entities (used by tooltip to show party members). */
+  getEntities(): Map<string, Entity> {
+    return this.entities;
   }
 
   /** Get the current visual pixel position of an entity (follows tweens). */
@@ -90,6 +113,7 @@ export class EntityRenderer {
         visual.label.destroy();
         visual.hpBar.destroy();
         visual.hpBg.destroy();
+        visual.partyRing?.destroy();
         this.visuals.delete(id);
         this.entities.delete(id);
       }
@@ -119,16 +143,20 @@ export class EntityRenderer {
   ): EntityVisual {
     if (!this.scene || !this.scene.add) {
       console.error("[EntityRenderer] Scene not initialized");
-      // Return a dummy visual to prevent crashes
       return {
         sprite: null as any,
         label: null as any,
         hpBar: null as any,
-        hpFill: null as any,
+        hpBg: null as any,
+        partyRing: null,
+        lastX: px,
+        lastY: py,
+        facing: "down",
+        moving: false,
       };
     }
 
-    const textureKey = getEntityTextureKey(entity.type);
+    const textureKey = getEntityTextureKey(entity.type, entity.classId, entity.name);
 
     const sprite = this.scene.add
       .sprite(px, py, textureKey, 0)
@@ -148,11 +176,13 @@ export class EntityRenderer {
       sprite.play(idleAnim);
     }
 
+    // Name label — colored if in a party
+    const labelColor = entity.partyId ? colorToHex(partyColor(entity.partyId)) : "#ffffff";
     const label = this.scene.add
       .text(px, py - 12, entity.name, {
         fontSize: "10px",
         fontFamily: "monospace",
-        color: "#ffffff",
+        color: labelColor,
         stroke: "#000000",
         strokeThickness: 2,
       })
@@ -174,11 +204,21 @@ export class EntityRenderer {
       )
       .setDepth(11);
 
+    // Party ring — colored circle around sprite
+    let partyRing: Phaser.GameObjects.Arc | null = null;
+    if (entity.partyId) {
+      partyRing = this.scene.add
+        .circle(px, py, 12, 0x000000, 0)
+        .setStrokeStyle(1.5, partyColor(entity.partyId), 0.8)
+        .setDepth(9);
+    }
+
     return {
       sprite,
       label,
       hpBar,
       hpBg,
+      partyRing,
       lastX: px,
       lastY: py,
       facing: "down",
@@ -196,7 +236,19 @@ export class EntityRenderer {
     const dy = py - visual.lastY;
     const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
 
-    const textureKey = getEntityTextureKey(entity.type);
+    const textureKey = getEntityTextureKey(entity.type, entity.classId, entity.name);
+
+    // Swap texture if class info arrived after initial creation
+    if (visual.sprite.texture.key !== textureKey && this.scene.textures.exists(textureKey)) {
+      visual.sprite.setTexture(textureKey);
+      const idleAnim = `${textureKey}-idle-${visual.facing}`;
+      if (this.scene.anims.exists(idleAnim)) {
+        visual.sprite.play(idleAnim);
+      }
+    }
+
+    // Update party ring: create/destroy/recolor if partyId changed
+    this.syncPartyRing(visual, entity);
 
     if (moved) {
       // Determine facing direction
@@ -218,7 +270,7 @@ export class EntityRenderer {
         duration: TWEEN_DURATION,
         ease: "Linear",
         onUpdate: () => {
-          // Labels and HP bars follow sprite
+          // Labels, HP bars, and party ring follow sprite
           visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12);
           visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10);
           const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
@@ -226,6 +278,7 @@ export class EntityRenderer {
             visual.sprite.x - HP_BAR_W / 2 + (HP_BAR_W * hpRatio) / 2,
             visual.sprite.y + 10,
           );
+          visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
         },
         onComplete: () => {
           visual.moving = false;
@@ -250,6 +303,7 @@ export class EntityRenderer {
       visual.sprite.setPosition(px, py);
       visual.label.setPosition(px, py - 12);
       visual.hpBg.setPosition(px, py + 10);
+      visual.partyRing?.setPosition(px, py);
     }
 
     // Update HP bar
@@ -264,6 +318,31 @@ export class EntityRenderer {
 
     visual.lastX = px;
     visual.lastY = py;
+  }
+
+  /** Sync party ring and label color when partyId changes. */
+  private syncPartyRing(visual: EntityVisual, entity: Entity): void {
+    if (entity.partyId) {
+      const color = partyColor(entity.partyId);
+      if (!visual.partyRing) {
+        // Joined a party — create ring
+        visual.partyRing = this.scene.add
+          .circle(visual.sprite.x, visual.sprite.y, 12, 0x000000, 0)
+          .setStrokeStyle(1.5, color, 0.8)
+          .setDepth(9);
+      } else {
+        // Already has ring — update color in case party changed
+        visual.partyRing.setStrokeStyle(1.5, color, 0.8);
+      }
+      visual.label.setColor(colorToHex(color));
+    } else {
+      if (visual.partyRing) {
+        // Left party — destroy ring
+        visual.partyRing.destroy();
+        visual.partyRing = null;
+      }
+      visual.label.setColor("#ffffff");
+    }
   }
 
   get entityCount(): number {

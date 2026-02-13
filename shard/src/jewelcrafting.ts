@@ -3,6 +3,8 @@ import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
+import { rollCraftedItem } from "./itemRng.js";
+import { logZoneEvent } from "./zoneEvents.js";
 
 export interface JewelcraftingRecipe {
   recipeId: string;
@@ -212,8 +214,27 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
 
       const outputItem = getItemByTokenId(recipe.outputTokenId);
 
+      // Roll RNG stats for jewelry (armor category)
+      const instance = rollCraftedItem({
+        baseTokenId: recipe.outputTokenId,
+        recipeId: recipe.recipeId,
+        craftedBy: walletAddress,
+      });
+
+      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
+        logZoneEvent({
+          zoneId,
+          type: "loot",
+          tick: 0,
+          message: `${entity.name} crafted a ${instance.quality.tier} item: ${instance.displayName}!`,
+          entityId: entity.id,
+          entityName: entity.name,
+          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
+        });
+      }
+
       server.log.info(
-        `[jewelcrafting] ${entity.name} crafted ${outputItem?.name} at ${station.name} → ${craftTx}`
+        `[jewelcrafting] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );
 
       return {
@@ -224,6 +245,14 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
           name: outputItem?.name ?? "Unknown",
           quantity: recipe.outputQuantity,
           tx: craftTx,
+          ...(instance && {
+            instanceId: instance.instanceId,
+            quality: instance.quality.tier,
+            displayName: instance.displayName,
+            rolledStats: instance.rolledStats,
+            bonusAffix: instance.bonusAffix,
+            rolledMaxDurability: instance.rolledMaxDurability,
+          }),
         },
         materialsConsumed: burnedMaterials,
         goldCost: recipe.goldCost,

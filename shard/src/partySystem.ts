@@ -257,3 +257,8 @@ export function areInSameParty(playerId1: string, playerId2: string): boolean {
   const party2 = playerToParty.get(playerId2);
   return party1 != null && party1 === party2;
 }
+
+// Helper to get a player's party ID (or undefined if solo)
+export function getPlayerPartyId(playerId: string): string | undefined {
+  return playerToParty.get(playerId);
+}

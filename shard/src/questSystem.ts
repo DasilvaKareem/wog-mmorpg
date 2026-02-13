@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
+import { getOrCreateZone, type Entity, recalculateEntityVitals } from "./zoneRuntime.js";
 import { mintGold, mintItem } from "./blockchain.js";
+import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
 
 // Quest definition
 export interface Quest {
@@ -648,6 +649,21 @@ export async function awardQuestRewards(
     player.xp += quest.rewards.xp;
   } else {
     player.xp = quest.rewards.xp;
+  }
+
+  // Check for level-up(s) after XP award
+  if (player.level != null && player.raceId && player.classId) {
+    let leveled = false;
+    while (player.level < MAX_LEVEL && player.xp >= xpForLevel(player.level + 1)) {
+      player.level++;
+      leveled = true;
+    }
+    if (leveled) {
+      const newStats = computeStatsAtLevel(player.raceId, player.classId, player.level);
+      player.stats = newStats;
+      recalculateEntityVitals(player);
+      console.log(`[quest] *** ${player.name} leveled up to ${player.level}! ***`);
+    }
   }
 
   // Award gold (async, non-blocking)

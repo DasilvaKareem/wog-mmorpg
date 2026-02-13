@@ -6,9 +6,92 @@
 import type { FastifyInstance } from "fastify";
 import { pvpBattleManager } from "./pvpBattleManager.js";
 import type { PvPFormat, MatchmakingEntry } from "./types/pvp.js";
-import type { BattleAction } from "../src/types/battle.js";
+import type { BattleAction } from "./types/battle.js";
+import { getAllZones } from "./zoneRuntime.js";
+import { COLISEUM_MAPS } from "./coliseumMaps.js";
 
 export async function registerPvPRoutes(app: FastifyInstance) {
+  /**
+   * GET /coliseum/npc/:zoneId/:entityId
+   * NPC discovery endpoint for AI agents — the main entry point for PvP.
+   * Returns NPC info, available formats, queue status, active battles, arenas, and endpoints.
+   */
+  app.get<{ Params: { zoneId: string; entityId: string } }>(
+    "/coliseum/npc/:zoneId/:entityId",
+    async (request, reply) => {
+      const { zoneId, entityId } = request.params;
+
+      const zone = getAllZones().get(zoneId);
+      if (!zone) {
+        reply.code(404);
+        return { error: "Zone not found" };
+      }
+
+      const entity = zone.entities.get(entityId);
+      if (!entity || entity.type !== "arena-master") {
+        reply.code(404);
+        return { error: "Arena master not found" };
+      }
+
+      const allQueues = pvpBattleManager.getAllQueuesStatus();
+      const activeBattles = pvpBattleManager.getActiveBattles();
+
+      const formats = [
+        { format: "1v1", playersPerTeam: 1, duration: "3 min", description: "Duel — test your skill 1-on-1" },
+        { format: "2v2", playersPerTeam: 2, duration: "5 min", description: "Tag team — coordinate with a partner" },
+        { format: "5v5", playersPerTeam: 5, duration: "5 min", description: "Team battle — full squad warfare" },
+        { format: "ffa", playersPerTeam: 1, duration: "7 min", description: "Free-For-All — last agent standing" },
+      ];
+
+      const arenas = Object.values(COLISEUM_MAPS).map((m) => ({
+        mapId: m.mapId,
+        name: m.name,
+        size: `${m.width}x${m.height}`,
+        obstacles: m.obstacles.length,
+        powerUps: m.powerUps.length,
+        hazards: m.hazards.length,
+      }));
+
+      return {
+        npcId: entity.id,
+        npcName: entity.name,
+        npcType: entity.type,
+        zoneId,
+        description: `${entity.name} runs the PvP Coliseum in ${zoneId}. Queue up for ranked battles, place encrypted bets on matches, and climb the leaderboard.`,
+        formats,
+        queueStatus: allQueues,
+        activeBattles,
+        arenas,
+        endpoints: {
+          matchmaking: {
+            joinQueue: { method: "POST", path: "/api/pvp/queue/join", body: "agentId, walletAddress, characterTokenId, level, format" },
+            leaveQueue: { method: "POST", path: "/api/pvp/queue/leave", body: "agentId, format" },
+            queueStatus: { method: "GET", path: "/api/pvp/queue/status/:format" },
+            allQueues: { method: "GET", path: "/api/pvp/queue/all" },
+          },
+          battles: {
+            activeBattles: { method: "GET", path: "/api/pvp/battles/active" },
+            battleState: { method: "GET", path: "/api/pvp/battle/:battleId" },
+            submitAction: { method: "POST", path: "/api/pvp/battle/:battleId/action", body: "actorId, actionId, targetId?" },
+          },
+          stats: {
+            leaderboard: { method: "GET", path: "/api/pvp/leaderboard" },
+            playerStats: { method: "GET", path: "/api/pvp/stats/:agentId" },
+            matchHistory: { method: "GET", path: "/api/pvp/history/:agentId" },
+          },
+          predictionMarket: {
+            activePools: { method: "GET", path: "/api/prediction/pools/active" },
+            poolDetails: { method: "GET", path: "/api/prediction/pool/:poolId" },
+            placeBet: { method: "POST", path: "/api/prediction/bet", body: "poolId, choice (RED|BLUE), amount, walletAddress" },
+            claimWinnings: { method: "POST", path: "/api/prediction/pool/:poolId/claim", body: "walletAddress" },
+            bettingHistory: { method: "GET", path: "/api/prediction/history/:walletAddress" },
+            x402Discovery: { method: "GET", path: "/api/x402/discovery" },
+          },
+        },
+      };
+    }
+  );
+
   /**
    * POST /api/pvp/queue/join
    * Join a matchmaking queue

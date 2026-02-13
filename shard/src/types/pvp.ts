@@ -3,7 +3,7 @@
  * Supports 1v1, 2v2, 5v5, and Free-For-All formats
  */
 
-import type { Combatant, BattlePhase, BattleState } from "../../../src/types/battle.js";
+import type { Combatant, BattlePhase, BattleState } from "./battle.js";
 
 export type PvPFormat = "1v1" | "2v2" | "5v5" | "ffa";
 export type PvPTeam = "red" | "blue" | "none";

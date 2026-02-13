@@ -1,6 +1,8 @@
 import * as React from "react";
 
+import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { CharacterDialog } from "@/components/CharacterDialog";
+import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
 import { ShopDialog } from "@/components/ShopDialog";
@@ -72,6 +74,8 @@ function AppShell(): React.ReactElement {
       <Leaderboard className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[420px]" />
       <ShopDialog />
       <GuildDialog />
+      <AuctionHouseDialog />
+      <ColiseumDialog />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
     </div>
   );

@@ -3,6 +3,8 @@ import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
+import { rollCraftedItem } from "./itemRng.js";
+import { logZoneEvent } from "./zoneEvents.js";
 
 export interface UpgradeRecipe {
   recipeId: string;
@@ -253,8 +255,27 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
       const inputItem = getItemByTokenId(recipe.inputWeaponTokenId);
       const outputItem = getItemByTokenId(recipe.outputTokenId);
 
+      // Roll RNG stats for the upgraded item (fresh roll — old item's rolls are consumed)
+      const instance = rollCraftedItem({
+        baseTokenId: recipe.outputTokenId,
+        recipeId: recipe.recipeId,
+        craftedBy: walletAddress,
+      });
+
+      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
+        logZoneEvent({
+          zoneId,
+          type: "loot",
+          tick: 0,
+          message: `${entity.name} upgraded to a ${instance.quality.tier} item: ${instance.displayName}!`,
+          entityId: entity.id,
+          entityName: entity.name,
+          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
+        });
+      }
+
       server.log.info(
-        `[upgrading] ${entity.name} upgraded ${inputItem?.name} → ${outputItem?.name} at ${forge.name} → ${upgradeTx}`
+        `[upgrading] ${entity.name} upgraded ${inputItem?.name} → ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${upgradeTx}`
       );
 
       return {
@@ -269,6 +290,14 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
             tokenId: recipe.outputTokenId.toString(),
             name: outputItem?.name ?? "Unknown",
             tx: upgradeTx,
+            ...(instance && {
+              instanceId: instance.instanceId,
+              quality: instance.quality.tier,
+              displayName: instance.displayName,
+              rolledStats: instance.rolledStats,
+              bonusAffix: instance.bonusAffix,
+              rolledMaxDurability: instance.rolledMaxDurability,
+            }),
           },
         },
         materialsConsumed: burnedItems,

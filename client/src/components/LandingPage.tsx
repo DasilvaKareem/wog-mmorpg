@@ -49,6 +49,16 @@ const FEATURES = [
     desc: "Class techniques with Essence costs, cooldowns, buffs, debuffs, and area attacks.",
     icon: "^^",
   },
+  {
+    title: "Reputation (ERC-8004)",
+    desc: "Multi-dimensional reputation tracking — Combat, Economic, Social, Crafting, and Agent scores.",
+    icon: "@@",
+  },
+  {
+    title: "Prediction Markets",
+    desc: "Encrypted PvP betting with SKALE BITE Protocol — bet on battle outcomes with sealed bids.",
+    icon: "%%",
+  },
 ];
 
 const ZONES = [
@@ -63,12 +73,47 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
   const [frameIndex, setFrameIndex] = React.useState(0);
   const frames = ["|", "/", "-", "\\"];
 
+  // Live stats
+  const [liveBattles, setLiveBattles] = React.useState(0);
+  const [queuedPlayers, setQueuedPlayers] = React.useState(0);
+
   React.useEffect(() => {
     const interval = window.setInterval(() => {
       setFrameIndex((i) => (i + 1) % frames.length);
     }, 200);
     return () => window.clearInterval(interval);
   }, [frames.length]);
+
+  React.useEffect(() => {
+    const fetchLiveStats = async () => {
+      try {
+        const [battlesRes, queuesRes] = await Promise.all([
+          fetch("/api/pvp/battles/active"),
+          fetch("/api/pvp/queue/all"),
+        ]);
+
+        if (battlesRes.ok) {
+          const data = await battlesRes.json();
+          setLiveBattles(data.battles?.length ?? 0);
+        }
+
+        if (queuesRes.ok) {
+          const data = await queuesRes.json();
+          const total = (data.queues ?? []).reduce(
+            (sum: number, q: { playersInQueue: number }) => sum + q.playersInQueue,
+            0
+          );
+          setQueuedPlayers(total);
+        }
+      } catch {
+        // Silently ignore — landing page stats are non-critical
+      }
+    };
+
+    fetchLiveStats();
+    const interval = window.setInterval(fetchLiveStats, 10000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   return (
     <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden">
@@ -272,7 +317,7 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
             { value: "20", label: "Quests" },
             { value: "8", label: "Classes" },
             { value: "8", label: "Professions" },
-            { value: "3", label: "Zones" },
+            { value: "5", label: "Token Standards" },
             { value: "10", label: "Gear Slots" },
             { value: "32+", label: "Techniques" },
             { value: "0", label: "Gas Fees" },
@@ -295,6 +340,48 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
         </div>
       </section>
 
+      {/* ── LIVE WORLD ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          Live World
+        </h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          {[
+            { value: liveBattles.toString(), label: "Live Battles", color: "#ff4d6d" },
+            { value: queuedPlayers.toString(), label: "In Queue", color: "#ffcc00" },
+            { value: "3", label: "Active Zones", color: "#54f28b" },
+          ].map((s) => (
+            <div
+              key={s.label}
+              className="flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3"
+            >
+              <span
+                className="text-[16px]"
+                style={{ color: s.color, textShadow: "2px 2px 0 #000" }}
+              >
+                {s.value}
+              </span>
+              <span className="mt-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">
+                {s.label}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-4 flex justify-center">
+          <Button
+            className="min-w-[200px] text-[11px]"
+            onClick={onEnterGame}
+            size="lg"
+            variant="ghost"
+          >
+            {">>>"} Enter World {"<<<"}
+          </Button>
+        </div>
+      </section>
+
       {/* ── ON-CHAIN ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
@@ -308,6 +395,8 @@ export function LandingPage({ onEnterGame, onPlayNow }: LandingPageProps): React
             { token: "ERC-721", name: "Characters", desc: "Unique NFTs with race, class, level, and stats" },
             { token: "ERC-1155", name: "Items", desc: "Weapons, armor, potions, tools, gems, and jewelry" },
             { token: "ERC-20", name: "Gold (GOLD)", desc: "Kill rewards, quest payouts, marketplace currency" },
+            { token: "ERC-8004", name: "Reputation", desc: "Multi-dimensional scores (Combat, Economic, Social, Crafting, Agent) with rank tiers" },
+            { token: "BITE v2", name: "PvP Prediction Market", desc: "Encrypted battle betting with threshold encryption and winner-take-all pools" },
           ].map((t) => (
             <div
               key={t.token}

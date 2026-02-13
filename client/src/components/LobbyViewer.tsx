@@ -21,11 +21,29 @@ function getHealthBarColor(hp: number, maxHp: number): string {
   return "bg-[#ff4d6d]";
 }
 
+const CLASS_COLORS: Record<string, string> = {
+  warrior: "#c83232",
+  paladin: "#e6c83c",
+  rogue:   "#8232b4",
+  ranger:  "#32a03c",
+  mage:    "#3264dc",
+  cleric:  "#dcdcf0",
+  warlock: "#3cb464",
+  monk:    "#e69628",
+};
+
 function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
   const healthPercent = player.maxHp > 0 ? (player.hp / player.maxHp) * 100 : 0;
+  const classColor = player.classId ? CLASS_COLORS[player.classId] : undefined;
 
   return (
     <div className="flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 hover:bg-[#1a2338] transition-colors">
+      {/* Class color dot */}
+      <span
+        className="w-2 h-2 rounded-full shrink-0 border border-black"
+        style={{ backgroundColor: classColor ?? "#9aa7cc" }}
+      />
+
       {/* Level badge */}
       <Badge variant={getLevelBadgeVariant(player.level)} className="w-10 justify-center">
         {player.level}
@@ -42,14 +60,14 @@ function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
       </div>
 
       {/* HP bar */}
-      <div className="w-20">
-        <div className="h-2 border-2 border-black bg-[#0f1830] shadow-[2px_2px_0_0_#000] overflow-hidden">
+      <div className="w-16">
+        <div className="h-2 border-2 border-black bg-[#0f1830] shadow-[1px_1px_0_0_#000] overflow-hidden">
           <div
             className={cn("h-full transition-all", getHealthBarColor(player.hp, player.maxHp))}
             style={{ width: `${Math.max(0, Math.min(100, healthPercent))}%` }}
           />
         </div>
-        <div className="text-[8px] text-[#9aa7cc] text-center mt-0.5">
+        <div className="text-[7px] text-[#9aa7cc] text-center mt-0.5">
           {player.hp}/{player.maxHp}
         </div>
       </div>
@@ -65,7 +83,7 @@ function ZoneLobbySection({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
       {/* Zone header button */}
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between border-2 border-black bg-[#283454] px-2 py-1.5 text-left text-[9px] shadow-[2px_2px_0_0_#000] transition hover:bg-[#324165]"
+        className="flex w-full items-center justify-between border-2 border-black bg-[#283454] px-2 py-1 text-left text-[9px] shadow-[2px_2px_0_0_#000] transition hover:bg-[#324165]"
         type="button"
       >
         <span className="truncate text-[#edf2ff] uppercase tracking-wide">
@@ -87,7 +105,7 @@ function ZoneLobbySection({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
       )}
 
       {expanded && lobby.players.length === 0 && (
-        <div className="border-2 border-black bg-[#0f1830] px-2 py-3 text-center text-[8px] text-[#9aa7cc] shadow-[2px_2px_0_0_#000]">
+        <div className="border-2 border-black bg-[#0f1830] px-2 py-2 text-center text-[8px] text-[#9aa7cc] shadow-[2px_2px_0_0_#000]">
           No players in zone
         </div>
       )}
@@ -97,6 +115,7 @@ function ZoneLobbySection({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
 
 export function LobbyViewer({ className }: LobbyViewerProps): React.ReactElement {
   const { lobbies, loading } = useZonePlayers({ pollInterval: 3000 });
+  const [collapsed, setCollapsed] = React.useState(false);
 
   const totalPlayers = lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0);
 
@@ -104,21 +123,33 @@ export function LobbyViewer({ className }: LobbyViewerProps): React.ReactElement
     <Card className={cn("pointer-events-auto", className)}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between">
-          Zone Lobbies
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+              type="button"
+            >
+              {collapsed ? "+" : "−"}
+            </button>
+            Zone Lobbies
+          </div>
           <Badge variant="success">{totalPlayers} online</Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="max-h-[320px] space-y-2 overflow-auto pt-0 text-[9px]">
-        {loading && lobbies.length === 0 ? (
-          <p className="text-[8px] text-[#9aa7cc]">Loading lobbies...</p>
-        ) : null}
-        {!loading && lobbies.length === 0 ? (
-          <p className="text-[8px] text-[#9aa7cc]">No zones found.</p>
-        ) : null}
-        {lobbies.map((lobby) => (
-          <ZoneLobbySection key={lobby.zoneId} lobby={lobby} />
-        ))}
-      </CardContent>
+
+      {!collapsed && (
+        <CardContent className="max-h-[320px] space-y-2 overflow-auto pt-0 text-[9px]">
+          {loading && lobbies.length === 0 ? (
+            <p className="text-[8px] text-[#9aa7cc]">Loading lobbies...</p>
+          ) : null}
+          {!loading && lobbies.length === 0 ? (
+            <p className="text-[8px] text-[#9aa7cc]">No zones found.</p>
+          ) : null}
+          {lobbies.map((lobby) => (
+            <ZoneLobbySection key={lobby.zoneId} lobby={lobby} />
+          ))}
+        </CardContent>
+      )}
     </Card>
   );
 }

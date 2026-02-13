@@ -144,7 +144,7 @@ export async function burnItem(
   const tx = burn({
     contract: itemsContract,
     account: fromAddress,
-    tokenId,
+    id: tokenId,
     value: quantity,
   });
   const receipt = await sendTransaction({ transaction: tx, account: serverAccount });

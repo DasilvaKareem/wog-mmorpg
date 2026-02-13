@@ -23,6 +23,7 @@ export interface Entity {
     >
   >;
   effectiveStats?: CharacterStats;
+  partyId?: string;
 }
 
 export interface ZoneResponse {

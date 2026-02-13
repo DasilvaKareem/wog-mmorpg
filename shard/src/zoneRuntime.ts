@@ -11,6 +11,7 @@ import { logZoneEvent } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollGold } from "./lootTables.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "./techniques.js";
 import { randomUUID } from "crypto";
+import { getPlayerPartyId } from "./partySystem.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -40,6 +41,15 @@ export interface EquippedItemState {
     specialEffect?: string;
     appliedAt: number;
   }>;
+  /** RNG crafting fields — populated when equipping with an instanceId */
+  instanceId?: string;
+  quality?: string;
+  rolledStats?: Partial<CharacterStats>;
+  bonusAffix?: {
+    name: string;
+    statBonuses: Partial<CharacterStats>;
+    specialEffect?: string;
+  };
 }
 
 export interface ActiveEffect {
@@ -120,8 +130,10 @@ export interface Entity {
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
+  const partyId = entity.type === "player" ? getPlayerPartyId(entity.id) : undefined;
   return {
     ...entity,
+    ...(partyId && { partyId }),
     ...(entity.characterTokenId != null && {
       characterTokenId: entity.characterTokenId.toString(),
     }),
@@ -210,17 +222,32 @@ function getEquipmentBonuses(entity: Entity): CharacterStats {
 
   for (const equipped of Object.values(entity.equipment)) {
     if (!equipped || equipped.broken || equipped.durability <= 0) continue;
-    const item = getItemByTokenId(BigInt(equipped.tokenId));
-    if (!item?.statBonuses) continue;
 
-    total.str += item.statBonuses.str ?? 0;
-    total.def += item.statBonuses.def ?? 0;
-    total.hp += item.statBonuses.hp ?? 0;
-    total.agi += item.statBonuses.agi ?? 0;
-    total.int += item.statBonuses.int ?? 0;
-    total.mp += item.statBonuses.mp ?? 0;
-    total.faith += item.statBonuses.faith ?? 0;
-    total.luck += item.statBonuses.luck ?? 0;
+    // Use rolled stats if present (RNG crafted item), otherwise fall back to catalog
+    const stats = equipped.rolledStats ?? getItemByTokenId(BigInt(equipped.tokenId))?.statBonuses;
+    if (stats) {
+      total.str += stats.str ?? 0;
+      total.def += stats.def ?? 0;
+      total.hp += stats.hp ?? 0;
+      total.agi += stats.agi ?? 0;
+      total.int += stats.int ?? 0;
+      total.mp += stats.mp ?? 0;
+      total.faith += stats.faith ?? 0;
+      total.luck += stats.luck ?? 0;
+    }
+
+    // Add bonus affix stats on top
+    if (equipped.bonusAffix?.statBonuses) {
+      const affix = equipped.bonusAffix.statBonuses;
+      total.str += affix.str ?? 0;
+      total.def += affix.def ?? 0;
+      total.hp += affix.hp ?? 0;
+      total.agi += affix.agi ?? 0;
+      total.int += affix.int ?? 0;
+      total.mp += affix.mp ?? 0;
+      total.faith += affix.faith ?? 0;
+      total.luck += affix.luck ?? 0;
+    }
   }
 
   return total;
@@ -855,7 +882,7 @@ async function worldTick() {
 
             // Grant XP on kill (only if target was mob/boss, not player)
             const xpReward = target.xpReward ?? 0;
-            if (xpReward > 0 && entity.level != null && entity.characterTokenId != null) {
+            if (xpReward > 0 && entity.level != null) {
               entity.xp = (entity.xp ?? 0) + xpReward;
 
               // Check for level-up(s)
@@ -881,9 +908,11 @@ async function worldTick() {
                   data: { level: entity.level, xp: entity.xp },
                 });
 
-                // Async on-chain sync (non-blocking)
-                updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                  .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                // Async on-chain sync (non-blocking, only if NFT character)
+                if (entity.characterTokenId != null) {
+                  updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                    .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                }
               }
             }
           }
@@ -1023,7 +1052,7 @@ async function worldTick() {
 
             // Grant XP on kill
             const xpReward = target.xpReward ?? 0;
-            if (xpReward > 0 && entity.level != null && entity.characterTokenId != null) {
+            if (xpReward > 0 && entity.level != null) {
               entity.xp = (entity.xp ?? 0) + xpReward;
               let leveled = false;
               while (entity.level < MAX_LEVEL && entity.xp >= xpForLevel(entity.level + 1)) {
@@ -1043,8 +1072,10 @@ async function worldTick() {
                   entityName: entity.name,
                   data: { level: entity.level, xp: entity.xp },
                 });
-                updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                  .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                if (entity.characterTokenId != null) {
+                  updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                    .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                }
               }
             }
           } else {

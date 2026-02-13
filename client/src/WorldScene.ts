@@ -56,6 +56,8 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("guildRegistrarClick", entity);
       } else if (entity.type === "auctioneer") {
         gameBus.emit("auctioneerClick", entity);
+      } else if (entity.type === "arena-master") {
+        gameBus.emit("arenaMasterClick", entity);
       }
 
       // Spectate: click any entity → snap camera immediately, then follow
@@ -299,6 +301,21 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
+      // ── Party membership ──
+      if (e.partyId) {
+        const partyMembers: string[] = [];
+        for (const [, other] of this.entityRenderer.getEntities()) {
+          if (other.partyId === e.partyId && other.id !== e.id) {
+            partyMembers.push(other.name);
+          }
+        }
+        lines.push("");
+        lines.push("[PARTY]");
+        if (partyMembers.length > 0) {
+          lines.push(`With: ${partyMembers.join(", ")}`);
+        }
+      }
+
       // ── NPC-specific hints ──
       if (e.type === "merchant") {
         lines.push("", "[Click] Browse shop");
@@ -310,6 +327,8 @@ export class WorldScene extends Phaser.Scene {
         lines.push("", "[Click] Guild hall");
       } else if (e.type === "auctioneer") {
         lines.push("", "[Click] Auction house");
+      } else if (e.type === "arena-master") {
+        lines.push("", "[Click] PvP Coliseum");
       } else if (e.type === "mob" || e.type === "boss") {
         if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
       }
@@ -351,6 +370,7 @@ export class WorldScene extends Phaser.Scene {
       "profession-trainer": "[PROF TRAINER]",
       "guild-registrar": "[GUILD]",
       auctioneer: "[AUCTIONEER]",
+      "arena-master": "[ARENA]",
       "ore-node": "[ORE]",
       "herb-node": "[HERB]",
     };

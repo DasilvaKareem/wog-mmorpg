@@ -264,6 +264,31 @@ const NPC_DEFS: NpcDef[] = [
     y: 300,
     hp: 999,
   },
+  // Arena Masters - PvP Coliseum
+  {
+    zoneId: "human-meadow",
+    type: "arena-master",
+    name: "Gladiator Varro",
+    x: 280,
+    y: 380,
+    hp: 999,
+  },
+  {
+    zoneId: "wild-meadow",
+    type: "arena-master",
+    name: "Pit Fighter Kael",
+    x: 210,
+    y: 250,
+    hp: 999,
+  },
+  {
+    zoneId: "dark-forest",
+    type: "arena-master",
+    name: "Shadow Champion Nyx",
+    x: 260,
+    y: 300,
+    hp: 999,
+  },
   // Guild Registrars
   {
     zoneId: "human-meadow",

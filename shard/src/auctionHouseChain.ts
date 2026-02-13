@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { biteWallet } from "./biteChain.js";
+import { biteWallet, biteProvider } from "./biteChain.js";
 
 const AUCTION_HOUSE_CONTRACT_ADDRESS = process.env.AUCTION_HOUSE_CONTRACT_ADDRESS;
 
@@ -46,6 +46,16 @@ export interface AuctionData {
   extensionCount: number;
 }
 
+// -- In-memory auction cache --
+// The on-chain getAuction() view function has a known bug (returns 0x on SKALE BITE v2).
+// All mutating functions (create/bid/end/cancel) work and emit events, but reads fail.
+// This cache mirrors on-chain state so the API can serve auction data reliably.
+const auctionCache = new Map<number, AuctionData>();
+
+function cacheAuction(data: AuctionData): void {
+  auctionCache.set(data.auctionId, data);
+}
+
 // -- Contract interaction helpers --
 
 /**
@@ -76,15 +86,27 @@ export async function createAuctionOnChain(
   );
   const receipt = await tx.wait();
 
-  // Parse AuctionCreated event to extract auctionId
+  // Parse AuctionCreated event to extract auctionId and cache the auction
   for (const log of receipt.logs) {
     try {
       const parsed = auctionHouseContract.interface.parseLog(log);
       if (parsed?.name === "AuctionCreated") {
-        return {
-          auctionId: Number(parsed.args.auctionId),
-          txHash: receipt.hash,
-        };
+        const auctionId = Number(parsed.args.auctionId);
+        cacheAuction({
+          auctionId,
+          zoneId,
+          seller,
+          tokenId,
+          quantity,
+          startPrice,
+          buyoutPrice,
+          endTime: Number(parsed.args.endTime),
+          highBidder: ethers.ZeroAddress,
+          highBid: 0,
+          status: 0, // Active
+          extensionCount: 0,
+        });
+        return { auctionId, txHash: receipt.hash };
       }
     } catch {
       // Not our event, skip
@@ -113,11 +135,18 @@ export async function placeBidOnChain(
   );
   const receipt = await tx.wait();
 
-  // Parse BidPlaced event to get previous bidder
+  // Parse BidPlaced event to get previous bidder and update cache
   for (const log of receipt.logs) {
     try {
       const parsed = auctionHouseContract.interface.parseLog(log);
       if (parsed?.name === "BidPlaced") {
+        const cached = auctionCache.get(auctionId);
+        if (cached) {
+          cached.highBidder = bidder;
+          cached.highBid = bidAmount;
+          cached.endTime = Number(parsed.args.newEndTime);
+          if (parsed.args.extended) cached.extensionCount++;
+        }
         return {
           txHash: receipt.hash,
           previousBidder: parsed.args.previousBidder,
@@ -152,6 +181,8 @@ export async function endAuctionOnChain(auctionId: number): Promise<string> {
   ensureAuctionHouseEnabled();
   const tx = await auctionHouseContract.endAuction(auctionId);
   const receipt = await tx.wait();
+  const cached = auctionCache.get(auctionId);
+  if (cached) cached.status = 1; // Ended
   return receipt.hash;
 }
 
@@ -162,42 +193,19 @@ export async function cancelAuctionOnChain(auctionId: number): Promise<string> {
   ensureAuctionHouseEnabled();
   const tx = await auctionHouseContract.cancelAuction(auctionId);
   const receipt = await tx.wait();
+  const cached = auctionCache.get(auctionId);
+  if (cached) cached.status = 2; // Cancelled
   return receipt.hash;
 }
 
 /**
- * Read auction details from the contract.
+ * Read auction details. Uses in-memory cache (the on-chain getAuction view
+ * function has a known bug on SKALE BITE v2 — returns 0x for all IDs).
  */
 export async function getAuctionFromChain(auctionId: number): Promise<AuctionData> {
-  ensureAuctionHouseEnabled();
-  const [
-    zoneId,
-    seller,
-    tokenId,
-    quantity,
-    startPrice,
-    buyoutPrice,
-    endTime,
-    highBidder,
-    highBid,
-    status,
-    extensionCount,
-  ] = await auctionHouseContract.getAuction(auctionId);
-
-  return {
-    auctionId,
-    zoneId,
-    seller,
-    tokenId: Number(tokenId),
-    quantity: Number(quantity),
-    startPrice: parseFloat(ethers.formatUnits(startPrice, 18)),
-    buyoutPrice: parseFloat(ethers.formatUnits(buyoutPrice, 18)),
-    endTime: Number(endTime),
-    highBidder,
-    highBid: parseFloat(ethers.formatUnits(highBid, 18)),
-    status: Number(status),
-    extensionCount: Number(extensionCount),
-  };
+  const cached = auctionCache.get(auctionId);
+  if (cached) return cached;
+  throw new Error(`Auction ${auctionId} not found`);
 }
 
 /**
@@ -210,25 +218,133 @@ export async function getNextAuctionId(): Promise<number> {
 
 /**
  * Get all auction IDs for a specific zone (filters by zoneId).
- * This is a helper that iterates through all auctions — not gas-efficient on-chain
- * but fine for off-chain querying.
+ * Reads from in-memory cache.
  */
 export async function getZoneAuctionsFromChain(
   zoneId: string,
   statusFilter?: number
 ): Promise<number[]> {
-  ensureAuctionHouseEnabled();
-  const nextId = await getNextAuctionId();
   const auctionIds: number[] = [];
 
-  for (let i = 0; i < nextId; i++) {
-    const auction = await getAuctionFromChain(i);
+  for (const auction of auctionCache.values()) {
     if (auction.zoneId === zoneId) {
       if (statusFilter === undefined || auction.status === statusFilter) {
-        auctionIds.push(i);
+        auctionIds.push(auction.auctionId);
       }
     }
   }
 
   return auctionIds;
+}
+
+/**
+ * Rebuild the auction cache from historical on-chain events.
+ * Call once at server startup to restore state from before the process restarted.
+ */
+export async function rebuildAuctionCache(): Promise<void> {
+  if (!AUCTION_HOUSE_CONTRACT_ADDRESS || !biteProvider) return;
+
+  const readContract = new ethers.Contract(
+    AUCTION_HOUSE_CONTRACT_ADDRESS,
+    AUCTION_HOUSE_ABI,
+    biteProvider
+  );
+
+  try {
+    const nextId = Number(await readContract.nextAuctionId());
+    if (nextId === 0) {
+      console.log("[auction] No auctions on-chain to rebuild");
+      return;
+    }
+
+    // SKALE limits eth_getLogs to 2000 blocks per query.
+    // Scan backwards from latest in 2000-block chunks until we find all auctions.
+    const latestBlock = await biteProvider.getBlockNumber();
+    const CHUNK = 1999;
+
+    async function queryInChunks(filter: any): Promise<any[]> {
+      const allLogs: any[] = [];
+      let to = latestBlock;
+      while (to >= 0) {
+        const from = Math.max(0, to - CHUNK);
+        const logs = await readContract.queryFilter(filter, from, to);
+        allLogs.push(...logs);
+        if (from === 0) break;
+        to = from - 1;
+        // Stop scanning if we've found all auctions
+        if (allLogs.length >= nextId) break;
+      }
+      return allLogs;
+    }
+
+    const createdFilter = readContract.filters.AuctionCreated();
+    const createdLogs = await queryInChunks(createdFilter);
+
+    for (const log of createdLogs) {
+      const parsed = readContract.interface.parseLog(log as any);
+      if (!parsed) continue;
+      const auctionId = Number(parsed.args.auctionId);
+      cacheAuction({
+        auctionId,
+        zoneId: parsed.args.zoneId,
+        seller: parsed.args.seller,
+        tokenId: Number(parsed.args.tokenId),
+        quantity: Number(parsed.args.quantity),
+        startPrice: parseFloat(ethers.formatUnits(parsed.args.startPrice, 18)),
+        buyoutPrice: parseFloat(ethers.formatUnits(parsed.args.buyoutPrice, 18)),
+        endTime: Number(parsed.args.endTime),
+        highBidder: ethers.ZeroAddress,
+        highBid: 0,
+        status: 0, // Assume active; updated below
+        extensionCount: 0,
+      });
+    }
+
+    // Apply BidPlaced events
+    const bidFilter = readContract.filters.BidPlaced();
+    const bidLogs = await queryInChunks(bidFilter);
+    for (const log of bidLogs) {
+      const parsed = readContract.interface.parseLog(log as any);
+      if (!parsed) continue;
+      const cached = auctionCache.get(Number(parsed.args.auctionId));
+      if (cached) {
+        cached.highBidder = parsed.args.bidder;
+        cached.highBid = parseFloat(ethers.formatUnits(parsed.args.bidAmount, 18));
+        cached.endTime = Number(parsed.args.newEndTime);
+        if (parsed.args.extended) cached.extensionCount++;
+      }
+    }
+
+    // Apply AuctionEnded events
+    const endedFilter = readContract.filters.AuctionEnded();
+    const endedLogs = await queryInChunks(endedFilter);
+    for (const log of endedLogs) {
+      const parsed = readContract.interface.parseLog(log as any);
+      if (!parsed) continue;
+      const cached = auctionCache.get(Number(parsed.args.auctionId));
+      if (cached) cached.status = 1;
+    }
+
+    // Apply AuctionCancelled events
+    const cancelFilter = readContract.filters.AuctionCancelled();
+    const cancelLogs = await queryInChunks(cancelFilter);
+    for (const log of cancelLogs) {
+      const parsed = readContract.interface.parseLog(log as any);
+      if (!parsed) continue;
+      const cached = auctionCache.get(Number(parsed.args.auctionId));
+      if (cached) cached.status = 2;
+    }
+
+    // Mark expired auctions as ended
+    const now = Math.floor(Date.now() / 1000);
+    for (const auction of auctionCache.values()) {
+      if (auction.status === 0 && auction.endTime < now) {
+        auction.status = 1; // Expired
+      }
+    }
+
+    console.log(`[auction] Rebuilt cache: ${auctionCache.size} auctions from on-chain events`);
+  } catch (err) {
+    console.error("[auction] Failed to rebuild cache from events:", err);
+  }
 }

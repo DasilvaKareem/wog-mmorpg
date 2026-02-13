@@ -4,6 +4,7 @@ export interface GameEventMap {
   merchantClick: Entity;
   guildRegistrarClick: Entity;
   auctioneerClick: Entity;
+  arenaMasterClick: Entity;
   switchZone: { zoneId: string };
   zoneChanged: { zoneId: string };
 }

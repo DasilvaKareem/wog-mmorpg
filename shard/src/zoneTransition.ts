@@ -325,16 +325,18 @@ async function performTransition(
   destZone.entities.set(entity.id, entity);
 
   // Log zone events
-  logZoneEvent(sourceZoneId, {
+  logZoneEvent({
+    zoneId: sourceZoneId,
     type: "system",
     message: `${entity.name} departed through ${sourcePortal.name}`,
-    timestamp: Date.now(),
+    tick: Date.now(),
   });
 
-  logZoneEvent(destZoneId, {
+  logZoneEvent({
+    zoneId: destZoneId,
     type: "system",
     message: `${entity.name} arrived from ${sourceZoneId}`,
-    timestamp: Date.now(),
+    tick: Date.now(),
   });
 
   server.log.info(

@@ -10,6 +10,7 @@ import {
   type ZoneState,
 } from "./zoneRuntime.js";
 import { authenticateRequest } from "./auth.js";
+import { getItemInstance } from "./itemRng.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -147,11 +148,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       tokenId: number;
       entityId?: string;
       walletAddress?: string;
+      instanceId?: string;
     };
   }>("/equipment/equip", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, tokenId, entityId, walletAddress } = request.body;
+    const { zoneId, tokenId, entityId, walletAddress, instanceId } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     if (!zoneId || !Number.isFinite(tokenId)) {
@@ -183,7 +185,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       reply.code(400);
       return { error: "Unknown item tokenId" };
     }
-    if ((item.category !== "armor" && item.category !== "weapon") || !item.equipSlot) {
+    if ((item.category !== "armor" && item.category !== "weapon" && item.category !== "tool") || !item.equipSlot) {
       reply.code(400);
       return { error: "Item is not equippable" };
     }
@@ -218,11 +220,39 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       };
     }
 
+    // Build the equipped item state — include rolled stats if instanceId provided
+    const itemInstance = instanceId ? getItemInstance(instanceId) : undefined;
+    if (instanceId && !itemInstance) {
+      reply.code(400);
+      return { error: "Item instance not found" };
+    }
+    if (itemInstance && itemInstance.baseTokenId !== Number(item.tokenId)) {
+      reply.code(400);
+      return { error: "Instance tokenId mismatch" };
+    }
+    if (itemInstance && itemInstance.craftedBy !== (owner ?? "").toLowerCase()) {
+      reply.code(400);
+      return { error: "Instance does not belong to this wallet" };
+    }
+
+    const durability = itemInstance?.rolledMaxDurability ?? item.maxDurability;
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
-      durability: item.maxDurability,
-      maxDurability: item.maxDurability,
+      durability,
+      maxDurability: durability,
       broken: false,
+      ...(itemInstance && {
+        instanceId: itemInstance.instanceId,
+        quality: itemInstance.quality.tier,
+        rolledStats: itemInstance.rolledStats,
+        bonusAffix: itemInstance.bonusAffix
+          ? {
+              name: itemInstance.bonusAffix.name,
+              statBonuses: itemInstance.bonusAffix.statBonuses,
+              specialEffect: itemInstance.bonusAffix.specialEffect,
+            }
+          : undefined,
+      }),
     };
     recalculateEntityVitals(entity);
 
@@ -231,7 +261,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       equipped: {
         slot: item.equipSlot,
         tokenId: item.tokenId.toString(),
-        name: item.name,
+        name: itemInstance?.displayName ?? item.name,
+        ...(itemInstance && {
+          instanceId: itemInstance.instanceId,
+          quality: itemInstance.quality.tier,
+          displayName: itemInstance.displayName,
+        }),
       },
       ...serializeEntityEquipment(entity),
     };
@@ -368,11 +403,23 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       const item = getItemByTokenId(BigInt(equipped.tokenId));
       if (!item) continue;
 
+      // Use rolled stats + affix stats for repair cost if present, else catalog stats
+      let repairStatBonuses = item.statBonuses;
+      if (equipped.rolledStats) {
+        const merged: Record<string, number | undefined> = { ...equipped.rolledStats };
+        if (equipped.bonusAffix?.statBonuses) {
+          for (const [k, v] of Object.entries(equipped.bonusAffix.statBonuses)) {
+            merged[k] = (merged[k] ?? 0) + (v ?? 0);
+          }
+        }
+        repairStatBonuses = merged;
+      }
+
       const cost = computeRepairCost(
         {
           goldPrice: item.goldPrice,
           maxDurability: equipped.maxDurability,
-          statBonuses: item.statBonuses,
+          statBonuses: repairStatBonuses,
         },
         missing,
         playerLevel

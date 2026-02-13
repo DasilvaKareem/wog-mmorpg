@@ -11,11 +11,16 @@ const BITE_V2_RPC =
 /** JSON-RPC provider for the BITE v2 sandbox chain. */
 export const biteProvider = new ethers.JsonRpcProvider(BITE_V2_RPC);
 
-/** Server wallet on the BITE v2 sandbox chain (same private key, different chain). */
-export const biteWallet = new ethers.Wallet(
-  process.env.SERVER_PRIVATE_KEY!,
-  biteProvider
-);
+/** Server wallet on the BITE v2 sandbox chain (same private key, different chain).
+ *  Wrapped in NonceManager to prevent nonce collisions from concurrent transactions
+ *  (auction house, guild, prediction market all share this signer). */
+export const biteWallet = process.env.SERVER_PRIVATE_KEY
+  ? new ethers.NonceManager(new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, biteProvider))
+  : null;
+
+if (!biteWallet) {
+  console.warn("[bite] SERVER_PRIVATE_KEY not set — BITE chain wallet disabled");
+}
 
 /** BITE SDK instance for encrypting values. */
 export const bite = new BITE(BITE_V2_RPC);

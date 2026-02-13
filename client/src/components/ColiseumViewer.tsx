@@ -1,17 +1,13 @@
-/**
- * Coliseum Viewer Component
- * Main view for watching PvP battles with integrated prediction market
- */
+import * as React from "react";
 
-import React, { useState, useEffect } from "react";
-import { Card } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { HpBar } from "./ui/hp-bar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { HpBar } from "@/components/ui/hp-bar";
 import { PredictionMarketPanel } from "./PredictionMarketPanel";
 
 interface ColiseumViewerProps {
   battleId: string;
+  onBack?: () => void;
 }
 
 interface BattleState {
@@ -67,13 +63,13 @@ interface TurnRecord {
   message: string;
 }
 
-export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
-  const [battle, setBattle] = useState<BattleState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+export function ColiseumViewer({ battleId, onBack }: ColiseumViewerProps): React.ReactElement {
+  const [battle, setBattle] = React.useState<BattleState | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [autoRefresh, setAutoRefresh] = React.useState(true);
 
-  useEffect(() => {
+  React.useEffect(() => {
     fetchBattle();
 
     if (autoRefresh) {
@@ -85,14 +81,11 @@ export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
   const fetchBattle = async () => {
     try {
       const response = await fetch(`/api/pvp/battle/${battleId}`);
-      if (!response.ok) {
-        throw new Error("Battle not found");
-      }
+      if (!response.ok) throw new Error("Battle not found");
       const data = await response.json();
       setBattle(data.battle);
       setLoading(false);
 
-      // Stop auto-refresh when battle is completed
       if (data.battle.status === "completed" || data.battle.status === "cancelled") {
         setAutoRefresh(false);
       }
@@ -104,55 +97,75 @@ export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-xl">Loading battle...</div>
+      <div className="flex items-center justify-center p-8">
+        <div className="text-[10px] text-[#9aa7cc]">Loading battle...</div>
       </div>
     );
   }
 
   if (error || !battle) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-xl text-red-500">{error || "Battle not found"}</div>
+      <div className="flex items-center justify-center p-8">
+        <div className="text-[10px] text-[#ff4d6d]">{error || "Battle not found"}</div>
       </div>
     );
   }
 
-  const timeRemaining = battle.status === "in_progress"
-    ? battle.config.duration - Math.floor(battle.turnCount / 2)
-    : 0;
+  const timeRemaining =
+    battle.status === "in_progress"
+      ? battle.config.duration - Math.floor(battle.turnCount / 2)
+      : 0;
 
   return (
-    <div className="container mx-auto p-4 space-y-4">
-      {/* Header */}
+    <div className="space-y-3">
+      {/* Back button + Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">
-          {battle.config.arena.name}
-        </h1>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <Button
+              onClick={onBack}
+              size="sm"
+              variant="ghost"
+              className="h-6 text-[8px]"
+            >
+              {"<-"} Back
+            </Button>
+          )}
+          <h2
+            className="text-[11px] font-bold uppercase tracking-wide text-[#ffcc00]"
+            style={{ textShadow: "2px 2px 0 #000" }}
+          >
+            {battle.config.arena.name}
+          </h2>
+        </div>
+        <div className="flex gap-1">
           <Badge variant={getStatusVariant(battle.status)}>
             {battle.status.toUpperCase()}
           </Badge>
-          <Badge variant="outline">{battle.config.format.toUpperCase()}</Badge>
+          <Badge variant="secondary">{battle.config.format.toUpperCase()}</Badge>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {/* Left: Arena & Battle Stats */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-3 lg:col-span-2">
           {/* Battle Timer */}
           {battle.status === "in_progress" && (
-            <Card className="p-4 bg-gradient-to-r from-orange-500 to-red-500 text-white">
-              <div className="text-center">
-                <div className="text-sm font-semibold">TIME REMAINING</div>
-                <div className="text-4xl font-bold">{formatTime(timeRemaining)}</div>
+            <div className="border-4 border-black bg-[#1a2340] p-3 text-center shadow-[4px_4px_0_0_#000]">
+              <div className="text-[8px] font-semibold uppercase tracking-wide text-[#9aa7cc]">
+                Time Remaining
               </div>
-            </Card>
+              <div
+                className="text-[18px] font-bold text-[#ffcc00]"
+                style={{ textShadow: "2px 2px 0 #000" }}
+              >
+                {formatTime(timeRemaining)}
+              </div>
+            </div>
           )}
 
           {/* Team Status */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Red Team */}
+          <div className="grid grid-cols-2 gap-3">
             <TeamPanel
               team="RED"
               combatants={battle.config.teamRed}
@@ -160,8 +173,6 @@ export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
               kills={battle.statistics.teamRedKills}
               isWinner={battle.winner === "red"}
             />
-
-            {/* Blue Team */}
             <TeamPanel
               team="BLUE"
               combatants={battle.config.teamBlue}
@@ -172,21 +183,19 @@ export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
           </div>
 
           {/* Battle Log */}
-          <Card className="p-4">
-            <h3 className="text-lg font-semibold mb-2">Battle Log</h3>
-            <div className="h-64 overflow-y-auto space-y-1 text-sm font-mono">
+          <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-3">
+            <h3 className="mb-2 text-[10px] font-semibold text-[#00ff88]">Battle Log</h3>
+            <div className="h-48 space-y-0.5 overflow-y-auto font-mono text-[9px]">
               {battle.log.slice(-20).reverse().map((turn, i) => (
                 <div
                   key={i}
-                  className={`p-1 ${
-                    turn.killed ? "bg-red-100 dark:bg-red-900" : ""
-                  }`}
+                  className={`p-1 ${turn.killed ? "bg-[#3a1020] text-[#ff4d6d]" : "text-[#d6deff]"}`}
                 >
-                  <span className="text-gray-500">#{turn.turn}</span> {turn.message}
+                  <span className="text-[#565f89]">#{turn.turn}</span> {turn.message}
                 </div>
               ))}
             </div>
-          </Card>
+          </div>
         </div>
 
         {/* Right: Prediction Market */}
@@ -198,25 +207,28 @@ export function ColiseumViewer({ battleId }: ColiseumViewerProps) {
               winner={battle.winner}
             />
           ) : (
-            <Card className="p-4">
-              <p className="text-gray-500">No prediction market for this battle</p>
-            </Card>
+            <div className="border-2 border-[#29334d] bg-[#11182b] p-3">
+              <p className="text-[9px] text-[#9aa7cc]">No prediction market for this battle</p>
+            </div>
           )}
         </div>
       </div>
 
       {/* MVP Card */}
       {battle.mvp && battle.status === "completed" && (
-        <Card className="p-4 bg-gradient-to-r from-yellow-400 to-yellow-600 text-white">
-          <div className="text-center">
-            <div className="text-sm font-semibold">🏆 MVP 🏆</div>
-            <div className="text-2xl font-bold">
-              {battle.config.teamRed.find((c) => c.id === battle.mvp)?.name ||
-                battle.config.teamBlue.find((c) => c.id === battle.mvp)?.name}
-            </div>
-            <div className="text-sm">+100 GOLD Bonus</div>
+        <div className="border-4 border-[#ffcc00] bg-[#1a2340] p-3 text-center shadow-[4px_4px_0_0_#000]">
+          <div className="text-[9px] font-semibold uppercase text-[#ffcc00]">
+            [MVP]
           </div>
-        </Card>
+          <div
+            className="text-[14px] font-bold text-[#f1f5ff]"
+            style={{ textShadow: "2px 2px 0 #000" }}
+          >
+            {battle.config.teamRed.find((c) => c.id === battle.mvp)?.name ||
+              battle.config.teamBlue.find((c) => c.id === battle.mvp)?.name}
+          </div>
+          <div className="text-[9px] text-[#ffcc00]">+100 GOLD Bonus</div>
+        </div>
       )}
     </div>
   );
@@ -235,52 +247,52 @@ function TeamPanel({
   kills: number;
   isWinner: boolean;
 }) {
-  const bgColor = team === "RED" ? "bg-red-600" : "bg-blue-600";
-  const borderColor = isWinner ? "border-yellow-400 border-4" : "";
+  const bgColor = team === "RED" ? "bg-[#cc3333]" : "bg-[#3355cc]";
+  const borderClass = isWinner
+    ? "border-4 border-[#ffcc00] shadow-[4px_4px_0_0_#000]"
+    : "border-2 border-[#29334d]";
 
   return (
-    <Card className={`p-4 ${borderColor}`}>
-      <div className={`${bgColor} text-white p-2 rounded mb-2 text-center font-bold`}>
-        {team} TEAM {isWinner && "👑"}
+    <div className={`${borderClass} bg-[#11182b] p-2`}>
+      <div className={`${bgColor} border-2 border-black p-1.5 text-center text-[10px] font-bold text-white`}>
+        {team} TEAM {isWinner && "[WINNER]"}
       </div>
 
-      <div className="space-y-2">
+      <div className="mt-2 space-y-2">
         {combatants.map((c) => (
           <div key={c.id} className="space-y-1">
-            <div className="flex justify-between text-sm">
-              <span className={c.alive ? "" : "line-through text-gray-400"}>
+            <div className="flex justify-between text-[9px]">
+              <span className={c.alive ? "text-[#f1f5ff]" : "text-[#565f89] line-through"}>
                 {c.name}
               </span>
-              <span className="text-xs text-gray-500">ELO: {c.elo}</span>
+              <span className="text-[8px] text-[#9aa7cc]">ELO: {c.elo}</span>
             </div>
-            <HpBar current={c.stats.hp} max={c.stats.maxHp} />
-            <div className="text-xs text-gray-500">
+            <HpBar hp={c.stats.hp} maxHp={c.stats.maxHp} />
+            <div className="text-[8px] text-[#9aa7cc]">
               ATK: {c.stats.attack} | DEF: {c.stats.defense} | SPD: {Math.round(c.stats.speed)}
             </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-3 pt-3 border-t">
-        <div className="text-sm">
-          <div>💥 Damage: {damage}</div>
-          <div>☠️ Kills: {kills}</div>
-        </div>
+      <div className="mt-2 border-t border-[#29334d] pt-2 text-[9px] text-[#9aa7cc]">
+        <div>DMG: <span className="text-[#ff4d6d]">{damage}</span></div>
+        <div>KIL: <span className="text-[#ff4d6d]">{kills}</span></div>
       </div>
-    </Card>
+    </div>
   );
 }
 
-function getStatusVariant(status: string): "default" | "destructive" | "outline" {
+function getStatusVariant(status: string): "default" | "danger" | "secondary" {
   switch (status) {
     case "in_progress":
       return "default";
     case "completed":
-      return "outline";
+      return "secondary";
     case "cancelled":
-      return "destructive";
+      return "danger";
     default:
-      return "outline";
+      return "secondary";
   }
 }
 

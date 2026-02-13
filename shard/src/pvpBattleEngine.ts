@@ -13,8 +13,8 @@ import type {
   CombatantStatistics,
   PvPMatchResult,
 } from "./types/pvp.js";
-import type { BattleAction, TurnRecord, BattlePhase } from "../src/types/battle.js";
-import { BattleEngine } from "../src/runtime/battle-engine.js";
+import type { BattleAction, TurnRecord, BattlePhase } from "./types/battle.js";
+import { BattleEngine } from "./runtime/battle-engine.js";
 
 const ELO_K_FACTOR = 32;
 const MVP_REWARD_GOLD = 100; // Bonus GOLD for MVP

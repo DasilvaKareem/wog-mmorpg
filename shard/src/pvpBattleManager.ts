@@ -13,7 +13,7 @@ import type {
   PvPMatchResult,
   PvPLeaderboardEntry,
 } from "./types/pvp.js";
-import type { BattleAction } from "../src/types/battle.js";
+import type { BattleAction } from "./types/battle.js";
 import { randomUUID } from "crypto";
 
 export interface PvPDatabase {

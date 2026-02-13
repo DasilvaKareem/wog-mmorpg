@@ -374,7 +374,7 @@ export const TECHNIQUES: TechniqueDefinition[] = [
     essenceCost: 25,
     cooldown: 5,
     type: "healing",
-    targetType: "self",
+    targetType: "ally",
     effects: { healAmount: 40 },
   },
   {
@@ -413,7 +413,7 @@ export const TECHNIQUES: TechniqueDefinition[] = [
     essenceCost: 35,
     cooldown: 15,
     type: "healing",
-    targetType: "self",
+    targetType: "ally",
     effects: { healAmount: 45, duration: 12 },
   },
   {

@@ -4,6 +4,8 @@ import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
+import { rollCraftedItem } from "./itemRng.js";
+import { logZoneEvent } from "./zoneEvents.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -439,12 +441,14 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           tx: burnTx,
         });
       }
-    } catch (err) {
+    } catch (err: any) {
+      console.error(`[crafting] BURN FAILED for ${walletAddress} recipe=${recipeId}:`, err?.message ?? err);
       server.log.error(err, `[crafting] Failed to burn materials for ${walletAddress}`);
       reply.code(500);
       return {
         error: "Failed to consume materials - you may not have enough ores",
         hint: "Check your wallet inventory for required materials",
+        detail: err?.message ?? String(err),
       };
     }
 
@@ -458,8 +462,28 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
       const outputItem = getItemByTokenId(recipe.outputTokenId);
 
+      // Roll RNG stats for weapons/armor
+      const instance = rollCraftedItem({
+        baseTokenId: recipe.outputTokenId,
+        recipeId: recipe.recipeId,
+        craftedBy: walletAddress,
+      });
+
+      // Log Rare+ crafts as zone events
+      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
+        logZoneEvent({
+          zoneId,
+          type: "loot",
+          tick: 0,
+          message: `${entity.name} forged a ${instance.quality.tier} item: ${instance.displayName}!`,
+          entityId: entity.id,
+          entityName: entity.name,
+          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
+        });
+      }
+
       server.log.info(
-        `[crafting] ${entity.name} forged ${outputItem?.name} at ${forge.name} → ${craftTx}`
+        `[crafting] ${entity.name} forged ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${craftTx}`
       );
 
       return {
@@ -470,6 +494,14 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           name: outputItem?.name ?? "Unknown",
           quantity: recipe.outputQuantity,
           tx: craftTx,
+          ...(instance && {
+            instanceId: instance.instanceId,
+            quality: instance.quality.tier,
+            displayName: instance.displayName,
+            rolledStats: instance.rolledStats,
+            bonusAffix: instance.bonusAffix,
+            rolledMaxDurability: instance.rolledMaxDurability,
+          }),
         },
         materialsConsumed: burnedMaterials,
         goldCost: recipe.goldCost,

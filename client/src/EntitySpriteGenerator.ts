@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { ENTITY_SPRITE_PALETTES } from "./config.js";
+import { ENTITY_SPRITE_PALETTES, CLASS_SPRITE_PALETTES, MOB_CATEGORY_PALETTES } from "./config.js";
 
 /**
  * Generates 16x16 sprite sheets for entity types and registers
@@ -24,7 +24,7 @@ const DIR_UP = 3;
 // Entity type categories
 const HUMANOID_TYPES = [
   "player", "npc", "merchant", "trainer", "profession-trainer",
-  "boss", "guild-registrar", "auctioneer",
+  "boss", "guild-registrar", "auctioneer", "arena-master", "quest-giver",
 ];
 
 const MOB_SHAPES: Record<string, string> = {
@@ -54,12 +54,33 @@ export function registerEntitySprites(scene: Phaser.Scene): void {
     createAnimations(scene, key);
   }
 
-  // Generic mob sheet
+  // Generate per-class player sheets
+  for (const [classId, pal] of Object.entries(CLASS_SPRITE_PALETTES)) {
+    const key = `entity-player-${classId}`;
+    if (scene.textures.exists(key)) continue;
+    const canvas = generateHumanoidSheet(pal);
+    addCanvasSpriteSheet(scene, key, canvas);
+    createAnimations(scene, key);
+  }
+
+  // Generic mob sheet (fallback)
   if (!scene.textures.exists("entity-mob")) {
     const pal = ENTITY_SPRITE_PALETTES["mob"] ?? DEFAULT_PALETTE;
     const canvas = generateMobSheet(pal, "quadruped");
     addCanvasSpriteSheet(scene, "entity-mob", canvas);
     createAnimations(scene, "entity-mob");
+  }
+
+  // Per-category mob sheets
+  for (const [category, catPal] of Object.entries(MOB_CATEGORY_PALETTES)) {
+    const key = `entity-mob-${category}`;
+    if (scene.textures.exists(key)) continue;
+    const pal = { body: catPal.body, outline: catPal.outline, detail: catPal.detail };
+    const canvas = catPal.shape === "humanoid"
+      ? generateHumanoidSheet(pal)
+      : generateMobSheet(pal, "quadruped");
+    addCanvasSpriteSheet(scene, key, canvas);
+    createAnimations(scene, key);
   }
 
   // Static entities (ore-node, flower-node, forge, etc.)
@@ -88,8 +109,26 @@ function addCanvasSpriteSheet(
   }
 }
 
-/** Get the texture key for an entity type */
-export function getEntityTextureKey(entityType: string): string {
+/** Infer mob category from entity name by keyword matching */
+export function inferMobCategory(name: string): string | null {
+  const lower = name.toLowerCase();
+  // Check each category keyword against the mob name
+  for (const category of Object.keys(MOB_CATEGORY_PALETTES)) {
+    if (lower.includes(category)) return category;
+  }
+  return null;
+}
+
+/** Get the texture key for an entity type, with optional class/name-specific variant */
+export function getEntityTextureKey(entityType: string, classId?: string, entityName?: string): string {
+  if (entityType === "player" && classId && CLASS_SPRITE_PALETTES[classId]) {
+    return `entity-player-${classId}`;
+  }
+  if (entityType === "mob" && entityName) {
+    const category = inferMobCategory(entityName);
+    if (category) return `entity-mob-${category}`;
+    return "entity-mob";
+  }
   if (HUMANOID_TYPES.includes(entityType)) return `entity-${entityType}`;
   if (entityType === "mob") return "entity-mob";
   // Static types

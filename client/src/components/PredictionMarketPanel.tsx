@@ -1,13 +1,10 @@
-/**
- * Prediction Market Panel Component
- * Displays betting interface and pool statistics
- */
+import * as React from "react";
 
-import React, { useState, useEffect } from "react";
-import { Card } from "./ui/card";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
-import { Badge } from "./ui/badge";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/toast";
+import { useWallet } from "@/hooks/useWallet";
 
 interface PredictionMarketPanelProps {
   poolId: string;
@@ -34,15 +31,17 @@ export function PredictionMarketPanel({
   poolId,
   battleStatus,
   winner,
-}: PredictionMarketPanelProps) {
-  const [pool, setPool] = useState<PoolStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [selectedTeam, setSelectedTeam] = useState<"RED" | "BLUE" | null>(null);
-  const [betAmount, setBetAmount] = useState("");
-  const [placingBet, setPlacingBet] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+}: PredictionMarketPanelProps): React.ReactElement {
+  const [pool, setPool] = React.useState<PoolStats | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [selectedTeam, setSelectedTeam] = React.useState<"RED" | "BLUE" | null>(null);
+  const [betAmount, setBetAmount] = React.useState("");
+  const [placingBet, setPlacingBet] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const { address, isConnected } = useWallet();
+  const { notify } = useToast();
 
-  useEffect(() => {
+  React.useEffect(() => {
     fetchPool();
     const interval = setInterval(fetchPool, 3000);
     return () => clearInterval(interval);
@@ -51,9 +50,7 @@ export function PredictionMarketPanel({
   const fetchPool = async () => {
     try {
       const response = await fetch(`/api/prediction/pool/${poolId}`);
-      if (!response.ok) {
-        throw new Error("Pool not found");
-      }
+      if (!response.ok) throw new Error("Pool not found");
       const data = await response.json();
       setPool(data.pool);
       setLoading(false);
@@ -64,15 +61,12 @@ export function PredictionMarketPanel({
   };
 
   const handlePlaceBet = async () => {
-    if (!selectedTeam || !betAmount || !pool) return;
+    if (!selectedTeam || !betAmount || !pool || !address) return;
 
     setPlacingBet(true);
     setError(null);
 
     try {
-      // Get wallet address (in production, from wallet context)
-      const walletAddress = "0x" + "1".repeat(40); // Placeholder
-
       const response = await fetch("/api/prediction/bet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,7 +74,7 @@ export function PredictionMarketPanel({
           poolId: pool.poolId,
           choice: selectedTeam,
           amount: parseFloat(betAmount),
-          walletAddress,
+          walletAddress: address,
         }),
       });
 
@@ -89,17 +83,13 @@ export function PredictionMarketPanel({
         throw new Error(errorData.error || "Failed to place bet");
       }
 
-      const data = await response.json();
-      alert(
-        `Bet placed successfully!\nAmount: ${betAmount} GOLD\nTeam: ${selectedTeam}\nTransaction: ${data.position.txHash.substring(0, 10)}...`
-      );
-
-      // Reset form
+      notify(`Bet placed: ${betAmount} GOLD on ${selectedTeam}`, "success");
       setSelectedTeam(null);
       setBetAmount("");
       fetchPool();
     } catch (err) {
       setError((err as Error).message);
+      notify((err as Error).message, "error");
     } finally {
       setPlacingBet(false);
     }
@@ -107,53 +97,55 @@ export function PredictionMarketPanel({
 
   if (loading) {
     return (
-      <Card className="p-4">
-        <div className="text-center">Loading prediction market...</div>
-      </Card>
+      <div className="border-2 border-[#29334d] bg-[#11182b] p-3">
+        <div className="text-center text-[9px] text-[#9aa7cc]">Loading prediction market...</div>
+      </div>
     );
   }
 
-  if (error || !pool) {
+  if (error && !pool) {
     return (
-      <Card className="p-4">
-        <div className="text-red-500">{error || "Pool not found"}</div>
-      </Card>
+      <div className="border-2 border-[#29334d] bg-[#11182b] p-3">
+        <div className="text-[9px] text-[#ff4d6d]">{error}</div>
+      </div>
     );
   }
+
+  if (!pool) return <></>;
 
   const isOpen = pool.status === "open" && battleStatus === "betting";
   const isLocked = pool.status === "locked" || battleStatus === "in_progress";
   const isSettled = pool.status === "settled" || battleStatus === "completed";
 
   return (
-    <Card className="p-4 space-y-4">
+    <div className="space-y-3 border-2 border-[#29334d] bg-[#11182b] p-3">
       {/* Header */}
       <div className="text-center">
-        <h2 className="text-2xl font-bold">🎲 Prediction Market</h2>
+        <h2 className="text-[11px] font-bold uppercase tracking-wide text-[#ffcc00]">
+          Prediction Market
+        </h2>
         <Badge
-          variant={
-            isOpen ? "default" : isLocked ? "outline" : "destructive"
-          }
-          className="mt-2"
+          variant={isOpen ? "default" : isLocked ? "secondary" : "danger"}
+          className="mt-1"
         >
           {pool.status.toUpperCase()}
         </Badge>
       </div>
 
       {/* Pool Stats */}
-      <div className="space-y-2 text-sm">
+      <div className="space-y-1 text-[9px]">
         <div className="flex justify-between">
-          <span className="text-gray-600">Total Pool:</span>
-          <span className="font-bold">{parseFloat(pool.totalStaked).toFixed(2)} GOLD</span>
+          <span className="text-[#9aa7cc]">Total Pool:</span>
+          <span className="font-bold text-[#ffcc00]">{parseFloat(pool.totalStaked).toFixed(2)} GOLD</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-600">Participants:</span>
-          <span className="font-bold">{pool.participantCount}</span>
+          <span className="text-[#9aa7cc]">Participants:</span>
+          <span className="font-bold text-[#f1f5ff]">{pool.participantCount}</span>
         </div>
         {pool.timeUntilLock && pool.timeUntilLock > 0 && (
           <div className="flex justify-between">
-            <span className="text-gray-600">Locks in:</span>
-            <span className="font-bold text-orange-500">
+            <span className="text-[#9aa7cc]">Locks in:</span>
+            <span className="font-bold text-[#ff4d6d]">
               {Math.floor(pool.timeUntilLock / 60)}m {Math.floor(pool.timeUntilLock % 60)}s
             </span>
           </div>
@@ -162,41 +154,36 @@ export function PredictionMarketPanel({
 
       {/* Betting Interface */}
       {isOpen ? (
-        <div className="space-y-3">
-          <div className="text-sm font-semibold text-center">Place Your Bet</div>
+        <div className="space-y-2">
+          <div className="text-center text-[9px] font-semibold text-[#f1f5ff]">Place Your Bet</div>
 
           {/* Team Selection */}
           <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant={selectedTeam === "RED" ? "default" : "outline"}
-              className={`h-16 ${
-                selectedTeam === "RED" ? "bg-red-600 hover:bg-red-700" : ""
+            <button
+              className={`border-2 border-black p-2 text-[9px] font-bold uppercase shadow-[2px_2px_0_0_#000] transition ${
+                selectedTeam === "RED"
+                  ? "bg-[#cc3333] text-white"
+                  : "bg-[#2b3656] text-[#9aa7cc] hover:bg-[#3a4870]"
               }`}
               onClick={() => setSelectedTeam("RED")}
             >
-              <div>
-                <div className="font-bold">RED</div>
-                <div className="text-xs">Bet on Red Team</div>
-              </div>
-            </Button>
-
-            <Button
-              variant={selectedTeam === "BLUE" ? "default" : "outline"}
-              className={`h-16 ${
-                selectedTeam === "BLUE" ? "bg-blue-600 hover:bg-blue-700" : ""
+              RED
+            </button>
+            <button
+              className={`border-2 border-black p-2 text-[9px] font-bold uppercase shadow-[2px_2px_0_0_#000] transition ${
+                selectedTeam === "BLUE"
+                  ? "bg-[#3355cc] text-white"
+                  : "bg-[#2b3656] text-[#9aa7cc] hover:bg-[#3a4870]"
               }`}
               onClick={() => setSelectedTeam("BLUE")}
             >
-              <div>
-                <div className="font-bold">BLUE</div>
-                <div className="text-xs">Bet on Blue Team</div>
-              </div>
-            </Button>
+              BLUE
+            </button>
           </div>
 
           {/* Amount Input */}
-          <div className="space-y-2">
-            <label className="text-sm text-gray-600">Amount (GOLD)</label>
+          <div className="space-y-1">
+            <label className="text-[8px] text-[#9aa7cc]">Amount (GOLD)</label>
             <Input
               type="number"
               placeholder="Enter amount..."
@@ -204,85 +191,86 @@ export function PredictionMarketPanel({
               onChange={(e) => setBetAmount(e.target.value)}
               min="0.001"
               step="0.1"
+              className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
             />
-            <div className="flex gap-2">
+            <div className="flex gap-1">
               {[10, 50, 100, 500].map((amount) => (
-                <Button
+                <button
                   key={amount}
-                  variant="outline"
-                  size="sm"
+                  className="flex-1 border-2 border-black bg-[#2b3656] px-1 py-1 text-[8px] text-[#9aa7cc] shadow-[2px_2px_0_0_#000] hover:bg-[#3a4870]"
                   onClick={() => setBetAmount(amount.toString())}
                 >
                   {amount}
-                </Button>
+                </button>
               ))}
             </div>
           </div>
 
           {/* Submit Button */}
           <Button
-            className="w-full h-12 text-lg font-bold"
+            className="h-8 w-full text-[9px] font-bold uppercase"
             onClick={handlePlaceBet}
-            disabled={!selectedTeam || !betAmount || placingBet}
+            disabled={!selectedTeam || !betAmount || placingBet || !isConnected}
           >
-            {placingBet ? "Placing Bet..." : "🔒 Place Encrypted Bet"}
+            {!isConnected
+              ? "Connect Wallet"
+              : placingBet
+                ? "Placing..."
+                : "Place Encrypted Bet"}
           </Button>
 
           {error && (
-            <div className="text-sm text-red-500 text-center">{error}</div>
+            <div className="text-center text-[8px] text-[#ff4d6d]">{error}</div>
           )}
 
-          {/* Info */}
-          <div className="text-xs text-gray-500 text-center">
-            Your choice is encrypted and hidden until the battle ends!
+          <div className="text-center text-[8px] text-[#565f89]">
+            Your choice is encrypted until the battle ends
           </div>
         </div>
       ) : isLocked ? (
-        <div className="text-center py-4">
-          <div className="text-lg font-semibold text-orange-600">
-            ⏱️ Betting Closed
-          </div>
-          <div className="text-sm text-gray-600 mt-2">
-            Battle in progress...
-          </div>
+        <div className="py-3 text-center">
+          <div className="text-[10px] font-semibold text-[#ffcc00]">Betting Closed</div>
+          <div className="mt-1 text-[8px] text-[#9aa7cc]">Battle in progress...</div>
         </div>
       ) : isSettled && winner ? (
-        <div className="text-center py-4">
-          <div className="text-lg font-semibold text-green-600">
-            ✅ Pool Settled
-          </div>
-          <div className="text-xl font-bold mt-2">
+        <div className="py-3 text-center">
+          <div className="text-[10px] font-semibold text-[#54f28b]">Pool Settled</div>
+          <div className="mt-1 text-[11px] font-bold text-[#f1f5ff]">
             Winner: {winner.toUpperCase()} Team
           </div>
-          <Button className="mt-4 w-full" variant="outline">
+          <Button className="mt-2 h-7 w-full text-[9px]" variant="ghost">
             Claim Winnings
           </Button>
         </div>
       ) : (
-        <div className="text-center py-4 text-gray-500">
+        <div className="py-3 text-center text-[9px] text-[#9aa7cc]">
           Waiting for settlement...
         </div>
       )}
 
       {/* Participants List */}
-      <div className="space-y-2">
-        <div className="text-sm font-semibold">Recent Bets</div>
-        <div className="max-h-40 overflow-y-auto space-y-1 text-xs">
+      <div className="space-y-1">
+        <div className="text-[9px] font-semibold text-[#9aa7cc]">Recent Bets</div>
+        <div className="max-h-28 space-y-1 overflow-y-auto">
           {pool.participants.slice(-10).reverse().map((p, i) => (
-            <div key={i} className="flex justify-between p-1 bg-gray-50 dark:bg-gray-800 rounded">
-              <span className="font-mono">
+            <div
+              key={i}
+              className="flex justify-between border border-[#29334d] bg-[#0a0f1a] p-1 text-[8px]"
+            >
+              <span className="font-mono text-[#9aa7cc]">
                 {p.wallet.substring(0, 6)}...{p.wallet.substring(38)}
               </span>
-              <span className="font-bold">{parseFloat(p.amount).toFixed(2)} GOLD 🔒</span>
+              <span className="font-bold text-[#ffcc00]">
+                {parseFloat(p.amount).toFixed(2)} GOLD
+              </span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* FOMO Message */}
-      <div className="text-center text-xs text-gray-500 italic">
-        You can see who bet and how much, but not which team they chose!
+      <div className="text-center text-[7px] italic text-[#565f89]">
+        Bets are visible, but team choices are encrypted
       </div>
-    </Card>
+    </div>
   );
 }

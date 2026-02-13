@@ -1,13 +1,9 @@
-/**
- * Matchmaking Queue Component
- * Allows players to join PvP queues and view status
- */
+import * as React from "react";
 
-import React, { useState, useEffect } from "react";
-import { Card } from "./ui/card";
-import { Button } from "./ui/button";
-import { Badge } from "./ui/badge";
-import { Select } from "./ui/select";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/ui/toast";
+import { useWallet } from "@/hooks/useWallet";
 
 interface QueueStatus {
   format: string;
@@ -16,13 +12,15 @@ interface QueueStatus {
   averageWaitTime: number;
 }
 
-export function MatchmakingQueue() {
-  const [queues, setQueues] = useState<QueueStatus[]>([]);
-  const [selectedFormat, setSelectedFormat] = useState<string>("1v1");
-  const [inQueue, setInQueue] = useState(false);
-  const [loading, setLoading] = useState(false);
+export function MatchmakingQueue(): React.ReactElement {
+  const [queues, setQueues] = React.useState<QueueStatus[]>([]);
+  const [selectedFormat, setSelectedFormat] = React.useState<string>("1v1");
+  const [inQueue, setInQueue] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const { address, isConnected } = useWallet();
+  const { notify } = useToast();
 
-  useEffect(() => {
+  React.useEffect(() => {
     fetchQueues();
     const interval = setInterval(fetchQueues, 3000);
     return () => clearInterval(interval);
@@ -39,59 +37,56 @@ export function MatchmakingQueue() {
   };
 
   const handleJoinQueue = async () => {
+    if (!address) {
+      notify("Connect wallet first", "error");
+      return;
+    }
+
     setLoading(true);
-
     try {
-      // Get player info (in production, from context)
-      const agentId = "agent_" + Math.random().toString(36).substr(2, 9);
-      const walletAddress = "0x" + "1".repeat(40); // Placeholder
-      const characterTokenId = "1";
-      const level = 10;
-
       const response = await fetch("/api/pvp/queue/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentId,
-          walletAddress,
-          characterTokenId,
-          level,
+          agentId: `agent_${address.slice(2, 10)}`,
+          walletAddress: address,
+          characterTokenId: "1",
+          level: 10,
           format: selectedFormat,
         }),
       });
 
       if (response.ok) {
         setInQueue(true);
-        alert("Joined queue successfully!");
+        notify(`Joined ${selectedFormat} queue`, "success");
       } else {
         const error = await response.json();
-        alert(`Failed to join queue: ${error.error}`);
+        notify(`Queue error: ${error.error}`, "error");
       }
     } catch (error) {
-      alert(`Error: ${(error as Error).message}`);
+      notify(`Error: ${(error as Error).message}`, "error");
     } finally {
       setLoading(false);
     }
   };
 
   const handleLeaveQueue = async () => {
+    if (!address) return;
+
     setLoading(true);
-
     try {
-      const agentId = "agent_placeholder"; // In production, get from context
-
       const response = await fetch("/api/pvp/queue/leave", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentId,
+          agentId: `agent_${address.slice(2, 10)}`,
           format: selectedFormat,
         }),
       });
 
       if (response.ok) {
         setInQueue(false);
-        alert("Left queue successfully!");
+        notify("Left queue", "info");
       }
     } catch (error) {
       console.error("Failed to leave queue:", error);
@@ -101,45 +96,39 @@ export function MatchmakingQueue() {
   };
 
   return (
-    <div className="container mx-auto p-4 space-y-4">
-      <h1 className="text-3xl font-bold text-center">⚔️ PvP Matchmaking</h1>
+    <div className="space-y-3">
+      <h3
+        className="text-[11px] font-bold uppercase tracking-wide text-[#ffcc00]"
+        style={{ textShadow: "2px 2px 0 #000" }}
+      >
+        Matchmaking
+      </h3>
 
       {/* Queue Status Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="space-y-2">
         {queues.map((queue) => (
-          <Card key={queue.format} className="p-4 space-y-2">
-            <div className="text-center">
-              <div className="text-2xl font-bold">{queue.format.toUpperCase()}</div>
-              <Badge
-                variant={queue.playersNeeded <= 0 ? "default" : "outline"}
-              >
+          <div
+            key={queue.format}
+            className="border-2 border-[#29334d] bg-[#0a0f1a] p-2"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold text-[#f1f5ff]">
+                {queue.format.toUpperCase()}
+              </span>
+              <Badge variant={queue.playersNeeded <= 0 ? "success" : "secondary"}>
                 {queue.playersNeeded <= 0 ? "READY" : "WAITING"}
               </Badge>
             </div>
 
-            <div className="space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span>In Queue:</span>
-                <span className="font-bold">{queue.playersInQueue}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Need:</span>
-                <span className="font-bold">
-                  {queue.playersNeeded > 0 ? queue.playersNeeded : 0} more
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Avg Wait:</span>
-                <span className="font-bold">
-                  {Math.floor(queue.averageWaitTime / 1000)}s
-                </span>
-              </div>
+            <div className="mt-1 flex justify-between text-[8px] text-[#9aa7cc]">
+              <span>In Queue: {queue.playersInQueue}</span>
+              <span>Need: {queue.playersNeeded > 0 ? queue.playersNeeded : 0}</span>
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+            <div className="mt-1 h-2 border-2 border-black bg-[#0f1528]">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all"
+                className="h-full bg-[#ffcc00]"
                 style={{
                   width: `${Math.min(
                     100,
@@ -150,70 +139,55 @@ export function MatchmakingQueue() {
                 }}
               />
             </div>
-          </Card>
+          </div>
         ))}
       </div>
 
-      {/* Join Queue Section */}
-      <Card className="p-6 space-y-4">
-        <h2 className="text-xl font-semibold text-center">Join a Queue</h2>
+      {/* Format Selection */}
+      <div className="grid grid-cols-2 gap-1">
+        {["1v1", "2v2", "5v5", "ffa"].map((format) => (
+          <button
+            key={format}
+            className={`border-2 border-black p-1.5 text-[9px] font-bold uppercase shadow-[2px_2px_0_0_#000] transition ${
+              selectedFormat === format
+                ? "bg-[#ffcc00] text-black"
+                : "bg-[#2b3656] text-[#9aa7cc] hover:bg-[#3a4870]"
+            }`}
+            onClick={() => setSelectedFormat(format)}
+          >
+            {format.toUpperCase()}
+          </button>
+        ))}
+      </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {["1v1", "2v2", "5v5", "ffa"].map((format) => (
-            <Button
-              key={format}
-              variant={selectedFormat === format ? "default" : "outline"}
-              className="h-20"
-              onClick={() => setSelectedFormat(format)}
-            >
-              <div>
-                <div className="text-lg font-bold">{format.toUpperCase()}</div>
-                <div className="text-xs">
-                  {format === "ffa" ? "Free-For-All" : `Team Battle`}
-                </div>
-              </div>
-            </Button>
-          ))}
-        </div>
-
-        {!inQueue ? (
+      {/* Join/Leave Queue */}
+      {!inQueue ? (
+        <Button
+          className="h-8 w-full text-[9px] font-bold uppercase"
+          onClick={handleJoinQueue}
+          disabled={loading || !isConnected}
+        >
+          {!isConnected
+            ? "Connect Wallet"
+            : loading
+              ? "Joining..."
+              : `Join ${selectedFormat.toUpperCase()}`}
+        </Button>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-center text-[9px] font-semibold text-[#54f28b]">
+            In Queue - Waiting...
+          </div>
           <Button
-            className="w-full h-14 text-lg font-bold"
-            onClick={handleJoinQueue}
+            variant="danger"
+            className="h-7 w-full text-[8px]"
+            onClick={handleLeaveQueue}
             disabled={loading}
           >
-            {loading ? "Joining..." : `Join ${selectedFormat.toUpperCase()} Queue`}
+            Leave Queue
           </Button>
-        ) : (
-          <div className="space-y-2">
-            <div className="text-center text-green-600 font-semibold">
-              ✓ In Queue - Waiting for match...
-            </div>
-            <Button
-              variant="destructive"
-              className="w-full"
-              onClick={handleLeaveQueue}
-              disabled={loading}
-            >
-              Leave Queue
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      {/* Info */}
-      <Card className="p-4 bg-blue-50 dark:bg-blue-900">
-        <div className="text-sm space-y-1">
-          <div className="font-semibold">How it works:</div>
-          <ul className="list-disc list-inside space-y-1">
-            <li>Select a format (1v1, 2v2, 5v5, or Free-For-All)</li>
-            <li>Join the queue and wait for other players</li>
-            <li>When enough players join, a match is created automatically</li>
-            <li>Place encrypted bets on the prediction market before battle starts</li>
-            <li>Watch the battle live and claim winnings if you bet correctly!</li>
-          </ul>
         </div>
-      </Card>
+      )}
     </div>
   );
 }

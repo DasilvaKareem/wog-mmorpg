@@ -37,6 +37,11 @@ import { registerLeaderboardRoutes } from "./leaderboard.js";
 import { registerLeatherworkingRoutes } from "./leatherworking.js";
 import { registerUpgradingRoutes } from "./upgrading.js";
 import { registerJewelcraftingRoutes } from "./jewelcrafting.js";
+import { rebuildAuctionCache } from "./auctionHouseChain.js";
+import { registerPvPRoutes } from "./pvpRoutes.js";
+import { registerPredictionRoutes } from "./predictionRoutes.js";
+import { registerX402Routes } from "./x402Routes.js";
+import { registerItemRngRoutes } from "./itemRng.js";
 
 const server = Fastify({ logger: true });
 
@@ -46,6 +51,7 @@ server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
 // Register subsystems
 server.register(cors, { origin: true });
 registerAuthRoutes(server);
+registerX402Routes(server);
 registerZoneRuntime(server);
 registerSpawnOrders(server);
 registerCommands(server);
@@ -78,6 +84,9 @@ registerLeaderboardRoutes(server);
 registerLeatherworkingRoutes(server);
 registerUpgradingRoutes(server);
 registerJewelcraftingRoutes(server);
+registerPvPRoutes(server);
+registerPredictionRoutes(server);
+registerItemRngRoutes(server);
 spawnNpcs();
 spawnOreNodes();
 spawnFlowerNodes();
@@ -88,6 +97,9 @@ setInterval(() => {
 }, 5000);
 
 const start = async () => {
+  // Rebuild auction cache from on-chain events before accepting requests
+  await rebuildAuctionCache();
+
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";
 

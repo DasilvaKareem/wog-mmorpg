@@ -20,7 +20,7 @@ import type {
 import type { PvPTeam } from "./types/pvp.js";
 import { randomUUID } from "crypto";
 
-const PREDICTION_CONTRACT_ADDRESS = process.env.PREDICTION_CONTRACT_ADDRESS!;
+const PREDICTION_CONTRACT_ADDRESS = process.env.PREDICTION_CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000";
 
 /** PvPPredictionMarket ABI - core functions */
 const PREDICTION_ABI = [
@@ -40,11 +40,25 @@ const PREDICTION_ABI = [
   "event WinningsClaimed(string indexed poolId, address indexed winner, uint256 amount)",
 ];
 
-const predictionContract = new ethers.Contract(
-  PREDICTION_CONTRACT_ADDRESS,
-  PREDICTION_ABI,
-  biteWallet
-);
+let predictionContract: ethers.Contract | null;
+
+// Only initialize contract if address is valid (not default zero address)
+if (PREDICTION_CONTRACT_ADDRESS && PREDICTION_CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000") {
+  try {
+    predictionContract = new ethers.Contract(
+      PREDICTION_CONTRACT_ADDRESS,
+      PREDICTION_ABI,
+      biteWallet
+    );
+    console.log("[prediction] Contract initialized at", PREDICTION_CONTRACT_ADDRESS);
+  } catch (err) {
+    console.warn("[prediction] Contract initialization failed — prediction markets disabled", err);
+    predictionContract = null;
+  }
+} else {
+  console.warn("[prediction] Contract not configured (set PREDICTION_CONTRACT_ADDRESS in .env) — prediction markets disabled");
+  predictionContract = null;
+}
 
 export class PredictionPoolManager {
   private pools: Map<string, PredictionPool>;
@@ -56,6 +70,16 @@ export class PredictionPoolManager {
   }
 
   /**
+   * Check if prediction contract is available
+   * @throws Error if contract is not configured
+   */
+  private ensureContract(): void {
+    if (!predictionContract) {
+      throw new Error("Prediction markets are not available. Set PREDICTION_CONTRACT_ADDRESS in .env to enable.");
+    }
+  }
+
+  /**
    * Create a new prediction pool for a battle
    */
   async createPool(
@@ -63,10 +87,11 @@ export class PredictionPoolManager {
     duration: number, // seconds
     betLockTime: number // seconds before battle to lock bets
   ): Promise<string> {
+    this.ensureContract();
     const poolId = randomUUID();
 
     // Create pool on-chain
-    const tx = await predictionContract.createPool(
+    const tx = await predictionContract!.createPool(
       poolId,
       battleId,
       duration,
@@ -101,6 +126,7 @@ export class PredictionPoolManager {
    * Place an encrypted bet on a pool
    */
   async placeBet(request: BetPlacementRequest): Promise<BetPlacementResult> {
+    this.ensureContract();
     const { poolId, choice, amount, betterAddress } = request;
 
     const pool = this.pools.get(poolId);
@@ -121,7 +147,7 @@ export class PredictionPoolManager {
 
     // Submit on-chain
     const amountWei = ethers.parseUnits(amount.toString(), 18);
-    const tx = await predictionContract.placeBet(
+    const tx = await predictionContract!.placeBet(
       poolId,
       encryptedChoice,
       betterAddress,
@@ -172,12 +198,13 @@ export class PredictionPoolManager {
    * Lock a pool - no more bets allowed
    */
   async lockPool(poolId: string): Promise<void> {
+    this.ensureContract();
     const pool = this.pools.get(poolId);
     if (!pool) {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    const tx = await predictionContract.lockPool(poolId);
+    const tx = await predictionContract!.lockPool(poolId);
     await tx.wait();
 
     pool.status = "locked";
@@ -191,6 +218,7 @@ export class PredictionPoolManager {
     poolId: string,
     winner: PvPTeam
   ): Promise<PoolSettlementData> {
+    this.ensureContract();
     const pool = this.pools.get(poolId);
     if (!pool) {
       throw new Error(`Pool ${poolId} not found`);
@@ -216,7 +244,7 @@ export class PredictionPoolManager {
     }
 
     // Submit settlement on-chain
-    const tx = await predictionContract.settleBattle(
+    const tx = await predictionContract!.settleBattle(
       poolId,
       winnerChoice,
       decryptedChoices
@@ -305,6 +333,7 @@ export class PredictionPoolManager {
    * Claim winnings from a settled pool
    */
   async claimWinnings(poolId: string, betterAddress: string): Promise<string> {
+    this.ensureContract();
     const pool = this.pools.get(poolId);
     if (!pool) {
       throw new Error(`Pool ${poolId} not found`);
@@ -328,7 +357,7 @@ export class PredictionPoolManager {
     }
 
     // Claim on-chain
-    const tx = await predictionContract.claimWinnings(poolId);
+    const tx = await predictionContract!.claimWinnings(poolId);
     const receipt = await tx.wait();
 
     position.claimed = true;
@@ -476,12 +505,13 @@ export class PredictionPoolManager {
    * Cancel a pool and refund bets
    */
   async cancelPool(poolId: string, reason: string): Promise<void> {
+    this.ensureContract();
     const pool = this.pools.get(poolId);
     if (!pool) {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    const tx = await predictionContract.cancelPool(poolId, reason);
+    const tx = await predictionContract!.cancelPool(poolId, reason);
     await tx.wait();
 
     pool.status = "cancelled";
