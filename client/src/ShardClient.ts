@@ -7,6 +7,10 @@ import type {
   OwnedCharacter,
   TerrainGridData,
   TerrainGridDataV2,
+  ChunkPayloadV2,
+  ChunkStreamResponse,
+  ChunkInfo,
+  ZoneChunkInfo,
 } from "./types.js";
 import { API_URL } from "./config.js";
 
@@ -180,6 +184,54 @@ export async function fetchTerrainGridV2(
     const res = await fetch(`${API_URL}/v2/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridDataV2;
+  } catch {
+    return null;
+  }
+}
+
+// ── Chunk streaming API ──────────────────────────────────────────────
+
+export async function fetchChunkInfo(): Promise<ChunkInfo | null> {
+  try {
+    const res = await fetch(`${API_URL}/v1/chunks/info`);
+    if (!res.ok) return null;
+    return (await res.json()) as ChunkInfo;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchZoneChunkInfo(zoneId: string): Promise<ZoneChunkInfo | null> {
+  try {
+    const res = await fetch(`${API_URL}/v1/chunks/zone/${zoneId}`);
+    if (!res.ok) return null;
+    return (await res.json()) as ZoneChunkInfo;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchChunkAt(
+  zoneId: string, cx: number, cz: number
+): Promise<ChunkPayloadV2 | null> {
+  try {
+    const res = await fetch(`${API_URL}/v1/chunks/at?zone=${zoneId}&cx=${cx}&cz=${cz}`);
+    if (!res.ok) return null;
+    return (await res.json()) as ChunkPayloadV2;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchChunkStream(
+  zoneId: string, worldX: number, worldZ: number, radius = 2
+): Promise<ChunkStreamResponse | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/v1/chunks/stream?zone=${zoneId}&x=${worldX}&z=${worldZ}&radius=${radius}`
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ChunkStreamResponse;
   } catch {
     return null;
   }

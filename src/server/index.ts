@@ -23,6 +23,7 @@ import { registerPartyRoutes } from "./routes/party.js";
 import { registerNavigateRoutes } from "./routes/navigate.js";
 import { registerTerrainRoutes } from "./routes/terrain.js";
 import { registerMiningRoutes } from "./routes/mining.js";
+import { registerChunkRoutes } from "./routes/chunks.js";
 
 export interface ServerDeps {
   world: WorldManager;
@@ -54,6 +55,7 @@ export function buildServer(deps: ServerDeps) {
   registerNavigateRoutes(app, deps.navGraph, deps.agentRegistry, deps.zones);
   registerTerrainRoutes(app, deps.terrainGrids);
   registerMiningRoutes(app, deps.oreManagers, deps.world);
+  registerChunkRoutes(app, deps.world);
 
   return app;
 }

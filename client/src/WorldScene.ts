@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 
-import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
+import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT, CLIENT_TILE_PX } from "@/config";
 import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
-import { fetchZone } from "@/ShardClient";
+import { ChunkStreamManager } from "@/ChunkStreamManager";
+import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites } from "@/EntitySpriteGenerator";
 
@@ -18,6 +19,7 @@ function pad(n: number): string {
 export class WorldScene extends Phaser.Scene {
   private entityRenderer!: EntityRenderer;
   private tilemapRenderer!: TilemapRenderer;
+  private chunkManager!: ChunkStreamManager;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private hud!: Phaser.GameObjects.Text;
   private tooltip!: Phaser.GameObjects.Text;
@@ -28,8 +30,8 @@ export class WorldScene extends Phaser.Scene {
   private zoneId = "human-meadow";
   private unsubscribeSwitchZone: (() => void) | null = null;
 
-  /** Dynamic min zoom — ensures the map always fills the viewport */
-  private minZoom = 0.5;
+  /** Dynamic min zoom */
+  private minZoom = 0.3;
 
   /** Spectate camera: follows this entity id, null = free cam */
   private followTarget: string | null = null;
@@ -38,16 +40,28 @@ export class WorldScene extends Phaser.Scene {
   private dragStartY = 0;
   private escKey!: Phaser.Input.Keyboard.Key;
 
+  /** Chunk streaming mode enabled */
+  private chunkStreamingEnabled = false;
+  private tileSize = 10;
+
   constructor() {
     super({ key: "WorldScene" });
   }
 
   create(): void {
-    // Register all entity sprite sheets and animations
     registerEntitySprites(this);
 
     this.tilemapRenderer = new TilemapRenderer(this);
     this.entityRenderer = new EntityRenderer(this);
+    this.chunkManager = new ChunkStreamManager(this.zoneId, this.tileSize);
+
+    // Wire chunk manager to tilemap renderer
+    this.chunkManager.onChunkLoaded = (chunk) => {
+      this.tilemapRenderer.addChunk(chunk);
+    };
+    this.chunkManager.onChunkUnloaded = (cx, cz) => {
+      this.tilemapRenderer.removeChunk(cx, cz);
+    };
 
     this.entityRenderer.onClick((entity) => {
       if (entity.type === "merchant" && entity.shopItems) {
@@ -60,7 +74,7 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("arenaMasterClick", entity);
       }
 
-      // Spectate: click any entity → snap camera immediately, then follow
+      // Spectate: click any entity -> snap camera, then follow
       this.followTarget = entity.id;
       this.isDragging = false;
       const px = entity.x * this.tilemapRenderer.coordScale;
@@ -68,7 +82,7 @@ export class WorldScene extends Phaser.Scene {
       this.cameras.main.centerOn(px, py);
     });
 
-    // Camera + input — only treat as drag after moving 4+ pixels
+    // Camera + input
     this.input.on("pointerdown", () => {
       this.isDragging = false;
       this.dragStartX = this.input.activePointer.x;
@@ -81,7 +95,6 @@ export class WorldScene extends Phaser.Scene {
       const movedY = Math.abs(pointer.y - this.dragStartY);
       if (!this.isDragging && movedX < 4 && movedY < 4) return;
       this.isDragging = true;
-      // Dragging releases spectate
       this.followTarget = null;
       const cam = this.cameras.main;
       cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
@@ -122,7 +135,6 @@ export class WorldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(100);
 
-    // Tooltip background (hidden by default) — 8-bit dark box with green border
     this.tooltipBg = this.add
       .rectangle(0, 0, 200, 100, 0x0a0e1a, 0.92)
       .setOrigin(0, 0)
@@ -131,7 +143,6 @@ export class WorldScene extends Phaser.Scene {
       .setStrokeStyle(2, 0x00ff88)
       .setVisible(false);
 
-    // Tooltip text (hidden by default)
     this.tooltip = this.add
       .text(0, 0, "", {
         fontSize: "10px",
@@ -145,9 +156,9 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(201)
       .setVisible(false);
 
-    // Handle window resize - update camera bounds
+    // Handle window resize
     this.scale.on(Phaser.Scale.Events.RESIZE, () => {
-      if (this.terrainLoaded) {
+      if (this.terrainLoaded && !this.chunkStreamingEnabled) {
         this.updateCameraBounds();
       }
     });
@@ -164,8 +175,8 @@ export class WorldScene extends Phaser.Scene {
 
     gameBus.emit("zoneChanged", { zoneId: this.zoneId });
 
-    // Initial load
-    void this.loadZoneTerrain(this.zoneId);
+    // Initial load -- try chunk streaming, fall back to legacy
+    void this.initChunkStreaming(this.zoneId);
     void this.pollZone();
     this.time.addEvent({
       delay: POLL_INTERVAL,
@@ -196,15 +207,23 @@ export class WorldScene extends Phaser.Scene {
       if (this.cursors.down.isDown) cam.scrollY += CAMERA_SPEED / cam.zoom;
     }
 
-    // Follow target entity — use sprite's current visual position (smooth during tweens)
+    // Follow target entity
     if (this.followTarget) {
       const spritePos = this.entityRenderer.getSpritePosition(this.followTarget);
       if (spritePos) {
         cam.centerOn(spritePos.x, spritePos.y);
       } else {
-        // Entity left zone — release
         this.followTarget = null;
       }
+    }
+
+    // Update chunk streaming based on camera position
+    if (this.chunkStreamingEnabled) {
+      const cameraCenterX = cam.scrollX + cam.width / (2 * cam.zoom);
+      const cameraCenterY = cam.scrollY + cam.height / (2 * cam.zoom);
+      const worldX = cameraCenterX / this.tilemapRenderer.coordScale;
+      const worldZ = cameraCenterY / this.tilemapRenderer.coordScale;
+      this.chunkManager.update(worldX, worldZ);
     }
 
     // Build HUD text
@@ -212,12 +231,17 @@ export class WorldScene extends Phaser.Scene {
       ? this.entityRenderer.getEntity(this.followTarget)?.name ?? "?"
       : null;
 
+    const chunkInfo = this.chunkStreamingEnabled
+      ? `Chunks: ${this.tilemapRenderer.renderedChunkCount}`
+      : "";
+
     this.hud.setText(
       [
         `Zone: ${this.zoneId}`,
         `Tick: ${this.tick}`,
         `Entities: ${this.entityRenderer.entityCount}`,
         `Zoom: ${cam.zoom.toFixed(1)}x`,
+        chunkInfo,
         "",
         followName ? `Following: ${followName} | ESC: free cam` : "Click entity to spectate",
         "Drag/Arrows: pan | Scroll: zoom",
@@ -228,45 +252,36 @@ export class WorldScene extends Phaser.Scene {
         .join("\n"),
     );
 
-    // Update hover tooltip
     this.updateTooltip();
   }
 
   private updateTooltip(): void {
     const pointer = this.input.activePointer;
     const cam = this.cameras.main;
-
-    // Use Phaser's built-in screen-to-world conversion (handles zoom, scroll, viewport)
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
-
-    // Find entity under cursor (within 16px world-space radius)
     const hoveredEntity = this.entityRenderer.getEntityAt(worldPoint.x, worldPoint.y, 16);
 
     if (hoveredEntity) {
       const lines: string[] = [];
       const e = hoveredEntity;
 
-      // ── Header: name + type tag ──
       const typeTag = this.entityTypeTag(e.type);
       lines.push(e.name);
       lines.push(typeTag);
 
-      // ── Race / Class (players + agents) ──
       if (e.raceId || e.classId) {
         const race = e.raceId ? capitalize(e.raceId) : "";
         const cls = e.classId ? capitalize(e.classId) : "";
         lines.push(`${race} ${cls}`.trim());
       }
 
-      lines.push(""); // separator
+      lines.push("");
 
-      // ── HP bar (text-art) ──
       const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
       const hpBarFill = Math.round(hpRatio * 10);
       const hpBar = "#".repeat(hpBarFill) + "-".repeat(10 - hpBarFill);
       lines.push(`HP [${hpBar}] ${e.hp}/${e.maxHp}`);
 
-      // ── Essence bar (if present) ──
       if (e.essence !== undefined && e.maxEssence && e.maxEssence > 0) {
         const esRatio = e.essence / e.maxEssence;
         const esFill = Math.round(esRatio * 10);
@@ -274,14 +289,12 @@ export class WorldScene extends Phaser.Scene {
         lines.push(`ES [${esBar}] ${e.essence}/${e.maxEssence}`);
       }
 
-      // ── Level + XP ──
       if (e.level) {
         let lvlLine = `Lv.${e.level}`;
         if (e.xp !== undefined) lvlLine += `  XP:${e.xp}`;
         lines.push(lvlLine);
       }
 
-      // ── Stats (if available) ──
       if (e.effectiveStats) {
         const s = e.effectiveStats;
         lines.push("");
@@ -290,7 +303,6 @@ export class WorldScene extends Phaser.Scene {
         lines.push(`FAI ${pad(s.faith)} LCK ${pad(s.luck)}`);
       }
 
-      // ── Equipment summary ──
       if (e.equipment) {
         const equipped = Object.keys(e.equipment).filter(
           (slot) => e.equipment![slot as keyof typeof e.equipment] != null
@@ -301,7 +313,6 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
-      // ── Party membership ──
       if (e.partyId) {
         const partyMembers: string[] = [];
         for (const [, other] of this.entityRenderer.getEntities()) {
@@ -316,7 +327,6 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
-      // ── NPC-specific hints ──
       if (e.type === "merchant") {
         lines.push("", "[Click] Browse shop");
       } else if (e.type === "trainer") {
@@ -333,7 +343,6 @@ export class WorldScene extends Phaser.Scene {
         if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
       }
 
-      // ── Spectate hint for players ──
       if (e.type === "player") {
         lines.push("", "[Click] Spectate");
       }
@@ -393,20 +402,85 @@ export class WorldScene extends Phaser.Scene {
     this.entityRenderer.update({});
     this.connected = false;
     gameBus.emit("zoneChanged", { zoneId });
-    void this.loadZoneTerrain(zoneId);
+
+    if (this.chunkStreamingEnabled) {
+      this.chunkManager.setZone(zoneId);
+      // Force chunk reload at zone center
+      void this.reloadChunksForZone(zoneId);
+    } else {
+      void this.loadZoneTerrain(zoneId);
+    }
+
     void this.pollZone();
+  }
+
+  private async reloadChunksForZone(zoneId: string): Promise<void> {
+    const info = await fetchZoneChunkInfo(zoneId);
+    if (!info || zoneId !== this.zoneId) return;
+
+    const zonePixelW = info.width * CLIENT_TILE_PX;
+    const zonePixelH = info.height * CLIENT_TILE_PX;
+    const cam = this.cameras.main;
+    cam.centerOn(zonePixelW / 2, zonePixelH / 2);
+
+    const worldCenterX = (info.width * info.tileSize) / 2;
+    const worldCenterZ = (info.height * info.tileSize) / 2;
+    this.chunkManager.update(worldCenterX, worldCenterZ);
+    this.terrainLoaded = true;
+  }
+
+  /** Initialize chunk streaming for a zone */
+  private async initChunkStreaming(zoneId: string): Promise<void> {
+    const zoneInfo = await fetchZoneChunkInfo(zoneId);
+
+    if (!zoneInfo) {
+      console.log("[WorldScene] Chunk API unavailable, using legacy zone loading");
+      void this.loadZoneTerrain(zoneId);
+      return;
+    }
+
+    this.tileSize = zoneInfo.tileSize;
+    this.chunkStreamingEnabled = true;
+
+    this.tilemapRenderer.initChunkMode(zoneInfo.tileSize);
+    this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
+
+    this.chunkManager = new ChunkStreamManager(zoneId, zoneInfo.tileSize);
+    this.chunkManager.onChunkLoaded = (chunk) => {
+      this.tilemapRenderer.addChunk(chunk);
+    };
+    this.chunkManager.onChunkUnloaded = (cx, cz) => {
+      this.tilemapRenderer.removeChunk(cx, cz);
+    };
+
+    // No camera bounds in chunk mode -- seamless scrolling
+    this.cameras.main.removeBounds();
+    this.minZoom = 0.3;
+
+    // Center camera on zone
+    const zonePixelW = zoneInfo.width * CLIENT_TILE_PX;
+    const zonePixelH = zoneInfo.height * CLIENT_TILE_PX;
+    const cam = this.cameras.main;
+    cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
+    cam.centerOn(zonePixelW / 2, zonePixelH / 2);
+
+    // Initial chunk load
+    const worldCenterX = (zoneInfo.width * zoneInfo.tileSize) / 2;
+    const worldCenterZ = (zoneInfo.height * zoneInfo.tileSize) / 2;
+    this.chunkManager.update(worldCenterX, worldCenterZ);
+
+    this.terrainLoaded = true;
+    console.log(`[WorldScene] Chunk streaming: ${zoneInfo.chunksX}x${zoneInfo.chunksZ} chunks`);
   }
 
   private async loadZoneTerrain(zoneId: string): Promise<void> {
     await this.tilemapRenderer.loadZone(zoneId);
-    // Zone may have changed while loading
     if (zoneId !== this.zoneId) return;
 
     this.terrainLoaded = true;
     this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
     this.updateCameraBounds();
 
-    // Center and apply default zoom (never below minZoom)
     const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
     const cam = this.cameras.main;
     cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
@@ -418,16 +492,12 @@ export class WorldScene extends Phaser.Scene {
     if (w <= 0 || h <= 0) return;
 
     const cam = this.cameras.main;
-
-    // Calculate min zoom so the map always fills the viewport entirely
     this.minZoom = Math.max(cam.width / w, cam.height / h);
 
-    // Clamp current zoom if it's now below the new minimum
     if (cam.zoom < this.minZoom) {
       cam.setZoom(this.minZoom);
     }
 
-    // Tight bounds — map edges exactly, no black space visible
     cam.setBounds(0, 0, w, h);
   }
 
