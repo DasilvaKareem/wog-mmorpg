@@ -42,6 +42,7 @@ import { registerPvPRoutes } from "./pvpRoutes.js";
 import { registerPredictionRoutes } from "./predictionRoutes.js";
 import { registerX402Routes } from "./x402Routes.js";
 import { registerItemRngRoutes } from "./itemRng.js";
+import { registerMarketplaceRoutes } from "./marketplace.js";
 
 const server = Fastify({ logger: true });
 
@@ -87,6 +88,7 @@ registerJewelcraftingRoutes(server);
 registerPvPRoutes(server);
 registerPredictionRoutes(server);
 registerItemRngRoutes(server);
+registerMarketplaceRoutes(server);
 spawnNpcs();
 spawnOreNodes();
 spawnFlowerNodes();

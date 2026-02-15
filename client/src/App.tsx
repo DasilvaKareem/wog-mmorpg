@@ -5,6 +5,7 @@ import { CharacterDialog } from "@/components/CharacterDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
+import { MarketplacePage } from "@/components/MarketplacePage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
@@ -18,7 +19,7 @@ import { GameProvider } from "@/context/GameContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
 
-type Page = "landing" | "game";
+type Page = "landing" | "game" | "marketplace";
 
 function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
@@ -56,8 +57,13 @@ function AppShell(): React.ReactElement {
           // Open character dialog after a tick so game canvas mounts first
           window.setTimeout(() => setCharacterOpen(true), 100);
         }}
+        onOpenMarketplace={() => setPage("marketplace")}
       />
     );
+  }
+
+  if (page === "marketplace") {
+    return <MarketplacePage onBack={() => setPage("landing")} />;
   }
 
   return (
