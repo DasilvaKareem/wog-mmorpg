@@ -15,9 +15,9 @@ export function ZoneSelector(): React.ReactElement {
   });
 
   return (
-    <Card className="pointer-events-auto absolute bottom-4 left-4 z-30 w-96">
+    <Card className="pointer-events-auto absolute bottom-2 left-2 z-30 w-72 md:w-96 md:bottom-4 md:left-4">
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between">
+        <CardTitle className="flex items-center justify-between text-sm md:text-base">
           Zones
           <Badge variant="secondary">{zones.length}</Badge>
         </CardTitle>
