@@ -3,6 +3,7 @@ import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CurrencyDisplay } from "@/components/ui/currency-display";
 import { HpBar } from "@/components/ui/hp-bar";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
@@ -60,7 +61,13 @@ export function WalletPanel(): React.ReactElement {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Gold</span>
-              <Badge variant="success">{balance?.gold ?? "..."}</Badge>
+              <div className="bg-[#54f28b] border-2 border-black px-1.5 py-0.5 shadow-[2px_2px_0_0_#000]">
+                {balance?.gold ? (
+                  <CurrencyDisplay amount={balance.gold} size="sm" />
+                ) : (
+                  <span className="text-[8px] text-black">...</span>
+                )}
+              </div>
             </div>
             <div className="space-y-1 border-2 border-[#29334d] bg-[#11182b] p-2">
               <div className="flex items-center justify-between">
