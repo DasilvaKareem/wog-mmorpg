@@ -176,18 +176,12 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     const mintTxHash = await mintCharacter(wallet.address, nftMetadata);
     console.log(`[x402] ${deploymentId}: NFT minted: ${mintTxHash}`);
 
-    // Small delay to ensure nonce increments
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
     // 7. Distribute welcome bonus gold
     const pricingTier = getPricingTier(request.payment.method);
     const goldBonus = pricingTier.goldBonus;
     console.log(`[x402] ${deploymentId}: Distributing ${goldBonus} gold...`);
     const goldTxHash = await mintGold(wallet.address, goldBonus.toString());
     console.log(`[x402] ${deploymentId}: Gold distributed: ${goldTxHash}`);
-
-    // Small delay to ensure nonce increments
-    await new Promise(resolve => setTimeout(resolve, 2000));
 
     // 8. Distribute sFUEL for gas
     console.log(`[x402] ${deploymentId}: Distributing sFUEL...`);

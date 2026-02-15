@@ -20,6 +20,56 @@ const serverAccount = privateKeyToAccount({
   privateKey: process.env.SERVER_PRIVATE_KEY!,
 });
 
+/**
+ * Transaction queue — serializes all server-wallet transactions to prevent
+ * nonce collisions on SKALE.  Each call to `queueTransaction` waits for every
+ * earlier transaction to settle before sending the next one.  On nonce errors
+ * it retries up to 3 times with short back-off.
+ */
+let txChain: Promise<void> = Promise.resolve();
+
+const NONCE_ERROR_CODES = [-32004, -32000, -32603]; // common nonce / replacement error codes
+const MAX_RETRIES = 3;
+
+async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  let resolve!: (v: void) => void;
+  const gate = new Promise<void>((r) => { resolve = r; });
+  const prev = txChain;
+  txChain = gate;
+
+  await prev; // wait for all earlier txs to finish
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await fn();
+      resolve();
+      return result;
+    } catch (err: any) {
+      lastError = err;
+      const code = err?.code ?? err?.cause?.code ?? err?.data?.code;
+      const msg = String(err?.message ?? err ?? "");
+      const isNonceError =
+        NONCE_ERROR_CODES.includes(code) ||
+        msg.includes("nonce") ||
+        msg.includes("replacement transaction");
+
+      if (isNonceError && attempt < MAX_RETRIES) {
+        const delay = 1000 * 2 ** attempt; // 1s, 2s, 4s
+        console.warn(
+          `[blockchain] Nonce error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      break;
+    }
+  }
+
+  resolve(); // unblock queue even on failure
+  throw lastError;
+}
+
 const goldContract = getContract({
   client: thirdwebClient,
   chain: skaleBaseSepolia,
@@ -46,17 +96,18 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
         );
       }
 
-      const tx = mintERC1155({
-        contract: itemsContract,
-        to: serverAccount.address,
-        supply: 1n,
-        nft: {
-          name: item.name,
-          description: item.description,
-        },
+      const receipt = await queueTransaction(async () => {
+        const tx = mintERC1155({
+          contract: itemsContract,
+          to: serverAccount.address,
+          supply: 1n,
+          nft: {
+            name: item.name,
+            description: item.description,
+          },
+        });
+        return sendTransaction({ transaction: tx, account: serverAccount });
       });
-
-      const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
       console.log(
         `[items] Seeded tokenId ${item.tokenId.toString()} (${item.name}): ${receipt.transactionHash}`
       );
@@ -83,25 +134,29 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
  * SKALE sFUEL is the native gas token — free, but wallets need a dust amount.
  */
 export async function distributeSFuel(toAddress: string): Promise<string> {
-  const tx = prepareTransaction({
-    to: toAddress,
-    value: toWei("0.00001"),
-    chain: skaleBaseSepolia,
-    client: thirdwebClient,
+  return queueTransaction(async () => {
+    const tx = prepareTransaction({
+      to: toAddress,
+      value: toWei("0.00001"),
+      chain: skaleBaseSepolia,
+      client: thirdwebClient,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
 
 /** Mint gold (ERC-20) to a player address. `amount` is in whole tokens (e.g. "50"). */
 export async function mintGold(toAddress: string, amount: string): Promise<string> {
-  const tx = mintERC20({
-    contract: goldContract,
-    to: toAddress,
-    amount,
+  return queueTransaction(async () => {
+    const tx = mintERC20({
+      contract: goldContract,
+      to: toAddress,
+      amount,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
 
 /** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). */
@@ -117,14 +172,16 @@ export async function mintItem(
   quantity: bigint
 ): Promise<string> {
   await ensureItemTokenIdExists(tokenId);
-  const tx = mintAdditionalSupplyTo({
-    contract: itemsContract,
-    to: toAddress,
-    tokenId,
-    supply: quantity,
+  return queueTransaction(async () => {
+    const tx = mintAdditionalSupplyTo({
+      contract: itemsContract,
+      to: toAddress,
+      tokenId,
+      supply: quantity,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
 
 /** Get item balance for a specific tokenId. */
@@ -141,14 +198,16 @@ export async function burnItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  const tx = burn({
-    contract: itemsContract,
-    account: fromAddress,
-    id: tokenId,
-    value: quantity,
+  return queueTransaction(async () => {
+    const tx = burn({
+      contract: itemsContract,
+      account: fromAddress,
+      id: tokenId,
+      value: quantity,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
 
 // --- ERC-721 Character NFTs ---
@@ -164,13 +223,15 @@ export async function mintCharacter(
   toAddress: string,
   nft: { name: string; description: string; properties: Record<string, unknown> }
 ): Promise<string> {
-  const tx = mintERC721({
-    contract: characterContract,
-    to: toAddress,
-    nft,
+  return queueTransaction(async () => {
+    const tx = mintERC721({
+      contract: characterContract,
+      to: toAddress,
+      nft,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
 
 /** Get all character NFTs owned by a wallet address. */
@@ -202,11 +263,13 @@ export async function updateCharacterMetadata(entity: {
 
   const uri = await upload({ client: thirdwebClient, files: [metadata] });
 
-  const tx = setTokenURI({
-    contract: characterContract,
-    tokenId: entity.characterTokenId,
-    uri,
+  return queueTransaction(async () => {
+    const tx = setTokenURI({
+      contract: characterContract,
+      tokenId: entity.characterTokenId,
+      uri,
+    });
+    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-  return receipt.transactionHash;
 }
