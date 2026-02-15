@@ -31,9 +31,6 @@ export function registerWalletRoutes(server: FastifyInstance) {
         const sfuelTx = await distributeSFuel(address);
         server.log.info(`sFUEL sent to ${address}: ${sfuelTx}`);
 
-        // Wait 1 second for SKALE to clear the nonce before next tx
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
         const goldTx = await mintGold(address, "50");
         server.log.info(`50 GOLD minted to ${address}: ${goldTx}`);
 
