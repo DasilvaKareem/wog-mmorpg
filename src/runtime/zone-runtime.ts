@@ -6,6 +6,8 @@ import type { SpawnOrder, SpawnOrderResult } from "../types/spawn-order.js";
 import type { TerrainGrid } from "./terrain-grid.js";
 import type { OreManager } from "./ore-manager.js";
 import { WorldAgentInstance } from "./world-agent-instance.js";
+import { SpatialIndex } from "./spatial-index.js";
+import type { ChunkPayload } from "../types/chunk.js";
 
 const TICK_INTERVAL_MS = 500;
 
@@ -18,6 +20,7 @@ export class ZoneRuntime {
   private tickCount = 0;
   private terrain: TerrainGrid | null;
   private oreManager: OreManager | null;
+  private spatialIndex: SpatialIndex<WorldAgentInstance> = new SpatialIndex();
 
   constructor(zone: Zone, templates: Map<string, WorldAgentTemplate>, terrain?: TerrainGrid, oreManager?: OreManager) {
     this.zone = zone;
@@ -43,15 +46,20 @@ export class ZoneRuntime {
   private tick(): void {
     this.tickCount++;
 
+    // Rebuild spatial index each tick
+    this.spatialIndex.clear();
+
     for (const agent of this.agents.values()) {
       agent.tick();
     }
 
-    // Remove dead agents
+    // Remove dead agents, index living ones
     for (const [id, agent] of this.agents) {
       if (!agent.alive) {
         this.agents.delete(id);
         console.log(`[ZoneRuntime] Agent ${id} despawned (tick ${this.tickCount})`);
+      } else {
+        this.spatialIndex.insert(agent, agent.position);
       }
     }
 
@@ -110,6 +118,8 @@ export class ZoneRuntime {
       const id = randomUUID();
       const agent = new WorldAgentInstance(id, template, order.position, this.terrain ?? undefined);
       this.agents.set(id, agent);
+      // Also insert into spatial index immediately
+      this.spatialIndex.insert(agent, agent.position);
       instanceIds.push(id);
     }
 
@@ -119,20 +129,11 @@ export class ZoneRuntime {
     return { orderId: order.orderId, status: "accepted", instanceIds };
   }
 
+  /** Query entities near a position using the spatial index (O(k) instead of O(n)) */
   getEntitiesNear(position: Vec2, radius: number): { entities: WorldAgentState[]; tick: number } {
-    const results: WorldAgentState[] = [];
-    const r2 = radius * radius;
-
-    for (const agent of this.agents.values()) {
-      const pos = agent.position;
-      const dx = pos.x - position.x;
-      const dz = pos.z - position.z;
-      if (dx * dx + dz * dz <= r2) {
-        results.push(agent.getState());
-      }
-    }
-
-    return { entities: results, tick: this.tickCount };
+    const nearby = this.spatialIndex.queryRadius(position, radius);
+    const entities = nearby.map(agent => agent.getState());
+    return { entities, tick: this.tickCount };
   }
 
   getStats(): { population: number; threat: number; tick: number; zoneId: string } {
@@ -150,6 +151,31 @@ export class ZoneRuntime {
 
   getOreManager(): OreManager | null {
     return this.oreManager;
+  }
+
+  /** Get chunk payloads around a world position for streaming */
+  getChunksAround(worldX: number, worldZ: number, radius: number): {
+    chunks: ChunkPayload[];
+    outOfBounds: Array<{ cx: number; cz: number }>;
+  } | null {
+    if (!this.terrain) return null;
+    return this.terrain.getChunksAround(worldX, worldZ, radius);
+  }
+
+  /** Get a single chunk payload */
+  getChunkPayload(cx: number, cz: number): ChunkPayload | null {
+    if (!this.terrain) return null;
+    return this.terrain.getChunkPayload(cx, cz);
+  }
+
+  /** Get chunk layout info for this zone */
+  getChunkInfo(): { chunksX: number; chunksZ: number; chunkKeys: string[] } | null {
+    if (!this.terrain) return null;
+    return {
+      chunksX: this.terrain.chunksX,
+      chunksZ: this.terrain.chunksZ,
+      chunkKeys: this.terrain.getLoadedChunkKeys(),
+    };
   }
 
   private currentThreat(): number {
