@@ -3,24 +3,48 @@ import type { TerrainGridDataV2 } from "./types.js";
 import { fetchTerrainGridV2 } from "./ShardClient.js";
 import { CLIENT_TILE_PX } from "./config.js";
 import { createTileAtlas, TILE } from "./TileAtlas.js";
+import type { LoadedChunk } from "./ChunkStreamManager.js";
+import { CHUNK_SIZE } from "./ChunkStreamManager.js";
+
+function chunkKey(cx: number, cz: number): string {
+  return `${cx}_${cz}`;
+}
+
+/** Per-chunk tilemap layers stored in the renderer */
+interface ChunkVisual {
+  cx: number;
+  cz: number;
+  groundMap: Phaser.Tilemaps.Tilemap;
+  groundLayer: Phaser.Tilemaps.TilemapLayer;
+  overlayMap: Phaser.Tilemaps.Tilemap;
+  overlayLayer: Phaser.Tilemaps.TilemapLayer;
+  waterPositions: { x: number; y: number }[];
+}
 
 /**
  * Renders zone terrain using Phaser native tilemaps with the programmatic
- * tile atlas. Two layers: ground (depth 0) and overlay (depth 20).
- * Water tiles animate by swapping indices every 500ms.
+ * tile atlas. Supports both legacy full-zone loading and chunked streaming.
+ *
+ * In chunk mode, each chunk is an independent tilemap positioned at the
+ * correct pixel offset. Chunks can be added/removed dynamically.
  */
 export class TilemapRenderer {
   private scene: Phaser.Scene;
+  private waterTimer: Phaser.Time.TimerEvent | null = null;
+  private waterFrame = 0;
+
+  /** Chunk mode: individual tilemaps per chunk */
+  private chunkVisuals: Map<string, ChunkVisual> = new Map();
+
+  /** Legacy mode: single tilemap for whole zone */
   private tilemap: Phaser.Tilemaps.Tilemap | null = null;
   private groundLayer: Phaser.Tilemaps.TilemapLayer | null = null;
   private overlayLayer: Phaser.Tilemaps.TilemapLayer | null = null;
-  private waterTimer: Phaser.Time.TimerEvent | null = null;
-  private waterFrame = 0;
   private waterPositions: { x: number; y: number }[] = [];
 
   /** Scale factor: multiply server world coords by this to get pixel coords */
   coordScale = 1;
-  /** Pixel dimensions of the rendered world */
+  /** Pixel dimensions of the rendered world (legacy mode only) */
   worldPixelW = 0;
   worldPixelH = 0;
 
@@ -28,14 +52,131 @@ export class TilemapRenderer {
     this.scene = scene;
   }
 
-  /**
-   * Load terrain for a zone using the v2 tile-indexed API.
-   * Falls back to a flat grass grid if unavailable.
-   */
-  async loadZone(zoneId: string): Promise<boolean> {
-    this.destroy();
+  // ─── Chunk streaming mode ──────────────────────────────────────────
 
-    // Ensure the tile atlas is registered
+  /** Initialize chunk streaming mode */
+  initChunkMode(tileSize: number): void {
+    this.destroyAll();
+    this.coordScale = tileSize > 0 ? CLIENT_TILE_PX / tileSize : 1.6;
+    createTileAtlas(this.scene);
+
+    // Start water animation timer
+    this.waterTimer = this.scene.time.addEvent({
+      delay: 500,
+      callback: this.animateWaterAll,
+      callbackScope: this,
+      loop: true,
+    });
+  }
+
+  /** Add a loaded chunk to the renderer */
+  addChunk(chunk: LoadedChunk): void {
+    const key = chunkKey(chunk.cx, chunk.cz);
+    if (this.chunkVisuals.has(key)) return;
+
+    const T = CLIENT_TILE_PX;
+    const offsetX = chunk.cx * CHUNK_SIZE * T;
+    const offsetY = chunk.cz * CHUNK_SIZE * T;
+
+    const groundData: number[][] = [];
+    const overlayData: number[][] = [];
+    const waterPos: { x: number; y: number }[] = [];
+
+    for (let y = 0; y < CHUNK_SIZE; y++) {
+      const groundRow: number[] = [];
+      const overlayRow: number[] = [];
+      for (let x = 0; x < CHUNK_SIZE; x++) {
+        const idx = y * CHUNK_SIZE + x;
+        const g = chunk.payload.ground[idx];
+        groundRow.push(g);
+        const o = chunk.payload.overlay[idx];
+        overlayRow.push(o >= 0 ? o : -1);
+        if (g === TILE.WATER_STILL) {
+          waterPos.push({ x, y });
+        }
+      }
+      groundData.push(groundRow);
+      overlayData.push(overlayRow);
+    }
+
+    const groundMap = this.scene.make.tilemap({
+      data: groundData,
+      tileWidth: T,
+      tileHeight: T,
+    });
+    const groundTileset = groundMap.addTilesetImage("tile-atlas");
+    if (!groundTileset) return;
+    const groundLayer = groundMap.createLayer(0, groundTileset, offsetX, offsetY);
+    if (!groundLayer) return;
+    groundLayer.setDepth(0);
+
+    const overlayMap = this.scene.make.tilemap({
+      data: overlayData,
+      tileWidth: T,
+      tileHeight: T,
+    });
+    const overlayTileset = overlayMap.addTilesetImage("tile-atlas");
+    if (!overlayTileset) return;
+    const overlayLayer = overlayMap.createLayer(0, overlayTileset, offsetX, offsetY);
+    if (!overlayLayer) return;
+    overlayLayer.setDepth(20);
+
+    this.chunkVisuals.set(key, {
+      cx: chunk.cx,
+      cz: chunk.cz,
+      groundMap,
+      groundLayer,
+      overlayMap,
+      overlayLayer,
+      waterPositions: waterPos,
+    });
+  }
+
+  /** Remove a chunk from the renderer */
+  removeChunk(cx: number, cz: number): void {
+    const key = chunkKey(cx, cz);
+    const visual = this.chunkVisuals.get(key);
+    if (!visual) return;
+
+    visual.overlayLayer.destroy();
+    visual.overlayMap.destroy();
+    visual.groundLayer.destroy();
+    visual.groundMap.destroy();
+    this.chunkVisuals.delete(key);
+  }
+
+  /** Number of chunks currently rendered */
+  get renderedChunkCount(): number {
+    return this.chunkVisuals.size;
+  }
+
+  // ─── Water animation (works for both modes) ───────────────────────
+
+  private animateWaterAll(): void {
+    this.waterFrame = (this.waterFrame + 1) % 3;
+    const frames = [TILE.WATER_STILL, TILE.WATER_ANIM1, TILE.WATER_ANIM2];
+    const tileIdx = frames[this.waterFrame];
+
+    // Chunk mode
+    for (const visual of this.chunkVisuals.values()) {
+      for (const pos of visual.waterPositions) {
+        visual.groundLayer.putTileAt(tileIdx, pos.x, pos.y);
+      }
+    }
+
+    // Legacy mode
+    if (this.groundLayer) {
+      for (const pos of this.waterPositions) {
+        this.groundLayer.putTileAt(tileIdx, pos.x, pos.y);
+      }
+    }
+  }
+
+  // ─── Legacy full-zone mode (kept for backward compat) ─────────────
+
+  async loadZone(zoneId: string): Promise<boolean> {
+    this.destroyAll();
+
     createTileAtlas(this.scene);
 
     const data = await fetchTerrainGridV2(zoneId);
@@ -46,7 +187,6 @@ export class TilemapRenderer {
     this.worldPixelW = terrain.width * T;
     this.worldPixelH = terrain.height * T;
 
-    // Build 2D tile data arrays
     const groundData: number[][] = [];
     const overlayData: number[][] = [];
     this.waterPositions = [];
@@ -58,11 +198,8 @@ export class TilemapRenderer {
         const idx = y * terrain.width + x;
         const g = terrain.ground[idx];
         groundRow.push(g);
-
         const o = terrain.overlay[idx];
         overlayRow.push(o >= 0 ? o : -1);
-
-        // Track water positions for animation
         if (g === TILE.WATER_STILL) {
           this.waterPositions.push({ x, y });
         }
@@ -71,7 +208,6 @@ export class TilemapRenderer {
       overlayData.push(overlayRow);
     }
 
-    // Create Phaser tilemap from data
     if (!this.scene || !this.scene.make || !this.scene.textures) {
       console.error("[TilemapRenderer] Scene not properly initialized");
       return false;
@@ -94,7 +230,6 @@ export class TilemapRenderer {
       return false;
     }
 
-    // Ground layer
     this.groundLayer = this.tilemap.createLayer(0, tileset, 0, 0);
     if (!this.groundLayer) {
       console.error("[TilemapRenderer] Failed to create ground layer");
@@ -102,7 +237,6 @@ export class TilemapRenderer {
     }
     this.groundLayer.setDepth(0);
 
-    // Overlay layer — create blank, then populate
     const overlayMap = this.scene.make.tilemap({
       data: overlayData,
       tileWidth: T,
@@ -126,11 +260,10 @@ export class TilemapRenderer {
     }
     this.overlayLayer.setDepth(20);
 
-    // Start water animation
     if (this.waterPositions.length > 0) {
       this.waterTimer = this.scene.time.addEvent({
         delay: 500,
-        callback: this.animateWater,
+        callback: this.animateWaterAll,
         callbackScope: this,
         loop: true,
       });
@@ -147,7 +280,16 @@ export class TilemapRenderer {
     };
   }
 
-  destroy(): void {
+  /** Clean up everything */
+  destroyAll(): void {
+    for (const visual of this.chunkVisuals.values()) {
+      visual.overlayLayer.destroy();
+      visual.overlayMap.destroy();
+      visual.groundLayer.destroy();
+      visual.groundMap.destroy();
+    }
+    this.chunkVisuals.clear();
+
     this.waterTimer?.destroy();
     this.waterTimer = null;
     this.overlayLayer?.destroy();
@@ -159,15 +301,8 @@ export class TilemapRenderer {
     this.waterPositions = [];
   }
 
-  /** Cycle water tiles between 3 animation frames */
-  private animateWater(): void {
-    if (!this.groundLayer) return;
-    this.waterFrame = (this.waterFrame + 1) % 3;
-    const frames = [TILE.WATER_STILL, TILE.WATER_ANIM1, TILE.WATER_ANIM2];
-    const tileIdx = frames[this.waterFrame];
-    for (const pos of this.waterPositions) {
-      this.groundLayer.putTileAt(tileIdx, pos.x, pos.y);
-    }
+  destroy(): void {
+    this.destroyAll();
   }
 
   /** Fallback: flat grass grid when v2 API unavailable */
