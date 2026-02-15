@@ -5,6 +5,7 @@ import { CharacterDialog } from "@/components/CharacterDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
+import { X402AgentPage } from "@/components/X402AgentPage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
@@ -18,7 +19,7 @@ import { GameProvider } from "@/context/GameContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
 
-type Page = "landing" | "game";
+type Page = "landing" | "game" | "x402";
 
 function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
@@ -56,8 +57,13 @@ function AppShell(): React.ReactElement {
           // Open character dialog after a tick so game canvas mounts first
           window.setTimeout(() => setCharacterOpen(true), 100);
         }}
+        onX402={() => setPage("x402")}
       />
     );
+  }
+
+  if (page === "x402") {
+    return <X402AgentPage onBack={() => setPage("landing")} />;
   }
 
   return (
