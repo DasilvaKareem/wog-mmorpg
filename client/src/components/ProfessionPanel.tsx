@@ -28,10 +28,10 @@ export function ProfessionPanel(): React.ReactElement {
 
   if (!isConnected) {
     return (
-      <Card className="pointer-events-auto absolute left-4 top-4 z-30 w-80">
+      <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-64 md:w-80 md:left-4 md:top-4 hidden sm:block">
         <CardHeader className="pb-2">
-          <CardTitle>Professions</CardTitle>
-          <CardDescription>Connect wallet to view</CardDescription>
+          <CardTitle className="text-sm md:text-base">Professions</CardTitle>
+          <CardDescription className="text-xs">Connect wallet to view</CardDescription>
         </CardHeader>
         <CardContent>
           <p className="text-[8px] text-[#9aa7cc]">No wallet connected</p>
@@ -41,10 +41,10 @@ export function ProfessionPanel(): React.ReactElement {
   }
 
   return (
-    <Card className="pointer-events-auto absolute left-4 top-4 z-30 w-80">
+    <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-64 md:w-80 md:left-4 md:top-4 hidden sm:block">
       <CardHeader className="pb-2">
-        <CardTitle>Professions</CardTitle>
-        <CardDescription>Learned skills & crafting</CardDescription>
+        <CardTitle className="text-sm md:text-base">Professions</CardTitle>
+        <CardDescription className="text-xs">Learned skills & crafting</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-[9px]">
         {professionsLoading ? (

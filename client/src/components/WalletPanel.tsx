@@ -28,10 +28,10 @@ export function WalletPanel(): React.ReactElement {
   const { notify } = useToast();
 
   return (
-    <Card className="pointer-events-auto absolute right-4 top-4 z-30 w-80">
+    <Card className="pointer-events-auto absolute right-2 top-2 z-30 w-64 md:w-80 md:right-4 md:top-4">
       <CardHeader className="pb-2">
-        <CardTitle>Wallet</CardTitle>
-        <CardDescription>Spectator inventory</CardDescription>
+        <CardTitle className="text-sm md:text-base">Wallet</CardTitle>
+        <CardDescription className="text-xs">Spectator inventory</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 text-[9px]">
         {!isConnected ? (

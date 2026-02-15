@@ -63,15 +63,16 @@ function AppShell(): React.ReactElement {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
+      {/* On mobile (< md), only show WalletPanel and ZoneSelector. On desktop, show all panels */}
       <WalletPanel />
       <ProfessionPanel />
       <ZoneSelector />
-      <LobbyViewer className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-96" />
+      <LobbyViewer className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-96 hidden md:block" />
       <ChatLog
         zoneId={currentZone}
-        className="absolute bottom-4 right-4 z-30 w-96"
+        className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
       />
-      <Leaderboard className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[420px]" />
+      <Leaderboard className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
       <ShopDialog />
       <GuildDialog />
       <AuctionHouseDialog />
