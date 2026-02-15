@@ -1,6 +1,5 @@
 import * as React from "react";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+import { API_URL } from "../config.js";
 
 const RACES = [
   { id: "human", name: "Human", desc: "+2 STR, +1 CHA — versatile warriors" },

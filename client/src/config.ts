@@ -1,5 +1,5 @@
-/** API URL - use environment variable or fallback to localhost */
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+/** API URL - production Cloudflare tunnel with HTTPS */
+export const API_URL = "https://private-accessible-asia-qualified.trycloudflare.com";
 
 /** Client-side tile size in pixels — 16px for Pokemon aesthetic */
 export const CLIENT_TILE_PX = 16;
