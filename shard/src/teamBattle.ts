@@ -477,9 +477,17 @@ async function gathererLoop(agent: Agent) {
 
   log(agent.team, agent.role, `Tools: ${[...ownedTools].map(t => toolNames[t]).join(", ") || "NONE"}`);
 
+  // Tier-1 ore types that stone pickaxe can mine
+  const mineableOres = new Set(["coal", "tin"]);
+  // Tier-1 herbs that basic sickle can gather
+  const gatherableHerbs = new Set(["Meadow Lily Patch", "Wild Rose Bush", "Clover Field", "Dandelion Cluster"]);
+  // Offset for team Bravo so they don't fight for same nodes
+  const teamOffset = agent.team === "BRAVO" ? 1 : 0;
+
   let cycle = 0;
   while (true) {
-    const doMining = cycle % 2 === 0;
+    // Prioritize mining (3 mine : 1 herb) to accumulate ore for crafting
+    const doMining = cycle % 4 !== 3;
 
     if (doMining) {
       if (!ownedTools.has(27)) {
@@ -490,9 +498,9 @@ async function gathererLoop(agent: Agent) {
 
       try {
         const nodes = await api("GET", `/mining/nodes/${ZONE}`);
-        const available = nodes.oreNodes?.filter((n: any) => !n.depleted && n.charges > 0) ?? [];
+        const available = nodes.oreNodes?.filter((n: any) => !n.depleted && n.charges > 0 && mineableOres.has(n.oreType)) ?? [];
         if (available.length > 0) {
-          const node = available[cycle % available.length]; // Rotate through nodes
+          const node = available[(cycle + teamOffset) % available.length];
           log(agent.team, agent.role, `Mining ${node.name} (${node.oreType}) at (${node.x}, ${node.y})...`);
           await moveTo(agent.id, node.x, node.y);
           await sleep(500);
@@ -500,6 +508,8 @@ async function gathererLoop(agent: Agent) {
             const result = await api("POST", "/mining/gather", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, oreNodeId: node.id });
             log(agent.team, agent.role, `Mined ${result.oreName}! (dur: ${result.pickaxe?.durability}/${result.pickaxe?.maxDurability})`);
           } catch (err: any) { log(agent.team, agent.role, `Mining failed: ${err.message?.slice(0, 50)}`); }
+        } else {
+          log(agent.team, agent.role, "No mineable nodes — waiting for respawn...");
         }
       } catch {}
     } else {
@@ -511,9 +521,9 @@ async function gathererLoop(agent: Agent) {
 
       try {
         const nodes = await api("GET", `/herbalism/nodes/${ZONE}`);
-        const available = nodes.flowerNodes?.filter((n: any) => !n.depleted && n.charges > 0) ?? [];
+        const available = nodes.flowerNodes?.filter((n: any) => !n.depleted && n.charges > 0 && gatherableHerbs.has(n.name)) ?? [];
         if (available.length > 0) {
-          const node = available[cycle % available.length];
+          const node = available[(cycle + teamOffset) % available.length];
           log(agent.team, agent.role, `Gathering ${node.name} at (${node.x}, ${node.y})...`);
           await moveTo(agent.id, node.x, node.y);
           await sleep(500);
@@ -526,7 +536,7 @@ async function gathererLoop(agent: Agent) {
     }
 
     cycle++;
-    await sleep(5000);
+    await sleep(4000);
   }
 }
 

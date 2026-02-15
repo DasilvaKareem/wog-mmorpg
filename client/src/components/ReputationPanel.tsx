@@ -1,4 +1,5 @@
 /**
+import { API_URL } from "../config.js";
  * Reputation Panel Component
  * Displays ERC-8004 reputation scores for a character
  */

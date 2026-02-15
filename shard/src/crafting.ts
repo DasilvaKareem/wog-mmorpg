@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem } from "./blockchain.js";
+import { mintItem, burnItem, getItemBalance } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
 import { rollCraftedItem } from "./itemRng.js";
@@ -425,6 +425,18 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
     // TODO: Check gold balance and deduct cost
     // For now, we'll skip the gold check
+
+    // PRE-CHECK: Verify on-chain balances before attempting burn (avoids costly reverts)
+    for (const material of recipe.requiredMaterials) {
+      const balance = await getItemBalance(walletAddress, material.tokenId);
+      if (balance < BigInt(material.quantity)) {
+        reply.code(400);
+        return {
+          error: "Insufficient materials",
+          missing: { tokenId: material.tokenId.toString(), need: material.quantity, have: Number(balance) },
+        };
+      }
+    }
 
     // CRITICAL: Burn required materials (consume ore NFTs)
     const burnedMaterials: Array<{ tokenId: string; quantity: number; tx: string }> = [];

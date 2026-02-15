@@ -1,4 +1,5 @@
 import { createThirdwebClient } from "thirdweb";
+import { API_URL } from "../config.js";
 import { defineChain } from "thirdweb";
 import { createWallet } from "thirdweb/wallets";
 
@@ -90,7 +91,7 @@ export class WalletManager {
 
     this._address = account.address;
 
-    await fetch("/wallet/register", {
+    await fetch(`/wallet/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address: this._address }),
@@ -120,7 +121,7 @@ export class WalletManager {
   async buyItem(tokenId: number, quantity: number): Promise<boolean> {
     if (!this._address) return false;
 
-    const res = await fetch("/shop/buy", {
+    const res = await fetch(`/shop/buy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -140,7 +141,7 @@ export class WalletManager {
     if (!this._address) return false;
 
     console.log("[equipItem] Request:", { zoneId, tokenId, walletAddress: this._address });
-    const res = await fetch("/equipment/equip", {
+    const res = await fetch(`/equipment/equip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -162,7 +163,7 @@ export class WalletManager {
   async unequipSlot(slot: EquipmentSlot, zoneId: string): Promise<boolean> {
     if (!this._address) return false;
 
-    const res = await fetch("/equipment/unequip", {
+    const res = await fetch(`/equipment/unequip", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { API_URL } from "../config.js";
 
 export interface LeaderboardEntry {
   rank: number;

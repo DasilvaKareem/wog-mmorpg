@@ -1,4 +1,5 @@
 import * as React from "react";
+import { API_URL } from "../config.js";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
