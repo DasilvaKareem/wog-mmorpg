@@ -238,6 +238,20 @@ export async function getZoneAuctionsFromChain(
 }
 
 /**
+ * Get all auctions across all zones from cache.
+ * Optional status filter (0=Active, 1=Ended, 2=Cancelled).
+ */
+export function getAllAuctionsFromCache(statusFilter?: number): AuctionData[] {
+  const results: AuctionData[] = [];
+  for (const auction of auctionCache.values()) {
+    if (statusFilter === undefined || auction.status === statusFilter) {
+      results.push(auction);
+    }
+  }
+  return results;
+}
+
+/**
  * Rebuild the auction cache from historical on-chain events.
  * Call once at server startup to restore state from before the process restarted.
  */

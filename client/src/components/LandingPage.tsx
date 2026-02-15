@@ -6,6 +6,7 @@ import { useWalletContext } from "@/context/WalletContext";
 interface LandingPageProps {
   onEnterGame: () => void;
   onPlayNow: () => void;
+  onOpenMarketplace?: () => void;
   onX402: () => void;
 }
 
@@ -60,6 +61,11 @@ const FEATURES = [
     desc: "Encrypted PvP betting with SKALE BITE Protocol — bet on battle outcomes with sealed bids.",
     icon: "%%",
   },
+  {
+    title: "NFT Marketplace",
+    desc: "Buy, sell, and trade ERC-1155 items across all zones — weapons, armor, potions, and rare materials.",
+    icon: "$$",
+  },
 ];
 
 const ZONES = [
@@ -68,7 +74,7 @@ const ZONES = [
   { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
 ];
 
-export function LandingPage({ onEnterGame, onPlayNow, onX402 }: LandingPageProps): React.ReactElement {
+export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 }: LandingPageProps): React.ReactElement {
   const { isConnected, connect, loading, address } = useWalletContext();
 
   const [frameIndex, setFrameIndex] = React.useState(0);
@@ -192,6 +198,14 @@ export function LandingPage({ onEnterGame, onPlayNow, onX402 }: LandingPageProps
 
         {/* Secondary CTAs */}
         <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
+          {onOpenMarketplace && (
+            <button
+              onClick={onOpenMarketplace}
+              className="inline-flex items-center gap-2 border-2 border-[#ffcc00] bg-[#2a2210] px-4 py-2 text-[9px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffd84d] hover:text-[#ffd84d]"
+            >
+              {"$$"} NFT Marketplace {"$$"}
+            </button>
+          )}
           <button
             onClick={onX402}
             className="inline-flex items-center gap-2 border-2 border-[#54f28b] bg-[#112a1b] px-4 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
@@ -435,7 +449,7 @@ export function LandingPage({ onEnterGame, onPlayNow, onX402 }: LandingPageProps
         <p className="mb-4 text-[10px] text-[#9aa7cc]">
           Ready to enter the world?
         </p>
-        <div className="flex flex-col items-center gap-4 sm:flex-row">
+        <div className="flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center">
           {!isConnected ? (
             <Button
               className="min-w-[220px] text-[12px]"
@@ -453,6 +467,14 @@ export function LandingPage({ onEnterGame, onPlayNow, onX402 }: LandingPageProps
             >
               Create Character
             </Button>
+          )}
+          {onOpenMarketplace && (
+            <button
+              onClick={onOpenMarketplace}
+              className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[12px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            >
+              NFT Marketplace
+            </button>
           )}
           <button
             onClick={onX402}
