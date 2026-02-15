@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "./classes.js";
 import { getItemByTokenId } from "./itemCatalog.js";
+import { generateWeaponName, type GeneratedWeaponName } from "./weaponNameGenerator.js";
 import { randomUUID } from "crypto";
 
 // ── Quality Tiers ──────────────────────────────────────────────────────
@@ -147,6 +148,8 @@ export interface CraftedItemInstance {
   craftedAt: number; // timestamp
   recipeId: string;
   displayName: string;
+  /** Expanded procedural name components (null for non-weapon items) */
+  generatedName?: GeneratedWeaponName;
 }
 
 // ── In-Memory Registry ─────────────────────────────────────────────────
@@ -174,10 +177,24 @@ export function rollCraftedItem(params: {
     ? rollDurability(item.maxDurability)
     : 100;
 
-  // Build display name: "Fine Iron Sword of the Bear"
-  const prefix = quality.displayPrefix ? `${quality.displayPrefix} ` : "";
-  const suffix = affix ? ` ${affix.name}` : "";
-  const displayName = `${prefix}${item.name}${suffix}`;
+  // Build display name using the expanded weapon name generator
+  // Formula: [Prefix] + [Base Weapon] + [Suffix] + [Affix]
+  // e.g. "Voidforged Claymore of Eternal Ruin" or "Rusty Dagger of the Bear"
+  const generated = item.category === "weapon"
+    ? generateWeaponName(Number(params.baseTokenId), quality.tier)
+    : null;
+
+  let displayName: string;
+  if (generated) {
+    // Procedural name: attach affix after the generated suffix
+    const affixPart = affix ? ` ${affix.name}` : "";
+    displayName = generated.displayName + affixPart;
+  } else {
+    // Fallback for armor / non-weapon items: original simple logic
+    const prefix = quality.displayPrefix ? `${quality.displayPrefix} ` : "";
+    const suffix = affix ? ` ${affix.name}` : "";
+    displayName = `${prefix}${item.name}${suffix}`;
+  }
 
   const instance: CraftedItemInstance = {
     instanceId: randomUUID(),
@@ -197,6 +214,7 @@ export function rollCraftedItem(params: {
     craftedAt: Date.now(),
     recipeId: params.recipeId,
     displayName,
+    generatedName: generated ?? undefined,
   };
 
   // Store in registry

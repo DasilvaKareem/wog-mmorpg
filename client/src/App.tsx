@@ -6,6 +6,7 @@ import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
 import { MarketplacePage } from "@/components/MarketplacePage";
+import { X402AgentPage } from "@/components/X402AgentPage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
@@ -19,7 +20,7 @@ import { GameProvider } from "@/context/GameContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
 
-type Page = "landing" | "game" | "marketplace";
+type Page = "landing" | "game" | "marketplace" | "x402";
 
 function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
@@ -58,12 +59,17 @@ function AppShell(): React.ReactElement {
           window.setTimeout(() => setCharacterOpen(true), 100);
         }}
         onOpenMarketplace={() => setPage("marketplace")}
+        onX402={() => setPage("x402")}
       />
     );
   }
 
   if (page === "marketplace") {
     return <MarketplacePage onBack={() => setPage("landing")} />;
+  }
+
+  if (page === "x402") {
+    return <X402AgentPage onBack={() => setPage("landing")} />;
   }
 
   return (

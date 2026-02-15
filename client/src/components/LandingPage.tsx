@@ -7,6 +7,7 @@ interface LandingPageProps {
   onEnterGame: () => void;
   onPlayNow: () => void;
   onOpenMarketplace?: () => void;
+  onX402: () => void;
 }
 
 const FEATURES = [
@@ -73,7 +74,7 @@ const ZONES = [
   { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
 ];
 
-export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace }: LandingPageProps): React.ReactElement {
+export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 }: LandingPageProps): React.ReactElement {
   const { isConnected, connect, loading, address } = useWalletContext();
 
   const [frameIndex, setFrameIndex] = React.useState(0);
@@ -205,14 +206,12 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace }: Landi
               {"$$"} NFT Marketplace {"$$"}
             </button>
           )}
-          <a
-            href={`${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/x402/discovery`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={onX402}
             className="inline-flex items-center gap-2 border-2 border-[#54f28b] bg-[#112a1b] px-4 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
           >
             {"$>"} x402 Agent Protocol
-          </a>
+          </button>
           <a
             href="/docs"
             target="_blank"
@@ -477,14 +476,12 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace }: Landi
               NFT Marketplace
             </button>
           )}
-          <a
-            href={`${import.meta.env.VITE_API_URL || "http://localhost:3000"}/api/x402/discovery`}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            onClick={onX402}
             className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#112a1b] px-5 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#1a3d28] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             x402 Protocol
-          </a>
+          </button>
           <a
             href="/docs"
             target="_blank"
