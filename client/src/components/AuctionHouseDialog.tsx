@@ -101,7 +101,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
   const loadNpcInfo = React.useCallback(async (zone: string, entityId: string) => {
     try {
-      const res = await fetch(`/auctionhouse/npc/${zone}/${entityId}`);
+      const res = await fetch(`${API_URL}/auctionhouse/npc/${zone}/${entityId}`);
       if (res.ok) {
         const data = await res.json();
         setNpcInfo(data);
@@ -114,7 +114,7 @@ export function AuctionHouseDialog(): React.ReactElement {
   const loadAuctions = React.useCallback(async (zone: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/auctionhouse/${zone}/auctions?status=active`);
+      const res = await fetch(`${API_URL}/auctionhouse/${zone}/auctions?status=active`);
       if (res.ok) {
         const data = await res.json();
         setAuctions(data.auctions ?? data ?? []);
@@ -149,7 +149,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
     setBiddingId(auction.auctionId);
     try {
-      const res = await fetch(`/auctionhouse/${zoneId}/bid`, {
+      const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/bid`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -179,7 +179,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
     setBiddingId(auction.auctionId);
     try {
-      const res = await fetch(`/auctionhouse/${zoneId}/buyout`, {
+      const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/buyout`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -206,7 +206,7 @@ export function AuctionHouseDialog(): React.ReactElement {
     if (!address) return;
 
     try {
-      const res = await fetch(`/auctionhouse/${zoneId}/cancel`, {
+      const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ auctionId, seller: address }),
@@ -229,7 +229,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
     setCreating(true);
     try {
-      const res = await fetch(`/auctionhouse/${zoneId}/create`, {
+      const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

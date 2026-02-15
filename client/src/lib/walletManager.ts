@@ -91,7 +91,7 @@ export class WalletManager {
 
     this._address = account.address;
 
-    await fetch(`/wallet/register`, {
+    await fetch(`${API_URL}/wallet/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address: this._address }),
@@ -110,7 +110,7 @@ export class WalletManager {
       return this._balance;
     }
 
-    const res = await fetch(`/wallet/${this._address}/balance`);
+    const res = await fetch(`${API_URL}/wallet/${this._address}/balance`);
     if (!res.ok) return null;
 
     this._balance = await res.json();
@@ -121,7 +121,7 @@ export class WalletManager {
   async buyItem(tokenId: number, quantity: number): Promise<boolean> {
     if (!this._address) return false;
 
-    const res = await fetch(`/shop/buy`, {
+    const res = await fetch(`${API_URL}/shop/buy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -141,7 +141,7 @@ export class WalletManager {
     if (!this._address) return false;
 
     console.log("[equipItem] Request:", { zoneId, tokenId, walletAddress: this._address });
-    const res = await fetch(`/equipment/equip`, {
+    const res = await fetch(`${API_URL}/equipment/equip`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -163,7 +163,7 @@ export class WalletManager {
   async unequipSlot(slot: EquipmentSlot, zoneId: string): Promise<boolean> {
     if (!this._address) return false;
 
-    const res = await fetch(`/equipment/unequip`, {
+    const res = await fetch(`${API_URL}/equipment/unequip`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

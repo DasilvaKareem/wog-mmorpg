@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWallet } from "@/hooks/useWallet";
+import { API_URL } from "../config.js";
 
 interface QueueStatus {
   format: string;
@@ -28,7 +29,7 @@ export function MatchmakingQueue(): React.ReactElement {
 
   const fetchQueues = async () => {
     try {
-      const response = await fetch("/api/pvp/queue/all");
+      const response = await fetch(`${API_URL}/api/pvp/queue/all`);
       const data = await response.json();
       setQueues(data.queues);
     } catch (error) {
@@ -44,7 +45,7 @@ export function MatchmakingQueue(): React.ReactElement {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/pvp/queue/join", {
+      const response = await fetch(`${API_URL}/api/pvp/queue/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -75,7 +76,7 @@ export function MatchmakingQueue(): React.ReactElement {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/pvp/queue/leave", {
+      const response = await fetch(`${API_URL}/api/pvp/queue/leave`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

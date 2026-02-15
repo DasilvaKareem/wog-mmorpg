@@ -2,6 +2,7 @@ import * as React from "react";
 
 import { Button } from "@/components/ui/button";
 import { useWalletContext } from "@/context/WalletContext";
+import { API_URL } from "../config.js";
 
 interface LandingPageProps {
   onEnterGame: () => void;
@@ -95,8 +96,8 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
     const fetchLiveStats = async () => {
       try {
         const [battlesRes, queuesRes] = await Promise.all([
-          fetch("/api/pvp/battles/active"),
-          fetch("/api/pvp/queue/all"),
+          fetch(`${API_URL}/api/pvp/battles/active`),
+          fetch(`${API_URL}/api/pvp/queue/all`),
         ]);
 
         if (battlesRes.ok) {

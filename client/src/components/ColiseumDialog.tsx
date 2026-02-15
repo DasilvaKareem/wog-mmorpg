@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { API_URL } from "../config.js";
 import {
   Dialog,
   DialogContent,
@@ -64,8 +65,8 @@ export function ColiseumDialog(): React.ReactElement {
     setLoading(true);
     try {
       const [battlesRes, leaderboardRes] = await Promise.all([
-        fetch("/api/pvp/battles/active"),
-        fetch("/api/pvp/leaderboard?limit=5"),
+        fetch(`${API_URL}/api/pvp/battles/active`),
+        fetch(`${API_URL}/api/pvp/leaderboard?limit=5`),
       ]);
 
       if (battlesRes.ok) {

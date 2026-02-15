@@ -45,7 +45,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
 
       // Fetch details for each zone
       const lobbyPromises = zoneIds.map(async (zoneId) => {
-        const zoneResponse = await fetch(`/zones/${zoneId}`);
+        const zoneResponse = await fetch(`${API_URL}/zones/${zoneId}`);
 
         if (!zoneResponse.ok) {
           console.warn(`Failed to fetch zone ${zoneId}`);

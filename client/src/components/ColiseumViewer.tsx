@@ -81,7 +81,7 @@ export function ColiseumViewer({ battleId, onBack }: ColiseumViewerProps): React
 
   const fetchBattle = async () => {
     try {
-      const response = await fetch(`/api/pvp/battle/${battleId}`);
+      const response = await fetch(`${API_URL}/api/pvp/battle/${battleId}`);
       if (!response.ok) throw new Error("Battle not found");
       const data = await response.json();
       setBattle(data.battle);

@@ -40,7 +40,7 @@ export function ShopDialog(): React.ReactElement {
   const loadCatalog = React.useCallback(async (nextZoneId: string, entityId: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/shop/npc/${nextZoneId}/${entityId}`);
+      const res = await fetch(`${API_URL}/shop/npc/${nextZoneId}/${entityId}`);
       if (!res.ok) {
         setItems([]);
         return;

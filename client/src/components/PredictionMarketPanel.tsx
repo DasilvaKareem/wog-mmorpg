@@ -50,7 +50,7 @@ export function PredictionMarketPanel({
 
   const fetchPool = async () => {
     try {
-      const response = await fetch(`/api/prediction/pool/${poolId}`);
+      const response = await fetch(`${API_URL}/api/prediction/pool/${poolId}`);
       if (!response.ok) throw new Error("Pool not found");
       const data = await response.json();
       setPool(data.pool);
@@ -68,7 +68,7 @@ export function PredictionMarketPanel({
     setError(null);
 
     try {
-      const response = await fetch("/api/prediction/bet", {
+      const response = await fetch(`${API_URL}/api/prediction/bet`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

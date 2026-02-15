@@ -30,7 +30,7 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
 
   const fetchLeaderboard = useCallback(async () => {
     try {
-      const res = await fetch(`/leaderboard?limit=${limit}&sortBy=${sortBy}`);
+      const res = await fetch(`${API_URL}/leaderboard?limit=${limit}&sortBy=${sortBy}`);
       if (!res.ok) throw new Error(`Failed to fetch leaderboard: ${res.statusText}`);
       const data = await res.json();
       setEntries(data.entries);

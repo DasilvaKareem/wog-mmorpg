@@ -1,10 +1,10 @@
 /**
-import { API_URL } from "../config.js";
  * Reputation Panel Component
  * Displays ERC-8004 reputation scores for a character
  */
 
 import React, { useState, useEffect } from "react";
+import { API_URL } from "../config.js";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 
@@ -48,7 +48,7 @@ export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
 
     try {
       // Fetch reputation
-      const repResponse = await fetch(`/api/reputation/${characterTokenId}`);
+      const repResponse = await fetch(`${API_URL}/api/reputation/${characterTokenId}`);
       if (!repResponse.ok) {
         throw new Error("Reputation not found");
       }
@@ -57,7 +57,7 @@ export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
 
       // Fetch history
       const historyResponse = await fetch(
-        `/api/reputation/${characterTokenId}/history?limit=10`
+        `${API_URL}/api/reputation/${characterTokenId}/history?limit=10`
       );
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();

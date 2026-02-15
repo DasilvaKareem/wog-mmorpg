@@ -139,7 +139,7 @@ export function GuildDialog(): React.ReactElement {
   const loadRegistrar = React.useCallback(async (nextZoneId: string, entityId: string) => {
     setLoading(true);
     try {
-      const res = await fetch(`/guild/registrar/${nextZoneId}/${entityId}`);
+      const res = await fetch(`${API_URL}/guild/registrar/${nextZoneId}/${entityId}`);
       if (!res.ok) {
         setGuilds([]);
         return;
@@ -157,21 +157,21 @@ export function GuildDialog(): React.ReactElement {
     setLoadingDetails(true);
     try {
       // Load guild details with members
-      const guildRes = await fetch(`/guild/${guildId}`);
+      const guildRes = await fetch(`${API_URL}/guild/${guildId}`);
       if (guildRes.ok) {
         const guildData: Guild = await guildRes.json();
         setSelectedGuild(guildData);
       }
 
       // Load proposals for this guild
-      const proposalsRes = await fetch(`/guild/${guildId}/proposals`);
+      const proposalsRes = await fetch(`${API_URL}/guild/${guildId}/proposals`);
       if (proposalsRes.ok) {
         const proposalsData: Proposal[] = await proposalsRes.json();
         setProposals(proposalsData);
       }
 
       // Load vault data for this guild
-      const vaultRes = await fetch(`/guild/${guildId}/vault`);
+      const vaultRes = await fetch(`${API_URL}/guild/${guildId}/vault`);
       if (vaultRes.ok) {
         const vaultData: VaultResponse = await vaultRes.json();
         setVaultData(vaultData);
