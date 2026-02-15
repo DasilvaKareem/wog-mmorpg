@@ -3,6 +3,8 @@ import { API_URL } from "../config.js";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CurrencyDisplay } from "@/components/ui/currency-display";
+import { SimpleCurrencyInput } from "@/components/ui/currency-input";
 import {
   Dialog,
   DialogContent,
@@ -73,13 +75,13 @@ export function AuctionHouseDialog(): React.ReactElement {
   // Create form
   const [createTokenId, setCreateTokenId] = React.useState("");
   const [createQuantity, setCreateQuantity] = React.useState("1");
-  const [createStartPrice, setCreateStartPrice] = React.useState("");
+  const [createStartPrice, setCreateStartPrice] = React.useState(0);
   const [createDuration, setCreateDuration] = React.useState("60");
-  const [createBuyoutPrice, setCreateBuyoutPrice] = React.useState("");
+  const [createBuyoutPrice, setCreateBuyoutPrice] = React.useState(0);
   const [creating, setCreating] = React.useState(false);
 
   // Bid tracking
-  const [bidAmounts, setBidAmounts] = React.useState<Record<string, string>>({});
+  const [bidAmounts, setBidAmounts] = React.useState<Record<string, number>>({});
   const [biddingId, setBiddingId] = React.useState<string | null>(null);
 
   const { address, isConnected } = useWallet();
@@ -142,7 +144,7 @@ export function AuctionHouseDialog(): React.ReactElement {
   }, [open]);
 
   const handleBid = async (auction: Auction) => {
-    const amount = parseFloat(bidAmounts[auction.auctionId] ?? "");
+    const amount = bidAmounts[auction.auctionId] ?? 0;
     if (!amount || !address) return;
 
     setBiddingId(auction.auctionId);
@@ -158,8 +160,8 @@ export function AuctionHouseDialog(): React.ReactElement {
       });
 
       if (res.ok) {
-        notify(`Bid placed: ${amount} GOLD`, "success");
-        setBidAmounts((prev) => ({ ...prev, [auction.auctionId]: "" }));
+        notify(`Bid placed successfully`, "success");
+        setBidAmounts((prev) => ({ ...prev, [auction.auctionId]: 0 }));
         void loadAuctions(zoneId);
       } else {
         const err = await res.json();
@@ -234,9 +236,9 @@ export function AuctionHouseDialog(): React.ReactElement {
           seller: address,
           tokenId: parseInt(createTokenId),
           quantity: parseInt(createQuantity) || 1,
-          startPrice: parseFloat(createStartPrice),
+          startPrice: createStartPrice,
           durationMinutes: parseInt(createDuration),
-          buyoutPrice: createBuyoutPrice ? parseFloat(createBuyoutPrice) : undefined,
+          buyoutPrice: createBuyoutPrice || undefined,
         }),
       });
 
@@ -244,8 +246,8 @@ export function AuctionHouseDialog(): React.ReactElement {
         notify("Auction created", "success");
         setCreateTokenId("");
         setCreateQuantity("1");
-        setCreateStartPrice("");
-        setCreateBuyoutPrice("");
+        setCreateStartPrice(0);
+        setCreateBuyoutPrice(0);
         setActiveTab("browse");
         void loadAuctions(zoneId);
       } else {
@@ -334,13 +336,18 @@ export function AuctionHouseDialog(): React.ReactElement {
                           <TableCell className="font-mono text-[8px] text-[#9aa7cc]">
                             {truncateAddress(auction.seller)}
                           </TableCell>
-                          <TableCell className="text-[9px] font-bold text-[#ffcc00]">
-                            {auction.currentBid > 0
-                              ? `${auction.currentBid} GOLD`
-                              : `${auction.startPrice} GOLD`}
+                          <TableCell className="text-[9px]">
+                            <CurrencyDisplay
+                              amount={auction.currentBid > 0 ? auction.currentBid : auction.startPrice}
+                              size="sm"
+                            />
                           </TableCell>
-                          <TableCell className="text-[9px] text-[#ffcc00]">
-                            {auction.buyoutPrice ? `${auction.buyoutPrice} GOLD` : "--"}
+                          <TableCell className="text-[9px]">
+                            {auction.buyoutPrice ? (
+                              <CurrencyDisplay amount={auction.buyoutPrice} size="sm" />
+                            ) : (
+                              <span className="text-[#9aa7cc]">--</span>
+                            )}
                           </TableCell>
                           <TableCell
                             className={`text-[9px] font-bold ${isUrgent ? "text-[#ff4d6d]" : "text-[#f1f5ff]"}`}
@@ -349,18 +356,17 @@ export function AuctionHouseDialog(): React.ReactElement {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1">
-                              <Input
-                                type="number"
-                                placeholder="Gold"
-                                value={bidAmounts[auction.auctionId] ?? ""}
-                                onChange={(e) =>
+                              <SimpleCurrencyInput
+                                value={bidAmounts[auction.auctionId] ?? 0}
+                                onChange={(amount) =>
                                   setBidAmounts((prev) => ({
                                     ...prev,
-                                    [auction.auctionId]: e.target.value,
+                                    [auction.auctionId]: amount,
                                   }))
                                 }
-                                className="h-6 w-16 border border-[#29334d] bg-[#0a0f1a] text-[8px] text-[#f1f5ff]"
                                 min={auction.currentBid > 0 ? auction.currentBid + 1 : auction.startPrice}
+                                size="sm"
+                                className="w-24"
                               />
                               <Button
                                 size="sm"
@@ -417,14 +423,12 @@ export function AuctionHouseDialog(): React.ReactElement {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[8px] text-[#9aa7cc]">Starting Price (GOLD)</label>
-                  <Input
-                    type="number"
-                    placeholder="Minimum bid..."
+                  <label className="text-[8px] text-[#9aa7cc]">Starting Price</label>
+                  <SimpleCurrencyInput
                     value={createStartPrice}
-                    onChange={(e) => setCreateStartPrice(e.target.value)}
-                    min="1"
-                    className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
+                    onChange={setCreateStartPrice}
+                    min={0.0001}
+                    size="sm"
                   />
                 </div>
 
@@ -453,12 +457,11 @@ export function AuctionHouseDialog(): React.ReactElement {
 
                 <div className="space-y-1">
                   <label className="text-[8px] text-[#9aa7cc]">Buyout Price (optional)</label>
-                  <Input
-                    type="number"
-                    placeholder="Instant buy price..."
+                  <SimpleCurrencyInput
                     value={createBuyoutPrice}
-                    onChange={(e) => setCreateBuyoutPrice(e.target.value)}
-                    className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
+                    onChange={setCreateBuyoutPrice}
+                    min={0}
+                    size="sm"
                   />
                 </div>
 
