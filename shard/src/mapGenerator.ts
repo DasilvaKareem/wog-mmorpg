@@ -569,6 +569,95 @@ function placePortal(
   }
 }
 
+// ── Chunk extraction ─────────────────────────────────────────────────
+
+export const CHUNK_SIZE = 64; // tiles per chunk dimension
+
+export interface ChunkPayloadV2 {
+  cx: number;
+  cz: number;
+  zoneId: string;
+  ground: number[];
+  overlay: number[];
+  biome: string;
+}
+
+/** Extract a single chunk from a generated map by chunk coordinates */
+export function getChunkFromMap(zoneId: string, cx: number, cz: number): ChunkPayloadV2 | null {
+  const map = mapCache.get(zoneId);
+  if (!map) return null;
+
+  const originTx = cx * CHUNK_SIZE;
+  const originTz = cz * CHUNK_SIZE;
+
+  // Check if chunk overlaps the map at all
+  if (originTx >= map.width || originTz >= map.height || cx < 0 || cz < 0) return null;
+
+  const ground: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(TILE.GRASS_PLAIN);
+  const overlay: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(TILE.EMPTY);
+
+  for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const globalTx = originTx + lx;
+      const globalTz = originTz + lz;
+      if (globalTx >= map.width || globalTz >= map.height) continue;
+
+      const srcIdx = globalTz * map.width + globalTx;
+      const dstIdx = lz * CHUNK_SIZE + lx;
+      ground[dstIdx] = map.ground[srcIdx];
+      overlay[dstIdx] = map.overlay[srcIdx];
+    }
+  }
+
+  return { cx, cz, zoneId, ground, overlay, biome: map.biome };
+}
+
+/** Get chunks in a radius around a world position */
+export function getChunksAroundPosition(
+  zoneId: string,
+  worldX: number,
+  worldZ: number,
+  radius: number,
+): { chunks: ChunkPayloadV2[]; outOfBounds: { cx: number; cz: number }[] } | null {
+  const map = mapCache.get(zoneId);
+  if (!map) return null;
+
+  const tileX = Math.floor(worldX / TILE_SIZE);
+  const tileZ = Math.floor(worldZ / TILE_SIZE);
+  const centerCx = Math.floor(tileX / CHUNK_SIZE);
+  const centerCz = Math.floor(tileZ / CHUNK_SIZE);
+
+  const chunks: ChunkPayloadV2[] = [];
+  const outOfBounds: { cx: number; cz: number }[] = [];
+
+  for (let dz = -radius; dz <= radius; dz++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const cx = centerCx + dx;
+      const cz = centerCz + dz;
+      const chunk = getChunkFromMap(zoneId, cx, cz);
+      if (chunk) {
+        chunks.push(chunk);
+      } else {
+        outOfBounds.push({ cx, cz });
+      }
+    }
+  }
+
+  return { chunks, outOfBounds };
+}
+
+/** Get chunk layout info for a zone */
+export function getZoneChunkInfo(zoneId: string): { chunksX: number; chunksZ: number; width: number; height: number } | null {
+  const map = mapCache.get(zoneId);
+  if (!map) return null;
+  return {
+    chunksX: Math.ceil(map.width / CHUNK_SIZE),
+    chunksZ: Math.ceil(map.height / CHUNK_SIZE),
+    width: map.width,
+    height: map.height,
+  };
+}
+
 // ── Seeded RNG ───────────────────────────────────────────────────────
 
 function hashStr(s: string): number {

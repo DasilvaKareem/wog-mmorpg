@@ -18,10 +18,13 @@ export function registerWorldRoutes(app: FastifyInstance, world: WorldManager): 
     const stats = runtime.getStats();
     const connections = world.getConnectionsFrom(req.params.zoneId);
 
+    const chunkInfo = runtime.getChunkInfo();
+
     return reply.send({
       ...zone,
       stats,
       connections,
+      chunks: chunkInfo,
     });
   });
 }

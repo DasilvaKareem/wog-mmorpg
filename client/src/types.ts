@@ -107,3 +107,36 @@ export interface TerrainGridDataV2 {
   overlay: number[];
   biome: string;
 }
+
+export interface ChunkPayloadV2 {
+  cx: number;
+  cz: number;
+  zoneId: string;
+  ground: number[];
+  overlay: number[];
+  biome: string;
+}
+
+export interface ChunkStreamResponse {
+  zoneId: string;
+  centerWorld: { x: number; z: number };
+  chunkRadius: number;
+  chunks: ChunkPayloadV2[];
+  outOfBounds: { cx: number; cz: number }[];
+}
+
+export interface ChunkInfo {
+  chunkSize: number;
+  tileSize: number;
+  chunkWorldSize: number;
+}
+
+export interface ZoneChunkInfo {
+  zoneId: string;
+  chunkSize: number;
+  tileSize: number;
+  chunksX: number;
+  chunksZ: number;
+  width: number;
+  height: number;
+}
