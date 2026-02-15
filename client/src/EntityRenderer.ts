@@ -92,7 +92,7 @@ export class EntityRenderer {
   getEntityAt(worldX: number, worldY: number, radius: number): Entity | undefined {
     for (const [id, entity] of this.entities) {
       const visual = this.visuals.get(id);
-      if (!visual) continue;
+      if (!visual || !visual.sprite) continue;
       const dx = worldX - visual.sprite.x;
       const dy = worldY - visual.sprite.y;
       const distSq = dx * dx + dy * dy;
