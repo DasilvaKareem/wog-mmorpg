@@ -341,16 +341,24 @@ export class WorldScene extends Phaser.Scene {
       const text = lines.join("\n");
       this.tooltip.setText(text);
 
-      // Position tooltip near pointer, clamped to screen
-      const tooltipX = Math.min(pointer.x + 15, cam.width - 220);
-      const tooltipY = Math.min(pointer.y + 15, cam.height - 200);
+      // Measure actual tooltip size before positioning
+      const bounds = this.tooltip.getBounds();
+      const tw = bounds.width + 12; // include bg padding
+      const th = bounds.height + 8;
+      const gap = 10;
+
+      // Flip to left/above cursor when tooltip would overflow screen edge
+      const tooltipX = pointer.x + gap + tw > cam.width
+        ? pointer.x - gap - tw + 6
+        : pointer.x + gap;
+      const tooltipY = pointer.y + gap + th > cam.height
+        ? pointer.y - gap - th + 4
+        : pointer.y + gap;
 
       this.tooltip.setPosition(tooltipX, tooltipY);
-
-      const bounds = this.tooltip.getBounds();
       this.tooltipBg
         .setPosition(tooltipX - 6, tooltipY - 4)
-        .setSize(bounds.width + 12, bounds.height + 8);
+        .setSize(tw, th);
 
       this.tooltip.setVisible(true);
       this.tooltipBg.setVisible(true);
