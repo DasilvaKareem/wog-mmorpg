@@ -525,6 +525,92 @@ async function pvpFight(w: Warrior, battleId: string) {
 }
 
 // =============================================================================
+//  Weapon Enhancement: Upgrade + Alchemy + Enchanting
+// =============================================================================
+
+async function learnCraftingProfessions() {
+  const leader = warriors[0];
+  log(leader.name, "Learning blacksmithing + alchemy for weapon upgrades...");
+  const profTrainers = await findEntitiesByType("profession-trainer");
+  for (const [tId, trainer] of profTrainers as Array<[string, any]>) {
+    if (trainer.teachesProfession === "blacksmithing" || trainer.teachesProfession === "alchemy") {
+      await moveTo(leader.id, trainer.x, trainer.y);
+      try {
+        await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: ZONE, entityId: leader.id, trainerId: tId, professionId: trainer.teachesProfession });
+        log(leader.name, `Learned ${trainer.teachesProfession} — knowledge is gains`);
+      } catch { log(leader.name, `Already know ${trainer.teachesProfession}`); }
+      await sleep(300);
+    }
+  }
+}
+
+async function upgradeAndEnchantWeapons(w: Warrior) {
+  // Find crafting stations
+  const forges = await findEntitiesByType("forge");
+  const alchemyLabs = await findEntitiesByType("alchemy-lab");
+  const altars = await findEntitiesByType("enchanting-altar");
+
+  // --- WEAPON UPGRADES at Forge ---
+  if (forges.length > 0) {
+    const [forgeId, forge] = forges[0] as [string, any];
+    await moveTo(w.id, forge.x, forge.y);
+
+    const UPGRADE_PRIORITY = [
+      "upgrade-battle-axe-masterwork", "upgrade-steel-longsword-masterwork",
+      "upgrade-battle-axe-reinforced", "upgrade-steel-longsword-reinforced",
+      "upgrade-iron-sword-masterwork", "upgrade-iron-sword-reinforced",
+      "upgrade-hunters-bow-reinforced", "upgrade-apprentice-staff-reinforced",
+    ];
+    for (const upgradeId of UPGRADE_PRIORITY) {
+      try {
+        const result = await api("POST", "/crafting/upgrade", {
+          walletAddress: WALLET, zoneId: ZONE, entityId: w.id, forgeId, recipeId: upgradeId,
+        });
+        log(w.name, `UPGRADED to ${result.crafted?.name ?? upgradeId}! — BEAST MODE`);
+        if (result.crafted?.tokenId) {
+          try {
+            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(result.crafted.tokenId), entityId: w.id, walletAddress: WALLET });
+            log(w.name, `Equipped upgraded weapon — time to dominate`);
+          } catch {}
+        }
+        break;
+      } catch {}
+    }
+  }
+
+  // --- BREW ENCHANTMENT ELIXIRS at Alchemy Lab ---
+  if (alchemyLabs.length > 0) {
+    const [labId, lab] = alchemyLabs[0] as [string, any];
+    await moveTo(w.id, lab.x, lab.y);
+    const ELIXIR_RECIPES = ["sharpness-elixir", "shadow-enchantment", "fire-enchantment"];
+    for (const recipe of ELIXIR_RECIPES) {
+      try {
+        await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: w.id, alchemyLabId: labId, recipeId: recipe });
+        log(w.name, `Brewed ${recipe} — alchemy gains`);
+        break;
+      } catch {}
+    }
+  }
+
+  // --- ENCHANT WEAPON at Enchanter's Altar ---
+  if (altars.length > 0) {
+    const [altarId, altar] = altars[0] as [string, any];
+    await moveTo(w.id, altar.x, altar.y);
+    const ENCHANT_ELIXIRS = [60, 59, 55, 57]; // Sharpness +8 STR, Shadow +6 STR, Fire +5 STR, Lightning
+    for (const elixirTokenId of ENCHANT_ELIXIRS) {
+      try {
+        await api("POST", "/enchanting/apply", {
+          walletAddress: WALLET, zoneId: ZONE, entityId: w.id,
+          altarId, enchantmentElixirTokenId: elixirTokenId, equipmentSlot: "weapon",
+        });
+        log(w.name, `Enchanted weapon — MAXIMUM POWER`);
+        break;
+      } catch {}
+    }
+  }
+}
+
+// =============================================================================
 //  Main Warrior Loop — Kill mobs, shop, PvP, repeat
 // =============================================================================
 
@@ -556,6 +642,15 @@ async function warriorMainLoop(w: Warrior) {
       try { await pvpQueue(w); } catch (e: any) {
         log(w.name, `PvP error: ${e.message?.slice(0, 50)}`);
       }
+      cycle++;
+      await sleep(2000);
+      continue;
+    }
+
+    // Every 25 cycles: upgrade & enchant weapons
+    if (cycle % 25 === 12) {
+      log(w.name, "Time to upgrade weapons — hitting the forge");
+      try { await upgradeAndEnchantWeapons(w); } catch {}
       cycle++;
       await sleep(2000);
       continue;
@@ -717,6 +812,20 @@ async function main() {
     await equipUpgradedGear(w);
     await learnTechniques(w);
   }));
+
+  // Learn crafting professions for weapon upgrades
+  console.log("\n============================================================");
+  console.log("  LEARNING BLACKSMITHING + ALCHEMY (weapon enhancement)");
+  console.log("============================================================\n");
+
+  await learnCraftingProfessions();
+
+  // Initial weapon upgrade + enchant pass
+  console.log("\n============================================================");
+  console.log("  UPGRADING & ENCHANTING WEAPONS");
+  console.log("============================================================\n");
+
+  await upgradeAndEnchantWeapons(warriors[0]);
 
   // Create guild DAO
   console.log("\n============================================================");

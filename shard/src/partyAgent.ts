@@ -1023,35 +1023,31 @@ async function gathererLoop(agent: Agent) {
 // =============================================================================
 
 async function crafterLoop(agent: Agent) {
-  banner("CRAFTER ACTIVE: BLACKSMITHING");
-  log(agent.role, "Setting up blacksmithing...");
+  banner("CRAFTER ACTIVE: FORGE + ALCHEMY + ENCHANTING");
+  log(agent.role, "Setting up blacksmithing + alchemy...");
 
-  // Learn blacksmithing profession
+  // Learn blacksmithing + alchemy professions
   const profTrainers = await findEntitiesByType("profession-trainer");
   for (const [tId, trainer] of profTrainers as Array<[string, any]>) {
-    if (trainer.teachesProfession === "blacksmithing") {
+    if (trainer.teachesProfession === "blacksmithing" || trainer.teachesProfession === "alchemy") {
       await moveTo(agent.id, trainer.x, trainer.y);
       try {
         await api("POST", "/professions/learn", {
-          walletAddress: WALLET,
-          zoneId: ZONE,
-          entityId: agent.id,
-          trainerId: tId,
-          professionId: "blacksmithing",
+          walletAddress: WALLET, zoneId: ZONE, entityId: agent.id,
+          trainerId: tId, professionId: trainer.teachesProfession,
         });
-        log(agent.role, `Learned Blacksmithing from ${trainer.name}`);
+        log(agent.role, `Learned ${trainer.teachesProfession} from ${trainer.name}`);
       } catch {
-        log(agent.role, "Already know Blacksmithing");
+        log(agent.role, `Already know ${trainer.teachesProfession}`);
       }
-      break;
+      await sleep(300);
     }
   }
 
-  // Find forge (Ancient Forge at 280, 460)
+  // Find all crafting stations
   const forges = await findEntitiesByType("forge");
   let forgeId: string | null = null;
   let forgePos = { x: 280, y: 460 };
-
   if (forges.length > 0) {
     forgeId = forges[0][0];
     const forge: any = forges[0][1];
@@ -1061,7 +1057,14 @@ async function crafterLoop(agent: Agent) {
     log(agent.role, "No forge found! Will stand by...");
   }
 
-  // Move to forge area
+  const alchemyLabs = await findEntitiesByType("alchemy-lab");
+  const alchemyLabId = alchemyLabs.length > 0 ? alchemyLabs[0][0] : null;
+  if (alchemyLabId) log(agent.role, "Found Mystical Cauldron for alchemy");
+
+  const altars = await findEntitiesByType("enchanting-altar");
+  const altarId = altars.length > 0 ? altars[0][0] : null;
+  if (altarId) log(agent.role, "Found Enchanter's Altar for weapon enchanting");
+
   await moveTo(agent.id, forgePos.x, forgePos.y);
 
   // Get all blacksmithing recipes
@@ -1113,54 +1116,94 @@ async function crafterLoop(agent: Agent) {
 
     // Stay near forge
     await moveTo(agent.id, forgePos.x, forgePos.y);
+    const warrior = squad.find((a) => a.role === "WARRIOR")!;
 
-    // Try each recipe — the one with available materials will succeed
+    // --- PHASE 1: WEAPON UPGRADES (Base → Reinforced → Masterwork) ---
+    const UPGRADE_PRIORITY = [
+      "upgrade-battle-axe-masterwork", "upgrade-steel-longsword-masterwork",
+      "upgrade-battle-axe-reinforced", "upgrade-steel-longsword-reinforced",
+      "upgrade-iron-sword-masterwork", "upgrade-iron-sword-reinforced",
+      "upgrade-hunters-bow-masterwork", "upgrade-hunters-bow-reinforced",
+      "upgrade-apprentice-staff-masterwork", "upgrade-apprentice-staff-reinforced",
+    ];
+    for (const upgradeId of UPGRADE_PRIORITY) {
+      try {
+        const result = await api("POST", "/crafting/upgrade", {
+          walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, forgeId, recipeId: upgradeId,
+        });
+        const upgName = result.crafted?.name ?? upgradeId;
+        log(agent.role, `UPGRADED to ${upgName}!`);
+        if (result.crafted?.tokenId) {
+          try {
+            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(result.crafted.tokenId), entityId: warrior.id, walletAddress: WALLET });
+            log(agent.role, `Equipped ${upgName} on ${warrior.name}!`);
+          } catch {}
+        }
+        break;
+      } catch {}
+    }
+
+    // --- PHASE 2: FORGE NEW WEAPONS ---
     let crafted = false;
     for (const recipe of prioritized) {
       try {
         const result = await api("POST", "/crafting/forge", {
-          walletAddress: WALLET,
-          zoneId: ZONE,
-          entityId: agent.id,
-          forgeId,
-          recipeId: recipe.recipeId,
+          walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, forgeId, recipeId: recipe.recipeId,
         });
         const craftedName = result.crafted?.name ?? recipe.recipeId;
         const craftedTokenId = result.crafted?.tokenId ?? recipe.outputTokenId;
-        log(
-          agent.role,
-          `FORGED ${craftedName}! (${result.materialsConsumed?.length ?? "?"} materials consumed)`
-        );
+        log(agent.role, `FORGED ${craftedName}!`);
         crafted = true;
-
-        // Equip the forged weapon/armor on Ironclad (warrior)
-        const warrior = squad.find((a) => a.role === "WARRIOR")!;
         if (craftedTokenId) {
           try {
-            await api("POST", "/equipment/equip", {
-              zoneId: ZONE,
-              tokenId: Number(craftedTokenId),
-              entityId: warrior.id,
-              walletAddress: WALLET,
-            });
+            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(craftedTokenId), entityId: warrior.id, walletAddress: WALLET });
             log(agent.role, `Equipped ${craftedName} on ${warrior.name}!`);
-          } catch {
-            log(agent.role, `${craftedName} forged — Ironclad can't equip it (wrong slot or already better)`);
-          }
+          } catch {}
         }
-
         await sleep(2000);
-        break; // One craft per cycle
-      } catch {
-        // Not enough materials for this recipe
+        break;
+      } catch {}
+    }
+
+    // --- PHASE 3: BREW ENCHANTMENT ELIXIRS ---
+    if (alchemyLabId) {
+      await moveTo(agent.id, 360, 460);
+      const ELIXIR_RECIPES = ["sharpness-elixir", "shadow-enchantment", "fire-enchantment", "lightning-enchantment"];
+      for (const recipe of ELIXIR_RECIPES) {
+        try {
+          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, alchemyLabId, recipeId: recipe });
+          log(agent.role, `Brewed ${recipe}!`);
+          break;
+        } catch {}
+      }
+      // Also brew combat potions
+      for (const potion of ["greater-health-potion", "stamina-elixir", "elixir-of-strength"]) {
+        try {
+          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, alchemyLabId, recipeId: potion });
+          log(agent.role, `Brewed ${potion}!`);
+          break;
+        } catch {}
       }
     }
 
-    if (!crafted) {
-      log(agent.role, "Waiting for Thornleaf to gather more materials...");
+    // --- PHASE 4: ENCHANT WARRIOR'S WEAPON ---
+    if (altarId) {
+      await moveTo(agent.id, 320, 460);
+      const ENCHANT_ELIXIRS = [60, 59, 55, 57]; // Sharpness +8 STR, Shadow +6 STR, Fire +5 STR, Lightning
+      for (const elixirTokenId of ENCHANT_ELIXIRS) {
+        try {
+          await api("POST", "/enchanting/apply", {
+            walletAddress: WALLET, zoneId: ZONE, entityId: warrior.id,
+            altarId, enchantmentElixirTokenId: elixirTokenId, equipmentSlot: "weapon",
+          });
+          log(agent.role, `Enchanted ${warrior.name}'s weapon! (+STR bonus)`);
+          break;
+        } catch {}
+      }
     }
 
-    await sleep(12000); // Try crafting every 12s
+    if (!crafted) { log(agent.role, "Waiting for Thornleaf to gather more materials..."); }
+    await sleep(12000);
   }
 }
 
