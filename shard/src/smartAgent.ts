@@ -23,7 +23,7 @@ const PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY!;
 const WALLET = privateKeyToAccount(PRIVATE_KEY as `0x${string}`).address;
 
 let agentId: string;
-let currentZone = "human-meadow";
+let currentZone = "village-square";
 let api: ReturnType<typeof createAuthenticatedAPI>;
 
 // ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ async function learnAvailableTechniques() {
     for (const tech of toLearn) {
       try {
         // Find matching trainer
-        const trainer = trainers[0]; // class trainers are in human-meadow
+        const trainer = trainers[0]; // class trainers are in village-square
         await moveNear(trainer[0]);
 
         await api("POST", "/techniques/learn", {

@@ -10,18 +10,18 @@ interface FlowerSpawnDef {
 }
 
 const FLOWER_SPAWN_DEFS: FlowerSpawnDef[] = [
-  // human-meadow (starter zone) - common flowers everywhere
-  { zoneId: "human-meadow", flowerType: "meadow-lily", x: 150, y: 300 },
-  { zoneId: "human-meadow", flowerType: "meadow-lily", x: 400, y: 200 },
-  { zoneId: "human-meadow", flowerType: "wild-rose", x: 200, y: 350 },
-  { zoneId: "human-meadow", flowerType: "wild-rose", x: 500, y: 250 },
-  { zoneId: "human-meadow", flowerType: "dandelion", x: 300, y: 150 },
-  { zoneId: "human-meadow", flowerType: "dandelion", x: 600, y: 400 },
-  { zoneId: "human-meadow", flowerType: "dandelion", x: 450, y: 550 },
-  { zoneId: "human-meadow", flowerType: "clover", x: 250, y: 500 },
-  { zoneId: "human-meadow", flowerType: "clover", x: 700, y: 300 },
-  { zoneId: "human-meadow", flowerType: "lavender", x: 550, y: 450 },
-  { zoneId: "human-meadow", flowerType: "sage", x: 800, y: 600 },
+  // village-square (starter zone) - common flowers everywhere
+  { zoneId: "village-square", flowerType: "meadow-lily", x: 150, y: 300 },
+  { zoneId: "village-square", flowerType: "meadow-lily", x: 400, y: 200 },
+  { zoneId: "village-square", flowerType: "wild-rose", x: 200, y: 350 },
+  { zoneId: "village-square", flowerType: "wild-rose", x: 500, y: 250 },
+  { zoneId: "village-square", flowerType: "dandelion", x: 300, y: 150 },
+  { zoneId: "village-square", flowerType: "dandelion", x: 600, y: 400 },
+  { zoneId: "village-square", flowerType: "dandelion", x: 450, y: 550 },
+  { zoneId: "village-square", flowerType: "clover", x: 250, y: 500 },
+  { zoneId: "village-square", flowerType: "clover", x: 700, y: 300 },
+  { zoneId: "village-square", flowerType: "lavender", x: 550, y: 450 },
+  { zoneId: "village-square", flowerType: "sage", x: 800, y: 600 },
 
   // wild-meadow (mid-tier) - uncommon and rare flowers
   { zoneId: "wild-meadow", flowerType: "meadow-lily", x: 100, y: 200 },

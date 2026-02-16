@@ -25,7 +25,7 @@ type Page = "landing" | "game" | "marketplace" | "x402";
 function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
   const [characterOpen, setCharacterOpen] = React.useState(false);
-  const [currentZone, setCurrentZone] = React.useState<string | null>("human-meadow");
+  const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

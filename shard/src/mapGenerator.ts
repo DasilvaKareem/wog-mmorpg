@@ -961,7 +961,7 @@ export function getChunkFromMap(zoneId: string, cx: number, cz: number): ChunkPa
   // Check if chunk overlaps the map at all
   if (originTx >= map.width || originTz >= map.height || cx < 0 || cz < 0) return null;
 
-  const ground: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(TILE.GRASS_PLAIN);
+  const ground: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(-1);
   const overlay: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(TILE.EMPTY);
   const elevation: number[] = new Array(CHUNK_SIZE * CHUNK_SIZE).fill(0);
 

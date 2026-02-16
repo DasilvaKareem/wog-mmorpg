@@ -43,7 +43,7 @@ function truncateAddress(address: string): string {
 export function ColiseumDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [npc, setNpc] = React.useState<Entity | null>(null);
-  const [zoneId, setZoneId] = React.useState("human-meadow");
+  const [zoneId, setZoneId] = React.useState("village-square");
   const [selectedBattleId, setSelectedBattleId] = React.useState<string | null>(null);
   const [activeBattles, setActiveBattles] = React.useState<ActiveBattle[]>([]);
   const [leaderboard, setLeaderboard] = React.useState<LeaderboardEntry[]>([]);

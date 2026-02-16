@@ -67,7 +67,7 @@ function formatTimeRemaining(endsAt: number): string {
 export function AuctionHouseDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [npcInfo, setNpcInfo] = React.useState<NpcInfo | null>(null);
-  const [zoneId, setZoneId] = React.useState("human-meadow");
+  const [zoneId, setZoneId] = React.useState("village-square");
   const [auctions, setAuctions] = React.useState<Auction[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("browse");

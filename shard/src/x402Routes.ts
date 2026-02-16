@@ -36,7 +36,7 @@ export function registerX402Routes(server: FastifyInstance): void {
       payment_methods: ["free", "stripe", "crypto"],
       supported_races: RACE_DEFINITIONS.map(r => r.id),
       supported_classes: CLASS_DEFINITIONS.map(c => c.id),
-      deployment_zones: ["human-meadow", "wild-meadow", "dark-forest"],
+      deployment_zones: ["village-square", "wild-meadow", "dark-forest"],
       documentation: "https://github.com/yourusername/wog-mmorpg/blob/master/docs/X402_AGENT_DEPLOYMENT.md",
       examples: {
         free_deployment: {
@@ -52,7 +52,7 @@ export function registerX402Routes(server: FastifyInstance): void {
             payment: {
               method: "free",
             },
-            deployment_zone: "human-meadow",
+            deployment_zone: "village-square",
             metadata: {
               source: "my-ai-service",
               version: "1.0",
@@ -93,7 +93,7 @@ export function registerX402Routes(server: FastifyInstance): void {
     }
 
     // Validate deployment zone
-    const validZones = ["human-meadow", "wild-meadow", "dark-forest"];
+    const validZones = ["village-square", "wild-meadow", "dark-forest"];
     if (!validZones.includes(deploymentZone)) {
       return reply.status(400).send({
         success: false,

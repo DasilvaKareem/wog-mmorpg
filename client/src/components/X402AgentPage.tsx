@@ -20,7 +20,7 @@ const CLASSES = [
 ];
 
 const ZONES = [
-  { id: "human-meadow", name: "Human Meadow", desc: "Lv 1-5, peaceful starter zone" },
+  { id: "village-square", name: "Village Square", desc: "Lv 1-5, peaceful starter zone" },
   { id: "wild-meadow", name: "Wild Meadow", desc: "Lv 5-10, moderate danger" },
   { id: "dark-forest", name: "Dark Forest", desc: "Lv 10-16, high danger" },
 ];

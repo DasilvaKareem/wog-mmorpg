@@ -70,7 +70,7 @@ const FEATURES = [
 ];
 
 const ZONES = [
-  { name: "Human Meadow", level: "Lv 1-5", color: "#54f28b", desc: "Peaceful grassland — 7 mob types, starter quests, merchants, and gathering nodes." },
+  { name: "Village Square", level: "Lv 1-5", color: "#54f28b", desc: "Peaceful grassland — 7 mob types, starter quests, merchants, and gathering nodes." },
   { name: "Wild Meadow", level: "Lv 5-10", color: "#ffcc00", desc: "Open fields — bears, spiders, mid-tier quests, and rare herbs." },
   { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
 ];

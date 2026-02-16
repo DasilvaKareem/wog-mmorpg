@@ -44,7 +44,7 @@ async function spawnCharacterFromNFT() {
   console.log("🎮 Spawning in game world...\n");
 
   const spawn = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "player",
     name: character.name,
     x: 150,

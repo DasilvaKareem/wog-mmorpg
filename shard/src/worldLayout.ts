@@ -28,7 +28,7 @@ export interface WorldLayout {
 
 export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "village-square": 1,
-  "human-meadow": 1,
+  "village-square": 1,
   "wild-meadow": 5,
   "dark-forest": 10,
 };

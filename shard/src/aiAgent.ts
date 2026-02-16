@@ -43,15 +43,15 @@ interface Entity {
   zoneId?: string;
 }
 
-const ZONES = ["human-meadow", "wild-meadow", "dark-forest"];
+const ZONES = ["village-square", "wild-meadow", "dark-forest"];
 const ZONE_QUEST_GIVERS: Record<string, string> = {
-  "human-meadow": "Guard Captain Marcus",
+  "village-square": "Guard Captain Marcus",
   "wild-meadow": "Ranger Thornwood",
   "dark-forest": "Priestess Selene",
 };
 
 let agentId: string | null = null;
-let currentZone = "human-meadow";
+let currentZone = "village-square";
 
 async function apiCall(method: string, path: string, body?: any): Promise<any> {
   const url = `${API_BASE}${path}`;
@@ -366,7 +366,7 @@ async function main() {
     await sleep(2000);
 
     // Complete all quests in Human Meadow (full quest chain)
-    await playThroughZone("human-meadow", 7);
+    await playThroughZone("village-square", 7);
 
     console.log(`
 ╔═══════════════════════════════════════════════════════════╗

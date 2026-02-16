@@ -33,7 +33,7 @@ export interface ActiveQuest {
 
 // Predefined quests offered by NPCs
 export const QUEST_CATALOG: Quest[] = [
-  // === NEWCOMER'S WELCOME — Talk Quest Chain (human-meadow, 8 quests, 900 XP → L3) ===
+  // === NEWCOMER'S WELCOME — Talk Quest Chain (village-square, 8 quests, 900 XP → L3) ===
 
   {
     id: "welcome_adventurer",
@@ -574,7 +574,7 @@ export const QUEST_CATALOG: Quest[] = [
   // ═══════════════════════════════════════════════════════════════════════
 
   // ── CHAIN 1: THE ESSENCE AWAKENING (3 zones, 6 quests) ─────────────
-  // Scholar Elowen (human-meadow) → Druid Caelum (wild-meadow) → Arcanist Voss (dark-forest)
+  // Scholar Elowen (village-square) → Druid Caelum (wild-meadow) → Arcanist Voss (dark-forest)
   // Theme: What is essence? Cruton particles, the fundamental magic of Arcadia,
   //         and the growing cultural rift between traditionalists and modernists.
 
@@ -691,7 +691,7 @@ export const QUEST_CATALOG: Quest[] = [
     },
   },
 
-  // ── CHAIN 2: WHISPERS OF THE AURORAL PLAINS (human-meadow, 5 quests) ──
+  // ── CHAIN 2: WHISPERS OF THE AURORAL PLAINS (village-square, 5 quests) ──
   // Elder Mirael — an old storyteller who remembers the legends
   // Theme: The Auroral Plains, Lake Lumina, cosmic origins of essence,
   //         and the bio-essence phenomenon that makes the land shimmer.
@@ -989,7 +989,7 @@ export const QUEST_CATALOG: Quest[] = [
   },
 
   // ── CHAIN 5: THE FALL AND RISE OF ARCADIA (3 zones, 7 quests) ──────
-  // Chronicler Orin (human-meadow) → Sage Thessaly (wild-meadow) → Remnant Keeper Nyx (dark-forest)
+  // Chronicler Orin (village-square) → Sage Thessaly (wild-meadow) → Remnant Keeper Nyx (dark-forest)
   // Theme: The Arcadian Empire's rise and decline, Solaris, Aurundel the sky-city,
   //         Library of Selerion, and whether Arcadia can find a new golden age.
 

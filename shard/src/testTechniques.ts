@@ -20,7 +20,7 @@ async function testTechniques() {
   // 1. Spawn a warrior
   console.log("1️⃣  Spawning Level 5 Warrior...");
   const spawn = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "player",
     name: "Technique Tester",
     x: 100,
@@ -37,7 +37,7 @@ async function testTechniques() {
   // 2. Find trainer
   console.log("2️⃣  Finding class trainer...");
   const state = await api("GET", "/state");
-  const trainer = Object.entries(state.zones["human-meadow"].entities)
+  const trainer = Object.entries(state.zones["village-square"].entities)
     .find(([_, e]: any) => e.type === "trainer");
   if (!trainer) throw new Error("No trainer found");
   const trainerId = trainer[0];
@@ -45,7 +45,7 @@ async function testTechniques() {
 
   // 3. Get available techniques
   console.log("3️⃣  Getting available techniques...");
-  const available = await api("GET", `/techniques/available/human-meadow/${playerId}`);
+  const available = await api("GET", `/techniques/available/village-square/${playerId}`);
   console.log(`✅ Available techniques: ${available.techniques.length}`);
   available.techniques.forEach((t: any) => {
     console.log(`   - ${t.name} (Level ${t.levelRequired}, ${t.goldCost}g, ${t.essenceCost} essence)`);
@@ -58,7 +58,7 @@ async function testTechniques() {
   await mintGold(WALLET, "50");
 
   const learn = await api("POST", "/techniques/learn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     playerEntityId: playerId,
     techniqueId: "warrior_heroic_strike",
     trainerEntityId: trainerId,
@@ -70,7 +70,7 @@ async function testTechniques() {
   // 5. Spawn a test mob
   console.log("5️⃣  Spawning test mob...");
   const mob = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Training Dummy",
     x: 100,
@@ -84,7 +84,7 @@ async function testTechniques() {
   // 6. Use technique on mob
   console.log("6️⃣  Using Heroic Strike on mob...");
   const use = await api("POST", "/techniques/use", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     casterEntityId: playerId,
     techniqueId: "warrior_heroic_strike",
     targetEntityId: mobId,

@@ -122,7 +122,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
       reply.code(400);
       return {
         error: "You must learn the Mining profession from a trainer first",
-        hint: "Find Grizzled Miner Torvik in human-meadow to learn Mining",
+        hint: "Find Grizzled Miner Torvik in village-square to learn Mining",
       };
     }
 

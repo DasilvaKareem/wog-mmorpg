@@ -146,7 +146,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   const [sellStartPrice, setSellStartPrice] = React.useState(0);
   const [sellBuyoutPrice, setSellBuyoutPrice] = React.useState(0);
   const [sellDuration, setSellDuration] = React.useState("60");
-  const [sellZone, setSellZone] = React.useState("human-meadow");
+  const [sellZone, setSellZone] = React.useState("village-square");
   const [selling, setSelling] = React.useState(false);
 
   // Detail view
@@ -754,7 +754,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                         </label>
                         <div className="grid grid-cols-3 gap-1">
                           {[
-                            { label: "Meadow", value: "human-meadow", color: "#54f28b" },
+                            { label: "Village", value: "village-square", color: "#54f28b" },
                             { label: "Wilds", value: "wild-meadow", color: "#ffcc00" },
                             { label: "Forest", value: "dark-forest", color: "#ff4d6d" },
                           ].map((z) => (

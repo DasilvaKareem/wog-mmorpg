@@ -28,7 +28,7 @@ const WALLET = privateKeyToAccount(PRIVATE_KEY as `0x${string}`).address;
 
 type ApiFunc = ReturnType<typeof createAuthenticatedAPI>;
 let api: ApiFunc;
-const ZONE = "human-meadow";
+const ZONE = "village-square";
 
 // =============================================================================
 //  Types & Scoreboard
@@ -228,6 +228,140 @@ async function runTalkQuests(agent: Agent) {
     await sleep(300);
   }
   log(agent.team, agent.role, "Quest chain complete!");
+}
+
+// =============================================================================
+//  Lore Quests — Strong Weapon Rewards
+// =============================================================================
+
+const LORE_NPC_ROUTE = [
+  { name: "Scholar Elowen", x: 120, y: 380 },
+  { name: "Elder Mirael", x: 80, y: 300 },
+  { name: "Chronicler Orin", x: 60, y: 340 },
+];
+
+async function runLoreQuests(agent: Agent) {
+  log(agent.team, agent.role, "Running lore quests for weapon rewards...");
+  for (const npc of LORE_NPC_ROUTE) {
+    await moveTo(agent.id, npc.x, npc.y);
+    const npcId = await findEntityByName(npc.name);
+    if (!npcId) continue;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
+        log(agent.team, agent.role, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g${result.rewards?.items?.length ? " + items!" : ""}`);
+      } catch { break; }
+      await sleep(300);
+    }
+  }
+  log(agent.team, agent.role, "Lore quests complete — stronger weapons acquired!");
+}
+
+// =============================================================================
+//  Profession Tutorials — Free Tools & XP
+// =============================================================================
+
+const PROFESSION_NPC_ROUTE = [
+  { name: "Grizzled Miner Torvik", x: 260, y: 420 },
+  { name: "Herbalist Willow", x: 340, y: 420 },
+  { name: "Chef Gastron", x: 460, y: 420 },
+  { name: "Huntsman Greaves", x: 300, y: 180 },
+  { name: "Alchemist Mirelle", x: 380, y: 420 },
+  { name: "Tanner Hilda", x: 420, y: 420 },
+  { name: "Gemcutter Orik", x: 500, y: 420 },
+];
+
+async function runProfessionTutorials(agent: Agent) {
+  log(agent.team, agent.role, "Running profession tutorials for XP + tools...");
+  for (const npc of PROFESSION_NPC_ROUTE) {
+    await moveTo(agent.id, npc.x, npc.y);
+    const npcId = await findEntityByName(npc.name);
+    if (!npcId) continue;
+    try {
+      const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
+      log(agent.team, agent.role, `${npc.name} tutorial -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
+    } catch {}
+    await sleep(300);
+  }
+  log(agent.team, agent.role, "Profession tutorials done!");
+}
+
+// =============================================================================
+//  Guild DAO — Create Team Guild
+// =============================================================================
+
+const guildIds: Record<string, number> = {};
+
+async function createTeamGuild(teamName: string) {
+  const leader = teams[teamName][0];
+  const guildName = teamName === "ALPHA" ? "Alpha Legion" : "Bravo Vanguard";
+  log(teamName, "GUILD", `${leader.name} founding DAO "${guildName}"...`);
+  try {
+    const result = await api("POST", "/guild/create", {
+      founderAddress: WALLET,
+      name: guildName,
+      description: `Team ${teamName} DAO — forged in battle, united in purpose.`,
+      initialDeposit: 100,
+    });
+    guildIds[teamName] = result.guildId;
+    log(teamName, "GUILD", `DAO "${guildName}" created! (ID: ${result.guildId}, cost: ${result.totalCost}g)`);
+    try {
+      await api("POST", `/guild/${result.guildId}/deposit`, { memberAddress: WALLET, amount: 50 });
+      log(teamName, "GUILD", "Deposited 50g to DAO treasury");
+    } catch {}
+  } catch (e: any) {
+    log(teamName, "GUILD", `DAO creation failed: ${e.message?.slice(0, 80)}`);
+  }
+}
+
+// =============================================================================
+//  Equip Upgraded Gear — Stronger Weapons from Quests
+// =============================================================================
+
+const UPGRADED_WEAPONS = [
+  { tokenId: 113, name: "Masterwork Battle Axe" },      // +27 STR
+  { tokenId: 111, name: "Masterwork Steel Longsword" },  // +21 STR
+  { tokenId: 108, name: "Reinforced Battle Axe" },       // +23 STR
+  { tokenId: 106, name: "Reinforced Steel Longsword" },  // +18 STR
+  { tokenId: 105, name: "Reinforced Iron Sword" },       // +10 STR
+  { tokenId: 5, name: "Battle Axe" },                    // +18 ATK
+  { tokenId: 3, name: "Steel Longsword" },               // +14 ATK
+];
+
+const UPGRADED_ARMOR = [
+  { tokenId: 9, name: "Chainmail Shirt" },               // +10 DEF
+  { tokenId: 98, name: "Reinforced Hide Vest" },         // +8 DEF, +4 AGI
+];
+
+const UPGRADED_ACCESSORIES = [
+  { tokenId: 125, name: "Diamond Amulet" },              // +5 DEF, +8 HP, +3 FAITH
+  { tokenId: 126, name: "Shadow Opal Amulet" },          // +4 STR, +3 AGI, +2 LUCK
+  { tokenId: 122, name: "Ruby Ring" },                    // +4 STR, +6 HP
+];
+
+async function equipUpgradedGear(agent: Agent) {
+  log(agent.team, agent.role, "Equipping upgraded weapons from quest rewards...");
+  for (const weapon of UPGRADED_WEAPONS) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: weapon.tokenId, entityId: agent.id, walletAddress: WALLET });
+      log(agent.team, agent.role, `Equipped ${weapon.name}!`);
+      break;
+    } catch {}
+  }
+  for (const armor of UPGRADED_ARMOR) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: armor.tokenId, entityId: agent.id, walletAddress: WALLET });
+      log(agent.team, agent.role, `Equipped ${armor.name}!`);
+      break;
+    } catch {}
+  }
+  for (const acc of UPGRADED_ACCESSORIES) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: acc.tokenId, entityId: agent.id, walletAddress: WALLET });
+      log(agent.team, agent.role, `Equipped ${acc.name}!`);
+      break;
+    } catch {}
+  }
 }
 
 // =============================================================================
@@ -794,11 +928,32 @@ async function main() {
     ...teams.BRAVO.map((a) => runTalkQuests(a)),
   ]);
 
+  // Lore quests — strong weapon rewards
+  banner("SETUP: LORE QUESTS (weapon rewards)");
+  await Promise.all([
+    ...teams.ALPHA.map((a) => runLoreQuests(a)),
+    ...teams.BRAVO.map((a) => runLoreQuests(a)),
+  ]);
+
+  // Profession tutorials — free XP + tools
+  banner("SETUP: PROFESSION TUTORIALS");
+  await Promise.all([
+    ...teams.ALPHA.map((a) => runProfessionTutorials(a)),
+    ...teams.BRAVO.map((a) => runProfessionTutorials(a)),
+  ]);
+
   // Equip gear
   banner("SETUP: EQUIP STARTER GEAR");
   await Promise.all([
     ...teams.ALPHA.map((a) => equipGear(a)),
     ...teams.BRAVO.map((a) => equipGear(a)),
+  ]);
+
+  // Equip upgraded weapons from quest rewards
+  banner("SETUP: EQUIP UPGRADED WEAPONS");
+  await Promise.all([
+    ...teams.ALPHA.map((a) => equipUpgradedGear(a)),
+    ...teams.BRAVO.map((a) => equipUpgradedGear(a)),
   ]);
 
   // Learn techniques
@@ -807,6 +962,12 @@ async function main() {
     ...teams.ALPHA.map((a) => learnAllTechniques(a)),
     ...teams.BRAVO.map((a) => learnAllTechniques(a)),
   ]);
+
+  // Create guild DAOs
+  banner("SETUP: CREATE GUILD DAOs");
+  await createTeamGuild("ALPHA");
+  await sleep(1000);
+  await createTeamGuild("BRAVO");
 
   // Print initial status
   console.log("\n  Initial Party Status:");

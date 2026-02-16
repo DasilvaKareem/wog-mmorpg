@@ -25,7 +25,7 @@ async function main() {
   // Test 1: List portals in all zones
   console.log("\n1️⃣  Listing portals in all zones...\n");
 
-  for (const zoneId of ["human-meadow", "wild-meadow", "dark-forest"]) {
+  for (const zoneId of ["village-square", "wild-meadow", "dark-forest"]) {
     const portals = await api("GET", `/portals/${zoneId}`);
     console.log(`📍 ${portals.zoneName} (${zoneId})`);
     if (portals.portals.length === 0) {
@@ -40,7 +40,7 @@ async function main() {
   }
 
   // Test 2: Spawn a test agent
-  console.log("\n2️⃣  Spawning test agent in human-meadow...\n");
+  console.log("\n2️⃣  Spawning test agent in village-square...\n");
 
   const testWallet = process.env.AGENT_WALLET_ADDRESS;
   if (!testWallet) {
@@ -53,7 +53,7 @@ async function main() {
   const testToken = "test-token"; // You'd need a real token
 
   const spawn = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "player",
     name: "Zone Transition Tester",
     x: 850, // Near portal at (900, 500)
@@ -71,7 +71,7 @@ async function main() {
   // Test 3: Check distance to portal
   console.log("\n3️⃣  Checking distance to portal...\n");
 
-  const portals = await api("GET", "/portals/human-meadow");
+  const portals = await api("GET", "/portals/village-square");
   const meadowExit = portals.portals[0];
   const dx = meadowExit.position.x - spawn.spawned.x;
   const dy = meadowExit.position.z - spawn.spawned.y;
@@ -82,7 +82,7 @@ async function main() {
     console.log(`   ⚠️  Too far! Moving closer...`);
 
     await api("POST", "/command", {
-      zoneId: "human-meadow",
+      zoneId: "village-square",
       entityId,
       action: "move",
       x: meadowExit.position.x,
@@ -103,7 +103,7 @@ async function main() {
   try {
     const result = await api("POST", "/transition/auto", {
       walletAddress: testWallet,
-      zoneId: "human-meadow",
+      zoneId: "village-square",
       entityId,
     });
 
@@ -159,8 +159,8 @@ async function main() {
       console.log(`   Position: (${result2.entity.x}, ${result2.entity.y})`);
     }
 
-    // Test 7: Return to human-meadow
-    console.log("\n7️⃣  Returning to human-meadow...\n");
+    // Test 7: Return to village-square
+    console.log("\n7️⃣  Returning to village-square...\n");
 
     // Go back through portals
     const darkPortals = await api("GET", "/portals/dark-forest");
@@ -183,7 +183,7 @@ async function main() {
       entityId,
     });
 
-    // Then to human-meadow
+    // Then to village-square
     await api("POST", "/command", {
       zoneId: "wild-meadow",
       entityId,
@@ -210,7 +210,7 @@ async function main() {
 
   // Cleanup
   console.log("\n🧹 Cleaning up test entity...\n");
-  await api("DELETE", `/spawn/human-meadow/${entityId}`);
+  await api("DELETE", `/spawn/village-square/${entityId}`);
   console.log("✅ Test complete!");
 }
 

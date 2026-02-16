@@ -523,7 +523,7 @@ export class WorldScene extends Phaser.Scene {
 
   /** Fallback to legacy single-zone loading if world layout unavailable */
   private async initLegacyFallback(): Promise<void> {
-    const zoneId = "human-meadow";
+    const zoneId = "village-square";
     this.currentZoneLabel = zoneId;
     gameBus.emit("zoneChanged", { zoneId });
 
@@ -546,7 +546,7 @@ export class WorldScene extends Phaser.Scene {
   private async pollAllZones(): Promise<void> {
     if (!this.worldLayout.loaded) {
       // Fallback: poll single zone
-      const data = await fetchZone(this.currentZoneLabel || "human-meadow");
+      const data = await fetchZone(this.currentZoneLabel || "village-square");
       if (data) {
         this.connected = true;
         this.tick = data.tick;

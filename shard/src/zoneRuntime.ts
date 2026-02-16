@@ -185,7 +185,7 @@ const ARMOR_SLOTS: ArmorSlot[] = [
 
 // Graveyard spawn locations per zone
 const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
-  "human-meadow": { x: 100, y: 100 }, // Safe corner near merchants
+  "village-square": { x: 100, y: 100 }, // Safe corner near merchants
   "wild-meadow": { x: 50, y: 50 },
   "dark-forest": { x: 50, y: 50 },
   "village-square": { x: 150, y: 150 },

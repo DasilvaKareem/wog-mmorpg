@@ -60,7 +60,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const [address, setAddress] = React.useState<string | null>(walletManager.address);
   const [balance, setBalance] = React.useState<WalletBalance | null>(walletManager.balance);
   const [loading, setLoading] = React.useState(false);
-  const [zoneId, setZoneId] = React.useState("human-meadow");
+  const [zoneId, setZoneId] = React.useState("village-square");
   const [characterProgress, setCharacterProgress] = React.useState<WalletCharacterProgress | null>(null);
   const [characterLoading, setCharacterLoading] = React.useState(false);
   const [professions, setProfessions] = React.useState<ProfessionsResponse | null>(null);

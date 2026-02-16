@@ -151,7 +151,7 @@ export class TilemapRenderer {
         const idx = y * CHUNK_SIZE + x;
         const g = chunk.payload.ground[idx];
         const gMapped = useOverworld ? mapOldTileToOverworld(g) : g;
-        groundRow.push(gMapped >= 0 ? gMapped : fallbackGround);
+        groundRow.push(g === -1 ? -1 : (gMapped >= 0 ? gMapped : fallbackGround));
         const o = chunk.payload.overlay[idx];
         const oMapped = useOverworld && o >= 0 ? mapOldTileToOverworld(o) : o;
         overlayRow.push(oMapped >= 0 ? oMapped : -1);
@@ -532,7 +532,7 @@ export class TilemapRenderer {
   private static fallbackTerrainV2(zoneId: string): TerrainGridDataV2 {
     const ZONE_DEFAULTS: Record<string, { w: number; h: number; biome: string }> = {
       "village-square": { w: 30, h: 30, biome: "village" },
-      "human-meadow": { w: 100, h: 100, biome: "grassland" },
+      "village-square": { w: 100, h: 100, biome: "grassland" },
       "wild-meadow": { w: 50, h: 50, biome: "grassland" },
       "dark-forest": { w: 60, h: 60, biome: "forest" },
     };

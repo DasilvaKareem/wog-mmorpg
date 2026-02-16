@@ -8,7 +8,7 @@ import { useZoneList } from "@/hooks/useZoneList";
 
 export function ZoneSelector(): React.ReactElement {
   const { zones, loading } = useZoneList();
-  const [currentZone, setCurrentZone] = React.useState("human-meadow");
+  const [currentZone, setCurrentZone] = React.useState("village-square");
 
   useGameBridge("zoneChanged", ({ zoneId }) => {
     setCurrentZone(zoneId);

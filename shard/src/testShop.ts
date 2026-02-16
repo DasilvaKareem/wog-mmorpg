@@ -9,7 +9,7 @@ async function testShop() {
 
   // Get merchant
   const state = await fetch(`${API}/state`).then(r => r.json());
-  const merchant = Object.entries(state.zones["human-meadow"].entities)
+  const merchant = Object.entries(state.zones["village-square"].entities)
     .find(([_, e]: any) => e.type === "merchant");
 
   if (!merchant) {
@@ -21,7 +21,7 @@ async function testShop() {
   console.log(`✅ Found merchant: ${(merchant[1] as any).name}\n`);
 
   // Get shop items
-  const shop = await fetch(`${API}/shop/npc/human-meadow/${merchantId}`).then(r => r.json());
+  const shop = await fetch(`${API}/shop/npc/village-square/${merchantId}`).then(r => r.json());
   const healthPotion = shop.items?.find((i: any) => i.name === "Health Potion");
 
   if (!healthPotion) {

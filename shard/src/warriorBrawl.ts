@@ -33,7 +33,7 @@ const WALLET = privateKeyToAccount(PRIVATE_KEY as `0x${string}`).address;
 
 type ApiFunc = ReturnType<typeof createAuthenticatedAPI>;
 let api: ApiFunc;
-const ZONE = "human-meadow";
+const ZONE = "village-square";
 
 // =============================================================================
 //  Types
@@ -170,6 +170,109 @@ async function runTalkQuests(w: Warrior) {
       log(w.name, `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
     } catch {}
     await sleep(300);
+  }
+}
+
+// =============================================================================
+//  Lore Quests — Strong Weapon Rewards
+// =============================================================================
+
+const LORE_NPC_ROUTE = [
+  { name: "Scholar Elowen", x: 120, y: 380 },
+  { name: "Elder Mirael", x: 80, y: 300 },
+  { name: "Chronicler Orin", x: 60, y: 340 },
+];
+
+async function runLoreQuests(w: Warrior) {
+  log(w.name, "Running lore quests for weapon rewards...");
+  for (const npc of LORE_NPC_ROUTE) {
+    await moveTo(w.id, npc.x, npc.y);
+    const npcId = await findEntityByName(npc.name);
+    if (!npcId) continue;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: w.id, npcEntityId: npcId });
+        log(w.name, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g${result.rewards?.items?.length ? " + items!" : ""}`);
+      } catch { break; }
+      await sleep(300);
+    }
+  }
+  log(w.name, "Lore quests done — got the good weapons now");
+}
+
+// =============================================================================
+//  Guild DAO — The Boys DAO
+// =============================================================================
+
+let brawlGuildId: number | null = null;
+
+async function createBrawlGuild() {
+  const leader = warriors[0];
+  log(leader.name, 'Founding "The Boys DAO"...');
+  try {
+    const result = await api("POST", "/guild/create", {
+      founderAddress: WALLET,
+      name: "The Boys",
+      description: "Eight warriors, one goal: maximum gains. No skipping leg day.",
+      initialDeposit: 100,
+    });
+    brawlGuildId = result.guildId;
+    log(leader.name, `DAO "The Boys" created! (ID: ${result.guildId}, cost: ${result.totalCost}g)`);
+    try {
+      await api("POST", `/guild/${result.guildId}/deposit`, { memberAddress: WALLET, amount: 100 });
+      log(leader.name, "Deposited 100g to The Boys DAO treasury — investing in gains");
+    } catch {}
+  } catch (e: any) {
+    log(leader.name, `DAO creation failed: ${e.message?.slice(0, 80)}`);
+  }
+}
+
+// =============================================================================
+//  Equip Upgraded Gear — Stronger Weapons from Quests
+// =============================================================================
+
+const UPGRADED_WEAPONS = [
+  { tokenId: 113, name: "Masterwork Battle Axe" },      // +27 STR
+  { tokenId: 111, name: "Masterwork Steel Longsword" },  // +21 STR
+  { tokenId: 108, name: "Reinforced Battle Axe" },       // +23 STR
+  { tokenId: 106, name: "Reinforced Steel Longsword" },  // +18 STR
+  { tokenId: 105, name: "Reinforced Iron Sword" },       // +10 STR
+  { tokenId: 5, name: "Battle Axe" },                    // +18 ATK
+  { tokenId: 3, name: "Steel Longsword" },               // +14 ATK
+];
+
+const UPGRADED_ARMOR = [
+  { tokenId: 9, name: "Chainmail Shirt" },               // +10 DEF
+  { tokenId: 98, name: "Reinforced Hide Vest" },         // +8 DEF, +4 AGI
+];
+
+const UPGRADED_ACCESSORIES = [
+  { tokenId: 125, name: "Diamond Amulet" },              // +5 DEF, +8 HP, +3 FAITH
+  { tokenId: 126, name: "Shadow Opal Amulet" },          // +4 STR, +3 AGI, +2 LUCK
+  { tokenId: 122, name: "Ruby Ring" },                    // +4 STR, +6 HP
+];
+
+async function equipUpgradedGear(w: Warrior) {
+  for (const weapon of UPGRADED_WEAPONS) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: weapon.tokenId, entityId: w.id, walletAddress: WALLET });
+      log(w.name, `Equipped ${weapon.name} — now we're talking`);
+      break;
+    } catch {}
+  }
+  for (const armor of UPGRADED_ARMOR) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: armor.tokenId, entityId: w.id, walletAddress: WALLET });
+      log(w.name, `Equipped ${armor.name}!`);
+      break;
+    } catch {}
+  }
+  for (const acc of UPGRADED_ACCESSORIES) {
+    try {
+      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: acc.tokenId, entityId: w.id, walletAddress: WALLET });
+      log(w.name, `Equipped ${acc.name}!`);
+      break;
+    } catch {}
   }
 }
 
@@ -596,15 +699,31 @@ async function main() {
   await Promise.all(warriors.slice(0, 4).map(w => runTalkQuests(w)));
   await Promise.all(warriors.slice(4).map(w => runTalkQuests(w)));
 
-  // Equip gear + learn techniques
+  // Lore quests — strong weapon rewards
   console.log("\n============================================================");
-  console.log("  GEARING UP");
+  console.log("  LORE QUESTS (strong weapon rewards)");
+  console.log("============================================================\n");
+
+  await Promise.all(warriors.slice(0, 4).map(w => runLoreQuests(w)));
+  await Promise.all(warriors.slice(4).map(w => runLoreQuests(w)));
+
+  // Equip gear + upgraded weapons + learn techniques
+  console.log("\n============================================================");
+  console.log("  GEARING UP (upgraded weapons)");
   console.log("============================================================\n");
 
   await Promise.all(warriors.map(async (w) => {
     await equipGear(w);
+    await equipUpgradedGear(w);
     await learnTechniques(w);
   }));
+
+  // Create guild DAO
+  console.log("\n============================================================");
+  console.log("  FOUNDING THE BOYS DAO");
+  console.log("============================================================\n");
+
+  await createBrawlGuild();
 
   // Print initial status
   const firstWarrior = await getEntity(warriors[0].id);

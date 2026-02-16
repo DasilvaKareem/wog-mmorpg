@@ -28,7 +28,7 @@ interface NpcShopResponse {
 export function ShopDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [merchant, setMerchant] = React.useState<Entity | null>(null);
-  const [zoneId, setZoneId] = React.useState("human-meadow");
+  const [zoneId, setZoneId] = React.useState("village-square");
   const [items, setItems] = React.useState<CatalogItem[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [activeCategory, setActiveCategory] = React.useState("weapon");

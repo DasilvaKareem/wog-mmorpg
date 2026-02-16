@@ -22,7 +22,7 @@ interface NpcDef {
 const NPC_DEFS: NpcDef[] = [
   // Quest Giver - Offers kill quests
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "quest-giver",
     name: "Guard Captain Marcus",
     x: 150,
@@ -30,7 +30,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "merchant",
     name: "Grimwald the Trader",
     x: 180,
@@ -40,7 +40,7 @@ const NPC_DEFS: NpcDef[] = [
     shopItems: [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76],
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "merchant",
     name: "Bron the Blacksmith",
     x: 220,
@@ -51,7 +51,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Auctioneer - Regional Auction House
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "auctioneer",
     name: "Lysandra the Auctioneer",
     x: 200,
@@ -60,7 +60,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Profession Trainers
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Grizzled Miner Torvik",
     x: 260,
@@ -69,7 +69,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "mining",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Master Smith Durgan",
     x: 300,
@@ -78,7 +78,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "blacksmithing",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Herbalist Willow",
     x: 340,
@@ -87,7 +87,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "herbalism",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Alchemist Mirelle",
     x: 380,
@@ -96,7 +96,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "alchemy",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Huntsman Greaves",
     x: 420,
@@ -105,7 +105,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "skinning",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Chef Gastron",
     x: 460,
@@ -115,7 +115,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Crafting Stations
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "forge",
     name: "Ancient Forge",
     x: 280,
@@ -123,7 +123,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 9999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "alchemy-lab",
     name: "Mystical Cauldron",
     x: 360,
@@ -131,7 +131,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 9999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "enchanting-altar",
     name: "Enchanter's Altar",
     x: 320,
@@ -139,7 +139,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 9999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "campfire",
     name: "Cooking Campfire",
     x: 400,
@@ -148,7 +148,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Leatherworking & Jewelcrafting Stations
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "tanning-rack",
     name: "Sturdy Tanning Rack",
     x: 440,
@@ -156,7 +156,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 9999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "jewelers-bench",
     name: "Jeweler's Workbench",
     x: 480,
@@ -165,7 +165,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Leatherworking & Jewelcrafting Trainers
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Tanner Hilda",
     x: 500,
@@ -174,7 +174,7 @@ const NPC_DEFS: NpcDef[] = [
     teachesProfession: "leatherworking",
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "profession-trainer",
     name: "Gemcutter Orik",
     x: 540,
@@ -184,7 +184,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Class Trainers
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Thrain Ironforge - Warrior Trainer",
     x: 100,
@@ -192,7 +192,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Sister Elara - Paladin Trainer",
     x: 140,
@@ -200,7 +200,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Shade Whisper - Rogue Trainer",
     x: 180,
@@ -208,7 +208,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Sylvan Swiftarrow - Ranger Trainer",
     x: 220,
@@ -216,7 +216,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Archmage Aldric - Mage Trainer",
     x: 260,
@@ -224,7 +224,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Father Benedict - Cleric Trainer",
     x: 100,
@@ -232,7 +232,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Malakai Darkbane - Warlock Trainer",
     x: 140,
@@ -240,7 +240,7 @@ const NPC_DEFS: NpcDef[] = [
     hp: 999,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "trainer",
     name: "Master Li Chen - Monk Trainer",
     x: 180,
@@ -266,7 +266,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Arena Masters - PvP Coliseum
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "arena-master",
     name: "Gladiator Varro",
     x: 280,
@@ -292,7 +292,7 @@ const NPC_DEFS: NpcDef[] = [
   // ── Lore NPCs — Arcadian History & Essence Scholars ──────────────
   // Chain 1: The Essence Awakening (Scholar Elowen → Druid Caelum → Arcanist Voss)
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "lore-npc",
     name: "Scholar Elowen",
     x: 120,
@@ -317,7 +317,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Chain 2: Whispers of the Auroral Plains (Elder Mirael)
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "lore-npc",
     name: "Elder Mirael",
     x: 80,
@@ -344,7 +344,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Chain 5: The Fall and Rise of Arcadia (Chronicler Orin → Sage Thessaly → Remnant Keeper Nyx)
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "lore-npc",
     name: "Chronicler Orin",
     x: 60,
@@ -369,7 +369,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Guild Registrars
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "guild-registrar",
     name: "Guildmaster Theron",
     x: 240,
@@ -394,7 +394,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // Mobs
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Hungry Wolf",
     x: 520,
@@ -404,7 +404,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 18,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Hungry Wolf",
     x: 560,
@@ -414,7 +414,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 18,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Goblin Raider",
     x: 680,
@@ -424,7 +424,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 28,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Mire Slime",
     x: 740,
@@ -435,7 +435,7 @@ const NPC_DEFS: NpcDef[] = [
   },
   // New Phase 2 Mobs
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Giant Rat",
     x: 200,
@@ -445,7 +445,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 12,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Giant Rat",
     x: 240,
@@ -455,7 +455,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 12,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Giant Rat",
     x: 280,
@@ -465,7 +465,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 12,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Wild Boar",
     x: 420,
@@ -475,7 +475,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 16,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Wild Boar",
     x: 460,
@@ -485,7 +485,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 16,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Wild Boar",
     x: 500,
@@ -495,7 +495,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 16,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Bandit Scout",
     x: 800,
@@ -505,7 +505,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 35,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Bandit Scout",
     x: 840,
@@ -515,7 +515,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 35,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Bandit Scout",
     x: 780,
@@ -525,7 +525,7 @@ const NPC_DEFS: NpcDef[] = [
     xpReward: 35,
   },
   {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "mob",
     name: "Diseased Wolf",
     x: 900,

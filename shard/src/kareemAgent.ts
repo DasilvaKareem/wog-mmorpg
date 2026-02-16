@@ -17,7 +17,7 @@ const WALLET = "0xf6f0f8ca2ef85deb9eEBdBc4BC541d2D57832D4b";
 const PRIVATE_KEY = process.env.SERVER_PRIVATE_KEY!;
 
 let agentId: string;
-let currentZone = "human-meadow";
+let currentZone = "village-square";
 let partyId: string | null = null;
 let api: ReturnType<typeof createAuthenticatedAPI>;
 

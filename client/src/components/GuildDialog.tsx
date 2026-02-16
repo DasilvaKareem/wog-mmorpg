@@ -127,7 +127,7 @@ function formatTimeRemaining(seconds: number): string {
 export function GuildDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [registrar, setRegistrar] = React.useState<Entity | null>(null);
-  const [zoneId, setZoneId] = React.useState("human-meadow");
+  const [zoneId, setZoneId] = React.useState("village-square");
   const [guilds, setGuilds] = React.useState<Guild[]>([]);
   const [selectedGuild, setSelectedGuild] = React.useState<Guild | null>(null);
   const [proposals, setProposals] = React.useState<Proposal[]>([]);
