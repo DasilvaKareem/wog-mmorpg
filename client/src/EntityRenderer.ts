@@ -45,6 +45,9 @@ function colorToHex(color: number): string {
   return `#${color.toString(16).padStart(6, "0")}`;
 }
 
+/** Callback to query elevation at a world position */
+type ElevationQuery = (worldX: number, worldZ: number) => number;
+
 export class EntityRenderer {
   private scene: Phaser.Scene;
   private visuals = new Map<string, EntityVisual>();
@@ -57,6 +60,9 @@ export class EntityRenderer {
    */
   private coordScale = 1.6;
 
+  /** Optional elevation query for depth sorting */
+  private elevationQuery: ElevationQuery | null = null;
+
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
   }
@@ -64,6 +70,11 @@ export class EntityRenderer {
   /** Set coordinate scale (called when terrain loads and we know the ratio) */
   setCoordScale(scale: number): void {
     this.coordScale = scale;
+  }
+
+  /** Set elevation query for depth sorting (called once when tilemap renderer is ready) */
+  setElevationQuery(query: ElevationQuery): void {
+    this.elevationQuery = query;
   }
 
   /** Register a callback for when an entity is clicked. */
@@ -88,19 +99,22 @@ export class EntityRenderer {
     return { x: visual.sprite.x, y: visual.sprite.y };
   }
 
-  /** Find entity at world position (within radius). */
+  /** Find closest entity at world position (within radius). */
   getEntityAt(worldX: number, worldY: number, radius: number): Entity | undefined {
+    let closest: Entity | undefined;
+    let closestDistSq = radius * radius;
     for (const [id, entity] of this.entities) {
       const visual = this.visuals.get(id);
       if (!visual || !visual.sprite) continue;
       const dx = worldX - visual.sprite.x;
       const dy = worldY - visual.sprite.y;
       const distSq = dx * dx + dy * dy;
-      if (distSq <= radius * radius) {
-        return entity;
+      if (distSq <= closestDistSq) {
+        closestDistSq = distSq;
+        closest = entity;
       }
     }
-    return undefined;
+    return closest;
   }
 
   update(entities: Record<string, Entity>): void {
@@ -158,9 +172,13 @@ export class EntityRenderer {
 
     const textureKey = getEntityTextureKey(entity.type, entity.classId, entity.name);
 
+    // Elevation-aware depth: base 10 + elevation * 2
+    const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
+    const entityDepth = 10 + elev * 2;
+
     const sprite = this.scene.add
       .sprite(px, py, textureKey, 0)
-      .setDepth(10)
+      .setDepth(entityDepth)
       .setInteractive({ useHandCursor: true });
 
     sprite.on("pointerdown", () => {
@@ -187,11 +205,11 @@ export class EntityRenderer {
         strokeThickness: 2,
       })
       .setOrigin(0.5, 1)
-      .setDepth(11);
+      .setDepth(entityDepth + 1);
 
     const hpBg = this.scene.add
       .rectangle(px, py + 10, HP_BAR_W, HP_BAR_H, 0x333333)
-      .setDepth(10);
+      .setDepth(entityDepth);
 
     const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
     const hpBar = this.scene.add
@@ -202,7 +220,7 @@ export class EntityRenderer {
         HP_BAR_H,
         hpColor(hpRatio),
       )
-      .setDepth(11);
+      .setDepth(entityDepth + 1);
 
     // Party ring — colored circle around sprite
     let partyRing: Phaser.GameObjects.Arc | null = null;
@@ -210,7 +228,7 @@ export class EntityRenderer {
       partyRing = this.scene.add
         .circle(px, py, 12, 0x000000, 0)
         .setStrokeStyle(1.5, partyColor(entity.partyId), 0.8)
-        .setDepth(9);
+        .setDepth(entityDepth - 1);
     }
 
     return {
@@ -246,6 +264,15 @@ export class EntityRenderer {
         visual.sprite.play(idleAnim);
       }
     }
+
+    // Update elevation-based depth
+    const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
+    const entityDepth = 10 + elev * 2;
+    visual.sprite.setDepth(entityDepth);
+    visual.label.setDepth(entityDepth + 1);
+    visual.hpBg.setDepth(entityDepth);
+    visual.hpBar.setDepth(entityDepth + 1);
+    visual.partyRing?.setDepth(entityDepth - 1);
 
     // Update party ring: create/destroy/recolor if partyId changed
     this.syncPartyRing(visual, entity);

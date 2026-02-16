@@ -1,14 +1,14 @@
 {
   "id": "dark-forest",
   "name": "Dark Forest",
-  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 600, "z": 600 } },
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 400, "z": 400 } },
   "budget": { "maxPopulation": 30, "maxThreat": 100 },
   "pois": [
     {
       "id": "meadow-entrance",
       "name": "Meadow Entrance",
       "type": "portal",
-      "position": { "x": 20, "z": 300 },
+      "position": { "x": 13, "z": 200 },
       "radius": 12,
       "tags": [],
       "portal": {
@@ -21,15 +21,15 @@
       "id": "forest-clearing",
       "name": "Forest Clearing",
       "type": "landmark",
-      "position": { "x": 150, "z": 300 },
-      "radius": 30,
+      "position": { "x": 100, "z": 200 },
+      "radius": 20,
       "tags": ["safe-zone"]
     },
     {
       "id": "rangers-cabin",
       "name": "Ranger's Cabin",
       "type": "structure",
-      "position": { "x": 140, "z": 250 },
+      "position": { "x": 93, "z": 167 },
       "radius": 8,
       "tags": [],
       "structure": {
@@ -43,31 +43,31 @@
       "id": "dark-hollow",
       "name": "Dark Hollow",
       "type": "spawn-point",
-      "position": { "x": 350, "z": 200 },
-      "radius": 60,
+      "position": { "x": 233, "z": 133 },
+      "radius": 40,
       "tags": ["hostile", "dense"]
     },
     {
       "id": "ancient-ruins",
       "name": "Ancient Ruins",
       "type": "landmark",
-      "position": { "x": 500, "z": 400 },
-      "radius": 40,
+      "position": { "x": 333, "z": 267 },
+      "radius": 27,
       "tags": ["hostile", "boss-area"]
     },
     {
       "id": "spider-nest",
       "name": "Spider Nest",
       "type": "spawn-point",
-      "position": { "x": 400, "z": 450 },
-      "radius": 45,
+      "position": { "x": 267, "z": 300 },
+      "radius": 30,
       "tags": ["hostile"]
     },
     {
       "id": "deep-trail-end",
       "name": "Deep Trail End",
       "type": "road-node",
-      "position": { "x": 550, "z": 300 },
+      "position": { "x": 367, "z": 200 },
       "radius": 10,
       "tags": []
     }

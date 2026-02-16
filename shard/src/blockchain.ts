@@ -20,6 +20,51 @@ const serverAccount = privateKeyToAccount({
   privateKey: process.env.SERVER_PRIVATE_KEY!,
 });
 
+// =============================================================================
+//  Transaction Stats — track every on-chain tx
+// =============================================================================
+
+export interface TxStats {
+  total: number;
+  goldMints: number;
+  itemMints: number;
+  itemBurns: number;
+  characterMints: number;
+  metadataUpdates: number;
+  sfuelDistributions: number;
+  itemSeeds: number;
+  startedAt: number;
+  recentTxs: Array<{ type: string; hash: string; ts: number }>;
+}
+
+const txStats: TxStats = {
+  total: 0,
+  goldMints: 0,
+  itemMints: 0,
+  itemBurns: 0,
+  characterMints: 0,
+  metadataUpdates: 0,
+  sfuelDistributions: 0,
+  itemSeeds: 0,
+  startedAt: Date.now(),
+  recentTxs: [],
+};
+
+function recordTx(type: string, hash: string) {
+  txStats.total++;
+  txStats.recentTxs.push({ type, hash, ts: Date.now() });
+  if (txStats.recentTxs.length > 50) txStats.recentTxs.shift();
+}
+
+export function getTxStats(): TxStats & { uptime: string; txPerMinute: string } {
+  const uptimeMs = Date.now() - txStats.startedAt;
+  const uptimeMin = uptimeMs / 60000;
+  const txPerMin = uptimeMin > 0 ? (txStats.total / uptimeMin).toFixed(2) : "0";
+  const hours = Math.floor(uptimeMs / 3600000);
+  const mins = Math.floor((uptimeMs % 3600000) / 60000);
+  return { ...txStats, uptime: `${hours}h ${mins}m`, txPerMinute: txPerMin };
+}
+
 /**
  * Transaction queue — serializes all server-wallet transactions to prevent
  * nonce collisions on SKALE.  Each call to `queueTransaction` waits for every
@@ -108,6 +153,8 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
         });
         return sendTransaction({ transaction: tx, account: serverAccount });
       });
+      txStats.itemSeeds++;
+      recordTx("item-seed", receipt.transactionHash);
       console.log(
         `[items] Seeded tokenId ${item.tokenId.toString()} (${item.name}): ${receipt.transactionHash}`
       );
@@ -142,6 +189,8 @@ export async function distributeSFuel(toAddress: string): Promise<string> {
       client: thirdwebClient,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.sfuelDistributions++;
+    recordTx("sfuel", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }
@@ -155,6 +204,8 @@ export async function mintGold(toAddress: string, amount: string): Promise<strin
       amount,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.goldMints++;
+    recordTx("gold-mint", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }
@@ -180,6 +231,8 @@ export async function mintItem(
       supply: quantity,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.itemMints++;
+    recordTx("item-mint", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }
@@ -206,6 +259,8 @@ export async function burnItem(
       value: quantity,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.itemBurns++;
+    recordTx("item-burn", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }
@@ -230,6 +285,8 @@ export async function mintCharacter(
       nft,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.characterMints++;
+    recordTx("character-mint", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }
@@ -270,6 +327,8 @@ export async function updateCharacterMetadata(entity: {
       uri,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    txStats.metadataUpdates++;
+    recordTx("metadata-update", receipt.transactionHash);
     return receipt.transactionHash;
   });
 }

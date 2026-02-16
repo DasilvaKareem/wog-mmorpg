@@ -1,0 +1,8 @@
+{
+  "id": "village-square",
+  "name": "Village Square",
+  "biome": "village",
+  "width": 300,
+  "height": 300,
+  "pois": ["fountain", "general-store", "tavern"]
+}

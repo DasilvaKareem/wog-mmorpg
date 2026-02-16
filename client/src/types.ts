@@ -105,6 +105,7 @@ export interface TerrainGridDataV2 {
   tileSize: number;
   ground: number[];
   overlay: number[];
+  elevation: number[];
   biome: string;
 }
 
@@ -114,6 +115,7 @@ export interface ChunkPayloadV2 {
   zoneId: string;
   ground: number[];
   overlay: number[];
+  elevation: number[];
   biome: string;
 }
 

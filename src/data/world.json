@@ -3,5 +3,10 @@
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
     { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" }
-  ]
+  ],
+  "worldOffsets": {
+    "village-square": { "x": 0, "z": 50 },
+    "wild-meadow": { "x": 300, "z": 25 },
+    "dark-forest": { "x": 650, "z": 0 }
+  }
 }

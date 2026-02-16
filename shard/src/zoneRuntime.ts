@@ -12,6 +12,11 @@ import { getLootTable, rollDrops, rollGold } from "./lootTables.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "./techniques.js";
 import { randomUUID } from "crypto";
 import { getPlayerPartyId } from "./partySystem.js";
+import {
+  getAdjacentZone,
+  clampToZoneBounds,
+  ZONE_LEVEL_REQUIREMENTS,
+} from "./worldLayout.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -1086,6 +1091,13 @@ async function worldTick() {
       }
     }
 
+    // ── Clamp mobs to zone bounds (mobs don't transition) ──────────
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "mob" || entity.type === "boss") {
+        clampToZoneBounds(entity, zone.zoneId);
+      }
+    }
+
     // Smart auto-combat AI: players pick techniques or basic attack
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
@@ -1156,6 +1168,67 @@ async function worldTick() {
     for (const corpseId of corpsesToRemove) {
       zone.entities.delete(corpseId);
     }
+  }
+
+  // ── Seamless zone transitions (after all zones tick) ──────────────
+  const transfers: Array<{
+    entity: Entity;
+    sourceZoneId: string;
+    dest: { destZoneId: string; destLocalX: number; destLocalZ: number };
+  }> = [];
+
+  for (const zone of zones.values()) {
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player") continue;
+
+      const dest = getAdjacentZone(zone.zoneId, entity.x, entity.y);
+      if (!dest) continue;
+
+      // Level check — clamp if too low
+      const requiredLevel = ZONE_LEVEL_REQUIREMENTS[dest.destZoneId] ?? 1;
+      if ((entity.level ?? 1) < requiredLevel) {
+        clampToZoneBounds(entity, zone.zoneId);
+        entity.order = undefined;
+        continue;
+      }
+
+      transfers.push({ entity, sourceZoneId: zone.zoneId, dest });
+    }
+  }
+
+  for (const { entity, sourceZoneId, dest } of transfers) {
+    const srcZone = zones.get(sourceZoneId);
+    if (!srcZone) continue;
+
+    srcZone.entities.delete(entity.id);
+    entity.x = dest.destLocalX;
+    entity.y = dest.destLocalZ;
+    entity.order = undefined;
+
+    const destZone = getOrCreateZone(dest.destZoneId);
+    destZone.entities.set(entity.id, entity);
+
+    logZoneEvent({
+      zoneId: sourceZoneId,
+      type: "system",
+      tick: srcZone.tick,
+      message: `${entity.name} departed to ${dest.destZoneId}`,
+      entityId: entity.id,
+      entityName: entity.name,
+    });
+
+    logZoneEvent({
+      zoneId: dest.destZoneId,
+      type: "system",
+      tick: destZone.tick,
+      message: `${entity.name} arrived from ${sourceZoneId}`,
+      entityId: entity.id,
+      entityName: entity.name,
+    });
+
+    console.log(
+      `[transition] ${entity.name} moved from ${sourceZoneId} to ${dest.destZoneId} at (${dest.destLocalX}, ${dest.destLocalZ})`
+    );
   }
 }
 

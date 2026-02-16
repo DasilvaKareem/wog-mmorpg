@@ -1,14 +1,14 @@
 {
   "id": "wild-meadow",
   "name": "Wild Meadow",
-  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 500, "z": 500 } },
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 350, "z": 350 } },
   "budget": { "maxPopulation": 20, "maxThreat": 50 },
   "pois": [
     {
       "id": "village-gate",
       "name": "Village Gate",
       "type": "portal",
-      "position": { "x": 50, "z": 250 },
+      "position": { "x": 35, "z": 175 },
       "radius": 12,
       "tags": [],
       "portal": {
@@ -21,7 +21,7 @@
       "id": "crossroads",
       "name": "Crossroads",
       "type": "road-node",
-      "position": { "x": 150, "z": 250 },
+      "position": { "x": 105, "z": 175 },
       "radius": 20,
       "tags": []
     },
@@ -29,7 +29,7 @@
       "id": "traders-hut",
       "name": "Trader's Hut",
       "type": "structure",
-      "position": { "x": 170, "z": 310 },
+      "position": { "x": 119, "z": 217 },
       "radius": 8,
       "tags": [],
       "structure": {
@@ -43,7 +43,7 @@
       "id": "healers-tent",
       "name": "Healer's Tent",
       "type": "structure",
-      "position": { "x": 130, "z": 310 },
+      "position": { "x": 91, "z": 217 },
       "radius": 8,
       "tags": [],
       "structure": {
@@ -57,31 +57,31 @@
       "id": "meadow-center",
       "name": "Meadow Center",
       "type": "landmark",
-      "position": { "x": 250, "z": 250 },
-      "radius": 50,
+      "position": { "x": 175, "z": 175 },
+      "radius": 35,
       "tags": []
     },
     {
       "id": "wolf-den",
       "name": "Wolf Den",
       "type": "spawn-point",
-      "position": { "x": 350, "z": 200 },
-      "radius": 40,
+      "position": { "x": 245, "z": 140 },
+      "radius": 28,
       "tags": ["hostile"]
     },
     {
       "id": "wolf-clearing",
       "name": "Wolf Clearing",
       "type": "spawn-point",
-      "position": { "x": 400, "z": 350 },
-      "radius": 30,
+      "position": { "x": 280, "z": 245 },
+      "radius": 21,
       "tags": ["hostile"]
     },
     {
       "id": "forest-gate",
       "name": "Forest Gate",
       "type": "portal",
-      "position": { "x": 480, "z": 250 },
+      "position": { "x": 336, "z": 175 },
       "radius": 12,
       "tags": [],
       "portal": {

@@ -2,7 +2,7 @@
   "id": "dark-forest",
   "name": "Dark Forest",
   "biome": "forest",
-  "width": 1800,
-  "height": 1800,
+  "width": 400,
+  "height": 400,
   "pois": []
 }

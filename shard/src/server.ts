@@ -43,11 +43,19 @@ import { registerPredictionRoutes } from "./predictionRoutes.js";
 import { registerX402Routes } from "./x402Routes.js";
 import { registerItemRngRoutes } from "./itemRng.js";
 import { registerMarketplaceRoutes } from "./marketplace.js";
+import { getTxStats } from "./blockchain.js";
+import { getWorldLayout } from "./worldLayout.js";
 
 const server = Fastify({ logger: true });
 
 // Health check — GCP and you use this to know the shard is alive
 server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
+
+// Transaction stats — live blockchain activity dashboard
+server.get("/stats/transactions", async () => getTxStats());
+
+// World layout — zone positions for seamless world rendering
+server.get("/world/layout", async () => getWorldLayout());
 
 // Register subsystems
 server.register(cors, { origin: true });

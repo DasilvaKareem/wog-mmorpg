@@ -4,9 +4,12 @@ import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT, CLIENT_
 import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
 import { ChunkStreamManager } from "@/ChunkStreamManager";
+import { WorldLayoutManager } from "@/WorldLayoutManager";
 import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
+import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites } from "@/EntitySpriteGenerator";
+import { preloadOverworld } from "@/OverworldAtlas";
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -20,6 +23,7 @@ export class WorldScene extends Phaser.Scene {
   private entityRenderer!: EntityRenderer;
   private tilemapRenderer!: TilemapRenderer;
   private chunkManager!: ChunkStreamManager;
+  private worldLayout!: WorldLayoutManager;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private hud!: Phaser.GameObjects.Text;
   private tooltip!: Phaser.GameObjects.Text;
@@ -27,7 +31,7 @@ export class WorldScene extends Phaser.Scene {
   private tick = 0;
   private connected = false;
   private terrainLoaded = false;
-  private zoneId = "human-meadow";
+  private currentZoneLabel = "";
   private unsubscribeSwitchZone: (() => void) | null = null;
 
   /** Dynamic min zoom */
@@ -40,28 +44,26 @@ export class WorldScene extends Phaser.Scene {
   private dragStartY = 0;
   private escKey!: Phaser.Input.Keyboard.Key;
 
-  /** Chunk streaming mode enabled */
+  /** Tooltip stickiness: keep showing same entity until cursor moves far away */
+  private tooltipEntityId: string | null = null;
+
+  /** Multi-zone streaming active */
   private chunkStreamingEnabled = false;
-  private tileSize = 10;
 
   constructor() {
     super({ key: "WorldScene" });
   }
 
+  preload(): void {
+    preloadOverworld(this);
+  }
+
   create(): void {
     registerEntitySprites(this);
 
+    this.worldLayout = new WorldLayoutManager();
     this.tilemapRenderer = new TilemapRenderer(this);
     this.entityRenderer = new EntityRenderer(this);
-    this.chunkManager = new ChunkStreamManager(this.zoneId, this.tileSize);
-
-    // Wire chunk manager to tilemap renderer
-    this.chunkManager.onChunkLoaded = (chunk) => {
-      this.tilemapRenderer.addChunk(chunk);
-    };
-    this.chunkManager.onChunkUnloaded = (cx, cz) => {
-      this.tilemapRenderer.removeChunk(cx, cz);
-    };
 
     this.entityRenderer.onClick((entity) => {
       if (entity.type === "merchant" && entity.shopItems) {
@@ -156,16 +158,9 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(201)
       .setVisible(false);
 
-    // Handle window resize
-    this.scale.on(Phaser.Scale.Events.RESIZE, () => {
-      if (this.terrainLoaded && !this.chunkStreamingEnabled) {
-        this.updateCameraBounds();
-      }
-    });
-
-    // Event bus
+    // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
-      this.switchZone(zoneId);
+      this.scrollToZone(zoneId);
     });
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -173,14 +168,14 @@ export class WorldScene extends Phaser.Scene {
       this.unsubscribeSwitchZone = null;
     });
 
-    gameBus.emit("zoneChanged", { zoneId: this.zoneId });
+    // Initialize seamless world
+    void this.initSeamlessWorld();
 
-    // Initial load -- try chunk streaming, fall back to legacy
-    void this.initChunkStreaming(this.zoneId);
-    void this.pollZone();
+    // Start multi-zone entity polling
+    void this.pollAllZones();
     this.time.addEvent({
       delay: POLL_INTERVAL,
-      callback: this.pollZone,
+      callback: this.pollAllZones,
       callbackScope: this,
       loop: true,
     });
@@ -218,12 +213,17 @@ export class WorldScene extends Phaser.Scene {
     }
 
     // Update chunk streaming based on camera position
-    if (this.chunkStreamingEnabled) {
+    if (this.chunkStreamingEnabled && this.chunkManager) {
       const cameraCenterX = cam.scrollX + cam.width / (2 * cam.zoom);
       const cameraCenterY = cam.scrollY + cam.height / (2 * cam.zoom);
+      // Convert pixel coords to world game units
       const worldX = cameraCenterX / this.tilemapRenderer.coordScale;
       const worldZ = cameraCenterY / this.tilemapRenderer.coordScale;
       this.chunkManager.update(worldX, worldZ);
+
+      // Update zone label based on camera center
+      const zoneId = this.worldLayout.pixelToZone(cameraCenterX, cameraCenterY);
+      this.currentZoneLabel = zoneId ?? "wilderness";
     }
 
     // Build HUD text
@@ -237,7 +237,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.hud.setText(
       [
-        `Zone: ${this.zoneId}`,
+        `Zone: ${this.currentZoneLabel}`,
         `Tick: ${this.tick}`,
         `Entities: ${this.entityRenderer.entityCount}`,
         `Zoom: ${cam.zoom.toFixed(1)}x`,
@@ -256,103 +256,56 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private updateTooltip(): void {
+    // Hide tooltip while dragging the camera
+    if (this.isDragging) {
+      this.tooltip.setVisible(false);
+      this.tooltipBg.setVisible(false);
+      this.tooltipEntityId = null;
+      return;
+    }
+
     const pointer = this.input.activePointer;
     const cam = this.cameras.main;
     const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
-    const hoveredEntity = this.entityRenderer.getEntityAt(worldPoint.x, worldPoint.y, 16);
 
-    if (hoveredEntity) {
-      const lines: string[] = [];
-      const e = hoveredEntity;
+    // Zoom-compensated radius: 16 world pixels at zoom 1, scales up when zoomed out
+    // so entities are always easy to hover. Min 16, max 64 world pixels.
+    const baseRadius = 16;
+    const zoomRadius = Math.min(64, Math.max(baseRadius, baseRadius / cam.zoom));
 
-      const typeTag = this.entityTypeTag(e.type);
-      lines.push(e.name);
-      lines.push(typeTag);
+    // If we're already showing a tooltip for an entity, use a larger sticky radius
+    // to prevent flicker at entity edges
+    const stickyRadius = zoomRadius * 1.5;
+    let hoveredEntity: Entity | undefined;
 
-      if (e.raceId || e.classId) {
-        const race = e.raceId ? capitalize(e.raceId) : "";
-        const cls = e.classId ? capitalize(e.classId) : "";
-        lines.push(`${race} ${cls}`.trim());
-      }
-
-      lines.push("");
-
-      const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
-      const hpBarFill = Math.round(hpRatio * 10);
-      const hpBar = "#".repeat(hpBarFill) + "-".repeat(10 - hpBarFill);
-      lines.push(`HP [${hpBar}] ${e.hp}/${e.maxHp}`);
-
-      if (e.essence !== undefined && e.maxEssence && e.maxEssence > 0) {
-        const esRatio = e.essence / e.maxEssence;
-        const esFill = Math.round(esRatio * 10);
-        const esBar = "*".repeat(esFill) + "-".repeat(10 - esFill);
-        lines.push(`ES [${esBar}] ${e.essence}/${e.maxEssence}`);
-      }
-
-      if (e.level) {
-        let lvlLine = `Lv.${e.level}`;
-        if (e.xp !== undefined) lvlLine += `  XP:${e.xp}`;
-        lines.push(lvlLine);
-      }
-
-      if (e.effectiveStats) {
-        const s = e.effectiveStats;
-        lines.push("");
-        lines.push(`STR ${pad(s.str)} DEF ${pad(s.def)}`);
-        lines.push(`INT ${pad(s.int)} AGI ${pad(s.agi)}`);
-        lines.push(`FAI ${pad(s.faith)} LCK ${pad(s.luck)}`);
-      }
-
-      if (e.equipment) {
-        const equipped = Object.keys(e.equipment).filter(
-          (slot) => e.equipment![slot as keyof typeof e.equipment] != null
-        );
-        if (equipped.length > 0) {
-          lines.push("");
-          lines.push(`Gear: ${equipped.length} items`);
-        }
-      }
-
-      if (e.partyId) {
-        const partyMembers: string[] = [];
-        for (const [, other] of this.entityRenderer.getEntities()) {
-          if (other.partyId === e.partyId && other.id !== e.id) {
-            partyMembers.push(other.name);
+    if (this.tooltipEntityId) {
+      // Check if we're still close to the sticky entity
+      const stickyEntity = this.entityRenderer.getEntity(this.tooltipEntityId);
+      if (stickyEntity) {
+        const spritePos = this.entityRenderer.getSpritePosition(this.tooltipEntityId);
+        if (spritePos) {
+          const dx = worldPoint.x - spritePos.x;
+          const dy = worldPoint.y - spritePos.y;
+          if (dx * dx + dy * dy <= stickyRadius * stickyRadius) {
+            hoveredEntity = stickyEntity;
           }
         }
-        lines.push("");
-        lines.push("[PARTY]");
-        if (partyMembers.length > 0) {
-          lines.push(`With: ${partyMembers.join(", ")}`);
-        }
       }
+    }
 
-      if (e.type === "merchant") {
-        lines.push("", "[Click] Browse shop");
-      } else if (e.type === "trainer") {
-        lines.push("", "[Click] Train skills");
-      } else if (e.type === "profession-trainer") {
-        lines.push("", "[Click] Learn profession");
-      } else if (e.type === "guild-registrar") {
-        lines.push("", "[Click] Guild hall");
-      } else if (e.type === "auctioneer") {
-        lines.push("", "[Click] Auction house");
-      } else if (e.type === "arena-master") {
-        lines.push("", "[Click] PvP Coliseum");
-      } else if (e.type === "mob" || e.type === "boss") {
-        if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
-      }
+    // If sticky check failed, do a normal closest-entity search
+    if (!hoveredEntity) {
+      hoveredEntity = this.entityRenderer.getEntityAt(worldPoint.x, worldPoint.y, zoomRadius);
+    }
 
-      if (e.type === "player") {
-        lines.push("", "[Click] Spectate");
-      }
-
-      const text = lines.join("\n");
+    if (hoveredEntity) {
+      this.tooltipEntityId = hoveredEntity.id;
+      const text = this.buildTooltipText(hoveredEntity);
       this.tooltip.setText(text);
 
       // Measure actual tooltip size before positioning
       const bounds = this.tooltip.getBounds();
-      const tw = bounds.width + 12; // include bg padding
+      const tw = bounds.width + 12;
       const th = bounds.height + 8;
       const gap = 10;
 
@@ -372,9 +325,108 @@ export class WorldScene extends Phaser.Scene {
       this.tooltip.setVisible(true);
       this.tooltipBg.setVisible(true);
     } else {
+      this.tooltipEntityId = null;
       this.tooltip.setVisible(false);
       this.tooltipBg.setVisible(false);
     }
+  }
+
+  /** Build tooltip text for an entity — consolidated, all info in one place. */
+  private buildTooltipText(e: Entity): string {
+    const lines: string[] = [];
+
+    // Header: name + type tag
+    lines.push(e.name);
+    lines.push(this.entityTypeTag(e.type));
+
+    // Race / class
+    if (e.raceId || e.classId) {
+      const race = e.raceId ? capitalize(e.raceId) : "";
+      const cls = e.classId ? capitalize(e.classId) : "";
+      lines.push(`${race} ${cls}`.trim());
+    }
+
+    lines.push("");
+
+    // HP bar
+    const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+    const hpBarFill = Math.round(hpRatio * 10);
+    const hpBar = "#".repeat(hpBarFill) + "-".repeat(10 - hpBarFill);
+    lines.push(`HP [${hpBar}] ${e.hp}/${e.maxHp}`);
+
+    // Essence bar
+    if (e.essence !== undefined && e.maxEssence && e.maxEssence > 0) {
+      const esRatio = e.essence / e.maxEssence;
+      const esFill = Math.round(esRatio * 10);
+      const esBar = "*".repeat(esFill) + "-".repeat(10 - esFill);
+      lines.push(`ES [${esBar}] ${e.essence}/${e.maxEssence}`);
+    }
+
+    // Level + XP
+    if (e.level) {
+      let lvlLine = `Lv.${e.level}`;
+      if (e.xp !== undefined) lvlLine += `  XP:${e.xp}`;
+      lines.push(lvlLine);
+    }
+
+    // Stats
+    if (e.effectiveStats) {
+      const s = e.effectiveStats;
+      lines.push("");
+      lines.push(`STR ${pad(s.str)} DEF ${pad(s.def)}`);
+      lines.push(`INT ${pad(s.int)} AGI ${pad(s.agi)}`);
+      lines.push(`FAI ${pad(s.faith)} LCK ${pad(s.luck)}`);
+    }
+
+    // Equipment summary
+    if (e.equipment) {
+      const equipped = Object.keys(e.equipment).filter(
+        (slot) => e.equipment![slot as keyof typeof e.equipment] != null,
+      );
+      if (equipped.length > 0) {
+        lines.push("");
+        lines.push(`Gear: ${equipped.length} items`);
+      }
+    }
+
+    // Party members
+    if (e.partyId) {
+      const partyMembers: string[] = [];
+      for (const [, other] of this.entityRenderer.getEntities()) {
+        if (other.partyId === e.partyId && other.id !== e.id) {
+          partyMembers.push(other.name);
+        }
+      }
+      lines.push("");
+      lines.push("[PARTY]");
+      if (partyMembers.length > 0) {
+        lines.push(`With: ${partyMembers.join(", ")}`);
+      }
+    }
+
+    // NPC interaction hints
+    if (e.type === "merchant") {
+      lines.push("", "[Click] Browse shop");
+    } else if (e.type === "trainer") {
+      lines.push("", "[Click] Train skills");
+    } else if (e.type === "profession-trainer") {
+      lines.push("", "[Click] Learn profession");
+    } else if (e.type === "guild-registrar") {
+      lines.push("", "[Click] Guild hall");
+    } else if (e.type === "auctioneer") {
+      lines.push("", "[Click] Auction house");
+    } else if (e.type === "arena-master") {
+      lines.push("", "[Click] PvP Coliseum");
+    } else if (e.type === "mob" || e.type === "boss") {
+      if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
+    }
+
+    // Player spectate hint
+    if (e.type === "player") {
+      lines.push("", "[Click] Spectate");
+    }
+
+    return lines.join("\n");
   }
 
   private entityTypeTag(type: string): string {
@@ -394,122 +446,150 @@ export class WorldScene extends Phaser.Scene {
     return tags[type] ?? `[${type.toUpperCase()}]`;
   }
 
-  switchZone(zoneId: string): void {
-    if (zoneId === this.zoneId) return;
-    this.zoneId = zoneId;
-    this.terrainLoaded = false;
+  /** Scroll camera to a zone's center (called by ZoneSelector) */
+  private scrollToZone(zoneId: string): void {
+    if (!this.worldLayout.loaded) return;
+    const center = this.worldLayout.getZonePixelCenter(zoneId);
+    this.cameras.main.centerOn(center.x, center.z);
     this.followTarget = null;
-    this.entityRenderer.update({});
-    this.connected = false;
+    this.currentZoneLabel = zoneId;
     gameBus.emit("zoneChanged", { zoneId });
-
-    if (this.chunkStreamingEnabled) {
-      this.chunkManager.setZone(zoneId);
-      // Force chunk reload at zone center
-      void this.reloadChunksForZone(zoneId);
-    } else {
-      void this.loadZoneTerrain(zoneId);
-    }
-
-    void this.pollZone();
   }
 
-  private async reloadChunksForZone(zoneId: string): Promise<void> {
-    const info = await fetchZoneChunkInfo(zoneId);
-    if (!info || zoneId !== this.zoneId) return;
-
-    const zonePixelW = info.width * CLIENT_TILE_PX;
-    const zonePixelH = info.height * CLIENT_TILE_PX;
-    const cam = this.cameras.main;
-    cam.centerOn(zonePixelW / 2, zonePixelH / 2);
-
-    const worldCenterX = (info.width * info.tileSize) / 2;
-    const worldCenterZ = (info.height * info.tileSize) / 2;
-    this.chunkManager.update(worldCenterX, worldCenterZ);
-    this.terrainLoaded = true;
-  }
-
-  /** Initialize chunk streaming for a zone */
-  private async initChunkStreaming(zoneId: string): Promise<void> {
-    const zoneInfo = await fetchZoneChunkInfo(zoneId);
-
-    if (!zoneInfo) {
-      console.log("[WorldScene] Chunk API unavailable, using legacy zone loading");
-      void this.loadZoneTerrain(zoneId);
+  /** Initialize seamless multi-zone world */
+  private async initSeamlessWorld(): Promise<void> {
+    // Fetch world layout
+    const loaded = await this.worldLayout.load();
+    if (!loaded || !this.worldLayout.data) {
+      console.warn("[WorldScene] World layout unavailable, falling back to legacy");
+      void this.initLegacyFallback();
       return;
     }
 
-    this.tileSize = zoneInfo.tileSize;
+    const layoutData = this.worldLayout.data;
+
+    // Probe one zone for chunk info (tileSize)
+    const firstZoneId = this.worldLayout.getZoneIds()[0];
+    const zoneInfo = firstZoneId ? await fetchZoneChunkInfo(firstZoneId) : null;
+
+    if (!zoneInfo) {
+      console.warn("[WorldScene] Chunk API unavailable, falling back to legacy");
+      void this.initLegacyFallback();
+      return;
+    }
+
     this.chunkStreamingEnabled = true;
 
+    // Init tilemap renderer in chunk mode
+    this.tilemapRenderer.setWorldLayout(this.worldLayout);
     this.tilemapRenderer.initChunkMode(zoneInfo.tileSize);
     this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
+    this.entityRenderer.setElevationQuery((wx, wz) =>
+      this.tilemapRenderer.getElevationAt(wx, wz)
+    );
 
-    this.chunkManager = new ChunkStreamManager(zoneId, zoneInfo.tileSize);
+    // Create multi-zone chunk manager
+    this.chunkManager = new ChunkStreamManager(layoutData, zoneInfo.tileSize);
     this.chunkManager.onChunkLoaded = (chunk) => {
       this.tilemapRenderer.addChunk(chunk);
     };
-    this.chunkManager.onChunkUnloaded = (cx, cz) => {
-      this.tilemapRenderer.removeChunk(cx, cz);
+    this.chunkManager.onChunkUnloaded = (key) => {
+      this.tilemapRenderer.removeChunk(key);
     };
 
-    // No camera bounds in chunk mode -- seamless scrolling
+    // No camera bounds — seamless scrolling
     this.cameras.main.removeBounds();
-    this.minZoom = 0.3;
+    this.minZoom = 0.15;
 
-    // Center camera on zone
-    const zonePixelW = zoneInfo.width * CLIENT_TILE_PX;
-    const zonePixelH = zoneInfo.height * CLIENT_TILE_PX;
+    // Center camera on world center
+    const worldCenter = this.worldLayout.getWorldPixelCenter();
     const cam = this.cameras.main;
     cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
-    cam.centerOn(zonePixelW / 2, zonePixelH / 2);
+    cam.centerOn(worldCenter.x, worldCenter.z);
 
-    // Initial chunk load
-    const worldCenterX = (zoneInfo.width * zoneInfo.tileSize) / 2;
-    const worldCenterZ = (zoneInfo.height * zoneInfo.tileSize) / 2;
-    this.chunkManager.update(worldCenterX, worldCenterZ);
+    // Initial chunk load at world center
+    const worldCenterGameX = layoutData.totalSize.width / 2;
+    const worldCenterGameZ = layoutData.totalSize.height / 2;
+    this.chunkManager.update(worldCenterGameX, worldCenterGameZ);
 
     this.terrainLoaded = true;
-    console.log(`[WorldScene] Chunk streaming: ${zoneInfo.chunksX}x${zoneInfo.chunksZ} chunks`);
+    this.currentZoneLabel = this.worldLayout.pixelToZone(worldCenter.x, worldCenter.z) ?? "world";
+
+    gameBus.emit("zoneChanged", { zoneId: this.currentZoneLabel });
+    console.log(
+      `[WorldScene] Seamless world initialized: ${this.worldLayout.getZoneIds().length} zones`
+    );
   }
 
-  private async loadZoneTerrain(zoneId: string): Promise<void> {
-    await this.tilemapRenderer.loadZone(zoneId);
-    if (zoneId !== this.zoneId) return;
+  /** Fallback to legacy single-zone loading if world layout unavailable */
+  private async initLegacyFallback(): Promise<void> {
+    const zoneId = "human-meadow";
+    this.currentZoneLabel = zoneId;
+    gameBus.emit("zoneChanged", { zoneId });
 
+    await this.tilemapRenderer.loadZone(zoneId);
     this.terrainLoaded = true;
     this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
-    this.updateCameraBounds();
+    this.entityRenderer.setElevationQuery((wx, wz) =>
+      this.tilemapRenderer.getElevationAt(wx, wz)
+    );
 
     const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
     const cam = this.cameras.main;
+    this.minZoom = Math.max(cam.width / w, cam.height / h);
     cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
+    cam.setBounds(0, 0, w, h);
     cam.centerOn(w / 2, h / 2);
   }
 
-  private updateCameraBounds(): void {
-    const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
-    if (w <= 0 || h <= 0) return;
-
-    const cam = this.cameras.main;
-    this.minZoom = Math.max(cam.width / w, cam.height / h);
-
-    if (cam.zoom < this.minZoom) {
-      cam.setZoom(this.minZoom);
-    }
-
-    cam.setBounds(0, 0, w, h);
-  }
-
-  private async pollZone(): Promise<void> {
-    const data = await fetchZone(this.zoneId);
-    if (!data) {
-      this.connected = false;
+  /** Poll all zones for entities, offset to world coordinates */
+  private async pollAllZones(): Promise<void> {
+    if (!this.worldLayout.loaded) {
+      // Fallback: poll single zone
+      const data = await fetchZone(this.currentZoneLabel || "human-meadow");
+      if (data) {
+        this.connected = true;
+        this.tick = data.tick;
+        this.entityRenderer.update(data.entities);
+      } else {
+        this.connected = false;
+      }
       return;
     }
 
-    this.connected = true;
-    this.tick = data.tick;
-    this.entityRenderer.update(data.entities);
+    const zoneIds = this.worldLayout.getZoneIds();
+    const allEntities: Record<string, Entity> = {};
+    let anyConnected = false;
+    let maxTick = 0;
+
+    // Fetch all zones in parallel
+    const results = await Promise.all(
+      zoneIds.map(async (zoneId) => {
+        const data = await fetchZone(zoneId);
+        return { zoneId, data };
+      })
+    );
+
+    for (const { zoneId, data } of results) {
+      if (!data) continue;
+      anyConnected = true;
+      if (data.tick > maxTick) maxTick = data.tick;
+
+      const zone = this.worldLayout.getZone(zoneId);
+      if (!zone) continue;
+
+      // Offset entity positions from zone-local to world coordinates
+      for (const [id, entity] of Object.entries(data.entities)) {
+        allEntities[id] = {
+          ...entity,
+          x: entity.x + zone.offset.x,
+          y: entity.y + zone.offset.z,
+        };
+      }
+    }
+
+    this.connected = anyConnected;
+    this.tick = maxTick;
+    this.entityRenderer.update(allEntities);
   }
 }
