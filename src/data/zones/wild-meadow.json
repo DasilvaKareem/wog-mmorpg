@@ -1,7 +1,7 @@
 {
   "id": "wild-meadow",
   "name": "Wild Meadow",
-  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 350, "z": 350 } },
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
   "budget": { "maxPopulation": 20, "maxThreat": 50 },
   "pois": [
     {

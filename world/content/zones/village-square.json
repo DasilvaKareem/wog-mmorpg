@@ -2,7 +2,7 @@
   "id": "village-square",
   "name": "Village Square",
   "biome": "village",
-  "width": 300,
-  "height": 300,
+  "width": 640,
+  "height": 640,
   "pois": ["fountain", "general-store", "tavern"]
 }

@@ -5,8 +5,8 @@
     { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" }
   ],
   "worldOffsets": {
-    "village-square": { "x": 0, "z": 50 },
-    "wild-meadow": { "x": 300, "z": 25 },
-    "dark-forest": { "x": 650, "z": 0 }
+    "village-square": { "x": 0, "z": 0 },
+    "wild-meadow": { "x": 640, "z": 0 },
+    "dark-forest": { "x": 1280, "z": 0 }
   }
 }

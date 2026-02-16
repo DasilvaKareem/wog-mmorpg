@@ -11,12 +11,12 @@ interface OreSpawnDef {
 
 const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   // village-square (starter zone) - coal, tin, copper, silver
-  { zoneId: "village-square", oreType: "coal", x: 320, y: 180 },
-  { zoneId: "village-square", oreType: "coal", x: 640, y: 220 },
-  { zoneId: "village-square", oreType: "tin", x: 380, y: 280 },
-  { zoneId: "village-square", oreType: "tin", x: 720, y: 480 },
-  { zoneId: "village-square", oreType: "copper", x: 560, y: 680 },
-  { zoneId: "village-square", oreType: "silver", x: 880, y: 720 },
+  { zoneId: "village-square", oreType: "coal", x: 205, y: 115 },
+  { zoneId: "village-square", oreType: "coal", x: 410, y: 141 },
+  { zoneId: "village-square", oreType: "tin", x: 243, y: 179 },
+  { zoneId: "village-square", oreType: "tin", x: 461, y: 307 },
+  { zoneId: "village-square", oreType: "copper", x: 358, y: 435 },
+  { zoneId: "village-square", oreType: "silver", x: 563, y: 461 },
 
   // wild-meadow (mid-tier) - more copper/silver, rare gold
   { zoneId: "wild-meadow", oreType: "coal", x: 180, y: 340 },

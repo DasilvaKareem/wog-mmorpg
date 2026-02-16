@@ -1,7 +1,7 @@
 {
   "id": "dark-forest",
   "name": "Dark Forest",
-  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 400, "z": 400 } },
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
   "budget": { "maxPopulation": 30, "maxThreat": 100 },
   "pois": [
     {

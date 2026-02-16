@@ -531,10 +531,9 @@ export class TilemapRenderer {
   /** Fallback: flat grass grid when v2 API unavailable */
   private static fallbackTerrainV2(zoneId: string): TerrainGridDataV2 {
     const ZONE_DEFAULTS: Record<string, { w: number; h: number; biome: string }> = {
-      "village-square": { w: 30, h: 30, biome: "village" },
-      "village-square": { w: 100, h: 100, biome: "grassland" },
-      "wild-meadow": { w: 50, h: 50, biome: "grassland" },
-      "dark-forest": { w: 60, h: 60, biome: "forest" },
+      "village-square": { w: 64, h: 64, biome: "village" },
+      "wild-meadow": { w: 64, h: 64, biome: "grassland" },
+      "dark-forest": { w: 64, h: 64, biome: "forest" },
     };
     const cfg = ZONE_DEFAULTS[zoneId] ?? { w: 100, h: 100, biome: "grassland" };
     const total = cfg.w * cfg.h;

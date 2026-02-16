@@ -2,7 +2,7 @@
   "id": "wild-meadow",
   "name": "Wild Meadow",
   "biome": "grassland",
-  "width": 350,
-  "height": 350,
+  "width": 640,
+  "height": 640,
   "pois": []
 }

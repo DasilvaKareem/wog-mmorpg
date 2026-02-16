@@ -1,7 +1,7 @@
 {
   "id": "village-square",
   "name": "Village Square",
-  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 300, "z": 300 } },
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
   "budget": { "maxPopulation": 10, "maxThreat": 0 },
   "pois": [
     {
