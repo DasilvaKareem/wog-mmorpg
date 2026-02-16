@@ -75,6 +75,49 @@ const ZONES = [
   { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
 ];
 
+const CONTINENTS = [
+  {
+    name: "Arcadia",
+    color: "#54f28b",
+    icon: "//",
+    tagline: "Realm of Emerald Forests",
+    desc: "A northern continent blanketed in ancient evergreen forests and towering mountain ranges. The traditional center of essence study and druidic tradition, home to the capital city of Solaris and the mystical Emerald Woods.",
+    landmarks: ["Viridian Range", "Lake Lumina", "Aurundel (Sky City)", "Library of Selerion"],
+  },
+  {
+    name: "Nocturia",
+    color: "#aa44ff",
+    icon: ")(",
+    tagline: "Land of Eternal Twilight",
+    desc: "A vast northern region of contrasts — jagged peaks, mist-shrouded plains, and shadowy woodlands. Home to the vampire-like Sanguine, werewolf Lycan, and enigmatic Umbralists who wield shadow essence.",
+    landmarks: ["Sanguinis (Vampire Capital)", "Umbra Forest", "Crimson Spire", "Zephyr's Roost"],
+  },
+  {
+    name: "Pacifica",
+    color: "#44ddff",
+    icon: "~~",
+    tagline: "Jeweled Archipelago",
+    desc: "A vast island continent in the southern hemisphere — thousands of islands spanning the Pacifica Ocean. Renowned for lush rainforests, exotic wildlife, vibrant port cities, and legendary pirate lords.",
+    landmarks: ["Jeweled Archipelago", "Coral Citadels", "Monsoon Peaks", "Pirate Havens"],
+  },
+  {
+    name: "Lemuria",
+    color: "#ff8c00",
+    icon: "||",
+    tagline: "Empire of Flame and Sand",
+    desc: "A continent of geographic extremes — scorching deserts, volcanic mountain ranges, fertile grasslands, and primordial rainforests. Dominated by the militant Lemurian Empire and its warrior-priest theocracy.",
+    landmarks: ["Valoris Prime", "Brimstone Deserts", "Overblaze Rift", "Gateways of Amun"],
+  },
+  {
+    name: "Draconis",
+    color: "#ff4d6d",
+    icon: "<>",
+    tagline: "Domain of Dragons",
+    desc: "Shrouded in mist and mystery, where draconic races dwell among active volcanoes and elemental extremes. Largely unexplored by outsiders — its deepest secrets remain unknown to the other continents.",
+    landmarks: ["Volcanic Throne", "Mist Veil", "Obsidian Caldera", "Dragon Spires"],
+  },
+];
+
 export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 }: LandingPageProps): React.ReactElement {
   const { isConnected, connect, loading, address } = useWalletContext();
 
@@ -293,6 +336,150 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
           <span className="text-[#ffcc00]">Meadow</span>
           <span>{"<-->"}</span>
           <span className="text-[#ff4d6d]">Forest</span>
+        </div>
+      </section>
+
+      {/* ── ABOUT: THE WORLD OF GENEVA ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          About Geneva
+        </h2>
+        <p className="mb-8 text-center text-[8px] tracking-wide text-[#565f89]">
+          {"<<"} PLANETARY CODEX {">>"}
+        </p>
+
+        {/* Planet overview */}
+        <div className="mb-8 border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-5 shadow-[6px_6px_0_0_#000]">
+          <h3
+            className="mb-3 text-[11px] uppercase tracking-wide text-[#ffdd57]"
+            style={{ textShadow: "2px 2px 0 #000" }}
+          >
+            The Planet
+          </h3>
+          <p className="mb-3 text-[9px] leading-relaxed text-[#d6deff]">
+            Geneva is a vibrant world in the Helios planetary system — the only known
+            planet to harbor intelligent life. Five major continents teem with diverse
+            cultures, ancient civilizations, and wondrous environments, all bound
+            together by the fundamental force of <span className="text-[#ffcc00]">Essence</span>.
+          </p>
+          <p className="text-[9px] leading-relaxed text-[#9aa7cc]">
+            Two celestial moons orbit Geneva — <span className="text-[#c0c0ff]">Selene</span> and{" "}
+            <span className="text-[#ffd0aa]">Eos</span> — bathing the world in catalytic
+            energies that intermingle with matter on the subatomic level, giving rise
+            to the mysterious particles known as <span className="text-[#54f28b]">Crutons</span>.
+          </p>
+        </div>
+
+        {/* Essence & Crutons */}
+        <div className="mb-8 border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-5 shadow-[6px_6px_0_0_#000]">
+          <h3
+            className="mb-3 text-[11px] uppercase tracking-wide text-[#ffdd57]"
+            style={{ textShadow: "2px 2px 0 #000" }}
+          >
+            Essence & Crutons
+          </h3>
+          <p className="mb-3 text-[9px] leading-relaxed text-[#d6deff]">
+            Geneva{"'"}s elements possess an additional subatomic particle — the{" "}
+            <span className="text-[#54f28b]">Cruton</span>. These ultra-dense particles
+            exist alongside protons, neutrons, and electrons, and their presence is
+            what allows for the manifestation of Essence — the arcane energy that
+            permeates all life on Geneva.
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { label: "Pyromancy", desc: "Fire manipulation", color: "#ff6b35" },
+              { label: "Cryomancy", desc: "Ice and frost", color: "#88ccff" },
+              { label: "Chronomancy", desc: "Time distortion", color: "#ffcc00" },
+              { label: "Transmutation", desc: "Matter reshaping", color: "#54f28b" },
+            ].map((e) => (
+              <div
+                key={e.label}
+                className="flex items-center gap-2 border-2 border-[#2a3450] bg-[#11192d] px-3 py-2"
+              >
+                <span className="text-[10px]" style={{ color: e.color }}>
+                  {"*"}
+                </span>
+                <div>
+                  <span className="text-[9px] text-[#d6deff]">{e.label}</span>
+                  <p className="text-[7px] text-[#565f89]">{e.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[8px] text-[#565f89]">
+            The more crutons in an element{"'"}s nucleus, the higher its essence potential.
+            Elements like Radamum, Thoride, and Platinix are highly catalytic — prized
+            across all five continents.
+          </p>
+        </div>
+
+        {/* Five Continents */}
+        <h3
+          className="mb-4 text-center text-[11px] uppercase tracking-wide text-[#ffdd57]"
+          style={{ textShadow: "2px 2px 0 #000" }}
+        >
+          Five Continents
+        </h3>
+        <div className="flex flex-col gap-4">
+          {CONTINENTS.map((c) => (
+            <div
+              key={c.name}
+              className="border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-4 shadow-[6px_6px_0_0_#000]"
+            >
+              <div className="mb-2 flex items-center gap-3">
+                <div
+                  className="flex h-10 w-10 shrink-0 items-center justify-center border-2 text-[12px] font-bold"
+                  style={{ borderColor: c.color, color: c.color }}
+                >
+                  {c.icon}
+                </div>
+                <div>
+                  <h4
+                    className="text-[11px] uppercase tracking-wide"
+                    style={{ color: c.color, textShadow: "2px 2px 0 #000" }}
+                  >
+                    {c.name}
+                  </h4>
+                  <p className="text-[8px] text-[#565f89]">{c.tagline}</p>
+                </div>
+              </div>
+              <p className="mb-3 text-[9px] leading-relaxed text-[#9aa7cc]">
+                {c.desc}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {c.landmarks.map((l) => (
+                  <span
+                    key={l}
+                    className="border border-[#2a3450] bg-[#11192d] px-2 py-0.5 text-[7px] text-[#9aa7cc]"
+                  >
+                    {l}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Continent connection diagram */}
+        <div className="mt-6 flex flex-col items-center gap-1 text-[8px] text-[#565f89]">
+          <div className="flex items-center gap-2">
+            <span style={{ color: "#54f28b" }}>Arcadia</span>
+            <span>{"---"}</span>
+            <span style={{ color: "#aa44ff" }}>Nocturia</span>
+            <span>{"---"}</span>
+            <span style={{ color: "#ff4d6d" }}>Draconis</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span style={{ color: "#44ddff" }}>Pacifica</span>
+            <span>{"---"}</span>
+            <span style={{ color: "#ff8c00" }}>Lemuria</span>
+          </div>
+          <p className="mt-2 text-[7px] text-[#565f89]">
+            {"<<"} The Helios System {"//"}  2 Moons {"//"}  5 Continents {"//"}  Infinite Essence {">>"}
+          </p>
         </div>
       </section>
 
