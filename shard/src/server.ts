@@ -43,8 +43,13 @@ import { registerPredictionRoutes } from "./predictionRoutes.js";
 import { registerX402Routes } from "./x402Routes.js";
 import { registerItemRngRoutes } from "./itemRng.js";
 import { registerMarketplaceRoutes } from "./marketplace.js";
+import { registerItemCatalogRoutes } from "./itemCatalogRoutes.js";
 import { getTxStats } from "./blockchain.js";
 import { getWorldLayout } from "./worldLayout.js";
+import { getAllZones } from "./zoneRuntime.js";
+import { saveCharacter } from "./characterStore.js";
+import { authenticateRequest } from "./auth.js";
+import { getLearnedProfessions } from "./professions.js";
 
 const server = Fastify({ logger: true });
 
@@ -56,6 +61,76 @@ server.get("/stats/transactions", async () => getTxStats());
 
 // World layout — zone positions for seamless world rendering
 server.get("/world/layout", async () => getWorldLayout());
+
+// POST /logout — save character state and despawn entity
+server.post<{
+  Body: { zoneId: string; entityId: string };
+}>("/logout", {
+  preHandler: authenticateRequest,
+}, async (request, reply) => {
+  const { zoneId, entityId } = request.body;
+  const authenticatedWallet = (request as any).walletAddress;
+
+  if (!zoneId || !entityId) {
+    reply.code(400);
+    return { error: "zoneId and entityId are required" };
+  }
+
+  // Find the entity across all zones (might have transitioned)
+  let foundZoneId: string | null = null;
+  let entity: any = null;
+
+  for (const [zId, zone] of getAllZones()) {
+    const e = zone.entities.get(entityId);
+    if (e) {
+      foundZoneId = zId;
+      entity = e;
+      break;
+    }
+  }
+
+  if (!entity) {
+    reply.code(404);
+    return { error: "Entity not found" };
+  }
+
+  // Verify wallet ownership
+  if (!entity.walletAddress || entity.walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    reply.code(403);
+    return { error: "Not authorized to log out this character" };
+  }
+
+  // Save full character state
+  await saveCharacter(entity.walletAddress, {
+    name: entity.name,
+    level: entity.level ?? 1,
+    xp: entity.xp ?? 0,
+    raceId: entity.raceId ?? "human",
+    classId: entity.classId ?? "warrior",
+    zone: foundZoneId!,
+    x: entity.x,
+    y: entity.y,
+    kills: entity.kills ?? 0,
+    completedQuests: entity.completedQuests ?? [],
+    learnedTechniques: entity.learnedTechniques ?? [],
+    professions: getLearnedProfessions(entity.walletAddress),
+  });
+
+  // Despawn entity
+  const zone = getAllZones().get(foundZoneId!);
+  if (zone) {
+    zone.entities.delete(entityId);
+  }
+
+  server.log.info(`[logout] ${entity.name} saved and despawned from ${foundZoneId}`);
+
+  return {
+    ok: true,
+    saved: true,
+    character: entity.name,
+    zone: foundZoneId,
+  };
+});
 
 // Register subsystems
 server.register(cors, { origin: true });
@@ -97,6 +172,7 @@ registerPvPRoutes(server);
 registerPredictionRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
+registerItemCatalogRoutes(server);
 spawnNpcs();
 spawnOreNodes();
 spawnFlowerNodes();

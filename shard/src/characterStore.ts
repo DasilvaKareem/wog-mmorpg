@@ -1,0 +1,92 @@
+/**
+ * Character persistence via Redis hashes.
+ * Key pattern: character:{walletAddress}
+ *
+ * Falls back to in-memory Map when Redis is unavailable (dev mode).
+ */
+
+import { getRedis } from "./redis.js";
+
+export interface CharacterSaveData {
+  name: string;
+  level: number;
+  xp: number;
+  raceId: string;
+  classId: string;
+  zone: string;
+  x: number;
+  y: number;
+  kills: number;
+  completedQuests: string[];
+  learnedTechniques: string[];
+  professions: string[];
+}
+
+// In-memory fallback for dev (no Redis)
+const memoryStore = new Map<string, Record<string, string>>();
+
+function key(walletAddress: string): string {
+  return `character:${walletAddress.toLowerCase()}`;
+}
+
+export async function saveCharacter(
+  walletAddress: string,
+  data: Partial<CharacterSaveData>
+): Promise<void> {
+  // Flatten to string values for Redis HSET
+  const flat: Record<string, string> = {};
+  for (const [k, v] of Object.entries(data)) {
+    if (v === undefined || v === null) continue;
+    flat[k] = Array.isArray(v) ? JSON.stringify(v) : String(v);
+  }
+
+  if (Object.keys(flat).length === 0) return;
+
+  const redis = getRedis();
+  if (redis) {
+    await redis.hset(key(walletAddress), flat);
+  } else {
+    const existing = memoryStore.get(key(walletAddress)) ?? {};
+    memoryStore.set(key(walletAddress), { ...existing, ...flat });
+  }
+}
+
+export async function loadCharacter(
+  walletAddress: string
+): Promise<CharacterSaveData | null> {
+  const redis = getRedis();
+  let raw: Record<string, string>;
+
+  if (redis) {
+    raw = await redis.hgetall(key(walletAddress));
+  } else {
+    raw = memoryStore.get(key(walletAddress)) ?? {};
+  }
+
+  // Empty hash = no saved character
+  if (!raw || Object.keys(raw).length === 0) return null;
+
+  return {
+    name: raw.name ?? "Unknown",
+    level: parseInt(raw.level ?? "1", 10),
+    xp: parseInt(raw.xp ?? "0", 10),
+    raceId: raw.raceId ?? "human",
+    classId: raw.classId ?? "warrior",
+    zone: raw.zone ?? "village-square",
+    x: parseFloat(raw.x ?? "0"),
+    y: parseFloat(raw.y ?? "0"),
+    kills: parseInt(raw.kills ?? "0", 10),
+    completedQuests: raw.completedQuests ? JSON.parse(raw.completedQuests) : [],
+    learnedTechniques: raw.learnedTechniques ? JSON.parse(raw.learnedTechniques) : [],
+    professions: raw.professions ? JSON.parse(raw.professions) : [],
+  };
+}
+
+export async function deleteCharacter(walletAddress: string): Promise<void> {
+  const redis = getRedis();
+  if (redis) {
+    await redis.del(key(walletAddress));
+  } else {
+    memoryStore.delete(key(walletAddress));
+  }
+}

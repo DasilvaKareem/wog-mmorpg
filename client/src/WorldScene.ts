@@ -76,6 +76,11 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("arenaMasterClick", entity);
       }
 
+      // Inspect: open inspect panel for players, mobs, and bosses
+      if (entity.type === "player" || entity.type === "mob" || entity.type === "boss") {
+        gameBus.emit("entityInspect", { entityId: entity.id, zoneId: this.currentZoneLabel });
+      }
+
       // Spectate: click any entity -> snap camera, then follow
       this.followTarget = entity.id;
       this.isDragging = false;
@@ -418,12 +423,11 @@ export class WorldScene extends Phaser.Scene {
     } else if (e.type === "arena-master") {
       lines.push("", "[Click] PvP Coliseum");
     } else if (e.type === "mob" || e.type === "boss") {
+      lines.push("");
       if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
-    }
-
-    // Player spectate hint
-    if (e.type === "player") {
-      lines.push("", "[Click] Spectate");
+      lines.push("[Click] Inspect");
+    } else if (e.type === "player") {
+      lines.push("", "[Click] Inspect & Spectate");
     }
 
     return lines.join("\n");

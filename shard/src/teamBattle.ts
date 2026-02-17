@@ -223,7 +223,7 @@ async function runTalkQuests(agent: Agent) {
     if (!npcId) continue;
     try {
       const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
-      log(agent.team, agent.role, `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
+      log(agent.team, agent.role, `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c`);
     } catch { /* done */ }
     await sleep(300);
   }
@@ -249,7 +249,7 @@ async function runLoreQuests(agent: Agent) {
     for (let i = 0; i < 5; i++) {
       try {
         const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
-        log(agent.team, agent.role, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g${result.rewards?.items?.length ? " + items!" : ""}`);
+        log(agent.team, agent.role, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c${result.rewards?.items?.length ? " + items!" : ""}`);
       } catch { break; }
       await sleep(300);
     }
@@ -279,7 +279,7 @@ async function runProfessionTutorials(agent: Agent) {
     if (!npcId) continue;
     try {
       const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
-      log(agent.team, agent.role, `${npc.name} tutorial -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
+      log(agent.team, agent.role, `${npc.name} tutorial -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c`);
     } catch {}
     await sleep(300);
   }
@@ -851,7 +851,7 @@ async function traderLoop(agent: Agent) {
         try {
           await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: parseInt(item.tokenId), quantity: 1 });
           scores[agent.team].itemsTraded++;
-          log(agent.team, agent.role, `Bought ${item.name} for ${item.goldPrice}g`);
+          log(agent.team, agent.role, `Bought ${item.name} for ${item.copperPrice}c`);
           await sleep(500);
         } catch {}
       }

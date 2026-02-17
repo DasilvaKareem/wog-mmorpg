@@ -15,7 +15,7 @@ interface CatalogItem {
   tokenId: string;
   name: string;
   description: string;
-  goldPrice: number;
+  copperPrice: number;
   category: string;
 }
 
@@ -143,7 +143,7 @@ export function ShopDialog(): React.ReactElement {
                             setBuyingTokenId(null);
                           });
                       }}
-                      price={item.goldPrice}
+                      price={item.copperPrice}
                     />
                   ))}
                 </div>

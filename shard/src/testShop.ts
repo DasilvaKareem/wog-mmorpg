@@ -30,7 +30,7 @@ async function testShop() {
   }
 
   console.log(`Item: ${healthPotion.name}`);
-  console.log(`Price: ${healthPotion.goldPrice}g`);
+  console.log(`Price: ${healthPotion.copperPrice}c`);
   console.log(`\nAttempting purchase...\n`);
 
   // Try to buy

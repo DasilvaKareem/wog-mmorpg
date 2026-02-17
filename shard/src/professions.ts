@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getAllZones } from "./zoneRuntime.js";
+import { saveCharacter } from "./characterStore.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
@@ -78,6 +79,13 @@ export function learnProfession(
 export function getLearnedProfessions(walletAddress: string): ProfessionType[] {
   const professions = learnedProfessions.get(walletAddress.toLowerCase());
   return professions ? Array.from(professions) : [];
+}
+
+/** Restore professions from persisted data (called on spawn/login) */
+export function restoreProfessions(walletAddress: string, professions: string[]): void {
+  const key = walletAddress.toLowerCase();
+  const set = new Set<ProfessionType>(professions as ProfessionType[]);
+  learnedProfessions.set(key, set);
 }
 
 export function registerProfessionRoutes(server: FastifyInstance) {
@@ -184,6 +192,11 @@ export function registerProfessionRoutes(server: FastifyInstance) {
 
     // Learn the profession
     learnProfession(walletAddress, professionId);
+
+    // Persist to Redis
+    saveCharacter(walletAddress, {
+      professions: getLearnedProfessions(walletAddress),
+    }).catch((err) => server.log.error(err, "[persistence] Failed to save professions"));
 
     server.log.info(
       `[profession] ${entity.name} learned ${professionInfo.name} from ${trainer.name}`

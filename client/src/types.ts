@@ -18,12 +18,25 @@ export interface Entity {
   xpReward?: number;
   equipment?: Partial<
     Record<
-      "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt",
-      { tokenId: number; durability: number; maxDurability: number; broken?: boolean }
+      "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "ring" | "amulet",
+      { tokenId: number; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string }
     >
   >;
   effectiveStats?: CharacterStats;
   partyId?: string;
+  learnedTechniques?: string[];
+  activeEffects?: ActiveEffect[];
+  kills?: number;
+}
+
+export interface ActiveEffect {
+  techniqueId: string;
+  type: "buff" | "debuff";
+  expiresAt: number;
+  statBonus?: Partial<Record<string, number>>;
+  statReduction?: Partial<Record<string, number>>;
+  dotDamage?: number;
+  shield?: number;
 }
 
 export interface ZoneResponse {

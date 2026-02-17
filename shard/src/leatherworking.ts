@@ -11,7 +11,7 @@ export interface LeatherworkingRecipe {
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
-  goldCost: number;
+  copperCost: number;
   craftingTime: number;
 }
 
@@ -26,7 +26,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 62n, quantity: 2 }, // 2x Scrap Leather
       { tokenId: 68n, quantity: 2 }, // 2x Small Bone
     ],
-    goldCost: 25,
+    copperCost: 25,
     craftingTime: 10,
   },
   {
@@ -38,7 +38,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 62n, quantity: 2 }, // 2x Scrap Leather
       { tokenId: 65n, quantity: 1 }, // 1x Wolf Pelt
     ],
-    goldCost: 22,
+    copperCost: 22,
     craftingTime: 8,
   },
   {
@@ -49,7 +49,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 63n, quantity: 2 }, // 2x Light Leather
       { tokenId: 62n, quantity: 2 }, // 2x Scrap Leather
     ],
-    goldCost: 18,
+    copperCost: 18,
     craftingTime: 6,
   },
   {
@@ -60,7 +60,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 63n, quantity: 2 }, // 2x Light Leather
       { tokenId: 68n, quantity: 2 }, // 2x Small Bone
     ],
-    goldCost: 18,
+    copperCost: 18,
     craftingTime: 6,
   },
   {
@@ -72,7 +72,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 65n, quantity: 1 }, // 1x Wolf Pelt
       { tokenId: 68n, quantity: 1 }, // 1x Small Bone
     ],
-    goldCost: 20,
+    copperCost: 20,
     craftingTime: 7,
   },
   {
@@ -83,7 +83,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 63n, quantity: 2 }, // 2x Light Leather
       { tokenId: 62n, quantity: 1 }, // 1x Scrap Leather
     ],
-    goldCost: 15,
+    copperCost: 15,
     craftingTime: 5,
   },
   {
@@ -95,7 +95,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 62n, quantity: 2 }, // 2x Scrap Leather
       { tokenId: 68n, quantity: 1 }, // 1x Small Bone
     ],
-    goldCost: 15,
+    copperCost: 15,
     craftingTime: 5,
   },
 
@@ -110,7 +110,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 66n, quantity: 1 }, // 1x Bear Hide
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
-    goldCost: 65,
+    copperCost: 65,
     craftingTime: 18,
   },
   {
@@ -122,7 +122,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 64n, quantity: 2 }, // 2x Medium Leather
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
-    goldCost: 55,
+    copperCost: 55,
     craftingTime: 14,
   },
   {
@@ -134,7 +134,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 64n, quantity: 1 }, // 1x Medium Leather
       { tokenId: 69n, quantity: 1 }, // 1x Thick Bone
     ],
-    goldCost: 50,
+    copperCost: 50,
     craftingTime: 10,
   },
   {
@@ -145,7 +145,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 70n, quantity: 2 }, // 2x Heavy Leather
       { tokenId: 69n, quantity: 3 }, // 3x Thick Bone
     ],
-    goldCost: 50,
+    copperCost: 50,
     craftingTime: 10,
   },
   {
@@ -157,7 +157,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 66n, quantity: 1 }, // 1x Bear Hide
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
-    goldCost: 55,
+    copperCost: 55,
     craftingTime: 12,
   },
   {
@@ -169,7 +169,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 64n, quantity: 2 }, // 2x Medium Leather
       { tokenId: 73n, quantity: 1 }, // 1x Troll Hide
     ],
-    goldCost: 60,
+    copperCost: 60,
     craftingTime: 10,
   },
   {
@@ -181,7 +181,7 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 64n, quantity: 1 }, // 1x Medium Leather
       { tokenId: 72n, quantity: 2 }, // 2x Ancient Bone
     ],
-    goldCost: 55,
+    copperCost: 55,
     craftingTime: 10,
   },
 ];
@@ -212,7 +212,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
             quantity: mat.quantity,
           };
         }),
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
         craftingTime: recipe.craftingTime,
       };
     });
@@ -351,7 +351,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
           }),
         },
         materialsConsumed: burnedMaterials,
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     } catch (err) {
       server.log.error(err, `[leatherworking] Failed to mint crafted item for ${walletAddress}`);

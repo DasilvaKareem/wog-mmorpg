@@ -8,7 +8,8 @@ import { QUEST_CATALOG, doesKillCountForQuest } from "./questSystem.js";
 import type { ProfessionType } from "./professions.js";
 import type { FlowerType } from "./flowerCatalog.js";
 import { logZoneEvent } from "./zoneEvents.js";
-import { getLootTable, rollDrops, rollGold } from "./lootTables.js";
+import { getLootTable, rollDrops, rollCopper } from "./lootTables.js";
+import { saveCharacter } from "./characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "./techniques.js";
 import { randomUUID } from "crypto";
 import { getPlayerPartyId } from "./partySystem.js";
@@ -417,9 +418,9 @@ async function handleMobDeath(
   // Auto-loot: mint gold + common drops to killer's wallet
   if (killer?.walletAddress && lootTable) {
     // Roll gold
-    const goldAmount = rollGold(lootTable.goldMin, lootTable.goldMax);
-    mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
-      console.error(`[loot] Failed to mint ${goldAmount} gold to ${killer.walletAddress}:`, err);
+    const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
+    mintGold(killer.walletAddress, copperAmount.toString()).catch((err) => {
+      console.error(`[loot] Failed to mint ${copperAmount} copper to ${killer.walletAddress}:`, err);
     });
 
     // Roll auto-drops
@@ -433,9 +434,9 @@ async function handleMobDeath(
       });
     }
 
-    if (autoDrops.length > 0 || goldAmount > 0) {
+    if (autoDrops.length > 0 || copperAmount > 0) {
       console.log(
-        `[loot] ${killer.name} auto-looted ${goldAmount}g + ${autoDrops.length} items from ${mob.name}`
+        `[loot] ${killer.name} auto-looted ${copperAmount}c + ${autoDrops.length} items from ${mob.name}`
       );
     }
   }
@@ -912,6 +913,18 @@ async function worldTick() {
                   entityName: entity.name,
                   data: { level: entity.level, xp: entity.xp },
                 });
+
+                // Persist character to Redis on level-up
+                if (entity.walletAddress) {
+                  saveCharacter(entity.walletAddress, {
+                    level: entity.level,
+                    xp: entity.xp,
+                    zone: zone.zoneId,
+                    x: entity.x,
+                    y: entity.y,
+                    kills: entity.kills,
+                  }).catch((err) => console.error(`[persistence] Save failed for ${entity.id}:`, err));
+                }
 
                 // Async on-chain sync (non-blocking, only if NFT character)
                 if (entity.characterTokenId != null) {

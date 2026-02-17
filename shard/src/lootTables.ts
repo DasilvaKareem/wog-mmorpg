@@ -14,8 +14,8 @@ export interface LootDrop {
 
 export interface MobLootTable {
   mobName: string;
-  goldMin: number;
-  goldMax: number;
+  copperMin: number;
+  copperMax: number;
   autoDrops: LootDrop[]; // Auto-mint on kill
   skinningDrops: LootDrop[]; // Requires skinning profession
 }
@@ -24,8 +24,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
   // --- Human Meadow Mobs (Starter Zone) ---
   "Hungry Wolf": {
     mobName: "Hungry Wolf",
-    goldMin: 8,
-    goldMax: 15,
+    copperMin: 8,
+    copperMax: 15,
     autoDrops: [
       { tokenId: 1n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Raw Meat
     ],
@@ -38,8 +38,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Giant Rat": {
     mobName: "Giant Rat",
-    goldMin: 5,
-    goldMax: 10,
+    copperMin: 5,
+    copperMax: 10,
     autoDrops: [
       { tokenId: 1n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, // Raw Meat
     ],
@@ -51,8 +51,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Wild Boar": {
     mobName: "Wild Boar",
-    goldMin: 10,
-    goldMax: 18,
+    copperMin: 10,
+    copperMax: 18,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 3, chance: 0.6 }, // Raw Meat
     ],
@@ -64,8 +64,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Goblin Raider": {
     mobName: "Goblin Raider",
-    goldMin: 12,
-    goldMax: 20,
+    copperMin: 12,
+    copperMax: 20,
     autoDrops: [
       { tokenId: 22n, minQuantity: 1, maxQuantity: 2, chance: 0.2 }, // Coal Ore
     ],
@@ -76,8 +76,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Bandit Scout": {
     mobName: "Bandit Scout",
-    goldMin: 15,
-    goldMax: 25,
+    copperMin: 15,
+    copperMax: 25,
     autoDrops: [
       { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Healing Potion
       { tokenId: 22n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Coal Ore
@@ -89,8 +89,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Mire Slime": {
     mobName: "Mire Slime",
-    goldMin: 8,
-    goldMax: 14,
+    copperMin: 8,
+    copperMax: 14,
     autoDrops: [
       { tokenId: 31n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Meadow Lily (slime residue)
     ],
@@ -99,8 +99,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Diseased Wolf": {
     mobName: "Diseased Wolf",
-    goldMin: 10,
-    goldMax: 16,
+    copperMin: 10,
+    copperMax: 16,
     autoDrops: [
       { tokenId: 1n, minQuantity: 1, maxQuantity: 1, chance: 0.25 }, // Raw Meat (diseased)
     ],
@@ -113,8 +113,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
   // --- Wild Meadow Mobs (Mid-Tier) ---
   "Forest Bear": {
     mobName: "Forest Bear",
-    goldMin: 20,
-    goldMax: 35,
+    copperMin: 20,
+    copperMax: 35,
     autoDrops: [
       { tokenId: 1n, minQuantity: 3, maxQuantity: 5, chance: 0.7 }, // Raw Meat
     ],
@@ -127,8 +127,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Venom Spider": {
     mobName: "Venom Spider",
-    goldMin: 18,
-    goldMax: 30,
+    copperMin: 18,
+    copperMax: 30,
     autoDrops: [
       { tokenId: 38n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Moonflower (venom gland)
     ],
@@ -140,8 +140,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Rogue Bandit": {
     mobName: "Rogue Bandit",
-    goldMin: 25,
-    goldMax: 40,
+    copperMin: 25,
+    copperMax: 40,
     autoDrops: [
       { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Healing Potion
       { tokenId: 23n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Tin Ore
@@ -153,8 +153,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Corrupted Ent": {
     mobName: "Corrupted Ent",
-    goldMin: 30,
-    goldMax: 50,
+    copperMin: 30,
+    copperMax: 50,
     autoDrops: [
       { tokenId: 35n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Lavender (corrupted wood)
     ],
@@ -165,8 +165,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Dire Wolf": {
     mobName: "Dire Wolf",
-    goldMin: 35,
-    goldMax: 55,
+    copperMin: 35,
+    copperMax: 55,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, // Raw Meat
     ],
@@ -180,8 +180,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
   // --- Dark Forest Mobs (High-Tier) ---
   "Shadow Wolf": {
     mobName: "Shadow Wolf",
-    goldMin: 40,
-    goldMax: 65,
+    copperMin: 40,
+    copperMax: 65,
     autoDrops: [
       { tokenId: 1n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Raw Meat
       { tokenId: 39n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, // Starbloom (shadow essence)
@@ -196,8 +196,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Dark Cultist": {
     mobName: "Dark Cultist",
-    goldMin: 50,
-    goldMax: 80,
+    copperMin: 50,
+    copperMax: 80,
     autoDrops: [
       { tokenId: 80n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, // Mana Potion
       { tokenId: 24n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Copper Ore
@@ -210,8 +210,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Undead Knight": {
     mobName: "Undead Knight",
-    goldMin: 60,
-    goldMax: 95,
+    copperMin: 60,
+    copperMax: 95,
     autoDrops: [
       { tokenId: 24n, minQuantity: 1, maxQuantity: 3, chance: 0.4 }, // Copper Ore
       { tokenId: 25n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Silver Ore
@@ -226,8 +226,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Forest Troll": {
     mobName: "Forest Troll",
-    goldMin: 70,
-    goldMax: 110,
+    copperMin: 70,
+    copperMax: 110,
     autoDrops: [
       { tokenId: 1n, minQuantity: 4, maxQuantity: 6, chance: 0.7 }, // Raw Meat
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.08 }, // Shadow Opal
@@ -241,8 +241,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Ancient Golem": {
     mobName: "Ancient Golem",
-    goldMin: 80,
-    goldMax: 130,
+    copperMin: 80,
+    copperMax: 130,
     autoDrops: [
       { tokenId: 25n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Silver Ore
       { tokenId: 26n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }, // Gold Ore
@@ -257,8 +257,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 
   "Necromancer Valdris": {
     mobName: "Necromancer Valdris",
-    goldMin: 150,
-    goldMax: 250,
+    copperMin: 150,
+    copperMax: 250,
     autoDrops: [
       { tokenId: 80n, minQuantity: 3, maxQuantity: 5, chance: 0.8 }, // Mana Potion
       { tokenId: 26n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Gold Ore
@@ -300,8 +300,8 @@ export function rollDrops(drops: LootDrop[]): Array<{ tokenId: bigint; quantity:
 }
 
 /**
- * Roll random gold amount from range
+ * Roll random copper amount from range
  */
-export function rollGold(min: number, max: number): number {
+export function rollCopper(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }

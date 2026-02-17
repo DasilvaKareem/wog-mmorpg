@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getOrCreateZone, type Entity, recalculateEntityVitals } from "./zoneRuntime.js";
 import { mintGold, mintItem } from "./blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
+import { saveCharacter } from "./characterStore.js";
 
 // Quest definition
 export interface Quest {
@@ -18,7 +19,7 @@ export interface Quest {
     count: number;
   };
   rewards: {
-    gold: number;
+    copper: number;
     xp: number;
     items?: Array<{ tokenId: number; quantity: number }>; // minted to player on completion
   };
@@ -47,7 +48,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 10,
+      copper: 10,
       xp: 40,
       items: [{ tokenId: 0, quantity: 3 }], // 3x Health Potion
     },
@@ -65,7 +66,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 60,
       items: [{ tokenId: 2, quantity: 1 }], // 1x Iron Sword
     },
@@ -83,7 +84,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 80,
       items: [{ tokenId: 8, quantity: 1 }], // 1x Leather Vest
     },
@@ -101,7 +102,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 10,
+      copper: 10,
       xp: 100,
       items: [{ tokenId: 10, quantity: 1 }], // 1x Iron Helm
     },
@@ -119,7 +120,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 10,
+      copper: 10,
       xp: 120,
       items: [{ tokenId: 12, quantity: 1 }], // 1x Leather Leggings
     },
@@ -137,7 +138,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 140,
       items: [{ tokenId: 13, quantity: 1 }], // 1x Traveler Boots
     },
@@ -155,7 +156,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 160,
       items: [
         { tokenId: 15, quantity: 1 }, // 1x Padded Gloves
@@ -176,7 +177,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 20,
+      copper: 20,
       xp: 200,
       items: [
         { tokenId: 14, quantity: 1 }, // 1x Bronze Shoulders
@@ -200,7 +201,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 50,
     },
   },
@@ -219,7 +220,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 5,
     },
     rewards: {
-      gold: 50,
+      copper: 50,
       xp: 100,
     },
   },
@@ -236,7 +237,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 60,
+      copper: 60,
       xp: 120,
     },
   },
@@ -255,7 +256,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 75,
+      copper: 75,
       xp: 150,
     },
   },
@@ -272,7 +273,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 2,
     },
     rewards: {
-      gold: 60,
+      copper: 60,
       xp: 120,
     },
   },
@@ -291,7 +292,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 100,
+      copper: 100,
       xp: 200,
     },
   },
@@ -310,7 +311,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 150,
+      copper: 150,
       xp: 300,
     },
   },
@@ -331,7 +332,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 125,
+      copper: 125,
       xp: 250,
     },
   },
@@ -350,7 +351,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 5,
     },
     rewards: {
-      gold: 150,
+      copper: 150,
       xp: 300,
     },
   },
@@ -369,7 +370,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 175,
+      copper: 175,
       xp: 350,
     },
   },
@@ -388,7 +389,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 200,
+      copper: 200,
       xp: 400,
     },
   },
@@ -407,7 +408,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 250,
+      copper: 250,
       xp: 500,
     },
   },
@@ -426,7 +427,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 7, // 2 bears + 3 spiders + 2 bandits = 7 total (simplified to just bears for now)
     },
     rewards: {
-      gold: 300,
+      copper: 300,
       xp: 600,
     },
   },
@@ -447,7 +448,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 5,
     },
     rewards: {
-      gold: 275,
+      copper: 275,
       xp: 550,
     },
   },
@@ -466,7 +467,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 325,
+      copper: 325,
       xp: 650,
     },
   },
@@ -485,7 +486,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 375,
+      copper: 375,
       xp: 750,
     },
   },
@@ -504,7 +505,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 425,
+      copper: 425,
       xp: 850,
     },
   },
@@ -523,7 +524,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 2,
     },
     rewards: {
-      gold: 475,
+      copper: 475,
       xp: 950,
     },
   },
@@ -542,7 +543,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 750,
+      copper: 750,
       xp: 1500,
     },
   },
@@ -561,7 +562,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 10, // 3 Shadow Wolves + 2 Dark Cultists + 2 Undead Knights + 1 Forest Troll + 2 Golems = 10 total
     },
     rewards: {
-      gold: 1000,
+      copper: 1000,
       xp: 2000,
     },
   },
@@ -590,7 +591,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 80,
       items: [{ tokenId: 6, quantity: 1 }], // Apprentice Staff — essence-attuned
     },
@@ -609,7 +610,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 120,
       items: [{ tokenId: 7, quantity: 1 }], // Oak Shield
     },
@@ -627,7 +628,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 150,
       items: [{ tokenId: 3, quantity: 1 }], // Steel Longsword +14 ATK
     },
@@ -646,7 +647,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 60,
+      copper: 60,
       xp: 300,
       items: [{ tokenId: 9, quantity: 1 }], // Chainmail Shirt +10 DEF
     },
@@ -664,7 +665,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 35,
+      copper: 35,
       xp: 200,
     },
   },
@@ -682,7 +683,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 100,
+      copper: 100,
       xp: 500,
       items: [
         { tokenId: 109, quantity: 1 }, // Reinforced Apprentice Staff +15 INT, +4 FAITH
@@ -708,7 +709,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 10,
+      copper: 10,
       xp: 60,
       items: [{ tokenId: 2, quantity: 1 }], // Iron Sword +8 ATK
     },
@@ -727,7 +728,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 35,
+      copper: 35,
       xp: 100,
       items: [{ tokenId: 4, quantity: 1 }], // Hunter's Bow +10 ATK
     },
@@ -745,7 +746,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 20,
+      copper: 20,
       xp: 120,
     },
   },
@@ -763,7 +764,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 50,
+      copper: 50,
       xp: 150,
     },
   },
@@ -780,7 +781,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 200,
       items: [
         { tokenId: 105, quantity: 1 }, // Reinforced Iron Sword +10 STR
@@ -806,7 +807,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 20,
+      copper: 20,
       xp: 150,
       items: [{ tokenId: 5, quantity: 1 }], // Battle Axe +18 ATK
     },
@@ -825,7 +826,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 5,
     },
     rewards: {
-      gold: 75,
+      copper: 75,
       xp: 300,
       items: [{ tokenId: 98, quantity: 1 }], // Reinforced Hide Vest +8 DEF, +4 AGI
     },
@@ -843,7 +844,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 200,
     },
   },
@@ -861,7 +862,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 100,
+      copper: 100,
       xp: 400,
       items: [{ tokenId: 106, quantity: 1 }], // Reinforced Steel Longsword +18 STR
     },
@@ -879,7 +880,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 50,
+      copper: 50,
       xp: 350,
       items: [
         { tokenId: 108, quantity: 1 }, // Reinforced Battle Axe +23 STR
@@ -905,7 +906,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 200,
       items: [{ tokenId: 108, quantity: 1 }], // Reinforced Battle Axe +23 STR — dwarven-forged
     },
@@ -924,7 +925,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 80,
+      copper: 80,
       xp: 400,
       items: [{ tokenId: 122, quantity: 1 }], // Ruby Ring +4 STR, +6 HP — Gemloch gem
     },
@@ -942,7 +943,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 300,
     },
   },
@@ -960,7 +961,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 120,
+      copper: 120,
       xp: 600,
       items: [{ tokenId: 111, quantity: 1 }], // Masterwork Steel Longsword +21 STR
     },
@@ -978,7 +979,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 75,
+      copper: 75,
       xp: 500,
       items: [
         { tokenId: 113, quantity: 1 }, // Masterwork Battle Axe +27 STR — Felsrock relic
@@ -1005,7 +1006,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 15,
+      copper: 15,
       xp: 80,
       items: [{ tokenId: 2, quantity: 1 }], // Iron Sword +8 ATK
     },
@@ -1024,7 +1025,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 100,
       items: [{ tokenId: 8, quantity: 1 }], // Leather Vest +4 DEF
     },
@@ -1042,7 +1043,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 200,
       items: [{ tokenId: 3, quantity: 1 }], // Steel Longsword +14 ATK
     },
@@ -1061,7 +1062,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 80,
+      copper: 80,
       xp: 350,
       items: [{ tokenId: 107, quantity: 1 }], // Reinforced Hunter's Bow +5 STR, +8 AGI
     },
@@ -1079,7 +1080,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 300,
       items: [{ tokenId: 109, quantity: 1 }], // Reinforced Apprentice Staff +15 INT, +4 FAITH
     },
@@ -1098,7 +1099,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 100,
+      copper: 100,
       xp: 500,
       items: [
         { tokenId: 111, quantity: 1 }, // Masterwork Steel Longsword +21 STR
@@ -1119,7 +1120,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 150,
+      copper: 150,
       xp: 750,
       items: [
         { tokenId: 114, quantity: 1 }, // Masterwork Apprentice Staff +18 INT, +5 FAITH — Selerion relic
@@ -1154,7 +1155,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 100,
       items: [
         { tokenId: 27, quantity: 1 },  // Stone Pickaxe (mining tool T1)
@@ -1177,7 +1178,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 150,
       items: [
         { tokenId: 28, quantity: 1 },  // Iron Pickaxe (mining tool T2)
@@ -1201,7 +1202,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 100,
       items: [
         { tokenId: 41, quantity: 1 },  // Basic Sickle (herbalism tool T1)
@@ -1224,7 +1225,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 150,
       items: [
         { tokenId: 42, quantity: 1 },  // Iron Sickle (herbalism tool T2)
@@ -1249,7 +1250,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 100,
       items: [
         { tokenId: 76, quantity: 1 },  // Rusty Skinning Knife (T1)
@@ -1272,7 +1273,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 40,
+      copper: 40,
       xp: 150,
       items: [
         { tokenId: 77, quantity: 1 },  // Iron Skinning Knife (T2)
@@ -1296,7 +1297,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 120,
       items: [
         { tokenId: 22, quantity: 10 }, // 10x Coal Ore
@@ -1320,7 +1321,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 60,
+      copper: 60,
       xp: 200,
       items: [
         { tokenId: 3, quantity: 1 },   // Steel Longsword +14 ATK
@@ -1344,7 +1345,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 100,
       items: [
         { tokenId: 31, quantity: 6 },  // 6x Meadow Lily (for health pots)
@@ -1368,7 +1369,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 2,
     },
     rewards: {
-      gold: 50,
+      copper: 50,
       xp: 180,
       items: [
         { tokenId: 35, quantity: 5 },  // 5x Lavender
@@ -1393,7 +1394,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 20,
+      copper: 20,
       xp: 80,
       items: [
         { tokenId: 1, quantity: 10 },  // 10x Raw Meat
@@ -1415,7 +1416,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 3,
     },
     rewards: {
-      gold: 35,
+      copper: 35,
       xp: 120,
       items: [
         { tokenId: 1, quantity: 15 },  // 15x Raw Meat
@@ -1439,7 +1440,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 25,
+      copper: 25,
       xp: 100,
       items: [
         { tokenId: 62, quantity: 8 },  // 8x Scrap Leather
@@ -1463,7 +1464,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 4,
     },
     rewards: {
-      gold: 50,
+      copper: 50,
       xp: 180,
       items: [
         { tokenId: 63, quantity: 10 }, // 10x Light Leather
@@ -1488,7 +1489,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 1,
     },
     rewards: {
-      gold: 30,
+      copper: 30,
       xp: 120,
       items: [
         { tokenId: 116, quantity: 2 }, // 2x Rough Ruby
@@ -1511,7 +1512,7 @@ export const QUEST_CATALOG: Quest[] = [
       count: 2,
     },
     rewards: {
-      gold: 60,
+      copper: 60,
       xp: 200,
       items: [
         { tokenId: 89, quantity: 2 },  // 2x Gold Bar (for crafting rings)
@@ -1623,7 +1624,7 @@ export async function awardQuestRewards(
 
   // Award gold (async, non-blocking)
   if (player.walletAddress) {
-    await mintGold(player.walletAddress, quest.rewards.gold.toString()).catch(
+    await mintGold(player.walletAddress, quest.rewards.copper.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)
     );
 
@@ -1641,8 +1642,19 @@ export async function awardQuestRewards(
     }
   }
 
+  // Persist character after quest completion
+  if (player.walletAddress) {
+    saveCharacter(player.walletAddress, {
+      level: player.level,
+      xp: player.xp,
+      completedQuests: player.completedQuests,
+      learnedTechniques: player.learnedTechniques,
+      kills: player.kills,
+    }).catch((err) => console.error(`[persistence] Save failed after quest for ${player.name}:`, err));
+  }
+
   console.log(
-    `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.gold} gold + ${quest.rewards.xp} XP` +
+    `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.copper} copper + ${quest.rewards.xp} XP` +
       (quest.rewards.items
         ? ` + ${quest.rewards.items.map((i) => `${i.quantity}x tokenId:${i.tokenId}`).join(", ")}`
         : "")

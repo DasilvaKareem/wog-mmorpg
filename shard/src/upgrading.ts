@@ -11,7 +11,7 @@ export interface UpgradeRecipe {
   inputWeaponTokenId: bigint;
   outputTokenId: bigint;
   additionalMaterials: Array<{ tokenId: bigint; quantity: number }>;
-  goldCost: number;
+  copperCost: number;
 }
 
 export const UPGRADE_RECIPES: UpgradeRecipe[] = [
@@ -24,7 +24,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
       { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
     ],
-    goldCost: 100,
+    copperCost: 100,
   },
   {
     recipeId: "upgrade-steel-longsword-reinforced",
@@ -34,7 +34,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
       { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
     ],
-    goldCost: 200,
+    copperCost: 200,
   },
   {
     recipeId: "upgrade-hunters-bow-reinforced",
@@ -44,7 +44,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 150,
+    copperCost: 150,
   },
   {
     recipeId: "upgrade-battle-axe-reinforced",
@@ -54,7 +54,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
       { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
     ],
-    goldCost: 350,
+    copperCost: 350,
   },
   {
     recipeId: "upgrade-apprentice-staff-reinforced",
@@ -64,7 +64,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 88n, quantity: 2 }, // 2x Silver Bar
       { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
     ],
-    goldCost: 180,
+    copperCost: 180,
   },
 
   // --- Reinforced → Masterwork ---
@@ -76,7 +76,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
       { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
     ],
-    goldCost: 250,
+    copperCost: 250,
   },
   {
     recipeId: "upgrade-steel-longsword-masterwork",
@@ -86,7 +86,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
       { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
     ],
-    goldCost: 500,
+    copperCost: 500,
   },
   {
     recipeId: "upgrade-hunters-bow-masterwork",
@@ -96,7 +96,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
       { tokenId: 88n, quantity: 2 }, // 2x Silver Bar
     ],
-    goldCost: 350,
+    copperCost: 350,
   },
   {
     recipeId: "upgrade-battle-axe-masterwork",
@@ -106,7 +106,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 89n, quantity: 3 }, // 3x Gold Bar
       { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
     ],
-    goldCost: 750,
+    copperCost: 750,
   },
   {
     recipeId: "upgrade-apprentice-staff-masterwork",
@@ -116,7 +116,7 @@ export const UPGRADE_RECIPES: UpgradeRecipe[] = [
       { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
       { tokenId: 88n, quantity: 3 }, // 3x Silver Bar
     ],
-    goldCost: 500,
+    copperCost: 500,
   },
 ];
 
@@ -148,7 +148,7 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
             quantity: mat.quantity,
           };
         }),
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     });
   });
@@ -301,7 +301,7 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
           },
         },
         materialsConsumed: burnedItems,
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     } catch (err) {
       server.log.error(err, `[upgrading] Failed to mint upgraded weapon for ${walletAddress}`);

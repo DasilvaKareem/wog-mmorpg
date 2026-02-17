@@ -12,7 +12,7 @@ export interface CraftingRecipe {
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
-  goldCost: number;
+  copperCost: number;
   requiredProfession: "blacksmithing" | "alchemy" | "leatherworking" | "jewelcrafting";
   craftingTime: number; // seconds (for future use)
 }
@@ -27,7 +27,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
       { tokenId: 23n, quantity: 1 }, // 1x Tin Ore
     ],
-    goldCost: 25,
+    copperCost: 25,
     requiredProfession: "blacksmithing",
     craftingTime: 5,
   },
@@ -39,7 +39,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 22n, quantity: 3 }, // 3x Coal Ore
       { tokenId: 24n, quantity: 2 }, // 2x Copper Ore
     ],
-    goldCost: 50,
+    copperCost: 50,
     requiredProfession: "blacksmithing",
     craftingTime: 10,
   },
@@ -50,7 +50,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     requiredMaterials: [
       { tokenId: 23n, quantity: 2 }, // 2x Tin Ore (for metal tips)
     ],
-    goldCost: 35,
+    copperCost: 35,
     requiredProfession: "blacksmithing",
     craftingTime: 8,
   },
@@ -62,7 +62,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 24n, quantity: 3 }, // 3x Copper Ore
       { tokenId: 25n, quantity: 1 }, // 1x Silver Ore
     ],
-    goldCost: 100,
+    copperCost: 100,
     requiredProfession: "blacksmithing",
     craftingTime: 15,
   },
@@ -74,7 +74,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 22n, quantity: 1 }, // 1x Coal Ore (for metal rim)
       { tokenId: 23n, quantity: 1 }, // 1x Tin Ore
     ],
-    goldCost: 20,
+    copperCost: 20,
     requiredProfession: "blacksmithing",
     craftingTime: 6,
   },
@@ -87,7 +87,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 24n, quantity: 4 }, // 4x Copper Ore
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
     ],
-    goldCost: 75,
+    copperCost: 75,
     requiredProfession: "blacksmithing",
     craftingTime: 20,
   },
@@ -99,7 +99,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
       { tokenId: 24n, quantity: 1 }, // 1x Copper Ore
     ],
-    goldCost: 40,
+    copperCost: 40,
     requiredProfession: "blacksmithing",
     craftingTime: 12,
   },
@@ -111,7 +111,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 24n, quantity: 2 }, // 2x Copper Ore
       { tokenId: 25n, quantity: 1 }, // 1x Silver Ore
     ],
-    goldCost: 60,
+    copperCost: 60,
     requiredProfession: "blacksmithing",
     craftingTime: 14,
   },
@@ -125,7 +125,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 25n, quantity: 2 }, // 2x Silver Ore
       { tokenId: 24n, quantity: 3 }, // 3x Copper Ore
     ],
-    goldCost: 300,
+    copperCost: 300,
     requiredProfession: "blacksmithing",
     craftingTime: 30,
   },
@@ -139,7 +139,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 23n, quantity: 2 }, // 2x Tin Ore
       { tokenId: 22n, quantity: 1 }, // 1x Coal Ore (fuel)
     ],
-    goldCost: 5,
+    copperCost: 5,
     requiredProfession: "blacksmithing",
     craftingTime: 3,
   },
@@ -151,7 +151,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 24n, quantity: 2 }, // 2x Copper Ore
       { tokenId: 22n, quantity: 1 }, // 1x Coal Ore (fuel)
     ],
-    goldCost: 8,
+    copperCost: 8,
     requiredProfession: "blacksmithing",
     craftingTime: 4,
   },
@@ -163,7 +163,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 25n, quantity: 2 }, // 2x Silver Ore
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore (fuel)
     ],
-    goldCost: 15,
+    copperCost: 15,
     requiredProfession: "blacksmithing",
     craftingTime: 6,
   },
@@ -175,7 +175,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 26n, quantity: 2 }, // 2x Gold Ore
       { tokenId: 22n, quantity: 3 }, // 3x Coal Ore (fuel)
     ],
-    goldCost: 30,
+    copperCost: 30,
     requiredProfession: "blacksmithing",
     craftingTime: 8,
   },
@@ -188,7 +188,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
       { tokenId: 22n, quantity: 3 }, // 3x Coal Ore
     ],
-    goldCost: 40,
+    copperCost: 40,
     requiredProfession: "blacksmithing",
     craftingTime: 10,
   },
@@ -201,7 +201,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     requiredMaterials: [
       { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
     ],
-    goldCost: 15,
+    copperCost: 15,
     requiredProfession: "blacksmithing",
     craftingTime: 6,
   },
@@ -213,7 +213,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
       { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
     ],
-    goldCost: 20,
+    copperCost: 20,
     requiredProfession: "blacksmithing",
     craftingTime: 8,
   },
@@ -225,7 +225,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 50,
+    copperCost: 50,
     requiredProfession: "blacksmithing",
     craftingTime: 12,
   },
@@ -237,7 +237,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
       { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
     ],
-    goldCost: 60,
+    copperCost: 60,
     requiredProfession: "blacksmithing",
     craftingTime: 14,
   },
@@ -249,7 +249,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 45,
+    copperCost: 45,
     requiredProfession: "blacksmithing",
     craftingTime: 10,
   },
@@ -261,7 +261,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 87n, quantity: 3 }, // 3x Copper Bar
       { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
     ],
-    goldCost: 70,
+    copperCost: 70,
     requiredProfession: "blacksmithing",
     craftingTime: 18,
   },
@@ -273,7 +273,7 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
       { tokenId: 88n, quantity: 2 }, // 2x Silver Bar
       { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
     ],
-    goldCost: 55,
+    copperCost: 55,
     requiredProfession: "blacksmithing",
     craftingTime: 12,
   },
@@ -303,7 +303,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
             quantity: mat.quantity,
           };
         }),
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
         requiredProfession: recipe.requiredProfession,
         craftingTime: recipe.craftingTime,
       };
@@ -342,7 +342,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
               quantity: mat.quantity,
             };
           }),
-          goldCost: recipe.goldCost,
+          copperCost: recipe.copperCost,
           craftingTime: recipe.craftingTime,
         };
       });
@@ -516,7 +516,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           }),
         },
         materialsConsumed: burnedMaterials,
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     } catch (err) {
       server.log.error(err, `[crafting] Failed to mint crafted item for ${walletAddress}`);

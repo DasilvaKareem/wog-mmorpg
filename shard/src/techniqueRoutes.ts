@@ -7,6 +7,7 @@ import { getAvailableGold, recordGoldSpend } from "./goldLedger.js";
 import { getGoldBalance } from "./blockchain.js";
 import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
 import { randomUUID } from "crypto";
+import { saveCharacter } from "./characterStore.js";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -144,14 +145,14 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const onChainGold = Number(onChainGoldStr);
     const availableGold = getAvailableGold(player.walletAddress, onChainGold);
 
-    if (availableGold < technique.goldCost) {
+    if (availableGold < technique.copperCost) {
       return reply.status(400).send({
-        error: `Not enough gold. Need ${technique.goldCost}, have ${availableGold}`
+        error: `Not enough gold. Need ${technique.copperCost}, have ${availableGold}`
       });
     }
 
     // Deduct gold
-    recordGoldSpend(player.walletAddress, technique.goldCost);
+    recordGoldSpend(player.walletAddress, technique.copperCost);
 
     // Add technique to learned list
     if (!player.learnedTechniques) {
@@ -159,12 +160,17 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
     player.learnedTechniques.push(techniqueId);
 
+    // Persist to Redis
+    saveCharacter(player.walletAddress, {
+      learnedTechniques: player.learnedTechniques,
+    }).catch((err) => console.error(`[persistence] Save failed after technique learn:`, err));
+
     const newAvailableGold = getAvailableGold(player.walletAddress, onChainGold);
 
     return reply.send({
       success: true,
       technique: technique.name,
-      goldSpent: technique.goldCost,
+      goldSpent: technique.copperCost,
       remainingGold: newAvailableGold,
       totalLearned: player.learnedTechniques.length,
     });

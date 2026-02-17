@@ -33,7 +33,7 @@ const WALLET = privateKeyToAccount(PRIVATE_KEY as `0x${string}`).address;
 
 type ApiFunc = ReturnType<typeof createAuthenticatedAPI>;
 let api: ApiFunc;
-const ZONE = "village-square";
+const START_ZONE = "village-square";
 
 // =============================================================================
 //  Types
@@ -48,6 +48,7 @@ interface Warrior {
   pvpLosses: number;
   itemsBought: number;
   auctionsCreated: number;
+  currentZone: string;
 }
 
 // =============================================================================
@@ -79,32 +80,41 @@ function log(name: string, msg: string) {
   console.log(`  ${ts} [${short}] ${msg}`);
 }
 
-async function getZoneEntities() {
+async function getZoneEntities(zoneId: string) {
   const state = await api("GET", "/state");
-  return state.zones[ZONE]?.entities ?? {};
+  return state.zones[zoneId]?.entities ?? {};
 }
 
-async function getEntity(entityId: string) {
+async function getEntity(zoneId: string, entityId: string) {
   const state = await api("GET", "/state");
-  return state.zones[ZONE]?.entities?.[entityId];
+  return state.zones[zoneId]?.entities?.[entityId];
 }
 
-async function findEntityByName(name: string): Promise<string | null> {
-  const entities = await getZoneEntities();
+async function findEntityByName(zoneId: string, name: string): Promise<string | null> {
+  const entities = await getZoneEntities(zoneId);
   const entry = Object.entries(entities).find(([_, e]: any) => e.name === name);
   return entry ? entry[0] : null;
 }
 
-async function findEntitiesByType(type: string): Promise<Array<[string, any]>> {
-  const entities = await getZoneEntities();
+async function findEntitiesByType(zoneId: string, type: string): Promise<Array<[string, any]>> {
+  const entities = await getZoneEntities(zoneId);
   return Object.entries(entities).filter(([_, e]: any) => e.type === type);
 }
 
-async function moveTo(entityId: string, x: number, y: number) {
-  await api("POST", "/command", { zoneId: ZONE, entityId, action: "move", x, y });
+/** Detect which zone an entity is currently in by scanning all zones */
+async function detectCurrentZone(entityId: string): Promise<string | null> {
+  const state = await api("GET", "/state");
+  for (const [zoneId, zone] of Object.entries(state.zones)) {
+    if ((zone as any).entities?.[entityId]) return zoneId;
+  }
+  return null;
+}
+
+async function moveTo(zoneId: string, entityId: string, x: number, y: number) {
+  await api("POST", "/command", { zoneId, entityId, action: "move", x, y });
   for (let i = 0; i < 30; i++) {
     await sleep(600);
-    const e = await getEntity(entityId);
+    const e = await getEntity(zoneId, entityId);
     if (!e) break;
     const dx = e.x - x;
     const dy = e.y - y;
@@ -112,13 +122,66 @@ async function moveTo(entityId: string, x: number, y: number) {
   }
 }
 
-async function moveNear(entityId: string, targetId: string) {
-  const entities = await getZoneEntities();
+async function moveNear(zoneId: string, entityId: string, targetId: string) {
+  const entities = await getZoneEntities(zoneId);
   const target = entities[targetId];
   if (target) {
-    await moveTo(entityId, target.x, target.y);
+    await moveTo(zoneId, entityId, target.x, target.y);
     await sleep(400);
   }
+}
+
+// =============================================================================
+//  Zone Progression — walk east to enter higher-level zones
+// =============================================================================
+
+const ZONE_PROGRESSION = [
+  { zone: "village-square", minLevel: 1 },
+  { zone: "wild-meadow", minLevel: 5 },
+  { zone: "dark-forest", minLevel: 10 },
+];
+
+/** Returns the zone this warrior should be in based on level */
+function targetZoneForLevel(level: number): string {
+  for (let i = ZONE_PROGRESSION.length - 1; i >= 0; i--) {
+    if (level >= ZONE_PROGRESSION[i].minLevel) return ZONE_PROGRESSION[i].zone;
+  }
+  return ZONE_PROGRESSION[0].zone;
+}
+
+/** Walk east past the zone boundary to trigger auto-transition to the next zone */
+async function advanceToNextZone(w: Warrior): Promise<boolean> {
+  const target = targetZoneForLevel(await getWarriorLevel(w));
+  if (target === w.currentZone) return false;
+
+  // Only advance forward (east)
+  const curIdx = ZONE_PROGRESSION.findIndex(z => z.zone === w.currentZone);
+  const targetIdx = ZONE_PROGRESSION.findIndex(z => z.zone === target);
+  if (targetIdx <= curIdx) return false;
+
+  log(w.name, `Level high enough for ${target} — walking east to cross the boundary!`);
+
+  // Walk to the east edge (x=645 is past the 640 boundary, triggering auto-transfer)
+  await api("POST", "/command", { zoneId: w.currentZone, entityId: w.id, action: "move", x: 645, y: 320 });
+
+  // Poll until we detect the warrior in the new zone
+  for (let i = 0; i < 40; i++) {
+    await sleep(800);
+    const newZone = await detectCurrentZone(w.id);
+    if (newZone && newZone !== w.currentZone) {
+      log(w.name, `Arrived in ${newZone}! Time to fight tougher mobs!`);
+      w.currentZone = newZone;
+      return true;
+    }
+  }
+
+  log(w.name, "Zone transition didn't happen — will try again later");
+  return false;
+}
+
+async function getWarriorLevel(w: Warrior): Promise<number> {
+  const e = await getEntity(w.currentZone, w.id);
+  return e?.level ?? 1;
 }
 
 // =============================================================================
@@ -127,21 +190,22 @@ async function moveNear(entityId: string, targetId: string) {
 
 function printScoreboard() {
   console.log(`
-┌──────────────────────────────────────────────────────────────────────┐
-│                     WARRIOR BRAWL LEADERBOARD                        │
-├──────────────────────────────┬───────┬───────┬───────┬───────────────┤
-│  Name                        │ Kills │ W/L   │ Buys  │ Auctions      │
-├──────────────────────────────┼───────┼───────┼───────┼───────────────┤`);
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                          WARRIOR BRAWL LEADERBOARD                                │
+├──────────────────────────────┬───────┬───────┬───────┬──────────┬─────────────────┤
+│  Name                        │ Kills │ W/L   │ Buys  │ Auctions │ Zone            │
+├──────────────────────────────┼───────┼───────┼───────┼──────────┼─────────────────┤`);
   const sorted = [...warriors].sort((a, b) => (b.kills + b.pvpWins * 5) - (a.kills + a.pvpWins * 5));
   for (const w of sorted) {
     const name = w.name.padEnd(28);
     const kills = String(w.kills).padEnd(5);
     const wl = `${w.pvpWins}/${w.pvpLosses}`.padEnd(5);
     const buys = String(w.itemsBought).padEnd(5);
-    const auctions = String(w.auctionsCreated).padEnd(13);
-    console.log(`│  ${name}│ ${kills} │ ${wl} │ ${buys} │ ${auctions} │`);
+    const auctions = String(w.auctionsCreated).padEnd(8);
+    const zone = w.currentZone.padEnd(15);
+    console.log(`│  ${name}│ ${kills} │ ${wl} │ ${buys} │ ${auctions} │ ${zone} │`);
   }
-  console.log(`└──────────────────────────────┴───────┴───────┴───────┴───────────────┘`);
+  console.log(`└──────────────────────────────┴───────┴───────┴───────┴──────────┴─────────────────┘`);
 }
 
 // =============================================================================
@@ -162,11 +226,11 @@ const NPC_ROUTE = [
 async function runTalkQuests(w: Warrior) {
   log(w.name, "Starting talk quest grind...");
   for (const npc of NPC_ROUTE) {
-    await moveTo(w.id, npc.x, npc.y);
-    const npcId = await findEntityByName(npc.name);
+    await moveTo(w.currentZone, w.id, npc.x, npc.y);
+    const npcId = await findEntityByName(w.currentZone, npc.name);
     if (!npcId) continue;
     try {
-      const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: w.id, npcEntityId: npcId });
+      const result = await api("POST", "/quests/talk", { zoneId: w.currentZone, playerId: w.id, npcEntityId: npcId });
       log(w.name, `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
     } catch {}
     await sleep(300);
@@ -186,12 +250,12 @@ const LORE_NPC_ROUTE = [
 async function runLoreQuests(w: Warrior) {
   log(w.name, "Running lore quests for weapon rewards...");
   for (const npc of LORE_NPC_ROUTE) {
-    await moveTo(w.id, npc.x, npc.y);
-    const npcId = await findEntityByName(npc.name);
+    await moveTo(w.currentZone, w.id, npc.x, npc.y);
+    const npcId = await findEntityByName(w.currentZone, npc.name);
     if (!npcId) continue;
     for (let i = 0; i < 5; i++) {
       try {
-        const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: w.id, npcEntityId: npcId });
+        const result = await api("POST", "/quests/talk", { zoneId: w.currentZone, playerId: w.id, npcEntityId: npcId });
         log(w.name, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g${result.rewards?.items?.length ? " + items!" : ""}`);
       } catch { break; }
       await sleep(300);
@@ -255,21 +319,21 @@ const UPGRADED_ACCESSORIES = [
 async function equipUpgradedGear(w: Warrior) {
   for (const weapon of UPGRADED_WEAPONS) {
     try {
-      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: weapon.tokenId, entityId: w.id, walletAddress: WALLET });
+      await api("POST", "/equipment/equip", { zoneId: w.currentZone, tokenId: weapon.tokenId, entityId: w.id, walletAddress: WALLET });
       log(w.name, `Equipped ${weapon.name} — now we're talking`);
       break;
     } catch {}
   }
   for (const armor of UPGRADED_ARMOR) {
     try {
-      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: armor.tokenId, entityId: w.id, walletAddress: WALLET });
+      await api("POST", "/equipment/equip", { zoneId: w.currentZone, tokenId: armor.tokenId, entityId: w.id, walletAddress: WALLET });
       log(w.name, `Equipped ${armor.name}!`);
       break;
     } catch {}
   }
   for (const acc of UPGRADED_ACCESSORIES) {
     try {
-      await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: acc.tokenId, entityId: w.id, walletAddress: WALLET });
+      await api("POST", "/equipment/equip", { zoneId: w.currentZone, tokenId: acc.tokenId, entityId: w.id, walletAddress: WALLET });
       log(w.name, `Equipped ${acc.name}!`);
       break;
     } catch {}
@@ -289,7 +353,7 @@ const STARTER_GEAR = [
 
 async function equipGear(w: Warrior) {
   for (const gear of STARTER_GEAR) {
-    try { await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: gear.tokenId, entityId: w.id, walletAddress: WALLET }); } catch {}
+    try { await api("POST", "/equipment/equip", { zoneId: w.currentZone, tokenId: gear.tokenId, entityId: w.id, walletAddress: WALLET }); } catch {}
     await sleep(200);
   }
   log(w.name, "Gear equipped — time to get swole");
@@ -297,14 +361,14 @@ async function equipGear(w: Warrior) {
 
 async function learnTechniques(w: Warrior) {
   try {
-    const trainers = await findEntitiesByType("trainer");
+    const trainers = await findEntitiesByType(w.currentZone, "trainer");
     if (trainers.length === 0) return;
-    const available = await api("GET", `/techniques/available/${ZONE}/${w.id}`);
+    const available = await api("GET", `/techniques/available/${w.currentZone}/${w.id}`);
     const toLearn = available.techniques.filter((t: any) => !t.isLearned);
     for (const tech of toLearn) {
       try {
-        await moveNear(w.id, trainers[0][0]);
-        await api("POST", "/techniques/learn", { zoneId: ZONE, playerEntityId: w.id, techniqueId: tech.id, trainerEntityId: trainers[0][0] });
+        await moveNear(w.currentZone, w.id, trainers[0][0]);
+        await api("POST", "/techniques/learn", { zoneId: w.currentZone, playerEntityId: w.id, techniqueId: tech.id, trainerEntityId: trainers[0][0] });
         await sleep(300);
       } catch {}
     }
@@ -326,15 +390,15 @@ const SHOP_BUYS = [
 
 async function shopRun(w: Warrior) {
   // Find merchants
-  const merchants = await findEntitiesByType("merchant");
+  const merchants = await findEntitiesByType(w.currentZone, "merchant");
   if (merchants.length === 0) return;
 
   const [merchantId, merchant] = merchants[0] as [string, any];
-  await moveTo(w.id, merchant.x, merchant.y);
+  await moveTo(w.currentZone, w.id, merchant.x, merchant.y);
 
   // Browse catalog
   try {
-    const catalog = await api("GET", `/shop/npc/${ZONE}/${merchantId}`);
+    const catalog = await api("GET", `/shop/npc/${w.currentZone}/${merchantId}`);
     const items = catalog.shopItems ?? catalog.items ?? [];
     if (items.length > 0) {
       log(w.name, `Checking ${merchant.name}'s shop (${items.length} items)`);
@@ -356,15 +420,15 @@ async function shopRun(w: Warrior) {
 
 async function auctionRun(w: Warrior) {
   // Find auctioneer
-  const auctioneers = await findEntitiesByType("auctioneer");
+  const auctioneers = await findEntitiesByType(w.currentZone, "auctioneer");
   if (auctioneers.length === 0) return;
 
   const [aucId, auc] = auctioneers[0] as [string, any];
-  await moveTo(w.id, auc.x, auc.y);
+  await moveTo(w.currentZone, w.id, auc.x, auc.y);
 
   // Check current auctions
   try {
-    const auctions = await api("GET", `/auctionhouse/${ZONE}/auctions`);
+    const auctions = await api("GET", `/auctionhouse/${w.currentZone}/auctions`);
     const active = auctions.auctions ?? [];
     log(w.name, `Auction House: ${active.length} active listings`);
 
@@ -372,7 +436,7 @@ async function auctionRun(w: Warrior) {
     if (active.length > 0) {
       const listing = active[0];
       try {
-        await api("POST", `/auctionhouse/${ZONE}/bid`, {
+        await api("POST", `/auctionhouse/${w.currentZone}/bid`, {
           auctionId: listing.id ?? listing.auctionId,
           bidderAddress: WALLET,
           bidAmount: (listing.currentBid ?? listing.startingPrice ?? 5) + 1,
@@ -390,7 +454,7 @@ async function auctionRun(w: Warrior) {
   ];
   const item = listableItems[Math.floor(Math.random() * listableItems.length)];
   try {
-    await api("POST", `/auctionhouse/${ZONE}/create`, {
+    await api("POST", `/auctionhouse/${w.currentZone}/create`, {
       sellerAddress: WALLET,
       tokenId: item.tokenId,
       quantity: 1,
@@ -407,17 +471,17 @@ async function auctionRun(w: Warrior) {
 // =============================================================================
 
 async function pvpQueue(w: Warrior) {
-  const me = await getEntity(w.id);
+  const me = await getEntity(w.currentZone, w.id);
   if (!me) return;
 
   log(w.name, "Heading to the Coliseum...");
 
   // Find arena master
-  const arenaMasters = await findEntitiesByType("arena-master");
+  const arenaMasters = await findEntitiesByType(w.currentZone, "arena-master");
   if (arenaMasters.length === 0) { log(w.name, "No arena master found"); return; }
 
   const [amId, am] = arenaMasters[0] as [string, any];
-  await moveTo(w.id, am.x, am.y);
+  await moveTo(w.currentZone, w.id, am.x, am.y);
 
   // Queue for 1v1
   try {
@@ -531,12 +595,12 @@ async function pvpFight(w: Warrior, battleId: string) {
 async function learnCraftingProfessions() {
   const leader = warriors[0];
   log(leader.name, "Learning blacksmithing + alchemy for weapon upgrades...");
-  const profTrainers = await findEntitiesByType("profession-trainer");
+  const profTrainers = await findEntitiesByType(leader.currentZone, "profession-trainer");
   for (const [tId, trainer] of profTrainers as Array<[string, any]>) {
     if (trainer.teachesProfession === "blacksmithing" || trainer.teachesProfession === "alchemy") {
-      await moveTo(leader.id, trainer.x, trainer.y);
+      await moveTo(leader.currentZone, leader.id, trainer.x, trainer.y);
       try {
-        await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: ZONE, entityId: leader.id, trainerId: tId, professionId: trainer.teachesProfession });
+        await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: leader.currentZone, entityId: leader.id, trainerId: tId, professionId: trainer.teachesProfession });
         log(leader.name, `Learned ${trainer.teachesProfession} — knowledge is gains`);
       } catch { log(leader.name, `Already know ${trainer.teachesProfession}`); }
       await sleep(300);
@@ -546,14 +610,14 @@ async function learnCraftingProfessions() {
 
 async function upgradeAndEnchantWeapons(w: Warrior) {
   // Find crafting stations
-  const forges = await findEntitiesByType("forge");
-  const alchemyLabs = await findEntitiesByType("alchemy-lab");
-  const altars = await findEntitiesByType("enchanting-altar");
+  const forges = await findEntitiesByType(w.currentZone, "forge");
+  const alchemyLabs = await findEntitiesByType(w.currentZone, "alchemy-lab");
+  const altars = await findEntitiesByType(w.currentZone, "enchanting-altar");
 
   // --- WEAPON UPGRADES at Forge ---
   if (forges.length > 0) {
     const [forgeId, forge] = forges[0] as [string, any];
-    await moveTo(w.id, forge.x, forge.y);
+    await moveTo(w.currentZone, w.id, forge.x, forge.y);
 
     const UPGRADE_PRIORITY = [
       "upgrade-battle-axe-masterwork", "upgrade-steel-longsword-masterwork",
@@ -564,12 +628,12 @@ async function upgradeAndEnchantWeapons(w: Warrior) {
     for (const upgradeId of UPGRADE_PRIORITY) {
       try {
         const result = await api("POST", "/crafting/upgrade", {
-          walletAddress: WALLET, zoneId: ZONE, entityId: w.id, forgeId, recipeId: upgradeId,
+          walletAddress: WALLET, zoneId: w.currentZone, entityId: w.id, forgeId, recipeId: upgradeId,
         });
         log(w.name, `UPGRADED to ${result.crafted?.name ?? upgradeId}! — BEAST MODE`);
         if (result.crafted?.tokenId) {
           try {
-            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(result.crafted.tokenId), entityId: w.id, walletAddress: WALLET });
+            await api("POST", "/equipment/equip", { zoneId: w.currentZone, tokenId: Number(result.crafted.tokenId), entityId: w.id, walletAddress: WALLET });
             log(w.name, `Equipped upgraded weapon — time to dominate`);
           } catch {}
         }
@@ -581,11 +645,11 @@ async function upgradeAndEnchantWeapons(w: Warrior) {
   // --- BREW ENCHANTMENT ELIXIRS at Alchemy Lab ---
   if (alchemyLabs.length > 0) {
     const [labId, lab] = alchemyLabs[0] as [string, any];
-    await moveTo(w.id, lab.x, lab.y);
+    await moveTo(w.currentZone, w.id, lab.x, lab.y);
     const ELIXIR_RECIPES = ["sharpness-elixir", "shadow-enchantment", "fire-enchantment"];
     for (const recipe of ELIXIR_RECIPES) {
       try {
-        await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: w.id, alchemyLabId: labId, recipeId: recipe });
+        await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: w.currentZone, entityId: w.id, alchemyLabId: labId, recipeId: recipe });
         log(w.name, `Brewed ${recipe} — alchemy gains`);
         break;
       } catch {}
@@ -595,12 +659,12 @@ async function upgradeAndEnchantWeapons(w: Warrior) {
   // --- ENCHANT WEAPON at Enchanter's Altar ---
   if (altars.length > 0) {
     const [altarId, altar] = altars[0] as [string, any];
-    await moveTo(w.id, altar.x, altar.y);
+    await moveTo(w.currentZone, w.id, altar.x, altar.y);
     const ENCHANT_ELIXIRS = [60, 59, 55, 57]; // Sharpness +8 STR, Shadow +6 STR, Fire +5 STR, Lightning
     for (const elixirTokenId of ENCHANT_ELIXIRS) {
       try {
         await api("POST", "/enchanting/apply", {
-          walletAddress: WALLET, zoneId: ZONE, entityId: w.id,
+          walletAddress: WALLET, zoneId: w.currentZone, entityId: w.id,
           altarId, enchantmentElixirTokenId: elixirTokenId, equipmentSlot: "weapon",
         });
         log(w.name, `Enchanted weapon — MAXIMUM POWER`);
@@ -618,8 +682,30 @@ async function warriorMainLoop(w: Warrior) {
   let cycle = 0;
 
   while (true) {
-    const me = await getEntity(w.id);
-    if (!me) { await sleep(3000); continue; }
+    const me = await getEntity(w.currentZone, w.id);
+    if (!me) {
+      // Entity may have transitioned — re-detect zone
+      const detected = await detectCurrentZone(w.id);
+      if (detected && detected !== w.currentZone) {
+        log(w.name, `Re-detected in ${detected} (was ${w.currentZone})`);
+        w.currentZone = detected;
+      }
+      await sleep(3000);
+      continue;
+    }
+
+    // ── Zone progression: advance to higher-level zones when ready ──
+    const target = targetZoneForLevel(me.level ?? 1);
+    if (target !== w.currentZone) {
+      try {
+        const advanced = await advanceToNextZone(w);
+        if (advanced) {
+          cycle++;
+          await sleep(2000);
+          continue;
+        }
+      } catch {}
+    }
 
     // Every 10 cycles: go shopping
     if (cycle % 10 === 3) {
@@ -666,7 +752,7 @@ async function warriorMainLoop(w: Warrior) {
     }
 
     // Find strongest fightable mob
-    const entities = await getZoneEntities();
+    const entities = await getZoneEntities(w.currentZone);
     const mobs = Object.entries(entities)
       .filter(([_, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0)
       .filter(([_, e]: any) => (e.level ?? 1) <= (me.level ?? 1) + 2)
@@ -685,31 +771,31 @@ async function warriorMainLoop(w: Warrior) {
     const [mobId, mob] = mobPick as [string, any];
     const mobLevel = mob.level ?? 1;
 
-    log(w.name, `Engaging ${mob.name} L${mobLevel} (${mob.hp}/${mob.maxHp} HP)`);
-    await moveTo(w.id, mob.x, mob.y);
+    log(w.name, `Engaging ${mob.name} L${mobLevel} (${mob.hp}/${mob.maxHp} HP) [${w.currentZone}]`);
+    await moveTo(w.currentZone, w.id, mob.x, mob.y);
 
     // Use technique
     let usedTech = false;
     try {
-      const learned = await api("GET", `/techniques/learned/${ZONE}/${w.id}`);
+      const learned = await api("GET", `/techniques/learned/${w.currentZone}/${w.id}`);
       const attacks = learned.techniques
         .filter((t: any) => t.type === "attack" && t.essenceCost <= (me.essence ?? 0))
         .sort((a: any, b: any) => (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0));
       if (attacks.length > 0) {
-        await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: w.id, techniqueId: attacks[0].id, targetEntityId: mobId });
+        await api("POST", "/techniques/use", { zoneId: w.currentZone, casterEntityId: w.id, techniqueId: attacks[0].id, targetEntityId: mobId });
         log(w.name, `Used ${attacks[0].name}!`);
         usedTech = true;
       }
     } catch {}
 
     if (!usedTech) {
-      try { await api("POST", "/command", { zoneId: ZONE, entityId: w.id, action: "attack", targetId: mobId }); } catch {}
+      try { await api("POST", "/command", { zoneId: w.currentZone, entityId: w.id, action: "attack", targetId: mobId }); } catch {}
     }
 
     // Wait for kill
     for (let i = 0; i < 40; i++) {
       await sleep(800);
-      const entities = await getZoneEntities();
+      const entities = await getZoneEntities(w.currentZone);
       const target = entities[mobId];
       const self = entities[w.id];
       if (!self) { log(w.name, "DIED! Time for a protein shake and respawn..."); await sleep(5000); break; }
@@ -721,10 +807,10 @@ async function warriorMainLoop(w: Warrior) {
       // Buff mid-combat
       if (i % 5 === 0) {
         try {
-          const learned = await api("GET", `/techniques/learned/${ZONE}/${w.id}`);
+          const learned = await api("GET", `/techniques/learned/${w.currentZone}/${w.id}`);
           const buffs = learned.techniques.filter((t: any) => t.type === "buff" && t.essenceCost <= (self.essence ?? 0));
           if (buffs.length > 0) {
-            await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: w.id, techniqueId: buffs[0].id });
+            await api("POST", "/techniques/use", { zoneId: w.currentZone, casterEntityId: w.id, techniqueId: buffs[0].id });
             log(w.name, `Buffed with ${buffs[0].name}`);
           }
         } catch {}
@@ -774,13 +860,14 @@ async function main() {
 
   for (const def of WARRIOR_DEFS) {
     const data = await api("POST", "/spawn", {
-      zoneId: ZONE, type: "player", name: def.name,
+      zoneId: START_ZONE, type: "player", name: def.name,
       x: def.x, y: def.y, walletAddress: WALLET,
       level: 1, xp: 0, raceId: def.raceId, classId: "warrior",
     });
     warriors.push({
       id: data.spawned.id, name: def.name, raceId: def.raceId,
       kills: 0, pvpWins: 0, pvpLosses: 0, itemsBought: 0, auctionsCreated: 0,
+      currentZone: START_ZONE,
     });
     log(def.name, `spawned (${def.raceId} warrior) — HP ${data.spawned.hp}/${data.spawned.maxHp}`);
     await sleep(300);
@@ -835,7 +922,7 @@ async function main() {
   await createBrawlGuild();
 
   // Print initial status
-  const firstWarrior = await getEntity(warriors[0].id);
+  const firstWarrior = await getEntity(warriors[0].currentZone, warriors[0].id);
   console.log(`\n  All warriors ready — Level ${firstWarrior?.level ?? 1}\n`);
   printScoreboard();
 

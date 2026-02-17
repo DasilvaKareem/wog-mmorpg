@@ -3,12 +3,12 @@ import {
   getOrCreateZone,
   recalculateEntityVitals,
   type Entity,
-  type EquippedItemState,
 } from "./zoneRuntime.js";
 import { randomUUID } from "crypto";
 import { computeStatsAtLevel } from "./leveling.js";
-import { getItemByTokenId, type EquipmentSlot } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
+import { loadCharacter, saveCharacter } from "./characterStore.js";
+import { restoreProfessions } from "./professions.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -24,12 +24,6 @@ interface SpawnOrderBody {
   characterTokenId?: string;
   raceId?: string;
   classId?: string;
-  equipment?: Partial<
-    Record<
-      EquipmentSlot,
-      number | { tokenId: number; durability: number; maxDurability: number; broken?: boolean }
-    >
-  >;
 }
 
 export function registerSpawnOrders(server: FastifyInstance) {
@@ -39,7 +33,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
   }, async (request, reply) => {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
-      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, equipment,
+      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
@@ -57,78 +51,88 @@ export function registerSpawnOrders(server: FastifyInstance) {
       }
     }
 
-    const zone = getOrCreateZone(zoneId);
+    // Try to restore saved character from Redis
+    let saved: Awaited<ReturnType<typeof loadCharacter>> = null;
+    let restored = false;
+    if (type === "player" && walletAddress) {
+      saved = await loadCharacter(walletAddress);
+    }
 
-    const resolvedLevel = level ?? 1;
+    const spawnZoneId = saved?.zone ?? zoneId;
+    const zone = getOrCreateZone(spawnZoneId);
+
+    const resolvedLevel = saved?.level ?? level ?? 1;
+    const resolvedRaceId = saved?.raceId ?? raceId;
+    const resolvedClassId = saved?.classId ?? classId;
     const derivedStats =
-      type === "player" && raceId && classId
-        ? computeStatsAtLevel(raceId, classId, resolvedLevel)
+      type === "player" && resolvedRaceId && resolvedClassId
+        ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
         : undefined;
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
-
-    const normalizedEquipment: Partial<Record<EquipmentSlot, EquippedItemState>> = {};
-    if (equipment) {
-      for (const [slot, raw] of Object.entries(equipment)) {
-        if (raw == null) continue;
-        if (typeof raw === "number") {
-          const item = getItemByTokenId(BigInt(raw));
-          const maxDurability = item?.maxDurability ?? 0;
-          normalizedEquipment[slot as EquipmentSlot] = {
-            tokenId: raw,
-            durability: maxDurability,
-            maxDurability,
-            broken: maxDurability <= 0,
-          };
-          continue;
-        }
-
-        const item = getItemByTokenId(BigInt(raw.tokenId));
-        const fallbackMaxDurability = item?.maxDurability ?? 0;
-        const maxDurability =
-          raw.maxDurability > 0 ? raw.maxDurability : fallbackMaxDurability;
-        const durability =
-          raw.durability >= 0
-            ? Math.min(raw.durability, maxDurability)
-            : maxDurability;
-
-        normalizedEquipment[slot as EquipmentSlot] = {
-          tokenId: raw.tokenId,
-          durability,
-          maxDurability,
-          broken: raw.broken ?? durability <= 0,
-        };
-      }
-    }
 
     const entity: Entity = {
       id: randomUUID(),
       type,
-      name,
-      x,
-      y,
+      name: saved?.name ?? name,
+      x: saved?.x ?? x,
+      y: saved?.y ?? y,
       hp: resolvedHp,
       maxHp: derivedStats?.hp ?? resolvedHp,
       ...(derivedStats?.essence != null && { essence: derivedStats.essence, maxEssence: derivedStats.essence }),
       createdAt: Date.now(),
       ...(walletAddress != null && { walletAddress }),
-      ...((level != null || derivedStats != null) && { level: resolvedLevel }),
-      ...(xp != null && { xp }),
+      level: resolvedLevel,
+      xp: saved?.xp ?? xp ?? 0,
       ...(xpReward != null && { xpReward }),
       ...(characterTokenId != null && { characterTokenId: BigInt(characterTokenId) }),
-      ...(raceId != null && { raceId }),
-      ...(classId != null && { classId }),
+      ...(resolvedRaceId != null && { raceId: resolvedRaceId }),
+      ...(resolvedClassId != null && { classId: resolvedClassId }),
       ...(derivedStats != null && { stats: derivedStats }),
-      ...(Object.keys(normalizedEquipment).length > 0 && { equipment: normalizedEquipment }),
+      kills: saved?.kills ?? 0,
+      completedQuests: saved?.completedQuests ?? [],
+      learnedTechniques: saved?.learnedTechniques ?? [],
     };
 
     if (entity.stats) {
       recalculateEntityVitals(entity);
     }
 
+    // Restore professions into in-memory map
+    if (saved?.professions && saved.professions.length > 0 && walletAddress) {
+      restoreProfessions(walletAddress, saved.professions);
+      restored = true;
+      server.log.info(
+        `[persistence] Restored character "${entity.name}" L${entity.level} (${saved.completedQuests.length} quests, ${saved.learnedTechniques.length} techniques, ${saved.professions.length} professions)`
+      );
+    } else if (saved) {
+      restored = true;
+      server.log.info(
+        `[persistence] Restored character "${entity.name}" L${entity.level}`
+      );
+    }
+
+    // First-time spawn: save initial character data
+    if (!saved && walletAddress && type === "player") {
+      await saveCharacter(walletAddress, {
+        name: entity.name,
+        level: entity.level ?? 1,
+        xp: entity.xp ?? 0,
+        raceId: resolvedRaceId ?? "human",
+        classId: resolvedClassId ?? "warrior",
+        zone: spawnZoneId,
+        x: entity.x,
+        y: entity.y,
+        kills: 0,
+        completedQuests: [],
+        learnedTechniques: [],
+        professions: [],
+      });
+    }
+
     zone.entities.set(entity.id, entity);
 
     server.log.info(
-      `Spawned ${type} "${name}" in zone ${zoneId} (${zone.entities.size} entities)`
+      `Spawned ${type} "${entity.name}" in zone ${spawnZoneId} (${zone.entities.size} entities)${restored ? " [RESTORED]" : ""}`
     );
 
     return {
@@ -138,6 +142,8 @@ export function registerSpawnOrders(server: FastifyInstance) {
           characterTokenId: entity.characterTokenId.toString(),
         }),
       },
+      restored,
+      zone: spawnZoneId,
     };
   });
 

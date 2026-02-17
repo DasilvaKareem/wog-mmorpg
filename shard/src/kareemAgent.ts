@@ -177,7 +177,7 @@ async function learnTechniques() {
     for (const tech of sortedTechniques) {
       try {
         const { mintGold } = await import("./blockchain.js");
-        await mintGold(WALLET, tech.goldCost.toString());
+        await mintGold(WALLET, tech.copperCost.toString());
 
         await api("POST", "/techniques/learn", {
           zoneId: currentZone,

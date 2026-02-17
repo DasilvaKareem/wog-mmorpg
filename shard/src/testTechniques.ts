@@ -48,7 +48,7 @@ async function testTechniques() {
   const available = await api("GET", `/techniques/available/village-square/${playerId}`);
   console.log(`✅ Available techniques: ${available.techniques.length}`);
   available.techniques.forEach((t: any) => {
-    console.log(`   - ${t.name} (Level ${t.levelRequired}, ${t.goldCost}g, ${t.essenceCost} essence)`);
+    console.log(`   - ${t.name} (Level ${t.levelRequired}, ${t.copperCost}c, ${t.essenceCost} essence)`);
   });
   console.log();
 

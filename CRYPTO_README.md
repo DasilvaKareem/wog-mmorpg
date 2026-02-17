@@ -484,34 +484,6 @@ pnpm dev
 pnpm exec tsx src/smartAgent.ts
 ```
 
-### Production (Fly.io)
-
-```bash
-# Install Fly CLI
-curl -L https://fly.io/install.sh | sh
-
-# Login
-fly auth login
-
-# Deploy app
-fly deploy
-
-# Set secrets
-fly secrets set \
-  THIRDWEB_SECRET_KEY="sk_..." \
-  SERVER_PRIVATE_KEY="0x..." \
-  JWT_SECRET="$(openssl rand -hex 32)" \
-  ENCRYPTION_KEY="$(openssl rand -hex 32)" \
-  GOLD_CONTRACT_ADDRESS="0x421699e71bBeC7d05FCbc79C690afD5D8585f182" \
-  ITEMS_CONTRACT_ADDRESS="0xAe68cdA079fd699780506cc49381EE732837Ec35" \
-  CHARACTER_CONTRACT_ADDRESS="0x331dAdFFFFC8A126a739CA5CCAd847c29973B642"
-
-# Create Redis (for custodial wallets)
-fly redis create wog-redis
-```
-
-See [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md) for full deployment guide.
-
 ---
 
 ## 📡 API Reference

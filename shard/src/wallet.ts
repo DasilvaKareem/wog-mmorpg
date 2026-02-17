@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { distributeSFuel, mintGold, getGoldBalance, getItemBalance } from "./blockchain.js";
 import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
 import { ITEM_CATALOG } from "./itemCatalog.js";
+import { goldToCopper } from "./currency.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -98,6 +99,7 @@ export function registerWalletRoutes(server: FastifyInstance) {
 
         return {
           address,
+          copper: goldToCopper(availableGold),
           gold: formatGold(availableGold),
           onChainGold: formatGold(safeOnChainGold),
           spentGold: formatGold(spentGold),

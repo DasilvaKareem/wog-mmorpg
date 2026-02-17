@@ -175,6 +175,19 @@ export function parseGoldString(goldString: string): number {
  * @param copper - Copper pieces (should be 0-99)
  * @returns True if valid, false otherwise
  */
+/** Convert copper to on-chain gold (e.g. 500 copper → 0.05 gold) */
+export const COPPER_PER_GOLD = 10_000;
+export const copperToGold = (copper: number): number => copper / COPPER_PER_GOLD;
+export const goldToCopper = (gold: number): number => Math.floor(gold * COPPER_PER_GOLD);
+
+/**
+ * Format a copper amount as a human-readable denomination string.
+ * e.g. 150 → "1s 50c", 10050 → "1g 50c"
+ */
+export function formatCopperString(copper: number): string {
+  return formatGoldString(copperToGold(copper));
+}
+
 export function isValidMetalAmount(
   gold: number,
   silver: number,

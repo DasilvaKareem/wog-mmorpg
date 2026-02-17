@@ -253,7 +253,7 @@ async function runTalkQuests(agent: Agent) {
       });
       log(
         agent.role,
-        `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`
+        `Talked to ${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c`
       );
     } catch {
       // Already completed or not available
@@ -283,7 +283,7 @@ async function runLoreQuests(agent: Agent) {
     for (let i = 0; i < 5; i++) {
       try {
         const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
-        log(agent.role, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g${result.rewards?.items?.length ? " + items!" : ""}`);
+        log(agent.role, `${npc.name} -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c${result.rewards?.items?.length ? " + items!" : ""}`);
       } catch { break; }
       await sleep(300);
     }
@@ -313,7 +313,7 @@ async function runProfessionTutorials(agent: Agent) {
     if (!npcId) continue;
     try {
       const result = await api("POST", "/quests/talk", { zoneId: ZONE, playerId: agent.id, npcEntityId: npcId });
-      log(agent.role, `${npc.name} tutorial -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.gold ?? 0}g`);
+      log(agent.role, `${npc.name} tutorial -> +${result.rewards?.xp ?? 0}xp +${result.rewards?.copper ?? 0}c`);
     } catch {}
     await sleep(300);
   }
@@ -1240,7 +1240,7 @@ async function traderLoop(agent: Agent) {
             tokenId: parseInt(item.tokenId),
             quantity: 1,
           });
-          log(agent.role, `Bought ${item.name} for ${item.goldPrice}g`);
+          log(agent.role, `Bought ${item.name} for ${item.copperPrice}c`);
           await sleep(500);
         } catch (err: any) {
           log(
@@ -1352,7 +1352,7 @@ async function traderLoop(agent: Agent) {
           });
           log(
             agent.role,
-            `Restocked ${randomItem.name} for ${randomItem.goldPrice}g`
+            `Restocked ${randomItem.name} for ${randomItem.copperPrice}c`
           );
         }
       } catch {

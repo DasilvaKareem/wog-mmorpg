@@ -35,7 +35,7 @@ function isBlacksmith(entity: Entity | undefined): entity is Entity {
 }
 
 function computeRepairCost(
-  item: { goldPrice: number; maxDurability?: number; statBonuses?: Record<string, number | undefined> },
+  item: { copperPrice: number; maxDurability?: number; statBonuses?: Record<string, number | undefined> },
   missingDurability: number,
   playerLevel: number
 ): number {
@@ -47,7 +47,7 @@ function computeRepairCost(
   const qualityMultiplier = 1 + statWeight / 80;
   const levelMultiplier = 1 + Math.max(0, playerLevel - 1) * 0.04;
   const perPoint =
-    Math.max(1, (item.goldPrice / maxDurability) * 0.75 * qualityMultiplier) *
+    Math.max(1, (item.copperPrice / maxDurability) * 0.75 * qualityMultiplier) *
     levelMultiplier;
   return Math.max(1, Math.ceil(missingDurability * perPoint));
 }
@@ -417,7 +417,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
 
       const cost = computeRepairCost(
         {
-          goldPrice: item.goldPrice,
+          copperPrice: item.copperPrice,
           maxDurability: equipped.maxDurability,
           statBonuses: repairStatBonuses,
         },

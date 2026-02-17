@@ -11,7 +11,7 @@ export interface JewelcraftingRecipe {
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
-  goldCost: number;
+  copperCost: number;
   craftingTime: number;
 }
 
@@ -24,7 +24,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 116n, quantity: 2 }, // 2x Rough Ruby
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
     ],
-    goldCost: 100,
+    copperCost: 100,
     craftingTime: 12,
   },
   {
@@ -35,7 +35,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 117n, quantity: 2 }, // 2x Rough Sapphire
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
     ],
-    goldCost: 100,
+    copperCost: 100,
     craftingTime: 12,
   },
   {
@@ -46,7 +46,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 118n, quantity: 2 }, // 2x Rough Emerald
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 110,
+    copperCost: 110,
     craftingTime: 14,
   },
   {
@@ -57,7 +57,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 119n, quantity: 2 }, // 2x Flawed Diamond
       { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
     ],
-    goldCost: 200,
+    copperCost: 200,
     craftingTime: 20,
   },
   {
@@ -69,7 +69,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 220,
+    copperCost: 220,
     craftingTime: 18,
   },
   {
@@ -81,7 +81,7 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
-    goldCost: 280,
+    copperCost: 280,
     craftingTime: 24,
   },
 ];
@@ -112,7 +112,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
             quantity: mat.quantity,
           };
         }),
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
         craftingTime: recipe.craftingTime,
       };
     });
@@ -255,7 +255,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
           }),
         },
         materialsConsumed: burnedMaterials,
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     } catch (err) {
       server.log.error(err, `[jewelcrafting] Failed to mint crafted item for ${walletAddress}`);

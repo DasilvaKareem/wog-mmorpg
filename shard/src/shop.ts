@@ -15,7 +15,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       tokenId: item.tokenId.toString(),
       name: item.name,
       description: item.description,
-      goldPrice: item.goldPrice,
+      copperPrice: item.copperPrice,
       category: item.category,
       equipSlot: item.equipSlot ?? null,
       armorSlot: item.armorSlot ?? null,
@@ -54,7 +54,7 @@ export function registerShopRoutes(server: FastifyInstance) {
           tokenId: item.tokenId.toString(),
           name: item.name,
           description: item.description,
-          goldPrice: item.goldPrice,
+          copperPrice: item.copperPrice,
           category: item.category,
           equipSlot: item.equipSlot ?? null,
           armorSlot: item.armorSlot ?? null,
@@ -100,7 +100,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       return { error: `Unknown tokenId: ${tokenId}` };
     }
 
-    const totalCost = item.goldPrice * quantity;
+    const totalCost = item.copperPrice * quantity;
 
     try {
       const onChainGold = parseFloat(await getGoldBalance(buyerAddress));

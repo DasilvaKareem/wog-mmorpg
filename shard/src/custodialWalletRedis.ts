@@ -1,6 +1,7 @@
 import { randomPrivateKey, privateKeyToAccount } from "thirdweb/wallets";
 import { thirdwebClient } from "./chain.js";
 import { encrypt, decrypt } from "./encryption.js";
+import { getRedis } from "./redis.js";
 import type { Account } from "thirdweb/wallets";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-production";
@@ -8,28 +9,11 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-prod
 /**
  * Redis-backed storage for custodial wallets (production)
  * Falls back to in-memory if Redis not configured (development)
+ * Uses shared Redis client from redis.ts
  */
-
-let redis: any = null;
-
-// Lazy-load Redis only if REDIS_URL is set
-if (process.env.REDIS_URL) {
-  try {
-    // Dynamically import Redis to avoid errors if ioredis not installed
-    const Redis = await import("ioredis").then(m => m.default);
-    redis = new Redis(process.env.REDIS_URL);
-    console.log("[custodial] Redis connected for wallet storage");
-  } catch (err) {
-    console.warn("[custodial] Redis not available, using in-memory storage:", err);
-  }
-}
 
 // Fallback in-memory storage (dev mode)
 const inMemoryStore = new Map<string, string>();
-
-if (!redis) {
-  console.warn("[custodial] WARNING: Using in-memory wallet storage (data will be lost on restart)");
-}
 
 export interface CustodialWalletInfo {
   address: string;
@@ -49,6 +33,7 @@ export function createCustodialWallet(): CustodialWalletInfo {
 
   // Store in Redis or in-memory
   const address = account.address.toLowerCase();
+  const redis = getRedis();
   if (redis) {
     redis.set(`wallet:${address}`, encryptedPrivateKey);
   } else {
@@ -70,6 +55,7 @@ export function createCustodialWallet(): CustodialWalletInfo {
 export async function getCustodialWallet(address: string): Promise<Account> {
   const normalizedAddress = address.toLowerCase();
 
+  const redis = getRedis();
   let encryptedPrivateKey: string | null;
   if (redis) {
     encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`);
@@ -91,6 +77,7 @@ export async function getCustodialWallet(address: string): Promise<Account> {
  */
 export async function hasCustodialWallet(address: string): Promise<boolean> {
   const normalizedAddress = address.toLowerCase();
+  const redis = getRedis();
 
   if (redis) {
     const exists = await redis.exists(`wallet:${normalizedAddress}`);
@@ -102,10 +89,11 @@ export async function hasCustodialWallet(address: string): Promise<boolean> {
 
 /**
  * Export wallet private key (for user to claim custody)
- * ⚠️ Only use this when explicitly requested by the user
+ * Only use this when explicitly requested by the user
  */
 export async function exportCustodialWallet(address: string): Promise<string> {
   const normalizedAddress = address.toLowerCase();
+  const redis = getRedis();
 
   let encryptedPrivateKey: string | null;
   if (redis) {
@@ -127,6 +115,7 @@ export async function exportCustodialWallet(address: string): Promise<string> {
  */
 export async function deleteCustodialWallet(address: string): Promise<boolean> {
   const normalizedAddress = address.toLowerCase();
+  const redis = getRedis();
 
   if (redis) {
     const deleted = await redis.del(`wallet:${normalizedAddress}`);
@@ -140,6 +129,8 @@ export async function deleteCustodialWallet(address: string): Promise<boolean> {
  * Get all custodial wallet addresses (for admin/monitoring)
  */
 export async function getAllCustodialWallets(): Promise<CustodialWalletInfo[]> {
+  const redis = getRedis();
+
   if (redis) {
     const keys = await redis.keys("wallet:*");
     return keys.map((key: string) => ({

@@ -10,7 +10,7 @@ export interface AlchemyRecipe {
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
-  goldCost: number;
+  copperCost: number;
   brewingTime: number; // seconds (for future use)
 }
 
@@ -24,7 +24,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 31n, quantity: 2 }, // 2x Meadow Lily
       { tokenId: 33n, quantity: 1 }, // 1x Dandelion
     ],
-    goldCost: 5,
+    copperCost: 5,
     brewingTime: 10,
   },
   {
@@ -35,7 +35,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 32n, quantity: 2 }, // 2x Wild Rose
       { tokenId: 34n, quantity: 1 }, // 1x Clover
     ],
-    goldCost: 5,
+    copperCost: 5,
     brewingTime: 10,
   },
 
@@ -48,7 +48,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
       { tokenId: 37n, quantity: 1 }, // 1x Mint
     ],
-    goldCost: 15,
+    copperCost: 15,
     brewingTime: 15,
   },
   {
@@ -59,7 +59,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 2 }, // 2x Sage
       { tokenId: 38n, quantity: 1 }, // 1x Moonflower
     ],
-    goldCost: 25,
+    copperCost: 25,
     brewingTime: 20,
   },
   {
@@ -70,7 +70,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 37n, quantity: 2 }, // 2x Mint
       { tokenId: 34n, quantity: 2 }, // 2x Clover
     ],
-    goldCost: 12,
+    copperCost: 12,
     brewingTime: 12,
   },
 
@@ -84,7 +84,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
       { tokenId: 36n, quantity: 1 }, // 1x Sage
     ],
-    goldCost: 40,
+    copperCost: 40,
     brewingTime: 25,
   },
   {
@@ -96,7 +96,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 37n, quantity: 2 }, // 2x Mint
       { tokenId: 35n, quantity: 1 }, // 1x Lavender
     ],
-    goldCost: 50,
+    copperCost: 50,
     brewingTime: 30,
   },
 
@@ -110,7 +110,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 2 }, // 2x Sage
       { tokenId: 38n, quantity: 1 }, // 1x Moonflower
     ],
-    goldCost: 80,
+    copperCost: 80,
     brewingTime: 40,
   },
   {
@@ -122,7 +122,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 2 }, // 2x Moonflower
       { tokenId: 39n, quantity: 1 }, // 1x Starbloom
     ],
-    goldCost: 100,
+    copperCost: 100,
     brewingTime: 45,
   },
   {
@@ -134,7 +134,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 39n, quantity: 2 }, // 2x Starbloom
       { tokenId: 38n, quantity: 2 }, // 2x Moonflower
     ],
-    goldCost: 200,
+    copperCost: 200,
     brewingTime: 60,
   },
 
@@ -147,7 +147,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 40n, quantity: 1 }, // 1x Dragon's Breath
       { tokenId: 35n, quantity: 3 }, // 3x Lavender
     ],
-    goldCost: 60,
+    copperCost: 60,
     brewingTime: 35,
   },
   {
@@ -158,7 +158,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 2 }, // 2x Moonflower
       { tokenId: 37n, quantity: 2 }, // 2x Mint
     ],
-    goldCost: 55,
+    copperCost: 55,
     brewingTime: 32,
   },
   {
@@ -170,7 +170,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 2 }, // 2x Sage
       { tokenId: 37n, quantity: 1 }, // 1x Mint
     ],
-    goldCost: 65,
+    copperCost: 65,
     brewingTime: 38,
   },
   {
@@ -182,7 +182,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 31n, quantity: 3 }, // 3x Meadow Lily
       { tokenId: 36n, quantity: 1 }, // 1x Sage
     ],
-    goldCost: 70,
+    copperCost: 70,
     brewingTime: 40,
   },
   {
@@ -194,7 +194,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 39n, quantity: 1 }, // 1x Starbloom
       { tokenId: 36n, quantity: 2 }, // 2x Sage
     ],
-    goldCost: 75,
+    copperCost: 75,
     brewingTime: 42,
   },
   {
@@ -206,7 +206,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 1 }, // 1x Moonflower
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
     ],
-    goldCost: 80,
+    copperCost: 80,
     brewingTime: 45,
   },
   {
@@ -217,7 +217,7 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 39n, quantity: 2 }, // 2x Starbloom
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
     ],
-    goldCost: 70,
+    copperCost: 70,
     brewingTime: 38,
   },
 ];
@@ -246,7 +246,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
             quantity: mat.quantity,
           };
         }),
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
         brewingTime: recipe.brewingTime,
       };
     });
@@ -290,7 +290,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
               quantity: mat.quantity,
             };
           }),
-          goldCost: recipe.goldCost,
+          copperCost: recipe.copperCost,
           brewingTime: recipe.brewingTime,
         };
       });
@@ -422,7 +422,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           tx: potionTx,
         },
         materialsConsumed: burnedMaterials,
-        goldCost: recipe.goldCost,
+        copperCost: recipe.copperCost,
       };
     } catch (err) {
       server.log.error(err, `[alchemy] Failed to mint potion for ${walletAddress}`);

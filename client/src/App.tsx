@@ -3,6 +3,7 @@ import * as React from "react";
 import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { CharacterDialog } from "@/components/CharacterDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
+import { InspectDialog } from "@/components/InspectDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
 import { MarketplacePage } from "@/components/MarketplacePage";
@@ -17,7 +18,7 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { LobbyViewer } from "@/components/LobbyViewer";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
-import { WalletProvider } from "@/context/WalletContext";
+import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
 
 type Page = "landing" | "game" | "marketplace" | "x402";
@@ -26,20 +27,26 @@ function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
+  const { address } = useWalletContext();
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (page !== "game") return;
-      if (event.key.toLowerCase() !== "c") return;
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      setCharacterOpen((current) => !current);
+
+      const key = event.key.toLowerCase();
+      if (key === "c") {
+        setCharacterOpen((current) => !current);
+      } else if (key === "i" && address && currentZone) {
+        gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
+      }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page]);
+  }, [page, address, currentZone]);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
@@ -89,6 +96,7 @@ function AppShell(): React.ReactElement {
       <GuildDialog />
       <AuctionHouseDialog />
       <ColiseumDialog />
+      <InspectDialog />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
     </div>
   );

@@ -218,7 +218,7 @@ export function registerMarketplaceRoutes(server: FastifyInstance) {
         name: item.name,
         description: item.description,
         category: item.category,
-        goldPrice: item.goldPrice,
+        copperPrice: item.copperPrice,
         equipSlot: item.equipSlot ?? null,
         armorSlot: item.armorSlot ?? null,
         statBonuses: item.statBonuses ?? {},
