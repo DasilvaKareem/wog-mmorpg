@@ -2,6 +2,7 @@
   "id": "dark-forest",
   "name": "Dark Forest",
   "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(100,60,160,0.12)",
   "budget": { "maxPopulation": 30, "maxThreat": 100 },
   "pois": [
     {
@@ -70,6 +71,32 @@
       "position": { "x": 367, "z": 200 },
       "radius": 10,
       "tags": []
+    },
+    {
+      "id": "plains-passage",
+      "name": "Plains Passage",
+      "type": "portal",
+      "position": { "x": 200, "z": 35 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "auroral-plains",
+        "destinationPoi": "forest-passage",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "woods-gate",
+      "name": "Woods Gate",
+      "type": "portal",
+      "position": { "x": 600, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "emerald-woods",
+        "destinationPoi": "forest-entrance",
+        "bidirectional": true
+      }
     }
   ],
   "roads": [
@@ -82,6 +109,16 @@
       "id": "ruins-trail",
       "name": "Ruins Trail",
       "nodes": ["dark-hollow", "spider-nest", "ancient-ruins"]
+    },
+    {
+      "id": "north-passage",
+      "name": "North Passage",
+      "nodes": ["forest-clearing", "plains-passage"]
+    },
+    {
+      "id": "east-gate",
+      "name": "East Gate",
+      "nodes": ["deep-trail-end", "woods-gate"]
     }
   ]
 }

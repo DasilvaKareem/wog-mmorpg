@@ -1,12 +1,81 @@
 {
-  "zones": ["village-square", "wild-meadow", "dark-forest"],
+  "zones": [
+    "village-square",
+    "wild-meadow",
+    "dark-forest",
+    "auroral-plains",
+    "emerald-woods",
+    "viridian-range",
+    "moondancer-glade",
+    "felsrock-citadel",
+    "lake-lumina",
+    "azurshard-chasm"
+  ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
-    { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" }
+    { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" },
+    { "from": "wild-meadow", "to": "auroral-plains", "portal": "plains-gate" },
+    { "from": "dark-forest", "to": "auroral-plains", "portal": "plains-passage" },
+    { "from": "dark-forest", "to": "emerald-woods", "portal": "woods-gate" },
+    { "from": "emerald-woods", "to": "viridian-range", "portal": "range-path" },
+    { "from": "emerald-woods", "to": "moondancer-glade", "portal": "glade-path" },
+    { "from": "viridian-range", "to": "felsrock-citadel", "portal": "citadel-pass" },
+    { "from": "moondancer-glade", "to": "felsrock-citadel", "portal": "citadel-path" },
+    { "from": "felsrock-citadel", "to": "lake-lumina", "portal": "lumina-passage" },
+    { "from": "lake-lumina", "to": "azurshard-chasm", "portal": "chasm-descent" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
     "wild-meadow": { "x": 640, "z": 0 },
-    "dark-forest": { "x": 1280, "z": 0 }
-  }
+    "dark-forest": { "x": 1280, "z": 0 },
+    "auroral-plains": { "x": 640, "z": -640 },
+    "emerald-woods": { "x": 1920, "z": 0 },
+    "viridian-range": { "x": 2560, "z": -640 },
+    "moondancer-glade": { "x": 2560, "z": 640 },
+    "felsrock-citadel": { "x": 3200, "z": 0 },
+    "lake-lumina": { "x": 3840, "z": 0 },
+    "azurshard-chasm": { "x": 4480, "z": 0 }
+  },
+  "continents": [
+    {
+      "id": "arcadia",
+      "name": "Arcadia",
+      "status": "active",
+      "description": "The verdant heartland of Geneva. Rolling meadows, ancient forests, and towering citadels span this sprawling continent — home to the world's boldest adventurers.",
+      "tint": "rgba(84,242,139,0.15)",
+      "icon": "🏰"
+    },
+    {
+      "id": "pacifica",
+      "name": "Pacifica",
+      "status": "placeholder",
+      "description": "A sun-drenched archipelago of tropical islands and coral reefs. Pirate lords rule the open seas while ancient rainforests hide forgotten temples.",
+      "tint": "rgba(80,180,200,0.10)",
+      "icon": "🌊"
+    },
+    {
+      "id": "nocturnia",
+      "name": "Nocturnia",
+      "status": "placeholder",
+      "description": "The frozen north, shrouded in eternal twilight. The Sanguine vampires and Lycan werewolves wage an endless war beneath blood-red moons.",
+      "tint": "rgba(120,40,160,0.10)",
+      "icon": "🌙"
+    },
+    {
+      "id": "lemuria",
+      "name": "Lemuria",
+      "status": "placeholder",
+      "description": "A vast arid continent of scorching deserts and crumbling ruins. The militant Lemurian Empire controls the sands with an iron fist.",
+      "tint": "rgba(200,160,60,0.10)",
+      "icon": "⚔️"
+    },
+    {
+      "id": "draconis",
+      "name": "Draconis",
+      "status": "placeholder",
+      "description": "A mist-shrouded land of volcanoes and crystalline caverns. The draconic races guard ancient power in their mountain strongholds.",
+      "tint": "rgba(200,60,60,0.10)",
+      "icon": "🐉"
+    }
+  ]
 }

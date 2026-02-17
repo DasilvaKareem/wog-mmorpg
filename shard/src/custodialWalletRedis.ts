@@ -8,11 +8,11 @@ const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-prod
 
 /**
  * Redis-backed storage for custodial wallets (production)
- * Falls back to in-memory if Redis not configured (development)
+ * Falls back to in-memory if Redis not configured or errors.
  * Uses shared Redis client from redis.ts
  */
 
-// Fallback in-memory storage (dev mode)
+// In-memory storage (always available as fallback)
 const inMemoryStore = new Map<string, string>();
 
 export interface CustodialWalletInfo {
@@ -31,13 +31,14 @@ export function createCustodialWallet(): CustodialWalletInfo {
   // Encrypt private key before storing
   const encryptedPrivateKey = encrypt(privateKey, ENCRYPTION_KEY);
 
-  // Store in Redis or in-memory
+  // Always write to in-memory
   const address = account.address.toLowerCase();
+  inMemoryStore.set(address, encryptedPrivateKey);
+
+  // Try Redis too
   const redis = getRedis();
   if (redis) {
-    redis.set(`wallet:${address}`, encryptedPrivateKey);
-  } else {
-    inMemoryStore.set(address, encryptedPrivateKey);
+    try { redis.set(`wallet:${address}`, encryptedPrivateKey); } catch {}
   }
 
   console.log(`[custodial] Created wallet: ${account.address}`);
@@ -55,11 +56,12 @@ export function createCustodialWallet(): CustodialWalletInfo {
 export async function getCustodialWallet(address: string): Promise<Account> {
   const normalizedAddress = address.toLowerCase();
 
+  let encryptedPrivateKey: string | null = null;
   const redis = getRedis();
-  let encryptedPrivateKey: string | null;
   if (redis) {
-    encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`);
-  } else {
+    try { encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`); } catch {}
+  }
+  if (!encryptedPrivateKey) {
     encryptedPrivateKey = inMemoryStore.get(normalizedAddress) || null;
   }
 
@@ -80,11 +82,12 @@ export async function hasCustodialWallet(address: string): Promise<boolean> {
   const redis = getRedis();
 
   if (redis) {
-    const exists = await redis.exists(`wallet:${normalizedAddress}`);
-    return exists === 1;
-  } else {
-    return inMemoryStore.has(normalizedAddress);
+    try {
+      const exists = await redis.exists(`wallet:${normalizedAddress}`);
+      if (exists === 1) return true;
+    } catch {}
   }
+  return inMemoryStore.has(normalizedAddress);
 }
 
 /**
@@ -93,12 +96,13 @@ export async function hasCustodialWallet(address: string): Promise<boolean> {
  */
 export async function exportCustodialWallet(address: string): Promise<string> {
   const normalizedAddress = address.toLowerCase();
-  const redis = getRedis();
 
-  let encryptedPrivateKey: string | null;
+  let encryptedPrivateKey: string | null = null;
+  const redis = getRedis();
   if (redis) {
-    encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`);
-  } else {
+    try { encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`); } catch {}
+  }
+  if (!encryptedPrivateKey) {
     encryptedPrivateKey = inMemoryStore.get(normalizedAddress) || null;
   }
 
@@ -115,14 +119,16 @@ export async function exportCustodialWallet(address: string): Promise<string> {
  */
 export async function deleteCustodialWallet(address: string): Promise<boolean> {
   const normalizedAddress = address.toLowerCase();
-  const redis = getRedis();
+  const memDeleted = inMemoryStore.delete(normalizedAddress);
 
+  const redis = getRedis();
   if (redis) {
-    const deleted = await redis.del(`wallet:${normalizedAddress}`);
-    return deleted === 1;
-  } else {
-    return inMemoryStore.delete(normalizedAddress);
+    try {
+      const deleted = await redis.del(`wallet:${normalizedAddress}`);
+      return deleted === 1 || memDeleted;
+    } catch {}
   }
+  return memDeleted;
 }
 
 /**
@@ -132,15 +138,16 @@ export async function getAllCustodialWallets(): Promise<CustodialWalletInfo[]> {
   const redis = getRedis();
 
   if (redis) {
-    const keys = await redis.keys("wallet:*");
-    return keys.map((key: string) => ({
-      address: key.replace("wallet:", ""),
-      createdAt: Date.now(), // TODO: Store actual creation time
-    }));
-  } else {
-    return Array.from(inMemoryStore.keys()).map(address => ({
-      address,
-      createdAt: Date.now(),
-    }));
+    try {
+      const keys = await redis.keys("wallet:*");
+      return keys.map((key: string) => ({
+        address: key.replace("wallet:", ""),
+        createdAt: Date.now(),
+      }));
+    } catch {}
   }
+  return Array.from(inMemoryStore.keys()).map(address => ({
+    address,
+    createdAt: Date.now(),
+  }));
 }

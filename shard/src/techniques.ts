@@ -565,8 +565,21 @@ export const TECHNIQUES: TechniqueDefinition[] = [
   },
 ];
 
+// Fallback lookup for dynamically generated techniques (e.g. essence techniques)
+let fallbackLookup: ((id: string) => TechniqueDefinition | undefined) | null = null;
+
+/**
+ * Register a fallback lookup function for techniques not in the static catalog.
+ * Used by essenceTechniqueGenerator to make procedural techniques work with combat.
+ */
+export function registerTechniqueFallbackLookup(
+  fn: (id: string) => TechniqueDefinition | undefined,
+): void {
+  fallbackLookup = fn;
+}
+
 export function getTechniqueById(id: string): TechniqueDefinition | undefined {
-  return TECHNIQUES.find((t) => t.id === id);
+  return TECHNIQUES.find((t) => t.id === id) ?? fallbackLookup?.(id);
 }
 
 export function getTechniquesByClass(className: string): TechniqueDefinition[] {

@@ -28,9 +28,15 @@ export interface WorldLayout {
 
 export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "village-square": 1,
-  "village-square": 1,
   "wild-meadow": 5,
   "dark-forest": 10,
+  "auroral-plains": 15,
+  "emerald-woods": 20,
+  "viridian-range": 25,
+  "moondancer-glade": 30,
+  "felsrock-citadel": 35,
+  "lake-lumina": 40,
+  "azurshard-chasm": 45,
 };
 
 // ── Load layout from data files at startup ───────────────────────────

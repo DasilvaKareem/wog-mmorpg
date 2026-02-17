@@ -37,6 +37,7 @@ export interface WalletBalance {
     name: string;
     balance: string;
     category?: string;
+    rarity?: string;
     equipSlot?: string | null;
     armorSlot?: string | null;
     statBonuses?: Record<string, number>;

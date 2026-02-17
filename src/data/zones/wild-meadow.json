@@ -2,6 +2,7 @@
   "id": "wild-meadow",
   "name": "Wild Meadow",
   "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(80,180,80,0.12)",
   "budget": { "maxPopulation": 20, "maxThreat": 50 },
   "pois": [
     {
@@ -89,6 +90,19 @@
         "destinationPoi": "meadow-entrance",
         "bidirectional": true
       }
+    },
+    {
+      "id": "plains-gate",
+      "name": "Plains Gate",
+      "type": "portal",
+      "position": { "x": 175, "z": 35 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "auroral-plains",
+        "destinationPoi": "meadow-gate",
+        "bidirectional": true
+      }
     }
   ],
   "roads": [
@@ -106,6 +120,11 @@
       "id": "hunters-trail",
       "name": "Hunter's Trail",
       "nodes": ["meadow-center", "wolf-den", "wolf-clearing"]
+    },
+    {
+      "id": "north-road",
+      "name": "North Road",
+      "nodes": ["crossroads", "plains-gate"]
     }
   ]
 }

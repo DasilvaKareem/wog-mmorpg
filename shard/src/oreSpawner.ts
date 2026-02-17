@@ -33,6 +33,62 @@ const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   { zoneId: "dark-forest", oreType: "silver", x: 520, y: 480 },
   { zoneId: "dark-forest", oreType: "gold", x: 340, y: 180 },
   { zoneId: "dark-forest", oreType: "gold", x: 560, y: 540 },
+
+  // auroral-plains - copper x2, silver x2, gold x2
+  { zoneId: "auroral-plains", oreType: "copper", x: 120, y: 200 },
+  { zoneId: "auroral-plains", oreType: "copper", x: 350, y: 350 },
+  { zoneId: "auroral-plains", oreType: "silver", x: 450, y: 200 },
+  { zoneId: "auroral-plains", oreType: "silver", x: 250, y: 500 },
+  { zoneId: "auroral-plains", oreType: "gold", x: 520, y: 350 },
+  { zoneId: "auroral-plains", oreType: "gold", x: 150, y: 550 },
+
+  // emerald-woods - copper x1, silver x2, gold x3
+  { zoneId: "emerald-woods", oreType: "copper", x: 300, y: 150 },
+  { zoneId: "emerald-woods", oreType: "silver", x: 450, y: 300 },
+  { zoneId: "emerald-woods", oreType: "silver", x: 180, y: 350 },
+  { zoneId: "emerald-woods", oreType: "gold", x: 520, y: 200 },
+  { zoneId: "emerald-woods", oreType: "gold", x: 350, y: 500 },
+  { zoneId: "emerald-woods", oreType: "gold", x: 100, y: 550 },
+
+  // viridian-range - silver x2, gold x4
+  { zoneId: "viridian-range", oreType: "silver", x: 200, y: 150 },
+  { zoneId: "viridian-range", oreType: "silver", x: 400, y: 200 },
+  { zoneId: "viridian-range", oreType: "gold", x: 300, y: 300 },
+  { zoneId: "viridian-range", oreType: "gold", x: 500, y: 350 },
+  { zoneId: "viridian-range", oreType: "gold", x: 150, y: 500 },
+  { zoneId: "viridian-range", oreType: "gold", x: 450, y: 550 },
+
+  // moondancer-glade - silver x1, gold x5
+  { zoneId: "moondancer-glade", oreType: "silver", x: 300, y: 200 },
+  { zoneId: "moondancer-glade", oreType: "gold", x: 150, y: 350 },
+  { zoneId: "moondancer-glade", oreType: "gold", x: 400, y: 300 },
+  { zoneId: "moondancer-glade", oreType: "gold", x: 250, y: 450 },
+  { zoneId: "moondancer-glade", oreType: "gold", x: 500, y: 500 },
+  { zoneId: "moondancer-glade", oreType: "gold", x: 100, y: 550 },
+
+  // felsrock-citadel - gold x6
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 100, y: 200 },
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 300, y: 150 },
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 500, y: 200 },
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 200, y: 500 },
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 400, y: 550 },
+  { zoneId: "felsrock-citadel", oreType: "gold", x: 550, y: 400 },
+
+  // lake-lumina - gold x6
+  { zoneId: "lake-lumina", oreType: "gold", x: 100, y: 200 },
+  { zoneId: "lake-lumina", oreType: "gold", x: 250, y: 150 },
+  { zoneId: "lake-lumina", oreType: "gold", x: 500, y: 150 },
+  { zoneId: "lake-lumina", oreType: "gold", x: 150, y: 400 },
+  { zoneId: "lake-lumina", oreType: "gold", x: 500, y: 500 },
+  { zoneId: "lake-lumina", oreType: "gold", x: 350, y: 580 },
+
+  // azurshard-chasm - gold x6
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 150, y: 100 },
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 350, y: 200 },
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 550, y: 150 },
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 200, y: 450 },
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 400, y: 550 },
+  { zoneId: "azurshard-chasm", oreType: "gold", x: 560, y: 400 },
 ];
 
 export function spawnOreNodes(): void {
@@ -58,5 +114,5 @@ export function spawnOreNodes(): void {
 
     zone.entities.set(entity.id, entity);
   }
-  console.log(`[ore] Spawned ${ORE_SPAWN_DEFS.length} ore nodes across 3 zones`);
+  console.log(`[ore] Spawned ${ORE_SPAWN_DEFS.length} ore nodes across ${new Set(ORE_SPAWN_DEFS.map(d => d.zoneId)).size} zones`);
 }

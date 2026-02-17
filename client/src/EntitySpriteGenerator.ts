@@ -15,11 +15,72 @@ const ROWS = 4; // down, left, right, up
 const SHEET_W = COLS * SPRITE_PX;
 const SHEET_H = ROWS * SPRITE_PX;
 
+// Player character sprites use taller frames from real sprite sheets
+const PLAYER_FW = 16;
+const PLAYER_FH = 22;
+
 // Directions: row index
 const DIR_DOWN = 0;
 const DIR_LEFT = 1;
 const DIR_RIGHT = 2;
 const DIR_UP = 3;
+
+// ── Real character sprite sheet configs ──────────────────────────────
+// Each skin defines the source frame positions in its PNG.
+// Sheet row order: 0=down, 1=right, 2=up, 3=left
+// Canvas row order: 0=down, 1=left, 2=right, 3=up
+interface CharSheetConfig {
+  imageKey: string;
+  rows: Array<{ y: number; h: number }>; // [down, right, up, left] in sheet order
+  walkX0: number;
+  walkSpacing: number;
+  walkW: number;
+}
+
+const CHAR_SHEETS: Record<string, CharSheetConfig> = {
+  a: {
+    imageKey: "char-sheet-a",
+    rows: [
+      { y: 6, h: 22 },   // down
+      { y: 38, h: 22 },  // right
+      { y: 69, h: 23 },  // up
+      { y: 102, h: 22 }, // left
+    ],
+    walkX0: 0, walkSpacing: 16, walkW: 16,
+  },
+  b: {
+    imageKey: "char-sheet-b",
+    rows: [
+      { y: 19, h: 92 },  // down
+      { y: 149, h: 88 }, // right
+      { y: 271, h: 92 }, // up
+      { y: 400, h: 89 }, // left
+    ],
+    walkX0: 0, walkSpacing: 62, walkW: 62,
+  },
+  c: {
+    imageKey: "char-sheet-c",
+    rows: [
+      { y: 19, h: 92 },  // down
+      { y: 149, h: 88 }, // right
+      { y: 271, h: 92 }, // up
+      { y: 400, h: 89 }, // left
+    ],
+    walkX0: 0, walkSpacing: 62, walkW: 62,
+  },
+};
+
+// Map class → character skin
+const CLASS_TO_SKIN: Record<string, string> = {
+  warrior: "a",
+  paladin: "c",
+  rogue: "b",
+  ranger: "a",
+  mage: "a",
+  cleric: "a",
+  warlock: "b",
+  monk: "b",
+};
 
 // Entity type categories
 const HUMANOID_TYPES = [
@@ -48,18 +109,35 @@ export function registerEntitySprites(scene: Phaser.Scene): void {
   for (const type of HUMANOID_TYPES) {
     const key = `entity-${type}`;
     if (scene.textures.exists(key)) continue;
+    // Use real sprite sheet for generic player type
+    if (type === "player") {
+      const config = CHAR_SHEETS["a"];
+      if (config && scene.textures.exists(config.imageKey)) {
+        registerCharacterSpriteSheet(scene, key, config);
+        createAnimations(scene, key);
+        continue;
+      }
+    }
     const pal = ENTITY_SPRITE_PALETTES[type] ?? DEFAULT_PALETTE;
     const canvas = generateHumanoidSheet(pal);
     addCanvasSpriteSheet(scene, key, canvas);
     createAnimations(scene, key);
   }
 
-  // Generate per-class player sheets
-  for (const [classId, pal] of Object.entries(CLASS_SPRITE_PALETTES)) {
+  // Generate per-class player sheets from real sprite PNGs
+  for (const [classId] of Object.entries(CLASS_SPRITE_PALETTES)) {
     const key = `entity-player-${classId}`;
     if (scene.textures.exists(key)) continue;
-    const canvas = generateHumanoidSheet(pal);
-    addCanvasSpriteSheet(scene, key, canvas);
+    const skinId = CLASS_TO_SKIN[classId] ?? "a";
+    const config = CHAR_SHEETS[skinId];
+    if (config && scene.textures.exists(config.imageKey)) {
+      registerCharacterSpriteSheet(scene, key, config);
+    } else {
+      // Fallback to procedural if PNG not loaded
+      const pal = CLASS_SPRITE_PALETTES[classId] ?? DEFAULT_PALETTE;
+      const canvas = generateHumanoidSheet(pal);
+      addCanvasSpriteSheet(scene, key, canvas);
+    }
     createAnimations(scene, key);
   }
 
@@ -87,6 +165,77 @@ export function registerEntitySprites(scene: Phaser.Scene): void {
   if (!scene.textures.exists("entity-static")) {
     const canvas = generateStaticSheet();
     addCanvasSpriteSheet(scene, "entity-static", canvas);
+  }
+}
+
+/**
+ * Create a player sprite sheet from a real PNG character sheet.
+ * Extracts 4 walk frames per direction and composites into the
+ * standard 4-col x 4-row layout (idle1, idle2, walk1, walk2 x down, left, right, up).
+ */
+function registerCharacterSpriteSheet(
+  scene: Phaser.Scene,
+  textureKey: string,
+  config: CharSheetConfig,
+): void {
+  const srcTex = scene.textures.get(config.imageKey);
+  const srcImg = srcTex.getSourceImage() as HTMLImageElement;
+
+  const canvasW = COLS * PLAYER_FW;   // 64
+  const canvasH = ROWS * PLAYER_FH;   // 88
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingEnabled = false;
+
+  // Sheet row order: 0=down, 1=right, 2=up, 3=left
+  // Canvas row order: 0=down, 1=left, 2=right, 3=up
+  const dirMap: Array<{ sheetRow: number; canvasRow: number }> = [
+    { sheetRow: 0, canvasRow: DIR_DOWN },
+    { sheetRow: 3, canvasRow: DIR_LEFT },
+    { sheetRow: 1, canvasRow: DIR_RIGHT },
+    { sheetRow: 2, canvasRow: DIR_UP },
+  ];
+
+  // Column mapping: canvas col → source frame index
+  // idle1=F0, idle2=F2, walk1=F1, walk2=F3
+  const frameOrder = [0, 2, 1, 3];
+
+  for (const { sheetRow, canvasRow } of dirMap) {
+    const srcRow = config.rows[sheetRow];
+    for (let col = 0; col < COLS; col++) {
+      const srcFrame = frameOrder[col];
+      const sx = config.walkX0 + srcFrame * config.walkSpacing;
+      const sy = srcRow.y;
+      const sw = config.walkW;
+      const sh = srcRow.h;
+      const dx = col * PLAYER_FW;
+      const dy = canvasRow * PLAYER_FH;
+      ctx.drawImage(srcImg, sx, sy, sw, sh, dx, dy, PLAYER_FW, PLAYER_FH);
+    }
+  }
+
+  // Strip black background pixels → transparent
+  // characterB/C PNGs have opaque black backgrounds instead of alpha
+  const imageData = ctx.getImageData(0, 0, canvasW, canvasH);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 10 && data[i + 1] < 10 && data[i + 2] < 10) {
+      data[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  // Register texture with per-frame coordinates (non-square frames)
+  const tex = scene.textures.addCanvas(textureKey, canvas);
+  if (tex) {
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const frameIdx = r * COLS + c;
+        tex.add(frameIdx, 0, c * PLAYER_FW, r * PLAYER_FH, PLAYER_FW, PLAYER_FH);
+      }
+    }
   }
 }
 

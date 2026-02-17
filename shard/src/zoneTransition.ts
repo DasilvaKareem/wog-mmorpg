@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeZoneTransition } from "./diary.js";
 import { readFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -11,9 +12,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Level requirements for each zone
 const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "village-square": 1,
-  "village-square": 1,
   "wild-meadow": 5,
   "dark-forest": 10,
+  "auroral-plains": 15,
+  "emerald-woods": 20,
+  "viridian-range": 25,
+  "moondancer-glade": 30,
+  "felsrock-citadel": 35,
+  "lake-lumina": 40,
+  "azurshard-chasm": 45,
 };
 
 // Portal interaction range
@@ -338,6 +345,16 @@ async function performTransition(
     message: `${entity.name} arrived from ${sourceZoneId}`,
     tick: Date.now(),
   });
+
+  // Log zone transition diary entry
+  if (entity.walletAddress) {
+    const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, sourceZoneId, destZoneId, sourcePortal.name);
+    logDiary(entity.walletAddress, entity.name, destZoneId, entity.x, entity.y, "zone_transition", headline, narrative, {
+      fromZone: sourceZoneId,
+      toZone: destZoneId,
+      portalName: sourcePortal.name,
+    });
+  }
 
   server.log.info(
     `[transition] ${entity.name} (${entity.id}) transitioned from ${sourceZoneId} → ${destZoneId}`

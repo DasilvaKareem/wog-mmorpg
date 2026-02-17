@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { getContract, prepareTransaction, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
-import { mintTo as mintERC20 } from "thirdweb/extensions/erc20";
+import { mintTo as mintERC20, transfer as transferERC20 } from "thirdweb/extensions/erc20";
 import { getBalance } from "thirdweb/extensions/erc20";
 import { mintAdditionalSupplyTo } from "thirdweb/extensions/erc1155";
 import { mintTo as mintERC1155, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
@@ -27,6 +27,7 @@ const serverAccount = privateKeyToAccount({
 export interface TxStats {
   total: number;
   goldMints: number;
+  goldTransfers: number;
   itemMints: number;
   itemBurns: number;
   characterMints: number;
@@ -40,6 +41,7 @@ export interface TxStats {
 const txStats: TxStats = {
   total: 0,
   goldMints: 0,
+  goldTransfers: 0,
   itemMints: 0,
   itemBurns: 0,
   characterMints: 0,
@@ -214,6 +216,26 @@ export async function mintGold(toAddress: string, amount: string): Promise<strin
 export async function getGoldBalance(address: string): Promise<string> {
   const result = await getBalance({ contract: goldContract, address });
   return result.displayValue;
+}
+
+/**
+ * Transfer gold (ERC-20) from a custodial wallet to another address.
+ * Uses the sender's account to sign — no new gold is minted.
+ */
+export async function transferGoldFrom(
+  fromAccount: import("thirdweb/wallets").Account,
+  toAddress: string,
+  amount: string
+): Promise<string> {
+  const tx = transferERC20({
+    contract: goldContract,
+    to: toAddress,
+    amount,
+  });
+  const receipt = await sendTransaction({ transaction: tx, account: fromAccount });
+  txStats.goldTransfers++;
+  recordTx("gold-transfer", receipt.transactionHash);
+  return receipt.transactionHash;
 }
 
 /** Mint an ERC-1155 item to a player address (existing tokenId). */

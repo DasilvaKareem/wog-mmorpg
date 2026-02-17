@@ -16,6 +16,7 @@ import { registerGuildRoutes } from "./guild.js";
 import { registerGuildTick } from "./guildTick.js";
 import { registerGuildVaultRoutes } from "./guildVault.js";
 import { spawnNpcs, tickMobRespawner } from "./npcSpawner.js";
+import { initMerchantWallets, registerMerchantAgentTick } from "./merchantAgent.js";
 import { registerMiningRoutes } from "./mining.js";
 import { spawnOreNodes } from "./oreSpawner.js";
 import { registerProfessionRoutes } from "./professions.js";
@@ -44,6 +45,15 @@ import { registerX402Routes } from "./x402Routes.js";
 import { registerItemRngRoutes } from "./itemRng.js";
 import { registerMarketplaceRoutes } from "./marketplace.js";
 import { registerItemCatalogRoutes } from "./itemCatalogRoutes.js";
+import { registerReputationRoutes } from "./reputationRoutes.js";
+import { registerDungeonGateRoutes } from "./dungeonGate.js";
+import { registerEssenceTechniqueRoutes } from "./essenceTechniqueRoutes.js";
+import { registerDungeonGateTick } from "./dungeonGateTick.js";
+import { initDungeonLootTables } from "./dungeonLootTables.js";
+import { startGuildNameCacheRefresh } from "./guildChain.js";
+import { registerWorldMapRoutes } from "./worldMapRoutes.js";
+import { registerDiaryRoutes } from "./diary.js";
+import { initWorldMapStore } from "./worldMapStore.js";
 import { getTxStats } from "./blockchain.js";
 import { getWorldLayout } from "./worldLayout.js";
 import { getAllZones } from "./zoneRuntime.js";
@@ -107,6 +117,7 @@ server.post<{
     xp: entity.xp ?? 0,
     raceId: entity.raceId ?? "human",
     classId: entity.classId ?? "warrior",
+    gender: entity.gender,
     zone: foundZoneId!,
     x: entity.x,
     y: entity.y,
@@ -173,7 +184,19 @@ registerPredictionRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
 registerItemCatalogRoutes(server);
+registerReputationRoutes(server);
+registerDungeonGateRoutes(server);
+registerEssenceTechniqueRoutes(server);
+registerDungeonGateTick(server);
+registerWorldMapRoutes(server);
+registerDiaryRoutes(server);
+initDungeonLootTables();
+startGuildNameCacheRefresh();
 spawnNpcs();
+registerMerchantAgentTick(server);
+initMerchantWallets().catch((err) => {
+  server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
+});
 spawnOreNodes();
 spawnFlowerNodes();
 
@@ -183,8 +206,12 @@ setInterval(() => {
 }, 5000);
 
 const start = async () => {
-  // Rebuild auction cache from on-chain events before accepting requests
-  await rebuildAuctionCache();
+  // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
+  rebuildAuctionCache().catch((err: any) => {
+    server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  await initWorldMapStore();
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";

@@ -11,6 +11,7 @@ import {
 } from "./zoneRuntime.js";
 import { authenticateRequest } from "./auth.js";
 import { getItemInstance } from "./itemRng.js";
+import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "./diary.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -256,6 +257,17 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     };
     recalculateEntityVitals(entity);
 
+    // Log equip diary entry
+    if (entity.walletAddress) {
+      const displayName = itemInstance?.displayName ?? item.name;
+      const { headline, narrative } = narrativeEquip(entity.name, entity.raceId, entity.classId, zoneId, displayName, item.equipSlot!);
+      logDiary(entity.walletAddress, entity.name, zoneId, entity.x, entity.y, "equip", headline, narrative, {
+        itemName: displayName,
+        tokenId: item.tokenId.toString(),
+        slot: item.equipSlot,
+      });
+    }
+
     return {
       ok: true,
       equipped: {
@@ -316,6 +328,14 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       }
     }
     recalculateEntityVitals(entity);
+
+    // Log unequip diary entry
+    if (entity.walletAddress) {
+      const { headline, narrative } = narrativeUnequip(entity.name, entity.raceId, entity.classId, zoneId, slot);
+      logDiary(entity.walletAddress, entity.name, zoneId, entity.x, entity.y, "unequip", headline, narrative, {
+        slot,
+      });
+    }
 
     return {
       ok: true,
@@ -460,6 +480,16 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     recalculateEntityVitals(entity);
     recordGoldSpend(owner, totalCost);
+
+    // Log repair diary entry
+    if (owner) {
+      const { headline, narrative } = narrativeRepair(entity.name, entity.raceId, entity.classId, zoneId, blacksmith.name, totalCost, repairs.length);
+      logDiary(owner, entity.name, zoneId, entity.x, entity.y, "repair", headline, narrative, {
+        blacksmithName: blacksmith.name,
+        totalCost,
+        itemsRepaired: repairs.length,
+      });
+    }
 
     return {
       ok: true,

@@ -9,6 +9,8 @@ import { computeStatsAtLevel } from "./leveling.js";
 import { authenticateRequest } from "./auth.js";
 import { loadCharacter, saveCharacter } from "./characterStore.js";
 import { restoreProfessions } from "./professions.js";
+import { reputationManager } from "./reputationManager.js";
+import { logDiary, narrativeSpawn } from "./diary.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -24,6 +26,7 @@ interface SpawnOrderBody {
   characterTokenId?: string;
   raceId?: string;
   classId?: string;
+  gender?: "male" | "female";
 }
 
 export function registerSpawnOrders(server: FastifyInstance) {
@@ -33,7 +36,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
   }, async (request, reply) => {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
-      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId,
+      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, gender,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
@@ -52,10 +55,15 @@ export function registerSpawnOrders(server: FastifyInstance) {
     }
 
     // Try to restore saved character from Redis
+    // Only restore if saved name matches the spawn request (same character).
+    // Different name = different character on same wallet (e.g. team battle scripts).
     let saved: Awaited<ReturnType<typeof loadCharacter>> = null;
     let restored = false;
     if (type === "player" && walletAddress) {
-      saved = await loadCharacter(walletAddress);
+      const candidate = await loadCharacter(walletAddress);
+      if (candidate && candidate.name === name) {
+        saved = candidate;
+      }
     }
 
     const spawnZoneId = saved?.zone ?? zoneId;
@@ -64,6 +72,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedLevel = saved?.level ?? level ?? 1;
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
+    const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
     const derivedStats =
       type === "player" && resolvedRaceId && resolvedClassId
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
@@ -87,6 +96,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(characterTokenId != null && { characterTokenId: BigInt(characterTokenId) }),
       ...(resolvedRaceId != null && { raceId: resolvedRaceId }),
       ...(resolvedClassId != null && { classId: resolvedClassId }),
+      ...(resolvedGender != null && { gender: resolvedGender }),
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
       completedQuests: saved?.completedQuests ?? [],
@@ -119,6 +129,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
         xp: entity.xp ?? 0,
         raceId: resolvedRaceId ?? "human",
         classId: resolvedClassId ?? "warrior",
+        gender: resolvedGender,
         zone: spawnZoneId,
         x: entity.x,
         y: entity.y,
@@ -130,6 +141,22 @@ export function registerSpawnOrders(server: FastifyInstance) {
     }
 
     zone.entities.set(entity.id, entity);
+
+    // Log diary entry for player spawns
+    if (type === "player" && walletAddress) {
+      const { headline, narrative } = narrativeSpawn(entity.name, entity.raceId, entity.classId, spawnZoneId, restored);
+      logDiary(walletAddress, entity.name, spawnZoneId, entity.x, entity.y, "spawn", headline, narrative, {
+        restored,
+        level: entity.level ?? 1,
+        raceId: entity.raceId,
+        classId: entity.classId,
+      });
+    }
+
+    // Initialize reputation for player wallets
+    if (type === "player" && walletAddress) {
+      reputationManager.ensureInitialized(walletAddress);
+    }
 
     server.log.info(
       `Spawned ${type} "${entity.name}" in zone ${spawnZoneId} (${zone.entities.size} entities)${restored ? " [RESTORED]" : ""}`

@@ -1,0 +1,125 @@
+{
+  "id": "emerald-woods",
+  "name": "Emerald Woods",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(40,160,60,0.12)",
+  "budget": { "maxPopulation": 40, "maxThreat": 150 },
+  "pois": [
+    {
+      "id": "forest-entrance",
+      "name": "Forest Entrance",
+      "type": "portal",
+      "position": { "x": 35, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "dark-forest",
+        "destinationPoi": "woods-gate",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "range-path",
+      "name": "Range Path",
+      "type": "portal",
+      "position": { "x": 320, "z": 35 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "viridian-range",
+        "destinationPoi": "woods-entrance",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "glade-path",
+      "name": "Glade Path",
+      "type": "portal",
+      "position": { "x": 320, "z": 605 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "moondancer-glade",
+        "destinationPoi": "woods-entrance",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "library-of-selerion",
+      "name": "Library of Selerion",
+      "type": "structure",
+      "position": { "x": 400, "z": 200 },
+      "radius": 20,
+      "tags": [],
+      "structure": {
+        "kind": "library",
+        "capacity": 6,
+        "services": ["research", "quest"],
+        "npcs": ["librarian"]
+      }
+    },
+    {
+      "id": "grom-artisan-village",
+      "name": "Grom Artisan Village",
+      "type": "structure",
+      "position": { "x": 200, "z": 450 },
+      "radius": 25,
+      "tags": [],
+      "structure": {
+        "kind": "village",
+        "capacity": 10,
+        "services": ["buy", "sell", "craft"],
+        "npcs": ["artisan"]
+      }
+    },
+    {
+      "id": "emerald-glade",
+      "name": "Emerald Glade",
+      "type": "landmark",
+      "position": { "x": 300, "z": 300 },
+      "radius": 30,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "treant-grove",
+      "name": "Treant Grove",
+      "type": "spawn-point",
+      "position": { "x": 500, "z": 400 },
+      "radius": 35,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "serpent-hollow",
+      "name": "Serpent Hollow",
+      "type": "spawn-point",
+      "position": { "x": 150, "z": 150 },
+      "radius": 30,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "sentinel-ruins",
+      "name": "Sentinel Ruins",
+      "type": "spawn-point",
+      "position": { "x": 550, "z": 150 },
+      "radius": 30,
+      "tags": ["hostile", "boss-area"]
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-trail",
+      "name": "Main Trail",
+      "nodes": ["forest-entrance", "emerald-glade", "library-of-selerion", "range-path"]
+    },
+    {
+      "id": "south-path",
+      "name": "South Path",
+      "nodes": ["emerald-glade", "grom-artisan-village", "glade-path"]
+    },
+    {
+      "id": "wild-trail",
+      "name": "Wild Trail",
+      "nodes": ["serpent-hollow", "treant-grove", "sentinel-ruins"]
+    }
+  ]
+}

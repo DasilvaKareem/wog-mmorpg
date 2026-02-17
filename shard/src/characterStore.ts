@@ -2,7 +2,7 @@
  * Character persistence via Redis hashes.
  * Key pattern: character:{walletAddress}
  *
- * Falls back to in-memory Map when Redis is unavailable (dev mode).
+ * Falls back to in-memory Map when Redis is unavailable or errors.
  */
 
 import { getRedis } from "./redis.js";
@@ -13,6 +13,7 @@ export interface CharacterSaveData {
   xp: number;
   raceId: string;
   classId: string;
+  gender?: string;
   zone: string;
   x: number;
   y: number;
@@ -20,9 +21,11 @@ export interface CharacterSaveData {
   completedQuests: string[];
   learnedTechniques: string[];
   professions: string[];
+  signatureTechniqueId?: string;
+  ultimateTechniqueId?: string;
 }
 
-// In-memory fallback for dev (no Redis)
+// In-memory fallback (always available)
 const memoryStore = new Map<string, Record<string, string>>();
 
 function key(walletAddress: string): string {
@@ -42,29 +45,43 @@ export async function saveCharacter(
 
   if (Object.keys(flat).length === 0) return;
 
+  // Always write to in-memory
+  const existing = memoryStore.get(key(walletAddress)) ?? {};
+  memoryStore.set(key(walletAddress), { ...existing, ...flat });
+
+  // Try Redis too
   const redis = getRedis();
   if (redis) {
-    await redis.hset(key(walletAddress), flat);
-  } else {
-    const existing = memoryStore.get(key(walletAddress)) ?? {};
-    memoryStore.set(key(walletAddress), { ...existing, ...flat });
+    try {
+      await redis.hset(key(walletAddress), flat);
+    } catch {
+      // Redis failed, in-memory already has the data
+    }
   }
 }
 
 export async function loadCharacter(
   walletAddress: string
 ): Promise<CharacterSaveData | null> {
-  const redis = getRedis();
-  let raw: Record<string, string>;
+  let raw: Record<string, string> = {};
 
+  // Try Redis first
+  const redis = getRedis();
   if (redis) {
-    raw = await redis.hgetall(key(walletAddress));
-  } else {
+    try {
+      raw = await redis.hgetall(key(walletAddress));
+    } catch {
+      // Redis failed, fall through to in-memory
+    }
+  }
+
+  // Fall back to in-memory if Redis returned nothing
+  if (!raw || Object.keys(raw).length === 0) {
     raw = memoryStore.get(key(walletAddress)) ?? {};
   }
 
   // Empty hash = no saved character
-  if (!raw || Object.keys(raw).length === 0) return null;
+  if (Object.keys(raw).length === 0) return null;
 
   return {
     name: raw.name ?? "Unknown",
@@ -72,6 +89,7 @@ export async function loadCharacter(
     xp: parseInt(raw.xp ?? "0", 10),
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
+    gender: raw.gender,
     zone: raw.zone ?? "village-square",
     x: parseFloat(raw.x ?? "0"),
     y: parseFloat(raw.y ?? "0"),
@@ -79,14 +97,20 @@ export async function loadCharacter(
     completedQuests: raw.completedQuests ? JSON.parse(raw.completedQuests) : [],
     learnedTechniques: raw.learnedTechniques ? JSON.parse(raw.learnedTechniques) : [],
     professions: raw.professions ? JSON.parse(raw.professions) : [],
+    signatureTechniqueId: raw.signatureTechniqueId || undefined,
+    ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
   };
 }
 
 export async function deleteCharacter(walletAddress: string): Promise<void> {
+  memoryStore.delete(key(walletAddress));
+
   const redis = getRedis();
   if (redis) {
-    await redis.del(key(walletAddress));
-  } else {
-    memoryStore.delete(key(walletAddress));
+    try {
+      await redis.del(key(walletAddress));
+    } catch {
+      // Redis failed, in-memory already cleared
+    }
   }
 }

@@ -10,6 +10,14 @@ import { useToast } from "@/components/ui/toast";
 import { XpBar } from "@/components/ui/xp-bar";
 import { useWallet } from "@/hooks/useWallet";
 
+const RARITY_COLORS: Record<string, string> = {
+  common: "#9aa7cc",
+  uncommon: "#54f28b",
+  rare: "#5dadec",
+  epic: "#b48efa",
+  legendary: "#ffcc00",
+};
+
 function truncateAddress(address: string): string {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
@@ -92,15 +100,19 @@ export function WalletPanel(): React.ReactElement {
               <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Items</p>
               <div className="max-h-24 space-y-1 overflow-auto pr-1">
                 {balance?.items?.length ? (
-                  balance.items.map((item) => (
+                  balance.items.map((item) => {
+                    const rarityColor = RARITY_COLORS[item.rarity ?? "common"] ?? RARITY_COLORS.common;
+                    return (
                     <div
-                      className="flex items-center justify-between gap-2 border-2 border-[#29334d] bg-[#11182b] px-2 py-1 text-[8px]"
+                      className="flex items-center justify-between gap-2 border-2 bg-[#11182b] px-2 py-1 text-[8px]"
                       key={`${item.tokenId}-${item.name}`}
+                      style={{ borderColor: rarityColor + "44" }}
                     >
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[#f1f5ff]">{item.name}</p>
+                        <p className="truncate font-bold" style={{ color: rarityColor }}>{item.name}</p>
                         <p className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">
                           x{item.balance}
+                          {item.rarity && item.rarity !== "common" ? `  |  ${item.rarity}` : ""}
                           {item.equipSlot ? `  |  ${item.equipSlot}` : ""}
                           {item.maxDurability ? `  |  dura ${item.maxDurability}` : ""}
                         </p>
@@ -133,7 +145,8 @@ export function WalletPanel(): React.ReactElement {
                         </Button>
                       ) : null}
                     </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <p className="text-[8px] text-[#9aa7cc]">No items</p>
                 )}

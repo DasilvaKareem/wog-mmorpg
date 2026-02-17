@@ -128,6 +128,18 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
   const [liveBattles, setLiveBattles] = React.useState(0);
   const [queuedPlayers, setQueuedPlayers] = React.useState(0);
 
+  // Guild leaderboard
+  interface GuildEntry {
+    guildId: number;
+    name: string;
+    founder: string;
+    treasury: number;
+    level: number;
+    reputation: number;
+    memberCount: number;
+  }
+  const [guilds, setGuilds] = React.useState<GuildEntry[]>([]);
+
   React.useEffect(() => {
     const interval = window.setInterval(() => {
       setFrameIndex((i) => (i + 1) % frames.length);
@@ -163,6 +175,27 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
 
     fetchLiveStats();
     const interval = window.setInterval(fetchLiveStats, 10000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // Fetch guilds for leaderboard
+  React.useEffect(() => {
+    const fetchGuilds = async () => {
+      try {
+        const res = await fetch(`${API_URL}/guilds`);
+        if (res.ok) {
+          const data: GuildEntry[] = await res.json();
+          // Sort by treasury descending
+          data.sort((a, b) => b.treasury - a.treasury);
+          setGuilds(data);
+        }
+      } catch {
+        // non-critical
+      }
+    };
+
+    fetchGuilds();
+    const interval = window.setInterval(fetchGuilds, 30000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -592,6 +625,77 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
           </Button>
         </div>
       </section>
+
+      {/* ── GUILD LEADERBOARD ── */}
+      {guilds.length > 0 && (
+        <section className="z-10 w-full max-w-3xl px-4 py-10">
+          <h2
+            className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+            style={{ textShadow: "3px 3px 0 #000" }}
+          >
+            Guild Leaderboard
+          </h2>
+          <p className="mb-6 text-center text-[8px] tracking-wide text-[#565f89]">
+            {"<<"} TOP GUILDS BY TREASURY {">>"}
+          </p>
+
+          {/* Table header */}
+          <div
+            className="flex items-center border-4 border-black border-b-0 bg-[#1a2240] px-4 py-2 text-[9px] uppercase tracking-wide text-[#9aa7cc]"
+            style={{ fontFamily: "monospace" }}
+          >
+            <span className="w-8 shrink-0">#</span>
+            <span className="flex-1">Guild</span>
+            <span className="w-20 text-right">Treasury</span>
+            <span className="w-16 text-right">Members</span>
+            <span className="w-12 text-right">Lv</span>
+          </div>
+
+          {/* Rows */}
+          <div className="flex flex-col border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[6px_6px_0_0_#000]">
+            {guilds.slice(0, 10).map((g, i) => {
+              const rankColor = i === 0 ? "#ffcc00" : i === 1 ? "#c0c0c0" : i === 2 ? "#cd7f32" : "#565f89";
+              return (
+                <div
+                  key={g.guildId}
+                  className="flex items-center border-b border-[#1e2842] px-4 py-2.5 last:border-b-0"
+                  style={{ fontFamily: "monospace" }}
+                >
+                  <span
+                    className="w-8 shrink-0 text-[12px] font-bold"
+                    style={{ color: rankColor }}
+                  >
+                    {i + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[11px] font-bold text-[#f1f5ff] truncate">
+                      {g.name}
+                    </div>
+                    <div className="text-[8px] text-[#565f89] truncate">
+                      {g.founder.slice(0, 6)}...{g.founder.slice(-4)}
+                    </div>
+                  </div>
+                  <span className="w-20 text-right text-[11px] text-[#ffcc00]">
+                    {g.treasury.toLocaleString()}
+                  </span>
+                  <span className="w-16 text-right text-[11px] text-[#54f28b]">
+                    {g.memberCount}
+                  </span>
+                  <span className="w-12 text-right text-[11px] text-[#5dadec]">
+                    {g.level}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {guilds.length === 0 && (
+            <div className="mt-4 text-center text-[10px] text-[#565f89]">
+              No guilds have been created yet. Be the first!
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── ON-CHAIN ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">

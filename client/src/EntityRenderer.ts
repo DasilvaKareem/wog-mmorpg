@@ -194,15 +194,19 @@ export class EntityRenderer {
       sprite.play(idleAnim);
     }
 
-    // Name label — colored if in a party
+    // Name label — colored if in a party, guild tag underneath
     const labelColor = entity.partyId ? colorToHex(partyColor(entity.partyId)) : "#ffffff";
+    const labelText = entity.guildName
+      ? `${entity.name}\n<${entity.guildName}>`
+      : entity.name;
     const label = this.scene.add
-      .text(px, py - 12, entity.name, {
+      .text(px, py - 12, labelText, {
         fontSize: "10px",
         fontFamily: "monospace",
         color: labelColor,
         stroke: "#000000",
         strokeThickness: 2,
+        align: "center",
       })
       .setOrigin(0.5, 1)
       .setDepth(entityDepth + 1);
@@ -276,6 +280,14 @@ export class EntityRenderer {
 
     // Update party ring: create/destroy/recolor if partyId changed
     this.syncPartyRing(visual, entity);
+
+    // Update label text (guild name may appear/change)
+    const expectedLabel = entity.guildName
+      ? `${entity.name}\n<${entity.guildName}>`
+      : entity.name;
+    if (visual.label.text !== expectedLabel) {
+      visual.label.setText(expectedLabel);
+    }
 
     if (moved) {
       // Determine facing direction

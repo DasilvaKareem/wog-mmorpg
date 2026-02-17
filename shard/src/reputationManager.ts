@@ -1,36 +1,8 @@
 /**
- * Reputation Manager
+ * Reputation Manager (In-Memory)
  * Manages ERC-8004 reputation system for WoG characters
+ * Keyed by wallet address — no on-chain contracts required
  */
-
-import { ethers } from "ethers";
-import { biteWallet, biteProvider } from "./biteChain.js";
-
-const IDENTITY_REGISTRY_ADDRESS = process.env.IDENTITY_REGISTRY_ADDRESS || "";
-const REPUTATION_REGISTRY_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS || "";
-
-/** Identity Registry ABI */
-const IDENTITY_ABI = [
-  "function createIdentity(uint256 characterTokenId, address characterOwner, string metadataURI) returns (uint256)",
-  "function getIdentityByCharacter(uint256 characterTokenId) view returns (tuple(uint256 characterTokenId, address characterOwner, string metadataURI, uint256 createdAt, bool active))",
-  "function identities(uint256 identityId) view returns (uint256 characterTokenId, address characterOwner, string metadataURI, uint256 createdAt, bool active)",
-  "function characterToIdentity(uint256 characterTokenId) view returns (uint256)",
-  "function isActive(uint256 identityId) view returns (bool)",
-  "event IdentityCreated(uint256 indexed identityId, uint256 indexed characterTokenId, address indexed owner, string metadataURI)",
-];
-
-/** Reputation Registry ABI */
-const REPUTATION_ABI = [
-  "function initializeReputation(uint256 identityId)",
-  "function submitFeedback(uint256 identityId, uint8 category, int256 delta, string reason)",
-  "function batchUpdateReputation(uint256 identityId, int256[5] deltas, string reason)",
-  "function getReputation(uint256 identityId) view returns (tuple(uint256 combat, uint256 economic, uint256 social, uint256 crafting, uint256 agent, uint256 overall, uint256 lastUpdated))",
-  "function getCategoryScore(uint256 identityId, uint8 category) view returns (uint256)",
-  "function getRankName(uint256 score) view returns (string)",
-  "function getIdentityFeedback(uint256 identityId) view returns (uint256[])",
-  "function getFeedback(uint256 feedbackId) view returns (tuple(address submitter, uint256 identityId, uint8 category, int256 delta, string reason, uint256 timestamp, bool validated))",
-  "event ReputationUpdated(uint256 indexed identityId, uint8 category, uint256 newScore, int256 delta)",
-];
 
 export enum ReputationCategory {
   Combat = 0,
@@ -50,219 +22,107 @@ export interface ReputationScore {
   lastUpdated: number;
 }
 
-export interface CharacterIdentity {
-  identityId: bigint;
-  characterTokenId: bigint;
-  characterOwner: string;
-  metadataURI: string;
-  createdAt: number;
-  active: boolean;
-}
-
 export interface ReputationFeedback {
   submitter: string;
-  identityId: bigint;
+  walletAddress: string;
   category: ReputationCategory;
   delta: number;
   reason: string;
   timestamp: number;
-  validated: boolean;
+}
+
+const DEFAULT_SCORE = 500;
+const MIN_SCORE = 0;
+const MAX_SCORE = 1000;
+
+const RANK_TIERS: { min: number; name: string }[] = [
+  { min: 900, name: "Legendary Hero" },
+  { min: 800, name: "Renowned Champion" },
+  { min: 700, name: "Trusted Veteran" },
+  { min: 600, name: "Reliable Ally" },
+  { min: 500, name: "Average Citizen" },
+  { min: 400, name: "Questionable" },
+  { min: 300, name: "Untrustworthy" },
+  { min: 0, name: "Notorious" },
+];
+
+function clamp(value: number): number {
+  return Math.max(MIN_SCORE, Math.min(MAX_SCORE, value));
 }
 
 export class ReputationManager {
-  private identityContract: ethers.Contract;
-  private reputationContract: ethers.Contract;
-  private identityCache: Map<string, CharacterIdentity>;
+  private scores: Map<string, ReputationScore> = new Map();
+  private feedbackLog: ReputationFeedback[] = [];
 
-  constructor() {
-    this.identityContract = new ethers.Contract(
-      IDENTITY_REGISTRY_ADDRESS,
-      IDENTITY_ABI,
-      biteWallet
-    );
-
-    this.reputationContract = new ethers.Contract(
-      REPUTATION_REGISTRY_ADDRESS,
-      REPUTATION_ABI,
-      biteWallet
-    );
-
-    this.identityCache = new Map();
-  }
-
-  /**
-   * Create identity for a new character
-   */
-  async createCharacterIdentity(
-    characterTokenId: bigint,
-    characterOwner: string,
-    characterData: {
-      name: string;
-      class: string;
-      level: number;
-    }
-  ): Promise<bigint> {
-    // Create metadata URI (in production, upload to IPFS)
-    const metadata = {
-      name: characterData.name,
-      characterClass: characterData.class,
-      level: characterData.level,
-      description: `${characterData.class} character in World of Goo MMORPG`,
-      createdAt: Date.now(),
-    };
-
-    const metadataURI = `data:application/json;base64,${Buffer.from(
-      JSON.stringify(metadata)
-    ).toString("base64")}`;
-
-    // Create identity on-chain
-    const tx = await this.identityContract.createIdentity(
-      characterTokenId,
-      characterOwner,
-      metadataURI
-    );
-
-    const receipt = await tx.wait();
-
-    // Parse IdentityCreated event
-    const event = receipt.logs.find(
-      (log: any) =>
-        log.topics[0] ===
-        this.identityContract.interface.getEvent("IdentityCreated").topicHash
-    );
-
-    if (!event) {
-      throw new Error("IdentityCreated event not found");
-    }
-
-    const parsedEvent = this.identityContract.interface.parseLog({
-      topics: event.topics,
-      data: event.data,
+  /** Ensure a wallet has a reputation entry (idempotent) */
+  ensureInitialized(walletAddress: string): void {
+    const key = walletAddress.toLowerCase();
+    if (this.scores.has(key)) return;
+    this.scores.set(key, {
+      combat: DEFAULT_SCORE,
+      economic: DEFAULT_SCORE,
+      social: DEFAULT_SCORE,
+      crafting: DEFAULT_SCORE,
+      agent: DEFAULT_SCORE,
+      overall: DEFAULT_SCORE,
+      lastUpdated: Date.now(),
     });
-
-    const identityId = parsedEvent?.args[0];
-
-    // Initialize reputation
-    await this.initializeReputation(identityId);
-
-    return identityId;
   }
 
-  /**
-   * Initialize reputation for an identity
-   */
-  async initializeReputation(identityId: bigint): Promise<void> {
-    const tx = await this.reputationContract.initializeReputation(identityId);
-    await tx.wait();
+  /** Get reputation scores for a wallet */
+  getReputation(walletAddress: string): ReputationScore | null {
+    const key = walletAddress.toLowerCase();
+    return this.scores.get(key) ?? null;
   }
 
-  /**
-   * Get character identity by token ID
-   */
-  async getCharacterIdentity(characterTokenId: bigint): Promise<CharacterIdentity | null> {
-    const cacheKey = characterTokenId.toString();
-
-    // Check cache
-    if (this.identityCache.has(cacheKey)) {
-      return this.identityCache.get(cacheKey)!;
+  /** Get rank name for a given score */
+  getReputationRank(score: number): string {
+    for (const tier of RANK_TIERS) {
+      if (score >= tier.min) return tier.name;
     }
-
-    try {
-      const identityId = await this.identityContract.characterToIdentity(characterTokenId);
-
-      if (identityId === BigInt(0)) {
-        return null;
-      }
-
-      const identityData = await this.identityContract.identities(identityId);
-
-      const identity: CharacterIdentity = {
-        identityId,
-        characterTokenId: identityData[0],
-        characterOwner: identityData[1],
-        metadataURI: identityData[2],
-        createdAt: Number(identityData[3]),
-        active: identityData[4],
-      };
-
-      // Cache it
-      this.identityCache.set(cacheKey, identity);
-
-      return identity;
-    } catch (error) {
-      console.error("Error fetching character identity:", error);
-      return null;
-    }
+    return "Notorious";
   }
 
-  /**
-   * Get reputation score for a character
-   */
-  async getReputation(characterTokenId: bigint): Promise<ReputationScore | null> {
-    const identity = await this.getCharacterIdentity(characterTokenId);
-    if (!identity) {
-      return null;
-    }
-
-    try {
-      const rep = await this.reputationContract.getReputation(identity.identityId);
-
-      return {
-        combat: Number(rep.combat),
-        economic: Number(rep.economic),
-        social: Number(rep.social),
-        crafting: Number(rep.crafting),
-        agent: Number(rep.agent),
-        overall: Number(rep.overall),
-        lastUpdated: Number(rep.lastUpdated),
-      };
-    } catch (error) {
-      console.error("Error fetching reputation:", error);
-      return null;
-    }
-  }
-
-  /**
-   * Get reputation rank name
-   */
-  async getReputationRank(score: number): Promise<string> {
-    try {
-      return await this.reputationContract.getRankName(score);
-    } catch (error) {
-      console.error("Error fetching rank name:", error);
-      return "Unknown";
-    }
-  }
-
-  /**
-   * Submit reputation feedback
-   */
-  async submitFeedback(
-    characterTokenId: bigint,
+  /** Submit feedback for a single category */
+  submitFeedback(
+    walletAddress: string,
     category: ReputationCategory,
     delta: number,
-    reason: string
-  ): Promise<void> {
-    const identity = await this.getCharacterIdentity(characterTokenId);
-    if (!identity) {
-      throw new Error(`No identity found for character ${characterTokenId}`);
-    }
+    reason: string,
+    submitter: string = "system"
+  ): void {
+    const key = walletAddress.toLowerCase();
+    this.ensureInitialized(key);
+    const rep = this.scores.get(key)!;
 
-    const tx = await this.reputationContract.submitFeedback(
-      identity.identityId,
+    const categoryKey = ReputationCategory[category].toLowerCase() as keyof Omit<
+      ReputationScore,
+      "overall" | "lastUpdated"
+    >;
+    rep[categoryKey] = clamp(rep[categoryKey] + delta);
+    rep.overall = Math.round(
+      (rep.combat + rep.economic + rep.social + rep.crafting + rep.agent) / 5
+    );
+    rep.lastUpdated = Date.now();
+
+    this.feedbackLog.push({
+      submitter,
+      walletAddress: key,
       category,
       delta,
-      reason
-    );
+      reason,
+      timestamp: Date.now(),
+    });
 
-    await tx.wait();
+    // Keep feedback log bounded
+    if (this.feedbackLog.length > 5000) {
+      this.feedbackLog = this.feedbackLog.slice(-2500);
+    }
   }
 
-  /**
-   * Batch update reputation (multiple categories at once)
-   */
-  async batchUpdateReputation(
-    characterTokenId: bigint,
+  /** Batch update multiple categories at once */
+  batchUpdateReputation(
+    walletAddress: string,
     deltas: {
       combat?: number;
       economic?: number;
@@ -270,135 +130,67 @@ export class ReputationManager {
       crafting?: number;
       agent?: number;
     },
-    reason: string
-  ): Promise<void> {
-    const identity = await this.getCharacterIdentity(characterTokenId);
-    if (!identity) {
-      throw new Error(`No identity found for character ${characterTokenId}`);
-    }
-
-    // Convert to array format [combat, economic, social, crafting, agent]
-    const deltaArray: [number, number, number, number, number] = [
-      deltas.combat || 0,
-      deltas.economic || 0,
-      deltas.social || 0,
-      deltas.crafting || 0,
-      deltas.agent || 0,
-    ];
-
-    const tx = await this.reputationContract.batchUpdateReputation(
-      identity.identityId,
-      deltaArray,
-      reason
-    );
-
-    await tx.wait();
+    reason: string,
+    submitter: string = "system"
+  ): void {
+    if (deltas.combat) this.submitFeedback(walletAddress, ReputationCategory.Combat, deltas.combat, reason, submitter);
+    if (deltas.economic) this.submitFeedback(walletAddress, ReputationCategory.Economic, deltas.economic, reason, submitter);
+    if (deltas.social) this.submitFeedback(walletAddress, ReputationCategory.Social, deltas.social, reason, submitter);
+    if (deltas.crafting) this.submitFeedback(walletAddress, ReputationCategory.Crafting, deltas.crafting, reason, submitter);
+    if (deltas.agent) this.submitFeedback(walletAddress, ReputationCategory.Agent, deltas.agent, reason, submitter);
   }
 
-  /**
-   * Get feedback history for a character
-   */
-  async getFeedbackHistory(
-    characterTokenId: bigint,
-    limit: number = 20
-  ): Promise<ReputationFeedback[]> {
-    const identity = await this.getCharacterIdentity(characterTokenId);
-    if (!identity) {
-      return [];
-    }
-
-    try {
-      const feedbackIds = await this.reputationContract.getIdentityFeedback(
-        identity.identityId
-      );
-
-      const feedbacks: ReputationFeedback[] = [];
-
-      // Get last N feedbacks
-      const startIndex = Math.max(0, feedbackIds.length - limit);
-      for (let i = feedbackIds.length - 1; i >= startIndex; i--) {
-        const feedbackId = feedbackIds[i];
-        const feedback = await this.reputationContract.getFeedback(feedbackId);
-
-        feedbacks.push({
-          submitter: feedback.submitter,
-          identityId: feedback.identityId,
-          category: feedback.category as ReputationCategory,
-          delta: Number(feedback.delta),
-          reason: feedback.reason,
-          timestamp: Number(feedback.timestamp),
-          validated: feedback.validated,
-        });
-      }
-
-      return feedbacks;
-    } catch (error) {
-      console.error("Error fetching feedback history:", error);
-      return [];
-    }
+  /** Get feedback history for a wallet */
+  getFeedbackHistory(walletAddress: string, limit: number = 20): ReputationFeedback[] {
+    const key = walletAddress.toLowerCase();
+    return this.feedbackLog
+      .filter((f) => f.walletAddress === key)
+      .slice(-limit)
+      .reverse();
   }
 
-  /**
-   * Update combat reputation based on PvP results
-   */
-  async updateCombatReputation(
-    characterTokenId: bigint,
+  /** Update combat reputation based on PvP results */
+  updateCombatReputation(
+    walletAddress: string,
     won: boolean,
-    performanceScore: number // 0-100
-  ): Promise<void> {
-    let delta = 0;
-
+    performanceScore: number
+  ): void {
+    let delta: number;
     if (won) {
-      // Winner gets points based on performance
-      delta = Math.floor(5 + (performanceScore / 100) * 15); // 5-20 points
+      delta = Math.floor(5 + (performanceScore / 100) * 15);
     } else {
-      // Loser loses fewer points (don't punish too hard)
-      delta = Math.floor(-2 - (performanceScore / 100) * 3); // -2 to -5 points
+      delta = Math.floor(-2 - (performanceScore / 100) * 3);
     }
-
-    await this.submitFeedback(
-      characterTokenId,
+    this.submitFeedback(
+      walletAddress,
       ReputationCategory.Combat,
       delta,
-      won ? `Won PvP battle (performance: ${performanceScore})` : `Lost PvP battle`
+      won ? `Won PvP battle (performance: ${performanceScore})` : "Lost PvP battle"
     );
   }
 
-  /**
-   * Update economic reputation based on trade
-   */
-  async updateEconomicReputation(
-    characterTokenId: bigint,
+  /** Update economic reputation based on trade */
+  updateEconomicReputation(
+    walletAddress: string,
     tradeCompleted: boolean,
     fairPrice: boolean
-  ): Promise<void> {
-    let delta = 0;
-
+  ): void {
+    let delta: number;
     if (tradeCompleted && fairPrice) {
-      delta = 5; // Fair trade completed
-    } else if (tradeCompleted && !fairPrice) {
-      delta = 1; // Trade completed but price questionable
+      delta = 5;
+    } else if (tradeCompleted) {
+      delta = 1;
     } else {
-      delta = -10; // Trade failed/scam
+      delta = -10;
     }
-
-    await this.submitFeedback(
-      characterTokenId,
+    this.submitFeedback(
+      walletAddress,
       ReputationCategory.Economic,
       delta,
       tradeCompleted
-        ? fairPrice
-          ? "Fair trade completed"
-          : "Trade completed (price concern)"
+        ? fairPrice ? "Fair trade completed" : "Trade completed (price concern)"
         : "Trade failed/cancelled"
     );
-  }
-
-  /**
-   * Clear identity cache (for testing)
-   */
-  clearCache(): void {
-    this.identityCache.clear();
   }
 }
 

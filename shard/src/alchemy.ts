@@ -4,6 +4,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeBrew } from "./diary.js";
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -220,6 +221,81 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
     copperCost: 70,
     brewingTime: 38,
   },
+  // --- Gate Reagents (Dungeon Key crafting pipeline) ---
+  {
+    recipeId: "crude-gate-essence",
+    outputTokenId: 128n, // Crude Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 31n, quantity: 5 }, // 5x Meadow Lily
+      { tokenId: 33n, quantity: 3 }, // 3x Dandelion
+      { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
+    ],
+    copperCost: 15,
+    brewingTime: 20,
+  },
+  {
+    recipeId: "lesser-gate-essence",
+    outputTokenId: 129n, // Lesser Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 35n, quantity: 4 }, // 4x Lavender
+      { tokenId: 34n, quantity: 3 }, // 3x Clover
+      { tokenId: 23n, quantity: 3 }, // 3x Tin Ore
+    ],
+    copperCost: 30,
+    brewingTime: 25,
+  },
+  {
+    recipeId: "gate-essence",
+    outputTokenId: 130n, // Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 36n, quantity: 4 }, // 4x Sage
+      { tokenId: 38n, quantity: 2 }, // 2x Moonflower
+      { tokenId: 24n, quantity: 3 }, // 3x Copper Ore
+    ],
+    copperCost: 60,
+    brewingTime: 35,
+  },
+  {
+    recipeId: "greater-gate-essence",
+    outputTokenId: 131n, // Greater Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 38n, quantity: 4 }, // 4x Moonflower
+      { tokenId: 39n, quantity: 2 }, // 2x Starbloom
+      { tokenId: 25n, quantity: 3 }, // 3x Silver Ore
+    ],
+    copperCost: 100,
+    brewingTime: 45,
+  },
+  {
+    recipeId: "superior-gate-essence",
+    outputTokenId: 132n, // Superior Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 39n, quantity: 4 }, // 4x Starbloom
+      { tokenId: 40n, quantity: 2 }, // 2x Dragon's Breath
+      { tokenId: 26n, quantity: 3 }, // 3x Gold Ore
+      { tokenId: 121n, quantity: 1 }, // 1x Arcane Crystal
+    ],
+    copperCost: 180,
+    brewingTime: 55,
+  },
+  {
+    recipeId: "supreme-gate-essence",
+    outputTokenId: 133n, // Supreme Gate Essence
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 40n, quantity: 4 }, // 4x Dragon's Breath
+      { tokenId: 39n, quantity: 4 }, // 4x Starbloom
+      { tokenId: 26n, quantity: 5 }, // 5x Gold Ore
+      { tokenId: 121n, quantity: 2 }, // 2x Arcane Crystal
+    ],
+    copperCost: 300,
+    brewingTime: 60,
+  },
 ];
 
 export function getAlchemyRecipeById(recipeId: string): AlchemyRecipe | undefined {
@@ -411,6 +487,17 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       server.log.info(
         `[alchemy] ${entity.name} brewed ${outputItem?.name} at ${alchemyLab.name} → ${potionTx}`
       );
+
+      // Log brew diary entry
+      if (walletAddress) {
+        const potionName = outputItem?.name ?? "Unknown Potion";
+        const { headline, narrative } = narrativeBrew(entity.name, entity.raceId, entity.classId, zoneId, potionName, alchemyLab.name);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "brew", headline, narrative, {
+          recipeId: recipe.recipeId,
+          potionName,
+          labName: alchemyLab.name,
+        });
+      }
 
       return {
         ok: true,

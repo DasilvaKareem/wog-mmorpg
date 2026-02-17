@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { distributeSFuel, mintGold, getGoldBalance, getItemBalance } from "./blockchain.js";
 import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
-import { ITEM_CATALOG } from "./itemCatalog.js";
+import { ITEM_CATALOG, getItemRarity } from "./itemCatalog.js";
 import { goldToCopper } from "./currency.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
@@ -76,6 +76,7 @@ export function registerWalletRoutes(server: FastifyInstance) {
           name: string;
           balance: string;
           category: string;
+          rarity: string;
           equipSlot: string | null;
           armorSlot: string | null;
           statBonuses: Record<string, number>;
@@ -89,6 +90,7 @@ export function registerWalletRoutes(server: FastifyInstance) {
               name: item.name,
               balance: balance.toString(),
               category: item.category,
+              rarity: getItemRarity(item.copperPrice),
               equipSlot: item.equipSlot ?? null,
               armorSlot: item.armorSlot ?? null,
               statBonuses: item.statBonuses ?? {},

@@ -5,6 +5,7 @@ import { FLOWER_CATALOG } from "./flowerCatalog.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeGatherHerb } from "./diary.js";
 
 const GATHER_RANGE = 50;
 
@@ -172,6 +173,16 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       server.log.info(
         `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx}`
       );
+
+      // Log gather_herb diary entry
+      if (walletAddress) {
+        const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, zoneId, flowerProps.label, sickleItem.name);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "gather_herb", headline, narrative, {
+          herbName: flowerProps.label,
+          sickleName: sickleItem.name,
+          chargesRemaining,
+        });
+      }
 
       return {
         ok: true,

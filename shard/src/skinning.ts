@@ -5,6 +5,7 @@ import { getLootTable, rollDrops } from "./lootTables.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeSkin } from "./diary.js";
 
 const SKINNING_RANGE = 50;
 
@@ -182,6 +183,16 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
       );
+
+      // Log skin diary entry
+      if (walletAddress) {
+        const { headline, narrative } = narrativeSkin(entity.name, entity.raceId, entity.classId, zoneId, corpse.name, mintedItems.length);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "skin", headline, narrative, {
+          corpseName: corpse.name,
+          materialsCount: mintedItems.length,
+          materials: mintedItems.map((i) => i.name),
+        });
+      }
 
       return {
         ok: true,

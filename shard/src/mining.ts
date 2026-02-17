@@ -5,6 +5,7 @@ import { ORE_CATALOG } from "./oreCatalog.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeMine } from "./diary.js";
 
 const GATHER_RANGE = 50;
 
@@ -170,6 +171,16 @@ export function registerMiningRoutes(server: FastifyInstance) {
       server.log.info(
         `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx}`
       );
+
+      // Log mine diary entry
+      if (walletAddress) {
+        const { headline, narrative } = narrativeMine(entity.name, entity.raceId, entity.classId, zoneId, oreProps.label, pickaxeItem.name);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "mine", headline, narrative, {
+          oreName: oreProps.label,
+          pickaxeName: pickaxeItem.name,
+          chargesRemaining,
+        });
+      }
 
       return {
         ok: true,

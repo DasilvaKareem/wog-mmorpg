@@ -4,6 +4,7 @@ import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { CharacterDialog } from "@/components/CharacterDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { InspectDialog } from "@/components/InspectDialog";
+import { QuestLogDialog } from "@/components/QuestLogDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
 import { MarketplacePage } from "@/components/MarketplacePage";
@@ -14,8 +15,8 @@ import { WalletPanel } from "@/components/WalletPanel";
 import { ProfessionPanel } from "@/components/ProfessionPanel";
 import { ZoneSelector } from "@/components/ZoneSelector";
 import { ChatLog } from "@/components/ChatLog";
-import { Leaderboard } from "@/components/Leaderboard";
-import { LobbyViewer } from "@/components/LobbyViewer";
+import { PlayerPanel } from "@/components/PlayerPanel";
+import { WorldMap } from "@/components/WorldMap";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
@@ -26,6 +27,8 @@ type Page = "landing" | "game" | "marketplace" | "x402";
 function AppShell(): React.ReactElement {
   const [page, setPage] = React.useState<Page>("landing");
   const [characterOpen, setCharacterOpen] = React.useState(false);
+  const [mapOpen, setMapOpen] = React.useState(false);
+  const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const { address } = useWalletContext();
 
@@ -39,6 +42,10 @@ function AppShell(): React.ReactElement {
       const key = event.key.toLowerCase();
       if (key === "c") {
         setCharacterOpen((current) => !current);
+      } else if (key === "m") {
+        setMapOpen((current) => !current);
+      } else if (key === "q") {
+        setQuestLogOpen((current) => !current);
       } else if (key === "i" && address && currentZone) {
         gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
       }
@@ -86,18 +93,19 @@ function AppShell(): React.ReactElement {
       <WalletPanel />
       <ProfessionPanel />
       <ZoneSelector />
-      <LobbyViewer className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-96 hidden md:block" />
+      <PlayerPanel className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
       <ChatLog
         zoneId={currentZone}
         className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
       />
-      <Leaderboard className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
       <ShopDialog />
       <GuildDialog />
       <AuctionHouseDialog />
       <ColiseumDialog />
       <InspectDialog />
+      <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
+      <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
     </div>
   );
 }

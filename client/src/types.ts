@@ -13,6 +13,7 @@ export interface Entity {
   xp?: number;
   raceId?: string;
   classId?: string;
+  gender?: "male" | "female";
   essence?: number;
   maxEssence?: number;
   xpReward?: number;
@@ -24,6 +25,7 @@ export interface Entity {
   >;
   effectiveStats?: CharacterStats;
   partyId?: string;
+  guildName?: string;
   learnedTechniques?: string[];
   activeEffects?: ActiveEffect[];
   kills?: number;

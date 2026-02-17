@@ -30,6 +30,12 @@ type ApiFunc = ReturnType<typeof createAuthenticatedAPI>;
 let api: ApiFunc;
 const ZONE = "village-square";
 
+// Per-team zone tracking (updated on transition)
+const teamZones: Record<string, string> = { ALPHA: "village-square", BRAVO: "village-square" };
+
+// Transition lock — when true, non-warrior loops pause to avoid move conflicts
+const teamTransitioning: Record<string, boolean> = { ALPHA: false, BRAVO: false };
+
 // =============================================================================
 //  Types & Scoreboard
 // =============================================================================
@@ -85,12 +91,15 @@ function banner(text: string) {
 function printScoreboard() {
   const a = scores.ALPHA;
   const b = scores.BRAVO;
+  const zA = teamZones.ALPHA ?? "village-square";
+  const zB = teamZones.BRAVO ?? "village-square";
   console.log(`
 ┌──────────────────────────────────────────────────────────┐
 │                    ⚔️  SCOREBOARD  ⚔️                     │
 ├──────────────────────────┬───────────────────────────────┤
 │  🔴 TEAM ALPHA           │  🔵 TEAM BRAVO                │
 ├──────────────────────────┼───────────────────────────────┤
+│  Zone: ${zA.padEnd(18)}│  Zone: ${zB.padEnd(23)}│
 │  Level: ${String(a.teamLevel).padEnd(17)}│  Level: ${String(b.teamLevel).padEnd(22)}│
 │  Kills: ${String(a.kills).padEnd(17)}│  Kills: ${String(b.kills).padEnd(22)}│
 │  Best Kill: L${String(a.highestLevelKill).padEnd(13)}│  Best Kill: L${String(b.highestLevelKill).padEnd(18)}│
@@ -100,32 +109,33 @@ function printScoreboard() {
 └──────────────────────────┴───────────────────────────────┘`);
 }
 
-async function getEntity(entityId: string) {
+async function getEntity(entityId: string, zoneId?: string) {
   const state = await api("GET", "/state");
-  return state.zones[ZONE]?.entities?.[entityId];
+  return state.zones[zoneId ?? ZONE]?.entities?.[entityId];
 }
 
-async function getZoneEntities() {
+async function getZoneEntities(zoneId?: string) {
   const state = await api("GET", "/state");
-  return state.zones[ZONE]?.entities ?? {};
+  return state.zones[zoneId ?? ZONE]?.entities ?? {};
 }
 
-async function findEntityByName(name: string): Promise<string | null> {
-  const entities = await getZoneEntities();
+async function findEntityByName(name: string, zoneId?: string): Promise<string | null> {
+  const entities = await getZoneEntities(zoneId);
   const entry = Object.entries(entities).find(([_, e]: any) => e.name === name);
   return entry ? entry[0] : null;
 }
 
-async function findEntitiesByType(type: string): Promise<Array<[string, any]>> {
-  const entities = await getZoneEntities();
+async function findEntitiesByType(type: string, zoneId?: string): Promise<Array<[string, any]>> {
+  const entities = await getZoneEntities(zoneId);
   return Object.entries(entities).filter(([_, e]: any) => e.type === type);
 }
 
-async function moveTo(entityId: string, x: number, y: number) {
-  await api("POST", "/command", { zoneId: ZONE, entityId, action: "move", x, y });
+async function moveTo(entityId: string, x: number, y: number, zoneId?: string) {
+  const zone = zoneId ?? ZONE;
+  await api("POST", "/command", { zoneId: zone, entityId, action: "move", x, y });
   for (let i = 0; i < 30; i++) {
     await sleep(600);
-    const e = await getEntity(entityId);
+    const e = await getEntity(entityId, zone);
     if (!e) break;
     const dx = e.x - x;
     const dy = e.y - y;
@@ -133,13 +143,347 @@ async function moveTo(entityId: string, x: number, y: number) {
   }
 }
 
-async function moveNear(entityId: string, targetId: string) {
-  const entities = await getZoneEntities();
+async function moveNear(entityId: string, targetId: string, zoneId?: string) {
+  const entities = await getZoneEntities(zoneId);
   const target = entities[targetId];
   if (target) {
-    await moveTo(entityId, target.x, target.y);
+    await moveTo(entityId, target.x, target.y, zoneId);
     await sleep(400);
   }
+}
+
+// =============================================================================
+//  Zone-Aware Helpers (for multi-zone transition quests)
+// =============================================================================
+
+function getTeamZone(team: string): string {
+  return teamZones[team] ?? ZONE;
+}
+
+async function getEntityInZone(entityId: string, zoneId: string) {
+  const state = await api("GET", "/state");
+  return state.zones[zoneId]?.entities?.[entityId];
+}
+
+async function getZoneEntitiesIn(zoneId: string) {
+  const state = await api("GET", "/state");
+  return state.zones[zoneId]?.entities ?? {};
+}
+
+async function moveToInZone(entityId: string, x: number, y: number, zoneId: string) {
+  await api("POST", "/command", { zoneId, entityId, action: "move", x, y });
+  for (let i = 0; i < 40; i++) {
+    await sleep(600);
+    const e = await getEntityInZone(entityId, zoneId);
+    if (!e) break;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    if (Math.sqrt(dx * dx + dy * dy) <= 15) break;
+  }
+}
+
+// =============================================================================
+//  TRANSITION QUEST CHAIN — Lore-driven zone progression
+// =============================================================================
+
+const ZONE_PROGRESSION = [
+  {
+    zoneId: "village-square",
+    bossName: "Diseased Wolf",
+    bossLevel: 5,
+    portalPos: { x: 290, y: 150 },
+    portalId: "meadow-exit",
+    requiredLevel: 5,
+    nextZone: "wild-meadow",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE FIRST TRIAL: PROVING GROUND",
+      "═══════════════════════════════════════════════════════",
+      "  The Village Square grows too small for warriors of",
+      "  your caliber. Ancient tales speak of wild beasts",
+      "  roaming the meadows beyond the village walls.",
+      "",
+      "  QUEST: Slay the Diseased Wolf, a corrupted beast",
+      "  that terrorizes the village outskirts. Only then",
+      "  shall the Meadow Road reveal itself to the worthy.",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "With the Diseased Wolf vanquished, the Meadow Road beckons. Onward to the Wild Meadow!",
+  },
+  {
+    zoneId: "wild-meadow",
+    bossName: "Dire Wolf",
+    bossLevel: 10,
+    portalPos: { x: 336, y: 175 },
+    portalId: "forest-gate",
+    requiredLevel: 10,
+    nextZone: "dark-forest",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE SECOND TRIAL: THE ALPHA'S HOWL",
+      "═══════════════════════════════════════════════════════",
+      "  The Wild Meadow has tested your mettle, but darker",
+      "  forces stir in the ancient woods beyond. The Dire",
+      "  Wolf — alpha of the meadow pack — guards the",
+      "  passage to the Dark Forest.",
+      "",
+      "  QUEST: Hunt and slay the Dire Wolf, apex predator",
+      "  of the meadows. Prove you are ready for the",
+      "  horrors that lurk beneath the forest canopy.",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "The Dire Wolf falls with a thunderous howl! The Forest Gate creaks open, revealing the ominous Dark Forest...",
+  },
+];
+
+const FINAL_BOSS = {
+  zoneId: "dark-forest",
+  bossName: "Necromancer Valdris",
+  bossLevel: 16,
+  lore: [
+    "═══════════════════════════════════════════════════════",
+    "  📜 THE FINAL TRIAL: VALDRIS MUST FALL",
+    "═══════════════════════════════════════════════════════",
+    "  The Dark Forest reeks of death and dark magic.",
+    "  Necromancer Valdris has corrupted these ancient",
+    "  woods, raising the dead as his twisted servants.",
+    "",
+    "  QUEST: Slay Necromancer Valdris and restore peace",
+    "  to the realm of Geneva. This is the ultimate test.",
+    "═══════════════════════════════════════════════════════",
+  ],
+  victoryLore: "⚔️ NECROMANCER VALDRIS IS DEFEATED! The dark magic dissipates and the ancient forest begins to heal. LEGENDS WILL BE WRITTEN! ⚔️",
+};
+
+/**
+ * Transition quest: grind to required level, slay zone boss, transition the whole team.
+ * Sets teamTransitioning flag to pause other loops during portal phase.
+ */
+async function runTransitionQuest(team: string, progressionIndex: number): Promise<boolean> {
+  const prog = ZONE_PROGRESSION[progressionIndex];
+  if (!prog) return false;
+
+  const squad = teams[team];
+  const warrior = squad.find((a) => a.role === "WARRIOR")!;
+
+  // Print lore
+  for (const line of prog.lore) {
+    console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
+  }
+
+  // Phase 1: Hunt the zone boss
+  log(team, "QUEST", `Hunting ${prog.bossName} (L${prog.bossLevel})...`);
+  const currentZone = prog.zoneId;
+
+  let bossSlain = false;
+  for (let attempt = 0; attempt < 60 && !bossSlain; attempt++) {
+    const entities = await getZoneEntitiesIn(currentZone);
+    const boss = Object.entries(entities).find(
+      ([_, e]: any) => e.name === prog.bossName && e.hp > 0
+    );
+
+    if (!boss) {
+      log(team, "QUEST", `${prog.bossName} not found — waiting for respawn...`);
+      await sleep(5000);
+      continue;
+    }
+
+    const [bossId, bossData] = boss as [string, any];
+    log(team, "QUEST", `Found ${prog.bossName} L${bossData.level} (${bossData.hp}/${bossData.maxHp} HP) — engaging!`);
+
+    // Move warrior to boss
+    await moveToInZone(warrior.id, bossData.x, bossData.y, currentZone);
+
+    // Attack with techniques
+    try {
+      const learned = await api("GET", `/techniques/learned/${currentZone}/${warrior.id}`);
+      const attacks = learned.techniques
+        .filter((t: any) => t.type === "attack")
+        .sort((a: any, b: any) => (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0));
+      if (attacks.length > 0) {
+        await api("POST", "/techniques/use", { zoneId: currentZone, casterEntityId: warrior.id, techniqueId: attacks[0].id, targetEntityId: bossId });
+      }
+    } catch {}
+    try {
+      await api("POST", "/command", { zoneId: currentZone, entityId: warrior.id, action: "attack", targetId: bossId });
+    } catch {}
+
+    // Wait for combat resolution
+    for (let i = 0; i < 60; i++) {
+      await sleep(800);
+      const entities2 = await getZoneEntitiesIn(currentZone);
+      const target = entities2[bossId];
+      const self = entities2[warrior.id];
+      if (!self) {
+        log(team, "QUEST", `Warrior died to ${prog.bossName}! Waiting for respawn...`);
+        await sleep(5000);
+        break;
+      }
+      if (!target || target.hp <= 0) {
+        bossSlain = true;
+        log(team, "QUEST", `☠️ ${prog.bossName} SLAIN by ${warrior.name}! (L${self.level} XP ${self.xp ?? 0})`);
+        break;
+      }
+      // Re-attack every few ticks
+      if (i % 4 === 0) {
+        try { await api("POST", "/command", { zoneId: currentZone, entityId: warrior.id, action: "attack", targetId: bossId }); } catch {}
+      }
+    }
+    await sleep(2000);
+  }
+
+  if (!bossSlain) {
+    log(team, "QUEST", `Failed to slay ${prog.bossName} after many attempts.`);
+    return false;
+  }
+
+  // Print victory lore
+  console.log(`\n  ${TEAM_COLORS[team]} [${team}] 📜 ${prog.victoryLore}\n`);
+
+  // ── TRANSITION PHASE: Lock other loops so they stop sending move commands ──
+  teamTransitioning[team] = true;
+  log(team, "QUEST", `🔒 Transition lock ON — pausing other loops for ${team}`);
+  await sleep(3000); // Wait for in-flight loop iterations to finish
+
+  try {
+    // Update team zone FIRST so paused loops will target the new zone when they resume
+    teamZones[team] = prog.nextZone;
+
+    // Phase 2: Move warrior to portal and transition
+    log(team, "QUEST", `Heading to ${prog.portalId} portal at (${prog.portalPos.x}, ${prog.portalPos.y})...`);
+    await moveToInZone(warrior.id, prog.portalPos.x, prog.portalPos.y, currentZone);
+
+    // Transition warrior with retry
+    let warriorTransitioned = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const result = await api("POST", `/transition/${currentZone}/portal/${prog.portalId}`, {
+          walletAddress: WALLET, entityId: warrior.id,
+        });
+        log(team, "QUEST", `⚡ ${warrior.name} entered ${prog.nextZone}! (arrived at ${result.destination?.portal ?? "portal"})`);
+        warriorTransitioned = true;
+        break;
+      } catch (err: any) {
+        log(team, "QUEST", `Warrior portal attempt ${attempt}/3 failed: ${err.message?.slice(0, 80)}`);
+        if (attempt < 3) {
+          await moveToInZone(warrior.id, prog.portalPos.x, prog.portalPos.y, currentZone);
+          await sleep(2000);
+        }
+      }
+    }
+
+    if (!warriorTransitioned) {
+      log(team, "QUEST", `Portal transition failed after 3 attempts — aborting.`);
+      teamZones[team] = currentZone; // Revert
+      return false;
+    }
+
+    // Phase 3: Transition ALL other team members (except crafter — stays at forge)
+    for (const agent of squad) {
+      if (agent.id === warrior.id || agent.role === "CRAFTER") continue;
+
+      let transitioned = false;
+      for (let attempt = 1; attempt <= 3 && !transitioned; attempt++) {
+        try {
+          // Verify agent is still in the old zone before moving
+          const agentState = await getEntityInZone(agent.id, currentZone);
+          if (!agentState) {
+            // Agent might already be in the new zone
+            const inNewZone = await getEntityInZone(agent.id, prog.nextZone);
+            if (inNewZone) {
+              log(team, "QUEST", `${agent.name} already in ${prog.nextZone}`);
+              transitioned = true;
+              break;
+            }
+            log(team, "QUEST", `${agent.name} not found in either zone (attempt ${attempt}/3)`);
+            await sleep(3000);
+            continue;
+          }
+
+          await moveToInZone(agent.id, prog.portalPos.x, prog.portalPos.y, currentZone);
+          await api("POST", `/transition/${currentZone}/portal/${prog.portalId}`, {
+            walletAddress: WALLET, entityId: agent.id,
+          });
+          log(team, "QUEST", `⚡ ${agent.name} followed to ${prog.nextZone}!`);
+          transitioned = true;
+        } catch (err: any) {
+          log(team, "QUEST", `${agent.name} transition attempt ${attempt}/3 failed: ${err.message?.slice(0, 60)}`);
+          if (attempt < 3) await sleep(2000);
+        }
+      }
+      if (!transitioned) {
+        log(team, "QUEST", `⚠️ ${agent.name} stranded — could not transition after 3 attempts`);
+      }
+      await sleep(500);
+    }
+
+    log(team, "QUEST", `🌍 TEAM ${team} is now in ${prog.nextZone.toUpperCase()}!`);
+    return true;
+  } finally {
+    // Always release the lock
+    teamTransitioning[team] = false;
+    log(team, "QUEST", `🔓 Transition lock OFF — loops resuming for ${team}`);
+  }
+}
+
+/**
+ * Final boss quest (no transition — just slay Necromancer Valdris)
+ */
+async function runFinalBossQuest(team: string): Promise<boolean> {
+  const squad = teams[team];
+  const warrior = squad.find((a) => a.role === "WARRIOR")!;
+  const currentZone = "dark-forest";
+
+  for (const line of FINAL_BOSS.lore) {
+    console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
+  }
+
+  log(team, "QUEST", `Hunting ${FINAL_BOSS.bossName} (L${FINAL_BOSS.bossLevel})...`);
+
+  for (let attempt = 0; attempt < 120; attempt++) {
+    const entities = await getZoneEntitiesIn(currentZone);
+    const boss = Object.entries(entities).find(
+      ([_, e]: any) => e.name === FINAL_BOSS.bossName && e.hp > 0
+    );
+
+    if (!boss) {
+      log(team, "QUEST", `${FINAL_BOSS.bossName} not found — waiting for respawn...`);
+      await sleep(5000);
+      continue;
+    }
+
+    const [bossId, bossData] = boss as [string, any];
+    log(team, "QUEST", `Found ${FINAL_BOSS.bossName} L${bossData.level} (${bossData.hp}/${bossData.maxHp} HP) — THE FINAL BATTLE!`);
+    await moveToInZone(warrior.id, bossData.x, bossData.y, currentZone);
+
+    try {
+      const learned = await api("GET", `/techniques/learned/${currentZone}/${warrior.id}`);
+      const attacks = learned.techniques.filter((t: any) => t.type === "attack")
+        .sort((a: any, b: any) => (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0));
+      if (attacks.length > 0) {
+        await api("POST", "/techniques/use", { zoneId: currentZone, casterEntityId: warrior.id, techniqueId: attacks[0].id, targetEntityId: bossId });
+      }
+    } catch {}
+    try { await api("POST", "/command", { zoneId: currentZone, entityId: warrior.id, action: "attack", targetId: bossId }); } catch {}
+
+    for (let i = 0; i < 80; i++) {
+      await sleep(800);
+      const entities2 = await getZoneEntitiesIn(currentZone);
+      const target = entities2[bossId];
+      const self = entities2[warrior.id];
+      if (!self) { log(team, "QUEST", "Warrior died! Respawning..."); await sleep(5000); break; }
+      if (!target || target.hp <= 0) {
+        console.log(`\n  ${TEAM_COLORS[team]} [${team}] 📜 ${FINAL_BOSS.victoryLore}\n`);
+        log(team, "QUEST", `🏆 TEAM ${team} HAS CONQUERED ALL OF GENEVA! 🏆`);
+        return true;
+      }
+      if (i % 4 === 0) {
+        try { await api("POST", "/command", { zoneId: currentZone, entityId: warrior.id, action: "attack", targetId: bossId }); } catch {}
+      }
+    }
+    await sleep(3000);
+  }
+  return false;
 }
 
 // =============================================================================
@@ -406,11 +750,57 @@ async function learnAllTechniques(agent: Agent) {
 // =============================================================================
 
 async function warriorLoop(agent: Agent) {
+  log(agent.team, agent.role, "Setting up skinning profession...");
+
+  // Learn skinning
+  const skinTrainers = await findEntitiesByType("profession-trainer");
+  for (const [tId, trainer] of skinTrainers as Array<[string, any]>) {
+    if (trainer.teachesProfession === "skinning") {
+      await moveTo(agent.id, trainer.x, trainer.y);
+      try {
+        await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, trainerId: tId, professionId: "skinning" });
+        log(agent.team, agent.role, "Learned skinning");
+      } catch { log(agent.team, agent.role, "Already know skinning"); }
+      break;
+    }
+  }
+  // Buy skinning knife
+  try {
+    await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: 76, quantity: 1 });
+    log(agent.team, agent.role, "Bought Rusty Skinning Knife");
+  } catch {}
+
   log(agent.team, agent.role, "Starting combat patrol...");
 
   while (true) {
-    const me = await getEntity(agent.id);
+    const z = getTeamZone(agent.team);
+    const me = await getEntity(agent.id, z);
     if (!me) { await sleep(3000); continue; }
+
+    // --- TRANSITION QUEST TRIGGERS ---
+    const currentLevel = me.level ?? 1;
+    if (z === "village-square" && currentLevel >= 5) {
+      log(agent.team, agent.role, "⚡ Level 5! The First Trial — slay the Diseased Wolf!");
+      const ok = await runTransitionQuest(agent.team, 0);
+      if (!ok) log(agent.team, agent.role, "Transition failed — retrying next loop");
+      continue;
+    }
+    if (z === "wild-meadow" && currentLevel >= 10) {
+      log(agent.team, agent.role, "⚡ Level 10! The Second Trial — hunt the Dire Wolf!");
+      const ok = await runTransitionQuest(agent.team, 1);
+      if (!ok) log(agent.team, agent.role, "Transition failed — retrying next loop");
+      continue;
+    }
+    if (z === "dark-forest" && currentLevel >= 14) {
+      log(agent.team, agent.role, "⚡ Ready for the Final Trial — Necromancer Valdris awaits!");
+      const won = await runFinalBossQuest(agent.team);
+      if (won) {
+        banner(`🏆 TEAM ${agent.team} CONQUERED GENEVA! 🏆`);
+        printScoreboard();
+        return;
+      }
+      continue;
+    }
 
     const hpPercent = (me.hp / me.maxHp) * 100;
     if (hpPercent < 30) {
@@ -420,7 +810,7 @@ async function warriorLoop(agent: Agent) {
     }
 
     // Find STRONGEST mob we can fight (competitive advantage!)
-    const entities = await getZoneEntities();
+    const entities = await getZoneEntities(z);
     const mobs = Object.entries(entities)
       .filter(([_, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0)
       .filter(([_, e]: any) => (e.level ?? 1) <= (me.level ?? 1) + 2) // Push limits: +2 levels
@@ -430,32 +820,32 @@ async function warriorLoop(agent: Agent) {
 
     const [mobId, mob] = mobs[0] as [string, any];
     const mobLevel = mob.level ?? 1;
-    log(agent.team, agent.role, `Engaging ${mob.name} L${mobLevel} (${mob.hp}/${mob.maxHp} HP)`);
+    log(agent.team, agent.role, `[${z}] Engaging ${mob.name} L${mobLevel} (${mob.hp}/${mob.maxHp} HP)`);
 
-    await moveTo(agent.id, mob.x, mob.y);
+    await moveTo(agent.id, mob.x, mob.y, z);
 
     // Use strongest technique
     let usedTech = false;
     try {
-      const learned = await api("GET", `/techniques/learned/${ZONE}/${agent.id}`);
+      const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
       const attacks = learned.techniques
         .filter((t: any) => t.type === "attack" && t.essenceCost <= (me.essence ?? 0))
         .sort((a: any, b: any) => (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0));
       if (attacks.length > 0) {
-        await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: agent.id, techniqueId: attacks[0].id, targetEntityId: mobId });
+        await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: attacks[0].id, targetEntityId: mobId });
         log(agent.team, agent.role, `Used ${attacks[0].name}!`);
         usedTech = true;
       }
     } catch {}
 
     if (!usedTech) {
-      try { await api("POST", "/command", { zoneId: ZONE, entityId: agent.id, action: "attack", targetId: mobId }); } catch {}
+      try { await api("POST", "/command", { zoneId: z, entityId: agent.id, action: "attack", targetId: mobId }); } catch {}
     }
 
     // Wait for combat
     for (let i = 0; i < 40; i++) {
       await sleep(800);
-      const entities = await getZoneEntities();
+      const entities = await getZoneEntities(z);
       const target = entities[mobId];
       const self = entities[agent.id];
       if (!self) { log(agent.team, agent.role, "DIED! Respawning..."); await sleep(5000); break; }
@@ -468,15 +858,45 @@ async function warriorLoop(agent: Agent) {
           scores[agent.team].strongestMobName = mob.name;
         }
         log(agent.team, agent.role, `Killed ${mob.name} L${mobLevel}! (L${self.level} XP ${self.xp ?? 0}) [Kills: ${scores[agent.team].kills}]`);
+        // Skin the corpse for leather + raw meat
+        try {
+          await sleep(1500);
+          const meNow = await getEntity(agent.id, z);
+          const savedWeaponTokenId = meNow?.equipment?.weapon?.tokenId;
+          // Swap to skinning knife
+          try { await api("POST", "/equipment/unequip", { zoneId: z, slot: "weapon", entityId: agent.id, walletAddress: WALLET }); } catch {}
+          await sleep(300);
+          try { await api("POST", "/equipment/equip", { zoneId: z, tokenId: 76, entityId: agent.id, walletAddress: WALLET }); } catch {}
+          await sleep(300);
+          const corpseData = await api("GET", `/skinning/corpses/${z}`);
+          const nearbyCorpses = (corpseData.corpses ?? []).filter((c: any) => {
+            const cdx = c.x - mob.x; const cdy = c.y - mob.y;
+            return Math.sqrt(cdx * cdx + cdy * cdy) < 60;
+          });
+          for (const corpse of nearbyCorpses.slice(0, 3)) {
+            try {
+              await moveTo(agent.id, corpse.x, corpse.y, z);
+              const skinResult = await api("POST", "/skinning/harvest", { walletAddress: WALLET, zoneId: z, entityId: agent.id, corpseId: corpse.id });
+              const matNames = skinResult.materials?.map((m: any) => `${m.name}×${m.quantity}`).join(", ") ?? "nothing";
+              log(agent.team, agent.role, `Skinned ${corpse.name} → ${matNames}`);
+            } catch {}
+          }
+          // Re-equip original weapon
+          try { await api("POST", "/equipment/unequip", { zoneId: z, slot: "weapon", entityId: agent.id, walletAddress: WALLET }); } catch {}
+          await sleep(300);
+          if (savedWeaponTokenId) {
+            try { await api("POST", "/equipment/equip", { zoneId: z, tokenId: savedWeaponTokenId, entityId: agent.id, walletAddress: WALLET }); } catch {}
+          }
+        } catch {}
         break;
       }
       // Buff mid-combat
       if (i % 5 === 0) {
         try {
-          const learned = await api("GET", `/techniques/learned/${ZONE}/${agent.id}`);
+          const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
           const buffs = learned.techniques.filter((t: any) => t.type === "buff" && t.essenceCost <= (self.essence ?? 0));
           if (buffs.length > 0) {
-            await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: agent.id, techniqueId: buffs[0].id });
+            await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: buffs[0].id });
             log(agent.team, agent.role, `Buffed with ${buffs[0].name}`);
           }
         } catch {}
@@ -492,30 +912,65 @@ async function warriorLoop(agent: Agent) {
 
 async function clericLoop(agent: Agent) {
   const warrior = teams[agent.team].find((a) => a.role === "WARRIOR")!;
+
+  // Learn cooking profession
+  log(agent.team, agent.role, "Setting up cooking profession...");
+  const cookTrainers = await findEntitiesByType("profession-trainer");
+  for (const [tId, trainer] of cookTrainers as Array<[string, any]>) {
+    if (trainer.teachesProfession === "cooking") {
+      await moveTo(agent.id, trainer.x, trainer.y);
+      try {
+        await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, trainerId: tId, professionId: "cooking" });
+        log(agent.team, agent.role, "Learned cooking");
+      } catch { log(agent.team, agent.role, "Already know cooking"); }
+      break;
+    }
+  }
+
+  // Find campfire
+  const campfires = await findEntitiesByType("campfire");
+  const campfireId = campfires.length > 0 ? campfires[0][0] : null;
+  const campfirePos = campfires.length > 0 ? { x: (campfires[0][1] as any).x, y: (campfires[0][1] as any).y } : { x: 380, y: 580 };
+  if (campfireId) log(agent.team, agent.role, `Found campfire at (${campfirePos.x}, ${campfirePos.y})`);
+
+  // Cooking recipes from cheapest to most expensive
+  const COOK_PRIORITY = ["cooked_meat", "hearty_stew", "roasted_boar", "bear_feast"];
+  // Food token IDs for consuming (81=Cooked Meat, 82=Hearty Stew, 83=Roasted Boar, 84=Bear Feast)
+  const FOOD_TOKENS = [84, 83, 82, 81]; // best first for consuming
+
   log(agent.team, agent.role, `Following and healing ${warrior.name}...`);
 
+  let clericCycle = 0;
   while (true) {
-    const wState = await getEntity(warrior.id);
-    const cState = await getEntity(agent.id);
+    // Pause during zone transitions to avoid conflicting move commands
+    if (teamTransitioning[agent.team]) {
+      log(agent.team, agent.role, "⏸ Paused — team transitioning...");
+      while (teamTransitioning[agent.team]) await sleep(1000);
+      log(agent.team, agent.role, "▶ Resumed after transition");
+    }
+
+    const z = getTeamZone(agent.team);
+    const wState = await getEntity(warrior.id, z);
+    const cState = await getEntity(agent.id, z);
     if (!wState || !cState) { await sleep(2000); continue; }
 
     // Follow warrior
     const dx = wState.x - cState.x;
     const dy = wState.y - cState.y;
     if (Math.sqrt(dx * dx + dy * dy) > 25) {
-      await moveTo(agent.id, wState.x - 5, wState.y - 5);
+      await moveTo(agent.id, wState.x - 5, wState.y - 5, z);
     }
 
     // Heal warrior when below 60%
     const wHpPercent = (wState.hp / wState.maxHp) * 100;
     if (wHpPercent < 60) {
       try {
-        const learned = await api("GET", `/techniques/learned/${ZONE}/${agent.id}`);
+        const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
         const heals = learned.techniques
           .filter((t: any) => t.type === "healing" && t.essenceCost <= (cState.essence ?? 0))
           .sort((a: any, b: any) => (b.effects?.healAmount ?? 0) - (a.effects?.healAmount ?? 0));
         if (heals.length > 0) {
-          await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: agent.id, techniqueId: heals[0].id, targetEntityId: warrior.id });
+          await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: heals[0].id, targetEntityId: warrior.id });
           log(agent.team, agent.role, `Healed ${warrior.name} with ${heals[0].name}! (was ${wHpPercent.toFixed(0)}% HP)`);
         }
       } catch {}
@@ -525,10 +980,10 @@ async function clericLoop(agent: Agent) {
     const cHpPercent = (cState.hp / cState.maxHp) * 100;
     if (cHpPercent < 50) {
       try {
-        const learned = await api("GET", `/techniques/learned/${ZONE}/${agent.id}`);
+        const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
         const heals = learned.techniques.filter((t: any) => t.type === "healing" && t.essenceCost <= (cState.essence ?? 0));
         if (heals.length > 0) {
-          await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: agent.id, techniqueId: heals[0].id, targetEntityId: agent.id });
+          await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: heals[0].id, targetEntityId: agent.id });
           log(agent.team, agent.role, `Self-healed with ${heals[0].name}`);
         }
       } catch {}
@@ -537,7 +992,7 @@ async function clericLoop(agent: Agent) {
     // Assist in combat if warrior is healthy
     if (wHpPercent > 70 && (cState.essence ?? 0) > 30) {
       try {
-        const entities = await getZoneEntities();
+        const entities = await getZoneEntities(z);
         const nearbyMobs = Object.entries(entities).filter(([_, e]: any) => {
           if (e.type !== "mob" || e.hp <= 0) return false;
           const mdx = e.x - wState.x;
@@ -545,16 +1000,52 @@ async function clericLoop(agent: Agent) {
           return Math.sqrt(mdx * mdx + mdy * mdy) < 50;
         });
         if (nearbyMobs.length > 0) {
-          const learned = await api("GET", `/techniques/learned/${ZONE}/${agent.id}`);
+          const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
           const attacks = learned.techniques.filter((t: any) => t.type === "attack" && t.essenceCost <= (cState.essence ?? 0));
           if (attacks.length > 0) {
-            await api("POST", "/techniques/use", { zoneId: ZONE, casterEntityId: agent.id, techniqueId: attacks[0].id, targetEntityId: nearbyMobs[0][0] });
+            await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: attacks[0].id, targetEntityId: nearbyMobs[0][0] });
             log(agent.team, agent.role, `Smited ${(nearbyMobs[0][1] as any).name}!`);
           }
         }
       } catch {}
     }
 
+    // --- COOKING CYCLE: Cook food + feed warrior every 8 loops ---
+    // (only works in village-square where campfire exists)
+    if (campfireId && z === "village-square" && clericCycle % 8 === 4) {
+      log(agent.team, agent.role, "Heading to campfire to cook...");
+      await moveTo(agent.id, campfirePos.x, campfirePos.y, z);
+      for (const recipeId of COOK_PRIORITY) {
+        try {
+          const result = await api("POST", "/cooking/cook", { walletAddress: WALLET, zoneId: z, entityId: agent.id, campfireId, recipeId });
+          log(agent.team, agent.role, `Cooked ${result.recipe}! (heals ${result.hpRestoration}hp)`);
+        } catch {}
+      }
+    }
+
+    // --- FEED WARRIOR: Consume food to restore HP when warrior is low ---
+    if (wHpPercent < 50) {
+      for (const foodTokenId of FOOD_TOKENS) {
+        try {
+          const result = await api("POST", "/cooking/consume", { walletAddress: WALLET, zoneId: z, entityId: warrior.id, foodTokenId });
+          log(agent.team, agent.role, `Fed ${warrior.name} ${result.consumed}! (+${result.hpRestored}hp → ${result.currentHp}/${result.maxHp})`);
+          break;
+        } catch {}
+      }
+    }
+
+    // --- SELF-FEED: Eat food if cleric is low ---
+    if (cHpPercent < 40) {
+      for (const foodTokenId of FOOD_TOKENS) {
+        try {
+          const result = await api("POST", "/cooking/consume", { walletAddress: WALLET, zoneId: z, entityId: agent.id, foodTokenId });
+          log(agent.team, agent.role, `Ate ${result.consumed}! (+${result.hpRestored}hp → ${result.currentHp}/${result.maxHp})`);
+          break;
+        } catch {}
+      }
+    }
+
+    clericCycle++;
     await sleep(2000);
   }
 }
@@ -597,15 +1088,16 @@ async function gathererLoop(agent: Agent) {
     await sleep(500);
   }
 
-  async function equipTool(agentId: string, tokenId: number, toolName: string): Promise<boolean> {
-    try { await api("POST", "/equipment/unequip", { zoneId: ZONE, slot: "weapon", entityId: agentId, walletAddress: WALLET }); } catch {}
+  async function equipTool(agentId: string, tokenId: number, toolName: string, zoneId?: string): Promise<boolean> {
+    const zone = zoneId ?? ZONE;
+    try { await api("POST", "/equipment/unequip", { zoneId: zone, slot: "weapon", entityId: agentId, walletAddress: WALLET }); } catch {}
     await sleep(500);
-    try { await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId, entityId: agentId, walletAddress: WALLET }); } catch (err: any) {
+    try { await api("POST", "/equipment/equip", { zoneId: zone, tokenId, entityId: agentId, walletAddress: WALLET }); } catch (err: any) {
       log(agent.team, "GATHERER", `Failed to equip ${toolName}`);
       return false;
     }
     await sleep(300);
-    const e = await getEntity(agentId);
+    const e = await getEntity(agentId, zone);
     return e?.equipment?.weapon?.tokenId === tokenId;
   }
 
@@ -620,6 +1112,14 @@ async function gathererLoop(agent: Agent) {
 
   let cycle = 0;
   while (true) {
+    // Pause during zone transitions to avoid conflicting move commands
+    if (teamTransitioning[agent.team]) {
+      log(agent.team, agent.role, "⏸ Paused — team transitioning...");
+      while (teamTransitioning[agent.team]) await sleep(1000);
+      log(agent.team, agent.role, "▶ Resumed after transition");
+    }
+
+    const z = getTeamZone(agent.team);
     // Prioritize mining (3 mine : 1 herb) to accumulate ore for crafting
     const doMining = cycle % 4 !== 3;
 
@@ -627,19 +1127,19 @@ async function gathererLoop(agent: Agent) {
       if (!ownedTools.has(27)) {
         try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: 27, quantity: 1 }); ownedTools.add(27); } catch { cycle++; await sleep(5000); continue; }
       }
-      const equipped = await equipTool(agent.id, 27, "Stone Pickaxe");
+      const equipped = await equipTool(agent.id, 27, "Stone Pickaxe", z);
       if (!equipped) { cycle++; await sleep(5000); continue; }
 
       try {
-        const nodes = await api("GET", `/mining/nodes/${ZONE}`);
+        const nodes = await api("GET", `/mining/nodes/${z}`);
         const available = nodes.oreNodes?.filter((n: any) => !n.depleted && n.charges > 0 && mineableOres.has(n.oreType)) ?? [];
         if (available.length > 0) {
           const node = available[(cycle + teamOffset) % available.length];
-          log(agent.team, agent.role, `Mining ${node.name} (${node.oreType}) at (${node.x}, ${node.y})...`);
-          await moveTo(agent.id, node.x, node.y);
+          log(agent.team, agent.role, `[${z}] Mining ${node.name} (${node.oreType}) at (${node.x}, ${node.y})...`);
+          await moveTo(agent.id, node.x, node.y, z);
           await sleep(500);
           try {
-            const result = await api("POST", "/mining/gather", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, oreNodeId: node.id });
+            const result = await api("POST", "/mining/gather", { walletAddress: WALLET, zoneId: z, entityId: agent.id, oreNodeId: node.id });
             log(agent.team, agent.role, `Mined ${result.oreName}! (dur: ${result.pickaxe?.durability}/${result.pickaxe?.maxDurability})`);
           } catch (err: any) { log(agent.team, agent.role, `Mining failed: ${err.message?.slice(0, 50)}`); }
         } else {
@@ -650,19 +1150,19 @@ async function gathererLoop(agent: Agent) {
       if (!ownedTools.has(41)) {
         try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: 41, quantity: 1 }); ownedTools.add(41); } catch { cycle++; await sleep(5000); continue; }
       }
-      const equipped = await equipTool(agent.id, 41, "Basic Sickle");
+      const equipped = await equipTool(agent.id, 41, "Basic Sickle", z);
       if (!equipped) { cycle++; await sleep(5000); continue; }
 
       try {
-        const nodes = await api("GET", `/herbalism/nodes/${ZONE}`);
+        const nodes = await api("GET", `/herbalism/nodes/${z}`);
         const available = nodes.flowerNodes?.filter((n: any) => !n.depleted && n.charges > 0 && gatherableHerbs.has(n.name)) ?? [];
         if (available.length > 0) {
           const node = available[(cycle + teamOffset) % available.length];
-          log(agent.team, agent.role, `Gathering ${node.name} at (${node.x}, ${node.y})...`);
-          await moveTo(agent.id, node.x, node.y);
+          log(agent.team, agent.role, `[${z}] Gathering ${node.name} at (${node.x}, ${node.y})...`);
+          await moveTo(agent.id, node.x, node.y, z);
           await sleep(500);
           try {
-            const result = await api("POST", "/herbalism/gather", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, flowerNodeId: node.id });
+            const result = await api("POST", "/herbalism/gather", { walletAddress: WALLET, zoneId: z, entityId: agent.id, flowerNodeId: node.id });
             log(agent.team, agent.role, `Gathered ${result.flowerName}! (dur: ${result.sickle?.durability}/${result.sickle?.maxDurability})`);
           } catch (err: any) { log(agent.team, agent.role, `Gathering failed: ${err.message?.slice(0, 50)}`); }
         }
@@ -679,11 +1179,11 @@ async function gathererLoop(agent: Agent) {
 // =============================================================================
 
 async function crafterLoop(agent: Agent) {
-  log(agent.team, agent.role, "Setting up blacksmithing + alchemy...");
+  log(agent.team, agent.role, "Setting up blacksmithing + alchemy + leatherworking + jewelcrafting...");
 
   const profTrainers = await findEntitiesByType("profession-trainer");
   for (const [tId, trainer] of profTrainers as Array<[string, any]>) {
-    if (trainer.teachesProfession === "blacksmithing" || trainer.teachesProfession === "alchemy") {
+    if (["blacksmithing", "alchemy", "leatherworking", "jewelcrafting"].includes(trainer.teachesProfession)) {
       await moveTo(agent.id, trainer.x, trainer.y);
       try {
         await api("POST", "/professions/learn", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, trainerId: tId, professionId: trainer.teachesProfession });
@@ -712,6 +1212,16 @@ async function crafterLoop(agent: Agent) {
   const altarId = altars.length > 0 ? altars[0][0] : null;
   if (altarId) log(agent.team, agent.role, "Found Enchanter's Altar for weapon enchanting");
 
+  const tanningRacks = await findEntitiesByType("tanning-rack");
+  const tanningRackId = tanningRacks.length > 0 ? tanningRacks[0][0] : null;
+  const tanningRackPos = tanningRacks.length > 0 ? { x: (tanningRacks[0][1] as any).x, y: (tanningRacks[0][1] as any).y } : { x: 480, y: 580 };
+  if (tanningRackId) log(agent.team, agent.role, "Found Tanning Rack for leatherworking");
+
+  const jewelersBenches = await findEntitiesByType("jewelers-bench");
+  const jewelersBenchId = jewelersBenches.length > 0 ? jewelersBenches[0][0] : null;
+  const jewelersBenchPos = jewelersBenches.length > 0 ? { x: (jewelersBenches[0][1] as any).x, y: (jewelersBenches[0][1] as any).y } : { x: 580, y: 580 };
+  if (jewelersBenchId) log(agent.team, agent.role, "Found Jeweler's Workbench for jewelcrafting");
+
   await moveTo(agent.id, forgePos.x, forgePos.y);
 
   let recipes: any[] = [];
@@ -731,6 +1241,16 @@ async function crafterLoop(agent: Agent) {
   log(agent.team, agent.role, "Standing by at forge...");
 
   while (true) {
+    // Pause during zone transitions to avoid conflicting move commands
+    if (teamTransitioning[agent.team]) {
+      log(agent.team, agent.role, "⏸ Paused — team transitioning...");
+      while (teamTransitioning[agent.team]) await sleep(1000);
+      log(agent.team, agent.role, "▶ Resumed after transition");
+    }
+
+    // Crafter stays in village-square; wz = warrior/gatherer's current zone (for remote equip)
+    const wz = getTeamZone(agent.team);
+
     if (!forgeId) {
       const forges = await findEntitiesByType("forge");
       if (forges.length > 0) { forgeId = forges[0][0]; }
@@ -759,7 +1279,7 @@ async function crafterLoop(agent: Agent) {
         log(agent.team, agent.role, `UPGRADED to ${upgName}! [Total: ${scores[agent.team].weaponsForged}]`);
         if (result.crafted?.tokenId) {
           try {
-            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(result.crafted.tokenId), entityId: warrior.id, walletAddress: WALLET });
+            await api("POST", "/equipment/equip", { zoneId: wz, tokenId: Number(result.crafted.tokenId), entityId: warrior.id, walletAddress: WALLET });
             log(agent.team, agent.role, `Equipped ${upgName} on ${warrior.name}!`);
           } catch {}
         }
@@ -781,7 +1301,7 @@ async function crafterLoop(agent: Agent) {
         crafted = true;
         if (craftedTokenId) {
           try {
-            await api("POST", "/equipment/equip", { zoneId: ZONE, tokenId: Number(craftedTokenId), entityId: warrior.id, walletAddress: WALLET });
+            await api("POST", "/equipment/equip", { zoneId: wz, tokenId: Number(craftedTokenId), entityId: warrior.id, walletAddress: WALLET });
             log(agent.team, agent.role, `Equipped ${craftedName} on ${warrior.name}!`);
           } catch {}
         }
@@ -822,6 +1342,60 @@ async function crafterLoop(agent: Agent) {
             altarId, enchantmentElixirTokenId: elixirTokenId, equipmentSlot: "weapon",
           });
           log(agent.team, agent.role, `Enchanted ${warrior.name}'s weapon! (+STR bonus)`);
+          break;
+        } catch {}
+      }
+    }
+
+    // --- PHASE 5: LEATHERWORKING — Craft leather armor ---
+    if (tanningRackId) {
+      await moveTo(agent.id, tanningRackPos.x, tanningRackPos.y);
+      const LEATHER_PRIORITY = [
+        "tanned-vest", "tanned-leggings", "tanned-boots", "tanned-helm",
+        "tanned-shoulders", "tanned-gloves", "tanned-belt",
+        "reinforced-vest", "reinforced-leggings", "reinforced-boots",
+      ];
+      for (const recipeId of LEATHER_PRIORITY) {
+        try {
+          const result = await api("POST", "/leatherworking/craft", {
+            walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, tanningRackId, recipeId,
+          });
+          const itemName = result.crafted?.name ?? recipeId;
+          log(agent.team, agent.role, `CRAFTED leather ${itemName}!`);
+          // Equip on gatherer (squishy ranger benefits from leather armor)
+          const gatherer = teams[agent.team].find((a) => a.role === "GATHERER");
+          if (gatherer && result.crafted?.tokenId) {
+            try {
+              await api("POST", "/equipment/equip", { zoneId: wz, tokenId: Number(result.crafted.tokenId), entityId: gatherer.id, walletAddress: WALLET });
+              log(agent.team, agent.role, `Equipped ${itemName} on ${gatherer.name}!`);
+            } catch {}
+          }
+          break;
+        } catch {}
+      }
+    }
+
+    // --- PHASE 6: JEWELCRAFTING — Craft rings & amulets ---
+    if (jewelersBenchId) {
+      await moveTo(agent.id, jewelersBenchPos.x, jewelersBenchPos.y);
+      const JEWELRY_PRIORITY = [
+        "ruby-ring", "sapphire-ring", "emerald-ring",
+        "diamond-amulet", "shadow-opal-amulet", "arcane-crystal-amulet",
+      ];
+      for (const recipeId of JEWELRY_PRIORITY) {
+        try {
+          const result = await api("POST", "/jewelcrafting/craft", {
+            walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, jewelersBenchId, recipeId,
+          });
+          const itemName = result.crafted?.name ?? recipeId;
+          log(agent.team, agent.role, `CRAFTED jewelry ${itemName}!`);
+          // Equip on warrior for stat boosts
+          if (result.crafted?.tokenId) {
+            try {
+              await api("POST", "/equipment/equip", { zoneId: wz, tokenId: Number(result.crafted.tokenId), entityId: warrior.id, walletAddress: WALLET });
+              log(agent.team, agent.role, `Equipped ${itemName} on ${warrior.name}!`);
+            } catch {}
+          }
           break;
         } catch {}
       }
@@ -868,16 +1442,33 @@ async function traderLoop(agent: Agent) {
 
   let tradeCycle = 0;
   while (true) {
+    // Pause during zone transitions to avoid conflicting move commands
+    if (teamTransitioning[agent.team]) {
+      log(agent.team, agent.role, "⏸ Paused — team transitioning...");
+      while (teamTransitioning[agent.team]) await sleep(1000);
+      log(agent.team, agent.role, "▶ Resumed after transition");
+    }
+
+    const z = getTeamZone(agent.team);
+
+    // Re-discover auctioneer in current zone (changes after transition)
+    if (!auctioneerInfo || tradeCycle % 10 === 0) {
+      const zoneAuctioneers = await findEntitiesByType("auctioneer", z);
+      if (zoneAuctioneers.length > 0) {
+        const [aId, auct] = zoneAuctioneers[0] as [string, any];
+        auctioneerInfo = { id: aId, x: auct.x, y: auct.y, name: auct.name };
+      }
+    }
+
     // Check auction house
     try {
-      const auctions = await api("GET", `/auctionhouse/${ZONE}/auctions`);
+      const auctions = await api("GET", `/auctionhouse/${z}/auctions`);
       const active = auctions.auctions?.filter((a: any) => a.status === "active") ?? [];
       if (active.length > 0) {
-        log(agent.team, agent.role, `Auction House: ${active.length} active listings`);
-        // Try to bid on auctions from rival team's listings
+        log(agent.team, agent.role, `[${z}] Auction House: ${active.length} active listings`);
         for (const listing of active.slice(0, 2)) {
           try {
-            await api("POST", `/auctionhouse/${ZONE}/bid`, {
+            await api("POST", `/auctionhouse/${z}/bid`, {
               bidderAddress: WALLET, auctionId: listing.id, bidAmount: (listing.currentBid ?? listing.startingBid) + 10,
             });
             scores[agent.team].itemsTraded++;
@@ -885,13 +1476,13 @@ async function traderLoop(agent: Agent) {
           } catch {}
         }
       } else {
-        log(agent.team, agent.role, "Auction House: empty");
+        log(agent.team, agent.role, `[${z}] Auction House: empty`);
       }
     } catch {}
 
     // List items
     if (auctioneerInfo && tradeCycle % 3 === 0) {
-      await moveTo(agent.id, auctioneerInfo.x, auctioneerInfo.y);
+      await moveTo(agent.id, auctioneerInfo.x, auctioneerInfo.y, z);
       const listableItems = [
         { tokenId: 22, name: "Coal Ore", startBid: 5, buyout: 15 },
         { tokenId: 23, name: "Tin Ore", startBid: 8, buyout: 20 },
@@ -899,7 +1490,7 @@ async function traderLoop(agent: Agent) {
       ];
       const itemToList = listableItems[tradeCycle % listableItems.length];
       try {
-        await api("POST", `/auctionhouse/${ZONE}/create`, {
+        await api("POST", `/auctionhouse/${z}/create`, {
           sellerAddress: WALLET, tokenId: itemToList.tokenId, quantity: 1,
           startingBid: itemToList.startBid, buyoutPrice: itemToList.buyout,
           durationMinutes: 60, auctioneerEntityId: auctioneerInfo.id,
@@ -909,12 +1500,12 @@ async function traderLoop(agent: Agent) {
       } catch {}
     }
 
-    // Buy from shop periodically
-    if (tradeCycle % 5 === 0 && merchants.length > 0) {
+    // Buy from shop periodically (only in village-square where merchants are)
+    if (z === "village-square" && tradeCycle % 5 === 0 && merchants.length > 0) {
       const [merchantId] = merchants[0];
-      await moveTo(agent.id, (merchants[0][1] as any).x, (merchants[0][1] as any).y);
+      await moveTo(agent.id, (merchants[0][1] as any).x, (merchants[0][1] as any).y, z);
       try {
-        const shopData = await api("GET", `/shop/npc/${ZONE}/${merchantId}`);
+        const shopData = await api("GET", `/shop/npc/${z}/${merchantId}`);
         const randomItem = shopData.items[Math.floor(Math.random() * shopData.items.length)];
         if (randomItem) {
           await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: parseInt(randomItem.tokenId), quantity: 1 });

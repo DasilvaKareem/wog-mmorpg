@@ -366,3 +366,52 @@ export async function getMemberGuildId(memberAddress: string): Promise<number> {
 
   return Number(await guildContract.memberToGuild(memberAddress));
 }
+
+// --- Guild name cache (refreshed periodically, used by entity serialization) ---
+
+const guildNameCache = new Map<string, string>(); // walletAddress (lowercase) → guild name
+let cacheRefreshing = false;
+
+/** Get cached guild name for a wallet address (returns undefined if not in a guild). */
+export function getCachedGuildName(walletAddress: string): string | undefined {
+  return guildNameCache.get(walletAddress.toLowerCase());
+}
+
+/** Refresh the guild name cache by scanning all active guilds. */
+export async function refreshGuildNameCache(): Promise<void> {
+  if (!guildContract || cacheRefreshing) return;
+  cacheRefreshing = true;
+
+  try {
+    const nextId = Number(await guildContract.nextGuildId());
+    const newCache = new Map<string, string>();
+
+    for (let guildId = 1; guildId < nextId; guildId++) {
+      try {
+        const [name, , , , , , status, ,] = await guildContract.getGuild(guildId);
+        if (Number(status) !== GuildStatus.Active) continue;
+
+        const members: string[] = await guildContract.getGuildMembers(guildId);
+        for (const addr of members) {
+          newCache.set(addr.toLowerCase(), name);
+        }
+      } catch {
+        // Skip individual guild errors
+      }
+    }
+
+    guildNameCache.clear();
+    for (const [k, v] of newCache) guildNameCache.set(k, v);
+  } catch (err) {
+    console.error("[guild-cache] Failed to refresh guild name cache:", err);
+  } finally {
+    cacheRefreshing = false;
+  }
+}
+
+/** Start periodic guild cache refresh (call once at server boot). */
+export function startGuildNameCacheRefresh(intervalMs = 30_000): void {
+  // Initial load
+  refreshGuildNameCache().catch(() => {});
+  setInterval(() => refreshGuildNameCache().catch(() => {}), intervalMs);
+}

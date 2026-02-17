@@ -7,6 +7,7 @@ export interface CatalogItem {
   description: string;
   copperPrice: number;
   category: string;
+  rarity?: string;
   equipSlot?: string;
   armorSlot?: string;
   statBonuses?: Partial<Record<string, number>>;

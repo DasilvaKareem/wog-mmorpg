@@ -15,6 +15,8 @@ export type EquipmentSlot = ArmorSlot | WeaponSlot;
 
 export interface ItemStatBonuses extends Partial<CharacterStats> {}
 
+export type ItemRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+
 export interface ItemDefinition {
   tokenId: bigint;
   name: string;
@@ -25,6 +27,15 @@ export interface ItemDefinition {
   armorSlot?: ArmorSlot;
   statBonuses?: ItemStatBonuses;
   maxDurability?: number;
+}
+
+/** Derive rarity from copper price. */
+export function getItemRarity(copperPrice: number): ItemRarity {
+  if (copperPrice >= 600) return "legendary";
+  if (copperPrice >= 350) return "epic";
+  if (copperPrice >= 150) return "rare";
+  if (copperPrice >= 50) return "uncommon";
+  return "common";
 }
 
 export const ITEM_CATALOG: ItemDefinition[] = [
@@ -1161,6 +1172,93 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     armorSlot: "amulet",
     statBonuses: { int: 6, mp: 8, faith: 3 },
     maxDurability: 100,
+  },
+  // --- Gate Reagents (Alchemy outputs for dungeon keys) ---
+  {
+    tokenId: 128n,
+    name: "Crude Gate Essence",
+    description: "Unstable essence. Enchant to create E-Key.",
+    copperPrice: 30,
+    category: "material",
+  },
+  {
+    tokenId: 129n,
+    name: "Lesser Gate Essence",
+    description: "Refined essence. Enchant to create D-Key.",
+    copperPrice: 60,
+    category: "material",
+  },
+  {
+    tokenId: 130n,
+    name: "Gate Essence",
+    description: "Potent reagent. Enchant to create C-Key.",
+    copperPrice: 120,
+    category: "material",
+  },
+  {
+    tokenId: 131n,
+    name: "Greater Gate Essence",
+    description: "Powerful reagent. Enchant to create B-Key.",
+    copperPrice: 200,
+    category: "material",
+  },
+  {
+    tokenId: 132n,
+    name: "Superior Gate Essence",
+    description: "Superb reagent. Enchant to create A-Key.",
+    copperPrice: 350,
+    category: "material",
+  },
+  {
+    tokenId: 133n,
+    name: "Supreme Gate Essence",
+    description: "Legendary reagent. Enchant to create S-Key.",
+    copperPrice: 500,
+    category: "material",
+  },
+
+  // --- Gate Keys (Consumables for opening dungeon gates) ---
+  {
+    tokenId: 134n,
+    name: "E-Key",
+    description: "Opens Rank E Dungeon Gates.",
+    copperPrice: 50,
+    category: "consumable",
+  },
+  {
+    tokenId: 135n,
+    name: "D-Key",
+    description: "Opens Rank D Dungeon Gates.",
+    copperPrice: 100,
+    category: "consumable",
+  },
+  {
+    tokenId: 136n,
+    name: "C-Key",
+    description: "Opens Rank C Dungeon Gates.",
+    copperPrice: 200,
+    category: "consumable",
+  },
+  {
+    tokenId: 137n,
+    name: "B-Key",
+    description: "Opens Rank B Dungeon Gates.",
+    copperPrice: 350,
+    category: "consumable",
+  },
+  {
+    tokenId: 138n,
+    name: "A-Key",
+    description: "Opens Rank A Dungeon Gates.",
+    copperPrice: 600,
+    category: "consumable",
+  },
+  {
+    tokenId: 139n,
+    name: "S-Key",
+    description: "Opens Rank S Dungeon Gates.",
+    copperPrice: 1000,
+    category: "consumable",
   },
 ];
 

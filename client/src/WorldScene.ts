@@ -56,6 +56,10 @@ export class WorldScene extends Phaser.Scene {
 
   preload(): void {
     preloadOverworld(this);
+    // Character sprite sheets (3 skins)
+    this.load.image("char-sheet-a", "/sprites/character.png");
+    this.load.image("char-sheet-b", "/sprites/characterB.png");
+    this.load.image("char-sheet-c", "/sprites/characterC.png");
   }
 
   create(): void {

@@ -11,13 +11,16 @@ import { logZoneEvent } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollCopper } from "./lootTables.js";
 import { saveCharacter } from "./characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "./techniques.js";
+import { ensureEssenceTechniqueInitialized } from "./essenceTechniqueGenerator.js";
 import { randomUUID } from "crypto";
 import { getPlayerPartyId } from "./partySystem.js";
+import { getCachedGuildName } from "./guildChain.js";
 import {
   getAdjacentZone,
   clampToZoneBounds,
   ZONE_LEVEL_REQUIREMENTS,
 } from "./worldLayout.js";
+import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "./diary.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -101,6 +104,8 @@ export interface Entity {
   raceId?: string;
   /** Class identifier for stat recalc on level-up. */
   classId?: string;
+  /** Character gender (players only). */
+  gender?: "male" | "female";
   /** Live computed stats (players only). */
   stats?: CharacterStats;
   /** Equipped item state by slot (players only). */
@@ -133,13 +138,22 @@ export interface Entity {
   mobName?: string; // Original mob name for loot table lookup
   skinned?: boolean; // Whether corpse has been skinned
   skinnableUntil?: number; // Timestamp when corpse decays
+  /** Dungeon gate fields. */
+  gateRank?: "E" | "D" | "C" | "B" | "A" | "S";
+  isDangerGate?: boolean;
+  gateExpiresAt?: number;
+  gateOpened?: boolean;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
   const partyId = entity.type === "player" ? getPlayerPartyId(entity.id) : undefined;
+  const guildName = entity.type === "player" && entity.walletAddress
+    ? getCachedGuildName(entity.walletAddress)
+    : undefined;
   return {
     ...entity,
     ...(partyId && { partyId }),
+    ...(guildName && { guildName }),
     ...(entity.characterTokenId != null && {
       characterTokenId: entity.characterTokenId.toString(),
     }),
@@ -165,6 +179,10 @@ export function getAllZones(): Map<string, ZoneState> {
   return zones;
 }
 
+export function deleteZone(zoneId: string): boolean {
+  return zones.delete(zoneId);
+}
+
 // Tick loop — advances the world every interval
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
@@ -186,10 +204,16 @@ const ARMOR_SLOTS: ArmorSlot[] = [
 
 // Graveyard spawn locations per zone
 const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
-  "village-square": { x: 100, y: 100 }, // Safe corner near merchants
+  "village-square": { x: 150, y: 150 },
   "wild-meadow": { x: 50, y: 50 },
   "dark-forest": { x: 50, y: 50 },
-  "village-square": { x: 150, y: 150 },
+  "auroral-plains": { x: 100, y: 500 },
+  "emerald-woods": { x: 300, y: 300 },
+  "viridian-range": { x: 150, y: 400 },
+  "moondancer-glade": { x: 150, y: 200 },
+  "felsrock-citadel": { x: 300, y: 350 },
+  "lake-lumina": { x: 300, y: 300 },
+  "azurshard-chasm": { x: 100, y: 320 },
 };
 
 const DEATH_XP_LOSS_PERCENT = 0.1; // Lose 10% of current XP on death
@@ -371,10 +395,11 @@ function canRetaliate(entity: Entity): boolean {
  */
 function handlePlayerDeath(player: Entity, zoneId: string): void {
   // Apply death penalty: lose 10% of current XP (min 0)
+  let deathXpLoss = 0;
   if (player.xp != null && player.xp > 0) {
-    const xpLoss = Math.floor(player.xp * DEATH_XP_LOSS_PERCENT);
-    player.xp = Math.max(0, player.xp - xpLoss);
-    console.log(`[death] ${player.name} lost ${xpLoss} XP (${player.xp} remaining)`);
+    deathXpLoss = Math.floor(player.xp * DEATH_XP_LOSS_PERCENT);
+    player.xp = Math.max(0, player.xp - deathXpLoss);
+    console.log(`[death] ${player.name} lost ${deathXpLoss} XP (${player.xp} remaining)`);
   }
 
   // Teleport to graveyard spawn point
@@ -397,6 +422,16 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
   player.hp = player.maxHp;
 
   console.log(`[death] ${player.name} respawned at graveyard (${spawn.x}, ${spawn.y})`);
+
+  // Log diary entry for player death
+  if (player.walletAddress) {
+    const { headline, narrative } = narrativeDeath(player.name, player.raceId, player.classId, zoneId, deathXpLoss);
+    logDiary(player.walletAddress, player.name, zoneId, spawn.x, spawn.y, "death", headline, narrative, {
+      xpLoss: deathXpLoss,
+      respawnX: spawn.x,
+      respawnY: spawn.y,
+    });
+  }
 
   // Sync death + XP loss to NFT (async, non-blocking)
   if (player.characterTokenId != null && player.raceId && player.classId && player.level != null) {
@@ -482,6 +517,24 @@ function ensureTechniquesForAutoCombat(entity: Entity): void {
     if (tech.levelRequired <= entity.level && !learned.has(tech.id)) {
       entity.learnedTechniques.push(tech.id);
       learned.add(tech.id);
+    }
+  }
+
+  // Auto-learn essence techniques for AI agents with wallets
+  if (entity.walletAddress) {
+    if (entity.level >= 15) {
+      const sig = ensureEssenceTechniqueInitialized(entity.walletAddress, entity.classId, "signature");
+      if (!learned.has(sig.id)) {
+        entity.learnedTechniques.push(sig.id);
+        learned.add(sig.id);
+      }
+    }
+    if (entity.level >= 30) {
+      const ult = ensureEssenceTechniqueInitialized(entity.walletAddress, entity.classId, "ultimate");
+      if (!learned.has(ult.id)) {
+        entity.learnedTechniques.push(ult.id);
+        learned.add(ult.id);
+      }
     }
   }
 }
@@ -861,6 +914,16 @@ async function worldTick() {
             // Increment kill count for player killers
             if (entity.type === "player") {
               entity.kills = (entity.kills ?? 0) + 1;
+
+              // Log kill diary entry
+              if (entity.walletAddress) {
+                const { headline, narrative } = narrativeKill(entity.name, entity.raceId, entity.classId, zone.zoneId, target.name, target.xpReward ?? 0);
+                logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "kill", headline, narrative, {
+                  targetName: target.name,
+                  targetType: target.type,
+                  xpReward: target.xpReward ?? 0,
+                });
+              }
             }
 
             // Handle target death based on type
@@ -913,6 +976,15 @@ async function worldTick() {
                   entityName: entity.name,
                   data: { level: entity.level, xp: entity.xp },
                 });
+
+                // Log level-up diary entry
+                if (entity.walletAddress) {
+                  const { headline, narrative } = narrativeLevelUp(entity.name, entity.raceId, entity.classId, zone.zoneId, entity.level);
+                  logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "level_up", headline, narrative, {
+                    newLevel: entity.level,
+                    xp: entity.xp,
+                  });
+                }
 
                 // Persist character to Redis on level-up
                 if (entity.walletAddress) {
@@ -1050,6 +1122,16 @@ async function worldTick() {
 
             if (entity.type === "player") {
               entity.kills = (entity.kills ?? 0) + 1;
+
+              // Log kill diary entry (technique path)
+              if (entity.walletAddress) {
+                const { headline, narrative } = narrativeKill(entity.name, entity.raceId, entity.classId, zone.zoneId, target.name, target.xpReward ?? 0);
+                logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "kill", headline, narrative, {
+                  targetName: target.name,
+                  targetType: target.type,
+                  xpReward: target.xpReward ?? 0,
+                });
+              }
             }
 
             if (target.type === "player") {
@@ -1090,6 +1172,16 @@ async function worldTick() {
                   entityName: entity.name,
                   data: { level: entity.level, xp: entity.xp },
                 });
+
+                // Log level-up diary entry (technique path)
+                if (entity.walletAddress) {
+                  const { headline, narrative } = narrativeLevelUp(entity.name, entity.raceId, entity.classId, zone.zoneId, entity.level);
+                  logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "level_up", headline, narrative, {
+                    newLevel: entity.level,
+                    xp: entity.xp,
+                  });
+                }
+
                 if (entity.characterTokenId != null) {
                   updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
                     .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
@@ -1238,6 +1330,15 @@ async function worldTick() {
       entityId: entity.id,
       entityName: entity.name,
     });
+
+    // Log zone transition diary entry
+    if (entity.walletAddress) {
+      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, sourceZoneId, dest.destZoneId);
+      logDiary(entity.walletAddress, entity.name, dest.destZoneId, entity.x, entity.y, "zone_transition", headline, narrative, {
+        fromZone: sourceZoneId,
+        toZone: dest.destZoneId,
+      });
+    }
 
     console.log(
       `[transition] ${entity.name} moved from ${sourceZoneId} to ${dest.destZoneId} at (${dest.destLocalX}, ${dest.destLocalZ})`

@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sprite Sheet Frame Viewer — All Characters</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-family: 'Courier New', monospace;
+    padding: 20px;
+  }
+  h1 { color: #00ff88; margin-bottom: 8px; font-size: 18px; }
+  .info { color: #888; font-size: 13px; margin-bottom: 20px; }
+  .info span { color: #ffcc00; }
+
+  .section { margin-bottom: 30px; }
+  .section h2 { color: #00ccff; font-size: 15px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 4px; }
+
+  /* Character selector tabs */
+  .char-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+  }
+  .char-tab {
+    padding: 10px 24px;
+    background: #2a2a3e;
+    border: 2px solid #444;
+    color: #aaa;
+    font-family: monospace;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
+    transition: all 0.15s;
+  }
+  .char-tab:hover { border-color: #00ff88; color: #fff; }
+  .char-tab.active {
+    background: #333350;
+    border-color: #00ff88;
+    color: #00ff88;
+    border-bottom-color: #333350;
+  }
+  .char-tab .preview {
+    display: block;
+    image-rendering: pixelated;
+    margin: 6px auto 0;
+    border: 1px solid #555;
+  }
+
+  .full-sheet {
+    border: 2px solid #00ff88;
+    image-rendering: pixelated;
+    display: block;
+    margin-bottom: 20px;
+    max-width: 100%;
+  }
+
+  .row-section {
+    margin-bottom: 16px;
+    padding: 10px;
+    background: #222238;
+    border: 1px solid #333;
+    border-radius: 4px;
+  }
+  .row-section h3 {
+    color: #00ccff;
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+  .row-section .row-meta {
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 8px;
+  }
+  .row-frames {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .det-frame {
+    background: #2a2a3e;
+    border: 2px solid #444;
+    text-align: center;
+    padding: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .det-frame:hover { border-color: #00ff88; background: #3a3a5e; }
+  .det-frame.selected { border-color: #ffcc00; background: #3a3a2e; }
+  .det-frame canvas {
+    image-rendering: pixelated;
+    display: block;
+    margin: 0 auto 4px;
+    background: #111;
+  }
+  .det-frame .label { font-size: 9px; color: #888; }
+  .det-frame .label b { color: #ccc; }
+
+  .anim-section {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+  }
+  .anim-box {
+    background: #2a2a3e;
+    border: 1px solid #444;
+    padding: 12px;
+    text-align: center;
+    border-radius: 4px;
+  }
+  .anim-box h3 { color: #ffcc00; font-size: 13px; margin-bottom: 8px; }
+  .anim-box canvas {
+    image-rendering: pixelated;
+    border: 1px solid #555;
+    background: #111;
+  }
+  .anim-box .fps-label { font-size: 10px; color: #888; margin-top: 4px; }
+
+  .controls {
+    margin: 15px 0;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .controls label { font-size: 13px; color: #aaa; }
+  .controls input[type=number] {
+    width: 50px;
+    background: #2a2a3e;
+    border: 1px solid #555;
+    color: #fff;
+    padding: 4px 6px;
+    font-family: monospace;
+    font-size: 13px;
+  }
+  button {
+    background: #00ff88;
+    color: #1a1a2e;
+    border: none;
+    padding: 6px 14px;
+    font-family: monospace;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 3px;
+  }
+  button:hover { background: #00cc66; }
+  button.secondary { background: #555; color: #eee; }
+  button.secondary:hover { background: #777; }
+  button.danger { background: #ff4444; color: #fff; }
+  button.danger:hover { background: #cc2222; }
+
+  .direction-tag {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    font-weight: bold;
+  }
+  .tag-down { background: #2255aa; color: #88bbff; }
+  .tag-right { background: #22aa55; color: #88ffbb; }
+  .tag-up { background: #aa5522; color: #ffbb88; }
+  .tag-left { background: #aa2255; color: #ff88bb; }
+  .tag-attack { background: #aa2222; color: #ff8888; }
+
+  /* Side-by-side compare */
+  .compare-section {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    margin-top: 15px;
+  }
+  .compare-box {
+    text-align: center;
+  }
+  .compare-box h3 { color: #ffcc00; font-size: 13px; margin-bottom: 8px; }
+  .compare-box canvas {
+    image-rendering: pixelated;
+    border: 1px solid #555;
+    background: #111;
+  }
+</style>
+</head>
+<body>
+
+<h1>SPRITE SHEET VIEWER — ALL CHARACTERS</h1>
+<div class="info">
+  3 character skins | Same layout | <span>Click tabs to switch</span>
+</div>
+
+<!-- Character tabs -->
+<div class="char-tabs" id="charTabs"></div>
+
+<!-- Full sheet -->
+<div class="section">
+  <h2>Full Sheet — <span id="sheetLabel">loading...</span></h2>
+  <canvas id="fullSheet" class="full-sheet"></canvas>
+</div>
+
+<!-- Detected frames -->
+<div class="section">
+  <h2>Detected Frames (click to select)</h2>
+  <div id="detectedFrames"></div>
+</div>
+
+<!-- Animation controls -->
+<div class="section">
+  <h2>Animation Preview</h2>
+  <div class="controls">
+    <button onclick="animateRow(0)">Walk Down</button>
+    <button onclick="animateRow(1)">Walk Right</button>
+    <button onclick="animateRow(2)">Walk Up</button>
+    <button onclick="animateRow(3)">Walk Left</button>
+    <button class="secondary" onclick="animateRow(4)">Attack Down</button>
+    <button class="secondary" onclick="animateRow(5)">Attack Right</button>
+    <button class="secondary" onclick="animateRow(6)">Attack Up</button>
+    <button class="secondary" onclick="animateRow(7)">Attack Left</button>
+    <button onclick="animateSelected()">Animate Selected</button>
+    <button onclick="animateAllWalks()">All 4 Walks</button>
+    <button onclick="compareAllChars()">Compare All 3</button>
+    <label>FPS: <input type="number" id="animFps" value="6" min="1" max="30"></label>
+    <button class="danger" onclick="clearAnims()">Clear</button>
+  </div>
+  <div class="anim-section" id="animSection"></div>
+</div>
+
+<script>
+// ── Character definitions ─────────────────────────────────────────────
+const CHARACTERS = [
+  {
+    id: 'A',
+    name: 'Character A (Red Shirt)',
+    file: 'character.png',
+    size: { w: 272, h: 256 },
+    rows: [
+      { label: "Walk Down",    tag: "down",   y: 6,   h: 22 },
+      { label: "Walk Right",   tag: "right",  y: 38,  h: 22 },
+      { label: "Walk Up",      tag: "up",     y: 69,  h: 23 },
+      { label: "Walk Left",    tag: "left",   y: 102, h: 22 },
+      { label: "Attack Down",  tag: "attack", y: 134, h: 25 },
+      { label: "Attack Right", tag: "attack", y: 166, h: 22 },
+      { label: "Attack Up",    tag: "attack", y: 198, h: 22 },
+      { label: "Attack Left",  tag: "attack", y: 230, h: 22 },
+    ],
+    walkGrid: { x0: 0, spacing: 16, w: 16, count: 4 },
+    atkGrid:  { x0: 0, spacing: 32, w: 32, count: 4 },
+    extraStart: 80,
+    extraSpacing: 16,
+    extraW: 16,
+    extraCount: 10,
+    previewScale: 4,
+    fullScale: 4,
+  },
+  {
+    id: 'B',
+    name: 'Character B (Dark Skin)',
+    file: 'characterB.png',
+    size: { w: 1056, h: 1008 },
+    rows: [
+      { label: "Walk Down",    tag: "down",   y: 19,  h: 92 },
+      { label: "Walk Right",   tag: "right",  y: 149, h: 88 },
+      { label: "Walk Up",      tag: "up",     y: 271, h: 92 },
+      { label: "Walk Left",    tag: "left",   y: 400, h: 89 },
+      { label: "Attack Down",  tag: "attack", y: 523, h: 104 },
+      { label: "Attack Right", tag: "attack", y: 649, h: 96 },
+      { label: "Attack Up",    tag: "attack", y: 771, h: 96 },
+      { label: "Attack Left",  tag: "attack", y: 897, h: 96 },
+    ],
+    walkGrid: { x0: 0, spacing: 62, w: 62, count: 4 },
+    atkGrid:  { x0: 0, spacing: 132, w: 132, count: 4 },
+    extraStart: 310,
+    extraSpacing: 62,
+    extraW: 62,
+    extraCount: 8,
+    previewScale: 1.5,
+    fullScale: 1,
+  },
+  {
+    id: 'C',
+    name: 'Character C (Blonde)',
+    file: 'characterC.png',
+    size: { w: 1056, h: 1008 },
+    rows: [
+      { label: "Walk Down",    tag: "down",   y: 19,  h: 92 },
+      { label: "Walk Right",   tag: "right",  y: 149, h: 88 },
+      { label: "Walk Up",      tag: "up",     y: 271, h: 92 },
+      { label: "Walk Left",    tag: "left",   y: 400, h: 89 },
+      { label: "Attack Down",  tag: "attack", y: 523, h: 104 },
+      { label: "Attack Right", tag: "attack", y: 649, h: 96 },
+      { label: "Attack Up",    tag: "attack", y: 771, h: 96 },
+      { label: "Attack Left",  tag: "attack", y: 897, h: 96 },
+    ],
+    walkGrid: { x0: 0, spacing: 62, w: 62, count: 4 },
+    atkGrid:  { x0: 0, spacing: 132, w: 132, count: 4 },
+    extraStart: 310,
+    extraSpacing: 62,
+    extraW: 62,
+    extraCount: 8,
+    previewScale: 1.5,
+    fullScale: 1,
+  },
+];
+
+// ── State ─────────────────────────────────────────────────────────────
+let activeChar = CHARACTERS[0];
+let images = {};
+let selectedFrames = [];
+let loadedCount = 0;
+
+// ── Load all images ───────────────────────────────────────────────────
+CHARACTERS.forEach(ch => {
+  const img = new Image();
+  img.onload = () => {
+    images[ch.id] = img;
+    loadedCount++;
+    if (loadedCount === CHARACTERS.length) {
+      buildTabs();
+      switchChar('A');
+    }
+  };
+  img.src = ch.file;
+});
+
+// ── Tab system ────────────────────────────────────────────────────────
+function buildTabs() {
+  const container = document.getElementById('charTabs');
+  CHARACTERS.forEach(ch => {
+    const tab = document.createElement('div');
+    tab.className = 'char-tab';
+    tab.id = `tab-${ch.id}`;
+    tab.onclick = () => switchChar(ch.id);
+
+    // Tab label
+    const label = document.createElement('span');
+    label.textContent = ch.name;
+    tab.appendChild(label);
+
+    // Mini preview canvas
+    const preview = document.createElement('canvas');
+    preview.className = 'preview';
+    const pw = ch.walkGrid.w;
+    const ph = ch.rows[0].h;
+    const ps = ch.id === 'A' ? 3 : 1;
+    preview.width = pw * ps;
+    preview.height = ph * ps;
+    const ctx = preview.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(images[ch.id], ch.walkGrid.x0, ch.rows[0].y, pw, ph, 0, 0, pw * ps, ph * ps);
+    tab.appendChild(preview);
+
+    container.appendChild(tab);
+  });
+}
+
+function switchChar(id) {
+  activeChar = CHARACTERS.find(c => c.id === id);
+  selectedFrames = [];
+
+  // Update tab styles
+  document.querySelectorAll('.char-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${id}`).classList.add('active');
+
+  // Update label
+  document.getElementById('sheetLabel').textContent =
+    `${activeChar.name} (${activeChar.size.w}x${activeChar.size.h})`;
+
+  drawFullSheet();
+  renderDetectedFrames();
+  clearAnims();
+}
+
+// ── Full sheet ────────────────────────────────────────────────────────
+function drawFullSheet() {
+  const img = images[activeChar.id];
+  const s = activeChar.fullScale;
+  const fc = document.getElementById('fullSheet');
+  fc.width = img.width * s;
+  fc.height = img.height * s;
+  const ctx = fc.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, fc.width, fc.height);
+
+  // Draw row bands
+  activeChar.rows.forEach((row, ri) => {
+    ctx.strokeStyle = ri < 4 ? 'rgba(0,200,255,0.5)' : 'rgba(255,100,100,0.5)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, row.y * s, fc.width, row.h * s);
+
+    // Frame cells
+    const grid = ri < 4 ? activeChar.walkGrid : activeChar.atkGrid;
+    ctx.strokeStyle = ri < 4 ? 'rgba(255,204,0,0.7)' : 'rgba(255,136,0,0.7)';
+    ctx.lineWidth = 1;
+    for (let c = 0; c < grid.count; c++) {
+      const x = grid.x0 + c * grid.spacing;
+      ctx.strokeRect(x * s, row.y * s, grid.w * s, row.h * s);
+    }
+  });
+}
+
+// ── Detected frames ──────────────────────────────────────────────────
+function renderDetectedFrames() {
+  const container = document.getElementById('detectedFrames');
+  container.innerHTML = '';
+  const ch = activeChar;
+  const img = images[ch.id];
+
+  // Walk + Attack rows
+  ch.rows.forEach((row, ri) => {
+    const section = document.createElement('div');
+    section.className = 'row-section';
+    const grid = ri < 4 ? ch.walkGrid : ch.atkGrid;
+    const tagClass = `tag-${row.tag}`;
+
+    section.innerHTML = `
+      <h3>Row ${ri}: ${row.label}
+        <span class="direction-tag ${tagClass}">${row.tag.toUpperCase()}</span>
+      </h3>
+      <div class="row-meta">y=${row.y} h=${row.h}px | ${grid.count} frames @ ${grid.w}px wide</div>
+    `;
+
+    const framesDiv = document.createElement('div');
+    framesDiv.className = 'row-frames';
+
+    for (let fi = 0; fi < grid.count; fi++) {
+      const sx = grid.x0 + fi * grid.spacing;
+      const div = createFrameEl(ri, fi, sx, row.y, grid.w, row.h, `F${fi}`, img, ch.previewScale);
+      framesDiv.appendChild(div);
+    }
+
+    section.appendChild(framesDiv);
+    container.appendChild(section);
+  });
+
+  // Extra frames from right side of walk rows
+  if (ch.extraCount > 0) {
+    const extraSection = document.createElement('div');
+    extraSection.className = 'row-section';
+    extraSection.innerHTML = `<h3>Extra Frames (right side of walk rows)</h3>`;
+
+    for (let ri = 0; ri < 4; ri++) {
+      const row = ch.rows[ri];
+      const sub = document.createElement('div');
+      sub.className = 'row-meta';
+      sub.textContent = `${row.label} extras:`;
+      extraSection.appendChild(sub);
+
+      const framesDiv = document.createElement('div');
+      framesDiv.className = 'row-frames';
+      framesDiv.style.marginBottom = '10px';
+
+      for (let fi = 0; fi < ch.extraCount; fi++) {
+        const sx = ch.extraStart + fi * ch.extraSpacing;
+        if (sx + ch.extraW > ch.size.w) break;
+        const div = createFrameEl(100 + ri, fi, sx, row.y, ch.extraW, row.h, `x${sx}`, img, ch.previewScale);
+        framesDiv.appendChild(div);
+      }
+      extraSection.appendChild(framesDiv);
+    }
+    container.appendChild(extraSection);
+  }
+}
+
+function createFrameEl(rowIdx, frameIdx, sx, sy, sw, sh, label, img, scale) {
+  const div = document.createElement('div');
+  div.className = 'det-frame';
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(sw * scale);
+  canvas.height = Math.round(sh * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+  const labelDiv = document.createElement('div');
+  labelDiv.className = 'label';
+  labelDiv.innerHTML = `<b>${label}</b><br>${sw}x${sh} @(${sx},${sy})`;
+
+  div.appendChild(canvas);
+  div.appendChild(labelDiv);
+
+  div.onclick = () => {
+    const key = `${rowIdx}-${frameIdx}`;
+    if (div.classList.contains('selected')) {
+      div.classList.remove('selected');
+      selectedFrames = selectedFrames.filter(f => f.key !== key);
+    } else {
+      div.classList.add('selected');
+      selectedFrames.push({ key, rowIdx, frameIdx, x: sx, y: sy, w: sw, h: sh });
+    }
+  };
+
+  return div;
+}
+
+// ── Animation ─────────────────────────────────────────────────────────
+function animateRow(rowIdx) {
+  const ch = activeChar;
+  const row = ch.rows[rowIdx];
+  if (!row) return;
+  const grid = rowIdx < 4 ? ch.walkGrid : ch.atkGrid;
+  const fps = parseInt(document.getElementById('animFps').value) || 6;
+  const frames = [];
+  for (let fi = 0; fi < grid.count; fi++) {
+    frames.push({ x: grid.x0 + fi * grid.spacing, y: row.y, w: grid.w, h: row.h });
+  }
+  createAnimPreview(`${ch.id}: ${row.label}`, frames, fps, grid.w, row.h, images[ch.id]);
+}
+
+function animateSelected() {
+  if (selectedFrames.length === 0) return;
+  const fps = parseInt(document.getElementById('animFps').value) || 6;
+  const maxW = Math.max(...selectedFrames.map(f => f.w));
+  const maxH = Math.max(...selectedFrames.map(f => f.h));
+  createAnimPreview(`Selected (${selectedFrames.length})`, [...selectedFrames], fps, maxW, maxH, images[activeChar.id]);
+}
+
+function animateAllWalks() {
+  for (let i = 0; i < 4; i++) animateRow(i);
+}
+
+function compareAllChars() {
+  const fps = parseInt(document.getElementById('animFps').value) || 6;
+  const section = document.getElementById('animSection');
+
+  // For each direction, show all 3 characters side by side
+  const dirs = ['Walk Down', 'Walk Right', 'Walk Up', 'Walk Left'];
+  dirs.forEach((dir, di) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'compare-section';
+
+    CHARACTERS.forEach(ch => {
+      const row = ch.rows[di];
+      const grid = ch.walkGrid;
+      const frames = [];
+      for (let fi = 0; fi < grid.count; fi++) {
+        frames.push({ x: grid.x0 + fi * grid.spacing, y: row.y, w: grid.w, h: row.h });
+      }
+
+      const box = document.createElement('div');
+      box.className = 'compare-box';
+
+      const h3 = document.createElement('h3');
+      h3.textContent = `${ch.id}: ${dir}`;
+      box.appendChild(h3);
+
+      // Normalize display size — A is small, B/C are large
+      const displayW = 80;
+      const displayH = Math.round(displayW * (row.h / grid.w));
+
+      const canvas = document.createElement('canvas');
+      canvas.width = displayW;
+      canvas.height = displayH;
+      box.appendChild(canvas);
+
+      wrapper.appendChild(box);
+
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+      const img = images[ch.id];
+      let i = 0;
+      setInterval(() => {
+        if (!document.body.contains(canvas)) return;
+        const f = frames[i % frames.length];
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, f.x, f.y, f.w, f.h, 0, 0, displayW, displayH);
+        i++;
+      }, 1000 / fps);
+    });
+
+    section.appendChild(wrapper);
+  });
+}
+
+function clearAnims() {
+  document.getElementById('animSection').innerHTML = '';
+  selectedFrames = [];
+  document.querySelectorAll('.det-frame.selected').forEach(el => el.classList.remove('selected'));
+}
+
+function createAnimPreview(label, frames, fps, cellW, cellH, img) {
+  const section = document.getElementById('animSection');
+  // Normalize to ~80px display height
+  const targetH = 80;
+  const displayScale = targetH / cellH;
+  const displayW = Math.round(cellW * displayScale);
+  const displayH = targetH;
+
+  const box = document.createElement('div');
+  box.className = 'anim-box';
+
+  const h3 = document.createElement('h3');
+  h3.textContent = label;
+  box.appendChild(h3);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = displayW;
+  canvas.height = displayH;
+  box.appendChild(canvas);
+
+  const fpsLabel = document.createElement('div');
+  fpsLabel.className = 'fps-label';
+  fpsLabel.textContent = `${fps} FPS | ${frames.length} frames | ${cellW}x${cellH}px`;
+  box.appendChild(fpsLabel);
+
+  section.appendChild(box);
+
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  let i = 0;
+  const interval = setInterval(() => {
+    if (!document.body.contains(canvas)) { clearInterval(interval); return; }
+    const f = frames[i % frames.length];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const dw = Math.round(f.w * displayScale);
+    const dh = Math.round(f.h * displayScale);
+    const dx = Math.round((displayW - dw) / 2);
+    const dy = Math.round((displayH - dh) / 2);
+    ctx.drawImage(img, f.x, f.y, f.w, f.h, dx, dy, dw, dh);
+    i++;
+  }, 1000 / fps);
+}
+</script>
+</body>
+</html>

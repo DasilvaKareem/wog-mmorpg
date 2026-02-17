@@ -1,8 +1,10 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, type Entity, recalculateEntityVitals } from "./zoneRuntime.js";
+import { getOrCreateZone, getAllZones, type Entity, recalculateEntityVitals } from "./zoneRuntime.js";
 import { mintGold, mintItem } from "./blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
 import { saveCharacter } from "./characterStore.js";
+import { getAllZoneEvents } from "./zoneEvents.js";
+import { logDiary, narrativeQuestComplete } from "./diary.js";
 
 // Quest definition
 export interface Quest {
@@ -1653,6 +1655,24 @@ export async function awardQuestRewards(
     }).catch((err) => console.error(`[persistence] Save failed after quest for ${player.name}:`, err));
   }
 
+  // Log quest_complete diary entry
+  if (player.walletAddress) {
+    let questZoneId = "unknown";
+    for (const [zId, zone] of getAllZones()) {
+      if (zone.entities.has(player.id)) {
+        questZoneId = zId;
+        break;
+      }
+    }
+    const { headline, narrative } = narrativeQuestComplete(player.name, player.raceId, player.classId, questZoneId, quest.title, quest.rewards.xp, quest.rewards.copper);
+    logDiary(player.walletAddress, player.name, questZoneId, player.x, player.y, "quest_complete", headline, narrative, {
+      questId: quest.id,
+      questTitle: quest.title,
+      xpReward: quest.rewards.xp,
+      goldReward: quest.rewards.copper,
+    });
+  }
+
   console.log(
     `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.copper} copper + ${quest.rewards.xp} XP` +
       (quest.rewards.items
@@ -1964,4 +1984,95 @@ export function registerQuestRoutes(server: FastifyInstance) {
       totalCompleted: player.completedQuests.length,
     };
   });
+
+  // GET /questlog/:walletAddress — Quest log + activity for NFT character owner
+  server.get<{ Params: { walletAddress: string } }>(
+    "/questlog/:walletAddress",
+    async (request, reply) => {
+      const normalized = request.params.walletAddress.toLowerCase();
+
+      // Find the player entity across all zones
+      let player: Entity | undefined;
+      let playerZoneId: string | undefined;
+
+      for (const [zoneId, zone] of getAllZones()) {
+        for (const entity of zone.entities.values()) {
+          if (
+            entity.type === "player" &&
+            entity.walletAddress?.toLowerCase() === normalized
+          ) {
+            player = entity;
+            playerZoneId = zoneId;
+            break;
+          }
+        }
+        if (player) break;
+      }
+
+      if (!player || !playerZoneId) {
+        reply.code(404);
+        return { error: "Player not found" };
+      }
+
+      // Active quests with full metadata
+      const activeQuests = (player.activeQuests ?? []).map((aq) => {
+        const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
+        return {
+          questId: aq.questId,
+          title: quest?.title ?? aq.questId,
+          description: quest?.description ?? "",
+          objective: quest?.objective ?? { type: "kill", count: 0 },
+          progress: aq.progress,
+          required: quest?.objective.count ?? 0,
+          complete: quest ? isQuestComplete(quest, aq.progress) : false,
+          rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+        };
+      });
+
+      // Completed quests with full metadata
+      const completedQuests = (player.completedQuests ?? []).map((qid) => {
+        const quest = QUEST_CATALOG.find((q) => q.id === qid);
+        return {
+          questId: qid,
+          title: quest?.title ?? qid,
+          description: quest?.description ?? "",
+          rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+        };
+      });
+
+      // Recent activity — zone events filtered by this player's entity ID
+      const ACTIVITY_TYPES = new Set([
+        "combat",
+        "death",
+        "kill",
+        "levelup",
+        "loot",
+        "quest",
+        "trade",
+        "shop",
+      ]);
+      const allEvents = getAllZoneEvents(500);
+      const activity = allEvents
+        .filter(
+          (e) =>
+            ACTIVITY_TYPES.has(e.type) &&
+            (e.entityId === player!.id || e.targetId === player!.id)
+        )
+        .slice(0, 50)
+        .map((e) => ({
+          type: e.type,
+          message: e.message,
+          timestamp: e.timestamp,
+          zoneId: e.zoneId,
+        }));
+
+      return {
+        playerName: player.name,
+        zoneId: playerZoneId,
+        activeQuests,
+        completedQuests,
+        activity,
+      };
+    }
+  );
 }

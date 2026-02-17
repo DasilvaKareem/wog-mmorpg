@@ -6,6 +6,7 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
 import { rollCraftedItem } from "./itemRng.js";
 import { logZoneEvent } from "./zoneEvents.js";
+import { logDiary, narrativeCraft } from "./diary.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -497,6 +498,18 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       server.log.info(
         `[crafting] ${entity.name} forged ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${craftTx}`
       );
+
+      // Log craft diary entry
+      if (walletAddress) {
+        const craftedName = instance?.displayName ?? outputItem?.name ?? "Unknown";
+        const { headline, narrative } = narrativeCraft(entity.name, entity.raceId, entity.classId, zoneId, craftedName, forge.name);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "craft", headline, narrative, {
+          recipeId: recipe.recipeId,
+          itemName: craftedName,
+          quality: instance?.quality.tier,
+          stationName: forge.name,
+        });
+      }
 
       return {
         ok: true,

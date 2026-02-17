@@ -1,0 +1,119 @@
+{
+  "id": "lake-lumina",
+  "name": "Lake Lumina",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(80,180,200,0.12)",
+  "budget": { "maxPopulation": 45, "maxThreat": 260 },
+  "pois": [
+    {
+      "id": "citadel-entrance",
+      "name": "Citadel Entrance",
+      "type": "portal",
+      "position": { "x": 35, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "felsrock-citadel",
+        "destinationPoi": "lumina-passage",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "chasm-descent",
+      "name": "Chasm Descent",
+      "type": "portal",
+      "position": { "x": 605, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": {
+        "destinationZone": "azurshard-chasm",
+        "destinationPoi": "lumina-ascent",
+        "bidirectional": true
+      }
+    },
+    {
+      "id": "gates-of-solaris",
+      "name": "Gates of Solaris",
+      "type": "landmark",
+      "position": { "x": 200, "z": 150 },
+      "radius": 25,
+      "tags": ["sacred"]
+    },
+    {
+      "id": "lumen-crystal-shrine",
+      "name": "Lumen Crystal Shrine",
+      "type": "landmark",
+      "position": { "x": 400, "z": 200 },
+      "radius": 20,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "sunken-temple",
+      "name": "Sunken Temple",
+      "type": "structure",
+      "position": { "x": 300, "z": 500 },
+      "radius": 25,
+      "tags": [],
+      "structure": {
+        "kind": "temple",
+        "capacity": 8,
+        "services": ["heal", "quest"],
+        "npcs": ["priest"]
+      }
+    },
+    {
+      "id": "lake-shore",
+      "name": "Lake Shore",
+      "type": "road-node",
+      "position": { "x": 300, "z": 300 },
+      "radius": 20,
+      "tags": []
+    },
+    {
+      "id": "wraith-shallows",
+      "name": "Wraith Shallows",
+      "type": "spawn-point",
+      "position": { "x": 150, "z": 450 },
+      "radius": 35,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "crystal-caverns",
+      "name": "Crystal Caverns",
+      "type": "spawn-point",
+      "position": { "x": 500, "z": 400 },
+      "radius": 35,
+      "tags": ["hostile"]
+    },
+    {
+      "id": "sunken-depths",
+      "name": "Sunken Depths",
+      "type": "spawn-point",
+      "position": { "x": 450, "z": 550 },
+      "radius": 40,
+      "tags": ["hostile", "boss-area"]
+    }
+  ],
+  "roads": [
+    {
+      "id": "lakeshore-road",
+      "name": "Lakeshore Road",
+      "nodes": ["citadel-entrance", "lake-shore", "lumen-crystal-shrine", "gates-of-solaris"]
+    },
+    {
+      "id": "south-trail",
+      "name": "South Trail",
+      "nodes": ["lake-shore", "sunken-temple"]
+    },
+    {
+      "id": "east-descent",
+      "name": "East Descent",
+      "nodes": ["lake-shore", "chasm-descent"]
+    },
+    {
+      "id": "danger-path",
+      "name": "Danger Path",
+      "nodes": ["wraith-shallows", "crystal-caverns", "sunken-depths"]
+    }
+  ]
+}

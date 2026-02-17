@@ -5,6 +5,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { getItemBalance } from "./blockchain.js";
 import { authenticateRequest } from "./auth.js";
+import { logDiary, narrativeCook, narrativeConsume } from "./diary.js";
 
 const COOKING_RANGE = 50;
 
@@ -199,6 +200,16 @@ export function registerCookingRoutes(server: FastifyInstance) {
         `[cooking] ${entity.name} cooked ${recipe.name} at ${campfire.name} → ${cookTx}`
       );
 
+      // Log cook diary entry
+      if (walletAddress) {
+        const { headline, narrative } = narrativeCook(entity.name, entity.raceId, entity.classId, zoneId, recipe.name, campfire.name);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "cook", headline, narrative, {
+          recipeName: recipe.name,
+          campfireName: campfire.name,
+          hpRestoration: recipe.hpRestoration,
+        });
+      }
+
       return {
         ok: true,
         recipe: recipe.name,
@@ -280,6 +291,17 @@ export function registerCookingRoutes(server: FastifyInstance) {
       server.log.info(
         `[cooking] ${entity.name} consumed ${recipe.name}, restored ${healAmount} HP → ${burnTx}`
       );
+
+      // Log consume diary entry
+      if (walletAddress) {
+        const { headline, narrative } = narrativeConsume(entity.name, entity.raceId, entity.classId, zoneId, recipe.name, healAmount);
+        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "consume", headline, narrative, {
+          foodName: recipe.name,
+          hpRestored: healAmount,
+          currentHp: entity.hp,
+          maxHp: entity.maxHp,
+        });
+      }
 
       return {
         ok: true,
