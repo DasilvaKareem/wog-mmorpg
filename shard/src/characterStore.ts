@@ -1,6 +1,6 @@
 /**
  * Character persistence via Redis hashes.
- * Key pattern: character:{walletAddress}
+ * Key pattern: character:{walletAddress}:{characterName}
  *
  * Falls back to in-memory Map when Redis is unavailable or errors.
  */
@@ -28,12 +28,13 @@ export interface CharacterSaveData {
 // In-memory fallback (always available)
 const memoryStore = new Map<string, Record<string, string>>();
 
-function key(walletAddress: string): string {
-  return `character:${walletAddress.toLowerCase()}`;
+function key(walletAddress: string, characterName: string): string {
+  return `character:${walletAddress.toLowerCase()}:${characterName}`;
 }
 
 export async function saveCharacter(
   walletAddress: string,
+  characterName: string,
   data: Partial<CharacterSaveData>
 ): Promise<void> {
   // Flatten to string values for Redis HSET
@@ -45,15 +46,17 @@ export async function saveCharacter(
 
   if (Object.keys(flat).length === 0) return;
 
+  const k = key(walletAddress, characterName);
+
   // Always write to in-memory
-  const existing = memoryStore.get(key(walletAddress)) ?? {};
-  memoryStore.set(key(walletAddress), { ...existing, ...flat });
+  const existing = memoryStore.get(k) ?? {};
+  memoryStore.set(k, { ...existing, ...flat });
 
   // Try Redis too
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.hset(key(walletAddress), flat);
+      await redis.hset(k, flat);
     } catch {
       // Redis failed, in-memory already has the data
     }
@@ -61,15 +64,18 @@ export async function saveCharacter(
 }
 
 export async function loadCharacter(
-  walletAddress: string
+  walletAddress: string,
+  characterName: string
 ): Promise<CharacterSaveData | null> {
   let raw: Record<string, string> = {};
+
+  const k = key(walletAddress, characterName);
 
   // Try Redis first
   const redis = getRedis();
   if (redis) {
     try {
-      raw = await redis.hgetall(key(walletAddress));
+      raw = await redis.hgetall(k);
     } catch {
       // Redis failed, fall through to in-memory
     }
@@ -77,7 +83,7 @@ export async function loadCharacter(
 
   // Fall back to in-memory if Redis returned nothing
   if (!raw || Object.keys(raw).length === 0) {
-    raw = memoryStore.get(key(walletAddress)) ?? {};
+    raw = memoryStore.get(k) ?? {};
   }
 
   // Empty hash = no saved character
@@ -102,13 +108,14 @@ export async function loadCharacter(
   };
 }
 
-export async function deleteCharacter(walletAddress: string): Promise<void> {
-  memoryStore.delete(key(walletAddress));
+export async function deleteCharacter(walletAddress: string, characterName: string): Promise<void> {
+  const k = key(walletAddress, characterName);
+  memoryStore.delete(k);
 
   const redis = getRedis();
   if (redis) {
     try {
-      await redis.del(key(walletAddress));
+      await redis.del(k);
     } catch {
       // Redis failed, in-memory already cleared
     }

@@ -5,6 +5,7 @@ import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { rollCraftedItem } from "./itemRng.js";
 import { logZoneEvent } from "./zoneEvents.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 export interface JewelcraftingRecipe {
   recipeId: string;
@@ -233,6 +234,12 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
         });
       }
 
+      // Award profession XP (ring = 35, amulet = 45)
+      const jcXp = recipeId.includes("amulet")
+        ? PROFESSION_XP.JEWEL_AMULET
+        : PROFESSION_XP.JEWEL_RING;
+      const profXpResult = awardProfessionXp(entity, zoneId, jcXp, "jewelcrafting", outputItem?.name);
+
       server.log.info(
         `[jewelcrafting] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );
@@ -240,6 +247,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
       return {
         ok: true,
         recipeId: recipe.recipeId,
+        professionXp: profXpResult,
         crafted: {
           tokenId: recipe.outputTokenId.toString(),
           name: outputItem?.name ?? "Unknown",

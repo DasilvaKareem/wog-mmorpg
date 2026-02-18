@@ -1,4 +1,5 @@
 import * as React from "react";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 
 import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { CharacterDialog } from "@/components/CharacterDialog";
@@ -7,7 +8,13 @@ import { InspectDialog } from "@/components/InspectDialog";
 import { QuestLogDialog } from "@/components/QuestLogDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
+import { LeaderboardPage } from "@/components/LeaderboardPage";
 import { MarketplacePage } from "@/components/MarketplacePage";
+import { MediaPage } from "@/components/MediaPage";
+import { Navbar } from "@/components/Navbar";
+import { NewsPage } from "@/components/NewsPage";
+import { RacesClassesPage } from "@/components/RacesClassesPage";
+import { StoryPage } from "@/components/StoryPage";
 import { X402AgentPage } from "@/components/X402AgentPage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
@@ -22,10 +29,7 @@ import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
 
-type Page = "landing" | "game" | "marketplace" | "x402";
-
-function AppShell(): React.ReactElement {
-  const [page, setPage] = React.useState<Page>("landing");
+function GameWorld(): React.ReactElement {
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
@@ -34,7 +38,6 @@ function AppShell(): React.ReactElement {
 
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      if (page !== "game") return;
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -53,47 +56,22 @@ function AppShell(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [page, address, currentZone]);
+  }, [address, currentZone]);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
       setCurrentZone(zoneId);
     });
-
     return unsubscribe;
   }, []);
-
-  if (page === "landing") {
-    return (
-      <LandingPage
-        onEnterGame={() => setPage("game")}
-        onPlayNow={() => {
-          setPage("game");
-          // Open character dialog after a tick so game canvas mounts first
-          window.setTimeout(() => setCharacterOpen(true), 100);
-        }}
-        onOpenMarketplace={() => setPage("marketplace")}
-        onX402={() => setPage("x402")}
-      />
-    );
-  }
-
-  if (page === "marketplace") {
-    return <MarketplacePage onBack={() => setPage("landing")} />;
-  }
-
-  if (page === "x402") {
-    return <X402AgentPage onBack={() => setPage("landing")} />;
-  }
 
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
-      {/* On mobile (< md), only show WalletPanel and ZoneSelector. On desktop, show all panels */}
       <WalletPanel />
       <ProfessionPanel />
       <ZoneSelector />
-      <PlayerPanel className="absolute top-4 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
+      <PlayerPanel className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
       <ChatLog
         zoneId={currentZone}
         className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
@@ -110,14 +88,44 @@ function AppShell(): React.ReactElement {
   );
 }
 
+function AppShell(): React.ReactElement {
+  const location = useLocation();
+  const isWorldRoute = location.pathname === "/world";
+
+  return (
+    <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
+      <Navbar />
+      {isWorldRoute ? (
+        <div className="h-full w-full pt-0">
+          <GameWorld />
+        </div>
+      ) : (
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/marketplace" element={<MarketplacePage />} />
+          <Route path="/x402" element={<X402AgentPage />} />
+          <Route path="/races" element={<RacesClassesPage />} />
+          <Route path="/story" element={<StoryPage />} />
+          <Route path="/media" element={<MediaPage />} />
+          <Route path="/leaderboards" element={<LeaderboardPage />} />
+          <Route path="/news" element={<NewsPage />} />
+          <Route path="*" element={<LandingPage />} />
+        </Routes>
+      )}
+    </div>
+  );
+}
+
 export default function App(): React.ReactElement {
   return (
-    <GameProvider>
-      <WalletProvider>
-        <ToastProvider>
-          <AppShell />
-        </ToastProvider>
-      </WalletProvider>
-    </GameProvider>
+    <BrowserRouter>
+      <GameProvider>
+        <WalletProvider>
+          <ToastProvider>
+            <AppShell />
+          </ToastProvider>
+        </WalletProvider>
+      </GameProvider>
+    </BrowserRouter>
   );
 }

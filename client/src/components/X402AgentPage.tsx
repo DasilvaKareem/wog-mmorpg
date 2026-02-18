@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useNavigate } from "react-router-dom";
 import { API_URL } from "../config.js";
 
 const RACES = [
@@ -60,10 +61,12 @@ interface DeployResult {
 }
 
 interface X402AgentPageProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElement {
+  const navigate = useNavigate();
+  const goBack = onBack ?? (() => navigate("/"));
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [step, setStep] = React.useState<Step>("greeting");
   const [selectedRace, setSelectedRace] = React.useState<string | null>(null);
@@ -294,7 +297,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
   };
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-10">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"
@@ -319,7 +322,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
             </p>
           </div>
           <button
-            onClick={onBack}
+            onClick={goBack}
             className="border-2 border-[#2a3450] bg-[#11192d] px-3 py-1.5 text-[9px] text-[#9aa7cc] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
           >
             {"<"} Back
@@ -478,7 +481,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
           {step === "done" && !isTyping && (
             <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <button
-                onClick={onBack}
+                onClick={goBack}
                 className="border-4 border-black bg-[#ffcc00] px-6 py-2.5 text-[11px] uppercase tracking-wide text-black shadow-[4px_4px_0_0_#000] transition hover:bg-[#ffd84d] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
                 Enter World
@@ -501,7 +504,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
                 Try Again
               </button>
               <button
-                onClick={onBack}
+                onClick={goBack}
                 className="border-2 border-[#2a3450] bg-[#11192d] px-4 py-2 text-[9px] text-[#9aa7cc] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
               >
                 Back to Home

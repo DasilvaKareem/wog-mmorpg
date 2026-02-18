@@ -6,6 +6,7 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeMine } from "./diary.js";
+import { awardProfessionXp, xpForRarity } from "./professionXp.js";
 
 const GATHER_RANGE = 50;
 
@@ -172,6 +173,10 @@ export function registerMiningRoutes(server: FastifyInstance) {
         `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx}`
       );
 
+      // Award profession XP
+      const xpAmount = xpForRarity(oreProps.rarity);
+      const profXpResult = awardProfessionXp(entity, zoneId, xpAmount, "mining", undefined, oreProps.label);
+
       // Log mine diary entry
       if (walletAddress) {
         const { headline, narrative } = narrativeMine(entity.name, entity.raceId, entity.classId, zoneId, oreProps.label, pickaxeItem.name);
@@ -190,6 +195,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
         chargesRemaining,
         tokenId: oreProps.tokenId.toString(),
         oreTx,
+        professionXp: profXpResult,
         pickaxe: {
           name: pickaxeItem.name,
           durability: weaponEquipped.durability,

@@ -5,7 +5,9 @@ import { generateAuthToken } from "./auth.js";
 import { computeCharacter, validateCharacterInput } from "./characterCreate.js";
 import { getOrCreateZone, recalculateEntityVitals, type Entity } from "./zoneRuntime.js";
 import { processPayment, getPricingTier, type PaymentMethod } from "./x402Payment.js";
-import { computeStatsAtLevel } from "./leveling.js";
+import { saveCharacter } from "./characterStore.js";
+import { reputationManager } from "./reputationManager.js";
+import { logDiary, narrativeSpawn } from "./diary.js";
 
 export interface DeploymentRequest {
   agentName: string;
@@ -159,43 +161,13 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       request.character.class
     );
 
-    // 6. Mint character NFT
-    console.log(`[x402] ${deploymentId}: Minting character NFT...`);
-    const nftMetadata = {
-      name: `${characterData.name} the ${characterData.class.name}`,
-      description: `Level 1 ${characterData.race.name} ${characterData.class.name}`,
-      properties: {
-        race: characterData.race.id,
-        class: characterData.class.id,
-        level: 1,
-        xp: 0,
-        stats: characterData.stats,
-      },
-    };
-
-    const mintTxHash = await mintCharacter(wallet.address, nftMetadata);
-    console.log(`[x402] ${deploymentId}: NFT minted: ${mintTxHash}`);
-
-    // 7. Distribute welcome bonus gold
-    const pricingTier = getPricingTier(request.payment.method);
-    const goldBonus = pricingTier.goldBonus;
-    console.log(`[x402] ${deploymentId}: Distributing ${goldBonus} gold...`);
-    const goldTxHash = await mintGold(wallet.address, goldBonus.toString());
-    console.log(`[x402] ${deploymentId}: Gold distributed: ${goldTxHash}`);
-
-    // 8. Distribute sFUEL for gas
-    console.log(`[x402] ${deploymentId}: Distributing sFUEL...`);
-    const sfuelTxHash = await distributeSFuel(wallet.address);
-    console.log(`[x402] ${deploymentId}: sFUEL distributed: ${sfuelTxHash}`);
-
-    // 9. Generate JWT token
+    // 6. Generate JWT token (no blockchain dependency)
     const jwtToken = generateAuthToken(wallet.address);
 
-    // 10. Spawn entity in game world
+    // 7. Spawn entity in game world FIRST (no blockchain needed)
     console.log(`[x402] ${deploymentId}: Spawning in ${request.deploymentZone}...`);
     const zone = getOrCreateZone(request.deploymentZone);
 
-    // Default spawn position (center of zone)
     const spawnX = 150;
     const spawnY = 150;
 
@@ -216,16 +188,95 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       raceId: request.character.race,
       classId: request.character.class,
       stats: characterData.stats,
-      characterTokenId: BigInt(0), // Will be set from blockchain event in production
+      characterTokenId: BigInt(0),
+      kills: 0,
+      completedQuests: [],
+      learnedTechniques: [],
     };
 
     recalculateEntityVitals(entity);
     zone.entities.set(entity.id, entity);
 
+    // 8. Save character to persistent store
+    await saveCharacter(wallet.address, request.character.name, {
+      name: request.character.name,
+      level: 1,
+      xp: 0,
+      raceId: request.character.race,
+      classId: request.character.class,
+      zone: request.deploymentZone,
+      x: spawnX,
+      y: spawnY,
+      kills: 0,
+      completedQuests: [],
+      learnedTechniques: [],
+      professions: [],
+    });
+
+    // 9. Initialize reputation
+    reputationManager.ensureInitialized(wallet.address);
+
+    // 10. Log diary entry
+    const { headline, narrative } = narrativeSpawn(
+      entity.name, entity.raceId, entity.classId, request.deploymentZone, false
+    );
+    logDiary(wallet.address, entity.name, request.deploymentZone, spawnX, spawnY,
+      "spawn", headline, narrative, {
+        restored: false,
+        level: 1,
+        raceId: entity.raceId,
+        classId: entity.classId,
+      });
+
     // 11. Record deployment for rate limiting
     recordDeployment(source);
 
-    // 12. Return deployment response
+    // 12. Fire blockchain calls (non-blocking — agent is already in-world)
+    const pricingTier = getPricingTier(request.payment.method);
+    const goldBonus = pricingTier.goldBonus;
+    let mintTxHash = "pending";
+    let goldTxHash = "pending";
+    let sfuelTxHash = "pending";
+
+    // Run blockchain operations in background — don't block the response
+    (async () => {
+      try {
+        console.log(`[x402] ${deploymentId}: Minting character NFT...`);
+        const nftMetadata = {
+          name: `${characterData.name} the ${characterData.class.name}`,
+          description: `Level 1 ${characterData.race.name} ${characterData.class.name}`,
+          properties: {
+            race: characterData.race.id,
+            class: characterData.class.id,
+            level: 1,
+            xp: 0,
+            stats: characterData.stats,
+          },
+        };
+        mintTxHash = await mintCharacter(wallet.address, nftMetadata);
+        console.log(`[x402] ${deploymentId}: NFT minted: ${mintTxHash}`);
+      } catch (err) {
+        console.error(`[x402] ${deploymentId}: NFT mint failed (non-fatal):`, err instanceof Error ? err.message : err);
+      }
+
+      try {
+        console.log(`[x402] ${deploymentId}: Distributing ${goldBonus} gold...`);
+        goldTxHash = await mintGold(wallet.address, goldBonus.toString());
+        console.log(`[x402] ${deploymentId}: Gold distributed: ${goldTxHash}`);
+      } catch (err) {
+        console.error(`[x402] ${deploymentId}: Gold mint failed (non-fatal):`, err instanceof Error ? err.message : err);
+      }
+
+      try {
+        console.log(`[x402] ${deploymentId}: Distributing sFUEL...`);
+        sfuelTxHash = await distributeSFuel(wallet.address);
+        console.log(`[x402] ${deploymentId}: sFUEL distributed: ${sfuelTxHash}`);
+      } catch (err) {
+        console.error(`[x402] ${deploymentId}: sFUEL failed (non-fatal):`, err instanceof Error ? err.message : err);
+      }
+    })();
+
+    // 13. Return response immediately — agent is live
     const duration = Date.now() - startTime;
     console.log(`[x402] ${deploymentId}: Deployment complete in ${duration}ms`);
 
@@ -238,7 +289,7 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
         expiresIn: "24h",
       },
       character: {
-        nftTokenId: "pending", // Will be available from blockchain event
+        nftTokenId: "pending",
         txHash: mintTxHash,
         name: request.character.name,
         race: request.character.race,

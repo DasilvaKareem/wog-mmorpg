@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
+import { getOrCreateZone, clearMobTagsForPlayer, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeZoneTransition } from "./diary.js";
@@ -319,8 +319,12 @@ async function performTransition(
     return { error: "Destination portal not found" };
   }
 
-  // Remove entity from source zone
+  // Clear mob tags in source zone and reset combat state
   const sourceZone = getOrCreateZone(sourceZoneId);
+  clearMobTagsForPlayer(sourceZone, entity.id);
+  entity.lastCombatTick = undefined;
+
+  // Remove entity from source zone
   sourceZone.entities.delete(entity.id);
 
   // Update entity position to destination portal

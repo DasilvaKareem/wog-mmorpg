@@ -1,15 +1,9 @@
 import * as React from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { useWalletContext } from "@/context/WalletContext";
 import { API_URL } from "../config.js";
-
-interface LandingPageProps {
-  onEnterGame: () => void;
-  onPlayNow: () => void;
-  onOpenMarketplace?: () => void;
-  onX402: () => void;
-}
 
 const FEATURES = [
   {
@@ -70,56 +64,22 @@ const FEATURES = [
 ];
 
 const ZONES = [
-  { name: "Village Square", level: "Lv 1-5", color: "#54f28b", desc: "Peaceful grassland — 7 mob types, starter quests, merchants, and gathering nodes." },
-  { name: "Wild Meadow", level: "Lv 5-10", color: "#ffcc00", desc: "Open fields — bears, spiders, mid-tier quests, and rare herbs." },
-  { name: "Dark Forest", level: "Lv 10-16", color: "#ff4d6d", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
+  { name: "Village Square", level: "Lv 1-5", color: "#54f28b", desc: "Peaceful starter zone — 7 mob types, starter quests, merchants, and gathering nodes." },
+  { name: "Wild Meadow", level: "Lv 5-10", color: "#7bf5a8", desc: "Open fields — bears, spiders, mid-tier quests, and rare herbs." },
+  { name: "Dark Forest", level: "Lv 10-16", color: "#ffcc00", desc: "Dangerous woodland — trolls, golems, the Necromancer boss, and legendary loot." },
+  { name: "Auroral Plains", level: "Lv 15-20", color: "#ffd84d", desc: "Shimmering highland — celestial mobs, essence storms, and shortcut portals." },
+  { name: "Emerald Woods", level: "Lv 20-25", color: "#ff8c00", desc: "Dense canopy — ancient treants, rare minerals, and branching pathways." },
+  { name: "Viridian Range", level: "Lv 25-30", color: "#ff6b35", desc: "Mountain passes — rock elementals, mining veins, and alpine strongholds." },
+  { name: "Moondancer Glade", level: "Lv 30-35", color: "#aa44ff", desc: "Twilight clearing — fey creatures, moonlit herbs, and enchanted groves." },
+  { name: "Felsrock Citadel", level: "Lv 35-40", color: "#ff4d6d", desc: "Fortified ruins — armored constructs, siege weapons, and vault treasures." },
+  { name: "Lake Lumina", level: "Lv 40-45", color: "#44ddff", desc: "Crystal waters — aquatic beasts, luminous flora, and deep-lake dungeons." },
+  { name: "Azurshard Chasm", level: "Lv 45+", color: "#5dadec", desc: "Endgame abyss — elite bosses, legendary drops, and the hardest content." },
 ];
 
-const CONTINENTS = [
-  {
-    name: "Arcadia",
-    color: "#54f28b",
-    icon: "//",
-    tagline: "Realm of Emerald Forests",
-    desc: "A northern continent blanketed in ancient evergreen forests and towering mountain ranges. The traditional center of essence study and druidic tradition, home to the capital city of Solaris and the mystical Emerald Woods.",
-    landmarks: ["Viridian Range", "Lake Lumina", "Aurundel (Sky City)", "Library of Selerion"],
-  },
-  {
-    name: "Nocturia",
-    color: "#aa44ff",
-    icon: ")(",
-    tagline: "Land of Eternal Twilight",
-    desc: "A vast northern region of contrasts — jagged peaks, mist-shrouded plains, and shadowy woodlands. Home to the vampire-like Sanguine, werewolf Lycan, and enigmatic Umbralists who wield shadow essence.",
-    landmarks: ["Sanguinis (Vampire Capital)", "Umbra Forest", "Crimson Spire", "Zephyr's Roost"],
-  },
-  {
-    name: "Pacifica",
-    color: "#44ddff",
-    icon: "~~",
-    tagline: "Jeweled Archipelago",
-    desc: "A vast island continent in the southern hemisphere — thousands of islands spanning the Pacifica Ocean. Renowned for lush rainforests, exotic wildlife, vibrant port cities, and legendary pirate lords.",
-    landmarks: ["Jeweled Archipelago", "Coral Citadels", "Monsoon Peaks", "Pirate Havens"],
-  },
-  {
-    name: "Lemuria",
-    color: "#ff8c00",
-    icon: "||",
-    tagline: "Empire of Flame and Sand",
-    desc: "A continent of geographic extremes — scorching deserts, volcanic mountain ranges, fertile grasslands, and primordial rainforests. Dominated by the militant Lemurian Empire and its warrior-priest theocracy.",
-    landmarks: ["Valoris Prime", "Brimstone Deserts", "Overblaze Rift", "Gateways of Amun"],
-  },
-  {
-    name: "Draconis",
-    color: "#ff4d6d",
-    icon: "<>",
-    tagline: "Domain of Dragons",
-    desc: "Shrouded in mist and mystery, where draconic races dwell among active volcanoes and elemental extremes. Largely unexplored by outsiders — its deepest secrets remain unknown to the other continents.",
-    landmarks: ["Volcanic Throne", "Mist Veil", "Obsidian Caldera", "Dragon Spires"],
-  },
-];
 
-export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 }: LandingPageProps): React.ReactElement {
+export function LandingPage(): React.ReactElement {
   const { isConnected, connect, loading, address } = useWalletContext();
+  const navigate = useNavigate();
 
   const [frameIndex, setFrameIndex] = React.useState(0);
   const frames = ["|", "/", "-", "\\"];
@@ -128,17 +88,6 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
   const [liveBattles, setLiveBattles] = React.useState(0);
   const [queuedPlayers, setQueuedPlayers] = React.useState(0);
 
-  // Guild leaderboard
-  interface GuildEntry {
-    guildId: number;
-    name: string;
-    founder: string;
-    treasury: number;
-    level: number;
-    reputation: number;
-    memberCount: number;
-  }
-  const [guilds, setGuilds] = React.useState<GuildEntry[]>([]);
 
   React.useEffect(() => {
     const interval = window.setInterval(() => {
@@ -178,29 +127,9 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
     return () => window.clearInterval(interval);
   }, []);
 
-  // Fetch guilds for leaderboard
-  React.useEffect(() => {
-    const fetchGuilds = async () => {
-      try {
-        const res = await fetch(`${API_URL}/guilds`);
-        if (res.ok) {
-          const data: GuildEntry[] = await res.json();
-          // Sort by treasury descending
-          data.sort((a, b) => b.treasury - a.treasury);
-          setGuilds(data);
-        }
-      } catch {
-        // non-critical
-      }
-    };
-
-    fetchGuilds();
-    const interval = window.setInterval(fetchGuilds, 30000);
-    return () => window.clearInterval(interval);
-  }, []);
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-10">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"
@@ -256,7 +185,7 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
               </div>
               <Button
                 className="min-w-[200px] text-[11px]"
-                onClick={onPlayNow}
+                onClick={() => navigate("/world")}
                 size="lg"
               >
                 Create Character
@@ -265,7 +194,7 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
           )}
           <Button
             className="min-w-[200px] text-[11px]"
-            onClick={onEnterGame}
+            onClick={() => navigate("/world")}
             size="lg"
             variant="ghost"
           >
@@ -275,20 +204,18 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
 
         {/* Secondary CTAs */}
         <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">
-          {onOpenMarketplace && (
-            <button
-              onClick={onOpenMarketplace}
-              className="inline-flex items-center gap-2 border-2 border-[#ffcc00] bg-[#2a2210] px-4 py-2 text-[9px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffd84d] hover:text-[#ffd84d]"
-            >
-              {"$$"} NFT Marketplace {"$$"}
-            </button>
-          )}
-          <button
-            onClick={onX402}
+          <Link
+            to="/marketplace"
+            className="inline-flex items-center gap-2 border-2 border-[#ffcc00] bg-[#2a2210] px-4 py-2 text-[9px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffd84d] hover:text-[#ffd84d]"
+          >
+            {"$$"} NFT Marketplace {"$$"}
+          </Link>
+          <Link
+            to="/x402"
             className="inline-flex items-center gap-2 border-2 border-[#54f28b] bg-[#112a1b] px-4 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
           >
             {"$>"} x402 Agent Protocol
-          </button>
+          </Link>
           <a
             href="/docs"
             target="_blank"
@@ -332,187 +259,82 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
       {/* ── ZONES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
-          The World
+          10 Zones of Arcadia
         </h2>
-        <div className="flex flex-col gap-4">
+        <p className="mb-6 text-center text-[8px] text-[#565f89]">
+          {"<<"} Connected open world spanning levels 1-45+ {">>"}
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
           {ZONES.map((z) => (
             <div
               key={z.name}
-              className="flex items-center gap-4 border-4 border-black bg-[linear-gradient(90deg,#121a2c,#0b1020)] p-4 shadow-[6px_6px_0_0_#000]"
+              className="flex items-center gap-3 border-4 border-black bg-[linear-gradient(90deg,#121a2c,#0b1020)] p-3 shadow-[4px_4px_0_0_#000]"
             >
               <div
-                className="flex h-12 w-12 shrink-0 items-center justify-center border-2 text-[10px]"
+                className="flex h-10 w-10 shrink-0 items-center justify-center border-2 text-[8px] font-bold"
                 style={{ borderColor: z.color, color: z.color }}
               >
-                {z.level}
+                {z.level.replace("Lv ", "L")}
               </div>
-              <div>
+              <div className="min-w-0">
                 <h3
-                  className="text-[11px] uppercase tracking-wide"
+                  className="text-[10px] uppercase tracking-wide"
                   style={{ color: z.color, textShadow: "2px 2px 0 #000" }}
                 >
                   {z.name}
                 </h3>
-                <p className="mt-1 text-[9px] text-[#9aa7cc]">{z.desc}</p>
+                <p className="mt-0.5 text-[8px] leading-snug text-[#9aa7cc]">{z.desc}</p>
               </div>
             </div>
           ))}
         </div>
 
         {/* Zone connection diagram */}
-        <div className="mt-4 flex items-center justify-center gap-2 text-[8px] text-[#565f89]">
-          <span className="text-[#54f28b]">Village</span>
-          <span>{"<-->"}</span>
-          <span className="text-[#ffcc00]">Meadow</span>
-          <span>{"<-->"}</span>
-          <span className="text-[#ff4d6d]">Forest</span>
+        <div className="mt-4 flex flex-col items-center gap-1 text-[7px] text-[#3a4260]" style={{ fontFamily: "monospace" }}>
+          <div className="flex items-center gap-1">
+            <span className="text-[#54f28b]">Village</span>
+            <span>-</span>
+            <span className="text-[#7bf5a8]">Meadow</span>
+            <span>-</span>
+            <span className="text-[#ffcc00]">Forest</span>
+            <span>-</span>
+            <span className="text-[#ff8c00]">Emerald</span>
+            <span>-</span>
+            <span className="text-[#ff6b35]">Viridian</span>
+            <span>/</span>
+            <span className="text-[#aa44ff]">Moon</span>
+            <span>-</span>
+            <span className="text-[#ff4d6d]">Felsrock</span>
+            <span>-</span>
+            <span className="text-[#44ddff]">Lumina</span>
+            <span>-</span>
+            <span className="text-[#5dadec]">Azurshard</span>
+          </div>
         </div>
       </section>
 
-      {/* ── ABOUT: THE WORLD OF GENEVA ── */}
+      {/* ── ABOUT GENEVA TEASER ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
-          About Geneva
+          The World of Geneva
         </h2>
-        <p className="mb-8 text-center text-[8px] tracking-wide text-[#565f89]">
-          {"<<"} PLANETARY CODEX {">>"}
+        <p className="mb-6 text-center text-[9px] leading-relaxed text-[#9aa7cc]">
+          A vibrant planet in the Helios system — 5 continents, 2 moons, and the
+          mysterious force of Essence that binds all life together.
         </p>
-
-        {/* Planet overview */}
-        <div className="mb-8 border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-5 shadow-[6px_6px_0_0_#000]">
-          <h3
-            className="mb-3 text-[11px] uppercase tracking-wide text-[#ffdd57]"
-            style={{ textShadow: "2px 2px 0 #000" }}
+        <div className="flex justify-center">
+          <Link
+            to="/story"
+            className="border-2 border-[#ffcc00] bg-[#2a2210] px-5 py-2 text-[9px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:bg-[#3d3218]"
           >
-            The Planet
-          </h3>
-          <p className="mb-3 text-[9px] leading-relaxed text-[#d6deff]">
-            Geneva is a vibrant world in the Helios planetary system — the only known
-            planet to harbor intelligent life. Five major continents teem with diverse
-            cultures, ancient civilizations, and wondrous environments, all bound
-            together by the fundamental force of <span className="text-[#ffcc00]">Essence</span>.
-          </p>
-          <p className="text-[9px] leading-relaxed text-[#9aa7cc]">
-            Two celestial moons orbit Geneva — <span className="text-[#c0c0ff]">Selene</span> and{" "}
-            <span className="text-[#ffd0aa]">Eos</span> — bathing the world in catalytic
-            energies that intermingle with matter on the subatomic level, giving rise
-            to the mysterious particles known as <span className="text-[#54f28b]">Crutons</span>.
-          </p>
-        </div>
-
-        {/* Essence & Crutons */}
-        <div className="mb-8 border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-5 shadow-[6px_6px_0_0_#000]">
-          <h3
-            className="mb-3 text-[11px] uppercase tracking-wide text-[#ffdd57]"
-            style={{ textShadow: "2px 2px 0 #000" }}
-          >
-            Essence & Crutons
-          </h3>
-          <p className="mb-3 text-[9px] leading-relaxed text-[#d6deff]">
-            Geneva{"'"}s elements possess an additional subatomic particle — the{" "}
-            <span className="text-[#54f28b]">Cruton</span>. These ultra-dense particles
-            exist alongside protons, neutrons, and electrons, and their presence is
-            what allows for the manifestation of Essence — the arcane energy that
-            permeates all life on Geneva.
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              { label: "Pyromancy", desc: "Fire manipulation", color: "#ff6b35" },
-              { label: "Cryomancy", desc: "Ice and frost", color: "#88ccff" },
-              { label: "Chronomancy", desc: "Time distortion", color: "#ffcc00" },
-              { label: "Transmutation", desc: "Matter reshaping", color: "#54f28b" },
-            ].map((e) => (
-              <div
-                key={e.label}
-                className="flex items-center gap-2 border-2 border-[#2a3450] bg-[#11192d] px-3 py-2"
-              >
-                <span className="text-[10px]" style={{ color: e.color }}>
-                  {"*"}
-                </span>
-                <div>
-                  <span className="text-[9px] text-[#d6deff]">{e.label}</span>
-                  <p className="text-[7px] text-[#565f89]">{e.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-[8px] text-[#565f89]">
-            The more crutons in an element{"'"}s nucleus, the higher its essence potential.
-            Elements like Radamum, Thoride, and Platinix are highly catalytic — prized
-            across all five continents.
-          </p>
-        </div>
-
-        {/* Five Continents */}
-        <h3
-          className="mb-4 text-center text-[11px] uppercase tracking-wide text-[#ffdd57]"
-          style={{ textShadow: "2px 2px 0 #000" }}
-        >
-          Five Continents
-        </h3>
-        <div className="flex flex-col gap-4">
-          {CONTINENTS.map((c) => (
-            <div
-              key={c.name}
-              className="border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-4 shadow-[6px_6px_0_0_#000]"
-            >
-              <div className="mb-2 flex items-center gap-3">
-                <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center border-2 text-[12px] font-bold"
-                  style={{ borderColor: c.color, color: c.color }}
-                >
-                  {c.icon}
-                </div>
-                <div>
-                  <h4
-                    className="text-[11px] uppercase tracking-wide"
-                    style={{ color: c.color, textShadow: "2px 2px 0 #000" }}
-                  >
-                    {c.name}
-                  </h4>
-                  <p className="text-[8px] text-[#565f89]">{c.tagline}</p>
-                </div>
-              </div>
-              <p className="mb-3 text-[9px] leading-relaxed text-[#9aa7cc]">
-                {c.desc}
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {c.landmarks.map((l) => (
-                  <span
-                    key={l}
-                    className="border border-[#2a3450] bg-[#11192d] px-2 py-0.5 text-[7px] text-[#9aa7cc]"
-                  >
-                    {l}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Continent connection diagram */}
-        <div className="mt-6 flex flex-col items-center gap-1 text-[8px] text-[#565f89]">
-          <div className="flex items-center gap-2">
-            <span style={{ color: "#54f28b" }}>Arcadia</span>
-            <span>{"---"}</span>
-            <span style={{ color: "#aa44ff" }}>Nocturia</span>
-            <span>{"---"}</span>
-            <span style={{ color: "#ff4d6d" }}>Draconis</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span style={{ color: "#44ddff" }}>Pacifica</span>
-            <span>{"---"}</span>
-            <span style={{ color: "#ff8c00" }}>Lemuria</span>
-          </div>
-          <p className="mt-2 text-[7px] text-[#565f89]">
-            {"<<"} The Helios System {"//"}  2 Moons {"//"}  5 Continents {"//"}  Infinite Essence {">>"}
-          </p>
+            {">>>"} Read the Full Story {"<<<"}
+          </Link>
         </div>
       </section>
 
@@ -615,87 +437,38 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
           ))}
         </div>
         <div className="mt-4 flex justify-center">
-          <Button
-            className="min-w-[200px] text-[11px]"
-            onClick={onEnterGame}
-            size="lg"
-            variant="ghost"
-          >
-            {">>>"} Enter World {"<<<"}
-          </Button>
+          <Link to="/world">
+            <Button
+              className="min-w-[200px] text-[11px]"
+              size="lg"
+              variant="ghost"
+            >
+              {">>>"} Enter World {"<<<"}
+            </Button>
+          </Link>
         </div>
       </section>
 
-      {/* ── GUILD LEADERBOARD ── */}
-      {guilds.length > 0 && (
-        <section className="z-10 w-full max-w-3xl px-4 py-10">
-          <h2
-            className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
-            style={{ textShadow: "3px 3px 0 #000" }}
+      {/* ── LEADERBOARDS TEASER ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          Leaderboards
+        </h2>
+        <p className="mb-6 text-center text-[9px] text-[#9aa7cc]">
+          Track the top guilds and players across all zones.
+        </p>
+        <div className="flex justify-center">
+          <Link
+            to="/leaderboards"
+            className="border-2 border-[#54f28b] bg-[#112a1b] px-5 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
           >
-            Guild Leaderboard
-          </h2>
-          <p className="mb-6 text-center text-[8px] tracking-wide text-[#565f89]">
-            {"<<"} TOP GUILDS BY TREASURY {">>"}
-          </p>
-
-          {/* Table header */}
-          <div
-            className="flex items-center border-4 border-black border-b-0 bg-[#1a2240] px-4 py-2 text-[9px] uppercase tracking-wide text-[#9aa7cc]"
-            style={{ fontFamily: "monospace" }}
-          >
-            <span className="w-8 shrink-0">#</span>
-            <span className="flex-1">Guild</span>
-            <span className="w-20 text-right">Treasury</span>
-            <span className="w-16 text-right">Members</span>
-            <span className="w-12 text-right">Lv</span>
-          </div>
-
-          {/* Rows */}
-          <div className="flex flex-col border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[6px_6px_0_0_#000]">
-            {guilds.slice(0, 10).map((g, i) => {
-              const rankColor = i === 0 ? "#ffcc00" : i === 1 ? "#c0c0c0" : i === 2 ? "#cd7f32" : "#565f89";
-              return (
-                <div
-                  key={g.guildId}
-                  className="flex items-center border-b border-[#1e2842] px-4 py-2.5 last:border-b-0"
-                  style={{ fontFamily: "monospace" }}
-                >
-                  <span
-                    className="w-8 shrink-0 text-[12px] font-bold"
-                    style={{ color: rankColor }}
-                  >
-                    {i + 1}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-bold text-[#f1f5ff] truncate">
-                      {g.name}
-                    </div>
-                    <div className="text-[8px] text-[#565f89] truncate">
-                      {g.founder.slice(0, 6)}...{g.founder.slice(-4)}
-                    </div>
-                  </div>
-                  <span className="w-20 text-right text-[11px] text-[#ffcc00]">
-                    {g.treasury.toLocaleString()}
-                  </span>
-                  <span className="w-16 text-right text-[11px] text-[#54f28b]">
-                    {g.memberCount}
-                  </span>
-                  <span className="w-12 text-right text-[11px] text-[#5dadec]">
-                    {g.level}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          {guilds.length === 0 && (
-            <div className="mt-4 text-center text-[10px] text-[#565f89]">
-              No guilds have been created yet. Be the first!
-            </div>
-          )}
-        </section>
-      )}
+            {">>>"} View Leaderboards {"<<<"}
+          </Link>
+        </div>
+      </section>
 
       {/* ── ON-CHAIN ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
@@ -754,26 +527,24 @@ export function LandingPage({ onEnterGame, onPlayNow, onOpenMarketplace, onX402 
           ) : (
             <Button
               className="min-w-[220px] text-[12px]"
-              onClick={onPlayNow}
+              onClick={() => navigate("/world")}
               size="lg"
             >
               Create Character
             </Button>
           )}
-          {onOpenMarketplace && (
-            <button
-              onClick={onOpenMarketplace}
-              className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[12px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
-            >
-              NFT Marketplace
-            </button>
-          )}
-          <button
-            onClick={onX402}
+          <Link
+            to="/marketplace"
+            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[12px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+          >
+            NFT Marketplace
+          </Link>
+          <Link
+            to="/x402"
             className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#112a1b] px-5 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#1a3d28] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             x402 Protocol
-          </button>
+          </Link>
           <a
             href="/docs"
             target="_blank"

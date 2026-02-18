@@ -194,7 +194,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
     learnProfession(walletAddress, professionId);
 
     // Persist to Redis
-    saveCharacter(walletAddress, {
+    saveCharacter(walletAddress, entity.name, {
       professions: getLearnedProfessions(walletAddress),
     }).catch((err) => server.log.error(err, "[persistence] Failed to save professions"));
 

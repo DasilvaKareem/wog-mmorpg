@@ -6,6 +6,7 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { getItemBalance } from "./blockchain.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeCook, narrativeConsume } from "./diary.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 const COOKING_RANGE = 50;
 
@@ -196,6 +197,14 @@ export function registerCookingRoutes(server: FastifyInstance) {
         BigInt(recipe.outputQuantity)
       );
 
+      // Award profession XP based on recipe tier
+      const cookXp = recipeId === "cooked_meat"
+        ? PROFESSION_XP.COOK_TIER1
+        : recipeId === "hearty_stew"
+          ? PROFESSION_XP.COOK_TIER2
+          : PROFESSION_XP.COOK_TIER3;
+      const profXpResult = awardProfessionXp(entity, zoneId, cookXp, "cooking", recipe.name);
+
       server.log.info(
         `[cooking] ${entity.name} cooked ${recipe.name} at ${campfire.name} → ${cookTx}`
       );
@@ -212,6 +221,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
 
       return {
         ok: true,
+        professionXp: profXpResult,
         recipe: recipe.name,
         quantity: recipe.outputQuantity,
         tokenId: recipe.outputTokenId.toString(),

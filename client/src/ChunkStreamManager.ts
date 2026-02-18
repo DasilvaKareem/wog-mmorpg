@@ -96,10 +96,18 @@ export class ChunkStreamManager {
     this.lastCameraCx = cameraCx;
     this.lastCameraCz = cameraCz;
 
-    // Collect all needed chunk keys across all zones
+    // Collect all needed chunk keys across nearby zones only
     const needed = new Set<string>();
 
     for (const zone of this.zones) {
+      // Quick reject: skip zones whose bounds are far from camera.
+      // Only consider zones where the camera is within 1 chunk of the zone edge.
+      const zoneEndX = zone.offsetX + zone.tilesW * this.tileSize;
+      const zoneEndZ = zone.offsetZ + zone.tilesH * this.tileSize;
+      const margin = chunkWorldSize; // 1-chunk margin for preloading neighbors
+      if (cameraWorldX < zone.offsetX - margin || cameraWorldX > zoneEndX + margin) continue;
+      if (cameraWorldZ < zone.offsetZ - margin || cameraWorldZ > zoneEndZ + margin) continue;
+
       // Convert camera world position to zone-local chunk coords
       const localX = cameraWorldX - zone.offsetX;
       const localZ = cameraWorldZ - zone.offsetZ;

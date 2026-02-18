@@ -5,6 +5,7 @@ import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeBrew } from "./diary.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -484,6 +485,16 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
 
       const outputItem = getItemByTokenId(recipe.outputTokenId);
 
+      // Award profession XP based on potion tier
+      const isMinor = recipeId.startsWith("minor-");
+      const isMid = ["stamina-elixir", "wisdom-potion", "swift-step-potion"].includes(recipeId);
+      const brewXp = isMinor
+        ? PROFESSION_XP.BREW_TIER1
+        : isMid
+          ? PROFESSION_XP.BREW_TIER2
+          : PROFESSION_XP.BREW_TIER3;
+      const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy", outputItem?.name);
+
       server.log.info(
         `[alchemy] ${entity.name} brewed ${outputItem?.name} at ${alchemyLab.name} → ${potionTx}`
       );
@@ -502,6 +513,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       return {
         ok: true,
         recipeId: recipe.recipeId,
+        professionXp: profXpResult,
         brewed: {
           tokenId: recipe.outputTokenId.toString(),
           name: outputItem?.name ?? "Unknown",

@@ -56,7 +56,7 @@ import { registerDiaryRoutes } from "./diary.js";
 import { initWorldMapStore } from "./worldMapStore.js";
 import { getTxStats } from "./blockchain.js";
 import { getWorldLayout } from "./worldLayout.js";
-import { getAllZones } from "./zoneRuntime.js";
+import { getAllZones, clearMobTagsForPlayer } from "./zoneRuntime.js";
 import { saveCharacter } from "./characterStore.js";
 import { authenticateRequest } from "./auth.js";
 import { getLearnedProfessions } from "./professions.js";
@@ -111,7 +111,7 @@ server.post<{
   }
 
   // Save full character state
-  await saveCharacter(entity.walletAddress, {
+  await saveCharacter(entity.walletAddress, entity.name, {
     name: entity.name,
     level: entity.level ?? 1,
     xp: entity.xp ?? 0,
@@ -127,9 +127,10 @@ server.post<{
     professions: getLearnedProfessions(entity.walletAddress),
   });
 
-  // Despawn entity
+  // Clear mob tags owned by this player before despawn
   const zone = getAllZones().get(foundZoneId!);
   if (zone) {
+    clearMobTagsForPlayer(zone, entityId);
     zone.entities.delete(entityId);
   }
 

@@ -14,10 +14,11 @@ export interface Quest {
   npcId: string; // Entity ID of quest giver
   prerequisiteQuestId?: string; // Optional: Quest that must be completed first
   objective: {
-    type: "kill" | "talk";
+    type: "kill" | "talk" | "gather" | "craft";
     targetMobType?: string; // kill quests: e.g. "mob" or specific name
     targetMobName?: string; // kill quests: specific mob name like "Hungry Wolf"
     targetNpcName?: string; // talk quests: NPC name to visit
+    targetItemName?: string; // gather/craft quests: e.g. "Coal Deposit", "Hearty Stew"
     count: number;
   };
   rewards: {
@@ -1523,6 +1524,243 @@ export const QUEST_CATALOG: Quest[] = [
       ],
     },
   },
+
+  // ═══════════════════════════════════════════════════════════════════════
+  //  PROFESSION PRACTICE QUESTS (103/104) — Gather & Craft XP
+  //  These use the new "gather" and "craft" quest types.
+  //  Progress is tracked automatically by awardProfessionXp() when
+  //  agents mine, gather herbs, skin, cook, brew, forge, or craft.
+  //  No prerequisites — any agent who completed the 101/102 tutorials
+  //  already has the tools and materials to complete these.
+  // ═══════════════════════════════════════════════════════════════════════
+
+  // ── MINING PRACTICE ────────────────────────────────────────────────
+
+  {
+    id: "mining_103",
+    title: "Mining 103: Coal Run",
+    description:
+      "Torvik scratches his beard. 'You've got the swing down. Now put it to real work — mine 5 Coal Deposits. Coal fuels every forge in Arcadia. No coal, no steel, no weapons. Simple as that.'",
+    npcId: "Grizzled Miner Torvik",
+    prerequisiteQuestId: "mining_102",
+    objective: {
+      type: "gather",
+      targetItemName: "Coal Deposit",
+      count: 5,
+    },
+    rewards: {
+      copper: 50,
+      xp: 200,
+    },
+  },
+  {
+    id: "mining_104",
+    title: "Mining 104: Copper Strike",
+    description:
+      "Torvik eyes your pickaxe approvingly. 'Ready for the harder veins? Copper runs deeper and takes more skill. Mine 3 Copper Veins and you'll have enough for a proper Steel Alloy.'",
+    npcId: "Grizzled Miner Torvik",
+    prerequisiteQuestId: "mining_103",
+    objective: {
+      type: "gather",
+      targetItemName: "Copper Vein",
+      count: 3,
+    },
+    rewards: {
+      copper: 75,
+      xp: 250,
+    },
+  },
+
+  // ── HERBALISM PRACTICE ─────────────────────────────────────────────
+
+  {
+    id: "herbalism_103",
+    title: "Herbalism 103: Lily Harvest",
+    description:
+      "Willow smiles. 'Meadow Lilies are the backbone of healing potions — every alchemist needs them. Gather 5 Meadow Lily Patches and you'll start building a real herb stockpile.'",
+    npcId: "Herbalist Willow",
+    prerequisiteQuestId: "herbalism_102",
+    objective: {
+      type: "gather",
+      targetItemName: "Meadow Lily",
+      count: 5,
+    },
+    rewards: {
+      copper: 50,
+      xp: 200,
+    },
+  },
+  {
+    id: "herbalism_104",
+    title: "Herbalism 104: Rose Collection",
+    description:
+      "Willow points to the hillside. 'Wild Roses grow where the wind carries pollen from the Auroral Plains. Their petals are key to mana potions. Gather 3 Wild Rose Bushes for me.'",
+    npcId: "Herbalist Willow",
+    prerequisiteQuestId: "herbalism_103",
+    objective: {
+      type: "gather",
+      targetItemName: "Wild Rose",
+      count: 3,
+    },
+    rewards: {
+      copper: 60,
+      xp: 220,
+    },
+  },
+
+  // ── SKINNING PRACTICE ──────────────────────────────────────────────
+
+  {
+    id: "skinning_103",
+    title: "Skinning 103: Field Dressing",
+    description:
+      "Greaves tests your blade's edge. 'Theory is nothing without practice. Get out there and skin 4 fresh corpses. The leather you harvest will keep armorers busy for days.'",
+    npcId: "Huntsman Greaves",
+    prerequisiteQuestId: "skinning_102",
+    objective: {
+      type: "gather",
+      targetItemName: "corpse",
+      count: 4,
+    },
+    rewards: {
+      copper: 50,
+      xp: 180,
+    },
+  },
+  {
+    id: "skinning_104",
+    title: "Skinning 104: Master Skinner",
+    description:
+      "Greaves grins wide. 'You're getting good at this. Skin 6 more corpses — I want to see you work fast and clean. A master skinner wastes nothing.'",
+    npcId: "Huntsman Greaves",
+    prerequisiteQuestId: "skinning_103",
+    objective: {
+      type: "gather",
+      targetItemName: "corpse",
+      count: 6,
+    },
+    rewards: {
+      copper: 75,
+      xp: 250,
+    },
+  },
+
+  // ── BLACKSMITHING PRACTICE ─────────────────────────────────────────
+
+  {
+    id: "blacksmithing_103",
+    title: "Blacksmithing 103: Bar Stock",
+    description:
+      "Durgan hammers a glowing ingot. 'Every great weapon starts as a bar. Smelt 2 Tin Bars at the forge — it's the foundation of metalwork. Use POST /crafting/forge with the smelt-tin-bar recipe.'",
+    npcId: "Master Smith Durgan",
+    prerequisiteQuestId: "blacksmithing_102",
+    objective: {
+      type: "craft",
+      targetItemName: "Tin Bar",
+      count: 2,
+    },
+    rewards: {
+      copper: 60,
+      xp: 200,
+    },
+  },
+
+  // ── ALCHEMY PRACTICE ──────────────────────────────────────────────
+
+  {
+    id: "alchemy_103",
+    title: "Alchemy 103: Potion Production",
+    description:
+      "Mirelle adjusts the cauldron temperature. 'Knowledge without practice is wasted. Brew 2 Minor Health Potions — your companions will thank you when blades clash and blood flows.'",
+    npcId: "Alchemist Mirelle",
+    prerequisiteQuestId: "alchemy_102",
+    objective: {
+      type: "craft",
+      targetItemName: "Minor Health Potion",
+      count: 2,
+    },
+    rewards: {
+      copper: 60,
+      xp: 200,
+    },
+  },
+
+  // ── COOKING PRACTICE ───────────────────────────────────────────────
+
+  {
+    id: "cooking_103",
+    title: "Cooking 103: Stew Master",
+    description:
+      "Gastron tastes from a bubbling pot. 'Hearty Stew is the adventurer's best friend — 60 HP restored in one sitting. Cook 2 Hearty Stews at any campfire to prove you've mastered the recipe.'",
+    npcId: "Chef Gastron",
+    prerequisiteQuestId: "cooking_102",
+    objective: {
+      type: "craft",
+      targetItemName: "Hearty Stew",
+      count: 2,
+    },
+    rewards: {
+      copper: 50,
+      xp: 180,
+    },
+  },
+  {
+    id: "cooking_104",
+    title: "Cooking 104: Roast Perfection",
+    description:
+      "Gastron wipes sweat from his brow. 'Ready for the big leagues? A Roasted Boar takes 5 Raw Meat and real skill. Cook 1 and you'll earn the right to call yourself a chef.'",
+    npcId: "Chef Gastron",
+    prerequisiteQuestId: "cooking_103",
+    objective: {
+      type: "craft",
+      targetItemName: "Roasted Boar",
+      count: 1,
+    },
+    rewards: {
+      copper: 60,
+      xp: 200,
+    },
+  },
+
+  // ── LEATHERWORKING PRACTICE ────────────────────────────────────────
+
+  {
+    id: "leatherworking_103",
+    title: "Leatherworking 103: Armor Up",
+    description:
+      "Hilda stretches a fresh hide. 'You know the basics. Now craft 1 piece of tanned leather armor — vest, boots, helm, whatever suits you. Check GET /leatherworking/recipes for options.'",
+    npcId: "Tanner Hilda",
+    prerequisiteQuestId: "leatherworking_102",
+    objective: {
+      type: "craft",
+      targetItemName: "Tanned",
+      count: 1,
+    },
+    rewards: {
+      copper: 60,
+      xp: 200,
+    },
+  },
+
+  // ── JEWELCRAFTING PRACTICE ─────────────────────────────────────────
+
+  {
+    id: "jewelcrafting_103",
+    title: "Jewelcrafting 103: Your First Commission",
+    description:
+      "Orik holds up a rough gem to the light. 'Theory is cheap. Craft 1 ring — any ring — at the Jeweler's Workbench. A real jeweler lets their work speak for itself.'",
+    npcId: "Gemcutter Orik",
+    prerequisiteQuestId: "jewelcrafting_102",
+    objective: {
+      type: "craft",
+      targetItemName: "Ring",
+      count: 1,
+    },
+    rewards: {
+      copper: 75,
+      xp: 250,
+    },
+  },
 ];
 
 /**
@@ -1645,8 +1883,8 @@ export async function awardQuestRewards(
   }
 
   // Persist character after quest completion
-  if (player.walletAddress) {
-    saveCharacter(player.walletAddress, {
+  if (player.walletAddress && player.name) {
+    saveCharacter(player.walletAddress, player.name, {
       level: player.level,
       xp: player.xp,
       completedQuests: player.completedQuests,

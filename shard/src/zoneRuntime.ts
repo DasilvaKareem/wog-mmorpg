@@ -5,7 +5,7 @@ import { mintGold, mintItem, updateCharacterMetadata } from "./blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
 import type { OreType } from "./oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "./questSystem.js";
-import type { ProfessionType } from "./professions.js";
+import { type ProfessionType, getLearnedProfessions } from "./professions.js";
 import type { FlowerType } from "./flowerCatalog.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollCopper } from "./lootTables.js";
@@ -143,6 +143,12 @@ export interface Entity {
   isDangerGate?: boolean;
   gateExpiresAt?: number;
   gateOpened?: boolean;
+  /** Mob tagging: ID of first-hit player (mobs/bosses only). */
+  taggedBy?: string;
+  /** Mob tagging: tick when tagger last hit this mob. */
+  taggedAtTick?: number;
+  /** Out-of-combat regen: tick when this entity last dealt/received damage (players only). */
+  lastCombatTick?: number;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -185,6 +191,7 @@ export function deleteZone(zoneId: string): boolean {
 
 // Tick loop — advances the world every interval
 let tickInterval: ReturnType<typeof setInterval> | null = null;
+let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
 const MOVE_SPEED = 30; // units per tick
 const ATTACK_RANGE = 40; // units
@@ -217,6 +224,9 @@ const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
 };
 
 const DEATH_XP_LOSS_PERCENT = 0.1; // Lose 10% of current XP on death
+const TAG_TIMEOUT_TICKS = 60;      // 60 ticks = 60s before mob tag expires
+const OOC_REGEN_DELAY_TICKS = 10;  // 10 ticks = 10s out of combat before regen starts
+const OOC_REGEN_PERCENT = 0.03;    // 3% of maxHp per tick while out of combat
 
 function emptyStats(): CharacterStats {
   return {
@@ -391,9 +401,42 @@ function canRetaliate(entity: Entity): boolean {
 }
 
 /**
+ * Tag a mob on first hit. Refresh tick on subsequent hits from tagger.
+ */
+function trySetMobTag(mob: Entity, attackerId: string, attackerType: string, tick: number): void {
+  if (mob.type !== "mob" && mob.type !== "boss") return;
+  if (attackerType !== "player") return;
+
+  if (!mob.taggedBy) {
+    mob.taggedBy = attackerId;
+    mob.taggedAtTick = tick;
+  } else if (mob.taggedBy === attackerId) {
+    mob.taggedAtTick = tick;
+  }
+}
+
+/**
+ * Clear all mob tags owned by a specific player in a zone.
+ * Called on death, logout, and zone transition.
+ */
+export function clearMobTagsForPlayer(zone: ZoneState, playerId: string): void {
+  for (const entity of zone.entities.values()) {
+    if ((entity.type === "mob" || entity.type === "boss") && entity.taggedBy === playerId) {
+      entity.taggedBy = undefined;
+      entity.taggedAtTick = undefined;
+    }
+  }
+}
+
+/**
  * Handle player death: respawn at graveyard, apply XP penalty, restore HP.
  */
 function handlePlayerDeath(player: Entity, zoneId: string): void {
+  // Clear mob tags owned by this player and reset combat state
+  const zone = zones.get(zoneId);
+  if (zone) clearMobTagsForPlayer(zone, player.id);
+  player.lastCombatTick = undefined;
+
   // Apply death penalty: lose 10% of current XP (min 0)
   let deathXpLoss = 0;
   if (player.xp != null && player.xp > 0) {
@@ -754,6 +797,24 @@ async function worldTick() {
       }
     }
 
+    // Tag timeout: release mob tags after TAG_TIMEOUT_TICKS of inactivity
+    for (const entity of zone.entities.values()) {
+      if ((entity.type === "mob" || entity.type === "boss") && entity.taggedBy && entity.taggedAtTick != null) {
+        if (zone.tick - entity.taggedAtTick >= TAG_TIMEOUT_TICKS) {
+          entity.taggedBy = undefined;
+          entity.taggedAtTick = undefined;
+        }
+      }
+    }
+
+    // Out-of-combat HP regeneration for players
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player" || entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
+      if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
+      const healAmount = Math.max(1, Math.ceil(entity.maxHp * OOC_REGEN_PERCENT));
+      entity.hp = Math.min(entity.maxHp, entity.hp + healAmount);
+    }
+
     // Process active effects (DoTs, HoTs, expiration)
     for (const entity of zone.entities.values()) {
       if (!entity.activeEffects || entity.activeEffects.length === 0) continue;
@@ -767,7 +828,18 @@ async function worldTick() {
         // DoT damage
         if (effect.type === "dot" && effect.dotDamage != null && effect.dotDamage > 0) {
           entity.hp -= effect.dotDamage;
+
+          // Mob tagging + combat tracking from DoT caster
+          trySetMobTag(entity, effect.casterId, "player", zone.tick);
+          entity.lastCombatTick = zone.tick;
+
           if (entity.hp <= 0) {
+            // Resolve tagger for DoT kill
+            const dotTagger = entity.taggedBy ? zone.entities.get(entity.taggedBy) : undefined;
+            const dotCaster = zone.entities.get(effect.casterId);
+            const dotKiller = (dotTagger && dotTagger.type === "player") ? dotTagger
+              : (dotCaster && dotCaster.type === "player") ? dotCaster : undefined;
+
             logZoneEvent({
               zoneId: zone.zoneId,
               type: "death",
@@ -779,8 +851,7 @@ async function worldTick() {
             if (entity.type === "player") {
               handlePlayerDeath(entity, zone.zoneId);
             } else {
-              const caster = zone.entities.get(effect.casterId);
-              await handleMobDeath(entity, caster, zone);
+              await handleMobDeath(entity, dotKiller, zone);
             }
             break; // Entity is dead, stop processing effects
           }
@@ -840,6 +911,11 @@ async function worldTick() {
           applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
           applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
 
+          // Mob tagging + combat tracking
+          trySetMobTag(target, entity.id, entity.type, zone.tick);
+          entity.lastCombatTick = zone.tick;
+          target.lastCombatTick = zone.tick;
+
           // Log combat event
           logZoneEvent({
             zoneId: zone.zoneId,
@@ -859,6 +935,10 @@ async function worldTick() {
             applyDamageWithShield(entity, retaliation);
             applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
             applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
+
+            // Update combat tracking for retaliation
+            entity.lastCombatTick = zone.tick;
+            target.lastCombatTick = zone.tick;
 
             // Log retaliation
             logZoneEvent({
@@ -898,27 +978,32 @@ async function worldTick() {
           }
 
           if (target.hp <= 0) {
+            // Resolve tagger: the player who first tagged the mob gets all rewards
+            const tagger = (target.taggedBy && target.taggedBy !== entity.id)
+              ? zone.entities.get(target.taggedBy) : undefined;
+            const xpRecipient = (tagger && tagger.type === "player") ? tagger : entity;
+
             // Log kill
             logZoneEvent({
               zoneId: zone.zoneId,
               type: "kill",
               tick: zone.tick,
-              message: `${entity.name} has slain ${target.name}!`,
-              entityId: entity.id,
-              entityName: entity.name,
+              message: `${xpRecipient.name} has slain ${target.name}!`,
+              entityId: xpRecipient.id,
+              entityName: xpRecipient.name,
               targetId: target.id,
               targetName: target.name,
               data: { xpReward: target.xpReward ?? 0 },
             });
 
-            // Increment kill count for player killers
-            if (entity.type === "player") {
-              entity.kills = (entity.kills ?? 0) + 1;
+            // Increment kill count for the reward recipient
+            if (xpRecipient.type === "player") {
+              xpRecipient.kills = (xpRecipient.kills ?? 0) + 1;
 
               // Log kill diary entry
-              if (entity.walletAddress) {
-                const { headline, narrative } = narrativeKill(entity.name, entity.raceId, entity.classId, zone.zoneId, target.name, target.xpReward ?? 0);
-                logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "kill", headline, narrative, {
+              if (xpRecipient.walletAddress) {
+                const { headline, narrative } = narrativeKill(xpRecipient.name, xpRecipient.raceId, xpRecipient.classId, zone.zoneId, target.name, target.xpReward ?? 0);
+                logDiary(xpRecipient.walletAddress, xpRecipient.name, zone.zoneId, xpRecipient.x, xpRecipient.y, "kill", headline, narrative, {
                   targetName: target.name,
                   targetType: target.type,
                   xpReward: target.xpReward ?? 0,
@@ -930,17 +1015,17 @@ async function worldTick() {
             if (target.type === "player") {
               handlePlayerDeath(target, zone.zoneId);
             } else {
-              // Mobs/bosses: auto-loot + create corpse
-              await handleMobDeath(target, entity, zone);
+              // Mobs/bosses: auto-loot to tagger + create corpse
+              await handleMobDeath(target, xpRecipient, zone);
 
-              // Track quest progress for kills (players only)
-              if (entity.type === "player" && entity.activeQuests) {
-                for (const activeQuest of entity.activeQuests) {
+              // Track quest progress for kills (reward recipient only)
+              if (xpRecipient.type === "player" && xpRecipient.activeQuests) {
+                for (const activeQuest of xpRecipient.activeQuests) {
                   const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
                   if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
                     activeQuest.progress++;
                     console.log(
-                      `[quest] ${entity.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
+                      `[quest] ${xpRecipient.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
                     );
                   }
                 }
@@ -949,59 +1034,59 @@ async function worldTick() {
 
             entity.order = undefined;
 
-            // Grant XP on kill (only if target was mob/boss, not player)
+            // Grant XP on kill to reward recipient (only if target was mob/boss, not player)
             const xpReward = target.xpReward ?? 0;
-            if (xpReward > 0 && entity.level != null) {
-              entity.xp = (entity.xp ?? 0) + xpReward;
+            if (xpReward > 0 && xpRecipient.level != null) {
+              xpRecipient.xp = (xpRecipient.xp ?? 0) + xpReward;
 
               // Check for level-up(s)
               let leveled = false;
-              while (entity.level < MAX_LEVEL && entity.xp >= xpForLevel(entity.level + 1)) {
-                entity.level++;
+              while (xpRecipient.level < MAX_LEVEL && xpRecipient.xp >= xpForLevel(xpRecipient.level + 1)) {
+                xpRecipient.level++;
                 leveled = true;
               }
 
-              if (leveled && entity.raceId && entity.classId) {
-                const newStats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level);
-                entity.stats = newStats;
-                recalculateEntityVitals(entity);
+              if (leveled && xpRecipient.raceId && xpRecipient.classId) {
+                const newStats = computeStatsAtLevel(xpRecipient.raceId, xpRecipient.classId, xpRecipient.level);
+                xpRecipient.stats = newStats;
+                recalculateEntityVitals(xpRecipient);
 
                 // Log level-up event
                 logZoneEvent({
                   zoneId: zone.zoneId,
                   type: "levelup",
                   tick: zone.tick,
-                  message: `*** ${entity.name} reached level ${entity.level}! ***`,
-                  entityId: entity.id,
-                  entityName: entity.name,
-                  data: { level: entity.level, xp: entity.xp },
+                  message: `*** ${xpRecipient.name} reached level ${xpRecipient.level}! ***`,
+                  entityId: xpRecipient.id,
+                  entityName: xpRecipient.name,
+                  data: { level: xpRecipient.level, xp: xpRecipient.xp },
                 });
 
                 // Log level-up diary entry
-                if (entity.walletAddress) {
-                  const { headline, narrative } = narrativeLevelUp(entity.name, entity.raceId, entity.classId, zone.zoneId, entity.level);
-                  logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "level_up", headline, narrative, {
-                    newLevel: entity.level,
-                    xp: entity.xp,
+                if (xpRecipient.walletAddress) {
+                  const { headline, narrative } = narrativeLevelUp(xpRecipient.name, xpRecipient.raceId, xpRecipient.classId, zone.zoneId, xpRecipient.level);
+                  logDiary(xpRecipient.walletAddress, xpRecipient.name, zone.zoneId, xpRecipient.x, xpRecipient.y, "level_up", headline, narrative, {
+                    newLevel: xpRecipient.level,
+                    xp: xpRecipient.xp,
                   });
                 }
 
                 // Persist character to Redis on level-up
-                if (entity.walletAddress) {
-                  saveCharacter(entity.walletAddress, {
-                    level: entity.level,
-                    xp: entity.xp,
+                if (xpRecipient.walletAddress && xpRecipient.name) {
+                  saveCharacter(xpRecipient.walletAddress, xpRecipient.name, {
+                    level: xpRecipient.level,
+                    xp: xpRecipient.xp,
                     zone: zone.zoneId,
-                    x: entity.x,
-                    y: entity.y,
-                    kills: entity.kills,
-                  }).catch((err) => console.error(`[persistence] Save failed for ${entity.id}:`, err));
+                    x: xpRecipient.x,
+                    y: xpRecipient.y,
+                    kills: xpRecipient.kills,
+                  }).catch((err) => console.error(`[persistence] Save failed for ${xpRecipient.id}:`, err));
                 }
 
                 // Async on-chain sync (non-blocking, only if NFT character)
-                if (entity.characterTokenId != null) {
-                  updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                    .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                if (xpRecipient.characterTokenId != null) {
+                  updateCharacterMetadata(xpRecipient as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                    .catch((err) => console.error(`NFT update failed for ${xpRecipient.id}:`, err));
                 }
               }
             }
@@ -1031,6 +1116,13 @@ async function worldTick() {
 
           // Apply technique effects inline (mirrors techniqueRoutes logic)
           const techResult = applyTechniqueInCombat(entity, target, technique, zone);
+
+          // Mob tagging + combat tracking for attack techniques
+          if (technique.type === "attack") {
+            trySetMobTag(target, entity.id, entity.type, zone.tick);
+            entity.lastCombatTick = zone.tick;
+            target.lastCombatTick = zone.tick;
+          }
 
           // Log the technique use
           if (technique.type === "attack") {
@@ -1074,6 +1166,11 @@ async function worldTick() {
           if (technique.type === "attack" && target.hp > 0 && canRetaliate(target)) {
             const retaliation = computeDamage(target, entity);
             applyDamageWithShield(entity, retaliation);
+
+            // Update combat tracking for retaliation
+            entity.lastCombatTick = zone.tick;
+            target.lastCombatTick = zone.tick;
+
             logZoneEvent({
               zoneId: zone.zoneId,
               type: "combat",
@@ -1108,25 +1205,30 @@ async function worldTick() {
 
           // Handle target death from technique damage
           if (target.hp <= 0) {
+            // Resolve tagger: the player who first tagged the mob gets all rewards
+            const techTagger = (target.taggedBy && target.taggedBy !== entity.id)
+              ? zone.entities.get(target.taggedBy) : undefined;
+            const techXpRecipient = (techTagger && techTagger.type === "player") ? techTagger : entity;
+
             logZoneEvent({
               zoneId: zone.zoneId,
               type: "kill",
               tick: zone.tick,
-              message: `${entity.name} has slain ${target.name}!`,
-              entityId: entity.id,
-              entityName: entity.name,
+              message: `${techXpRecipient.name} has slain ${target.name}!`,
+              entityId: techXpRecipient.id,
+              entityName: techXpRecipient.name,
               targetId: target.id,
               targetName: target.name,
               data: { xpReward: target.xpReward ?? 0 },
             });
 
-            if (entity.type === "player") {
-              entity.kills = (entity.kills ?? 0) + 1;
+            if (techXpRecipient.type === "player") {
+              techXpRecipient.kills = (techXpRecipient.kills ?? 0) + 1;
 
               // Log kill diary entry (technique path)
-              if (entity.walletAddress) {
-                const { headline, narrative } = narrativeKill(entity.name, entity.raceId, entity.classId, zone.zoneId, target.name, target.xpReward ?? 0);
-                logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "kill", headline, narrative, {
+              if (techXpRecipient.walletAddress) {
+                const { headline, narrative } = narrativeKill(techXpRecipient.name, techXpRecipient.raceId, techXpRecipient.classId, zone.zoneId, target.name, target.xpReward ?? 0);
+                logDiary(techXpRecipient.walletAddress, techXpRecipient.name, zone.zoneId, techXpRecipient.x, techXpRecipient.y, "kill", headline, narrative, {
                   targetName: target.name,
                   targetType: target.type,
                   xpReward: target.xpReward ?? 0,
@@ -1137,9 +1239,9 @@ async function worldTick() {
             if (target.type === "player") {
               handlePlayerDeath(target, zone.zoneId);
             } else {
-              await handleMobDeath(target, entity, zone);
-              if (entity.type === "player" && entity.activeQuests) {
-                for (const activeQuest of entity.activeQuests) {
+              await handleMobDeath(target, techXpRecipient, zone);
+              if (techXpRecipient.type === "player" && techXpRecipient.activeQuests) {
+                for (const activeQuest of techXpRecipient.activeQuests) {
                   const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
                   if (questDef && doesKillCountForQuest(questDef, target.type, target.name)) {
                     activeQuest.progress++;
@@ -1150,41 +1252,41 @@ async function worldTick() {
 
             entity.order = undefined;
 
-            // Grant XP on kill
+            // Grant XP on kill to reward recipient
             const xpReward = target.xpReward ?? 0;
-            if (xpReward > 0 && entity.level != null) {
-              entity.xp = (entity.xp ?? 0) + xpReward;
+            if (xpReward > 0 && techXpRecipient.level != null) {
+              techXpRecipient.xp = (techXpRecipient.xp ?? 0) + xpReward;
               let leveled = false;
-              while (entity.level < MAX_LEVEL && entity.xp >= xpForLevel(entity.level + 1)) {
-                entity.level++;
+              while (techXpRecipient.level < MAX_LEVEL && techXpRecipient.xp >= xpForLevel(techXpRecipient.level + 1)) {
+                techXpRecipient.level++;
                 leveled = true;
               }
-              if (leveled && entity.raceId && entity.classId) {
-                const newStats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level);
-                entity.stats = newStats;
-                recalculateEntityVitals(entity);
+              if (leveled && techXpRecipient.raceId && techXpRecipient.classId) {
+                const newStats = computeStatsAtLevel(techXpRecipient.raceId, techXpRecipient.classId, techXpRecipient.level);
+                techXpRecipient.stats = newStats;
+                recalculateEntityVitals(techXpRecipient);
                 logZoneEvent({
                   zoneId: zone.zoneId,
                   type: "levelup",
                   tick: zone.tick,
-                  message: `*** ${entity.name} reached level ${entity.level}! ***`,
-                  entityId: entity.id,
-                  entityName: entity.name,
-                  data: { level: entity.level, xp: entity.xp },
+                  message: `*** ${techXpRecipient.name} reached level ${techXpRecipient.level}! ***`,
+                  entityId: techXpRecipient.id,
+                  entityName: techXpRecipient.name,
+                  data: { level: techXpRecipient.level, xp: techXpRecipient.xp },
                 });
 
                 // Log level-up diary entry (technique path)
-                if (entity.walletAddress) {
-                  const { headline, narrative } = narrativeLevelUp(entity.name, entity.raceId, entity.classId, zone.zoneId, entity.level);
-                  logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "level_up", headline, narrative, {
-                    newLevel: entity.level,
-                    xp: entity.xp,
+                if (techXpRecipient.walletAddress) {
+                  const { headline, narrative } = narrativeLevelUp(techXpRecipient.name, techXpRecipient.raceId, techXpRecipient.classId, zone.zoneId, techXpRecipient.level);
+                  logDiary(techXpRecipient.walletAddress, techXpRecipient.name, zone.zoneId, techXpRecipient.x, techXpRecipient.y, "level_up", headline, narrative, {
+                    newLevel: techXpRecipient.level,
+                    xp: techXpRecipient.xp,
                   });
                 }
 
-                if (entity.characterTokenId != null) {
-                  updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                    .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+                if (techXpRecipient.characterTokenId != null) {
+                  updateCharacterMetadata(techXpRecipient as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+                    .catch((err) => console.error(`NFT update failed for ${techXpRecipient.id}:`, err));
                 }
               }
             }
@@ -1305,6 +1407,10 @@ async function worldTick() {
     const srcZone = zones.get(sourceZoneId);
     if (!srcZone) continue;
 
+    // Clear mob tags in source zone and reset combat state
+    clearMobTagsForPlayer(srcZone, entity.id);
+    entity.lastCombatTick = undefined;
+
     srcZone.entities.delete(entity.id);
     entity.x = dest.destLocalX;
     entity.y = dest.destLocalZ;
@@ -1346,12 +1452,58 @@ async function worldTick() {
   }
 }
 
+/**
+ * Save all online players to Redis/memory. Used by periodic auto-save and graceful shutdown.
+ */
+export async function saveAllOnlinePlayers(): Promise<void> {
+  let count = 0;
+  for (const zone of zones.values()) {
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player" || !entity.walletAddress || !entity.name) continue;
+      try {
+        await saveCharacter(entity.walletAddress, entity.name, {
+          name: entity.name,
+          level: entity.level ?? 1,
+          xp: entity.xp ?? 0,
+          raceId: entity.raceId ?? "human",
+          classId: entity.classId ?? "warrior",
+          gender: entity.gender,
+          zone: zone.zoneId,
+          x: entity.x,
+          y: entity.y,
+          kills: entity.kills ?? 0,
+          completedQuests: entity.completedQuests ?? [],
+          learnedTechniques: entity.learnedTechniques ?? [],
+          professions: getLearnedProfessions(entity.walletAddress),
+        });
+        count++;
+      } catch (err) {
+        console.error(`[auto-save] Failed to save ${entity.name}:`, err);
+      }
+    }
+  }
+  if (count > 0) {
+    console.log(`[auto-save] Saved ${count} online player(s)`);
+  }
+}
+
 export function registerZoneRuntime(server: FastifyInstance) {
   // Start the tick loop
   tickInterval = setInterval(worldTick, TICK_MS);
 
-  server.addHook("onClose", () => {
+  // Periodic auto-save every 60 seconds
+  autoSaveInterval = setInterval(() => {
+    saveAllOnlinePlayers().catch((err) =>
+      console.error("[auto-save] Periodic save error:", err)
+    );
+  }, 60_000);
+
+  server.addHook("onClose", async () => {
+    if (autoSaveInterval) clearInterval(autoSaveInterval);
     if (tickInterval) clearInterval(tickInterval);
+    // Flush all characters on graceful shutdown
+    await saveAllOnlinePlayers();
+    console.log("[shutdown] All online players saved");
   });
 
   server.get("/zones", async () => {

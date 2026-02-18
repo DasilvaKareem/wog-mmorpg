@@ -60,10 +60,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     let saved: Awaited<ReturnType<typeof loadCharacter>> = null;
     let restored = false;
     if (type === "player" && walletAddress) {
-      const candidate = await loadCharacter(walletAddress);
-      if (candidate && candidate.name === name) {
-        saved = candidate;
-      }
+      saved = await loadCharacter(walletAddress, name);
     }
 
     const spawnZoneId = saved?.zone ?? zoneId;
@@ -123,7 +120,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
 
     // First-time spawn: save initial character data
     if (!saved && walletAddress && type === "player") {
-      await saveCharacter(walletAddress, {
+      await saveCharacter(walletAddress, entity.name, {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,

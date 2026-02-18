@@ -105,7 +105,7 @@ export function registerEssenceTechniqueRoutes(server: FastifyInstance): void {
         saveData.ultimateTechniqueId = technique.id;
       }
 
-      await saveCharacter(player.walletAddress, saveData as any);
+      await saveCharacter(player.walletAddress, player.name, saveData as any);
 
       return reply.send({
         ok: true,

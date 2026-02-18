@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useNavigate } from "react-router-dom";
 import { API_URL } from "../config.js";
 
 import { Badge } from "@/components/ui/badge";
@@ -62,7 +63,7 @@ interface OwnedItem {
 }
 
 interface MarketplacePageProps {
-  onBack: () => void;
+  onBack?: () => void;
 }
 
 // ── Constants ──
@@ -120,6 +121,8 @@ function formatStatBonuses(bonuses: Record<string, number>): string {
 // ── Component ──
 
 export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactElement {
+  const navigate = useNavigate();
+  const goBack = onBack ?? (() => navigate("/"));
   const { address, balance, isConnected, connect, loading: walletLoading, refreshBalance } = useWalletContext();
   const { notify } = useToast();
 
@@ -378,7 +381,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   // ── Render ──
 
   return (
-    <div className="relative flex min-h-full w-full flex-col overflow-y-auto overflow-x-hidden">
+    <div className="relative flex min-h-full w-full flex-col overflow-y-auto overflow-x-hidden pt-10">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"
@@ -393,7 +396,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-4">
             <button
-              onClick={onBack}
+              onClick={goBack}
               className="border-2 border-[#6b7394] bg-[#1b2236] px-3 py-1.5 text-[9px] uppercase tracking-wide text-[#e8eeff] transition hover:bg-[#252d45]"
             >
               {"<< Back"}

@@ -7,6 +7,7 @@ import { authenticateRequest } from "./auth.js";
 import { rollCraftedItem } from "./itemRng.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { logDiary, narrativeCraft } from "./diary.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -499,6 +500,14 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         `[crafting] ${entity.name} forged ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${craftTx}`
       );
 
+      // Award profession XP based on recipe type
+      const craftXp = recipeId.startsWith("smelt-")
+        ? PROFESSION_XP.FORGE_SMELT
+        : recipeId.startsWith("bar-")
+          ? PROFESSION_XP.FORGE_ADVANCED
+          : PROFESSION_XP.FORGE_WEAPON;
+      const profXpResult = awardProfessionXp(entity, zoneId, craftXp, "crafting", outputItem?.name);
+
       // Log craft diary entry
       if (walletAddress) {
         const craftedName = instance?.displayName ?? outputItem?.name ?? "Unknown";
@@ -514,6 +523,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       return {
         ok: true,
         recipeId: recipe.recipeId,
+        professionXp: profXpResult,
         crafted: {
           tokenId: recipe.outputTokenId.toString(),
           name: outputItem?.name ?? "Unknown",

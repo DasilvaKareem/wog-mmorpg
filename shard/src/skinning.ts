@@ -6,6 +6,7 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeSkin } from "./diary.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 const SKINNING_RANGE = 50;
 
@@ -180,6 +181,9 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     try {
       const txHashes = await Promise.all(mintPromises);
 
+      // Award profession XP
+      const profXpResult = awardProfessionXp(entity, zoneId, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
+
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
       );
@@ -200,6 +204,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
         materials: mintedItems,
         totalItems: mintedItems.reduce((sum, item) => sum + item.quantity, 0),
         txHashes,
+        professionXp: profXpResult,
         knife: {
           name: knifeItem.name,
           durability: weaponEquipped.durability,

@@ -161,7 +161,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     player.learnedTechniques.push(techniqueId);
 
     // Persist to Redis
-    saveCharacter(player.walletAddress, {
+    saveCharacter(player.walletAddress, player.name, {
       learnedTechniques: player.learnedTechniques,
     }).catch((err) => console.error(`[persistence] Save failed after technique learn:`, err));
 

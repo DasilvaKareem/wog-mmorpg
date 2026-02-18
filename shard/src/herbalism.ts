@@ -6,6 +6,7 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeGatherHerb } from "./diary.js";
+import { awardProfessionXp, xpForRarity } from "./professionXp.js";
 
 const GATHER_RANGE = 50;
 
@@ -174,6 +175,10 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx}`
       );
 
+      // Award profession XP
+      const xpAmount = xpForRarity(flowerProps.rarity);
+      const profXpResult = awardProfessionXp(entity, zoneId, xpAmount, "herbalism", undefined, flowerProps.label);
+
       // Log gather_herb diary entry
       if (walletAddress) {
         const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, zoneId, flowerProps.label, sickleItem.name);
@@ -192,6 +197,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         chargesRemaining,
         tokenId: flowerProps.tokenId.toString(),
         flowerTx,
+        professionXp: profXpResult,
         sickle: {
           name: sickleItem.name,
           durability: weaponEquipped.durability,

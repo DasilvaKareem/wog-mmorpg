@@ -19,7 +19,13 @@ async function auctionTick(server: FastifyInstance) {
 
     for (let i = 0; i < nextId; i++) {
       try {
-        const auction = await getAuctionFromChain(i);
+        let auction;
+        try {
+          auction = await getAuctionFromChain(i);
+        } catch {
+          // Auction not in cache (stale from previous session) — skip
+          continue;
+        }
 
         // Skip if not active
         if (auction.status !== 0) continue;
@@ -31,7 +37,17 @@ async function auctionTick(server: FastifyInstance) {
           );
 
           // End auction on-chain
-          await endAuctionOnChain(i);
+          try {
+            await endAuctionOnChain(i);
+          } catch (endErr: any) {
+            // Already ended on-chain (e.g. cache rebuilt before AuctionEnded events applied)
+            if (endErr?.info?.error?.message?.includes("not active") ||
+                endErr?.message?.includes("not active")) {
+              auction.status = 1; // Mark as ended in cache
+              continue;
+            }
+            throw endErr;
+          }
 
           // If there was a winner, mint item and settle payment
           if (

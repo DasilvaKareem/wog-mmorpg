@@ -5,6 +5,7 @@ import { mintItem, burnItem } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { rollCraftedItem } from "./itemRng.js";
 import { logZoneEvent } from "./zoneEvents.js";
+import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 export interface LeatherworkingRecipe {
   recipeId: string;
@@ -329,6 +330,12 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
         });
       }
 
+      // Award profession XP (basic tanned = 30, reinforced = 40)
+      const lwXp = recipeId.startsWith("reinforced-")
+        ? PROFESSION_XP.LEATHER_ADVANCED
+        : PROFESSION_XP.LEATHER_BASIC;
+      const profXpResult = awardProfessionXp(entity, zoneId, lwXp, "leatherworking", outputItem?.name);
+
       server.log.info(
         `[leatherworking] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );
@@ -336,6 +343,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
       return {
         ok: true,
         recipeId: recipe.recipeId,
+        professionXp: profXpResult,
         crafted: {
           tokenId: recipe.outputTokenId.toString(),
           name: outputItem?.name ?? "Unknown",
