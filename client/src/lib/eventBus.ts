@@ -9,6 +9,7 @@ export interface GameEventMap {
   inspectSelf: { zoneId: string; walletAddress: string };
   switchZone: { zoneId: string };
   zoneChanged: { zoneId: string };
+  lockToPlayer: { walletAddress: string };
 }
 
 type GameEventKey = keyof GameEventMap;

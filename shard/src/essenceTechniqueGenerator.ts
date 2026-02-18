@@ -2,7 +2,7 @@
  * Essence Technique Generator — procedural unique techniques for players.
  *
  * Each player gets a deterministic, one-of-a-kind technique at Level 15
- * (Signature) and Level 30 (Ultimate), seeded from wallet + class + tier.
+ * (Signature) and Level 40 (Ultimate), seeded from wallet + class + tier.
  * The same inputs always produce the same technique (no randomness drift).
  */
 

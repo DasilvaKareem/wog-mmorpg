@@ -42,6 +42,8 @@ import { rebuildAuctionCache } from "./auctionHouseChain.js";
 import { registerPvPRoutes } from "./pvpRoutes.js";
 import { registerPredictionRoutes } from "./predictionRoutes.js";
 import { registerX402Routes } from "./x402Routes.js";
+import { registerAgentChatRoutes } from "./agentChatRoutes.js";
+import { agentManager } from "./agentManager.js";
 import { registerItemRngRoutes } from "./itemRng.js";
 import { registerMarketplaceRoutes } from "./marketplace.js";
 import { registerItemCatalogRoutes } from "./itemCatalogRoutes.js";
@@ -182,6 +184,7 @@ registerUpgradingRoutes(server);
 registerJewelcraftingRoutes(server);
 registerPvPRoutes(server);
 registerPredictionRoutes(server);
+registerAgentChatRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
 registerItemCatalogRoutes(server);
@@ -212,6 +215,11 @@ const start = async () => {
     server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
+  // Restore agent loops that were running before last restart
+  agentManager.restoreFromRedis().catch((err: any) => {
+    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
   await initWorldMapStore();
 
   const port = Number(process.env.PORT) || 3000;
@@ -220,5 +228,17 @@ const start = async () => {
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
 };
+
+// Graceful shutdown: stop all agent loops
+process.on("SIGTERM", async () => {
+  await agentManager.stopAll();
+  await server.close();
+  process.exit(0);
+});
+process.on("SIGINT", async () => {
+  await agentManager.stopAll();
+  await server.close();
+  process.exit(0);
+});
 
 start();

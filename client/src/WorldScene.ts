@@ -50,6 +50,10 @@ export class WorldScene extends Phaser.Scene {
   /** Multi-zone streaming active */
   private chunkStreamingEnabled = false;
 
+  /** Wallet address we're locking the camera to */
+  private lockedWalletAddress: string | null = null;
+  private unsubscribeLockToPlayer: (() => void) | null = null;
+
   constructor() {
     super({ key: "WorldScene" });
   }
@@ -82,7 +86,7 @@ export class WorldScene extends Phaser.Scene {
 
       // Inspect: open inspect panel for players, mobs, and bosses
       if (entity.type === "player" || entity.type === "mob" || entity.type === "boss") {
-        gameBus.emit("entityInspect", { entityId: entity.id, zoneId: this.currentZoneLabel });
+        gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
       // Spectate: click any entity -> snap camera, then follow
@@ -172,9 +176,17 @@ export class WorldScene extends Phaser.Scene {
       this.scrollToZone(zoneId);
     });
 
+    // Lock camera to a player entity by wallet address
+    this.unsubscribeLockToPlayer = gameBus.on("lockToPlayer", ({ walletAddress }) => {
+      this.lockedWalletAddress = walletAddress.toLowerCase();
+      this.lockToPlayerWallet(walletAddress);
+    });
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubscribeSwitchZone?.();
       this.unsubscribeSwitchZone = null;
+      this.unsubscribeLockToPlayer?.();
+      this.unsubscribeLockToPlayer = null;
     });
 
     // Initialize seamless world
@@ -454,6 +466,26 @@ export class WorldScene extends Phaser.Scene {
     return tags[type] ?? `[${type.toUpperCase()}]`;
   }
 
+  /**
+   * Lock camera to the entity owned by the given wallet address.
+   * Safe to call every poll cycle — silently does nothing if entity not found.
+   */
+  lockToPlayerWallet(walletAddress: string): void {
+    const normalized = walletAddress.toLowerCase();
+    for (const [id, entity] of this.entityRenderer.getEntities()) {
+      if (entity.walletAddress?.toLowerCase() === normalized) {
+        this.followTarget = id;
+        this.isDragging = false;
+        const spritePos = this.entityRenderer.getSpritePosition(id);
+        if (spritePos) {
+          this.cameras.main.centerOn(spritePos.x, spritePos.y);
+        }
+        return;
+      }
+    }
+    // Entity not in current zone yet — no-op (will retry on next poll)
+  }
+
   /** Scroll camera to a zone's center (called by ZoneSelector) */
   private scrollToZone(zoneId: string): void {
     if (!this.worldLayout.loaded) return;
@@ -592,6 +624,7 @@ export class WorldScene extends Phaser.Scene {
           ...entity,
           x: entity.x + zone.offset.x,
           y: entity.y + zone.offset.z,
+          zoneId,
         };
       }
     }
@@ -599,5 +632,10 @@ export class WorldScene extends Phaser.Scene {
     this.connected = anyConnected;
     this.tick = maxTick;
     this.entityRenderer.update(allEntities);
+
+    // Re-apply wallet lock after each poll (entity may have just spawned)
+    if (this.lockedWalletAddress) {
+      this.lockToPlayerWallet(this.lockedWalletAddress);
+    }
   }
 }

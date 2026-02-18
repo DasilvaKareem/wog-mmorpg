@@ -22,6 +22,7 @@ import { WalletPanel } from "@/components/WalletPanel";
 import { ProfessionPanel } from "@/components/ProfessionPanel";
 import { ZoneSelector } from "@/components/ZoneSelector";
 import { ChatLog } from "@/components/ChatLog";
+import { AgentChatPanel } from "@/components/AgentChatPanel";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { WorldMap } from "@/components/WorldMap";
 import { ToastProvider } from "@/components/ui/toast";
@@ -65,6 +66,13 @@ function GameWorld(): React.ReactElement {
     return unsubscribe;
   }, []);
 
+  // Lock camera to connected player's agent entity
+  React.useEffect(() => {
+    if (address) {
+      gameBus.emit("lockToPlayer", { walletAddress: address });
+    }
+  }, [address]);
+
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
@@ -72,10 +80,17 @@ function GameWorld(): React.ReactElement {
       <ProfessionPanel />
       <ZoneSelector />
       <PlayerPanel className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
-      <ChatLog
-        zoneId={currentZone}
-        className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
-      />
+      {address ? (
+        <AgentChatPanel
+          walletAddress={address}
+          className="absolute bottom-4 right-4 z-30 hidden md:flex"
+        />
+      ) : (
+        <ChatLog
+          zoneId={currentZone}
+          className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
+        />
+      )}
       <ShopDialog />
       <GuildDialog />
       <AuctionHouseDialog />

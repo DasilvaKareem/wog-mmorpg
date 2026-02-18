@@ -19,7 +19,7 @@ import {
 
 const FORGE_RANGE = 50; // Must be within 50 units of essence-forge NPC
 const VALID_TIERS: EssenceTier[] = ["signature", "ultimate"];
-const TIER_LEVELS: Record<EssenceTier, number> = { signature: 15, ultimate: 30 };
+const TIER_LEVELS: Record<EssenceTier, number> = { signature: 15, ultimate: 40 };
 
 export function registerEssenceTechniqueRoutes(server: FastifyInstance): void {
   // ── Forge a technique ─────────────────────────────────────────────

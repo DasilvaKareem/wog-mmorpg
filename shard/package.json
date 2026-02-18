@@ -9,11 +9,13 @@
     "start": "pnpm run build && node dist/server.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.77.0",
     "@fastify/cors": "^11.0.0",
     "@skalenetwork/bite": "^0.7.1",
     "dotenv": "^17.2.4",
     "ethers": "^6.16.0",
     "fastify": "^5.2.1",
+    "groq-sdk": "^0.37.0",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
     "thirdweb": "^5.118.1",

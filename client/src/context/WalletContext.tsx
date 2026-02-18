@@ -9,6 +9,7 @@ import {
 } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance } from "@/lib/walletManager";
+import { thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
 
 interface WalletContextValue {
   address: string | null;
@@ -20,6 +21,7 @@ interface WalletContextValue {
   professions: ProfessionsResponse | null;
   professionsLoading: boolean;
   connect: () => Promise<void>;
+  syncAddress: (address: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
   refreshCharacterProgress: () => Promise<void>;
   refreshProfessions: () => Promise<void>;
@@ -59,7 +61,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const walletManager = React.useMemo(() => WalletManager.getInstance(), []);
   const [address, setAddress] = React.useState<string | null>(walletManager.address);
   const [balance, setBalance] = React.useState<WalletBalance | null>(walletManager.balance);
-  const [loading, setLoading] = React.useState(false);
+  const [loading, setLoading] = React.useState(true); // true until auto-connect attempt completes
   const [zoneId, setZoneId] = React.useState("village-square");
   const [characterProgress, setCharacterProgress] = React.useState<WalletCharacterProgress | null>(null);
   const [characterLoading, setCharacterLoading] = React.useState(false);
@@ -136,6 +138,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     }
   }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
+  const syncAddress = React.useCallback(async (addr: string) => {
+    setLoading(true);
+    try {
+      await walletManager.syncExternalAddress(addr);
+      setAddress(walletManager.address);
+      setBalance(walletManager.balance);
+      await Promise.all([refreshCharacterProgress(), refreshProfessions()]);
+    } finally {
+      setLoading(false);
+    }
+  }, [walletManager, refreshCharacterProgress, refreshProfessions]);
+
   const buyItem = React.useCallback(
     async (tokenId: number, quantity: number) => {
       const ok = await walletManager.buyItem(tokenId, quantity);
@@ -164,6 +178,28 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     },
     [walletManager, zoneId, refreshCharacterProgress]
   );
+
+  // Auto-connect on mount: restore a previously authenticated in-app wallet session
+  React.useEffect(() => {
+    let cancelled = false;
+    async function tryAutoConnect() {
+      try {
+        const account = await sharedInAppWallet.autoConnect({ client: thirdwebClient });
+        if (cancelled) return;
+        await walletManager.syncExternalAddress(account.address);
+        if (cancelled) return;
+        setAddress(walletManager.address);
+        setBalance(walletManager.balance);
+      } catch {
+        // No saved session — stay disconnected, which is fine
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    void tryAutoConnect();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId: nextZoneId }) => {
@@ -204,6 +240,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       professions,
       professionsLoading,
       connect,
+      syncAddress,
       refreshBalance,
       refreshCharacterProgress,
       refreshProfessions,
@@ -220,6 +257,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       professions,
       professionsLoading,
       connect,
+      syncAddress,
       refreshBalance,
       refreshCharacterProgress,
       refreshProfessions,

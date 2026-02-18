@@ -29,6 +29,7 @@ export interface Entity {
   learnedTechniques?: string[];
   activeEffects?: ActiveEffect[];
   kills?: number;
+  zoneId?: string;
 }
 
 export interface ActiveEffect {

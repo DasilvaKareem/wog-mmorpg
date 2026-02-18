@@ -30,11 +30,11 @@
     "dark-forest": { "x": 1280, "z": 0 },
     "auroral-plains": { "x": 640, "z": -640 },
     "emerald-woods": { "x": 1920, "z": 0 },
-    "viridian-range": { "x": 2560, "z": -640 },
-    "moondancer-glade": { "x": 2560, "z": 640 },
-    "felsrock-citadel": { "x": 3200, "z": 0 },
-    "lake-lumina": { "x": 3840, "z": 0 },
-    "azurshard-chasm": { "x": 4480, "z": 0 }
+    "viridian-range": { "x": 1920, "z": -640 },
+    "moondancer-glade": { "x": 2560, "z": 0 },
+    "felsrock-citadel": { "x": 2560, "z": -640 },
+    "lake-lumina": { "x": 3200, "z": -640 },
+    "azurshard-chasm": { "x": 3840, "z": -640 }
   },
   "continents": [
     {

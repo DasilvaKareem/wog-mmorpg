@@ -65,6 +65,17 @@ export class WalletManager {
 
   private constructor() {}
 
+  /** Sync an address obtained via social/in-app wallet into WalletManager state */
+  async syncExternalAddress(address: string): Promise<void> {
+    this._address = address;
+    await fetch(`${API_URL}/wallet/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    });
+    await this.fetchBalance(true);
+  }
+
   static getInstance(): WalletManager {
     if (!WalletManager.instance) {
       WalletManager.instance = new WalletManager();

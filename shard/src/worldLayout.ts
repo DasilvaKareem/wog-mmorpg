@@ -55,6 +55,74 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "azurshard-chasm": 45,
 };
 
+// ── Connection graph (loaded from world.json) ───────────────────────
+
+interface WorldConnection {
+  from: string;
+  to: string;
+  portal: string;
+}
+
+let cachedConnections: WorldConnection[] | null = null;
+
+function loadConnections(): WorldConnection[] {
+  if (cachedConnections) return cachedConnections;
+  const worldPath = join(DATA_DIR, "world.json");
+  const world = JSON.parse(readFileSync(worldPath, "utf-8"));
+  cachedConnections = (world.connections ?? []) as WorldConnection[];
+  return cachedConnections;
+}
+
+/** Get all zone IDs connected to the given zone (bidirectional). */
+export function getZoneConnections(zoneId: string): string[] {
+  const conns = loadConnections();
+  const result: string[] = [];
+  for (const c of conns) {
+    if (c.from === zoneId) result.push(c.to);
+    else if (c.to === zoneId) result.push(c.from);
+  }
+  return result;
+}
+
+/**
+ * Determine the shared edge direction between two adjacent zones based on world offsets.
+ * Returns 'east'|'west'|'north'|'south' if they share a full edge, or null (corner-only).
+ */
+export function getSharedEdge(
+  fromZone: string,
+  toZone: string
+): "east" | "west" | "north" | "south" | null {
+  const layout = loadLayout();
+  const from = layout.zones[fromZone];
+  const to = layout.zones[toZone];
+  if (!from || !to) return null;
+
+  const dx = to.offset.x - from.offset.x;
+  const dz = to.offset.z - from.offset.z;
+
+  // East/west: offset differs by exactly one zone width, same z
+  if (dx === from.size.width && dz === 0) return "east";
+  if (dx === -to.size.width && dz === 0) return "west";
+  // North/south: offset differs by exactly one zone height, same x
+  if (dz === -to.size.height && dx === 0) return "north";
+  if (dz === from.size.height && dx === 0) return "south";
+
+  return null; // corner-only or not adjacent
+}
+
+/** Get the portal ID for a connection (from world.json). Returns null if not found. */
+export function getConnectionPortal(
+  fromZone: string,
+  toZone: string
+): string | null {
+  const conns = loadConnections();
+  for (const c of conns) {
+    if (c.from === fromZone && c.to === toZone) return c.portal;
+    if (c.to === fromZone && c.from === toZone) return c.portal;
+  }
+  return null;
+}
+
 // ── Load layout from data files at startup ───────────────────────────
 
 let cachedLayout: WorldLayout | null = null;
@@ -234,4 +302,60 @@ export function clampToZoneBounds(
   }
 
   return clamped;
+}
+
+// ── Portal position lookups (for travel command) ─────────────────────
+
+interface ZonePOI {
+  id: string;
+  type: string;
+  position: { x: number; z: number };
+  portal?: {
+    destinationZone: string;
+    destinationPoi: string;
+  };
+}
+
+const zonePoiCache = new Map<string, ZonePOI[]>();
+
+function loadZonePois(zoneId: string): ZonePOI[] {
+  if (zonePoiCache.has(zoneId)) return zonePoiCache.get(zoneId)!;
+  try {
+    const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
+    const data = JSON.parse(readFileSync(zonePath, "utf-8"));
+    const pois: ZonePOI[] = data.pois ?? [];
+    zonePoiCache.set(zoneId, pois);
+    return pois;
+  } catch {
+    return [];
+  }
+}
+
+/** Find the position of a portal POI in a zone (by portal ID or by destination zone). */
+export function findPortalInZone(
+  zoneId: string,
+  targetZone: string
+): { x: number; z: number } | null {
+  const pois = loadZonePois(zoneId);
+  // Find portal POI that leads to targetZone
+  const portal = pois.find(
+    (p) => p.type === "portal" && p.portal?.destinationZone === targetZone
+  );
+  return portal?.position ?? null;
+}
+
+/** Find the destination portal position when traveling from sourceZone through a portal to destZone. */
+export function findDestPortalPosition(
+  sourceZone: string,
+  destZone: string
+): { x: number; z: number } | null {
+  const sourcePois = loadZonePois(sourceZone);
+  const sourcePortal = sourcePois.find(
+    (p) => p.type === "portal" && p.portal?.destinationZone === destZone
+  );
+  if (!sourcePortal?.portal?.destinationPoi) return null;
+
+  const destPois = loadZonePois(destZone);
+  const destPortal = destPois.find((p) => p.id === sourcePortal.portal!.destinationPoi);
+  return destPortal?.position ?? null;
 }

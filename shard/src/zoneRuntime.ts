@@ -19,6 +19,9 @@ import {
   getAdjacentZone,
   clampToZoneBounds,
   ZONE_LEVEL_REQUIREMENTS,
+  getConnectionPortal,
+  findPortalInZone,
+  findDestPortalPosition,
 } from "./worldLayout.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "./diary.js";
 
@@ -149,6 +152,8 @@ export interface Entity {
   taggedAtTick?: number;
   /** Out-of-combat regen: tick when this entity last dealt/received damage (players only). */
   lastCombatTick?: number;
+  /** Travel command: zone the entity is walking toward (for portal-based transitions). */
+  travelTargetZone?: string;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -1449,6 +1454,108 @@ async function worldTick() {
 
     console.log(
       `[transition] ${entity.name} moved from ${sourceZoneId} to ${dest.destZoneId} at (${dest.destLocalX}, ${dest.destLocalZ})`
+    );
+  }
+
+  // ── Auto-portal transitions for travel command (corner connections) ──
+  const portalTransfers: Array<{
+    entity: Entity;
+    sourceZoneId: string;
+    destZoneId: string;
+    destPortalPos: { x: number; z: number };
+  }> = [];
+
+  for (const zone of zones.values()) {
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player" || !entity.travelTargetZone) continue;
+
+      // Find portal in current zone leading to travelTargetZone
+      const portalId = getConnectionPortal(zone.zoneId, entity.travelTargetZone);
+      if (!portalId) {
+        entity.travelTargetZone = undefined;
+        continue;
+      }
+
+      const portalPos = findPortalInZone(zone.zoneId, entity.travelTargetZone);
+      if (!portalPos) {
+        entity.travelTargetZone = undefined;
+        continue;
+      }
+
+      // Check proximity to portal (within 20 units)
+      const dx = portalPos.x - entity.x;
+      const dz = portalPos.z - entity.y;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist > 20) continue;
+
+      // Level check
+      const requiredLevel = ZONE_LEVEL_REQUIREMENTS[entity.travelTargetZone] ?? 1;
+      if ((entity.level ?? 1) < requiredLevel) {
+        entity.travelTargetZone = undefined;
+        entity.order = undefined;
+        continue;
+      }
+
+      // Find destination portal position
+      const destPortalPos = findDestPortalPosition(zone.zoneId, entity.travelTargetZone);
+      if (!destPortalPos) {
+        entity.travelTargetZone = undefined;
+        continue;
+      }
+
+      portalTransfers.push({
+        entity,
+        sourceZoneId: zone.zoneId,
+        destZoneId: entity.travelTargetZone,
+        destPortalPos,
+      });
+    }
+  }
+
+  for (const { entity, sourceZoneId, destZoneId, destPortalPos } of portalTransfers) {
+    const srcZone = zones.get(sourceZoneId);
+    if (!srcZone) continue;
+
+    clearMobTagsForPlayer(srcZone, entity.id);
+    entity.lastCombatTick = undefined;
+    entity.travelTargetZone = undefined;
+
+    srcZone.entities.delete(entity.id);
+    entity.x = destPortalPos.x;
+    entity.y = destPortalPos.z;
+    entity.order = undefined;
+
+    const destZone = getOrCreateZone(destZoneId);
+    destZone.entities.set(entity.id, entity);
+
+    logZoneEvent({
+      zoneId: sourceZoneId,
+      type: "system",
+      tick: srcZone.tick,
+      message: `${entity.name} departed to ${destZoneId}`,
+      entityId: entity.id,
+      entityName: entity.name,
+    });
+
+    logZoneEvent({
+      zoneId: destZoneId,
+      type: "system",
+      tick: destZone.tick,
+      message: `${entity.name} arrived from ${sourceZoneId}`,
+      entityId: entity.id,
+      entityName: entity.name,
+    });
+
+    if (entity.walletAddress) {
+      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, sourceZoneId, destZoneId);
+      logDiary(entity.walletAddress, entity.name, destZoneId, entity.x, entity.y, "zone_transition", headline, narrative, {
+        fromZone: sourceZoneId,
+        toZone: destZoneId,
+      });
+    }
+
+    console.log(
+      `[transition] ${entity.name} portal-traveled from ${sourceZoneId} to ${destZoneId} at (${destPortalPos.x}, ${destPortalPos.z})`
     );
   }
 }

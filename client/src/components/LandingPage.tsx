@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { useWalletContext } from "@/context/WalletContext";
 import { API_URL } from "../config.js";
 
@@ -83,6 +84,7 @@ export function LandingPage(): React.ReactElement {
 
   const [frameIndex, setFrameIndex] = React.useState(0);
   const frames = ["|", "/", "-", "\\"];
+  const [onboardingOpen, setOnboardingOpen] = React.useState(false);
 
   // Live stats
   const [liveBattles, setLiveBattles] = React.useState(0);
@@ -169,27 +171,28 @@ export function LandingPage(): React.ReactElement {
 
         {/* CTA buttons */}
         <div className="flex flex-col items-center gap-4 sm:flex-row">
-          {!isConnected ? (
-            <Button
-              className="min-w-[200px] text-[11px]"
-              disabled={loading}
-              onClick={() => void connect()}
-              size="lg"
+          {loading ? (
+            <div className="min-w-[220px] border-4 border-black bg-[#0a1a0e] px-5 py-3 text-center text-[10px] text-[#54f28b] shadow-[4px_4px_0_0_#000]">
+              {frames[frameIndex]} Restoring session...
+            </div>
+          ) : !isConnected ? (
+            <button
+              onClick={() => setOnboardingOpen(true)}
+              className="min-w-[220px] border-4 border-black bg-[#54f28b] px-5 py-3 text-[12px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
             >
-              {loading ? "Connecting..." : "Connect Wallet"}
-            </Button>
+              {frames[frameIndex]} Play Now {frames[frameIndex]}
+            </button>
           ) : (
             <div className="flex flex-col items-center gap-3 sm:flex-row">
               <div className="border-2 border-[#54f28b] bg-[#112a1b] px-3 py-2 text-[8px] text-[#54f28b] shadow-[3px_3px_0_0_#000]">
-                {address?.slice(0, 6)}...{address?.slice(-4)}
+                [✓] {address?.slice(0, 6)}...{address?.slice(-4)}
               </div>
-              <Button
-                className="min-w-[200px] text-[11px]"
-                onClick={() => navigate("/world")}
-                size="lg"
+              <button
+                onClick={() => setOnboardingOpen(true)}
+                className="min-w-[200px] border-4 border-black bg-[#0a1a0e] px-5 py-3 text-[11px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
                 Create Character
-              </Button>
+              </button>
             </div>
           )}
           <Button
@@ -515,24 +518,12 @@ export function LandingPage(): React.ReactElement {
           Ready to enter the world?
         </p>
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center">
-          {!isConnected ? (
-            <Button
-              className="min-w-[220px] text-[12px]"
-              disabled={loading}
-              onClick={() => void connect()}
-              size="lg"
-            >
-              {loading ? "Connecting..." : "Connect Wallet"}
-            </Button>
-          ) : (
-            <Button
-              className="min-w-[220px] text-[12px]"
-              onClick={() => navigate("/world")}
-              size="lg"
-            >
-              Create Character
-            </Button>
-          )}
+          <button
+            onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
+            className="inline-flex min-w-[220px] items-center justify-center border-4 border-black bg-[#54f28b] px-5 py-3 text-[12px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+          >
+            {isConnected ? "Create Character" : "Play Now"}
+          </button>
           <Link
             to="/marketplace"
             className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[12px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
@@ -555,6 +546,11 @@ export function LandingPage(): React.ReactElement {
           </a>
         </div>
       </section>
+
+      {/* Onboarding flow modal */}
+      {onboardingOpen && (
+        <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+      )}
     </div>
   );
 }
