@@ -807,9 +807,10 @@ async function worldTick() {
       }
     }
 
-    // Out-of-combat HP regeneration for players
+    // Out-of-combat HP regeneration for mobs/bosses (heal back up if players disengage)
     for (const entity of zone.entities.values()) {
-      if (entity.type !== "player" || entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
+      if (entity.type !== "mob" && entity.type !== "boss") continue;
+      if (entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
       if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
       const healAmount = Math.max(1, Math.ceil(entity.maxHp * OOC_REGEN_PERCENT));
       entity.hp = Math.min(entity.maxHp, entity.hp + healAmount);

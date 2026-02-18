@@ -13,12 +13,11 @@ cd shard
 npx tsc 2>/dev/null || true
 cd ..
 
-# Create tarball (fast transfer)
+# Create tarball (fast transfer — includes shard + world data)
 echo "[2/4] Packing and uploading..."
-cd shard
-tar czf /tmp/wog-deploy.tar.gz --exclude='node_modules' --exclude='.env' --exclude='.git' \
-  dist src data package.json pnpm-lock.yaml tsconfig.json
-cd ..
+tar czf /tmp/wog-deploy.tar.gz --exclude='node_modules' --exclude='.env' --exclude='.git' --exclude='._*' \
+  -C shard dist src data package.json pnpm-lock.yaml tsconfig.json \
+  -C .. world src/data
 
 gcloud compute scp --zone=$ZONE /tmp/wog-deploy.tar.gz $INSTANCE:/tmp/wog-deploy.tar.gz
 
@@ -36,7 +35,7 @@ echo "[4/4] Restarting PM2..."
 gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
   cd $REMOTE_DIR && \
   pm2 restart wog-mmorpg && \
-  sleep 3 && \
+  sleep 10 && \
   curl -sf http://localhost:3000/health && echo '' && \
   echo 'Server is healthy!'"
 

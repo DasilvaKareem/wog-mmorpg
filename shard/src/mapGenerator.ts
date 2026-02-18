@@ -215,28 +215,40 @@ function findAdjacentBlend(
 // ── Map generation ──────────────────────────────────────────────────
 
 export function generateAllMaps(): void {
-  const zonesDir = path.join(process.cwd(), "..", "world", "content", "zones");
+  // Try ./world (production: flat deploy) then ../world (dev: repo root)
+  let zonesDir = path.join(process.cwd(), "world", "content", "zones");
   if (!fs.existsSync(zonesDir)) {
-    console.warn(`[mapGenerator] Zones directory not found: ${zonesDir}`);
+    zonesDir = path.join(process.cwd(), "..", "world", "content", "zones");
+  }
+  if (!fs.existsSync(zonesDir)) {
+    console.warn(`[mapGenerator] Zones directory not found`);
     return;
   }
 
-  const files = fs.readdirSync(zonesDir).filter((f) => f.endsWith(".json"));
+  const files = fs.readdirSync(zonesDir).filter((f) => f.endsWith(".json") && !f.startsWith("._"));
   const allZoneData = new Map<string, ZoneData>();
 
   for (const file of files) {
-    const data: ZoneData = JSON.parse(
-      fs.readFileSync(path.join(zonesDir, file), "utf-8"),
-    );
-    allZoneData.set(data.id, data);
+    try {
+      const data: ZoneData = JSON.parse(
+        fs.readFileSync(path.join(zonesDir, file), "utf-8"),
+      );
+      allZoneData.set(data.id, data);
+    } catch (err) {
+      console.warn(`[mapGenerator] Failed to parse ${file}:`, err);
+    }
   }
 
   // Populate blend info before generating maps
   populateWorldBlendInfos(allZoneData);
 
   for (const data of allZoneData.values()) {
-    const map = generateMap(data);
-    mapCache.set(map.zoneId, map);
+    try {
+      const map = generateMap(data);
+      mapCache.set(map.zoneId, map);
+    } catch (err) {
+      console.error(`[mapGenerator] Failed to generate map for ${data.id}:`, err);
+    }
   }
 }
 

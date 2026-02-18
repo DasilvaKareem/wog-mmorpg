@@ -6,13 +6,26 @@
  * Falls back to in-memory when Redis is unavailable.
  */
 
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { getRedis } from "./redis.js";
 import { ZONE_LEVEL_REQUIREMENTS } from "./worldLayout.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Resolve src/data/ — works both in dev (shard/src/) and production (dist/) */
+function resolveDataDir(): string {
+  const prodPath = join(__dirname, "../src/data");
+  if (existsSync(join(prodPath, "world.json"))) return prodPath;
+  const devPath = join(__dirname, "../../src/data");
+  if (existsSync(join(devPath, "world.json"))) return devPath;
+  const cwdPath = join(process.cwd(), "src/data");
+  if (existsSync(join(cwdPath, "world.json"))) return cwdPath;
+  return devPath;
+}
+
+const DATA_DIR = resolveDataDir();
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -109,7 +122,7 @@ const DEFAULT_TINTS = [
 // ── Build payload from disk ────────────────────────────────────────
 
 function buildWorldMapData(): WorldMapData {
-  const worldPath = join(__dirname, "../../src/data/world.json");
+  const worldPath = join(DATA_DIR, "world.json");
   const world = JSON.parse(readFileSync(worldPath, "utf-8"));
 
   const zoneIds: string[] = world.zones ?? [];
@@ -118,7 +131,7 @@ function buildWorldMapData(): WorldMapData {
   );
 
   const zones: ZoneMapInfo[] = zoneIds.map((zoneId, idx) => {
-    const zonePath = join(__dirname, `../../src/data/zones/${zoneId}.json`);
+    const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
     let zoneData: any = {};
     try {
       zoneData = JSON.parse(readFileSync(zonePath, "utf-8"));

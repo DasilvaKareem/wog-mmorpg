@@ -153,6 +153,58 @@ async function moveNear(entityId: string, targetId: string, zoneId?: string) {
 }
 
 // =============================================================================
+//  Repair Helpers — Find blacksmith + repair gear
+// =============================================================================
+
+async function findBlacksmithInZone(zoneId: string): Promise<{ id: string; x: number; y: number; name: string } | null> {
+  const entities = await getZoneEntities(zoneId);
+  const smith = Object.entries(entities).find(
+    ([_, e]: any) => e.type === "merchant" && /blacksmith/i.test(e.name)
+  );
+  if (smith) {
+    const [id, data] = smith as [string, any];
+    return { id, x: data.x, y: data.y, name: data.name };
+  }
+  return null;
+}
+
+async function repairAllGear(agentId: string, zoneId: string, team: string, role: string): Promise<boolean> {
+  const smith = await findBlacksmithInZone(zoneId);
+  if (!smith) {
+    log(team, role, `No blacksmith in ${zoneId} — can't repair`);
+    return false;
+  }
+  try {
+    await moveTo(agentId, smith.x, smith.y, zoneId);
+    const result = await api("POST", "/equipment/repair", {
+      zoneId, npcId: smith.id, entityId: agentId, walletAddress: WALLET,
+    });
+    if (result.ok) {
+      const repaired = result.repairs?.map((r: any) => `${r.name}(+${r.repairedDurability})`).join(", ") ?? "gear";
+      log(team, role, `Repaired at ${smith.name}: ${repaired} (cost: ${result.totalCost}g, remaining: ${result.remainingGold}g)`);
+      return true;
+    }
+  } catch (err: any) {
+    // "No damaged equipped items" is fine — means we're already at full durability
+    if (err.message?.includes("No damaged")) return true;
+    log(team, role, `Repair failed: ${err.message?.slice(0, 60)}`);
+  }
+  return false;
+}
+
+/** Check if any equipped item has durability below threshold */
+async function needsRepair(entityId: string, zoneId: string, threshold: number = 15): Promise<boolean> {
+  const me = await getEntity(entityId, zoneId);
+  if (!me?.equipment) return false;
+  for (const slot of ["weapon", "chest", "legs", "head", "feet", "shoulders", "hands", "waist"] as const) {
+    const item = me.equipment[slot];
+    if (!item) continue;
+    if (item.broken || (item.maxDurability > 0 && item.durability <= threshold)) return true;
+  }
+  return false;
+}
+
+// =============================================================================
 //  Zone-Aware Helpers (for multi-zone transition quests)
 // =============================================================================
 
@@ -271,6 +323,10 @@ async function runTransitionQuest(team: string, progressionIndex: number): Promi
     console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
   }
 
+  // Pre-boss repair — make sure warrior has full gear
+  log(team, "QUEST", `Repairing gear before boss fight...`);
+  await repairAllGear(warrior.id, prog.zoneId, team, "QUEST");
+
   // Phase 1: Hunt the zone boss
   log(team, "QUEST", `Hunting ${prog.bossName} (L${prog.bossLevel})...`);
   const currentZone = prog.zoneId;
@@ -315,8 +371,9 @@ async function runTransitionQuest(team: string, progressionIndex: number): Promi
       const target = entities2[bossId];
       const self = entities2[warrior.id];
       if (!self) {
-        log(team, "QUEST", `Warrior died to ${prog.bossName}! Waiting for respawn...`);
+        log(team, "QUEST", `Warrior died to ${prog.bossName}! Respawning and repairing...`);
         await sleep(5000);
+        await repairAllGear(warrior.id, currentZone, team, "QUEST");
         break;
       }
       if (!target || target.hp <= 0) {
@@ -378,9 +435,9 @@ async function runTransitionQuest(team: string, progressionIndex: number): Promi
       return false;
     }
 
-    // Phase 3: Transition ALL other team members (except crafter — stays at forge)
+    // Phase 3: Transition ALL other team members (including crafter — re-discovers stations in new zone)
     for (const agent of squad) {
-      if (agent.id === warrior.id || agent.role === "CRAFTER") continue;
+      if (agent.id === warrior.id) continue;
 
       let transitioned = false;
       for (let attempt = 1; attempt <= 3 && !transitioned; attempt++) {
@@ -438,6 +495,9 @@ async function runFinalBossQuest(team: string): Promise<boolean> {
     console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
   }
 
+  // Pre-boss repair
+  await repairAllGear(warrior.id, currentZone, team, "QUEST");
+
   log(team, "QUEST", `Hunting ${FINAL_BOSS.bossName} (L${FINAL_BOSS.bossLevel})...`);
 
   for (let attempt = 0; attempt < 120; attempt++) {
@@ -471,7 +531,7 @@ async function runFinalBossQuest(team: string): Promise<boolean> {
       const entities2 = await getZoneEntitiesIn(currentZone);
       const target = entities2[bossId];
       const self = entities2[warrior.id];
-      if (!self) { log(team, "QUEST", "Warrior died! Respawning..."); await sleep(5000); break; }
+      if (!self) { log(team, "QUEST", "Warrior died! Respawning and repairing..."); await sleep(5000); await repairAllGear(warrior.id, currentZone, team, "QUEST"); break; }
       if (!target || target.hp <= 0) {
         console.log(`\n  ${TEAM_COLORS[team]} [${team}] 📜 ${FINAL_BOSS.victoryLore}\n`);
         log(team, "QUEST", `🏆 TEAM ${team} HAS CONQUERED ALL OF GENEVA! 🏆`);
@@ -802,6 +862,14 @@ async function warriorLoop(agent: Agent) {
       continue;
     }
 
+    // --- REPAIR CHECK: Fix broken gear before fighting ---
+    if (await needsRepair(agent.id, z)) {
+      log(agent.team, agent.role, "Gear damaged — heading to blacksmith...");
+      await repairAllGear(agent.id, z, agent.team, agent.role);
+      await sleep(1000);
+      continue;
+    }
+
     const hpPercent = (me.hp / me.maxHp) * 100;
     if (hpPercent < 30) {
       log(agent.team, agent.role, `Low HP (${me.hp}/${me.maxHp}) — waiting for heal...`);
@@ -848,7 +916,13 @@ async function warriorLoop(agent: Agent) {
       const entities = await getZoneEntities(z);
       const target = entities[mobId];
       const self = entities[agent.id];
-      if (!self) { log(agent.team, agent.role, "DIED! Respawning..."); await sleep(5000); break; }
+      if (!self) {
+        log(agent.team, agent.role, "DIED! Respawning and repairing...");
+        await sleep(5000);
+        // Repair after death — gear is likely broken
+        await repairAllGear(agent.id, z, agent.team, agent.role);
+        break;
+      }
       if (!target || target.hp <= 0) {
         scores[agent.team].kills++;
         scores[agent.team].totalXp = self.xp ?? 0;
@@ -1010,9 +1084,19 @@ async function clericLoop(agent: Agent) {
       } catch {}
     }
 
+    // --- REPAIR CHECK: Repair own gear + warrior's gear periodically ---
+    if (clericCycle % 12 === 6) {
+      if (await needsRepair(agent.id, z)) {
+        await repairAllGear(agent.id, z, agent.team, agent.role);
+      }
+      // Also repair warrior's gear if damaged
+      if (await needsRepair(warrior.id, z)) {
+        await repairAllGear(warrior.id, z, agent.team, agent.role);
+      }
+    }
+
     // --- COOKING CYCLE: Cook food + feed warrior every 8 loops ---
-    // (only works in village-square where campfire exists)
-    if (campfireId && z === "village-square" && clericCycle % 8 === 4) {
+    if (campfireId && clericCycle % 8 === 4) {
       log(agent.team, agent.role, "Heading to campfire to cook...");
       await moveTo(agent.id, campfirePos.x, campfirePos.y, z);
       for (const recipeId of COOK_PRIORITY) {
@@ -1103,10 +1187,22 @@ async function gathererLoop(agent: Agent) {
 
   log(agent.team, agent.role, `Tools: ${[...ownedTools].map(t => toolNames[t]).join(", ") || "NONE"}`);
 
-  // Tier-1 ore types that stone pickaxe can mine
-  const mineableOres = new Set(["coal", "tin"]);
-  // Tier-1 herbs that basic sickle can gather
-  const gatherableHerbs = new Set(["Meadow Lily Patch", "Wild Rose Bush", "Clover Field", "Dandelion Cluster"]);
+  // Accept ALL ore types — pickaxe tier check is server-side
+  // Buy better pickaxes when they fail on higher-tier ores
+  const PICKAXE_UPGRADE_ORDER = [
+    { tokenId: 27, name: "Stone Pickaxe" },    // Tier 1 — coal, tin
+    { tokenId: 28, name: "Iron Pickaxe" },      // Tier 2 — copper
+    { tokenId: 29, name: "Steel Pickaxe" },     // Tier 3 — silver
+    { tokenId: 30, name: "Mithril Pickaxe" },   // Tier 4 — gold
+  ];
+  const SICKLE_UPGRADE_ORDER = [
+    { tokenId: 41, name: "Basic Sickle" },      // Tier 1
+    { tokenId: 42, name: "Iron Sickle" },        // Tier 2
+    { tokenId: 43, name: "Steel Sickle" },       // Tier 3
+    { tokenId: 44, name: "Mithril Sickle" },     // Tier 4
+  ];
+  let currentPickaxe = 27;
+  let currentSickle = 41;
   // Offset for team Bravo so they don't fight for same nodes
   const teamOffset = agent.team === "BRAVO" ? 1 : 0;
 
@@ -1120,19 +1216,28 @@ async function gathererLoop(agent: Agent) {
     }
 
     const z = getTeamZone(agent.team);
+
+    // --- REPAIR CHECK: Repair tools before gathering ---
+    if (cycle % 6 === 5) {
+      if (await needsRepair(agent.id, z, 10)) {
+        await repairAllGear(agent.id, z, agent.team, agent.role);
+      }
+    }
+
     // Prioritize mining (3 mine : 1 herb) to accumulate ore for crafting
     const doMining = cycle % 4 !== 3;
 
     if (doMining) {
-      if (!ownedTools.has(27)) {
-        try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: 27, quantity: 1 }); ownedTools.add(27); } catch { cycle++; await sleep(5000); continue; }
+      // Ensure we own current tier pickaxe
+      if (!ownedTools.has(currentPickaxe)) {
+        try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: currentPickaxe, quantity: 1 }); ownedTools.add(currentPickaxe); } catch { cycle++; await sleep(5000); continue; }
       }
-      const equipped = await equipTool(agent.id, 27, "Stone Pickaxe", z);
+      const equipped = await equipTool(agent.id, currentPickaxe, `Pickaxe T${currentPickaxe}`, z);
       if (!equipped) { cycle++; await sleep(5000); continue; }
 
       try {
         const nodes = await api("GET", `/mining/nodes/${z}`);
-        const available = nodes.oreNodes?.filter((n: any) => !n.depleted && n.charges > 0 && mineableOres.has(n.oreType)) ?? [];
+        const available = nodes.oreNodes?.filter((n: any) => !n.depleted && n.charges > 0) ?? [];
         if (available.length > 0) {
           const node = available[(cycle + teamOffset) % available.length];
           log(agent.team, agent.role, `[${z}] Mining ${node.name} (${node.oreType}) at (${node.x}, ${node.y})...`);
@@ -1141,21 +1246,36 @@ async function gathererLoop(agent: Agent) {
           try {
             const result = await api("POST", "/mining/gather", { walletAddress: WALLET, zoneId: z, entityId: agent.id, oreNodeId: node.id });
             log(agent.team, agent.role, `Mined ${result.oreName}! (dur: ${result.pickaxe?.durability}/${result.pickaxe?.maxDurability})`);
-          } catch (err: any) { log(agent.team, agent.role, `Mining failed: ${err.message?.slice(0, 50)}`); }
+          } catch (err: any) {
+            const msg = err.message ?? "";
+            // Upgrade pickaxe if tier is too low
+            if (msg.includes("tier too low") || msg.includes("Pickaxe tier")) {
+              const nextIdx = PICKAXE_UPGRADE_ORDER.findIndex(p => p.tokenId === currentPickaxe) + 1;
+              if (nextIdx < PICKAXE_UPGRADE_ORDER.length) {
+                const next = PICKAXE_UPGRADE_ORDER[nextIdx];
+                log(agent.team, agent.role, `Upgrading to ${next.name}...`);
+                try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: next.tokenId, quantity: 1 }); ownedTools.add(next.tokenId); currentPickaxe = next.tokenId; } catch {}
+              }
+            } else {
+              log(agent.team, agent.role, `Mining failed: ${msg.slice(0, 50)}`);
+            }
+          }
         } else {
           log(agent.team, agent.role, "No mineable nodes — waiting for respawn...");
         }
       } catch {}
     } else {
-      if (!ownedTools.has(41)) {
-        try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: 41, quantity: 1 }); ownedTools.add(41); } catch { cycle++; await sleep(5000); continue; }
+      // Ensure we own current tier sickle
+      if (!ownedTools.has(currentSickle)) {
+        try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: currentSickle, quantity: 1 }); ownedTools.add(currentSickle); } catch { cycle++; await sleep(5000); continue; }
       }
-      const equipped = await equipTool(agent.id, 41, "Basic Sickle", z);
+      const equipped = await equipTool(agent.id, currentSickle, `Sickle T${currentSickle}`, z);
       if (!equipped) { cycle++; await sleep(5000); continue; }
 
       try {
         const nodes = await api("GET", `/herbalism/nodes/${z}`);
-        const available = nodes.flowerNodes?.filter((n: any) => !n.depleted && n.charges > 0 && gatherableHerbs.has(n.name)) ?? [];
+        // Accept ALL flower nodes in current zone (not just tier-1)
+        const available = nodes.flowerNodes?.filter((n: any) => !n.depleted && n.charges > 0) ?? [];
         if (available.length > 0) {
           const node = available[(cycle + teamOffset) % available.length];
           log(agent.team, agent.role, `[${z}] Gathering ${node.name} at (${node.x}, ${node.y})...`);
@@ -1164,7 +1284,20 @@ async function gathererLoop(agent: Agent) {
           try {
             const result = await api("POST", "/herbalism/gather", { walletAddress: WALLET, zoneId: z, entityId: agent.id, flowerNodeId: node.id });
             log(agent.team, agent.role, `Gathered ${result.flowerName}! (dur: ${result.sickle?.durability}/${result.sickle?.maxDurability})`);
-          } catch (err: any) { log(agent.team, agent.role, `Gathering failed: ${err.message?.slice(0, 50)}`); }
+          } catch (err: any) {
+            const msg = err.message ?? "";
+            // Upgrade sickle if tier is too low
+            if (msg.includes("tier too low") || msg.includes("Sickle tier")) {
+              const nextIdx = SICKLE_UPGRADE_ORDER.findIndex(s => s.tokenId === currentSickle) + 1;
+              if (nextIdx < SICKLE_UPGRADE_ORDER.length) {
+                const next = SICKLE_UPGRADE_ORDER[nextIdx];
+                log(agent.team, agent.role, `Upgrading to ${next.name}...`);
+                try { await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: next.tokenId, quantity: 1 }); ownedTools.add(next.tokenId); currentSickle = next.tokenId; } catch {}
+              }
+            } else {
+              log(agent.team, agent.role, `Gathering failed: ${msg.slice(0, 50)}`);
+            }
+          }
         }
       } catch {}
     }
@@ -1205,21 +1338,21 @@ async function crafterLoop(agent: Agent) {
   }
 
   const alchemyLabs = await findEntitiesByType("alchemy-lab");
-  const alchemyLabId = alchemyLabs.length > 0 ? alchemyLabs[0][0] : null;
+  let alchemyLabId = alchemyLabs.length > 0 ? alchemyLabs[0][0] : null;
   if (alchemyLabId) log(agent.team, agent.role, "Found Mystical Cauldron for alchemy");
 
   const altars = await findEntitiesByType("enchanting-altar");
-  const altarId = altars.length > 0 ? altars[0][0] : null;
+  let altarId = altars.length > 0 ? altars[0][0] : null;
   if (altarId) log(agent.team, agent.role, "Found Enchanter's Altar for weapon enchanting");
 
   const tanningRacks = await findEntitiesByType("tanning-rack");
-  const tanningRackId = tanningRacks.length > 0 ? tanningRacks[0][0] : null;
-  const tanningRackPos = tanningRacks.length > 0 ? { x: (tanningRacks[0][1] as any).x, y: (tanningRacks[0][1] as any).y } : { x: 480, y: 580 };
+  let tanningRackId = tanningRacks.length > 0 ? tanningRacks[0][0] : null;
+  let tanningRackPos = tanningRacks.length > 0 ? { x: (tanningRacks[0][1] as any).x, y: (tanningRacks[0][1] as any).y } : { x: 480, y: 580 };
   if (tanningRackId) log(agent.team, agent.role, "Found Tanning Rack for leatherworking");
 
   const jewelersBenches = await findEntitiesByType("jewelers-bench");
-  const jewelersBenchId = jewelersBenches.length > 0 ? jewelersBenches[0][0] : null;
-  const jewelersBenchPos = jewelersBenches.length > 0 ? { x: (jewelersBenches[0][1] as any).x, y: (jewelersBenches[0][1] as any).y } : { x: 580, y: 580 };
+  let jewelersBenchId = jewelersBenches.length > 0 ? jewelersBenches[0][0] : null;
+  let jewelersBenchPos = jewelersBenches.length > 0 ? { x: (jewelersBenches[0][1] as any).x, y: (jewelersBenches[0][1] as any).y } : { x: 580, y: 580 };
   if (jewelersBenchId) log(agent.team, agent.role, "Found Jeweler's Workbench for jewelcrafting");
 
   await moveTo(agent.id, forgePos.x, forgePos.y);
@@ -1240,6 +1373,9 @@ async function crafterLoop(agent: Agent) {
 
   log(agent.team, agent.role, "Standing by at forge...");
 
+  // Track which zone the crafter is currently set up in
+  let crafterZone = ZONE;
+
   while (true) {
     // Pause during zone transitions to avoid conflicting move commands
     if (teamTransitioning[agent.team]) {
@@ -1248,17 +1384,45 @@ async function crafterLoop(agent: Agent) {
       log(agent.team, agent.role, "▶ Resumed after transition");
     }
 
-    // Crafter stays in village-square; wz = warrior/gatherer's current zone (for remote equip)
+    // Crafter follows the team — re-discover stations when zone changes
     const wz = getTeamZone(agent.team);
+    if (wz !== crafterZone) {
+      log(agent.team, agent.role, `Zone changed to ${wz} — re-discovering crafting stations...`);
+      crafterZone = wz;
+      // Re-discover all stations in new zone
+      const newForges = await findEntitiesByType("forge", wz);
+      if (newForges.length > 0) {
+        forgeId = newForges[0][0];
+        const f: any = newForges[0][1];
+        forgePos = { x: f.x, y: f.y };
+        log(agent.team, agent.role, `Found forge in ${wz} at (${f.x}, ${f.y})`);
+      } else { forgeId = null; log(agent.team, agent.role, `No forge in ${wz}`); }
+      const newAlchemy = await findEntitiesByType("alchemy-lab", wz);
+      alchemyLabId = newAlchemy.length > 0 ? newAlchemy[0][0] : null;
+      if (alchemyLabId) log(agent.team, agent.role, `Found alchemy lab in ${wz}`);
+      const newAltars = await findEntitiesByType("enchanting-altar", wz);
+      altarId = newAltars.length > 0 ? newAltars[0][0] : null;
+      if (altarId) log(agent.team, agent.role, `Found enchanting altar in ${wz}`);
+      const newTanning = await findEntitiesByType("tanning-rack", wz);
+      tanningRackId = newTanning.length > 0 ? newTanning[0][0] : null;
+      if (newTanning.length > 0) { tanningRackPos = { x: (newTanning[0][1] as any).x, y: (newTanning[0][1] as any).y }; }
+      const newJewelers = await findEntitiesByType("jewelers-bench", wz);
+      jewelersBenchId = newJewelers.length > 0 ? newJewelers[0][0] : null;
+      if (newJewelers.length > 0) { jewelersBenchPos = { x: (newJewelers[0][1] as any).x, y: (newJewelers[0][1] as any).y }; }
+      // Re-fetch recipes
+      try { recipes = await api("GET", "/crafting/recipes/blacksmithing"); } catch {
+        try { const all = await api("GET", "/crafting/recipes"); recipes = all.filter((r: any) => r.requiredProfession === "blacksmithing"); } catch {}
+      }
+    }
 
     if (!forgeId) {
-      const forges = await findEntitiesByType("forge");
-      if (forges.length > 0) { forgeId = forges[0][0]; }
+      const forges = await findEntitiesByType("forge", wz);
+      if (forges.length > 0) { forgeId = forges[0][0]; const f: any = forges[0][1]; forgePos = { x: f.x, y: f.y }; }
       await sleep(10000);
       continue;
     }
 
-    await moveTo(agent.id, forgePos.x, forgePos.y);
+    await moveTo(agent.id, forgePos.x, forgePos.y, wz);
     const warrior = teams[agent.team].find((a) => a.role === "WARRIOR")!;
 
     // --- PHASE 1: WEAPON UPGRADES (Base → Reinforced → Masterwork) ---
@@ -1272,7 +1436,7 @@ async function crafterLoop(agent: Agent) {
     for (const upgradeId of UPGRADE_PRIORITY) {
       try {
         const result = await api("POST", "/crafting/upgrade", {
-          walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, forgeId, recipeId: upgradeId,
+          walletAddress: WALLET, zoneId: wz, entityId: agent.id, forgeId, recipeId: upgradeId,
         });
         const upgName = result.crafted?.name ?? upgradeId;
         scores[agent.team].weaponsForged++;
@@ -1292,7 +1456,7 @@ async function crafterLoop(agent: Agent) {
     for (const recipe of prioritized) {
       try {
         const result = await api("POST", "/crafting/forge", {
-          walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, forgeId, recipeId: recipe.recipeId,
+          walletAddress: WALLET, zoneId: wz, entityId: agent.id, forgeId, recipeId: recipe.recipeId,
         });
         const craftedName = result.crafted?.name ?? recipe.recipeId;
         const craftedTokenId = result.crafted?.tokenId ?? recipe.outputTokenId;
@@ -1312,11 +1476,13 @@ async function crafterLoop(agent: Agent) {
 
     // --- PHASE 3: BREW ENCHANTMENT ELIXIRS ---
     if (alchemyLabId) {
-      await moveTo(agent.id, 360, 460);
+      const alchEntity = (await findEntitiesByType("alchemy-lab", wz))[0];
+      const alchPos = alchEntity ? { x: (alchEntity[1] as any).x, y: (alchEntity[1] as any).y } : forgePos;
+      await moveTo(agent.id, alchPos.x, alchPos.y, wz);
       const ELIXIR_RECIPES = ["sharpness-elixir", "shadow-enchantment", "fire-enchantment", "lightning-enchantment"];
       for (const recipe of ELIXIR_RECIPES) {
         try {
-          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, alchemyLabId, recipeId: recipe });
+          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: wz, entityId: agent.id, alchemyLabId, recipeId: recipe });
           log(agent.team, agent.role, `Brewed ${recipe}!`);
           break;
         } catch {}
@@ -1324,7 +1490,7 @@ async function crafterLoop(agent: Agent) {
       // Also brew combat potions when possible
       for (const potion of ["greater-health-potion", "stamina-elixir", "elixir-of-strength"]) {
         try {
-          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, alchemyLabId, recipeId: potion });
+          await api("POST", "/alchemy/brew", { walletAddress: WALLET, zoneId: wz, entityId: agent.id, alchemyLabId, recipeId: potion });
           log(agent.team, agent.role, `Brewed ${potion}!`);
           break;
         } catch {}
@@ -1333,12 +1499,14 @@ async function crafterLoop(agent: Agent) {
 
     // --- PHASE 4: ENCHANT WARRIOR'S WEAPON ---
     if (altarId) {
-      await moveTo(agent.id, 320, 460);
+      const altarEntity = (await findEntitiesByType("enchanting-altar", wz))[0];
+      const altarPos = altarEntity ? { x: (altarEntity[1] as any).x, y: (altarEntity[1] as any).y } : forgePos;
+      await moveTo(agent.id, altarPos.x, altarPos.y, wz);
       const ENCHANT_ELIXIRS = [60, 59, 55, 57]; // Sharpness +8 STR, Shadow +6 STR, Fire +5 STR, Lightning
       for (const elixirTokenId of ENCHANT_ELIXIRS) {
         try {
           await api("POST", "/enchanting/apply", {
-            walletAddress: WALLET, zoneId: ZONE, entityId: warrior.id,
+            walletAddress: WALLET, zoneId: wz, entityId: warrior.id,
             altarId, enchantmentElixirTokenId: elixirTokenId, equipmentSlot: "weapon",
           });
           log(agent.team, agent.role, `Enchanted ${warrior.name}'s weapon! (+STR bonus)`);
@@ -1349,7 +1517,7 @@ async function crafterLoop(agent: Agent) {
 
     // --- PHASE 5: LEATHERWORKING — Craft leather armor ---
     if (tanningRackId) {
-      await moveTo(agent.id, tanningRackPos.x, tanningRackPos.y);
+      await moveTo(agent.id, tanningRackPos.x, tanningRackPos.y, wz);
       const LEATHER_PRIORITY = [
         "tanned-vest", "tanned-leggings", "tanned-boots", "tanned-helm",
         "tanned-shoulders", "tanned-gloves", "tanned-belt",
@@ -1358,7 +1526,7 @@ async function crafterLoop(agent: Agent) {
       for (const recipeId of LEATHER_PRIORITY) {
         try {
           const result = await api("POST", "/leatherworking/craft", {
-            walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, tanningRackId, recipeId,
+            walletAddress: WALLET, zoneId: wz, entityId: agent.id, tanningRackId, recipeId,
           });
           const itemName = result.crafted?.name ?? recipeId;
           log(agent.team, agent.role, `CRAFTED leather ${itemName}!`);
@@ -1377,7 +1545,7 @@ async function crafterLoop(agent: Agent) {
 
     // --- PHASE 6: JEWELCRAFTING — Craft rings & amulets ---
     if (jewelersBenchId) {
-      await moveTo(agent.id, jewelersBenchPos.x, jewelersBenchPos.y);
+      await moveTo(agent.id, jewelersBenchPos.x, jewelersBenchPos.y, wz);
       const JEWELRY_PRIORITY = [
         "ruby-ring", "sapphire-ring", "emerald-ring",
         "diamond-amulet", "shadow-opal-amulet", "arcane-crystal-amulet",
@@ -1385,7 +1553,7 @@ async function crafterLoop(agent: Agent) {
       for (const recipeId of JEWELRY_PRIORITY) {
         try {
           const result = await api("POST", "/jewelcrafting/craft", {
-            walletAddress: WALLET, zoneId: ZONE, entityId: agent.id, jewelersBenchId, recipeId,
+            walletAddress: WALLET, zoneId: wz, entityId: agent.id, jewelersBenchId, recipeId,
           });
           const itemName = result.crafted?.name ?? recipeId;
           log(agent.team, agent.role, `CRAFTED jewelry ${itemName}!`);

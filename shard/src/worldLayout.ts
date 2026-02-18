@@ -1,8 +1,24 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Resolve src/data/ — works both in dev (shard/src/) and production (dist/) */
+function resolveDataDir(): string {
+  // Production flat deploy: __dirname is dist/ → ../src/data/
+  const prodPath = join(__dirname, "../src/data");
+  if (existsSync(join(prodPath, "world.json"))) return prodPath;
+  // Dev: __dirname is shard/src/ or shard/dist/ → ../../src/data/
+  const devPath = join(__dirname, "../../src/data");
+  if (existsSync(join(devPath, "world.json"))) return devPath;
+  // Fallback: cwd-relative
+  const cwdPath = join(process.cwd(), "src/data");
+  if (existsSync(join(cwdPath, "world.json"))) return cwdPath;
+  return devPath; // default, will fail with readable error
+}
+
+const DATA_DIR = resolveDataDir();
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -46,7 +62,7 @@ let cachedLayout: WorldLayout | null = null;
 function loadLayout(): WorldLayout {
   if (cachedLayout) return cachedLayout;
 
-  const worldPath = join(__dirname, "../../src/data/world.json");
+  const worldPath = join(DATA_DIR, "world.json");
   const world = JSON.parse(readFileSync(worldPath, "utf-8"));
 
   const offsets: Record<string, Vec2> = world.worldOffsets ?? {};
@@ -58,7 +74,7 @@ function loadLayout(): WorldLayout {
 
   for (const zoneId of zoneIds) {
     // Read zone bounds from src/data/zones/<zoneId>.json
-    const zonePath = join(__dirname, `../../src/data/zones/${zoneId}.json`);
+    const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
     let width = 300;
     let height = 300;
     try {
