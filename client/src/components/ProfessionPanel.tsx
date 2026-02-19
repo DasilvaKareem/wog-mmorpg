@@ -31,20 +31,32 @@ export function ProfessionPanel(): React.ReactElement {
 
   if (!isConnected) {
     return (
-      <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-64 md:w-80 md:left-4 md:top-4 hidden sm:block">
+      <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-56 sm:w-64 md:w-80 md:left-4 md:top-4">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm md:text-base">Professions</CardTitle>
-          <CardDescription className="text-xs">Connect wallet to view</CardDescription>
+          <CardTitle className="flex items-center justify-between text-sm md:text-base">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPanelCollapsed(!panelCollapsed)}
+                className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+                type="button"
+              >
+                {panelCollapsed ? "+" : "−"}
+              </button>
+              Professions
+            </div>
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <p className="text-[8px] text-[#9aa7cc]">No wallet connected</p>
-        </CardContent>
+        {!panelCollapsed && (
+          <CardContent>
+            <p className="text-[8px] text-[#9aa7cc]">Connect wallet to view</p>
+          </CardContent>
+        )}
       </Card>
     );
   }
 
   return (
-    <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-64 md:w-80 md:left-4 md:top-4 hidden sm:block">
+    <Card className="pointer-events-auto absolute left-2 top-2 z-30 w-56 sm:w-64 md:w-80 md:left-4 md:top-4">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
           <div className="flex items-center gap-2">
