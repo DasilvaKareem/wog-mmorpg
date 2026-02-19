@@ -79,25 +79,39 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
 
-    // Look up the user's existing character NFT to get the real name/race/class
+    // Use the character data the client selected (from their NFT)
     let characterName = request.body.characterName;
     let raceId = request.body.raceId ?? "human";
     let classId = request.body.classId ?? "warrior";
 
-    try {
-      const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${authWallet}`);
-      if (charRes.ok) {
-        const charData = await charRes.json() as { characters?: any[] };
-        const nft = charData.characters?.[0];
-        if (nft) {
-          characterName = nft.name ?? characterName;
-          raceId = nft.properties?.race ?? nft.raceId ?? raceId;
-          classId = nft.properties?.class ?? nft.classId ?? classId;
-          server.log.info(`[agent/deploy] Using NFT character: ${characterName} (${raceId}/${classId})`);
-        }
+    // The client sends the formatted NFT name like "Zephyr the Mage".
+    // Extract the raw name by stripping the " the ClassName" suffix,
+    // since the character mint will re-add it.
+    if (characterName) {
+      const suffixMatch = characterName.match(/^(.+?)\s+the\s+\w+$/i);
+      if (suffixMatch) {
+        characterName = suffixMatch[1];
+        server.log.info(`[agent/deploy] Extracted raw name: "${characterName}" from formatted NFT name`);
       }
-    } catch {
-      // Fallback to whatever was passed in body
+    }
+
+    // Fallback: if client didn't send a name, try to look it up from their wallet's NFTs
+    if (!characterName) {
+      try {
+        const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${authWallet}`);
+        if (charRes.ok) {
+          const charData = await charRes.json() as { characters?: any[] };
+          const nft = charData.characters?.[0];
+          if (nft) {
+            // NFT name is formatted as "Name the Class" — extract raw name
+            const rawMatch = (nft.name as string)?.match(/^(.+?)\s+the\s+\w+$/i);
+            characterName = rawMatch ? rawMatch[1] : nft.name;
+            raceId = nft.properties?.race ?? raceId;
+            classId = nft.properties?.class ?? classId;
+            server.log.info(`[agent/deploy] Resolved from wallet NFT: "${characterName}" (${raceId}/${classId})`);
+          }
+        }
+      } catch {}
     }
 
     if (!characterName) {

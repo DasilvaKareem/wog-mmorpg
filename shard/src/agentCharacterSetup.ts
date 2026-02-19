@@ -105,7 +105,7 @@ export async function setupAgentCharacter(
 
   const token = await authenticateWithWallet(rawPrivateKey);
 
-  // ── Step 5: Load character NFT to get name + stats ────────────────────
+  // ── Step 5: Load character NFT to get level/xp/tokenId ────────────────
   let character: any;
   try {
     const charData = await apiCall("GET", `/character/${custodialAddress}`, undefined, token);
@@ -114,7 +114,10 @@ export async function setupAgentCharacter(
     character = null;
   }
 
-  const spawnName = character?.name ?? characterName;
+  // Use the passed-in characterName (raw, e.g., "Zephyr") for spawning.
+  // The character mint formatted it as "Zephyr the Mage" in the NFT, but
+  // the spawn route uses the name as-is, so we pass the raw name directly.
+  const spawnName = characterName;
   const spawnLevel = character?.properties?.level ?? 1;
   const spawnXp = character?.properties?.xp ?? 0;
   const spawnRace = character?.properties?.race ?? raceId;

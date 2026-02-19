@@ -74,7 +74,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           walletAddress: address,
-          characterName: character.name,
+          characterName: character.name.replace(/\s+the\s+\w+$/i, ""),
           raceId: character.properties.race,
           classId: character.properties.class,
         }),
