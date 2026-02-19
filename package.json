@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "concurrently -n redis,shard,client -c red,blue,green \"redis-server --daemonize no\" \"cd shard && REDIS_URL=redis://localhost:6379 pnpm dev\" \"cd client && pnpm dev\"",
+    "dev:no-redis": "concurrently -n shard,client -c blue,green \"cd shard && pnpm dev\" \"cd client && pnpm dev\"",
     "start": "tsx src/main.ts"
   },
   "dependencies": {
@@ -12,6 +13,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "concurrently": "^9.2.1",
     "tsx": "^4.0.0",
     "typescript": "^5.4.0"
   }

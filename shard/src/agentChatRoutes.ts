@@ -118,8 +118,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       config.lastUpdated = Date.now();
       await setAgentConfig(authWallet, config);
 
-      // Start agent loop
-      await agentManager.start(authWallet);
+      // Start agent loop — wait for first tick to verify it's actually alive
+      await agentManager.start(authWallet, /* waitForFirstTick */ true);
 
       return reply.send({
         ok: true,
@@ -172,6 +172,25 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entity = await getEntityState(ref.entityId, ref.zoneId);
     }
 
+    // If entity not in zone, fall back to NFT metadata for name
+    if (!entity && custodial) {
+      try {
+        const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
+        if (charRes.ok) {
+          const charData = await charRes.json() as { characters?: any[] };
+          const nft = charData.characters?.[0];
+          if (nft) {
+            entity = {
+              name: nft.name,
+              level: nft.properties?.level ?? 1,
+              hp: null,
+              maxHp: null,
+            };
+          }
+        }
+      } catch {}
+    }
+
     return reply.send({
       running,
       config: config ?? null,
@@ -211,6 +230,31 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const ref = gameState?.ref;
     const nearby = gameState?.nearby ?? [];
 
+    // Resolve character name — prefer live entity, fall back to NFT metadata
+    let charName = entity?.name;
+    let charRace = entity?.raceId ?? "human";
+    let charClass = entity?.classId ?? "warrior";
+    let charLevel = entity?.level ?? 1;
+    if (!charName) {
+      try {
+        const custodial = await getAgentCustodialWallet(authWallet);
+        if (custodial) {
+          const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
+          if (charRes.ok) {
+            const charData = await charRes.json() as { characters?: any[] };
+            const nft = charData.characters?.[0];
+            if (nft) {
+              charName = nft.name;
+              charRace = nft.properties?.race ?? charRace;
+              charClass = nft.properties?.class ?? charClass;
+              charLevel = nft.properties?.level ?? charLevel;
+            }
+          }
+        }
+      } catch {}
+    }
+    if (!charName) charName = "Unknown";
+
     const nearbyDesc = nearby
       .map((e: any) => `${e.name} (${e.type}, L${e.level ?? "?"}, HP ${e.hp}/${e.maxHp})`)
       .join(", ") || "none visible";
@@ -219,8 +263,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
 
-    const systemPrompt = `You are the AI agent for a character in World of Geneva (WoG MMORPG).
-Character: ${entity?.name ?? "Unknown"}, Level ${entity?.level ?? 1} ${entity?.raceId ?? "human"} ${entity?.classId ?? "warrior"}
+    const systemPrompt = `You are ${charName}, a character in World of Geneva (WoG MMORPG).
+Character: ${charName}, Level ${charLevel} ${charRace} ${charClass}
 Zone: ${ref?.zoneId ?? "unknown"}
 HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus}
@@ -228,10 +272,10 @@ Strategy: ${config.strategy}
 Nearby entities: ${nearbyDesc}
 ${inventoryDesc}
 
-You respond in character as the agent's inner voice — short, direct, in-world responses (1-3 sentences max).
+You respond in character as ${charName} — short, direct, in-world responses (1-3 sentences max).
 When the user asks you to change behavior, use the update_focus tool.
 When they ask for an immediate action, use the take_action tool.
-Always stay in character and keep responses under 100 words.`;
+Always stay in character as ${charName} and keep responses under 100 words.`;
 
     // Build message history from config
     const history: Groq.Chat.ChatCompletionMessageParam[] = [

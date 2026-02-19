@@ -9,6 +9,7 @@ import { useZoneList } from "@/hooks/useZoneList";
 export function ZoneSelector(): React.ReactElement {
   const { zones, loading } = useZoneList();
   const [currentZone, setCurrentZone] = React.useState("village-square");
+  const [collapsed, setCollapsed] = React.useState(false);
 
   useGameBridge("zoneChanged", ({ zoneId }) => {
     setCurrentZone(zoneId);
@@ -18,11 +19,20 @@ export function ZoneSelector(): React.ReactElement {
     <Card className="pointer-events-auto absolute bottom-2 left-2 z-30 w-72 md:w-96 md:bottom-4 md:left-4">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
-          Zones
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+              type="button"
+            >
+              {collapsed ? "+" : "−"}
+            </button>
+            Zones
+          </div>
           <Badge variant="secondary">{zones.length}</Badge>
         </CardTitle>
       </CardHeader>
-      <CardContent className="max-h-64 space-y-1 overflow-auto pt-0 text-[9px]">
+      {!collapsed && <CardContent className="max-h-64 space-y-1 overflow-auto pt-0 text-[9px]">
         {loading ? <p className="text-[8px] text-[#9aa7cc]">Loading zones...</p> : null}
         {!loading && zones.length === 0 ? <p className="text-[8px] text-[#9aa7cc]">No zones online.</p> : null}
         {zones.map((zone) => {
@@ -50,7 +60,7 @@ export function ZoneSelector(): React.ReactElement {
             </button>
           );
         })}
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }

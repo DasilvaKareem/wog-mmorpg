@@ -9,7 +9,14 @@ import { getRedis } from "./redis.js";
 class AgentManager {
   private loops = new Map<string, AgentRunner>();
 
-  async start(userWallet: string): Promise<void> {
+  /**
+   * Start an agent loop.
+   * @param waitForFirstTick  If true, waits for the first game tick to succeed
+   *                          before resolving. Throws if the tick fails (bad auth,
+   *                          missing entity, etc). Use true for deploys, false for
+   *                          boot restores.
+   */
+  async start(userWallet: string, waitForFirstTick = false): Promise<void> {
     const key = userWallet.toLowerCase();
     if (this.loops.has(key)) {
       const existing = this.loops.get(key)!;
@@ -22,8 +29,14 @@ class AgentManager {
 
     const runner = new AgentRunner(key);
     this.loops.set(key, runner);
-    await runner.start();
-    console.log(`[AgentManager] Started agent for ${key.slice(0, 8)}`);
+    try {
+      await runner.start(waitForFirstTick);
+      console.log(`[AgentManager] Started agent for ${key.slice(0, 8)}`);
+    } catch (err) {
+      // First tick failed — clean up the dead runner
+      this.loops.delete(key);
+      throw err;
+    }
   }
 
   async stop(userWallet: string): Promise<void> {

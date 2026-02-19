@@ -260,7 +260,7 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
             )}
             {m.role === "agent" && (
               <span>
-                <span className="text-[#54f28b]">[Agent]</span>{" "}
+                <span className="text-[#54f28b]">[{entityName}]</span>{" "}
                 <span className="text-[#9aa7cc]">{m.text}</span>
               </span>
             )}

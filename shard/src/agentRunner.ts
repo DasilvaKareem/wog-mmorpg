@@ -33,15 +33,42 @@ export class AgentRunner {
   private currentZone: string = "village-square";
   private jwtExpiry = 0;
   private jwt: string | null = null;
+  /** Resolves once the first tick succeeds (or rejects if it fails). */
+  private firstTickResult: Promise<void> | null = null;
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
   }
 
-  async start(): Promise<void> {
+  /**
+   * Start the agent loop.
+   * If `waitForFirstTick` is true (default for deploys), waits until the agent
+   * completes one successful tick before resolving — or throws if it fails.
+   */
+  async start(waitForFirstTick = false): Promise<void> {
     this.running = true;
     console.log(`[agent:${this.userWallet.slice(0, 8)}] Loop starting`);
-    void this.loop();
+
+    let resolveFirst: () => void;
+    let rejectFirst: (err: Error) => void;
+    this.firstTickResult = new Promise<void>((res, rej) => {
+      resolveFirst = res;
+      rejectFirst = rej;
+    });
+
+    // If not waiting, swallow first-tick rejections so they don't become
+    // unhandled promise rejections (boot restores are best-effort).
+    if (!waitForFirstTick) {
+      this.firstTickResult.catch((err) => {
+        console.warn(`[agent:${this.userWallet.slice(0, 8)}] First tick failed (non-blocking): ${err.message}`);
+      });
+    }
+
+    void this.loop(resolveFirst!, rejectFirst!);
+
+    if (waitForFirstTick) {
+      await this.firstTickResult;
+    }
   }
 
   stop(): void {
@@ -378,27 +405,64 @@ export class AgentRunner {
 
   // ── Main loop ─────────────────────────────────────────────────────────────
 
-  private async loop(): Promise<void> {
+  private async loop(
+    onFirstTick: () => void,
+    onFirstTickFail: (err: Error) => void,
+  ): Promise<void> {
+    let firstTickDone = false;
+
     while (this.running) {
       try {
         // Read config fresh each tick
         const config = await getAgentConfig(this.userWallet);
         if (!config?.enabled) {
+          if (!firstTickDone) onFirstTickFail(new Error("Agent config disabled"));
           this.running = false;
           break;
         }
 
         // Ensure we're authenticated
         const authed = await this.ensureAuth();
-        if (!authed) { await sleep(TICK_MS * 3); continue; }
+        if (!authed) {
+          if (!firstTickDone) {
+            onFirstTickFail(new Error("Agent auth failed — custodial wallet missing or invalid"));
+            this.running = false;
+            break;
+          }
+          await sleep(TICK_MS * 3);
+          continue;
+        }
 
         // Ensure entity exists
         const hasEntity = await this.ensureEntity();
-        if (!hasEntity) { await sleep(TICK_MS * 2); continue; }
+        if (!hasEntity) {
+          if (!firstTickDone) {
+            onFirstTickFail(new Error("Agent entity not found in any zone — spawn may have failed"));
+            this.running = false;
+            break;
+          }
+          await sleep(TICK_MS * 2);
+          continue;
+        }
 
         // Get entity state
         const entity = await this.getEntityState();
-        if (!entity) { await sleep(TICK_MS); continue; }
+        if (!entity) {
+          if (!firstTickDone) {
+            onFirstTickFail(new Error("Could not read entity state from zone"));
+            this.running = false;
+            break;
+          }
+          await sleep(TICK_MS);
+          continue;
+        }
+
+        // ── First tick verified — agent is alive and well ──
+        if (!firstTickDone) {
+          firstTickDone = true;
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] First tick OK — entity ${this.entityId} in ${this.currentZone}`);
+          onFirstTick();
+        }
 
         const strategy: AgentStrategy = config.strategy ?? "balanced";
 
@@ -419,6 +483,11 @@ export class AgentRunner {
         }
       } catch (err: any) {
         console.warn(`[agent:${this.userWallet.slice(0, 8)}] Loop error: ${err.message?.slice(0, 80)}`);
+        if (!firstTickDone) {
+          onFirstTickFail(err instanceof Error ? err : new Error(String(err.message ?? err)));
+          this.running = false;
+          return;
+        }
       }
 
       await sleep(TICK_MS);
