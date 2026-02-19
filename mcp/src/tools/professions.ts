@@ -294,6 +294,29 @@ export function registerProfessionTools(server: McpServer): void {
   );
 
   server.registerTool(
+    "cooking_consume",
+    {
+      description:
+        "Eat a cooked food item to restore HP. Burns the item from your wallet. Use cooking_list_recipes to see which food items restore how much HP, and items_get_inventory to see what you have.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Current zone ID"),
+        foodTokenId: z.number().describe("Token ID of the cooked food item to consume (e.g. 81=Cooked Meat, 82=Hearty Stew)"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, foodTokenId }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/cooking/consume",
+        { walletAddress, zoneId, entityId, foodTokenId },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
     "quests_complete",
     {
       description: "Complete a quest and claim XP and gold rewards.",

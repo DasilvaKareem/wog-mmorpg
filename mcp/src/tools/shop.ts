@@ -164,4 +164,66 @@ export function registerShopTools(server: McpServer): void {
       };
     }
   );
+
+  server.registerTool(
+    "equipment_unequip",
+    {
+      description:
+        "Remove an equipped item from a slot and return it to your inventory. Slot names: weapon, chest, legs, feet, helm, shoulders, gloves, belt, ring, amulet.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Current zone ID"),
+        slot: z.string().describe("Equipment slot to unequip: weapon, chest, legs, feet, helm, shoulders, gloves, belt, ring, amulet"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, slot }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/equipment/unequip",
+        { walletAddress, entityId, zoneId, slot },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "equipment_find_blacksmiths",
+    {
+      description:
+        "Find all blacksmith NPCs in a zone who can repair your gear. Returns their entity IDs and positions.",
+      inputSchema: {
+        zoneId: z.string().describe("Zone to search for blacksmiths"),
+      },
+    },
+    async ({ zoneId }) => {
+      const data = await shard.get<unknown>(`/equipment/blacksmiths/${zoneId}`);
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
+
+  server.registerTool(
+    "equipment_repair",
+    {
+      description:
+        "Repair all damaged equipped items at a blacksmith NPC. Costs GOLD proportional to damage. Must be in the same zone as the blacksmith. Use equipment_find_blacksmiths to locate one, then navigate_to_npc to reach them first.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        entityId: z.string().describe("Your entity ID"),
+        zoneId: z.string().describe("Zone where the blacksmith is"),
+        npcId: z.string().describe("Blacksmith NPC entity ID from equipment_find_blacksmiths"),
+        slot: z.string().optional().describe("Specific slot to repair (omit to repair all damaged gear)"),
+      },
+    },
+    async ({ sessionId, entityId, zoneId, npcId, slot }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/equipment/repair",
+        { walletAddress, entityId, zoneId, npcId, slot },
+        token
+      );
+      return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+    }
+  );
 }

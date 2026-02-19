@@ -24,6 +24,7 @@ import { registerCraftingRoutes } from "./crafting.js";
 import { registerQuestRoutes } from "./questSystem.js";
 import { registerHerbalismRoutes } from "./herbalism.js";
 import { spawnFlowerNodes } from "./flowerSpawner.js";
+import { spawnNectarNodes } from "./nectarSpawner.js";
 import { registerAlchemyRoutes } from "./alchemy.js";
 import { registerTechniqueRoutes } from "./techniqueRoutes.js";
 import { registerEnchantingRoutes } from "./enchanting.js";
@@ -203,6 +204,7 @@ initMerchantWallets().catch((err) => {
 });
 spawnOreNodes();
 spawnFlowerNodes();
+spawnNectarNodes();
 
 // Mob respawner - check every 5 seconds
 setInterval(() => {

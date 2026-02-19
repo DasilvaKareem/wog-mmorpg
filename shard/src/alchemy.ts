@@ -1,11 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "./zoneRuntime.js";
+import { getAllZones, getOrCreateZone, type Entity } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem } from "./blockchain.js";
+import { mintItem, burnItem, getItemBalance } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
-import { logDiary, narrativeBrew } from "./diary.js";
+import { logDiary, narrativeBrew, narrativeConsume } from "./diary.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { logZoneEvent } from "./zoneEvents.js";
+import { getPotionEffect, type PotionEffect } from "./potionEffects.js";
+import { randomUUID } from "crypto";
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -297,6 +300,118 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
     copperCost: 300,
     brewingTime: 60,
   },
+
+  // --- Tonics (XP Boosts, Tier 5) ---
+  {
+    recipeId: "meadow-tonic",
+    outputTokenId: 140n, // Meadow Tonic (+50% XP, 5 min)
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 31n, quantity: 3 }, // 3x Meadow Lily
+      { tokenId: 34n, quantity: 2 }, // 2x Clover
+      { tokenId: 150n, quantity: 1 }, // 1x Dew Nectar
+    ],
+    copperCost: 20,
+    brewingTime: 15,
+  },
+  {
+    recipeId: "starbloom-tonic",
+    outputTokenId: 141n, // Starbloom Tonic (+100% XP, 10 min)
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 39n, quantity: 2 }, // 2x Starbloom
+      { tokenId: 36n, quantity: 2 }, // 2x Sage
+      { tokenId: 152n, quantity: 2 }, // 2x Moonpetal Nectar
+    ],
+    copperCost: 60,
+    brewingTime: 25,
+  },
+  {
+    recipeId: "dragons-breath-tonic",
+    outputTokenId: 142n, // Dragon's Breath Tonic (+200% XP, 15 min)
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 40n, quantity: 2 }, // 2x Dragon's Breath
+      { tokenId: 39n, quantity: 1 }, // 1x Starbloom
+      { tokenId: 153n, quantity: 2 }, // 2x Emberveil Nectar
+    ],
+    copperCost: 120,
+    brewingTime: 40,
+  },
+  {
+    recipeId: "apprentice-tonic",
+    outputTokenId: 143n, // Apprentice's Tonic (+50% profession XP, 10 min)
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 36n, quantity: 3 }, // 3x Sage
+      { tokenId: 37n, quantity: 2 }, // 2x Mint
+      { tokenId: 151n, quantity: 1 }, // 1x Suncrest Nectar
+    ],
+    copperCost: 35,
+    brewingTime: 20,
+  },
+
+  // --- Resistance Elixirs (required for L25+ zones, Tier 6) ---
+  {
+    recipeId: "fire-resistance-elixir",
+    outputTokenId: 144n, // Fire Resistance Elixir
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 38n, quantity: 2 }, // 2x Moonflower
+      { tokenId: 37n, quantity: 3 }, // 3x Mint
+      { tokenId: 153n, quantity: 1 }, // 1x Emberveil Nectar
+    ],
+    copperCost: 45,
+    brewingTime: 25,
+  },
+  {
+    recipeId: "shadow-resistance-elixir",
+    outputTokenId: 145n, // Shadow Resistance Elixir
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 38n, quantity: 2 }, // 2x Moonflower
+      { tokenId: 35n, quantity: 3 }, // 3x Lavender
+      { tokenId: 154n, quantity: 1 }, // 1x Gloomveil Nectar
+    ],
+    copperCost: 45,
+    brewingTime: 25,
+  },
+  {
+    recipeId: "ice-resistance-elixir",
+    outputTokenId: 146n, // Ice Resistance Elixir
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 40n, quantity: 1 }, // 1x Dragon's Breath
+      { tokenId: 37n, quantity: 2 }, // 2x Mint
+      { tokenId: 151n, quantity: 1 }, // 1x Suncrest Nectar
+    ],
+    copperCost: 55,
+    brewingTime: 30,
+  },
+  {
+    recipeId: "lightning-resistance-elixir",
+    outputTokenId: 147n, // Lightning Resistance Elixir
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 39n, quantity: 2 }, // 2x Starbloom
+      { tokenId: 36n, quantity: 2 }, // 2x Sage
+      { tokenId: 155n, quantity: 1 }, // 1x Stormwell Nectar
+    ],
+    copperCost: 50,
+    brewingTime: 28,
+  },
+  {
+    recipeId: "holy-resistance-elixir",
+    outputTokenId: 148n, // Holy Resistance Elixir
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 38n, quantity: 3 }, // 3x Moonflower
+      { tokenId: 31n, quantity: 3 }, // 3x Meadow Lily
+      { tokenId: 152n, quantity: 1 }, // 1x Moonpetal Nectar
+    ],
+    copperCost: 50,
+    brewingTime: 28,
+  },
 ];
 
 export function getAlchemyRecipeById(recipeId: string): AlchemyRecipe | undefined {
@@ -536,5 +651,163 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
         warning: "Flowers were consumed but potion creation failed - contact support",
       };
     }
+  });
+
+  // ── POST /alchemy/consume — drink a potion/elixir/tonic ───────────
+  server.post<{
+    Body: {
+      walletAddress: string;
+      zoneId: string;
+      entityId: string;
+      tokenId: number;
+    };
+  }>("/alchemy/consume", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const { walletAddress, zoneId, entityId, tokenId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      reply.code(400);
+      return { error: "Invalid wallet address" };
+    }
+
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
+
+    const zone = getOrCreateZone(zoneId);
+    const entity = zone.entities.get(entityId);
+    if (!entity) {
+      reply.code(404);
+      return { error: "Entity not found" };
+    }
+
+    // Look up potion effect
+    const effect = getPotionEffect(BigInt(tokenId));
+    if (!effect) {
+      reply.code(400);
+      return { error: "Item is not a consumable potion, elixir, or tonic" };
+    }
+
+    // Check ownership
+    const balance = await getItemBalance(walletAddress, BigInt(tokenId));
+    if (balance < 1n) {
+      reply.code(400);
+      return { error: "You don't own this item" };
+    }
+
+    // Burn the consumable NFT
+    let burnTx: string;
+    try {
+      burnTx = await burnItem(walletAddress, BigInt(tokenId), 1n);
+    } catch (err) {
+      server.log.error(err, `[alchemy] Failed to burn consumable for ${walletAddress}`);
+      reply.code(500);
+      return { error: "Failed to consume item" };
+    }
+
+    const item = getItemByTokenId(BigInt(tokenId));
+    const itemName = item?.name ?? "Unknown";
+    const results: Record<string, unknown> = { ok: true, consumed: itemName, category: effect.category, tx: burnTx };
+
+    // Apply instant HP restore
+    if (effect.hpRestore && effect.hpRestore > 0) {
+      const healed = Math.min(effect.hpRestore, entity.maxHp - entity.hp);
+      entity.hp = Math.min(entity.maxHp, entity.hp + effect.hpRestore);
+      results.hpRestored = healed;
+      results.currentHp = entity.hp;
+      results.maxHp = entity.maxHp;
+    }
+
+    // Apply instant MP restore
+    if (effect.mpRestore && effect.mpRestore > 0 && entity.essence != null && entity.maxEssence != null) {
+      const restored = Math.min(effect.mpRestore, entity.maxEssence - entity.essence);
+      entity.essence = Math.min(entity.maxEssence, entity.essence + effect.mpRestore);
+      results.mpRestored = restored;
+      results.currentMp = entity.essence;
+      results.maxMp = entity.maxEssence;
+    }
+
+    // Apply buff as ActiveEffect
+    if (effect.buff) {
+      if (!entity.activeEffects) entity.activeEffects = [];
+
+      // Remove existing buff with same name (don't stack, refresh instead)
+      entity.activeEffects = entity.activeEffects.filter((e) => e.name !== effect.buff!.name);
+
+      entity.activeEffects.push({
+        id: randomUUID(),
+        techniqueId: `potion-${tokenId}`,
+        name: effect.buff.name,
+        type: effect.buff.type,
+        casterId: entity.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effect.buff.durationTicks,
+        remainingTicks: effect.buff.durationTicks,
+        ...(effect.buff.statModifiers && { statModifiers: effect.buff.statModifiers }),
+        ...(effect.buff.hotHealPerTick && { hotHealPerTick: effect.buff.hotHealPerTick }),
+        ...(effect.buff.shieldHp && { shieldHp: effect.buff.shieldHp, shieldMaxHp: effect.buff.shieldHp }),
+      });
+
+      results.buffApplied = {
+        name: effect.buff.name,
+        durationSeconds: Math.round(effect.buff.durationTicks / 2), // 500ms ticks
+        ...(effect.buff.statModifiers && { statModifiers: effect.buff.statModifiers }),
+        ...(effect.xpMultiplier && { xpMultiplier: effect.xpMultiplier }),
+        ...(effect.elementResist && { elementResist: effect.elementResist }),
+      };
+    }
+
+    // Log zone event
+    logZoneEvent({
+      zoneId,
+      type: "system",
+      tick: zone.tick,
+      message: `${entity.name} consumed ${itemName}`,
+      entityId: entity.id,
+      entityName: entity.name,
+    });
+
+    // Log diary
+    if (walletAddress) {
+      const hpRestored = (results.hpRestored as number) ?? 0;
+      const { headline, narrative } = narrativeConsume(entity.name, entity.raceId, entity.classId, zoneId, itemName, hpRestored);
+      logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "consume", headline, narrative, {
+        itemName,
+        category: effect.category,
+        ...(effect.buff && { buffName: effect.buff.name }),
+        ...(effect.xpMultiplier && { xpMultiplier: effect.xpMultiplier }),
+      });
+    }
+
+    server.log.info(`[alchemy] ${entity.name} consumed ${itemName} (${effect.category}) → ${burnTx}`);
+    return results;
+  });
+
+  // ── GET /alchemy/consumables — list all consumable effects ─────────
+  server.get("/alchemy/consumables", async () => {
+    const { POTION_EFFECTS } = await import("./potionEffects.js");
+    return Object.values(POTION_EFFECTS).map((effect: PotionEffect) => {
+      const item = getItemByTokenId(effect.tokenId);
+      return {
+        tokenId: effect.tokenId.toString(),
+        name: item?.name ?? "Unknown",
+        category: effect.category,
+        ...(effect.hpRestore && { hpRestore: effect.hpRestore }),
+        ...(effect.mpRestore && { mpRestore: effect.mpRestore }),
+        ...(effect.xpMultiplier && { xpMultiplier: effect.xpMultiplier }),
+        ...(effect.elementResist && { elementResist: effect.elementResist }),
+        ...(effect.buff && {
+          buff: {
+            name: effect.buff.name,
+            type: effect.buff.type,
+            durationSeconds: Math.round(effect.buff.durationTicks / 2),
+            ...(effect.buff.statModifiers && { statModifiers: effect.buff.statModifiers }),
+          },
+        }),
+      };
+    });
   });
 }

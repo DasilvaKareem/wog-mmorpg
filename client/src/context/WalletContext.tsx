@@ -184,14 +184,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     let cancelled = false;
     async function tryAutoConnect() {
       try {
-        const account = await sharedInAppWallet.autoConnect({ client: thirdwebClient });
+        // 8s timeout — if thirdweb session restore hangs, don't block the UI forever
+        const account = await Promise.race([
+          sharedInAppWallet.autoConnect({ client: thirdwebClient }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
+        ]);
         if (cancelled) return;
         await walletManager.syncExternalAddress(account.address);
         if (cancelled) return;
         setAddress(walletManager.address);
         setBalance(walletManager.balance);
       } catch {
-        // No saved session — stay disconnected, which is fine
+        // No saved session or timeout — stay disconnected, which is fine
       } finally {
         if (!cancelled) setLoading(false);
       }

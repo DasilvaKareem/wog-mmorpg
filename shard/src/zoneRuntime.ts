@@ -23,6 +23,8 @@ import {
   findPortalInZone,
   findDestPortalPosition,
 } from "./worldLayout.js";
+import { getActiveXpMultiplier } from "./potionEffects.js";
+import { getAttackMultiplier, getDefenseMultiplier } from "./elementSystem.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "./diary.js";
 
 export interface ZoneState {
@@ -123,6 +125,8 @@ export interface Entity {
   respawnTicks?: number;
   /** Flower node fields. */
   flowerType?: FlowerType;
+  /** Nectar node fields. */
+  nectarType?: string;
   /** Profession trainer fields. */
   teachesProfession?: ProfessionType;
   /** Active quests (players only). */
@@ -360,9 +364,22 @@ function getDefensePower(entity: Entity): number {
   return Math.max(0, Math.round((entity.level ?? 1) * 2));
 }
 
-function computeDamage(attacker: Entity, defender: Entity): number {
+function computeDamage(attacker: Entity, defender: Entity, zoneId?: string): number {
   const raw = getAttackPower(attacker) - getDefensePower(defender) * 0.35;
-  return Math.max(MIN_DAMAGE, Math.round(raw));
+  let damage = Math.max(MIN_DAMAGE, Math.round(raw));
+
+  // Apply elemental modifiers in L25+ zones
+  if (zoneId) {
+    if (attacker.type === "player" && defender.type !== "player") {
+      // Player attacking mob: check attacker resistance → deal less without it
+      damage = Math.round(damage * getAttackMultiplier(zoneId, attacker.activeEffects));
+    } else if (attacker.type !== "player" && defender.type === "player") {
+      // Mob attacking player: check defender resistance → take more without it
+      damage = Math.round(damage * getDefenseMultiplier(zoneId, defender.activeEffects));
+    }
+  }
+
+  return Math.max(MIN_DAMAGE, damage);
 }
 
 function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
@@ -912,7 +929,7 @@ async function worldTick() {
         if (dist > ATTACK_RANGE) {
           moveToward(entity, target.x, target.y);
         } else {
-          const dealt = computeDamage(entity, target);
+          const dealt = computeDamage(entity, target, zone.zoneId);
           applyDamageWithShield(target, dealt);
           applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
           applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
@@ -937,7 +954,7 @@ async function worldTick() {
 
           // Basic retaliation: combatants trade hits while in range.
           if (target.hp > 0 && canRetaliate(target)) {
-            const retaliation = computeDamage(target, entity);
+            const retaliation = computeDamage(target, entity, zone.zoneId);
             applyDamageWithShield(entity, retaliation);
             applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
             applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
@@ -1041,7 +1058,9 @@ async function worldTick() {
             entity.order = undefined;
 
             // Grant XP on kill to reward recipient (only if target was mob/boss, not player)
-            const xpReward = target.xpReward ?? 0;
+            const baseXpReward = target.xpReward ?? 0;
+            const xpMult = getActiveXpMultiplier(xpRecipient.activeEffects);
+            const xpReward = Math.round(baseXpReward * xpMult);
             if (xpReward > 0 && xpRecipient.level != null) {
               xpRecipient.xp = (xpRecipient.xp ?? 0) + xpReward;
 
@@ -1170,7 +1189,7 @@ async function worldTick() {
 
           // Retaliation from target (same as basic attack)
           if (technique.type === "attack" && target.hp > 0 && canRetaliate(target)) {
-            const retaliation = computeDamage(target, entity);
+            const retaliation = computeDamage(target, entity, zone.zoneId);
             applyDamageWithShield(entity, retaliation);
 
             // Update combat tracking for retaliation
@@ -1259,7 +1278,9 @@ async function worldTick() {
             entity.order = undefined;
 
             // Grant XP on kill to reward recipient
-            const xpReward = target.xpReward ?? 0;
+            const techBaseXpReward = target.xpReward ?? 0;
+            const techXpMult = getActiveXpMultiplier(techXpRecipient.activeEffects);
+            const xpReward = Math.round(techBaseXpReward * techXpMult);
             if (xpReward > 0 && techXpRecipient.level != null) {
               techXpRecipient.xp = (techXpRecipient.xp ?? 0) + xpReward;
               let leveled = false;
@@ -1364,6 +1385,17 @@ async function worldTick() {
       if (entity.type === "flower-node" && entity.depletedAtTick != null) {
         const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
         if (ticksSinceDepleted >= (entity.respawnTicks ?? 100)) {
+          entity.charges = entity.maxCharges;
+          entity.depletedAtTick = undefined;
+        }
+      }
+    }
+
+    // Respawn depleted nectar nodes
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "nectar-node" && entity.depletedAtTick != null) {
+        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
+        if (ticksSinceDepleted >= (entity.respawnTicks ?? 150)) {
           entity.charges = entity.maxCharges;
           entity.depletedAtTick = undefined;
         }

@@ -1,4 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { registerAgentTools } from "./tools/agent.js";
 import { registerAuthTools } from "./tools/auth.js";
 import { registerCharacterTools } from "./tools/character.js";
 import { registerCombatTools } from "./tools/combat.js";
@@ -14,10 +15,13 @@ export function createMcpServer(): McpServer {
     version: "0.1.0",
   });
 
+  // Agent decision-support (highest leverage — call these first)
+  registerAgentTools(server);
+
   registerAuthTools(server);
   registerCharacterTools(server);
   registerCombatTools(server);
-  registerNavigationTools(server);  // blocking walk, find_nearby, travel_to_zone
+  registerNavigationTools(server);
   registerWorldTools(server);
   registerShopTools(server);
   registerProfessionTools(server);
