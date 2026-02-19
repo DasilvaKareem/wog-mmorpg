@@ -14,6 +14,8 @@ export type AgentFocus =
   | "enchanting"
   | "crafting"
   | "gathering"
+  | "alchemy"
+  | "cooking"
   | "trading"
   | "idle";
 

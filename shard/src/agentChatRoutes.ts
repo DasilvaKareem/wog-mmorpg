@@ -305,7 +305,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
                 properties: {
                   focus: {
                     type: "string",
-                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "trading", "idle"],
+                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "idle"],
                     description: "The new activity focus",
                   },
                   strategy: {
@@ -326,18 +326,19 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
             type: "function",
             function: {
               name: "take_action",
-              description: "Execute an immediate one-off in-game action",
+              description: "Execute an immediate in-game action: learn a profession, brew a potion, etc. The agent loop will handle the details (walking to NPCs, finding materials).",
               parameters: {
                 type: "object",
                 properties: {
                   action: {
                     type: "string",
-                    enum: ["move", "attack", "gather", "craft", "enchant", "use_item"],
-                    description: "The action to perform",
+                    enum: ["learn_profession"],
+                    description: "The action type",
                   },
-                  params: {
-                    type: "object",
-                    description: "Action-specific parameters",
+                  professionId: {
+                    type: "string",
+                    enum: ["mining", "herbalism", "skinning", "blacksmithing", "alchemy", "cooking", "leatherworking", "jewelcrafting"],
+                    description: "Which profession to learn (for learn_profession action)",
                   },
                 },
                 required: ["action"],
@@ -379,7 +380,36 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
             server.log.info(`[agent/chat] Config updated: focus=${input.focus} strategy=${input.strategy ?? "unchanged"}`);
           } catch {}
         }
-        // take_action is a stub — agent loop picks up new focus on next tick
+        if (toolCall.function.name === "take_action") {
+          try {
+            const input = JSON.parse(toolCall.function.arguments) as {
+              action: string;
+              professionId?: string;
+            };
+            if (input.action === "learn_profession" && input.professionId) {
+              // Get the running agent and tell it to learn
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                const result = await runner.learnProfession(input.professionId);
+                server.log.info(`[agent/chat] learn_profession(${input.professionId}) → ${result}`);
+              }
+              // Also switch focus to match the profession
+              const focusMap: Record<string, AgentFocus> = {
+                alchemy: "alchemy",
+                cooking: "cooking",
+                blacksmithing: "crafting",
+                mining: "gathering",
+                herbalism: "gathering",
+                skinning: "gathering",
+              };
+              const newFocus = focusMap[input.professionId];
+              if (newFocus) {
+                await patchAgentConfig(authWallet, { focus: newFocus });
+                configUpdated = true;
+              }
+            }
+          } catch {}
+        }
       }
     }
 

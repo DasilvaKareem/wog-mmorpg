@@ -137,17 +137,86 @@ export class AgentRunner {
     }
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  private async getZoneState(): Promise<{ entities: Record<string, any>; me: any } | null> {
+    if (!this.api || !this.entityId) return null;
+    const state = await this.api("GET", `/zones/${this.currentZone}`);
+    const entities = state?.entities ?? {};
+    const me = entities[this.entityId];
+    if (!me) return null;
+    return { entities, me };
+  }
+
+  private findNearestEntity(entities: Record<string, any>, me: any, typePredicate: (e: any) => boolean): [string, any] | null {
+    const matches = Object.entries(entities)
+      .filter(([id, e]) => id !== this.entityId && typePredicate(e))
+      .sort(([, a], [, b]) => Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y));
+    return matches[0] as [string, any] ?? null;
+  }
+
+  private async moveToEntity(me: any, target: any): Promise<boolean> {
+    if (!this.api || !this.entityId) return false;
+    const dist = Math.hypot(target.x - me.x, target.y - me.y);
+    if (dist > 80) {
+      await this.api("POST", "/command", {
+        zoneId: this.currentZone, entityId: this.entityId, action: "move",
+        x: target.x, y: target.y,
+      });
+      return true; // still moving
+    }
+    return false; // close enough
+  }
+
+  /**
+   * Learn a profession from a trainer NPC if not already known.
+   * Returns true if learning happened (or already known).
+   */
+  async learnProfession(professionId: string): Promise<boolean> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    try {
+      // Check if already learned
+      const profRes = await this.api("GET", `/professions/${this.custodialWallet}`);
+      const learned: string[] = profRes?.professions ?? [];
+      if (learned.includes(professionId)) return true;
+
+      // Find the trainer for this profession
+      const zs = await this.getZoneState();
+      if (!zs) return false;
+
+      const trainer = this.findNearestEntity(zs.entities, zs.me,
+        (e) => e.type === "profession-trainer" && e.teachesProfession === professionId
+      );
+      if (!trainer) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] No ${professionId} trainer in ${this.currentZone}`);
+        return false;
+      }
+
+      // Move to trainer if needed
+      const moving = await this.moveToEntity(zs.me, trainer[1]);
+      if (moving) return false; // still walking
+
+      // Learn
+      await this.api("POST", "/professions/learn", {
+        walletAddress: this.custodialWallet,
+        zoneId: this.currentZone,
+        entityId: this.entityId,
+        trainerId: trainer[0],
+        professionId,
+      });
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned ${professionId}`);
+      return true;
+    } catch (err: any) {
+      console.debug(`[agent] learnProfession(${professionId}): ${err.message?.slice(0, 60)}`);
+      return false;
+    }
+  }
+
   // ── Focus behaviours ──────────────────────────────────────────────────────
 
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
-      const npcId = Object.entries(state?.entities ?? {}).find(
-        ([, e]: any) => e.type === "quest-giver"
-      )?.[0];
-      if (!npcId) return;
-
       const questsRes = await this.api("GET", `/quests/available/${this.currentZone}/${this.entityId}`);
       const available = questsRes?.quests ?? [];
       if (available.length === 0) {
@@ -175,18 +244,11 @@ export class AgentRunner {
   private async doCombat(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
-      const entities = state?.entities ?? {};
-
-      const me = entities[this.entityId];
-      if (!me) return;
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
 
       const myLevel = me.level ?? 1;
-
-      // How far above our level we'll engage depends on strategy:
-      //   aggressive → attack mobs up to 5 levels above (risk for big XP)
-      //   balanced   → attack mobs up to 2 levels above (current safe default)
-      //   defensive  → only attack mobs at or below our level
       const levelCap: Record<AgentStrategy, number> = {
         aggressive: myLevel + 5,
         balanced:   myLevel + 2,
@@ -194,8 +256,6 @@ export class AgentRunner {
       };
       const maxMobLevel = levelCap[strategy];
 
-      // Aggressive: prefer highest-level mob (most XP)
-      // Balanced/defensive: prefer nearest mob
       const eligible = Object.entries(entities)
         .filter(([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel);
 
@@ -203,26 +263,15 @@ export class AgentRunner {
 
       const sorted = eligible.sort(([, a]: any, [, b]: any) => {
         if (strategy === "aggressive") {
-          // Highest level first (most XP), tie-break by distance
           const levelDiff = (b.level ?? 1) - (a.level ?? 1);
           if (levelDiff !== 0) return levelDiff;
         }
-        // Nearest first
         return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
       });
 
       const [mobId, mob] = sorted[0] as [string, any];
-      const dist = Math.hypot(mob.x - me.x, mob.y - me.y);
-      if (dist > 80) {
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone,
-          entityId: this.entityId,
-          action: "move",
-          x: mob.x,
-          y: mob.y,
-        });
-        return;
-      }
+      const moving = await this.moveToEntity(me, mob);
+      if (moving) return;
 
       await this.api("POST", "/command", {
         zoneId: this.currentZone,
@@ -236,42 +285,38 @@ export class AgentRunner {
   }
 
   private async doGathering(strategy: AgentStrategy): Promise<void> {
-    if (!this.api || !this.entityId) return;
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
-      const entities = state?.entities ?? {};
-      const me = entities[this.entityId];
-      if (!me) return;
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
 
-      // Find nearest ore or flower node
-      const nodes = Object.entries(entities)
-        .filter(([, e]: any) => e.type === "ore-node" || e.type === "flower-node")
-        .sort(([, a]: any, [, b]: any) => {
-          const da = Math.hypot((a as any).x - me.x, (a as any).y - me.y);
-          const db = Math.hypot((b as any).x - me.x, (b as any).y - me.y);
-          return da - db;
-        });
+      const node = this.findNearestEntity(entities, me,
+        (e) => e.type === "ore-node" || e.type === "flower-node"
+      );
+      if (!node) { await this.doCombat(strategy); return; }
 
-      if (nodes.length === 0) { await this.doCombat(strategy); return; }
+      const [nodeId, nodeEntity] = node;
+      const moving = await this.moveToEntity(me, nodeEntity);
+      if (moving) return;
 
-      const [nodeId, node] = nodes[0] as [string, any];
-      const dist = Math.hypot(node.x - me.x, node.y - me.y);
-
-      if (dist > 60) {
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone, entityId: this.entityId, action: "move",
-          x: node.x, y: node.y,
-        });
-        return;
-      }
-
-      if (node.type === "ore-node") {
-        await this.api("POST", "/mining/mine", {
-          zoneId: this.currentZone, playerId: this.entityId, nodeId,
+      if (nodeEntity.type === "ore-node") {
+        // Ensure mining profession learned first
+        await this.learnProfession("mining");
+        await this.api("POST", "/mining/gather", {
+          walletAddress: this.custodialWallet,
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          oreNodeId: nodeId,
         });
       } else {
+        // Ensure herbalism profession learned first
+        await this.learnProfession("herbalism");
         await this.api("POST", "/herbalism/gather", {
-          zoneId: this.currentZone, playerId: this.entityId, nodeId,
+          walletAddress: this.custodialWallet,
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          flowerNodeId: nodeId,
         });
       }
     } catch (err: any) {
@@ -279,34 +324,137 @@ export class AgentRunner {
     }
   }
 
-  private async doEnchanting(strategy: AgentStrategy): Promise<void> {
-    if (!this.api || !this.entityId) return;
+  private async doAlchemy(strategy: AgentStrategy): Promise<void> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
-      const entities = state?.entities ?? {};
-      const me = entities[this.entityId];
-      if (!me) return;
+      // Step 1: Learn alchemy if needed
+      const learned = await this.learnProfession("alchemy");
+      if (!learned) return; // still walking to trainer or no trainer
 
-      const enchanter = Object.entries(entities).find(([, e]: any) => e.type === "enchanter")?.[0];
-      if (!enchanter) { await this.doCombat(strategy); return; }
+      // Step 2: Also learn herbalism (needed for materials)
+      await this.learnProfession("herbalism");
 
-      const enchNode = entities[enchanter] as any;
-      const dist = Math.hypot(enchNode.x - me.x, enchNode.y - me.y);
-      if (dist > 80) {
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone, entityId: this.entityId, action: "move",
-          x: enchNode.x, y: enchNode.y,
-        });
-        return;
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      // Step 3: Find alchemy lab
+      const lab = this.findNearestEntity(entities, me,
+        (e) => e.type === "alchemy-lab"
+      );
+      if (!lab) { await this.doGathering(strategy); return; }
+
+      const [labId, labEntity] = lab;
+      const moving = await this.moveToEntity(me, labEntity);
+      if (moving) return;
+
+      // Step 4: Get recipes and try to brew
+      const recipesRes = await this.api("GET", "/alchemy/recipes");
+      const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+      if (recipes.length === 0) { await this.doGathering(strategy); return; }
+
+      // Try recipes from simplest (tier 1) first
+      for (const recipe of recipes) {
+        try {
+          await this.api("POST", "/alchemy/brew", {
+            walletAddress: this.custodialWallet,
+            zoneId: this.currentZone,
+            entityId: this.entityId,
+            alchemyLabId: labId,
+            recipeId: recipe.recipeId ?? recipe.id,
+          });
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Brewed ${recipe.name ?? recipe.recipeId}`);
+          return;
+        } catch {
+          // Missing materials — try next recipe
+        }
       }
 
+      // No recipes craftable — go gather herbs for materials
+      await this.doGathering(strategy);
+    } catch (err: any) {
+      console.debug(`[agent] alchemy tick: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  private async doCooking(strategy: AgentStrategy): Promise<void> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
+    try {
+      // Learn cooking first
+      const learned = await this.learnProfession("cooking");
+      if (!learned) return;
+
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      // Find campfire
+      const campfire = this.findNearestEntity(entities, me,
+        (e) => e.type === "campfire"
+      );
+      if (!campfire) { await this.doGathering(strategy); return; }
+
+      const [campfireId, campfireEntity] = campfire;
+      const moving = await this.moveToEntity(me, campfireEntity);
+      if (moving) return;
+
+      // Get recipes and try to cook
+      const recipesRes = await this.api("GET", "/cooking/recipes");
+      const recipes = recipesRes?.recipes ?? [];
+      for (const recipe of recipes) {
+        try {
+          await this.api("POST", "/cooking/cook", {
+            walletAddress: this.custodialWallet,
+            zoneId: this.currentZone,
+            entityId: this.entityId,
+            campfireId,
+            recipeId: recipe.recipeId ?? recipe.id,
+          });
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Cooked ${recipe.name ?? recipe.recipeId}`);
+          return;
+        } catch {
+          // Missing materials
+        }
+      }
+
+      // No recipes possible — go gather
+      await this.doGathering(strategy);
+    } catch (err: any) {
+      console.debug(`[agent] cooking tick: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  private async doEnchanting(strategy: AgentStrategy): Promise<void> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
+    try {
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      const altar = this.findNearestEntity(entities, me,
+        (e) => e.type === "enchanting-altar"
+      );
+      if (!altar) { await this.doCombat(strategy); return; }
+
+      const [altarId, altarEntity] = altar;
+      const moving = await this.moveToEntity(me, altarEntity);
+      if (moving) return;
+
       if (me.equipment?.weapon) {
-        await this.api("POST", "/enchanting/enchant", {
+        // Find an enchantment elixir from inventory
+        const inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
+        const elixir = (inv?.items ?? []).find((i: any) =>
+          i.category === "enchantment-elixir" && Number(i.balance) > 0
+        );
+        if (!elixir) { await this.doAlchemy(strategy); return; }
+
+        await this.api("POST", "/enchanting/apply", {
+          walletAddress: this.custodialWallet,
           zoneId: this.currentZone,
-          playerId: this.entityId,
-          enchanterEntityId: enchanter,
-          tokenId: me.equipment.weapon.tokenId,
-          slot: "weapon",
+          entityId: this.entityId,
+          altarId,
+          enchantmentElixirTokenId: Number(elixir.tokenId),
+          equipmentSlot: "weapon",
         });
       } else {
         await this.doGathering(strategy);
@@ -317,53 +465,55 @@ export class AgentRunner {
   }
 
   private async doCrafting(strategy: AgentStrategy): Promise<void> {
-    if (!this.api || !this.entityId) return;
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
-      const entities = state?.entities ?? {};
-      const me = entities[this.entityId];
-      if (!me) return;
+      // Learn blacksmithing first
+      await this.learnProfession("blacksmithing");
 
-      const crafter = Object.entries(entities).find(
-        ([, e]: any) => e.type === "blacksmith" || e.type === "crafting-station"
-      )?.[0];
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
 
-      if (!crafter) { await this.doCombat(strategy); return; }
+      const forge = this.findNearestEntity(entities, me,
+        (e) => e.type === "forge"
+      );
+      if (!forge) { await this.doCombat(strategy); return; }
 
-      const craftNode = entities[crafter] as any;
-      const dist = Math.hypot(craftNode.x - me.x, craftNode.y - me.y);
-      if (dist > 80) {
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone, entityId: this.entityId, action: "move",
-          x: craftNode.x, y: craftNode.y,
-        });
-        return;
+      const [forgeId, forgeEntity] = forge;
+      const moving = await this.moveToEntity(me, forgeEntity);
+      if (moving) return;
+
+      const recipesRes = await this.api("GET", "/crafting/recipes");
+      const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+
+      // Try recipes
+      for (const recipe of recipes) {
+        try {
+          await this.api("POST", "/crafting/forge", {
+            walletAddress: this.custodialWallet,
+            zoneId: this.currentZone,
+            entityId: this.entityId,
+            forgeId,
+            recipeId: recipe.recipeId ?? recipe.id,
+          });
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Crafted ${recipe.name ?? recipe.recipeId}`);
+          return;
+        } catch {
+          // Missing materials
+        }
       }
 
-      const recipes = await this.api("GET", `/crafting/recipes/${this.currentZone}/${this.entityId}`);
-      const available = (recipes?.recipes ?? []).filter((r: any) => r.canCraft);
-      if (available.length === 0) { await this.doGathering(strategy); return; }
-
-      const best = available[available.length - 1];
-      await this.api("POST", "/crafting/forge", {
-        zoneId: this.currentZone,
-        playerId: this.entityId,
-        crafterEntityId: crafter,
-        recipeId: best.id,
-      });
+      // No recipes possible — go gather materials
+      await this.doGathering(strategy);
     } catch (err: any) {
       console.debug(`[agent] crafting tick: ${err.message?.slice(0, 60)}`);
     }
   }
 
   private async handleLowHp(entity: any, strategy: AgentStrategy): Promise<boolean> {
-    if (!this.api || !this.entityId) return false;
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
     const hpPct = entity.hp / (entity.maxHp || 1);
 
-    // HP threshold to trigger healing/flee depends on strategy:
-    //   aggressive → only react at 15% HP (keep fighting until nearly dead)
-    //   balanced   → react at 25% HP
-    //   defensive  → react at 40% HP (heal early, always stay safe)
     const threshold: Record<AgentStrategy, number> = {
       aggressive: 0.15,
       balanced:   0.25,
@@ -372,18 +522,46 @@ export class AgentRunner {
 
     if (hpPct > threshold[strategy]) return false;
 
-    // Try to use a health potion
+    // Check inventory for consumables
+    let inv: any = null;
     try {
-      await this.api("POST", "/cooking/consume", {
-        zoneId: this.currentZone,
-        playerId: this.entityId,
-        tokenId: 3,
-      });
-      console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Used potion at ${Math.round(hpPct * 100)}% HP`);
-      return true;
+      inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
     } catch {}
+    const ownedItems: any[] = inv?.items ?? [];
 
-    // Flee threshold: aggressive never flees, defensive flees earlier
+    // Try food first (cooking/consume)
+    const food = ownedItems.find((i: any) => i.category === "food" && Number(i.balance) > 0);
+    if (food) {
+      try {
+        await this.api("POST", "/cooking/consume", {
+          walletAddress: this.custodialWallet,
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          foodTokenId: Number(food.tokenId),
+        });
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Ate ${food.name} at ${Math.round(hpPct * 100)}% HP`);
+        return true;
+      } catch {}
+    }
+
+    // Try potion (alchemy/consume)
+    const potion = ownedItems.find((i: any) =>
+      (i.category === "potion" || i.category === "consumable") && Number(i.balance) > 0
+    );
+    if (potion) {
+      try {
+        await this.api("POST", "/alchemy/consume", {
+          walletAddress: this.custodialWallet,
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          tokenId: Number(potion.tokenId),
+        });
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Used ${potion.name} at ${Math.round(hpPct * 100)}% HP`);
+        return true;
+      } catch {}
+    }
+
+    // Flee threshold
     const fleeThreshold: Record<AgentStrategy, number> = {
       aggressive: 0.05,
       balanced:   0.15,
@@ -478,6 +656,8 @@ export class AgentRunner {
           case "gathering":  await this.doGathering(strategy); break;
           case "enchanting": await this.doEnchanting(strategy); break;
           case "crafting":   await this.doCrafting(strategy); break;
+          case "alchemy":    await this.doAlchemy(strategy); break;
+          case "cooking":    await this.doCooking(strategy); break;
           case "trading":    await this.doCombat(strategy); break;
           case "idle":       break;
         }

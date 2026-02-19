@@ -57,6 +57,11 @@ class AgentManager {
     return runner?.running === true;
   }
 
+  getRunner(userWallet: string): AgentRunner | null {
+    const key = userWallet.toLowerCase();
+    return this.loops.get(key) ?? null;
+  }
+
   async stopAll(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.loops.size} agents`);
     for (const [key, runner] of this.loops) {

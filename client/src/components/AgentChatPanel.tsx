@@ -310,7 +310,7 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleSend(); }}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void handleSend(); }}
             placeholder={token ? "Direct your agent..." : "Connect wallet to chat..."}
             disabled={!token || sending || authLoading}
             className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[8px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b] disabled:opacity-40"
