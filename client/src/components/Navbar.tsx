@@ -124,13 +124,15 @@ export function Navbar(): React.ReactElement {
   return (
     <nav
       ref={navRef}
-      className={`fixed top-0 left-0 right-0 z-[60] border-b-2 transition-all duration-300 ${
+      className={`fixed top-0 left-0 right-0 z-[60] transition-all duration-300 ${
         isWorldRoute
-          ? "border-[#2a3450]/40 bg-[#0d1526]/70 backdrop-blur-md"
-          : "border-[#2a3450] bg-[#0d1526]"
+          ? "pointer-events-none border-b-0 bg-transparent"
+          : "border-b-2 border-[#2a3450] bg-[#0d1526]"
       }`}
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-0">
+      <div className={`mx-auto flex max-w-6xl items-center justify-between px-4 py-0 ${
+        isWorldRoute ? "pointer-events-auto" : ""
+      }`}>
         {/* Logo */}
         <Link
           to="/"
@@ -286,7 +288,7 @@ export function Navbar(): React.ReactElement {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="border-t-2 border-[#2a3450] bg-[#0d1526] pb-4 md:hidden">
+        <div className="pointer-events-auto border-t-2 border-[#2a3450] bg-[#0d1526] pb-4 md:hidden">
           {MENUS.map((menu) => (
             <div key={menu.label} className="border-b border-[#1e2842]">
               <button
