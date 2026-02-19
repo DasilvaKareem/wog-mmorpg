@@ -68,12 +68,13 @@ export class WalletManager {
   /** Sync an address obtained via social/in-app wallet into WalletManager state */
   async syncExternalAddress(address: string): Promise<void> {
     this._address = address;
-    await fetch(`${API_URL}/wallet/register`, {
+    // Fire-and-forget registration + balance — don't block the wallet becoming "connected"
+    void fetch(`${API_URL}/wallet/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address }),
-    });
-    await this.fetchBalance(true);
+    }).catch(() => {});
+    void this.fetchBalance(true).catch(() => {});
   }
 
   static getInstance(): WalletManager {
@@ -103,13 +104,14 @@ export class WalletManager {
 
     this._address = account.address;
 
-    await fetch(`${API_URL}/wallet/register`, {
+    // Fire-and-forget registration + balance — don't block on these
+    void fetch(`${API_URL}/wallet/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address: this._address }),
-    });
+    }).catch(() => {});
+    void this.fetchBalance().catch(() => {});
 
-    await this.fetchBalance();
     return this._address;
   }
 

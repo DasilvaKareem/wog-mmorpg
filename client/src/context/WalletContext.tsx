@@ -129,13 +129,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       await walletManager.connect();
       setAddress(walletManager.address);
       setBalance(walletManager.balance);
-      await Promise.all([
-        refreshCharacterProgress(),
-        refreshProfessions(),
-      ]);
     } finally {
       setLoading(false);
     }
+    // Load character + professions in background — don't block the UI
+    void Promise.all([refreshCharacterProgress(), refreshProfessions()]);
   }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
   const syncAddress = React.useCallback(async (addr: string) => {
@@ -144,10 +142,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       await walletManager.syncExternalAddress(addr);
       setAddress(walletManager.address);
       setBalance(walletManager.balance);
-      await Promise.all([refreshCharacterProgress(), refreshProfessions()]);
     } finally {
       setLoading(false);
     }
+    // Load character + professions in background — don't block the UI
+    void Promise.all([refreshCharacterProgress(), refreshProfessions()]);
   }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
   const buyItem = React.useCallback(
