@@ -8,6 +8,8 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
+import { getAuthToken } from "@/lib/agentAuth";
+import { API_URL } from "@/config";
 import type { CharacterCreateResponse, CharacterStats } from "@/types";
 
 type View = "list" | "create" | "result" | "detail";
@@ -37,6 +39,8 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   const [submitting, setSubmitting] = React.useState(false);
   const [result, setResult] = React.useState<CharacterCreateResponse | null>(null);
   const [selectedCharacter, setSelectedCharacter] = React.useState<typeof characters[number] | null>(null);
+  const [deploying, setDeploying] = React.useState(false);
+  const [deployResult, setDeployResult] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open || !address) return;
@@ -51,8 +55,42 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
       setClassId("");
       setResult(null);
       setSubmitting(false);
+      setDeployResult(null);
     }
   }, [open]);
+
+  async function handleDeploy(character: typeof characters[number]) {
+    if (!address || deploying) return;
+    setDeploying(true);
+    setDeployResult(null);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) {
+        setDeployResult("Failed to authenticate. Try reconnecting your wallet.");
+        return;
+      }
+      const res = await fetch(`${API_URL}/agent/deploy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          walletAddress: address,
+          characterName: character.name,
+          raceId: character.properties.race,
+          classId: character.properties.class,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
+      } else {
+        setDeployResult(data.error ?? "Deploy failed");
+      }
+    } catch (err: any) {
+      setDeployResult(err.message ?? "Deploy failed");
+    } finally {
+      setDeploying(false);
+    }
+  }
 
   const selectedRace = races.find((race) => race.id === raceId);
   const selectedClass = classes.find((classInfo) => classInfo.id === classId);
@@ -353,9 +391,27 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
               </div>
             ) : null}
 
+            {/* Deploy result message */}
+            {deployResult && (
+              <div className={`border-2 p-2 text-[8px] shadow-[3px_3px_0_0_#000] ${
+                deployResult.startsWith("Deployed")
+                  ? "border-black bg-[#54f28b] text-black"
+                  : "border-black bg-[#ff4d6d] text-black"
+              }`}>
+                {deployResult}
+              </div>
+            )}
+
             <DialogFooter>
-              <Button onClick={() => setView("list")} type="button" variant="secondary">
+              <Button onClick={() => { setView("list"); setDeployResult(null); }} type="button" variant="secondary">
                 Back to List
+              </Button>
+              <Button
+                disabled={deploying}
+                onClick={() => { if (selectedCharacter) void handleDeploy(selectedCharacter); }}
+                type="button"
+              >
+                {deploying ? "Deploying..." : "Deploy Agent"}
               </Button>
             </DialogFooter>
           </div>
