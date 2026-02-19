@@ -319,7 +319,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
                 properties: {
                   focus: {
                     type: "string",
-                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "idle"],
+                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "idle"],
                     description: "The new activity focus",
                   },
                   strategy: {
@@ -340,19 +340,23 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
             type: "function",
             function: {
               name: "take_action",
-              description: "Execute an immediate in-game action: learn a profession, brew a potion, etc. The agent loop will handle the details (walking to NPCs, finding materials).",
+              description: "Execute an immediate in-game action: learn a profession, buy an item from a merchant, or equip an item from inventory.",
               parameters: {
                 type: "object",
                 properties: {
                   action: {
                     type: "string",
-                    enum: ["learn_profession"],
+                    enum: ["learn_profession", "buy_item", "equip_item"],
                     description: "The action type",
                   },
                   professionId: {
                     type: "string",
                     enum: ["mining", "herbalism", "skinning", "blacksmithing", "alchemy", "cooking", "leatherworking", "jewelcrafting"],
                     description: "Which profession to learn (for learn_profession action)",
+                  },
+                  tokenId: {
+                    type: "number",
+                    description: "The item token ID to buy or equip (for buy_item / equip_item actions)",
                   },
                 },
                 required: ["action"],
@@ -399,6 +403,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
             const input = JSON.parse(toolCall.function.arguments) as {
               action: string;
               professionId?: string;
+              tokenId?: number;
             };
             if (input.action === "learn_profession" && input.professionId) {
               // Get the running agent and tell it to learn
@@ -420,6 +425,27 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
               if (newFocus) {
                 await patchAgentConfig(authWallet, { focus: newFocus });
                 configUpdated = true;
+              }
+            }
+            if (input.action === "buy_item" && input.tokenId != null) {
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                const bought = await runner.buyItem(input.tokenId);
+                server.log.info(`[agent/chat] buy_item(${input.tokenId}) → ${bought}`);
+                // Auto-equip after buying
+                if (bought) {
+                  await runner.equipItem(input.tokenId);
+                }
+              }
+              // Switch to shopping focus so the agent loop continues shopping
+              await patchAgentConfig(authWallet, { focus: "shopping" });
+              configUpdated = true;
+            }
+            if (input.action === "equip_item" && input.tokenId != null) {
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                const equipped = await runner.equipItem(input.tokenId);
+                server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
               }
             }
           } catch {}

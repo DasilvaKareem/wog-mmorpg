@@ -212,6 +212,49 @@ export class AgentRunner {
     }
   }
 
+  // ── Public actions (called from chat routes) ────────────────────────────
+
+  /**
+   * Buy an item from the nearest merchant by tokenId.
+   * Returns true if the purchase succeeded.
+   */
+  async buyItem(tokenId: number): Promise<boolean> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    try {
+      await this.api("POST", "/shop/buy", {
+        buyerAddress: this.custodialWallet,
+        tokenId,
+        quantity: 1,
+      });
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Bought tokenId=${tokenId}`);
+      return true;
+    } catch (err: any) {
+      console.debug(`[agent] buyItem(${tokenId}): ${err.message?.slice(0, 60)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Equip an item the agent owns by tokenId.
+   * Returns true if equipping succeeded.
+   */
+  async equipItem(tokenId: number): Promise<boolean> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    try {
+      await this.api("POST", "/equipment/equip", {
+        zoneId: this.currentZone,
+        tokenId,
+        entityId: this.entityId,
+        walletAddress: this.custodialWallet,
+      });
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Equipped tokenId=${tokenId}`);
+      return true;
+    } catch (err: any) {
+      console.debug(`[agent] equipItem(${tokenId}): ${err.message?.slice(0, 60)}`);
+      return false;
+    }
+  }
+
   // ── Focus behaviours ──────────────────────────────────────────────────────
 
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
@@ -510,6 +553,82 @@ export class AgentRunner {
     }
   }
 
+  private async doShopping(strategy: AgentStrategy): Promise<void> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return;
+    try {
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      // Find nearest merchant
+      const merchant = this.findNearestEntity(entities, me,
+        (e) => e.type === "merchant"
+      );
+      if (!merchant) { await this.doCombat(strategy); return; }
+
+      const [merchantId, merchantEntity] = merchant;
+
+      // Move to merchant if not in range
+      const moving = await this.moveToEntity(me, merchantEntity);
+      if (moving) return;
+
+      // Fetch merchant catalog
+      const shopData = await this.api("GET", `/shop/npc/${this.currentZone}/${merchantId}`);
+      const items: any[] = shopData?.items ?? [];
+      if (items.length === 0) { await this.doCombat(strategy); return; }
+
+      // Check current equipment — identify empty slots
+      const equipment = me.equipment ?? {};
+      const emptySlots: string[] = [];
+      for (const slot of ["weapon", "chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"]) {
+        if (!equipment[slot]) emptySlots.push(slot);
+      }
+
+      if (emptySlots.length === 0) {
+        // Fully geared — fall back to combat
+        await this.doCombat(strategy);
+        return;
+      }
+
+      // Check gold balance
+      let inv: any = null;
+      try {
+        inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
+      } catch {}
+      const goldBalance = Number(inv?.gold ?? 0);
+
+      // For each empty slot, find cheapest matching item and buy+equip
+      for (const slot of emptySlots) {
+        // Match items by equipSlot or armorSlot
+        const matching = items.filter((item: any) => {
+          if (slot === "weapon") return item.equipSlot === "weapon" || item.category === "weapon";
+          return item.armorSlot === slot || item.equipSlot === slot;
+        }).sort((a: any, b: any) => (a.copperPrice ?? a.buyPrice ?? 9999) - (b.copperPrice ?? b.buyPrice ?? 9999));
+
+        if (matching.length === 0) continue;
+
+        const cheapest = matching[0];
+        const price = cheapest.copperPrice ?? cheapest.buyPrice ?? 0;
+        if (price > goldBalance) continue;
+
+        // Buy
+        const tokenId = Number(cheapest.tokenId);
+        const bought = await this.buyItem(tokenId);
+        if (!bought) continue;
+
+        // Equip
+        await this.equipItem(tokenId);
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Shopping: bought+equipped ${cheapest.name ?? tokenId} for slot=${slot}`);
+        return; // one purchase per tick to stay responsive
+      }
+
+      // Nothing left to buy or can't afford — fall back to combat
+      await this.doCombat(strategy);
+    } catch (err: any) {
+      console.debug(`[agent] shopping tick: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
   private async handleLowHp(entity: any, strategy: AgentStrategy): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     const hpPct = entity.hp / (entity.maxHp || 1);
@@ -658,7 +777,8 @@ export class AgentRunner {
           case "crafting":   await this.doCrafting(strategy); break;
           case "alchemy":    await this.doAlchemy(strategy); break;
           case "cooking":    await this.doCooking(strategy); break;
-          case "trading":    await this.doCombat(strategy); break;
+          case "trading":    await this.doShopping(strategy); break;
+          case "shopping":   await this.doShopping(strategy); break;
           case "idle":       break;
         }
       } catch (err: any) {

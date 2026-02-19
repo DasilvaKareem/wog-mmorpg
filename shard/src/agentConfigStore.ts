@@ -17,6 +17,7 @@ export type AgentFocus =
   | "alchemy"
   | "cooking"
   | "trading"
+  | "shopping"
   | "idle";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
