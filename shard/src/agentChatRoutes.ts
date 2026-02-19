@@ -78,10 +78,30 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
-    const { characterName, raceId = "human", classId = "warrior" } = request.body;
+
+    // Look up the user's existing character NFT to get the real name/race/class
+    let characterName = request.body.characterName;
+    let raceId = request.body.raceId ?? "human";
+    let classId = request.body.classId ?? "warrior";
+
+    try {
+      const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${authWallet}`);
+      if (charRes.ok) {
+        const charData = await charRes.json() as { characters?: any[] };
+        const nft = charData.characters?.[0];
+        if (nft) {
+          characterName = nft.name ?? characterName;
+          raceId = nft.properties?.race ?? nft.raceId ?? raceId;
+          classId = nft.properties?.class ?? nft.classId ?? classId;
+          server.log.info(`[agent/deploy] Using NFT character: ${characterName} (${raceId}/${classId})`);
+        }
+      }
+    } catch {
+      // Fallback to whatever was passed in body
+    }
 
     if (!characterName) {
-      return reply.code(400).send({ error: "characterName is required" });
+      return reply.code(400).send({ error: "No character found for this wallet. Create a character first." });
     }
 
     try {

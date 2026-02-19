@@ -63,11 +63,12 @@ interface OnboardingFlowProps {
 
 export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactElement {
   const navigate = useNavigate();
-  const { syncAddress } = useWalletContext();
+  const { syncAddress, address: walletAddress } = useWalletContext();
 
-  const [step, setStep] = React.useState<Step>("login");
+  // If already connected, skip login and go straight to character creation
+  const [step, setStep] = React.useState<Step>(walletAddress ? "create-char" : "login");
   const [error, setError] = React.useState<string | null>(null);
-  const [connectedAddress, setConnectedAddress] = React.useState<string | null>(null);
+  const [connectedAddress, setConnectedAddress] = React.useState<string | null>(walletAddress);
 
   // Email flow
   const [email, setEmail] = React.useState("");

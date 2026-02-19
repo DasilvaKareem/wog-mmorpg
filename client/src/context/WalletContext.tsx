@@ -187,7 +187,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
         // 8s timeout — if thirdweb session restore hangs, don't block the UI forever
         const account = await Promise.race([
           sharedInAppWallet.autoConnect({ client: thirdwebClient }),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 8000)),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), 2000)),
         ]);
         if (cancelled) return;
         await walletManager.syncExternalAddress(account.address);

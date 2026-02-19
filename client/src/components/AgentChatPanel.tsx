@@ -116,10 +116,7 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           walletAddress,
-          // Use existing entity name if available; agentCharacterSetup is idempotent
-          characterName: status?.entity?.name ?? "Adventurer",
-          raceId: "human",
-          classId: "warrior",
+          // Server will look up the user's character NFT automatically
         }),
       });
       const data = await res.json();
