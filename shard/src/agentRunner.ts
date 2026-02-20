@@ -35,6 +35,11 @@ export class AgentRunner {
   private jwt: string | null = null;
   /** Resolves once the first tick succeeds (or rejects if it fails). */
   private firstTickResult: Promise<void> | null = null;
+  /** Tracks ticks since last focus change — used for self-adaptation */
+  private ticksSinceFocusChange = 0;
+  private lastFocus: AgentFocus = "questing";
+  /** Tracks consecutive combat fallback ticks */
+  private combatFallbackCount = 0;
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
@@ -700,6 +705,47 @@ export class AgentRunner {
     return false;
   }
 
+  // ── Self-adaptation ────────────────────────────────────────────────────────
+
+  /**
+   * Periodically check the agent's situation and auto-adjust behavior.
+   * Returns true if an adaptation action was taken this tick.
+   */
+  private async checkSelfAdaptation(entity: any, strategy: AgentStrategy): Promise<boolean> {
+    if (!this.api || !this.custodialWallet) return false;
+    try {
+      const hpPct = entity.hp / (entity.maxHp || 1);
+
+      // Check inventory
+      let inv: any = null;
+      try { inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`); } catch {}
+      const items: any[] = inv?.items ?? [];
+      const gold = Number(inv?.gold ?? 0);
+      const hasFood = items.some((i: any) => i.category === "food" && Number(i.balance) > 0);
+      const hasPotions = items.some((i: any) => (i.category === "potion" || i.category === "consumable") && Number(i.balance) > 0);
+      const equipment = entity.equipment ?? {};
+      const hasWeapon = Boolean(equipment.weapon);
+
+      // Priority 1: No weapon + have gold → go shopping
+      if (!hasWeapon && gold >= 10) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no weapon, going shopping`);
+        await patchAgentConfig(this.userWallet, { focus: "shopping" });
+        return true;
+      }
+
+      // Priority 2: Low on consumables after combat → brew/cook some
+      if (!hasFood && !hasPotions && hpPct < 0.7) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables, going to cook/brew`);
+        await patchAgentConfig(this.userWallet, { focus: "cooking" });
+        return true;
+      }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   // ── Main loop ─────────────────────────────────────────────────────────────
 
   private async loop(
@@ -762,13 +808,29 @@ export class AgentRunner {
         }
 
         const strategy: AgentStrategy = config.strategy ?? "balanced";
+        const focus: AgentFocus = config.focus;
+
+        // Track focus changes
+        if (focus !== this.lastFocus) {
+          this.lastFocus = focus;
+          this.ticksSinceFocusChange = 0;
+          this.combatFallbackCount = 0;
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Focus changed → ${focus} (${strategy})`);
+        }
+        this.ticksSinceFocusChange++;
 
         // Handle low HP first (strategy affects thresholds)
         const usedPotion = await this.handleLowHp(entity, strategy);
         if (usedPotion) { await sleep(TICK_MS); continue; }
 
+        // ── Self-adaptation: periodically check if we should auto-adjust ──
+        // Every 30 ticks (~36s), check situational needs
+        if (focus !== "idle" && this.ticksSinceFocusChange % 30 === 0 && this.ticksSinceFocusChange > 0) {
+          const adapted = await this.checkSelfAdaptation(entity, strategy);
+          if (adapted) { await sleep(TICK_MS); continue; }
+        }
+
         // Execute focus (strategy flows through to combat decisions)
-        const focus: AgentFocus = config.focus;
         switch (focus) {
           case "questing":   await this.doQuesting(strategy); break;
           case "combat":     await this.doCombat(strategy); break;

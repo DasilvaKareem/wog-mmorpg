@@ -277,21 +277,22 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
 
-    const systemPrompt = `You are ${charName}, a character in World of Geneva (WoG MMORPG).
-Character: ${charName}, Level ${charLevel} ${charRace} ${charClass}
-Zone: ${ref?.zoneId ?? "unknown"}
-HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
-Current focus: ${config.focus}
-Strategy: ${config.strategy}
-Nearby entities: ${nearbyDesc}
+    const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva.
+Zone: ${ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
+Current focus: ${config.focus} | Strategy: ${config.strategy}
+Nearby: ${nearbyDesc}
 ${inventoryDesc}
 
-You respond in character as ${charName} — short, direct, in-world responses (1-3 sentences max).
-When the user asks you to change behavior, use the update_focus tool.
-When they ask for an immediate action, use the take_action tool.
-Always stay in character as ${charName} and keep responses under 100 words.`;
+RULES:
+1. Respond in character as ${charName} — 1-2 sentences max, stay in-world.
+2. ALWAYS call update_focus when the user wants you to change what you're doing. ANY request to fight, gather, craft, shop, brew, cook, quest, or idle MUST trigger update_focus. Do NOT just say you'll do it — call the tool.
+3. Call take_action for one-off actions: learning a profession, buying a specific item, equipping gear.
+4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
 
-    // Build message history from config
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, idle
+Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
+
+    // Build message history — include tool action context so the LLM knows what it did
     const history: Groq.Chat.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       ...config.chatHistory.slice(-10).map((m) => ({
@@ -305,7 +306,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
     let groqResponse: Groq.Chat.ChatCompletion;
     try {
       groqResponse = await groq.chat.completions.create({
-        model: "openai/gpt-oss-120b",
+        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
         max_tokens: 300,
         messages: history,
         tools: [
@@ -374,6 +375,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
     // Process response
     let configUpdated = false;
     let agentResponse = "";
+    const actionsTaken: string[] = [];
 
     const choice = groqResponse.choices[0];
     if (choice?.message?.content) {
@@ -395,6 +397,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
             if (input.targetZone) patch.targetZone = input.targetZone;
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
+            actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}]`);
             server.log.info(`[agent/chat] Config updated: focus=${input.focus} strategy=${input.strategy ?? "unchanged"}`);
           } catch {}
         }
@@ -406,13 +409,12 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
               tokenId?: number;
             };
             if (input.action === "learn_profession" && input.professionId) {
-              // Get the running agent and tell it to learn
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const result = await runner.learnProfession(input.professionId);
+                actionsTaken.push(`[${result ? "learned" : "learning"} ${input.professionId}]`);
                 server.log.info(`[agent/chat] learn_profession(${input.professionId}) → ${result}`);
               }
-              // Also switch focus to match the profession
               const focusMap: Record<string, AgentFocus> = {
                 alchemy: "alchemy",
                 cooking: "cooking",
@@ -432,12 +434,13 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
               if (runner) {
                 const bought = await runner.buyItem(input.tokenId);
                 server.log.info(`[agent/chat] buy_item(${input.tokenId}) → ${bought}`);
-                // Auto-equip after buying
                 if (bought) {
                   await runner.equipItem(input.tokenId);
+                  actionsTaken.push(`[bought & equipped item #${input.tokenId}]`);
+                } else {
+                  actionsTaken.push(`[failed to buy item #${input.tokenId}]`);
                 }
               }
-              // Switch to shopping focus so the agent loop continues shopping
               await patchAgentConfig(authWallet, { focus: "shopping" });
               configUpdated = true;
             }
@@ -445,6 +448,7 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const equipped = await runner.equipItem(input.tokenId);
+                actionsTaken.push(`[${equipped ? "equipped" : "failed to equip"} item #${input.tokenId}]`);
                 server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
               }
             }
@@ -453,14 +457,23 @@ Always stay in character as ${charName} and keep responses under 100 words.`;
       }
     }
 
-    if (!agentResponse) {
-      agentResponse = "Got it. I'll adjust my strategy accordingly.";
+    // Build the response text — include tool action context so future LLM calls
+    // know what was actually done (the LLM only sees chat history, not tool calls)
+    if (!agentResponse && actionsTaken.length > 0) {
+      agentResponse = "Done.";
+    } else if (!agentResponse) {
+      agentResponse = "Got it.";
     }
+
+    // Append action tags to the saved history so the LLM has context next time
+    const savedResponse = actionsTaken.length > 0
+      ? `${agentResponse} ${actionsTaken.join(" ")}`
+      : agentResponse;
 
     // Persist chat history
     const ts = Date.now();
     await appendChatMessage(authWallet, { role: "user", text: message, ts });
-    await appendChatMessage(authWallet, { role: "agent", text: agentResponse, ts: ts + 1 });
+    await appendChatMessage(authWallet, { role: "agent", text: savedResponse, ts: ts + 1 });
 
     return reply.send({
       response: agentResponse,
