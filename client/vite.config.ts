@@ -64,6 +64,8 @@ export default defineConfig({
       "/chunks": API_URL,
       "/dungeon": API_URL,
       "/essence-technique": API_URL,
+      "/agent": API_URL,
+      "/diary": API_URL,
     },
   },
 });

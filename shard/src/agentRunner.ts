@@ -9,11 +9,13 @@ import {
   getAgentEntityRef,
   setAgentEntityRef,
   patchAgentConfig,
+  appendChatMessage,
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
 import { exportCustodialWallet } from "./custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "./authHelper.js";
+import { ZONE_LEVEL_REQUIREMENTS } from "./worldLayout.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 const TICK_MS = 1200;
@@ -43,6 +45,13 @@ export class AgentRunner {
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
+  }
+
+  /** Log an activity message to the agent's chat history (visible to spectators). */
+  private async logActivity(text: string): Promise<void> {
+    try {
+      await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
+    } catch {}
   }
 
   /**
@@ -110,18 +119,22 @@ export class AgentRunner {
     this.entityId = ref.entityId;
     this.currentZone = ref.zoneId;
 
-    // Check entity still alive
+    // Check entity still in expected zone
     try {
       const state = await this.api("GET", `/zones/${this.currentZone}`);
       if (state?.entities?.[this.entityId]) return true;
     } catch {}
 
-    // Scan all zones
+    // Entity not in expected zone — scan all zones (handles server-side transitions)
     try {
       const zones = await this.api("GET", "/state");
       for (const [zid, zdata] of Object.entries(zones.zones ?? {})) {
         const ents = (zdata as any).entities ?? {};
         if (ents[this.entityId]) {
+          if (zid !== this.currentZone) {
+            console.log(`[agent:${this.userWallet.slice(0, 8)}] Zone changed: ${this.currentZone} → ${zid} (server-side transition)`);
+            void this.logActivity(`Zone transition: ${this.currentZone} → ${zid}`);
+          }
           this.currentZone = zid;
           await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: zid });
           return true;
@@ -210,6 +223,7 @@ export class AgentRunner {
         professionId,
       });
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned ${professionId}`);
+      void this.logActivity(`Learned profession: ${professionId}`);
       return true;
     } catch (err: any) {
       console.debug(`[agent] learnProfession(${professionId}): ${err.message?.slice(0, 60)}`);
@@ -232,6 +246,7 @@ export class AgentRunner {
         quantity: 1,
       });
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Bought tokenId=${tokenId}`);
+      void this.logActivity(`Bought item (token #${tokenId})`);
       return true;
     } catch (err: any) {
       console.debug(`[agent] buyItem(${tokenId}): ${err.message?.slice(0, 60)}`);
@@ -253,6 +268,7 @@ export class AgentRunner {
         walletAddress: this.custodialWallet,
       });
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Equipped tokenId=${tokenId}`);
+      void this.logActivity(`Equipped item (token #${tokenId})`);
       return true;
     } catch (err: any) {
       console.debug(`[agent] equipItem(${tokenId}): ${err.message?.slice(0, 60)}`);
@@ -303,6 +319,7 @@ export class AgentRunner {
       if (result?.ok) {
         const repaired = result.repairs?.map((r: any) => r.name).join(", ") ?? "gear";
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Repaired ${repaired} (cost: ${result.totalCost}g)`);
+        void this.logActivity(`Repaired ${repaired} (${result.totalCost}g)`);
       }
       return true;
     } catch (err: any) {
@@ -395,6 +412,7 @@ export class AgentRunner {
         action: "attack",
         targetId: mobId,
       });
+      void this.logActivity(`Attacking ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
     } catch (err: any) {
       console.debug(`[agent] combat tick: ${err.message?.slice(0, 60)}`);
     }
@@ -425,6 +443,7 @@ export class AgentRunner {
           entityId: this.entityId,
           oreNodeId: nodeId,
         });
+        void this.logActivity(`Gathered ore from ${nodeEntity.name ?? "ore node"}`);
       } else {
         // Ensure herbalism profession learned first
         await this.learnProfession("herbalism");
@@ -434,6 +453,7 @@ export class AgentRunner {
           entityId: this.entityId,
           flowerNodeId: nodeId,
         });
+        void this.logActivity(`Gathered herb from ${nodeEntity.name ?? "flower node"}`);
       }
     } catch (err: any) {
       console.debug(`[agent] gathering tick: ${err.message?.slice(0, 60)}`);
@@ -480,6 +500,7 @@ export class AgentRunner {
             recipeId: recipe.recipeId ?? recipe.id,
           });
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Brewed ${recipe.name ?? recipe.recipeId}`);
+          void this.logActivity(`Brewed ${recipe.name ?? recipe.recipeId}`);
           return;
         } catch {
           // Missing materials — try next recipe
@@ -527,6 +548,7 @@ export class AgentRunner {
             recipeId: recipe.recipeId ?? recipe.id,
           });
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Cooked ${recipe.name ?? recipe.recipeId}`);
+          void this.logActivity(`Cooked ${recipe.name ?? recipe.recipeId}`);
           return;
         } catch {
           // Missing materials
@@ -613,6 +635,7 @@ export class AgentRunner {
             recipeId: recipe.recipeId ?? recipe.id,
           });
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Crafted ${recipe.name ?? recipe.recipeId}`);
+          void this.logActivity(`Crafted ${recipe.name ?? recipe.recipeId}`);
           return;
         } catch {
           // Missing materials
@@ -692,6 +715,7 @@ export class AgentRunner {
         // Equip
         await this.equipItem(tokenId);
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Shopping: bought+equipped ${cheapest.name ?? tokenId} for slot=${slot}`);
+        void this.logActivity(`Bought & equipped ${cheapest.name ?? `token #${tokenId}`} (${slot})`);
         return; // one purchase per tick to stay responsive
       }
 
@@ -700,6 +724,139 @@ export class AgentRunner {
     } catch (err: any) {
       console.debug(`[agent] shopping tick: ${err.message?.slice(0, 60)}`);
     }
+  }
+
+  /**
+   * Travel to config.targetZone using the /command travel action.
+   * The server handles edge-walking vs portal routing internally.
+   * Falls back to combat if no targetZone is set or already in the target zone.
+   */
+  private async doTravel(strategy: AgentStrategy): Promise<void> {
+    if (!this.api || !this.entityId) return;
+    try {
+      const config = await getAgentConfig(this.userWallet);
+      const targetZone = config?.targetZone;
+
+      if (!targetZone || targetZone === this.currentZone) {
+        // Already arrived or no target — switch back to questing
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at ${this.currentZone}, switching to questing`);
+        void this.logActivity(`Arrived at ${this.currentZone}, resuming questing`);
+        await patchAgentConfig(this.userWallet, { focus: "questing", targetZone: undefined });
+        return;
+      }
+
+      // Fetch neighbors to find a path
+      const neighborsRes = await this.api("GET", `/neighbors/${this.currentZone}`);
+      const neighbors: Array<{ zone: string; levelReq: number; type: string }> =
+        neighborsRes?.neighbors ?? [];
+
+      // Direct connection?
+      const direct = neighbors.find((n) => n.zone === targetZone);
+      if (direct) {
+        const myLevel = (await this.getEntityState())?.level ?? 1;
+        if (myLevel < direct.levelReq) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${direct.levelReq} for ${targetZone}, currently ${myLevel} — grinding`);
+          await this.doCombat(strategy);
+          return;
+        }
+
+        // Issue travel command — server handles edge-walk vs portal routing
+        await this.api("POST", "/command", {
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          action: "travel",
+          targetZone,
+        });
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Traveling from ${this.currentZone} → ${targetZone}`);
+        void this.logActivity(`Traveling ${this.currentZone} → ${targetZone}`);
+        return;
+      }
+
+      // Not directly connected — find the next zone on the path toward targetZone
+      const nextZone = this.findNextZoneOnPath(neighbors, targetZone);
+      if (nextZone) {
+        const myLevel = (await this.getEntityState())?.level ?? 1;
+        const nextLevelReq = ZONE_LEVEL_REQUIREMENTS[nextZone] ?? 1;
+        if (myLevel < nextLevelReq) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${nextLevelReq} for ${nextZone}, currently ${myLevel} — grinding`);
+          await this.doCombat(strategy);
+          return;
+        }
+
+        await this.api("POST", "/command", {
+          zoneId: this.currentZone,
+          entityId: this.entityId,
+          action: "travel",
+          targetZone: nextZone,
+        });
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Traveling ${this.currentZone} → ${nextZone} (en route to ${targetZone})`);
+        void this.logActivity(`Traveling ${this.currentZone} → ${nextZone} (en route to ${targetZone})`);
+        return;
+      }
+
+      // Can't find a path — fall back to combat
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] No path from ${this.currentZone} to ${targetZone}`);
+      await this.doCombat(strategy);
+    } catch (err: any) {
+      console.debug(`[agent] travel tick: ${err.message?.slice(0, 80)}`);
+    }
+  }
+
+  /**
+   * Simple BFS to find the next hop from current neighbors toward a target zone.
+   * Uses the zone connection graph via /neighbors endpoints.
+   */
+  private findNextZoneOnPath(
+    currentNeighbors: Array<{ zone: string }>,
+    targetZone: string,
+  ): string | null {
+    // Build a simple zone ordering based on the known world graph.
+    // The zones form a mostly linear chain with some branches.
+    const ZONE_ORDER: Record<string, number> = {
+      "village-square": 0,
+      "wild-meadow": 1,
+      "dark-forest": 2,
+      "auroral-plains": 3,
+      "emerald-woods": 4,
+      "viridian-range": 5,
+      "moondancer-glade": 6,
+      "felsrock-citadel": 7,
+      "lake-lumina": 8,
+      "azurshard-chasm": 9,
+    };
+
+    const targetOrder = ZONE_ORDER[targetZone] ?? -1;
+    const currentOrder = ZONE_ORDER[this.currentZone] ?? -1;
+
+    if (targetOrder < 0 || currentOrder < 0) return null;
+
+    // Pick the neighbor that's closest to the target in the ordering
+    let bestZone: string | null = null;
+    let bestDist = Infinity;
+    for (const n of currentNeighbors) {
+      const nOrder = ZONE_ORDER[n.zone] ?? -1;
+      if (nOrder < 0) continue;
+      const dist = Math.abs(nOrder - targetOrder);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestZone = n.zone;
+      }
+    }
+    return bestZone;
+  }
+
+  /**
+   * Find the highest-level zone the agent qualifies for.
+   */
+  private findNextZoneForLevel(level: number): string | null {
+    const zonesByLevel = Object.entries(ZONE_LEVEL_REQUIREMENTS)
+      .sort(([, a], [, b]) => a - b);
+
+    let bestZone: string | null = null;
+    for (const [zone, req] of zonesByLevel) {
+      if (level >= req) bestZone = zone;
+    }
+    return bestZone;
   }
 
   private async handleLowHp(entity: any, strategy: AgentStrategy): Promise<boolean> {
@@ -732,6 +889,7 @@ export class AgentRunner {
           foodTokenId: Number(food.tokenId),
         });
         console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Ate ${food.name} at ${Math.round(hpPct * 100)}% HP`);
+        void this.logActivity(`Ate ${food.name} (${Math.round(hpPct * 100)}% HP)`);
         return true;
       } catch {}
     }
@@ -749,6 +907,7 @@ export class AgentRunner {
           tokenId: Number(potion.tokenId),
         });
         console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Used ${potion.name} at ${Math.round(hpPct * 100)}% HP`);
+        void this.logActivity(`Used ${potion.name} (${Math.round(hpPct * 100)}% HP)`);
         return true;
       } catch {}
     }
@@ -769,6 +928,7 @@ export class AgentRunner {
         y: 150,
       });
       console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Fleeing at ${Math.round(hpPct * 100)}% HP`);
+      void this.logActivity(`Fleeing! (${Math.round(hpPct * 100)}% HP)`);
     }
     return false;
   }
@@ -797,6 +957,7 @@ export class AgentRunner {
       // Priority 1: No weapon + have gold → go shopping
       if (!hasWeapon && gold >= 10) {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no weapon, going shopping`);
+        void this.logActivity("No weapon equipped — heading to shop");
         await patchAgentConfig(this.userWallet, { focus: "shopping" });
         return true;
       }
@@ -804,8 +965,23 @@ export class AgentRunner {
       // Priority 2: Low on consumables after combat → brew/cook some
       if (!hasFood && !hasPotions && hpPct < 0.7) {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables, going to cook/brew`);
+        void this.logActivity("Out of consumables — going to cook");
         await patchAgentConfig(this.userWallet, { focus: "cooking" });
         return true;
+      }
+
+      // Priority 3: Outleveled current zone → travel to next zone
+      const myLevel = entity.level ?? 1;
+      const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[this.currentZone] ?? 1;
+      // If agent is 5+ levels above the zone's requirement, find the next zone
+      if (myLevel >= currentZoneLevelReq + 5) {
+        const nextZone = this.findNextZoneForLevel(myLevel);
+        if (nextZone && nextZone !== this.currentZone) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: level ${myLevel} outleveled ${this.currentZone} (req ${currentZoneLevelReq}), traveling to ${nextZone}`);
+          void this.logActivity(`Outleveled ${this.currentZone} (Lv${myLevel}) — traveling to ${nextZone}`);
+          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: nextZone });
+          return true;
+        }
       }
 
       return false;
@@ -884,6 +1060,7 @@ export class AgentRunner {
           this.ticksSinceFocusChange = 0;
           this.combatFallbackCount = 0;
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Focus changed → ${focus} (${strategy})`);
+          void this.logActivity(`Switching focus → ${focus}`);
         }
         this.ticksSinceFocusChange++;
 
@@ -902,18 +1079,25 @@ export class AgentRunner {
         const repairing = await this.handleRepair(entity);
         if (repairing) { await sleep(TICK_MS); continue; }
 
-        // Execute focus (strategy flows through to combat decisions)
-        switch (focus) {
-          case "questing":   await this.doQuesting(strategy); break;
-          case "combat":     await this.doCombat(strategy); break;
-          case "gathering":  await this.doGathering(strategy); break;
-          case "enchanting": await this.doEnchanting(strategy); break;
-          case "crafting":   await this.doCrafting(strategy); break;
-          case "alchemy":    await this.doAlchemy(strategy); break;
-          case "cooking":    await this.doCooking(strategy); break;
-          case "trading":    await this.doShopping(strategy); break;
-          case "shopping":   await this.doShopping(strategy); break;
-          case "idle":       break;
+        // If targetZone is set and we're not there yet, override focus to travel
+        if (config.targetZone && config.targetZone !== this.currentZone && focus !== "traveling") {
+          await patchAgentConfig(this.userWallet, { focus: "traveling" });
+          await this.doTravel(strategy);
+        } else {
+          // Execute focus (strategy flows through to combat decisions)
+          switch (focus) {
+            case "questing":   await this.doQuesting(strategy); break;
+            case "combat":     await this.doCombat(strategy); break;
+            case "gathering":  await this.doGathering(strategy); break;
+            case "enchanting": await this.doEnchanting(strategy); break;
+            case "crafting":   await this.doCrafting(strategy); break;
+            case "alchemy":    await this.doAlchemy(strategy); break;
+            case "cooking":    await this.doCooking(strategy); break;
+            case "trading":    await this.doShopping(strategy); break;
+            case "shopping":   await this.doShopping(strategy); break;
+            case "traveling":  await this.doTravel(strategy); break;
+            case "idle":       break;
+          }
         }
       } catch (err: any) {
         console.warn(`[agent:${this.userWallet.slice(0, 8)}] Loop error: ${err.message?.slice(0, 80)}`);

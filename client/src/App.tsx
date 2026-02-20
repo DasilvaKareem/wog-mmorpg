@@ -25,6 +25,7 @@ import { ChatLog } from "@/components/ChatLog";
 import { AgentChatPanel } from "@/components/AgentChatPanel";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { WorldMap } from "@/components/WorldMap";
+import { FarcasterMiniApp } from "@/pages/FarcasterMiniApp";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
@@ -83,6 +84,7 @@ function GameWorld(): React.ReactElement {
       {address ? (
         <AgentChatPanel
           walletAddress={address}
+          currentZone={currentZone}
           className="absolute bottom-4 right-4 z-30 hidden md:flex"
         />
       ) : (
@@ -134,13 +136,24 @@ function AppShell(): React.ReactElement {
 export default function App(): React.ReactElement {
   return (
     <BrowserRouter>
-      <GameProvider>
-        <WalletProvider>
-          <ToastProvider>
-            <AppShell />
-          </ToastProvider>
-        </WalletProvider>
-      </GameProvider>
+      <Routes>
+        {/* Farcaster Mini App — standalone, no WalletProvider/GameProvider needed */}
+        <Route path="/farcaster" element={<FarcasterMiniApp />} />
+
+        {/* Main app shell — everything else */}
+        <Route
+          path="*"
+          element={
+            <GameProvider>
+              <WalletProvider>
+                <ToastProvider>
+                  <AppShell />
+                </ToastProvider>
+              </WalletProvider>
+            </GameProvider>
+          }
+        />
+      </Routes>
     </BrowserRouter>
   );
 }

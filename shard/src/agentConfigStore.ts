@@ -18,12 +18,13 @@ export type AgentFocus =
   | "cooking"
   | "trading"
   | "shopping"
+  | "traveling"
   | "idle";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 
 export interface ChatMessage {
-  role: "user" | "agent";
+  role: "user" | "agent" | "activity";
   text: string;
   ts: number;
 }

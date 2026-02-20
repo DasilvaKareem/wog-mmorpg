@@ -1,15 +1,17 @@
 /**
  * AgentChatPanel — 8-bit terminal style UI for directing your AI agent
  * Shows agent status, chat history, and provides input to send instructions.
+ * Includes a tabbed view: Agent chat + Zone Log.
  */
 
 import * as React from "react";
 import { API_URL } from "@/config";
 import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
+import { ChatLog } from "@/components/ChatLog";
 
 interface ChatMessage {
-  role: "user" | "agent" | "system";
+  role: "user" | "agent" | "activity" | "system";
   text: string;
   ts: number;
 }
@@ -20,7 +22,7 @@ interface AgentStatusData {
     enabled: boolean;
     focus: string;
     strategy: string;
-    chatHistory: { role: "user" | "agent"; text: string; ts: number }[];
+    chatHistory: { role: "user" | "agent" | "activity"; text: string; ts: number }[];
   } | null;
   entityId: string | null;
   zoneId: string | null;
@@ -32,12 +34,15 @@ interface AgentStatusData {
   } | null;
 }
 
+type Tab = "agent" | "zone";
+
 interface AgentChatPanelProps {
   walletAddress: string;
+  currentZone?: string | null;
   className?: string;
 }
 
-export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanelProps): React.ReactElement {
+export function AgentChatPanel({ walletAddress, currentZone, className = "" }: AgentChatPanelProps): React.ReactElement {
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
@@ -46,7 +51,10 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
   const [status, setStatus] = React.useState<AgentStatusData | null>(null);
   const [token, setToken] = React.useState<string | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
+  const [activeTab, setActiveTab] = React.useState<Tab>("agent");
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  /** Track the ts of the last server-synced message to detect new activity */
+  const lastSyncTs = React.useRef(0);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
@@ -84,17 +92,31 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
         if (res.ok && !cancelled) {
           const data: AgentStatusData = await res.json();
           setStatus(data);
-          // Sync chat history from server on first load
-          setMessages((prev) => {
-            if (prev.length === 0 && data.config?.chatHistory?.length) {
-              return data.config.chatHistory.map((m) => ({
-                role: m.role,
-                text: m.text,
-                ts: m.ts,
-              }));
-            }
-            return prev;
-          });
+
+          // Sync chat history from server — merge new activity messages
+          const serverHistory = data.config?.chatHistory ?? [];
+          if (serverHistory.length > 0) {
+            setMessages((prev) => {
+              // First load: replace entirely
+              if (prev.length === 0) {
+                lastSyncTs.current = serverHistory[serverHistory.length - 1].ts;
+                return serverHistory.map((m) => ({ role: m.role, text: m.text, ts: m.ts }));
+              }
+
+              // Incremental: append only new activity messages from server
+              const newActivities = serverHistory.filter(
+                (m) => m.role === "activity" && m.ts > lastSyncTs.current
+              );
+              if (newActivities.length > 0) {
+                lastSyncTs.current = newActivities[newActivities.length - 1].ts;
+                return [
+                  ...prev,
+                  ...newActivities.map((m) => ({ role: m.role as ChatMessage["role"], text: m.text, ts: m.ts })),
+                ];
+              }
+              return prev;
+            });
+          }
         } else if (res.status === 401) {
           clearCachedToken();
         }
@@ -116,7 +138,6 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           walletAddress,
-          // Server will look up the user's character NFT automatically
         }),
       });
       const data = await res.json();
@@ -193,6 +214,7 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
   const entityLevel = status?.entity?.level ?? 1;
   const focus = status?.config?.focus ?? "idle";
   const zoneId = status?.zoneId ?? "—";
+  const zoneForLog = status?.zoneId ?? currentZone ?? null;
 
   const statusColor = isRunning ? "#54f28b" : "#ff4d6d";
   const statusLabel = isRunning ? "RUNNING" : "STOPPED";
@@ -200,7 +222,7 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
   return (
     <div
       className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${className}`}
-      style={{ width: 384, height: 320 }}
+      style={{ width: 384, height: 360 }}
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
@@ -234,115 +256,156 @@ export function AgentChatPanel({ walletAddress, className = "" }: AgentChatPanel
         </div>
       )}
 
-      {/* Messages */}
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-3 py-2 space-y-1"
-        style={{ scrollbarWidth: "thin", scrollbarColor: "#1a3a22 transparent" }}
-      >
-        {messages.length === 0 && !authLoading && (
-          <p className="text-[8px] text-[#3a4260] italic">
-            {isRunning
-              ? "Your agent is active. Send a message to direct it..."
-              : "Deploy your agent to start playing. You can direct it by chatting here."}
-          </p>
-        )}
-        {authLoading && (
-          <p className="text-[8px] text-[#3a4260] animate-pulse">Authenticating...</p>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className="text-[8px] leading-relaxed">
-            {m.role === "user" && (
-              <span>
-                <span className="text-[#ffcc00]">[You]</span>{" "}
-                <span className="text-[#d6deff]">{m.text}</span>
-              </span>
-            )}
-            {m.role === "agent" && (
-              <span>
-                <span className="text-[#54f28b]">[{entityName}]</span>{" "}
-                <span className="text-[#9aa7cc]">{m.text}</span>
-              </span>
-            )}
-            {m.role === "system" && (
-              <span className="text-[#565f89] italic">{m.text}</span>
-            )}
-          </div>
-        ))}
-        {sending && (
-          <div className="text-[8px] text-[#3a4260] animate-pulse">Agent thinking...</div>
-        )}
+      {/* Tabs */}
+      <div className="flex border-b border-[#1a2a18] bg-[#080f0a]">
+        <button
+          onClick={() => setActiveTab("agent")}
+          className={`flex-1 py-1 text-[7px] uppercase tracking-widest transition ${
+            activeTab === "agent"
+              ? "text-[#54f28b] border-b-2 border-[#54f28b] bg-[#0a1a0e]"
+              : "text-[#3a4260] hover:text-[#54f28b]"
+          }`}
+        >
+          Agent
+        </button>
+        <button
+          onClick={() => setActiveTab("zone")}
+          className={`flex-1 py-1 text-[7px] uppercase tracking-widest transition ${
+            activeTab === "zone"
+              ? "text-[#54f28b] border-b-2 border-[#54f28b] bg-[#0a1a0e]"
+              : "text-[#3a4260] hover:text-[#54f28b]"
+          }`}
+        >
+          Zone Log
+        </button>
       </div>
 
-      {/* Agent deploy payment overlay */}
-      {showDeployPayment && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 px-4">
-          <div className="w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] font-mono shadow-[8px_8px_0_0_#000]">
-            <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
-              <span className="text-[9px] uppercase tracking-widest text-[#54f28b]">
-                {">> AI AGENT HOSTING FEE"}
-              </span>
+      {/* Tab content */}
+      {activeTab === "agent" ? (
+        <>
+          {/* Messages */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto px-3 py-2 space-y-1"
+            style={{ scrollbarWidth: "thin", scrollbarColor: "#1a3a22 transparent" }}
+          >
+            {messages.length === 0 && !authLoading && (
+              <p className="text-[8px] text-[#3a4260] italic">
+                {isRunning
+                  ? "Your agent is active. Send a message to direct it..."
+                  : "Deploy your agent to start playing. You can direct it by chatting here."}
+              </p>
+            )}
+            {authLoading && (
+              <p className="text-[8px] text-[#3a4260] animate-pulse">Authenticating...</p>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className="text-[8px] leading-relaxed">
+                {m.role === "user" && (
+                  <span>
+                    <span className="text-[#ffcc00]">[You]</span>{" "}
+                    <span className="text-[#d6deff]">{m.text}</span>
+                  </span>
+                )}
+                {m.role === "agent" && (
+                  <span>
+                    <span className="text-[#54f28b]">[{entityName}]</span>{" "}
+                    <span className="text-[#9aa7cc]">{m.text}</span>
+                  </span>
+                )}
+                {m.role === "activity" && (
+                  <span>
+                    <span className="text-[#e0af68]">[ACTION]</span>{" "}
+                    <span className="text-[#7a7f8d]">{m.text}</span>
+                  </span>
+                )}
+                {m.role === "system" && (
+                  <span className="text-[#565f89] italic">{m.text}</span>
+                )}
+              </div>
+            ))}
+            {sending && (
+              <div className="text-[8px] text-[#3a4260] animate-pulse">Agent thinking...</div>
+            )}
+          </div>
+
+          {/* Agent deploy payment overlay */}
+          {showDeployPayment && (
+            <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 px-4">
+              <div className="w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] font-mono shadow-[8px_8px_0_0_#000]">
+                <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
+                  <span className="text-[9px] uppercase tracking-widest text-[#54f28b]">
+                    {">> AI AGENT HOSTING FEE"}
+                  </span>
+                  <button
+                    onClick={() => setShowDeployPayment(false)}
+                    className="text-[10px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+                  >
+                    [X]
+                  </button>
+                </div>
+                <div className="p-5">
+                  <PaymentGate
+                    label="AI Agent Hosting Fee — $10/month autonomous agent in World of Geneva"
+                    onSuccess={() => {
+                      setShowDeployPayment(false);
+                      void executeDeploy();
+                    }}
+                    onCancel={() => setShowDeployPayment(false)}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Input area */}
+          <div className="border-t-2 border-[#1a2a18] bg-[#080f0a] p-2">
+            <div className="flex gap-1 mb-1">
+              <input
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void handleSend(); }}
+                placeholder={token ? "Direct your agent..." : "Connect wallet to chat..."}
+                disabled={!token || sending || authLoading}
+                className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[8px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b] disabled:opacity-40"
+              />
               <button
-                onClick={() => setShowDeployPayment(false)}
-                className="text-[10px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+                onClick={() => void handleSend()}
+                disabled={!input.trim() || !token || sending || authLoading}
+                className="border border-[#54f28b] bg-[#0a1a0e] px-2 py-1 text-[8px] text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                [X]
+                [→]
               </button>
             </div>
-            <div className="p-5">
-              <PaymentGate
-                label="AI Agent Hosting Fee — $10/month autonomous agent in World of Geneva"
-                onSuccess={() => {
-                  setShowDeployPayment(false);
-                  void executeDeploy();
-                }}
-                onCancel={() => setShowDeployPayment(false)}
-              />
+            <div className="flex gap-1">
+              {!isRunning ? (
+                <button
+                  onClick={() => setShowDeployPayment(true)}
+                  disabled={deploying || authLoading || !token}
+                  className="flex-1 border border-[#54f28b] bg-[#0a1a0e] py-1 text-[7px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {deploying ? "Deploying..." : "[▶] Deploy Agent — $10"}
+                </button>
+              ) : (
+                <button
+                  onClick={() => void handleStop()}
+                  disabled={authLoading || !token}
+                  className="flex-1 border border-[#ff4d6d] bg-[#1a0a0e] py-1 text-[7px] uppercase tracking-widest text-[#ff4d6d] transition hover:bg-[#2a1015] disabled:opacity-40"
+                >
+                  [⏹] Stop Agent
+                </button>
+              )}
             </div>
           </div>
-        </div>
+        </>
+      ) : (
+        /* Zone Log tab — reuses the existing ChatLog component */
+        <ChatLog
+          zoneId={zoneForLog}
+          embedded
+        />
       )}
-
-      {/* Input area */}
-      <div className="border-t-2 border-[#1a2a18] bg-[#080f0a] p-2">
-        <div className="flex gap-1 mb-1">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void handleSend(); }}
-            placeholder={token ? "Direct your agent..." : "Connect wallet to chat..."}
-            disabled={!token || sending || authLoading}
-            className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[8px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b] disabled:opacity-40"
-          />
-          <button
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || !token || sending || authLoading}
-            className="border border-[#54f28b] bg-[#0a1a0e] px-2 py-1 text-[8px] text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            [→]
-          </button>
-        </div>
-        <div className="flex gap-1">
-          {!isRunning ? (
-            <button
-              onClick={() => setShowDeployPayment(true)}
-              disabled={deploying || authLoading || !token}
-              className="flex-1 border border-[#54f28b] bg-[#0a1a0e] py-1 text-[7px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {deploying ? "Deploying..." : "[▶] Deploy Agent — $10"}
-            </button>
-          ) : (
-            <button
-              onClick={() => void handleStop()}
-              disabled={authLoading || !token}
-              className="flex-1 border border-[#ff4d6d] bg-[#1a0a0e] py-1 text-[7px] uppercase tracking-widest text-[#ff4d6d] transition hover:bg-[#2a1015] disabled:opacity-40"
-            >
-              [⏹] Stop Agent
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   );
 }

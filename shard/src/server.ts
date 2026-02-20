@@ -56,6 +56,7 @@ import { initDungeonLootTables } from "./dungeonLootTables.js";
 import { startGuildNameCacheRefresh } from "./guildChain.js";
 import { registerWorldMapRoutes } from "./worldMapRoutes.js";
 import { registerDiaryRoutes } from "./diary.js";
+import { registerFarcasterAuthRoutes } from "./farcasterAuth.js";
 import { initWorldMapStore } from "./worldMapStore.js";
 import { getTxStats } from "./blockchain.js";
 import { getWorldLayout } from "./worldLayout.js";
@@ -150,6 +151,7 @@ server.post<{
 // Register subsystems
 server.register(cors, { origin: true });
 registerAuthRoutes(server);
+registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
 registerZoneRuntime(server);
 registerSpawnOrders(server);

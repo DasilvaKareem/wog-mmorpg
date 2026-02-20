@@ -9,6 +9,8 @@
     "build:check": "tsc && vite build"
   },
   "dependencies": {
+    "@farcaster/miniapp-sdk": "^0.2.3",
+    "@tanstack/react-query": "^5.90.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.563.0",
@@ -17,7 +19,9 @@
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.0",
     "tailwind-merge": "^3.4.0",
-    "thirdweb": "^5.118.1"
+    "thirdweb": "^5.118.1",
+    "viem": "^2.39.0",
+    "wagmi": "^3.5.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",

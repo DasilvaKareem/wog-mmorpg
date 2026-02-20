@@ -1333,14 +1333,19 @@ async function worldTick() {
     }
 
     // Smart auto-combat AI: players pick techniques or basic attack
+    // Only engages mobs within AUTO_COMBAT_RANGE so agents can walk to
+    // portals, merchants, etc. without being hijacked.
+    const AUTO_COMBAT_RANGE = 80;
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
       if (entity.order) continue;
       if (entity.hp <= 0) continue;
+      // Skip players that are traveling to another zone
+      if (entity.travelTargetZone) continue;
 
-      // Find nearest mob
+      // Find nearest mob within range
       let nearestMob: Entity | null = null;
-      let nearestDist = Infinity;
+      let nearestDist = AUTO_COMBAT_RANGE;
       for (const other of zone.entities.values()) {
         if (other.type !== "mob" && other.type !== "boss") continue;
         if (other.hp <= 0) continue;

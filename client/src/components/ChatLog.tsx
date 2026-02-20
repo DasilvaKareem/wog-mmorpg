@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 interface ChatLogProps {
   zoneId: string | null;
   className?: string;
+  /** When true, renders without Card wrapper/header — for embedding inside other panels */
+  embedded?: boolean;
 }
 
 function getEventColor(type: ZoneEvent["type"]): string {
@@ -35,7 +37,7 @@ function getEventColor(type: ZoneEvent["type"]): string {
   }
 }
 
-export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement {
+export function ChatLog({ zoneId, className, embedded = false }: ChatLogProps): React.ReactElement {
   const { events, loading } = useZoneEvents(zoneId, { limit: 100, pollInterval: 2000 });
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = React.useState(true);
@@ -58,6 +60,11 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
   }, []);
 
   if (!zoneId) {
+    if (embedded) {
+      return <div className={cn("flex items-center justify-center flex-1", className)}>
+        <p className="text-[9px] text-[#9aa7cc]">No zone selected</p>
+      </div>;
+    }
     return (
       <Card className={cn("pointer-events-auto flex items-center justify-center", className)}>
         <p className="text-[9px] text-[#9aa7cc]">Select a zone to view events</p>
@@ -65,28 +72,16 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
     );
   }
 
-  return (
-    <Card className={cn("pointer-events-auto flex flex-col", className)}>
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCollapsed(!collapsed)}
-              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
-              type="button"
-            >
-              {collapsed ? "+" : "−"}
-            </button>
-            Zone Log
-          </div>
-          {loading && <span className="text-[8px] text-[#9aa7cc]">...</span>}
-        </CardTitle>
-      </CardHeader>
-      {!collapsed && <CardContent
+  const eventList = (
+    <>
+      <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-0.5 overflow-y-auto pt-0 text-[8px]"
-        style={{ minHeight: 0, maxHeight: "200px" }}
+        className={cn(
+          "flex-1 space-y-0.5 overflow-y-auto text-[8px]",
+          embedded ? "px-3 py-2" : "pt-0 px-4 pb-4"
+        )}
+        style={{ minHeight: 0, maxHeight: embedded ? undefined : "200px" }}
       >
         {events.length === 0 && (
           <p className="text-center text-[8px] text-[#9aa7cc] py-4">
@@ -112,10 +107,10 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
             {event.message}
           </div>
         ))}
-      </CardContent>}
+      </div>
 
       {/* Auto-scroll button */}
-      {!collapsed && !autoScroll && (
+      {!autoScroll && (
         <button
           onClick={() => {
             setAutoScroll(true);
@@ -128,6 +123,31 @@ export function ChatLog({ zoneId, className }: ChatLogProps): React.ReactElement
           ↓ New
         </button>
       )}
+    </>
+  );
+
+  if (embedded) {
+    return <div className={cn("relative flex flex-col flex-1 overflow-hidden", className)}>{eventList}</div>;
+  }
+
+  return (
+    <Card className={cn("pointer-events-auto flex flex-col", className)}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+              type="button"
+            >
+              {collapsed ? "+" : "−"}
+            </button>
+            Zone Log
+          </div>
+          {loading && <span className="text-[8px] text-[#9aa7cc]">...</span>}
+        </CardTitle>
+      </CardHeader>
+      {!collapsed && eventList}
     </Card>
   );
 }

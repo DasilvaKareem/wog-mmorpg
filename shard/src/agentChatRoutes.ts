@@ -320,7 +320,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 properties: {
                   focus: {
                     type: "string",
-                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "idle"],
+                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
                     description: "The new activity focus",
                   },
                   strategy: {

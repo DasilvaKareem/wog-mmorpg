@@ -65,6 +65,7 @@ const scores: Record<string, TeamScore> = {
 
 const teams: Record<string, Agent[]> = { ALPHA: [], BRAVO: [] };
 const partyIds: Record<string, string> = {};
+const finalBossDefeated: Record<string, boolean> = { ALPHA: false, BRAVO: false };
 
 // =============================================================================
 //  Helpers
@@ -252,12 +253,7 @@ const ZONE_PROGRESSION = [
       "  📜 THE FIRST TRIAL: PROVING GROUND",
       "═══════════════════════════════════════════════════════",
       "  The Village Square grows too small for warriors of",
-      "  your caliber. Ancient tales speak of wild beasts",
-      "  roaming the meadows beyond the village walls.",
-      "",
-      "  QUEST: Slay the Diseased Wolf, a corrupted beast",
-      "  that terrorizes the village outskirts. Only then",
-      "  shall the Meadow Road reveal itself to the worthy.",
+      "  your caliber. Slay the Diseased Wolf to advance!",
       "═══════════════════════════════════════════════════════",
     ],
     victoryLore: "With the Diseased Wolf vanquished, the Meadow Road beckons. Onward to the Wild Meadow!",
@@ -274,38 +270,129 @@ const ZONE_PROGRESSION = [
       "═══════════════════════════════════════════════════════",
       "  📜 THE SECOND TRIAL: THE ALPHA'S HOWL",
       "═══════════════════════════════════════════════════════",
-      "  The Wild Meadow has tested your mettle, but darker",
-      "  forces stir in the ancient woods beyond. The Dire",
-      "  Wolf — alpha of the meadow pack — guards the",
-      "  passage to the Dark Forest.",
-      "",
-      "  QUEST: Hunt and slay the Dire Wolf, apex predator",
-      "  of the meadows. Prove you are ready for the",
-      "  horrors that lurk beneath the forest canopy.",
+      "  The Dire Wolf guards the passage to the Dark Forest.",
+      "  Slay the alpha predator to prove your worth!",
       "═══════════════════════════════════════════════════════",
     ],
-    victoryLore: "The Dire Wolf falls with a thunderous howl! The Forest Gate creaks open, revealing the ominous Dark Forest...",
+    victoryLore: "The Dire Wolf falls with a thunderous howl! The Forest Gate creaks open...",
+  },
+  {
+    zoneId: "dark-forest",
+    bossName: "Necromancer Valdris",
+    bossLevel: 16,
+    portalPos: { x: 600, y: 320 },
+    portalId: "woods-gate",
+    requiredLevel: 20,
+    nextZone: "emerald-woods",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE THIRD TRIAL: VALDRIS MUST FALL",
+      "═══════════════════════════════════════════════════════",
+      "  Necromancer Valdris has corrupted the Dark Forest.",
+      "  Slay him to unlock the path to the Emerald Woods!",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "Necromancer Valdris is defeated! The dark magic fades and the Emerald Woods gate opens...",
+  },
+  {
+    zoneId: "emerald-woods",
+    bossName: "Grom Sentinel",
+    bossLevel: 25,
+    portalPos: { x: 320, y: 35 },
+    portalId: "range-path",
+    requiredLevel: 25,
+    nextZone: "viridian-range",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE FOURTH TRIAL: THE SENTINEL'S VIGIL",
+      "═══════════════════════════════════════════════════════",
+      "  The ancient Grom Sentinel guards the mountain pass.",
+      "  Defeat this living fortress to reach the Viridian Range!",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "The Grom Sentinel crumbles! The mountain path to the Viridian Range is revealed!",
+  },
+  {
+    zoneId: "viridian-range",
+    bossName: "Avalanche Titan",
+    bossLevel: 30,
+    portalPos: { x: 605, y: 320 },
+    portalId: "citadel-pass",
+    requiredLevel: 35,
+    nextZone: "felsrock-citadel",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE FIFTH TRIAL: TITAN OF THE PEAKS",
+      "═══════════════════════════════════════════════════════",
+      "  The Avalanche Titan commands the frozen peaks.",
+      "  Topple this colossus to breach Felsrock Citadel!",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "The Avalanche Titan shatters into ice! The citadel gates swing open...",
+  },
+  {
+    zoneId: "felsrock-citadel",
+    bossName: "Forgemaster Infernal",
+    bossLevel: 40,
+    portalPos: { x: 605, y: 320 },
+    portalId: "lumina-passage",
+    requiredLevel: 40,
+    nextZone: "lake-lumina",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE SIXTH TRIAL: THE FORGEMASTER'S WRATH",
+      "═══════════════════════════════════════════════════════",
+      "  Forgemaster Infernal commands molten steel and fire.",
+      "  Quench his flames to reach the luminous lake beyond!",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "Forgemaster Infernal's fires are extinguished! Lake Lumina glimmers ahead...",
+  },
+  {
+    zoneId: "lake-lumina",
+    bossName: "Solaris Warden",
+    bossLevel: 45,
+    portalPos: { x: 605, y: 320 },
+    portalId: "chasm-descent",
+    requiredLevel: 45,
+    nextZone: "azurshard-chasm",
+    lore: [
+      "═══════════════════════════════════════════════════════",
+      "  📜 THE SEVENTH TRIAL: WARDEN OF LIGHT",
+      "═══════════════════════════════════════════════════════",
+      "  The Solaris Warden bathes in celestial radiance.",
+      "  Dim its blinding light to descend into the Chasm!",
+      "═══════════════════════════════════════════════════════",
+    ],
+    victoryLore: "The Solaris Warden's light dims! The descent into the Azurshard Chasm beckons...",
   },
 ];
 
 const FINAL_BOSS = {
-  zoneId: "dark-forest",
-  bossName: "Necromancer Valdris",
-  bossLevel: 16,
+  zoneId: "azurshard-chasm",
+  bossName: "Azurshard Dragon",
+  bossLevel: 50,
   lore: [
     "═══════════════════════════════════════════════════════",
-    "  📜 THE FINAL TRIAL: VALDRIS MUST FALL",
+    "  📜 THE FINAL TRIAL: THE DRAGON AWAKENS",
     "═══════════════════════════════════════════════════════",
-    "  The Dark Forest reeks of death and dark magic.",
-    "  Necromancer Valdris has corrupted these ancient",
-    "  woods, raising the dead as his twisted servants.",
-    "",
-    "  QUEST: Slay Necromancer Valdris and restore peace",
-    "  to the realm of Geneva. This is the ultimate test.",
+    "  Deep within the Azurshard Chasm, the ancient dragon",
+    "  stirs. Its crystalline scales shimmer with lethal",
+    "  energy. This is the ultimate test of strength.",
     "═══════════════════════════════════════════════════════",
   ],
-  victoryLore: "⚔️ NECROMANCER VALDRIS IS DEFEATED! The dark magic dissipates and the ancient forest begins to heal. LEGENDS WILL BE WRITTEN! ⚔️",
+  victoryLore: "⚔️ THE AZURSHARD DRAGON IS SLAIN! Crystalline shards rain from the sky as the beast falls. LEGENDS ARE FORGED THIS DAY! ⚔️",
 };
+
+// Patrol waypoints for active mob exploration — warriors roam instead of waiting
+const ZONE_EXPLORE_WAYPOINTS: Array<{ x: number; y: number }> = [
+  { x: 100, y: 100 }, { x: 320, y: 80 },  { x: 540, y: 100 },
+  { x: 80, y: 320 },  { x: 320, y: 320 }, { x: 560, y: 320 },
+  { x: 100, y: 540 }, { x: 320, y: 560 }, { x: 540, y: 540 },
+  { x: 200, y: 200 }, { x: 440, y: 200 }, { x: 200, y: 440 },
+  { x: 440, y: 440 }, { x: 320, y: 180 }, { x: 180, y: 320 },
+  { x: 460, y: 320 }, { x: 320, y: 460 },
+];
 
 /**
  * Transition quest: grind to required level, slay zone boss, transition the whole team.
@@ -489,7 +576,7 @@ async function runTransitionQuest(team: string, progressionIndex: number): Promi
 async function runFinalBossQuest(team: string): Promise<boolean> {
   const squad = teams[team];
   const warrior = squad.find((a) => a.role === "WARRIOR")!;
-  const currentZone = "dark-forest";
+  const currentZone = FINAL_BOSS.zoneId;
 
   for (const line of FINAL_BOSS.lore) {
     console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
@@ -534,7 +621,7 @@ async function runFinalBossQuest(team: string): Promise<boolean> {
       if (!self) { log(team, "QUEST", "Warrior died! Respawning and repairing..."); await sleep(5000); await repairAllGear(warrior.id, currentZone, team, "QUEST"); break; }
       if (!target || target.hp <= 0) {
         console.log(`\n  ${TEAM_COLORS[team]} [${team}] 📜 ${FINAL_BOSS.victoryLore}\n`);
-        log(team, "QUEST", `🏆 TEAM ${team} HAS CONQUERED ALL OF GENEVA! 🏆`);
+        log(team, "QUEST", `🏆 TEAM ${team} HAS CONQUERED ALL OF ARCADIA! 🏆`);
         return true;
       }
       if (i % 4 === 0) {
@@ -837,27 +924,26 @@ async function warriorLoop(agent: Agent) {
     const me = await getEntity(agent.id, z);
     if (!me) { await sleep(3000); continue; }
 
-    // --- TRANSITION QUEST TRIGGERS ---
+    // --- DYNAMIC ZONE PROGRESSION: Check all transition thresholds ---
     const currentLevel = me.level ?? 1;
-    if (z === "village-square" && currentLevel >= 5) {
-      log(agent.team, agent.role, "⚡ Level 5! The First Trial — slay the Diseased Wolf!");
-      const ok = await runTransitionQuest(agent.team, 0);
+    const progIndex = ZONE_PROGRESSION.findIndex(p => p.zoneId === z);
+    if (progIndex >= 0 && currentLevel >= ZONE_PROGRESSION[progIndex].requiredLevel) {
+      const prog = ZONE_PROGRESSION[progIndex];
+      log(agent.team, agent.role, `⚡ Level ${currentLevel}! Time to conquer ${prog.nextZone} — hunting ${prog.bossName}!`);
+      const ok = await runTransitionQuest(agent.team, progIndex);
       if (!ok) log(agent.team, agent.role, "Transition failed — retrying next loop");
       continue;
     }
-    if (z === "wild-meadow" && currentLevel >= 10) {
-      log(agent.team, agent.role, "⚡ Level 10! The Second Trial — hunt the Dire Wolf!");
-      const ok = await runTransitionQuest(agent.team, 1);
-      if (!ok) log(agent.team, agent.role, "Transition failed — retrying next loop");
-      continue;
-    }
-    if (z === "dark-forest" && currentLevel >= 14) {
-      log(agent.team, agent.role, "⚡ Ready for the Final Trial — Necromancer Valdris awaits!");
+
+    // --- FINAL BOSS: Azurshard Dragon (only attempt once) ---
+    if (z === FINAL_BOSS.zoneId && currentLevel >= FINAL_BOSS.bossLevel - 5 && !finalBossDefeated[agent.team]) {
+      log(agent.team, agent.role, "⚡ THE FINAL TRIAL — the Azurshard Dragon awaits!");
       const won = await runFinalBossQuest(agent.team);
       if (won) {
-        banner(`🏆 TEAM ${agent.team} CONQUERED GENEVA! 🏆`);
+        finalBossDefeated[agent.team] = true;
+        banner(`🏆 TEAM ${agent.team} CONQUERED ALL OF ARCADIA! 🏆`);
         printScoreboard();
-        return;
+        // Don't return — keep grinding the strongest mobs forever!
       }
       continue;
     }
@@ -871,20 +957,27 @@ async function warriorLoop(agent: Agent) {
     }
 
     const hpPercent = (me.hp / me.maxHp) * 100;
-    if (hpPercent < 30) {
+    if (hpPercent < 25) {
       log(agent.team, agent.role, `Low HP (${me.hp}/${me.maxHp}) — waiting for heal...`);
-      await sleep(3000);
+      await sleep(1500);
       continue;
     }
 
-    // Find STRONGEST mob we can fight (competitive advantage!)
+    // Find STRONGEST mob we can fight — push limits aggressively!
     const entities = await getZoneEntities(z);
     const mobs = Object.entries(entities)
       .filter(([_, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0)
-      .filter(([_, e]: any) => (e.level ?? 1) <= (me.level ?? 1) + 2) // Push limits: +2 levels
+      .filter(([_, e]: any) => (e.level ?? 1) <= (me.level ?? 1) + 5) // Aggressive: fight +5 levels above
       .sort((a: any, b: any) => (b[1].level ?? 1) - (a[1].level ?? 1)); // Strongest first
 
-    if (mobs.length === 0) { log(agent.team, agent.role, "No mobs — waiting..."); await sleep(5000); continue; }
+    if (mobs.length === 0) {
+      // EXPLORE: Roam to a random patrol point to actively seek mobs
+      const wp = ZONE_EXPLORE_WAYPOINTS[Math.floor(Math.random() * ZONE_EXPLORE_WAYPOINTS.length)];
+      log(agent.team, agent.role, `[${z}] No mobs nearby — exploring (${wp.x}, ${wp.y})...`);
+      await moveTo(agent.id, wp.x, wp.y, z);
+      await sleep(1500);
+      continue;
+    }
 
     const [mobId, mob] = mobs[0] as [string, any];
     const mobLevel = mob.level ?? 1;
@@ -976,7 +1069,7 @@ async function warriorLoop(agent: Agent) {
         } catch {}
       }
     }
-    await sleep(1000);
+    await sleep(500); // Fast pace — minimal downtime between fights
   }
 }
 
@@ -1063,22 +1156,30 @@ async function clericLoop(agent: Agent) {
       } catch {}
     }
 
-    // Assist in combat if warrior is healthy
-    if (wHpPercent > 70 && (cState.essence ?? 0) > 30) {
+    // Assist in combat aggressively — attack any nearby mob
+    if (wHpPercent > 50 && (cState.essence ?? 0) > 15) {
       try {
         const entities = await getZoneEntities(z);
-        const nearbyMobs = Object.entries(entities).filter(([_, e]: any) => {
-          if (e.type !== "mob" || e.hp <= 0) return false;
-          const mdx = e.x - wState.x;
-          const mdy = e.y - wState.y;
-          return Math.sqrt(mdx * mdx + mdy * mdy) < 50;
-        });
+        const nearbyMobs = Object.entries(entities)
+          .filter(([_, e]: any) => {
+            if ((e.type !== "mob" && e.type !== "boss") || e.hp <= 0) return false;
+            const mdx = e.x - wState.x;
+            const mdy = e.y - wState.y;
+            return Math.sqrt(mdx * mdx + mdy * mdy) < 80; // Wider radius
+          })
+          .sort((a: any, b: any) => (b[1].level ?? 1) - (a[1].level ?? 1)); // Target strongest
         if (nearbyMobs.length > 0) {
           const learned = await api("GET", `/techniques/learned/${z}/${agent.id}`);
-          const attacks = learned.techniques.filter((t: any) => t.type === "attack" && t.essenceCost <= (cState.essence ?? 0));
+          const attacks = learned.techniques
+            .filter((t: any) => t.type === "attack" && t.essenceCost <= (cState.essence ?? 0))
+            .sort((a: any, b: any) => (b.effects?.damageMultiplier ?? 0) - (a.effects?.damageMultiplier ?? 0));
           if (attacks.length > 0) {
             await api("POST", "/techniques/use", { zoneId: z, casterEntityId: agent.id, techniqueId: attacks[0].id, targetEntityId: nearbyMobs[0][0] });
-            log(agent.team, agent.role, `Smited ${(nearbyMobs[0][1] as any).name}!`);
+            log(agent.team, agent.role, `Smited ${(nearbyMobs[0][1] as any).name} L${(nearbyMobs[0][1] as any).level}!`);
+          }
+          // Also basic attack if no essence for techniques
+          if (attacks.length === 0) {
+            try { await api("POST", "/command", { zoneId: z, entityId: agent.id, action: "attack", targetId: nearbyMobs[0][0] }); } catch {}
           }
         }
       } catch {}
@@ -1130,7 +1231,7 @@ async function clericLoop(agent: Agent) {
     }
 
     clericCycle++;
-    await sleep(2000);
+    await sleep(1500); // Faster cleric loop for tighter healing
   }
 }
 
@@ -1723,8 +1824,8 @@ async function main() {
 ║   Ashforge    (Mage)         Vulcanis    (Mage)          ║
 ║   Shadowcoin  (Rogue)        Goldweave   (Rogue)         ║
 ║                                                          ║
-║   GOAL: Defeat the strongest mobs, forge the best        ║
-║         weapons, and dominate the auction house!          ║
+║   GOAL: Explore all 10 zones, hunt the strongest mobs,   ║
+║         and slay the Azurshard Dragon!                    ║
 ║                                                          ║
 ║   Wallet: ${WALLET.slice(0, 10)}...                                  ║
 ╚══════════════════════════════════════════════════════════╝
