@@ -10,6 +10,7 @@ import {
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance } from "@/lib/walletManager";
 import { thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
+import type { OwnedCharacter } from "@/types";
 
 interface WalletContextValue {
   address: string | null;
@@ -18,6 +19,12 @@ interface WalletContextValue {
   loading: boolean;
   characterProgress: WalletCharacterProgress | null;
   characterLoading: boolean;
+  /** All owned character NFTs for this wallet */
+  characters: OwnedCharacter[];
+  /** Token ID of the user-selected character (null = auto-pick highest level) */
+  selectedCharacterTokenId: string | null;
+  /** Select a character by token ID to display in the wallet panel */
+  selectCharacter: (tokenId: string | null) => void;
   professions: ProfessionsResponse | null;
   professionsLoading: boolean;
   connect: () => Promise<void>;
@@ -65,6 +72,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const [zoneId, setZoneId] = React.useState("village-square");
   const [characterProgress, setCharacterProgress] = React.useState<WalletCharacterProgress | null>(null);
   const [characterLoading, setCharacterLoading] = React.useState(false);
+  const [characters, setCharacters] = React.useState<OwnedCharacter[]>([]);
+  const [selectedCharacterTokenId, setSelectedCharacterTokenId] = React.useState<string | null>(null);
   const [professions, setProfessions] = React.useState<ProfessionsResponse | null>(null);
   const [professionsLoading, setProfessionsLoading] = React.useState(false);
   const lastCharacterFetchRef = React.useRef<number>(0);
@@ -79,6 +88,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const refreshCharacterProgress = React.useCallback(async (force = false) => {
     if (!walletManager.address) {
       setCharacterProgress(null);
+      setCharacters([]);
       return;
     }
 
@@ -95,18 +105,40 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
         fetchCharacters(walletManager.address),
       ]);
 
+      // Always store all characters for the selector
+      setCharacters(ownedCharacters);
+
+      // If a live agent is in the zone, show that
       if (liveCharacter) {
         setCharacterProgress(liveCharacter);
         lastCharacterFetchRef.current = now;
         return;
       }
 
+      // If user has manually selected a character, show that one
+      if (selectedCharacterTokenId) {
+        const selected = ownedCharacters.find((c) => c.tokenId === selectedCharacterTokenId);
+        if (selected) {
+          setCharacterProgress({
+            name: selected.name,
+            level: selected.properties.level,
+            xp: selected.properties.xp,
+            hp: selected.properties.stats.hp,
+            maxHp: selected.properties.stats.hp,
+            source: "nft",
+          });
+          lastCharacterFetchRef.current = now;
+          return;
+        }
+      }
+
+      // Default: pick highest-level character
       setCharacterProgress(pickPrimaryCharacterProgress(ownedCharacters));
       lastCharacterFetchRef.current = now;
     } finally {
       setCharacterLoading(false);
     }
-  }, [walletManager, zoneId, characterCacheDuration]);
+  }, [walletManager, zoneId, characterCacheDuration, selectedCharacterTokenId]);
 
   const refreshProfessions = React.useCallback(async () => {
     if (!walletManager.address) {
@@ -122,6 +154,34 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       setProfessionsLoading(false);
     }
   }, [walletManager]);
+
+  const selectCharacter = React.useCallback((tokenId: string | null) => {
+    setSelectedCharacterTokenId(tokenId);
+    // Force an immediate refresh so the display updates
+    lastCharacterFetchRef.current = 0;
+  }, []);
+
+  // When selection changes, re-derive characterProgress from cached characters
+  React.useEffect(() => {
+    if (characters.length === 0) return;
+
+    if (selectedCharacterTokenId) {
+      const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
+      if (selected) {
+        setCharacterProgress({
+          name: selected.name,
+          level: selected.properties.level,
+          xp: selected.properties.xp,
+          hp: selected.properties.stats.hp,
+          maxHp: selected.properties.stats.hp,
+          source: "nft",
+        });
+        return;
+      }
+    }
+    // Fall back to auto-pick
+    setCharacterProgress(pickPrimaryCharacterProgress(characters));
+  }, [selectedCharacterTokenId, characters]);
 
   const connect = React.useCallback(async () => {
     setLoading(true);
@@ -214,6 +274,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   React.useEffect(() => {
     if (!address) {
       setCharacterProgress(null);
+      setCharacters([]);
+      setSelectedCharacterTokenId(null);
       setProfessions(null);
       return;
     }
@@ -240,6 +302,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       loading,
       characterProgress,
       characterLoading,
+      characters,
+      selectedCharacterTokenId,
+      selectCharacter,
       professions,
       professionsLoading,
       connect,
@@ -257,6 +322,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       loading,
       characterProgress,
       characterLoading,
+      characters,
+      selectedCharacterTokenId,
+      selectCharacter,
       professions,
       professionsLoading,
       connect,

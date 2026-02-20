@@ -31,6 +31,9 @@ export function WalletPanel(): React.ReactElement {
     loading,
     characterProgress,
     characterLoading,
+    characters,
+    selectedCharacterTokenId,
+    selectCharacter,
     connect,
     equipItem,
   } = useWallet();
@@ -84,6 +87,20 @@ export function WalletPanel(): React.ReactElement {
                   {characterProgress ? (characterProgress.source === "live" ? "Live" : "NFT") : "--"}
                 </Badge>
               </div>
+              {characters.length > 1 && (
+                <select
+                  className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
+                  value={selectedCharacterTokenId ?? ""}
+                  onChange={(e) => selectCharacter(e.target.value || null)}
+                >
+                  <option value="">Auto (highest level)</option>
+                  {characters.map((c) => (
+                    <option key={c.tokenId} value={c.tokenId}>
+                      {c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
+                    </option>
+                  ))}
+                </select>
+              )}
               {characterLoading ? (
                 <p className="text-[8px] text-[#9aa7cc]">Syncing character...</p>
               ) : characterProgress ? (
