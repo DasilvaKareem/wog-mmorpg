@@ -306,7 +306,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     let groqResponse: Groq.Chat.ChatCompletion;
     try {
       groqResponse = await groq.chat.completions.create({
-        model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+        model: "openai/gpt-oss-120b",
         max_tokens: 300,
         messages: history,
         tools: [
