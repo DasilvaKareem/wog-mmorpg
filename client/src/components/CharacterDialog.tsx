@@ -10,6 +10,7 @@ import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import { getAuthToken } from "@/lib/agentAuth";
 import { API_URL } from "@/config";
+import { fetchDiary, type DiaryEntry } from "@/ShardClient";
 import type { CharacterCreateResponse, CharacterStats } from "@/types";
 
 type View = "list" | "create" | "result" | "detail";
@@ -28,8 +29,70 @@ function combineStats(base: CharacterStats, modifiers: CharacterStats): Characte
   return result;
 }
 
+/* ── Rarity colors ───────────────────────────────────────────────── */
+
+const RARITY_COLORS: Record<string, string> = {
+  common: "#9aa7cc",
+  uncommon: "#54f28b",
+  rare: "#5dadec",
+  epic: "#b48efa",
+  legendary: "#ffcc00",
+};
+
+/* ── Diary helpers ───────────────────────────────────────────────── */
+
+const DIARY_COLORS: Record<string, string> = {
+  kill: "#54f28b",
+  death: "#f25454",
+  level_up: "#f2c854",
+  zone_transition: "#5dadec",
+  equip: "#9aa7cc",
+  unequip: "#9aa7cc",
+  buy: "#ffcc00",
+  sell: "#ffcc00",
+  craft: "#b48efa",
+  brew: "#b48efa",
+  cook: "#b48efa",
+  mine: "#f2a854",
+  gather_herb: "#f2a854",
+  skin: "#f2a854",
+  spawn: "#54f28b",
+  consume: "#b48efa",
+  repair: "#9aa7cc",
+  quest_complete: "#5dadec",
+};
+
+const DIARY_TAGS: Record<string, string> = {
+  kill: "KILL",
+  death: "DEATH",
+  level_up: "LEVEL",
+  zone_transition: "ZONE",
+  equip: "EQUIP",
+  unequip: "EQUIP",
+  buy: "TRADE",
+  sell: "TRADE",
+  craft: "CRAFT",
+  brew: "CRAFT",
+  cook: "CRAFT",
+  mine: "GATHER",
+  gather_herb: "GATHER",
+  skin: "GATHER",
+  spawn: "SPAWN",
+  consume: "USE",
+  repair: "REPAIR",
+  quest_complete: "QUEST",
+};
+
+function diaryTimeAgo(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
 export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): React.ReactElement {
-  const { address, isConnected } = useWallet();
+  const { address, isConnected, balance } = useWallet();
   const { classes, races, characters, loading, load, create } = useCharacters();
 
   const [view, setView] = React.useState<View>("list");
@@ -41,6 +104,9 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   const [selectedCharacter, setSelectedCharacter] = React.useState<typeof characters[number] | null>(null);
   const [deploying, setDeploying] = React.useState(false);
   const [deployResult, setDeployResult] = React.useState<string | null>(null);
+  const [diaryEntries, setDiaryEntries] = React.useState<DiaryEntry[]>([]);
+  const [diaryLoading, setDiaryLoading] = React.useState(false);
+  const [expandedEntry, setExpandedEntry] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open || !address) return;
@@ -56,8 +122,19 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
       setResult(null);
       setSubmitting(false);
       setDeployResult(null);
+      setDiaryEntries([]);
+      setExpandedEntry(null);
     }
   }, [open]);
+
+  React.useEffect(() => {
+    if (view !== "detail" || !address) return;
+    setDiaryLoading(true);
+    void fetchDiary(address, 20).then((entries) => {
+      setDiaryEntries(entries);
+      setDiaryLoading(false);
+    });
+  }, [view, address]);
 
   async function handleDeploy(character: typeof characters[number]) {
     if (!address || deploying) return;
@@ -390,6 +467,99 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                 </div>
               </div>
             ) : null}
+
+            {/* Gold + Inventory */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Wallet</p>
+                <div className="bg-[#54f28b] border-2 border-black px-1.5 py-0.5 shadow-[2px_2px_0_0_#000]">
+                  <span className="text-[8px] font-bold text-black" style={{ fontFamily: "monospace" }}>
+                    {balance?.gold ? `${balance.gold} GOLD` : "..."}
+                  </span>
+                </div>
+              </div>
+              <div
+                className="border-2 overflow-y-auto"
+                style={{
+                  borderColor: "#29334d",
+                  background: "#0a0e18",
+                  maxHeight: 120,
+                }}
+              >
+                {balance?.items?.length ? (
+                  balance.items.map((item) => {
+                    const rarityColor = RARITY_COLORS[item.rarity ?? "common"] ?? RARITY_COLORS.common;
+                    return (
+                      <div
+                        key={`${item.tokenId}-${item.name}`}
+                        className="flex items-center justify-between gap-2 border-b px-2 py-0.5 text-[8px]"
+                        style={{ borderColor: "#1a2240" }}
+                      >
+                        <span className="truncate font-bold" style={{ color: rarityColor }}>
+                          {item.name}
+                        </span>
+                        <span className="shrink-0 text-[#6b7a9e]" style={{ fontFamily: "monospace" }}>
+                          x{item.balance}
+                          {item.equipSlot ? ` | ${item.equipSlot}` : ""}
+                        </span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="p-2 text-[8px] text-[#6b7a9e]">No items</p>
+                )}
+              </div>
+            </div>
+
+            {/* Adventure Diary */}
+            <div>
+              <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Adventure Diary</p>
+              <div
+                className="border-2 overflow-y-auto"
+                style={{
+                  borderColor: "#29334d",
+                  background: "#0a0e18",
+                  maxHeight: 160,
+                  fontFamily: "monospace",
+                }}
+              >
+                {diaryLoading ? (
+                  <p className="p-2 text-[8px] text-[#6b7a9e]">Loading diary...</p>
+                ) : diaryEntries.length === 0 ? (
+                  <p className="p-2 text-[8px] text-[#6b7a9e]">No diary entries yet</p>
+                ) : (
+                  diaryEntries.map((entry) => {
+                    const color = DIARY_COLORS[entry.action] ?? "#6b7a9e";
+                    const tag = DIARY_TAGS[entry.action] ?? entry.action.toUpperCase().slice(0, 5);
+                    const isExpanded = expandedEntry === entry.id;
+                    return (
+                      <div
+                        key={entry.id}
+                        className="border-b px-2 py-0.5 cursor-pointer hover:bg-[#11182b]"
+                        style={{ borderColor: "#1a2240" }}
+                        onClick={() => setExpandedEntry(isExpanded ? null : entry.id)}
+                      >
+                        <div className="flex items-start gap-1 text-[8px]">
+                          <span
+                            className="shrink-0 font-bold"
+                            style={{ color, width: 48, display: "inline-block" }}
+                          >
+                            [{tag}]
+                          </span>
+                          <span className="flex-1 text-[#f1f5ff]">{entry.headline}</span>
+                          <span className="shrink-0 text-[#6b7a9e]">{diaryTimeAgo(entry.timestamp)}</span>
+                        </div>
+                        {isExpanded && entry.narrative && (
+                          <p className="mt-0.5 text-[7px] text-[#9aa7cc] pl-[52px] pb-0.5">
+                            {entry.narrative}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
 
             {/* Deploy result message */}
             {deployResult && (

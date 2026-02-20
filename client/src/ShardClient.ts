@@ -249,6 +249,38 @@ export interface ProfessionsResponse {
   available: ProfessionInfo[];
 }
 
+// ── Diary ─────────────────────────────────────────────────────────
+
+export interface DiaryEntry {
+  id: string;
+  timestamp: number;
+  walletAddress: string;
+  characterName: string;
+  zoneId: string;
+  x: number;
+  y: number;
+  action: string;
+  headline: string;
+  narrative: string;
+  details: Record<string, unknown>;
+}
+
+export async function fetchDiary(
+  walletAddress: string,
+  limit = 20
+): Promise<DiaryEntry[]> {
+  try {
+    const res = await fetch(
+      `${API_URL}/diary/${walletAddress}/recent?count=${limit}`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.entries ?? data) as DiaryEntry[];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchProfessions(
   walletAddress: string
 ): Promise<ProfessionsResponse> {

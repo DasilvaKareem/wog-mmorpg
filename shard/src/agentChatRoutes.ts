@@ -341,13 +341,13 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             type: "function",
             function: {
               name: "take_action",
-              description: "Execute an immediate in-game action: learn a profession, buy an item from a merchant, or equip an item from inventory.",
+              description: "Execute an immediate in-game action: learn a profession, buy an item from a merchant, equip an item, or repair damaged gear at a blacksmith.",
               parameters: {
                 type: "object",
                 properties: {
                   action: {
                     type: "string",
-                    enum: ["learn_profession", "buy_item", "equip_item"],
+                    enum: ["learn_profession", "buy_item", "equip_item", "repair_gear"],
                     description: "The action type",
                   },
                   professionId: {
@@ -450,6 +450,13 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 const equipped = await runner.equipItem(input.tokenId);
                 actionsTaken.push(`[${equipped ? "equipped" : "failed to equip"} item #${input.tokenId}]`);
                 server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
+              }
+            }
+            if (input.action === "repair_gear") {
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                const repaired = await runner.repairGear();
+                server.log.info(`[agent/chat] repair_gear → ${repaired}`);
               }
             }
           } catch {}

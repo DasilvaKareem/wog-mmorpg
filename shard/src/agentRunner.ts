@@ -260,6 +260,74 @@ export class AgentRunner {
     }
   }
 
+  /**
+   * Repair all damaged gear at the nearest blacksmith.
+   * Returns true if a repair happened.
+   */
+  async repairGear(): Promise<boolean> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    try {
+      const zs = await this.getZoneState();
+      if (!zs) return false;
+      const { entities, me } = zs;
+
+      // Check if any gear is damaged
+      const equipment = me.equipment ?? {};
+      const hasDamaged = Object.values(equipment).some(
+        (eq: any) => eq && eq.maxDurability > 0 && eq.durability < eq.maxDurability
+      );
+      if (!hasDamaged) return false;
+
+      // Find nearest blacksmith (merchant with "blacksmith" in name)
+      const smith = this.findNearestEntity(entities, me,
+        (e) => e.type === "merchant" && /blacksmith/i.test(e.name)
+      );
+      if (!smith) {
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] No blacksmith in ${this.currentZone}`);
+        return false;
+      }
+
+      const [smithId, smithEntity] = smith;
+
+      // Move to blacksmith if not in range
+      const moving = await this.moveToEntity(me, smithEntity);
+      if (moving) return true; // still walking — count as "handled"
+
+      // Repair all slots
+      const result = await this.api("POST", "/equipment/repair", {
+        zoneId: this.currentZone,
+        npcId: smithId,
+        entityId: this.entityId,
+        walletAddress: this.custodialWallet,
+      });
+      if (result?.ok) {
+        const repaired = result.repairs?.map((r: any) => r.name).join(", ") ?? "gear";
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Repaired ${repaired} (cost: ${result.totalCost}g)`);
+      }
+      return true;
+    } catch (err: any) {
+      console.debug(`[agent] repairGear: ${err.message?.slice(0, 60)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Check if gear is badly damaged and needs repair before continuing.
+   * Returns true if agent is busy repairing (caller should skip focus action).
+   */
+  private async handleRepair(entity: any): Promise<boolean> {
+    const equipment = entity.equipment ?? {};
+    for (const eq of Object.values(equipment)) {
+      const e = eq as any;
+      if (!e || e.maxDurability <= 0) continue;
+      // Repair if any slot is broken or below 20% durability
+      if (e.broken || e.durability / e.maxDurability < 0.2) {
+        return await this.repairGear();
+      }
+    }
+    return false;
+  }
+
   // ── Focus behaviours ──────────────────────────────────────────────────────
 
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
@@ -829,6 +897,10 @@ export class AgentRunner {
           const adapted = await this.checkSelfAdaptation(entity, strategy);
           if (adapted) { await sleep(TICK_MS); continue; }
         }
+
+        // Auto-repair if gear is badly damaged
+        const repairing = await this.handleRepair(entity);
+        if (repairing) { await sleep(TICK_MS); continue; }
 
         // Execute focus (strategy flows through to combat decisions)
         switch (focus) {
