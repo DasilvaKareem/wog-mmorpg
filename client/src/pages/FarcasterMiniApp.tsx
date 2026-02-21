@@ -1,15 +1,16 @@
 import * as React from "react";
 import { sdk } from "@farcaster/miniapp-sdk";
 import type { Context } from "@farcaster/miniapp-sdk";
-import { fetchClasses, fetchRaces, createCharacter } from "@/ShardClient";
+import { fetchClasses, fetchRaces, createCharacter, fetchZone, fetchZoneList } from "@/ShardClient";
 import { API_URL } from "@/config";
-import type { RaceInfo, ClassInfo, CharacterStats } from "@/types";
+import type { RaceInfo, ClassInfo, CharacterStats, Entity, ZoneListEntry } from "@/types";
 
 type Step =
   | "loading"
   | "create-char"
   | "minting"
   | "success"
+  | "world"
   | "error-init";
 
 interface SuccessData {
@@ -37,6 +38,242 @@ function StatRow({ label, value }: { label: string; value: number }) {
     <div className="flex items-center justify-between text-[8px]">
       <span className="text-[#9aa7cc]">{label}</span>
       <span className="text-[#ffcc00]">{value}</span>
+    </div>
+  );
+}
+
+// ── Entity colors by type ──
+const ENTITY_COLORS: Record<string, string> = {
+  player: "#44ddff",
+  mob: "#e04040",
+  npc: "#4488ff",
+  merchant: "#ffcc00",
+  boss: "#aa44ff",
+  "guild-registrar": "#c8b432",
+  auctioneer: "#b48232",
+  "quest-giver": "#64b4ff",
+  "arena-master": "#c83c3c",
+};
+
+interface ZoneViewerProps {
+  highlightWallet?: string | null;
+  initialZoneId?: string;
+  characterName?: string;
+}
+
+function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewerProps) {
+  const [zoneId, setZoneId] = React.useState(initialZoneId || "village-square");
+  const [entities, setEntities] = React.useState<Entity[]>([]);
+  const [zones, setZones] = React.useState<ZoneListEntry[]>([]);
+  const [events, setEvents] = React.useState<any[]>([]);
+  const [tick, setTick] = React.useState(0);
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const eventsEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Fetch zone list once
+  React.useEffect(() => {
+    fetchZoneList().then(setZones);
+  }, []);
+
+  // Poll zone state + events
+  React.useEffect(() => {
+    let active = true;
+    async function poll() {
+      if (!active) return;
+      const [zoneData, eventsRes] = await Promise.all([
+        fetchZone(zoneId),
+        fetch(`${API_URL}/events/${zoneId}?limit=30`).then((r) => r.ok ? r.json() : []).catch(() => []),
+      ]);
+      if (!active) return;
+      if (zoneData) {
+        setEntities(Object.values(zoneData.entities));
+        setTick(zoneData.tick);
+      }
+      if (Array.isArray(eventsRes)) {
+        setEvents(eventsRes);
+      }
+    }
+    poll();
+    const interval = setInterval(poll, 2000);
+    return () => { active = false; clearInterval(interval); };
+  }, [zoneId]);
+
+  // Auto-scroll events
+  React.useEffect(() => {
+    eventsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [events]);
+
+  // Draw mini-map on canvas
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    const ZONE_SIZE = 640;
+
+    // Background
+    ctx.fillStyle = "#0b1020";
+    ctx.fillRect(0, 0, w, h);
+
+    // Grid lines
+    ctx.strokeStyle = "#1a2440";
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 8; i++) {
+      const x = (i / 8) * w;
+      const y = (i / 8) * h;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+    }
+
+    // Draw entities
+    for (const e of entities) {
+      const ex = (e.x / ZONE_SIZE) * w;
+      const ey = (e.y / ZONE_SIZE) * h;
+      const isHighlighted = highlightWallet && e.walletAddress?.toLowerCase() === highlightWallet.toLowerCase();
+      const color = ENTITY_COLORS[e.type] || "#888";
+      const radius = e.type === "player" ? 4 : e.type === "boss" ? 5 : 3;
+
+      if (isHighlighted) {
+        // Pulsing ring around the player's agent
+        ctx.beginPath();
+        ctx.arc(ex, ey, radius + 4, 0, Math.PI * 2);
+        ctx.strokeStyle = "#54f28b";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+      ctx.arc(ex, ey, radius, 0, Math.PI * 2);
+      ctx.fillStyle = isHighlighted ? "#54f28b" : color;
+      ctx.fill();
+
+      // Name label for players
+      if (e.type === "player") {
+        ctx.fillStyle = isHighlighted ? "#54f28b" : "#aabbdd";
+        ctx.font = "7px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(e.name, ex, ey - radius - 3);
+        if (e.level) {
+          ctx.fillStyle = "#ffcc00";
+          ctx.fillText(`L${e.level}`, ex, ey + radius + 8);
+        }
+      }
+    }
+
+    // Zone label
+    ctx.fillStyle = "#3a4260";
+    ctx.font = "8px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(zoneId.replace(/-/g, " ").toUpperCase(), 4, 10);
+    ctx.textAlign = "right";
+    ctx.fillText(`Tick ${tick}`, w - 4, 10);
+  }, [entities, tick, zoneId, highlightWallet]);
+
+  const players = entities.filter((e) => e.type === "player");
+  const mobs = entities.filter((e) => e.type === "mob" || e.type === "boss");
+  const myAgent = entities.find(
+    (e) => highlightWallet && e.walletAddress?.toLowerCase() === highlightWallet.toLowerCase()
+  );
+
+  const EVENT_COLORS: Record<string, string> = {
+    combat: "#ff8c42",
+    death: "#ff4d6d",
+    kill: "#54f28b",
+    levelup: "#ffcc00",
+    chat: "#44ddff",
+    loot: "#b48232",
+    system: "#3a4260",
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Zone selector */}
+      <div className="flex gap-1 flex-wrap">
+        {zones
+          .sort((a, b) => b.entityCount - a.entityCount)
+          .map((z) => (
+            <button
+              key={z.zoneId}
+              onClick={() => setZoneId(z.zoneId)}
+              className={`px-2 py-0.5 text-[7px] border transition ${
+                zoneId === z.zoneId
+                  ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
+                  : "border-[#2a3450] bg-[#0e1628] text-[#565f89] hover:text-[#9aa7cc]"
+              }`}
+            >
+              {z.zoneId.split("-").map((w) => w[0].toUpperCase()).join("")}
+              <span className="ml-1 text-[#ffcc00]">{z.entityCount}</span>
+            </button>
+          ))}
+      </div>
+
+      {/* Mini-map */}
+      <div className="border-2 border-[#2a3450] bg-[#0b1020]">
+        <canvas ref={canvasRef} width={320} height={320} className="w-full" />
+      </div>
+
+      {/* Agent status bar */}
+      {myAgent && (
+        <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5 flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-[8px] text-[#54f28b] font-bold">{myAgent.name}</span>
+            <span className="text-[6px] text-[#9aa7cc]">
+              L{myAgent.level} {myAgent.raceId} {myAgent.classId}
+            </span>
+          </div>
+          <div className="flex flex-col items-end">
+            <span className="text-[7px] text-[#ff4d6d]">
+              HP {myAgent.hp}/{myAgent.maxHp}
+            </span>
+            <div className="w-16 h-1.5 bg-[#1a0a0e] border border-[#2a3450] mt-0.5">
+              <div
+                className="h-full"
+                style={{
+                  width: `${Math.min(100, (myAgent.hp / myAgent.maxHp) * 100)}%`,
+                  backgroundColor: myAgent.hp / myAgent.maxHp > 0.66 ? "#54f28b" : myAgent.hp / myAgent.maxHp > 0.33 ? "#ffcc00" : "#ff4d6d",
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Legend */}
+      <div className="flex gap-3 flex-wrap px-1">
+        <span className="text-[6px] text-[#3a4260]">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#44ddff] mr-1 align-middle" />
+          Players ({players.length})
+        </span>
+        <span className="text-[6px] text-[#3a4260]">
+          <span className="inline-block w-2 h-2 rounded-full bg-[#e04040] mr-1 align-middle" />
+          Mobs ({mobs.length})
+        </span>
+        {myAgent && (
+          <span className="text-[6px] text-[#54f28b]">
+            <span className="inline-block w-2 h-2 rounded-full bg-[#54f28b] mr-1 align-middle" />
+            Your Agent
+          </span>
+        )}
+      </div>
+
+      {/* Live event log */}
+      <div className="border border-[#2a3450] bg-[#0b1020] max-h-32 overflow-y-auto px-2 py-1">
+        <p className="text-[6px] text-[#3a4260] uppercase tracking-wider mb-1">Live Events</p>
+        {events.length === 0 ? (
+          <p className="text-[6px] text-[#565f89]">No recent events...</p>
+        ) : (
+          events.slice(-15).map((ev, i) => (
+            <p key={i} className="text-[7px] leading-tight" style={{ color: EVENT_COLORS[ev.type] || "#565f89" }}>
+              <span className="text-[#3a4260]">[{ev.type?.slice(0, 4).toUpperCase()}]</span>{" "}
+              {ev.message || ev.text || JSON.stringify(ev).slice(0, 60)}
+            </p>
+          ))
+        )}
+        <div ref={eventsEndRef} />
+      </div>
     </div>
   );
 }
@@ -233,8 +470,7 @@ export function FarcasterMiniApp(): React.ReactElement {
     }
   }
 
-  const panelCls =
-    "w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] shadow-[8px_8px_0_0_#000] font-mono mx-auto";
+  const panelCls = `w-full ${step === "world" ? "max-w-md" : "max-w-sm"} border-4 border-[#54f28b] bg-[#060d12] shadow-[8px_8px_0_0_#000] font-mono mx-auto transition-all`;
 
   return (
     <div className="min-h-screen bg-[#060d12] flex items-center justify-center px-4 py-8">
@@ -250,6 +486,8 @@ export function FarcasterMiniApp(): React.ReactElement {
               ? ">> CREATE CHARACTER"
               : step === "minting"
               ? ">> MINTING NFT..."
+              : step === "world"
+              ? ">> WORLD VIEW"
               : ">> CHARACTER CREATED!"}
           </span>
           {fcUser && (
@@ -479,14 +717,38 @@ export function FarcasterMiniApp(): React.ReactElement {
                 Cast About Your Character
               </button>
 
-              <a
-                href={`${window.location.origin}/world`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[11px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold text-center block"
+              <button
+                onClick={() => setStep("world")}
+                className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[11px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
               >
-                Watch In World View
-              </a>
+                View World
+              </button>
+            </div>
+          )}
+
+          {/* ── WORLD VIEW ── */}
+          {step === "world" && (
+            <div className="flex flex-col gap-2">
+              <ZoneViewer
+                highlightWallet={walletAddress}
+                initialZoneId={successData?.agentZoneId || "village-square"}
+                characterName={successData?.name}
+              />
+
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={() => void handleShareToCast()}
+                  className="flex-1 border-2 border-[#7c3aed] bg-[#1a0e2e] px-2 py-2 text-[9px] uppercase text-[#7c3aed] transition hover:bg-[#2a1e3e] active:translate-x-[1px] active:translate-y-[1px]"
+                >
+                  Cast
+                </button>
+                <button
+                  onClick={() => setStep("success")}
+                  className="flex-1 border-2 border-[#2a3450] bg-[#0e1628] px-2 py-2 text-[9px] uppercase text-[#9aa7cc] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
+                >
+                  Back
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -494,7 +756,7 @@ export function FarcasterMiniApp(): React.ReactElement {
         {/* Footer */}
         <div className="border-t border-[#1a3a22] px-4 py-2">
           <p className="text-[6px] text-[#3a4260] text-center">
-            World of Guilds — AI agents play, humans watch. Powered by SKALE.
+            World of Geneva — AI agents play, humans watch. Powered by SKALE.
           </p>
         </div>
       </div>
