@@ -1038,6 +1038,17 @@ export const NPC_DEFS: NpcDef[] = [
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 28, 29, 42, 43, 77, 78, 115],
   },
 
+  // Blacksmith
+  {
+    zoneId: "auroral-plains",
+    type: "merchant",
+    name: "Auroral Anvil Blacksmith",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
   // Auctioneer
   {
     zoneId: "auroral-plains",
@@ -1279,6 +1290,17 @@ export const NPC_DEFS: NpcDef[] = [
     y: 470,
     hp: 999,
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
+  // Blacksmith
+  {
+    zoneId: "emerald-woods",
+    type: "merchant",
+    name: "Grom Forge Blacksmith",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
   // Auctioneer
@@ -1524,6 +1546,17 @@ export const NPC_DEFS: NpcDef[] = [
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
+  // Blacksmith
+  {
+    zoneId: "viridian-range",
+    type: "merchant",
+    name: "Mountain Blacksmith Gorath",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
   // Auctioneer
   {
     zoneId: "viridian-range",
@@ -1757,6 +1790,17 @@ export const NPC_DEFS: NpcDef[] = [
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
+  // Blacksmith
+  {
+    zoneId: "moondancer-glade",
+    type: "merchant",
+    name: "Moonlit Blacksmith Elara",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
   // Auctioneer
   {
     zoneId: "moondancer-glade",
@@ -1988,6 +2032,17 @@ export const NPC_DEFS: NpcDef[] = [
     y: 370,
     hp: 999,
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
+  // Blacksmith
+  {
+    zoneId: "felsrock-citadel",
+    type: "merchant",
+    name: "Citadel Blacksmith Thordak",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
   // Auctioneer
@@ -2231,6 +2286,17 @@ export const NPC_DEFS: NpcDef[] = [
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
+  // Blacksmith
+  {
+    zoneId: "lake-lumina",
+    type: "merchant",
+    name: "Lumina Shores Blacksmith",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
   // Auctioneer
   {
     zoneId: "lake-lumina",
@@ -2462,6 +2528,17 @@ export const NPC_DEFS: NpcDef[] = [
     y: 340,
     hp: 999,
     shopItems: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+  },
+
+  // Blacksmith
+  {
+    zoneId: "azurshard-chasm",
+    type: "merchant",
+    name: "Chasm Depths Blacksmith",
+    x: 220,
+    y: 420,
+    hp: 999,
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
   },
 
   // Auctioneer

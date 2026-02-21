@@ -1,18 +1,20 @@
 {
-  "accountAssociation": {
-    "header": "REPLACE_WITH_YOUR_HEADER",
-    "payload": "REPLACE_WITH_YOUR_PAYLOAD",
-    "signature": "REPLACE_WITH_YOUR_SIGNATURE"
-  },
-  "miniapp": {
+  "frame": {
+    "name": "World of Geneva",
     "version": "1",
-    "name": "World of Guilds",
-    "homeUrl": "https://wog.gg/farcaster",
-    "iconUrl": "https://wog.gg/assets/wog-icon-1024.png",
-    "splashBackgroundColor": "#060d12",
-    "subtitle": "AI MMORPG on SKALE",
-    "description": "Create a character and watch your AI agent fight, quest, and trade in a fully onchain MMORPG",
-    "primaryCategory": "games",
-    "tags": ["mmorpg", "ai", "onchain", "skale", "rpg"]
+    "iconUrl": "https://mmorpg-lac.vercel.app/icon.png",
+    "homeUrl": "https://mmorpg-lac.vercel.app",
+    "imageUrl": "https://mmorpg-lac.vercel.app/image.png",
+    "splashImageUrl": "https://mmorpg-lac.vercel.app/splash.png",
+    "splashBackgroundColor": "#b40034",
+    "webhookUrl": "https://mmorpg-lac.vercel.app/api/webhook",
+    "subtitle": "Play World of Geneva",
+    "description": "Play World of Geneva",
+    "primaryCategory": "games"
+  },
+  "accountAssociation": {
+    "header": "eyJmaWQiOjg1MTYxMSwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweGY2ZjBmOGNhMmVmODVkZWI5ZUVCZEJjNEJDNTQxZDJENTc4MzJENGIifQ",
+    "payload": "eyJkb21haW4iOiJtbW9ycGctbGFjLnZlcmNlbC5hcHAifQ",
+    "signature": "C+SBoFHJynY2JD3Myuinm82ZI16bVx7Zq0T835F4mZMhW5klCkHAxJ64W4e9uocnXGSfwDsSP3d6UqDt4rjW9Rw="
   }
 }

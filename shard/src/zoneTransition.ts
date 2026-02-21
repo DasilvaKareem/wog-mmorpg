@@ -3,11 +3,27 @@ import { getOrCreateZone, clearMobTagsForPlayer, type Entity } from "./zoneRunti
 import { logZoneEvent } from "./zoneEvents.js";
 import { authenticateRequest } from "./auth.js";
 import { logDiary, narrativeZoneTransition } from "./diary.js";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Resolve src/data/zones — works both in dev (shard/src/) and production (dist/) */
+function resolveZonesDir(): string {
+  // Production flat deploy: __dirname is dist/ → ../src/data/zones/
+  const prodPath = join(__dirname, "../src/data/zones");
+  if (existsSync(prodPath)) return prodPath;
+  // Dev: __dirname is shard/src/ or shard/dist/ → ../../src/data/zones/
+  const devPath = join(__dirname, "../../src/data/zones");
+  if (existsSync(devPath)) return devPath;
+  // Fallback: cwd-relative
+  const cwdPath = join(process.cwd(), "src/data/zones");
+  if (existsSync(cwdPath)) return cwdPath;
+  return devPath;
+}
+
+const ZONES_DIR = resolveZonesDir();
 
 // Level requirements for each zone
 const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
@@ -56,7 +72,7 @@ function loadZoneData(zoneId: string): ZoneData | null {
   }
 
   try {
-    const zonePath = join(__dirname, "..", "..", "src", "data", "zones", `${zoneId}.json`);
+    const zonePath = join(ZONES_DIR, `${zoneId}.json`);
     const raw = readFileSync(zonePath, "utf-8");
     const data: ZoneData = JSON.parse(raw);
     zoneDataCache.set(zoneId, data);
