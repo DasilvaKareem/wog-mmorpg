@@ -236,6 +236,102 @@ async function needsRepair(entityId: string, zoneId: string, threshold: number =
 }
 
 // =============================================================================
+//  Auto-Equip — Buy and equip best available gear from zone shop
+// =============================================================================
+
+/** Best gear to buy from shop, ordered by priority (strongest first). */
+const WARRIOR_WEAPONS = [
+  { tokenId: 77, name: "Mithril Greatsword" },
+  { tokenId: 44, name: "Steel Battleaxe" },
+  { tokenId: 42, name: "Steel Longsword" },
+  { tokenId: 30, name: "Iron Warhammer" },
+  { tokenId: 29, name: "Iron Battleaxe" },
+  { tokenId: 28, name: "Iron Longsword" },
+  { tokenId: 5,  name: "Steel Sword" },
+  { tokenId: 3,  name: "Iron Sword" },
+];
+const WARRIOR_ARMOR = [
+  { tokenId: 79, name: "Mithril Plate" },
+  { tokenId: 78, name: "Mithril Helm" },
+  { tokenId: 21, name: "Steel Plate" },
+  { tokenId: 20, name: "Steel Helm" },
+  { tokenId: 19, name: "Steel Chain" },
+  { tokenId: 18, name: "Iron Plate" },
+  { tokenId: 17, name: "Iron Helm" },
+  { tokenId: 9,  name: "Leather Vest" },
+];
+
+async function ensureWarriorGeared(entityId: string, zoneId: string, team: string): Promise<void> {
+  const state = await getZoneEntitiesIn(zoneId);
+  const entity = state[entityId];
+  if (!entity) return;
+
+  const eq = entity.equipment ?? {};
+  const hasWeapon = eq.weapon && eq.weapon.name;
+  const hasArmor = eq.chest && eq.chest.name;
+
+  if (hasWeapon && hasArmor) return; // Already geared
+
+  log(team, "QUEST", `Warrior has NO ${!hasWeapon ? "weapon" : ""}${!hasWeapon && !hasArmor ? " or " : ""}${!hasArmor ? "armor" : ""} — buying gear from shop!`);
+
+  // Find a merchant in this zone
+  const entities = await getZoneEntities(zoneId);
+  const merchant = Object.entries(entities).find(
+    ([_, e]: any) => e.type === "merchant" && e.shopItems?.length > 0
+  );
+  if (!merchant) {
+    log(team, "QUEST", `No merchant in ${zoneId} to buy gear from`);
+    return;
+  }
+
+  const [merchantId, merchantData] = merchant as [string, any];
+  const shopItems = new Set(merchantData.shopItems ?? []);
+
+  // Buy and equip best available weapon
+  if (!hasWeapon) {
+    for (const w of WARRIOR_WEAPONS) {
+      if (!shopItems.has(w.tokenId)) continue;
+      try {
+        await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: w.tokenId, quantity: 1 });
+        await api("POST", "/equipment/equip", { zoneId, tokenId: w.tokenId, entityId, walletAddress: WALLET });
+        log(team, "QUEST", `Bought & equipped ${w.name}!`);
+        break;
+      } catch {}
+    }
+  }
+
+  // Buy and equip best available armor
+  if (!hasArmor) {
+    for (const a of WARRIOR_ARMOR) {
+      if (!shopItems.has(a.tokenId)) continue;
+      try {
+        await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: a.tokenId, quantity: 1 });
+        await api("POST", "/equipment/equip", { zoneId, tokenId: a.tokenId, entityId, walletAddress: WALLET });
+        log(team, "QUEST", `Bought & equipped ${a.name}!`);
+        break;
+      } catch {}
+    }
+  }
+
+  // Also try helm, leggings, boots, etc.
+  const EXTRA_ARMOR = [
+    { tokenId: 78, name: "Mithril Helm", slot: "head" },
+    { tokenId: 20, name: "Steel Helm", slot: "head" },
+    { tokenId: 17, name: "Iron Helm", slot: "head" },
+    { tokenId: 115, name: "Oak Shield", slot: "offhand" },
+  ];
+  for (const a of EXTRA_ARMOR) {
+    if (!shopItems.has(a.tokenId)) continue;
+    if (eq[a.slot]?.name) continue; // Already have something in that slot
+    try {
+      await api("POST", "/shop/buy", { buyerAddress: WALLET, tokenId: a.tokenId, quantity: 1 });
+      await api("POST", "/equipment/equip", { zoneId, tokenId: a.tokenId, entityId, walletAddress: WALLET });
+      log(team, "QUEST", `Bought & equipped ${a.name}!`);
+    } catch {}
+  }
+}
+
+// =============================================================================
 //  Zone-Aware Helpers (for multi-zone transition quests)
 // =============================================================================
 
@@ -461,9 +557,10 @@ async function runTransitionQuest(team: string, progressionIndex: number): Promi
     console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
   }
 
-  // Pre-boss prep — repair gear + apply zone resistance elixir
+  // Pre-boss prep — ensure gear, repair, resistance elixir
   log(team, "QUEST", `Preparing for boss fight...`);
   const currentZone = prog.zoneId;
+  await ensureWarriorGeared(warrior.id, currentZone, team);
   await repairAllGear(warrior.id, currentZone, team, "QUEST");
   await applyResistanceElixir(warrior.id, currentZone, team, "QUEST");
 
@@ -679,7 +776,8 @@ async function runFinalBossQuest(team: string): Promise<boolean> {
     console.log(`  ${TEAM_COLORS[team]} [${team}] ${line}`);
   }
 
-  // Pre-boss prep — repair, resistance elixir, combat potions
+  // Pre-boss prep — ensure gear, repair, resistance elixir, combat potions
+  await ensureWarriorGeared(warrior.id, currentZone, team);
   await repairAllGear(warrior.id, currentZone, team, "QUEST");
   await applyResistanceElixir(warrior.id, currentZone, team, "QUEST");
   for (const potionTokenId of [61, 50, 49]) {
@@ -793,28 +891,39 @@ const TEAM_DEFS: Record<string, Array<{
 //  Spawn & Party Formation
 // =============================================================================
 
-async function spawnTeam(teamName: string) {
-  const defs = TEAM_DEFS[teamName];
-
-  // Step 0: Clean up duplicate entities from previous runs
-  // Scan ALL zones and remove any existing entities with the same name + wallet
-  const allNames = defs.map((d) => d.name);
+/** Clean up ALL player entities belonging to our wallet across all zones. */
+async function cleanupAllPlayerEntities(): Promise<void> {
+  const ALL_TEAM_NAMES = [...TEAM_DEFS.ALPHA, ...TEAM_DEFS.BRAVO].map(d => d.name);
+  let cleanedCount = 0;
   const state = await api("GET", "/state");
   for (const zoneId of ALL_ZONES) {
     const zoneEntities = state.zones[zoneId]?.entities ?? {};
     for (const [eid, edata] of Object.entries(zoneEntities) as [string, any][]) {
       if (
         edata.type === "player" &&
-        allNames.includes(edata.name) &&
+        ALL_TEAM_NAMES.includes(edata.name) &&
         edata.walletAddress?.toLowerCase() === WALLET.toLowerCase()
       ) {
         try {
-          await api("DELETE", `/spawn/${zoneId}/${eid}`);
-          log(teamName, "CLEANUP", `Removed stale ${edata.name} from ${zoneId}`);
-        } catch {}
+          const result = await api("DELETE", `/spawn/${zoneId}/${eid}`);
+          cleanedCount++;
+          console.log(`  CLEANUP: Removed ${edata.name} from ${zoneId} (${eid.slice(0, 8)})`);
+        } catch (err: any) {
+          console.log(`  CLEANUP: Failed to delete ${edata.name} from ${zoneId}: ${err.message?.slice(0, 40)}`);
+        }
       }
     }
   }
+  if (cleanedCount > 0) {
+    console.log(`  CLEANUP: Removed ${cleanedCount} stale entities — waiting 3s for propagation...`);
+    await sleep(3000);
+  } else {
+    console.log(`  CLEANUP: No stale entities found`);
+  }
+}
+
+async function spawnTeam(teamName: string) {
+  const defs = TEAM_DEFS[teamName];
 
   // Step 1: Spawn fresh entities
   let restoredZone: string | null = null;
@@ -1149,6 +1258,13 @@ async function warriorLoop(agent: Agent) {
         printScoreboard();
         // Don't return — keep grinding the strongest mobs forever!
       }
+      continue;
+    }
+
+    // --- GEAR CHECK: Ensure warrior has weapon and armor ---
+    const eq = me.equipment ?? {};
+    if (!eq.weapon || !eq.chest) {
+      await ensureWarriorGeared(agent.id, z, agent.team);
       continue;
     }
 
@@ -2109,6 +2225,10 @@ async function main() {
   console.log("  Authenticating...\n");
   const token = await authenticateWithWallet(PRIVATE_KEY);
   api = createAuthenticatedAPI(token);
+
+  // Clean ALL stale entities from previous runs before spawning
+  banner("CLEANING STALE ENTITIES");
+  await cleanupAllPlayerEntities();
 
   // Spawn both teams
   banner("SPAWNING TEAMS");
