@@ -133,14 +133,58 @@ function AppShell(): React.ReactElement {
   );
 }
 
+/**
+ * Detects if we're inside a Farcaster Mini App (Warpcast webview).
+ * At the root path, renders the Mini App instead of the landing page.
+ */
+function RootDetector(): React.ReactElement {
+  const [mode, setMode] = React.useState<"checking" | "miniapp" | "website">("checking");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { sdk } = await import("@farcaster/miniapp-sdk");
+        const inMiniApp = await sdk.isInMiniApp();
+        if (!cancelled) setMode(inMiniApp ? "miniapp" : "website");
+      } catch {
+        if (!cancelled) setMode("website");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (mode === "checking") {
+    // Brief blank screen while detecting — resolves in <100ms
+    return <div className="min-h-screen bg-[#060d12]" />;
+  }
+
+  if (mode === "miniapp") {
+    return <FarcasterMiniApp />;
+  }
+
+  return (
+    <GameProvider>
+      <WalletProvider>
+        <ToastProvider>
+          <AppShell />
+        </ToastProvider>
+      </WalletProvider>
+    </GameProvider>
+  );
+}
+
 export default function App(): React.ReactElement {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Farcaster Mini App — standalone, no WalletProvider/GameProvider needed */}
+        {/* Farcaster Mini App — explicit route always works */}
         <Route path="/farcaster" element={<FarcasterMiniApp />} />
 
-        {/* Main app shell — everything else */}
+        {/* Root — auto-detect Warpcast vs normal browser */}
+        <Route path="/" element={<RootDetector />} />
+
+        {/* All other routes — normal app */}
         <Route
           path="*"
           element={
