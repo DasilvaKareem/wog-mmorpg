@@ -42,6 +42,19 @@ body {
     linear-gradient(180deg, var(--bg-1), var(--bg-0) 70%);
 }
 
+body.world-route {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.world-route #root {
+  height: 100dvh;
+}
+
+body.world-route .world-canvas-container {
+  touch-action: none;
+}
+
 button,
 input,
 select {

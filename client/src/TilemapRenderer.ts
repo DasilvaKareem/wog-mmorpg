@@ -93,9 +93,10 @@ export class TilemapRenderer {
   // ─── Chunk streaming mode ──────────────────────────────────────────
 
   /** Initialize chunk streaming mode */
-  initChunkMode(tileSize: number): void {
+  initChunkMode(tileSize: number, options?: { lowPower?: boolean }): void {
     this.destroyAll();
     this.coordScale = tileSize > 0 ? CLIENT_TILE_PX / tileSize : 1.6;
+    const waterDelay = options?.lowPower ? 900 : 500;
 
     // Prefer overworld tileset if loaded, fall back to procedural atlas
     if (isOverworldLoaded(this.scene)) {
@@ -111,7 +112,7 @@ export class TilemapRenderer {
 
     // Start water animation timer
     this.waterTimer = this.scene.time.addEvent({
-      delay: 500,
+      delay: waterDelay,
       callback: this.animateWaterAll,
       callbackScope: this,
       loop: true,
@@ -300,6 +301,18 @@ export class TilemapRenderer {
   /** Number of chunks currently rendered */
   get renderedChunkCount(): number {
     return this.chunkVisuals.size;
+  }
+
+  /** Show or hide all tilemap layers — used by LOD overview mode */
+  setChunksVisible(visible: boolean): void {
+    for (const visual of this.chunkVisuals.values()) {
+      visual.groundLayer.setVisible(visible);
+      visual.overlayLayer.setVisible(visible);
+      visual.cliffLayer?.layer.setVisible(visible);
+    }
+    // Legacy mode layers
+    this.groundLayer?.setVisible(visible);
+    this.overlayLayer?.setVisible(visible);
   }
 
   /**

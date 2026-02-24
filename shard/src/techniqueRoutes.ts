@@ -8,6 +8,7 @@ import { getGoldBalance } from "./blockchain.js";
 import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
 import { randomUUID } from "crypto";
 import { saveCharacter } from "./characterStore.js";
+import { copperToGold } from "./currency.js";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -145,14 +146,15 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const onChainGold = Number(onChainGoldStr);
     const availableGold = getAvailableGold(player.walletAddress, onChainGold);
 
-    if (availableGold < technique.copperCost) {
+    const goldCost = copperToGold(technique.copperCost);
+    if (availableGold < goldCost) {
       return reply.status(400).send({
-        error: `Not enough gold. Need ${technique.copperCost}, have ${availableGold}`
+        error: `Not enough gold. Need ${technique.copperCost}c, have ${availableGold}g`
       });
     }
 
-    // Deduct gold
-    recordGoldSpend(player.walletAddress, technique.copperCost);
+    // Deduct gold (copper → gold conversion)
+    recordGoldSpend(player.walletAddress, goldCost);
 
     // Add technique to learned list
     if (!player.learnedTechniques) {

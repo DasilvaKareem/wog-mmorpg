@@ -13,6 +13,18 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          phaser:   ["phaser"],
+          thirdweb: ["thirdweb"],
+          wagmi:    ["wagmi", "viem"],
+          react:    ["react", "react-dom", "react-router-dom"],
+        },
+      },
+    },
+  },
   server: {
     proxy: {
       "/health": API_URL,

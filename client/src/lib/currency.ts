@@ -176,7 +176,9 @@ export function parseGoldString(goldString: string): number {
  * @returns True if valid, false otherwise
  */
 /** Convert copper to on-chain gold (e.g. 500 copper → 0.05 gold) */
-export const COPPER_PER_GOLD = 10_000;
+export const COPPER_PER_SILVER = 100;
+export const SILVER_PER_GOLD = 100;
+export const COPPER_PER_GOLD = COPPER_PER_SILVER * SILVER_PER_GOLD; // 10_000
 export const copperToGold = (copper: number): number => copper / COPPER_PER_GOLD;
 export const goldToCopper = (gold: number): number => Math.floor(gold * COPPER_PER_GOLD);
 

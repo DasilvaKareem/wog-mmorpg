@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { getGoldBalance, getItemBalance } from "./blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "./goldLedger.js";
-import { getItemByTokenId, type EquipmentSlot } from "./itemCatalog.js";
+import { copperToGold } from "./currency.js";
+import { getItemByTokenId, getItemRarity, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
 import {
   getAllZones,
   getEffectiveStats,
@@ -459,11 +460,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: "No damaged equipped items to repair" };
     }
 
-    const totalCost = repairs.reduce((sum, entry) => sum + entry.cost, 0);
+    const totalCost = repairs.reduce((sum, entry) => sum + entry.cost, 0); // in copper
+    const goldCost = copperToGold(totalCost); // convert to on-chain gold
     const onChainGold = parseFloat(await getGoldBalance(owner));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
     const availableGold = getAvailableGold(owner, safeOnChainGold);
-    if (availableGold < totalCost) {
+    if (availableGold < goldCost) {
       reply.code(400);
       return {
         error: "Insufficient gold",
@@ -479,7 +481,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       equipped.broken = false;
     }
     recalculateEntityVitals(entity);
-    recordGoldSpend(owner, totalCost);
+    recordGoldSpend(owner, goldCost);
 
     // Log repair diary entry
     if (owner) {
@@ -504,4 +506,64 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       ...serializeEntityEquipment(entity),
     };
   });
+
+  // ── GET /inventory/:walletAddress ─────────────────────────────────────────
+  // Returns on-chain ERC-1155 item balances + equipped status for a wallet.
+  server.get<{ Params: { walletAddress: string } }>(
+    "/inventory/:walletAddress",
+    async (request, reply) => {
+      const { walletAddress } = request.params;
+      if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+        reply.code(400);
+        return { error: "Invalid wallet address" };
+      }
+
+      // Find live entity equipment across zones
+      const equippedByTokenId: Record<number, { slot: string; durability: number; maxDurability: number }> = {};
+      for (const [, zone] of getAllZones()) {
+        for (const [, entity] of zone.entities) {
+          if (entity.type === "player" && entity.walletAddress?.toLowerCase() === walletAddress.toLowerCase()) {
+            for (const [slot, e] of Object.entries(entity.equipment ?? {})) {
+              equippedByTokenId[(e as any).tokenId] = {
+                slot,
+                durability: (e as any).durability ?? (e as any).maxDurability ?? 0,
+                maxDurability: (e as any).maxDurability ?? 0,
+              };
+            }
+            break;
+          }
+        }
+      }
+
+      // Fetch all on-chain balances in parallel
+      const balances = await Promise.all(
+        ITEM_CATALOG.map(async (item) => {
+          const qty = await getItemBalance(walletAddress, item.tokenId);
+          return { tokenId: Number(item.tokenId), qty: Number(qty) };
+        })
+      );
+
+      const items = balances
+        .filter(({ tokenId, qty }) => qty > 0 || equippedByTokenId[tokenId] !== undefined)
+        .map(({ tokenId, qty }) => {
+          const def = ITEM_CATALOG.find((i) => Number(i.tokenId) === tokenId)!;
+          const equipped = equippedByTokenId[tokenId];
+          return {
+            tokenId,
+            name: def.name,
+            description: def.description,
+            category: def.category,
+            equipSlot: def.equipSlot ?? null,
+            rarity: getItemRarity(def.copperPrice),
+            quantity: qty,
+            equipped: !!equipped,
+            equippedSlot: equipped?.slot ?? null,
+            durability: equipped?.durability ?? null,
+            maxDurability: equipped?.maxDurability ?? null,
+          };
+        });
+
+      return { walletAddress, items };
+    }
+  );
 }

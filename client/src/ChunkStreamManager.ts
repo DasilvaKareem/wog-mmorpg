@@ -8,9 +8,6 @@ export const CHUNK_SIZE = 64;
 /** How many chunks to load in each direction around the camera center */
 export const STREAM_RADIUS = 2;
 
-/** How far beyond stream radius before unloading (prevents thrashing at edges) */
-const UNLOAD_RADIUS = STREAM_RADIUS + 1;
-
 function chunkKey(zoneId: string, cx: number, cz: number): string {
   return `${zoneId}_${cx}_${cz}`;
 }
@@ -43,6 +40,7 @@ export class ChunkStreamManager {
   private loaded: Map<string, LoadedChunk> = new Map();
   private loading: Set<string> = new Set();
   private tileSize: number;
+  private streamRadius: number;
   private zones: ZoneChunkBounds[] = [];
 
   /** Called when a new chunk is loaded and needs to be rendered */
@@ -54,8 +52,9 @@ export class ChunkStreamManager {
   private lastCameraCx = -9999;
   private lastCameraCz = -9999;
 
-  constructor(worldLayout: WorldLayoutData, tileSize: number) {
+  constructor(worldLayout: WorldLayoutData, tileSize: number, streamRadius = STREAM_RADIUS) {
     this.tileSize = tileSize;
+    this.streamRadius = Math.max(1, streamRadius);
 
     // Build zone chunk bounds from layout
     for (const zone of Object.values(worldLayout.zones)) {
@@ -114,8 +113,8 @@ export class ChunkStreamManager {
       const zoneCameraCx = Math.floor(localX / chunkWorldSize);
       const zoneCameraCz = Math.floor(localZ / chunkWorldSize);
 
-      for (let dz = -STREAM_RADIUS; dz <= STREAM_RADIUS; dz++) {
-        for (let dx = -STREAM_RADIUS; dx <= STREAM_RADIUS; dx++) {
+      for (let dz = -this.streamRadius; dz <= this.streamRadius; dz++) {
+        for (let dx = -this.streamRadius; dx <= this.streamRadius; dx++) {
           const cx = zoneCameraCx + dx;
           const cz = zoneCameraCz + dz;
 

@@ -19,6 +19,10 @@ import {
 } from "./auctionHouseChain.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { authenticateRequest } from "./auth.js";
+import { copperToGold } from "./currency.js";
+
+const AUCTION_LISTING_FEE = copperToGold(50); // 50 copper = 0.005 GOLD
+const AUCTION_CANCEL_FEE = copperToGold(25);  // 25 copper = 0.0025 GOLD
 
 const STATUS_NAMES = ["active", "ended", "cancelled"];
 
@@ -163,6 +167,22 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
           available: balance.toString(),
         };
       }
+
+      // Charge listing fee (50 copper = 0.005 GOLD)
+      const onChainGold = parseFloat(await getGoldBalance(sellerAddress));
+      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+      const availableGold = getAvailableGold(sellerAddress, safeOnChainGold);
+      if (availableGold < AUCTION_LISTING_FEE) {
+        reply.code(400);
+        return {
+          error: "Insufficient gold for listing fee",
+          required: AUCTION_LISTING_FEE,
+          available: availableGold,
+          message: `Listing fee is ${formatGold(AUCTION_LISTING_FEE)} (50 copper)`,
+        };
+      }
+      await recordGoldSpend(sellerAddress, AUCTION_LISTING_FEE);
+      server.log.info(`Listing fee of ${formatGold(AUCTION_LISTING_FEE)} charged to ${sellerAddress}`);
 
       const durationSeconds = durationMinutes * 60;
       const finalBuyoutPrice = buyoutPrice && buyoutPrice > 0 ? buyoutPrice : 0;
@@ -436,6 +456,21 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         reply.code(400);
         return { error: "Cannot cancel auction with bids" };
       }
+
+      // Charge cancellation fee (25 copper)
+      const onChainGold = parseFloat(await getGoldBalance(authenticatedWallet));
+      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+      const availableGold = getAvailableGold(authenticatedWallet, safeOnChainGold);
+      if (availableGold < AUCTION_CANCEL_FEE) {
+        reply.code(400);
+        return {
+          error: "Insufficient gold for cancellation fee",
+          required: AUCTION_CANCEL_FEE,
+          available: availableGold,
+          message: "Cancellation fee is 25 copper (0.0025 GOLD)",
+        };
+      }
+      recordGoldSpend(authenticatedWallet, AUCTION_CANCEL_FEE);
 
       const txHash = await cancelAuctionOnChain(auctionId);
 

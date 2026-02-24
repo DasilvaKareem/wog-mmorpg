@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { distributeSFuel, mintGold, getGoldBalance, getItemBalance } from "./blockchain.js";
 import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "./itemCatalog.js";
-import { goldToCopper } from "./currency.js";
+import { goldToCopper, copperToGold } from "./currency.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -32,8 +32,10 @@ export function registerWalletRoutes(server: FastifyInstance) {
         const sfuelTx = await distributeSFuel(address);
         server.log.info(`sFUEL sent to ${address}: ${sfuelTx}`);
 
-        const goldTx = await mintGold(address, "50");
-        server.log.info(`50 GOLD minted to ${address}: ${goldTx}`);
+        const welcomeCopper = 500; // 500 copper = 5 silver welcome bonus
+        const welcomeGold = copperToGold(welcomeCopper);
+        const goldTx = await mintGold(address, welcomeGold.toString());
+        server.log.info(`${welcomeCopper}c (${welcomeGold}g) welcome bonus minted to ${address}: ${goldTx}`);
 
         registeredWallets.add(normalized);
 

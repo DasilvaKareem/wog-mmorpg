@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "./classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "./itemCatalog.js";
-import { mintGold, mintItem, updateCharacterMetadata } from "./blockchain.js";
+import { mintGold, mintItem, updateCharacterMetadata, burnItem } from "./blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
 import type { OreType } from "./oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "./questSystem.js";
@@ -26,6 +26,8 @@ import {
 import { getActiveXpMultiplier } from "./potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "./elementSystem.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "./diary.js";
+import { recordGoldSpend } from "./goldLedger.js";
+import { copperToGold } from "./currency.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -473,6 +475,37 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
     console.log(`[death] ${player.name} lost ${deathXpLoss} XP (${player.xp} remaining)`);
   }
 
+  // Gold tax on death: level * 10 copper (e.g. L42 = 420 copper = 0.042 GOLD)
+  if (player.walletAddress) {
+    const goldTax = copperToGold((player.level ?? 1) * 10);
+    recordGoldSpend(player.walletAddress, goldTax);
+    console.log(`[death] ${player.name} taxed ${(player.level ?? 1) * 10} copper (L${player.level ?? 1})`);
+  }
+
+  // Permanently burn items at 0 durability
+  const burnedSlots: string[] = [];
+  if (player.walletAddress && player.equipment) {
+    for (const slot of Object.keys(player.equipment) as EquipmentSlot[]) {
+      const equipped = player.equipment[slot];
+      if (equipped && (equipped.durability <= 0 || equipped.broken)) {
+        burnedSlots.push(slot);
+        const { tokenId } = equipped;
+        delete player.equipment[slot];
+        burnItem(player.walletAddress, BigInt(tokenId), 1n)
+          .catch((err) => console.error(`[death] burn failed for ${player.name} slot=${slot} tokenId=${tokenId}:`, err));
+      }
+    }
+    if (burnedSlots.length > 0) {
+      console.log(`[death] ${player.name} lost ${burnedSlots.join(", ")} permanently (0 durability)`);
+      logZoneEvent({
+        zoneId,
+        type: "system",
+        message: `${player.name}'s ${burnedSlots.join(", ")} shattered beyond repair and was destroyed.`,
+        tick: Date.now(),
+      });
+    }
+  }
+
   // Teleport to graveyard spawn point
   const spawn = GRAVEYARD_SPAWNS[zoneId] ?? { x: 100, y: 100 };
   player.x = spawn.x;
@@ -523,10 +556,11 @@ async function handleMobDeath(
 
   // Auto-loot: mint gold + common drops to killer's wallet
   if (killer?.walletAddress && lootTable) {
-    // Roll gold
+    // Roll copper loot and convert to on-chain gold (10,000 copper = 1 gold)
     const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
-    mintGold(killer.walletAddress, copperAmount.toString()).catch((err) => {
-      console.error(`[loot] Failed to mint ${copperAmount} copper to ${killer.walletAddress}:`, err);
+    const goldAmount = copperToGold(copperAmount);
+    mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
+      console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
     });
 
     // Roll auto-drops

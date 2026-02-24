@@ -12,6 +12,7 @@ interface DropdownItem {
 interface DropdownMenu {
   label: string;
   icon: string;
+  to?: string; // If set, acts as a direct link instead of dropdown
   items: DropdownItem[];
 }
 
@@ -45,10 +46,9 @@ const MENUS: DropdownMenu[] = [
   },
   {
     label: "Champions",
-    icon: "@@",
-    items: [
-      { label: "My Champion", to: "/champions", icon: "@>" },
-    ],
+    icon: "@>",
+    to: "/champions",
+    items: [],
   },
 ];
 
@@ -164,7 +164,28 @@ export function Navbar(): React.ReactElement {
         {/* Desktop menu */}
         <div className="hidden items-center gap-0 md:flex">
           {MENUS.map((menu) => {
-            const active = isMenuActive(menu);
+            const active = menu.to
+              ? location.pathname === menu.to
+              : isMenuActive(menu);
+            // Direct link (no dropdown)
+            if (menu.to) {
+              return (
+                <div key={menu.label} className="relative">
+                  <Link
+                    to={menu.to}
+                    className={`flex items-center gap-1 px-3 py-3 text-[9px] uppercase tracking-wide transition ${
+                      active ? "text-[#ffcc00]" : "text-[#9aa7cc] hover:text-[#d6deff]"
+                    }`}
+                  >
+                    <span className="text-[7px]">{menu.icon}</span>
+                    {menu.label}
+                  </Link>
+                  {active && (
+                    <div className="absolute bottom-0 left-1/2 h-[2px] w-4 -translate-x-1/2 bg-[#ffcc00]" />
+                  )}
+                </div>
+              );
+            }
             return (
               <div key={menu.label} className="relative">
                 <button

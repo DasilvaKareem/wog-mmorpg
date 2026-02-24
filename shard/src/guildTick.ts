@@ -45,12 +45,20 @@ async function guildTick(server: FastifyInstance) {
 
             // If it's a gold withdrawal, handle the transfer on the server side
             if (proposal.proposalType === ProposalType.WithdrawGold) {
-              // Note: The contract already deducted from treasury
-              // Server needs to credit the recipient's available gold
-              // This is handled by NOT recording it as spent, since it's a guild->member transfer
-              server.log.info(
-                `Guild withdrawal: ${proposal.targetAmount} gold to ${proposal.targetAddress}`
-              );
+              // Note: The contract already deducted from treasury and sent to recipient
+              // Apply 3% protocol tax on the withdrawal amount
+              const taxRate = 0.03;
+              const taxAmount = proposal.targetAmount * taxRate;
+              if (taxAmount > 0 && proposal.targetAddress) {
+                recordGoldSpend(proposal.targetAddress, taxAmount);
+                server.log.info(
+                  `Guild withdrawal tax: ${taxAmount.toFixed(4)} gold (3%) from ${proposal.targetAmount} gold to ${proposal.targetAddress}`
+                );
+              } else {
+                server.log.info(
+                  `Guild withdrawal: ${proposal.targetAmount} gold to ${proposal.targetAddress}`
+                );
+              }
             }
           } else {
             server.log.info(`Proposal ${i} failed (more no votes than yes votes)`);

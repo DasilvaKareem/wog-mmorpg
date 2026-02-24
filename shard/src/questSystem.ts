@@ -6,6 +6,8 @@ import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
 import { saveCharacter } from "./characterStore.js";
 import { getAllZoneEvents } from "./zoneEvents.js";
 import { logDiary, narrativeQuestComplete } from "./diary.js";
+import { getAgentCustodialWallet } from "./agentConfigStore.js";
+import { copperToGold, formatCopperString } from "./currency.js";
 
 // Quest definition
 export interface Quest {
@@ -1863,9 +1865,10 @@ export async function awardQuestRewards(
     }
   }
 
-  // Award gold (async, non-blocking)
+  // Award gold — convert copper reward to on-chain gold (10,000 copper = 1 gold)
   if (player.walletAddress) {
-    await mintGold(player.walletAddress, quest.rewards.copper.toString()).catch(
+    const goldReward = copperToGold(quest.rewards.copper);
+    await mintGold(player.walletAddress, goldReward.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)
     );
 
@@ -1913,7 +1916,7 @@ export async function awardQuestRewards(
   }
 
   console.log(
-    `[quest] ${player.name} completed "${quest.title}" - awarded ${quest.rewards.copper} copper + ${quest.rewards.xp} XP` +
+    `[quest] ${player.name} completed "${quest.title}" - awarded ${formatCopperString(quest.rewards.copper)} + ${quest.rewards.xp} XP` +
       (quest.rewards.items
         ? ` + ${quest.rewards.items.map((i) => `${i.quantity}x tokenId:${i.tokenId}`).join(", ")}`
         : "")
@@ -2236,22 +2239,30 @@ export function registerQuestRoutes(server: FastifyInstance) {
     async (request, reply) => {
       const normalized = request.params.walletAddress.toLowerCase();
 
-      // Find the player entity across all zones
+      // Build search list: try owner wallet first, then custodial wallet
+      const custodial = await getAgentCustodialWallet(normalized);
+      const walletsToSearch = Array.from(
+        new Set([normalized, custodial?.toLowerCase()].filter(Boolean) as string[])
+      );
+
+      // Find the player entity across all zones (try all candidate wallets)
       let player: Entity | undefined;
       let playerZoneId: string | undefined;
 
-      for (const [zoneId, zone] of getAllZones()) {
-        for (const entity of zone.entities.values()) {
-          if (
-            entity.type === "player" &&
-            entity.walletAddress?.toLowerCase() === normalized
-          ) {
-            player = entity;
-            playerZoneId = zoneId;
-            break;
+      outer:
+      for (const walletToFind of walletsToSearch) {
+        for (const [zoneId, zone] of getAllZones()) {
+          for (const entity of zone.entities.values()) {
+            if (
+              entity.type === "player" &&
+              entity.walletAddress?.toLowerCase() === walletToFind
+            ) {
+              player = entity;
+              playerZoneId = zoneId;
+              break outer;
+            }
           }
         }
-        if (player) break;
       }
 
       if (!player || !playerZoneId) {

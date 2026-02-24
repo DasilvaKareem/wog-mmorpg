@@ -387,4 +387,15 @@ export class EntityRenderer {
   get entityCount(): number {
     return this.visuals.size;
   }
+
+  /** Show or hide all entity visuals — used by LOD overview mode */
+  setSpritesVisible(visible: boolean): void {
+    for (const visual of this.visuals.values()) {
+      visual.sprite.setVisible(visible);
+      visual.label.setVisible(visible);
+      visual.hpBar.setVisible(visible);
+      visual.hpBg.setVisible(visible);
+      visual.partyRing?.setVisible(visible);
+    }
+  }
 }

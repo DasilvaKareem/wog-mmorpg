@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT, CLIENT_TILE_PX } from "@/config";
+import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
 import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
 import { ChunkStreamManager } from "@/ChunkStreamManager";
@@ -10,6 +10,26 @@ import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites } from "@/EntitySpriteGenerator";
 import { preloadOverworld } from "@/OverworldAtlas";
+
+/** Zoom threshold below which the strategic overview renders instead of tiles */
+const OVERVIEW_ENTER = 0.38;
+/** Zoom threshold above which tiles resume (hysteresis prevents flicker) */
+const OVERVIEW_EXIT = 0.48;
+
+/** Known zone adjacency for overview connection lines */
+const ZONE_CONNECTIONS: [string, string][] = [
+  ["village-square",  "wild-meadow"],
+  ["wild-meadow",     "dark-forest"],
+  ["wild-meadow",     "auroral-plains"],
+  ["dark-forest",     "auroral-plains"],
+  ["dark-forest",     "emerald-woods"],
+  ["emerald-woods",   "viridian-range"],
+  ["emerald-woods",   "moondancer-glade"],
+  ["viridian-range",  "felsrock-citadel"],
+  ["moondancer-glade","felsrock-citadel"],
+  ["felsrock-citadel","lake-lumina"],
+  ["lake-lumina",     "azurshard-chasm"],
+];
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -46,6 +66,8 @@ export class WorldScene extends Phaser.Scene {
 
   /** Tooltip stickiness: keep showing same entity until cursor moves far away */
   private tooltipEntityId: string | null = null;
+  private lastTooltipUpdateAt = 0;
+  private lastHudUpdateAt = 0;
 
   /** Multi-zone streaming active */
   private chunkStreamingEnabled = false;
@@ -54,6 +76,17 @@ export class WorldScene extends Phaser.Scene {
   private lockedWalletAddress: string | null = null;
   private unsubscribeLockToPlayer: (() => void) | null = null;
   private unsubscribeFocusEntity: (() => void) | null = null;
+  private touchMode = false;
+  private mobileMode = false;
+  private lastPinchDistance: number | null = null;
+  private pollInFlight = false;
+  private pollDelayMs = POLL_INTERVAL;
+
+  // LOD overview mode — rendered when zoom drops below OVERVIEW_ENTER
+  private overviewMode = false;
+  private overviewGraphics: Phaser.GameObjects.Graphics | null = null;
+  private overviewDotGraphics: Phaser.GameObjects.Graphics | null = null;
+  private overviewLabels: Phaser.GameObjects.Text[] = [];
 
   constructor() {
     super({ key: "WorldScene" });
@@ -68,6 +101,17 @@ export class WorldScene extends Phaser.Scene {
   }
 
   create(): void {
+    const hasWindow = typeof window !== "undefined";
+    const coarsePointer = hasWindow && window.matchMedia("(pointer: coarse)").matches;
+    const noHover = hasWindow && window.matchMedia("(hover: none)").matches;
+    const smallViewport = hasWindow && window.innerWidth < 1024;
+    this.touchMode = coarsePointer || noHover;
+    this.mobileMode = this.touchMode || smallViewport;
+    this.pollDelayMs = this.mobileMode ? Math.max(POLL_INTERVAL, 2500) : POLL_INTERVAL;
+
+    // Enable second touch pointer for pinch gestures.
+    this.input.addPointer(1);
+
     registerEntitySprites(this);
 
     this.worldLayout = new WorldLayoutManager();
@@ -106,10 +150,12 @@ export class WorldScene extends Phaser.Scene {
     });
 
     this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+      if (this.touchMode && this.input.pointer1.isDown && this.input.pointer2.isDown) return;
       if (!pointer.isDown) return;
       const movedX = Math.abs(pointer.x - this.dragStartX);
       const movedY = Math.abs(pointer.y - this.dragStartY);
-      if (!this.isDragging && movedX < 4 && movedY < 4) return;
+      const dragThreshold = this.touchMode ? 8 : 4;
+      if (!this.isDragging && movedX < dragThreshold && movedY < dragThreshold) return;
       this.isDragging = true;
       this.followTarget = null;
       const cam = this.cameras.main;
@@ -172,6 +218,12 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(201)
       .setVisible(false);
 
+    if (this.mobileMode) {
+      this.hud.setVisible(false);
+      this.tooltip.setVisible(false);
+      this.tooltipBg.setVisible(false);
+    }
+
     // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
       this.scrollToZone(zoneId);
@@ -209,7 +261,7 @@ export class WorldScene extends Phaser.Scene {
     // Start multi-zone entity polling
     void this.pollAllZones();
     this.time.addEvent({
-      delay: POLL_INTERVAL,
+      delay: this.pollDelayMs,
       callback: this.pollAllZones,
       callbackScope: this,
       loop: true,
@@ -223,6 +275,9 @@ export class WorldScene extends Phaser.Scene {
     }
 
     const cam = this.cameras.main;
+    const now = this.time.now;
+
+    this.updatePinchZoom();
 
     // Arrow key pan (releases spectate)
     if (this.cursors.left.isDown || this.cursors.right.isDown ||
@@ -261,36 +316,78 @@ export class WorldScene extends Phaser.Scene {
       this.currentZoneLabel = zoneId ?? "wilderness";
     }
 
-    // Build HUD text
-    const followName = this.followTarget
-      ? this.entityRenderer.getEntity(this.followTarget)?.name ?? "?"
-      : null;
+    // LOD: switch to/from strategic overview based on zoom level
+    if (this.chunkStreamingEnabled) {
+      const zoom = cam.zoom;
+      if (!this.overviewMode && zoom < OVERVIEW_ENTER) {
+        this.enterOverviewMode();
+      } else if (this.overviewMode && zoom > OVERVIEW_EXIT) {
+        this.exitOverviewMode();
+      } else if (this.overviewMode) {
+        this.updateOverviewDots();
+      }
+    }
 
-    const chunkInfo = this.chunkStreamingEnabled
-      ? `Chunks: ${this.tilemapRenderer.renderedChunkCount}`
-      : "";
+    if (!this.mobileMode && now - this.lastHudUpdateAt >= 150) {
+      const followName = this.followTarget
+        ? this.entityRenderer.getEntity(this.followTarget)?.name ?? "?"
+        : null;
 
-    this.hud.setText(
-      [
-        `Zone: ${this.currentZoneLabel}`,
-        `Tick: ${this.tick}`,
-        `Entities: ${this.entityRenderer.entityCount}`,
-        `Zoom: ${cam.zoom.toFixed(1)}x`,
-        chunkInfo,
-        "",
-        followName ? `Following: ${followName} | ESC: free cam` : "Click entity to spectate",
-        "Drag/Arrows: pan | Scroll: zoom",
-        this.terrainLoaded ? "" : "Loading terrain...",
-        this.connected ? "" : "Connecting...",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    );
+      this.hud.setText(
+        [
+          followName ? `Following: ${followName} | ESC: free cam` : "",
+          this.terrainLoaded ? "" : "Loading terrain...",
+          this.connected ? "" : "Connecting...",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+      this.lastHudUpdateAt = now;
+    }
 
-    this.updateTooltip();
+    if (!this.touchMode && now - this.lastTooltipUpdateAt >= 120) {
+      this.updateTooltip();
+      this.lastTooltipUpdateAt = now;
+    }
+  }
+
+  private updatePinchZoom(): void {
+    if (!this.touchMode) return;
+
+    const p1 = this.input.pointer1;
+    const p2 = this.input.pointer2;
+    if (!p1 || !p2) return;
+
+    if (p1.isDown && p2.isDown) {
+      const distance = Phaser.Math.Distance.Between(p1.x, p1.y, p2.x, p2.y);
+      if (this.lastPinchDistance !== null) {
+        const delta = distance - this.lastPinchDistance;
+        if (Math.abs(delta) > 1) {
+          const cam = this.cameras.main;
+          const nextZoom = Phaser.Math.Clamp(
+            cam.zoom + delta * 0.003,
+            this.minZoom,
+            ZOOM_MAX,
+          );
+          cam.setZoom(nextZoom);
+        }
+      }
+      this.lastPinchDistance = distance;
+      this.isDragging = false;
+      return;
+    }
+
+    this.lastPinchDistance = null;
   }
 
   private updateTooltip(): void {
+    if (this.touchMode) {
+      this.tooltip.setVisible(false);
+      this.tooltipBg.setVisible(false);
+      this.tooltipEntityId = null;
+      return;
+    }
+
     // Hide tooltip while dragging the camera
     if (this.isDragging) {
       this.tooltip.setVisible(false);
@@ -536,14 +633,18 @@ export class WorldScene extends Phaser.Scene {
 
     // Init tilemap renderer in chunk mode
     this.tilemapRenderer.setWorldLayout(this.worldLayout);
-    this.tilemapRenderer.initChunkMode(zoneInfo.tileSize);
+    this.tilemapRenderer.initChunkMode(zoneInfo.tileSize, { lowPower: this.mobileMode });
     this.entityRenderer.setCoordScale(this.tilemapRenderer.coordScale);
     this.entityRenderer.setElevationQuery((wx, wz) =>
       this.tilemapRenderer.getElevationAt(wx, wz)
     );
 
     // Create multi-zone chunk manager
-    this.chunkManager = new ChunkStreamManager(layoutData, zoneInfo.tileSize);
+    this.chunkManager = new ChunkStreamManager(
+      layoutData,
+      zoneInfo.tileSize,
+      this.mobileMode ? 1 : 2,
+    );
     this.chunkManager.onChunkLoaded = (chunk) => {
       this.tilemapRenderer.addChunk(chunk);
     };
@@ -553,12 +654,13 @@ export class WorldScene extends Phaser.Scene {
 
     // No camera bounds — seamless scrolling
     this.cameras.main.removeBounds();
-    this.minZoom = 0.15;
+    this.minZoom = this.mobileMode ? 0.2 : 0.15;
 
     // Center camera on world center
     const worldCenter = this.worldLayout.getWorldPixelCenter();
     const cam = this.cameras.main;
-    cam.setZoom(Phaser.Math.Clamp(ZOOM_DEFAULT, this.minZoom, ZOOM_MAX));
+    const startZoom = this.mobileMode ? 1.7 : ZOOM_DEFAULT;
+    cam.setZoom(Phaser.Math.Clamp(startZoom, this.minZoom, ZOOM_MAX));
     cam.centerOn(worldCenter.x, worldCenter.z);
 
     // Initial chunk load at world center
@@ -596,60 +698,242 @@ export class WorldScene extends Phaser.Scene {
     cam.centerOn(w / 2, h / 2);
   }
 
-  /** Poll all zones for entities, offset to world coordinates */
-  private async pollAllZones(): Promise<void> {
-    if (!this.worldLayout.loaded) {
-      // Fallback: poll single zone
-      const data = await fetchZone(this.currentZoneLabel || "village-square");
-      if (data) {
-        this.connected = true;
-        this.tick = data.tick;
-        this.entityRenderer.update(data.entities);
-      } else {
-        this.connected = false;
-      }
-      return;
+  // ─── LOD Strategic Overview Mode ─────────────────────────────────────────
+
+  /** Map a zone's level requirement to a fill/stroke color */
+  private zoneLevelColor(levelReq: number): number {
+    if (levelReq <= 1)  return 0x4CAF50;  // green       — village-square
+    if (levelReq <= 5)  return 0x8BC34A;  // light green — wild-meadow
+    if (levelReq <= 10) return 0x2E7D32;  // dark green  — dark-forest
+    if (levelReq <= 15) return 0x7E57C2;  // purple      — auroral-plains
+    if (levelReq <= 20) return 0x00897B;  // teal        — emerald-woods
+    if (levelReq <= 25) return 0x1565C0;  // blue        — viridian-range
+    if (levelReq <= 30) return 0x6A1B9A;  // deep purple — moondancer-glade
+    if (levelReq <= 35) return 0xB71C1C;  // dark red    — felsrock-citadel
+    if (levelReq <= 40) return 0x0277BD;  // ocean blue  — lake-lumina
+    return 0x4A148C;                       // violet      — azurshard-chasm
+  }
+
+  /** Build static zone rectangles and connection lines for the overview */
+  private buildOverviewGraphics(): void {
+    this.overviewGraphics?.destroy();
+    for (const lbl of this.overviewLabels) lbl.destroy();
+    this.overviewLabels = [];
+
+    if (!this.worldLayout.loaded) return;
+
+    const g = this.add.graphics();
+    g.setDepth(50);
+    this.overviewGraphics = g;
+
+    // Connection lines (drawn first, behind zone fills)
+    g.lineStyle(2, 0x3a4260, 0.8);
+    for (const [a, b] of ZONE_CONNECTIONS) {
+      const za = this.worldLayout.getZone(a);
+      const zb = this.worldLayout.getZone(b);
+      if (!za || !zb) continue;
+      const ca = this.worldLayout.getZonePixelCenter(a);
+      const cb = this.worldLayout.getZonePixelCenter(b);
+      g.beginPath();
+      g.moveTo(ca.x, ca.z);
+      g.lineTo(cb.x, cb.z);
+      g.strokePath();
     }
 
-    const zoneIds = this.worldLayout.getZoneIds();
-    const allEntities: Record<string, Entity> = {};
-    let anyConnected = false;
-    let maxTick = 0;
-
-    // Fetch all zones in parallel
-    const results = await Promise.all(
-      zoneIds.map(async (zoneId) => {
-        const data = await fetchZone(zoneId);
-        return { zoneId, data };
-      })
-    );
-
-    for (const { zoneId, data } of results) {
-      if (!data) continue;
-      anyConnected = true;
-      if (data.tick > maxTick) maxTick = data.tick;
-
+    // Zone rectangles + labels
+    for (const zoneId of this.worldLayout.getZoneIds()) {
       const zone = this.worldLayout.getZone(zoneId);
       if (!zone) continue;
 
-      // Offset entity positions from zone-local to world coordinates
-      for (const [id, entity] of Object.entries(data.entities)) {
-        allEntities[id] = {
-          ...entity,
-          x: entity.x + zone.offset.x,
-          y: entity.y + zone.offset.z,
-          zoneId,
-        };
-      }
+      const offset = this.worldLayout.getZonePixelOffset(zoneId);
+      const pixW = zone.size.width * this.tilemapRenderer.coordScale;
+      const pixH = zone.size.height * this.tilemapRenderer.coordScale;
+      const color = this.zoneLevelColor(zone.levelReq);
+
+      g.fillStyle(color, 0.22);
+      g.fillRect(offset.x, offset.z, pixW, pixH);
+      g.lineStyle(2, color, 0.75);
+      g.strokeRect(offset.x, offset.z, pixW, pixH);
+
+      const center = this.worldLayout.getZonePixelCenter(zoneId);
+      const colorHex = `#${color.toString(16).padStart(6, "0")}`;
+
+      // Zone name
+      const nameLabel = this.add
+        .text(center.x, center.z - 14, zoneId.replace(/-/g, " ").toUpperCase(), {
+          fontSize: "13px",
+          fontFamily: "monospace",
+          color: colorHex,
+          stroke: "#000000",
+          strokeThickness: 3,
+          align: "center",
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(51);
+      this.overviewLabels.push(nameLabel);
+
+      // Level badge
+      const levelLabel = this.add
+        .text(center.x, center.z + 8, `L${zone.levelReq}+`, {
+          fontSize: "11px",
+          fontFamily: "monospace",
+          color: "#888888",
+          stroke: "#000000",
+          strokeThickness: 2,
+          align: "center",
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(51);
+      this.overviewLabels.push(levelLabel);
+    }
+  }
+
+  /** Redraw entity dots on the overview (called every update frame) */
+  private updateOverviewDots(): void {
+    if (!this.overviewDotGraphics) return;
+    const g = this.overviewDotGraphics;
+    g.clear();
+
+    for (const [, entity] of this.entityRenderer.getEntities()) {
+      let color: number;
+      if (entity.type === "player")     color = 0x54f28b;
+      else if (entity.type === "boss")  color = 0xff4444;
+      else if (entity.type === "mob")   color = 0xff8800;
+      else continue; // skip NPCs, nodes, etc.
+
+      const px = entity.x * this.tilemapRenderer.coordScale;
+      const py = entity.y * this.tilemapRenderer.coordScale;
+      g.fillStyle(color, 0.9);
+      g.fillCircle(px, py, 4);
+    }
+  }
+
+  private enterOverviewMode(): void {
+    if (this.overviewMode) return;
+    this.overviewMode = true;
+    this.tilemapRenderer.setChunksVisible(false);
+    this.entityRenderer.setSpritesVisible(false);
+    this.buildOverviewGraphics();
+    this.overviewDotGraphics = this.add.graphics().setDepth(52);
+    this.updateOverviewDots();
+    console.log("[WorldScene] Entered overview mode");
+  }
+
+  private exitOverviewMode(): void {
+    if (!this.overviewMode) return;
+    this.overviewMode = false;
+    this.tilemapRenderer.setChunksVisible(true);
+    this.entityRenderer.setSpritesVisible(true);
+    this.overviewGraphics?.destroy();
+    this.overviewGraphics = null;
+    this.overviewDotGraphics?.destroy();
+    this.overviewDotGraphics = null;
+    for (const lbl of this.overviewLabels) lbl.destroy();
+    this.overviewLabels = [];
+    console.log("[WorldScene] Exited overview mode");
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private getPollZoneIds(): string[] {
+    if (!this.worldLayout.loaded) {
+      return [this.currentZoneLabel || "village-square"];
     }
 
-    this.connected = anyConnected;
-    this.tick = maxTick;
-    this.entityRenderer.update(allEntities);
+    const zoneIds = this.worldLayout.getZoneIds();
+    if (!this.mobileMode) return zoneIds;
 
-    // Re-apply wallet lock after each poll (entity may have just spawned)
-    if (this.lockedWalletAddress) {
-      this.lockToPlayerWallet(this.lockedWalletAddress);
+    const cam = this.cameras.main;
+    const cameraCenterX = cam.scrollX + cam.width / (2 * cam.zoom);
+    const cameraCenterY = cam.scrollY + cam.height / (2 * cam.zoom);
+
+    const nearest = zoneIds
+      .map((zoneId) => {
+        const center = this.worldLayout.getZonePixelCenter(zoneId);
+        const dx = center.x - cameraCenterX;
+        const dy = center.z - cameraCenterY;
+        return { zoneId, distSq: dx * dx + dy * dy };
+      })
+      .sort((a, b) => a.distSq - b.distSq);
+
+    const selected = new Set<string>();
+    const activeZone = this.worldLayout.pixelToZone(cameraCenterX, cameraCenterY);
+    if (activeZone) selected.add(activeZone);
+    if (this.currentZoneLabel) selected.add(this.currentZoneLabel);
+
+    if (this.followTarget) {
+      const followed = this.entityRenderer.getEntity(this.followTarget);
+      if (followed?.zoneId) selected.add(followed.zoneId);
+    }
+
+    for (const zone of nearest.slice(0, 2)) {
+      selected.add(zone.zoneId);
+    }
+
+    return Array.from(selected);
+  }
+
+  /** Poll all zones for entities, offset to world coordinates */
+  private async pollAllZones(): Promise<void> {
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
+
+    try {
+      if (!this.worldLayout.loaded) {
+        // Fallback: poll single zone
+        const data = await fetchZone(this.currentZoneLabel || "village-square");
+        if (data) {
+          this.connected = true;
+          this.tick = data.tick;
+          this.entityRenderer.update(data.entities);
+        } else {
+          this.connected = false;
+        }
+        return;
+      }
+
+      const zoneIds = this.getPollZoneIds();
+      const allEntities: Record<string, Entity> = {};
+      let anyConnected = false;
+      let maxTick = 0;
+
+      // Fetch polled zones in parallel
+      const results = await Promise.all(
+        zoneIds.map(async (zoneId) => {
+          const data = await fetchZone(zoneId);
+          return { zoneId, data };
+        })
+      );
+
+      for (const { zoneId, data } of results) {
+        if (!data) continue;
+        anyConnected = true;
+        if (data.tick > maxTick) maxTick = data.tick;
+
+        const zone = this.worldLayout.getZone(zoneId);
+        if (!zone) continue;
+
+        // Offset entity positions from zone-local to world coordinates
+        for (const [id, entity] of Object.entries(data.entities)) {
+          allEntities[id] = {
+            ...entity,
+            x: entity.x + zone.offset.x,
+            y: entity.y + zone.offset.z,
+            zoneId,
+          };
+        }
+      }
+
+      this.connected = anyConnected;
+      this.tick = maxTick;
+      this.entityRenderer.update(allEntities);
+
+      // Re-apply wallet lock after each poll (entity may have just spawned)
+      if (this.lockedWalletAddress) {
+        this.lockToPlayerWallet(this.lockedWalletAddress);
+      }
+    } finally {
+      this.pollInFlight = false;
     }
   }
 }

@@ -6,6 +6,13 @@ import { logDiary, narrativeZoneTransition } from "./diary.js";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
+import { copperToGold } from "./currency.js";
+import { getAvailableGold, recordGoldSpend } from "./goldLedger.js";
+import { getGoldBalance } from "./blockchain.js";
+
+/** Zones requiring L25+ charge a portal toll of 100 copper */
+const PORTAL_TOLL_MIN_LEVEL = 25;
+const PORTAL_TOLL = copperToGold(100); // 0.01 GOLD
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -257,6 +264,122 @@ export function registerZoneTransitionRoutes(server: FastifyInstance) {
   });
 
   /**
+   * POST /transition/fast-travel
+   * Instantly teleport to any unlocked zone — no portal proximity required.
+   * Cost: 300 copper (0.03 GOLD). Level requirement for destination still applies.
+   */
+  server.post<{
+    Body: {
+      walletAddress: string;
+      entityId: string;
+      fromZoneId: string;
+      toZoneId: string;
+    };
+  }>("/transition/fast-travel", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const { walletAddress, entityId, fromZoneId, toZoneId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+      reply.code(400);
+      return { error: "Invalid wallet address" };
+    }
+
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
+
+    if (fromZoneId === toZoneId) {
+      reply.code(400);
+      return { error: "Already in destination zone" };
+    }
+
+    const sourceZone = getOrCreateZone(fromZoneId);
+    const entity = sourceZone.entities.get(entityId);
+    if (!entity) {
+      reply.code(404);
+      return { error: "Entity not found in this zone" };
+    }
+
+    if (entity.walletAddress?.toLowerCase() !== walletAddress.toLowerCase()) {
+      reply.code(403);
+      return { error: "This entity does not belong to your wallet" };
+    }
+
+    // Level requirement check
+    const requiredLevel = ZONE_LEVEL_REQUIREMENTS[toZoneId] ?? 1;
+    const entityLevel = entity.level ?? 1;
+    if (entityLevel < requiredLevel) {
+      reply.code(400);
+      return {
+        error: `Level ${requiredLevel} required for ${toZoneId}`,
+        currentLevel: entityLevel,
+        requiredLevel,
+      };
+    }
+
+    // Destination zone must be a known zone
+    const destZoneData = loadZoneData(toZoneId);
+    if (!destZoneData) {
+      reply.code(404);
+      return { error: `Unknown destination zone: ${toZoneId}` };
+    }
+
+    // Charge 300 copper fast travel fee
+    const FAST_TRAVEL_FEE = copperToGold(300);
+    const onChainGold = parseFloat(await getGoldBalance(walletAddress));
+    const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+    const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+    if (availableGold < FAST_TRAVEL_FEE) {
+      reply.code(400);
+      return {
+        error: "Insufficient gold for fast travel",
+        required: FAST_TRAVEL_FEE,
+        available: availableGold,
+        message: "Fast travel costs 300 copper (0.03 GOLD)",
+      };
+    }
+    recordGoldSpend(walletAddress, FAST_TRAVEL_FEE);
+
+    // Find a spawn point in the destination zone (first portal, else center)
+    const destPortalPoi = destZoneData.pois?.find((p: any) => p.type === "portal");
+    const spawnX: number = destPortalPoi?.position?.x ?? 320;
+    const spawnY: number = destPortalPoi?.position?.z ?? 320;
+
+    // Move entity
+    clearMobTagsForPlayer(sourceZone, entity.id);
+    entity.lastCombatTick = undefined;
+    sourceZone.entities.delete(entity.id);
+
+    entity.x = spawnX;
+    entity.y = spawnY;
+
+    const destZone = getOrCreateZone(toZoneId);
+    destZone.entities.set(entity.id, entity);
+
+    logZoneEvent({ zoneId: fromZoneId, type: "system", message: `${entity.name} vanished in a flash of light.`, tick: Date.now() });
+    logZoneEvent({ zoneId: toZoneId,   type: "system", message: `${entity.name} materialized from thin air.`,   tick: Date.now() });
+
+    if (entity.walletAddress) {
+      logDiary(entity.walletAddress, entity.name, toZoneId, spawnX, spawnY, "zone_transition",
+        `Fast-traveled to ${destZoneData.name}`,
+        `${entity.name} used a fast travel scroll to instantly appear in ${destZoneData.name}.`,
+        { fromZoneId, toZoneId, cost: FAST_TRAVEL_FEE } as Record<string, unknown>
+      );
+    }
+
+    return {
+      ok: true,
+      fromZoneId,
+      toZoneId,
+      position: { x: spawnX, y: spawnY },
+      goldCharged: FAST_TRAVEL_FEE,
+    };
+  });
+
+  /**
    * GET /portals/:zoneId
    * List all portals in a zone
    */
@@ -326,6 +449,24 @@ async function performTransition(
       currentLevel: entityLevel,
       requiredLevel,
     };
+  }
+
+  // Charge portal toll for high-level zones (L25+): 100 copper = 0.01 GOLD
+  if (requiredLevel >= PORTAL_TOLL_MIN_LEVEL && entity.walletAddress) {
+    const { getGoldBalance } = await import("./blockchain.js");
+    const onChainGold = parseFloat(await getGoldBalance(entity.walletAddress));
+    const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+    const availableGold = getAvailableGold(entity.walletAddress, safeOnChainGold);
+    if (availableGold < PORTAL_TOLL) {
+      reply.code(400);
+      return {
+        error: "Insufficient gold for portal toll",
+        required: PORTAL_TOLL,
+        available: availableGold,
+        message: `Portal toll to ${destZoneId} is 100 copper (0.01 GOLD)`,
+      };
+    }
+    recordGoldSpend(entity.walletAddress, PORTAL_TOLL);
   }
 
   // Find destination portal

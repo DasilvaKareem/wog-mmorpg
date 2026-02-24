@@ -8,6 +8,7 @@ import { authenticateRequest } from "./auth.js";
 import { rollCraftedItem } from "./itemRng.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { logDiary, narrativeCraft } from "./diary.js";
+import { copperToGold } from "./currency.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 
 export interface CraftingRecipe {
@@ -426,12 +427,13 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       };
     }
 
-    // Check gold balance and deduct crafting cost
+    // Check gold balance and deduct crafting cost (copper → gold conversion)
     if (recipe.copperCost > 0) {
+      const goldCost = copperToGold(recipe.copperCost);
       const onChainGold = parseFloat(await getGoldBalance(walletAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
       const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
-      if (availableGold < recipe.copperCost) {
+      if (availableGold < goldCost) {
         reply.code(400);
         return {
           error: "Insufficient gold for crafting",
@@ -439,7 +441,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
         };
       }
-      recordGoldSpend(walletAddress, recipe.copperCost);
+      recordGoldSpend(walletAddress, goldCost);
     }
 
     // PRE-CHECK: Verify on-chain balances before attempting burn (avoids costly reverts)

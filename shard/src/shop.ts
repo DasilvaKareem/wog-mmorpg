@@ -14,6 +14,7 @@ import {
   recordMerchantPurchase,
 } from "./merchantAgent.js";
 import { logDiary, narrativeBuy, narrativeSell } from "./diary.js";
+import { copperToGold } from "./currency.js";
 
 export function registerShopRoutes(server: FastifyInstance) {
   /**
@@ -144,13 +145,14 @@ export function registerShopRoutes(server: FastifyInstance) {
       }
     }
 
-    const totalCost = unitPrice * quantity;
+    const totalCost = unitPrice * quantity; // in copper
+    const goldCost = copperToGold(totalCost); // convert to on-chain gold
 
     try {
       const onChainGold = parseFloat(await getGoldBalance(buyerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
       const availableGold = getAvailableGold(buyerAddress, safeOnChainGold);
-      if (availableGold < totalCost) {
+      if (availableGold < goldCost) {
         reply.code(400);
         return {
           error: "Insufficient gold",
@@ -164,7 +166,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       server.log.info(
         `Minted ${quantity}x ${item.name} to ${buyerAddress}: ${itemTx}`
       );
-      recordGoldSpend(buyerAddress, totalCost);
+      recordGoldSpend(buyerAddress, goldCost);
 
       // Update merchant inventory if using dynamic path
       if (merchantState) {
@@ -275,10 +277,11 @@ export function registerShopRoutes(server: FastifyInstance) {
       return { error: "Merchant does not buy this item" };
     }
 
-    const totalPayout = unitBuyPrice * quantity;
+    const totalPayout = unitBuyPrice * quantity; // in copper
+    const goldPayout = copperToGold(totalPayout); // convert to on-chain gold
 
     // Check merchant can afford the payout
-    if (merchantState.goldBalance < totalPayout) {
+    if (merchantState.goldBalance < goldPayout) {
       reply.code(400);
       return { error: "Merchant does not have enough gold", merchantGold: merchantState.goldBalance };
     }
@@ -302,10 +305,10 @@ export function registerShopRoutes(server: FastifyInstance) {
 
       // Transfer gold from merchant's custodial wallet to seller (no new gold minted)
       const merchantAccount = await getCustodialWallet(merchantState.walletAddress);
-      await transferGoldFrom(merchantAccount, sellerAddress, String(totalPayout));
+      await transferGoldFrom(merchantAccount, sellerAddress, goldPayout.toString());
 
       // Update merchant's in-memory gold balance (on-chain balance decreases naturally)
-      merchantState.goldBalance = Math.max(0, merchantState.goldBalance - totalPayout);
+      merchantState.goldBalance = Math.max(0, merchantState.goldBalance - goldPayout);
 
       // Update merchant inventory
       recordMerchantPurchase(merchantEntityId, tokenId, quantity);

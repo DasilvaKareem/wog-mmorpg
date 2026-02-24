@@ -4,6 +4,7 @@ import { getAllZones } from "./zoneRuntime.js";
 import { getGoldBalance } from "./blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "./goldLedger.js";
 import { saveCharacter, getProfessionsForWallet } from "./characterStore.js";
+import { copperToGold } from "./currency.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
@@ -204,12 +205,13 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       };
     }
 
-    // Check gold balance and deduct learning cost
+    // Check gold balance and deduct learning cost (copper → gold conversion)
     if (professionInfo.cost > 0) {
+      const goldCost = copperToGold(professionInfo.cost);
       const onChainGold = parseFloat(await getGoldBalance(walletAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
       const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
-      if (availableGold < professionInfo.cost) {
+      if (availableGold < goldCost) {
         reply.code(400);
         return {
           error: "Insufficient gold to learn this profession",
@@ -217,7 +219,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
         };
       }
-      recordGoldSpend(walletAddress, professionInfo.cost);
+      recordGoldSpend(walletAddress, goldCost);
     }
 
     // Learn the profession

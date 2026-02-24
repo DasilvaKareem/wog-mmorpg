@@ -36,6 +36,7 @@ function GameWorld(): React.ReactElement {
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
+  const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const { address } = useWalletContext();
 
   React.useEffect(() => {
@@ -67,6 +68,29 @@ function GameWorld(): React.ReactElement {
     return unsubscribe;
   }, []);
 
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const query = window.matchMedia("(max-width: 1023px), (pointer: coarse)");
+    const onChange = () => setIsCompactWorldUI(query.matches);
+    onChange();
+
+    if (query.addEventListener) {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
+  }, []);
+
+  React.useEffect(() => {
+    document.body.classList.add("world-route");
+    return () => {
+      document.body.classList.remove("world-route");
+    };
+  }, []);
+
   // Lock camera to connected player's agent entity
   React.useEffect(() => {
     if (address) {
@@ -77,19 +101,23 @@ function GameWorld(): React.ReactElement {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
-      <WalletPanel />
-      <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
-      {address ? (
-        <AgentChatPanel
-          walletAddress={address}
-          currentZone={currentZone}
-          className="absolute bottom-4 right-4 z-30 hidden md:flex"
-        />
-      ) : (
-        <ChatLog
-          zoneId={currentZone}
-          className="absolute bottom-4 right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto hidden md:block"
-        />
+      {!isCompactWorldUI && <WalletPanel />}
+      {!isCompactWorldUI && (
+        <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
+      )}
+      {!isCompactWorldUI && (
+        address ? (
+          <AgentChatPanel
+            walletAddress={address}
+            currentZone={currentZone}
+            className="absolute bottom-4 right-4 z-30 hidden md:flex"
+          />
+        ) : (
+          <ChatLog
+            zoneId={currentZone}
+            className="absolute bottom-4 right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto hidden md:block"
+          />
+        )
       )}
       <ShopDialog />
       <GuildDialog />
@@ -99,8 +127,14 @@ function GameWorld(): React.ReactElement {
       <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
       <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
-      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30">
+      <div
+        className="absolute left-1/2 -translate-x-1/2 z-30"
+        style={{
+          bottom: isCompactWorldUI ? "calc(env(safe-area-inset-bottom, 0px) + 8px)" : "8px",
+        }}
+      >
         <HotkeyBar
+          mobile={isCompactWorldUI}
           onCharacter={() => setCharacterOpen((c) => !c)}
           onMap={() => setMapOpen((c) => !c)}
           onQuestLog={() => setQuestLogOpen((c) => !c)}
