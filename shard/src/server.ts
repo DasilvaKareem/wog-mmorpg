@@ -58,6 +58,7 @@ import { registerWorldMapRoutes } from "./worldMapRoutes.js";
 import { registerDiaryRoutes } from "./diary.js";
 import { registerFarcasterAuthRoutes } from "./farcasterAuth.js";
 import { initWorldMapStore } from "./worldMapStore.js";
+import { restoreReservations } from "./goldLedger.js";
 import { getTxStats } from "./blockchain.js";
 import { getWorldLayout } from "./worldLayout.js";
 import { getAllZones, clearMobTagsForPlayer } from "./zoneRuntime.js";
@@ -222,6 +223,11 @@ const start = async () => {
   // Restore agent loops that were running before last restart
   agentManager.restoreFromRedis().catch((err: any) => {
     server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  // Restore gold reservations from Redis (prevents double-spend after restart)
+  restoreReservations().catch((err: any) => {
+    server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
   await Promise.race([

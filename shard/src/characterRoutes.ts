@@ -4,6 +4,7 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "./blockchain.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { loadCharacter } from "./characterStore.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -122,13 +123,16 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           if (liveEntity) break;
         }
 
-        return {
-          walletAddress,
-          liveEntity,
-          characters: nfts.map((nft) => {
+        // Build character list with live entity overlay → Redis fallback → NFT metadata
+        const characters = await Promise.all(
+          nfts.map(async (nft) => {
             const props = nft.metadata.properties as Record<string, unknown> | undefined;
-            // Overlay live data if this character matches the live entity
-            if (liveEntity && nft.metadata.name && (nft.metadata.name as string).startsWith(liveEntity.name)) {
+            const nftName = (nft.metadata.name as string) ?? "";
+            // Extract base name: "Grondar the Warrior" → "Grondar"
+            const baseName = nftName.includes(" the ") ? nftName.split(" the ")[0] : nftName;
+
+            // 1) Overlay live entity data if character is currently spawned
+            if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
               return {
                 tokenId: nft.id.toString(),
                 name: nft.metadata.name,
@@ -144,13 +148,42 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                 },
               };
             }
+
+            // 2) Fall back to Redis-persisted data (level, xp, zone, kills, etc.)
+            if (baseName) {
+              try {
+                const saved = await loadCharacter(walletAddress, baseName);
+                if (saved && saved.level > 1) {
+                  return {
+                    tokenId: nft.id.toString(),
+                    name: nft.metadata.name,
+                    description: nft.metadata.description,
+                    properties: {
+                      ...props,
+                      level: saved.level,
+                      xp: saved.xp,
+                    },
+                  };
+                }
+              } catch {
+                // Redis lookup failed, fall through to raw NFT metadata
+              }
+            }
+
+            // 3) Raw NFT metadata (mint-time values)
             return {
               tokenId: nft.id.toString(),
               name: nft.metadata.name,
               description: nft.metadata.description,
               properties: props,
             };
-          }),
+          })
+        );
+
+        return {
+          walletAddress,
+          liveEntity,
+          characters,
         };
       } catch (err) {
         server.log.error(err, `Failed to fetch characters for ${walletAddress}`);

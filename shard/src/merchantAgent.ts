@@ -146,7 +146,7 @@ export async function initMerchantWallets(): Promise<void> {
 
     try {
       // Create custodial wallet
-      const walletInfo = createCustodialWallet();
+      const walletInfo = await createCustodialWallet();
       entity.walletAddress = walletInfo.address;
 
       // Mint seed gold

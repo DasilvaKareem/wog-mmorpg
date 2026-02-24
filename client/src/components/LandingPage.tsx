@@ -131,7 +131,7 @@ export function LandingPage(): React.ReactElement {
 
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-10">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"
@@ -142,30 +142,36 @@ export function LandingPage(): React.ReactElement {
       />
 
       {/* ── HERO ── */}
-      <header
-        className="relative z-10 flex w-full flex-col items-center justify-end px-4 pt-16 pb-12 text-center"
-        style={{
-          backgroundImage: "url('/assets/Banner.png')",
-          backgroundSize: "cover",
-          backgroundPosition: "center top",
-          backgroundRepeat: "no-repeat",
-          minHeight: "520px",
-        }}
-      >
-        {/* CTA */}
-        <div className="relative mt-auto flex flex-col items-center gap-3">
+      <header className="relative z-10 w-full">
+        <img
+          src="/assets/Banner.png"
+          alt="World of Geneva"
+          className="w-full object-cover"
+          style={{ display: "block", maxHeight: "90vh" }}
+        />
+        {/* Logo overlay — top-center */}
+        <div className="absolute top-8 left-1/2 -translate-x-1/2">
+          <img
+            src="/assets/logo.png"
+            alt="World of Geneva"
+            className="w-[640px] max-w-[90vw] object-contain"
+            style={{ filter: "drop-shadow(2px 6px 16px rgba(0,0,0,0.7))" }}
+          />
+        </div>
+        {/* CTA — bottom-center */}
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
           <button
             onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
-            className="min-w-[240px] border-4 border-black bg-[#54f28b] px-5 py-4 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="whitespace-nowrap border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             {frames[frameIndex]} {isConnected ? "Enter World" : "Play Now"} {frames[frameIndex]}
           </button>
           {isConnected ? (
-            <div className="text-[8px] text-[#54f28b]">
+            <div className="text-[8px] text-[#54f28b]" style={{ textShadow: "1px 1px 0 #000" }}>
               [✓] {address?.slice(0, 6)}...{address?.slice(-4)}
             </div>
           ) : loading ? (
-            <div className="text-[8px] text-[#9aa7cc]">
+            <div className="text-[8px] text-[#9aa7cc]" style={{ textShadow: "1px 1px 0 #000" }}>
               {frames[frameIndex]} restoring session...
             </div>
           ) : null}

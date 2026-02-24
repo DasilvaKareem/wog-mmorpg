@@ -53,10 +53,7 @@ export function ZoneSelector(): React.ReactElement {
               type="button"
             >
               <span className="truncate">{zone.zoneId}</span>
-              <span className="inline-flex items-center gap-2 text-[#0f1830]">
-                <Badge variant={active ? "default" : "secondary"}>{zone.entityCount}</Badge>
-                t{zone.tick}
-              </span>
+              <Badge variant={active ? "default" : "secondary"}>{zone.entityCount}</Badge>
             </button>
           );
         })}

@@ -81,7 +81,7 @@ function GameWorld(): React.ReactElement {
       <WalletPanel />
       <ProfessionPanel />
       <ZoneSelector />
-      <PlayerPanel className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-72 md:w-80 lg:w-[420px] max-w-[40vw] max-h-[45vh] overflow-auto hidden md:block" />
+      <PlayerPanel className="absolute top-12 left-1/2 -translate-x-1/2 z-30 w-72 md:w-80 lg:w-[420px] max-w-[40vw] max-h-[45vh] overflow-auto hidden md:block" />
       {address ? (
         <AgentChatPanel
           walletAddress={address}

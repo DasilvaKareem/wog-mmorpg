@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { getRedis } from "./redis.js";
 
 const LEDGER_PATH = path.resolve(process.cwd(), "data", "gold-spent.json");
+const REDIS_RESERVED_KEY = "gold:reserved";
 
 type GoldLedgerState = Record<string, number>;
 
@@ -43,6 +45,37 @@ function persistLedger(): void {
   }
 }
 
+/** Persist all reservations to Redis (fire-and-forget, non-blocking) */
+function persistReservations(): void {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    const data = JSON.stringify(reservedByWallet);
+    redis.set(REDIS_RESERVED_KEY, data).catch(() => {});
+  } catch {}
+}
+
+/** Restore reservations from Redis on startup */
+export async function restoreReservations(): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    const raw = await redis.get(REDIS_RESERVED_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const [address, value] of Object.entries(parsed)) {
+        const amount = typeof value === "number" ? value : Number(value);
+        if (Number.isFinite(amount) && amount > 0) {
+          reservedByWallet[normalizeAddress(address)] = roundGold(amount);
+        }
+      }
+      console.log(`[goldLedger] Restored ${Object.keys(reservedByWallet).length} gold reservations from Redis`);
+    }
+  } catch {
+    // Redis unavailable — start with empty reservations
+  }
+}
+
 export function formatGold(amount: number): string {
   const rounded = roundGold(Math.max(0, amount));
   if (Number.isInteger(rounded)) return rounded.toString();
@@ -78,6 +111,7 @@ export function reserveGold(address: string, amount: number): void {
   const normalized = normalizeAddress(address);
   const current = reservedByWallet[normalized] ?? 0;
   reservedByWallet[normalized] = roundGold(current + amount);
+  persistReservations();
 }
 
 /**
@@ -89,6 +123,7 @@ export function unreserveGold(address: string, amount: number): void {
   const normalized = normalizeAddress(address);
   const current = reservedByWallet[normalized] ?? 0;
   reservedByWallet[normalized] = Math.max(0, roundGold(current - amount));
+  persistReservations();
 }
 
 /**

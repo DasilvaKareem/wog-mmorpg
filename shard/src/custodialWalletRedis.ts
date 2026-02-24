@@ -24,7 +24,7 @@ export interface CustodialWalletInfo {
  * Create a new custodial wallet
  * Returns wallet address (private key is encrypted and stored)
  */
-export function createCustodialWallet(): CustodialWalletInfo {
+export async function createCustodialWallet(): Promise<CustodialWalletInfo> {
   const privateKey = randomPrivateKey();
   const account = privateKeyToAccount({ client: thirdwebClient, privateKey });
 
@@ -35,10 +35,10 @@ export function createCustodialWallet(): CustodialWalletInfo {
   const address = account.address.toLowerCase();
   inMemoryStore.set(address, encryptedPrivateKey);
 
-  // Try Redis too
+  // Persist to Redis (awaited — private keys must not be lost)
   const redis = getRedis();
   if (redis) {
-    try { redis.set(`wallet:${address}`, encryptedPrivateKey); } catch {}
+    try { await redis.set(`wallet:${address}`, encryptedPrivateKey); } catch {}
   }
 
   console.log(`[custodial] Created wallet: ${account.address}`);

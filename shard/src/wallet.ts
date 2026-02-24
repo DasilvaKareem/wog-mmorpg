@@ -71,6 +71,11 @@ export function registerWalletRoutes(server: FastifyInstance) {
         const spentGold = getSpentGold(address);
         const availableGold = getAvailableGold(address, safeOnChainGold);
 
+        // Fetch all item balances in parallel (cached 10s in blockchain.ts)
+        const balanceResults = await Promise.all(
+          ITEM_CATALOG.map((item) => getItemBalance(address, item.tokenId))
+        );
+
         const items: {
           tokenId: string;
           name: string;
@@ -82,9 +87,10 @@ export function registerWalletRoutes(server: FastifyInstance) {
           statBonuses: Record<string, number>;
           maxDurability: number | null;
         }[] = [];
-        for (const item of ITEM_CATALOG) {
-          const balance = await getItemBalance(address, item.tokenId);
+        for (let i = 0; i < ITEM_CATALOG.length; i++) {
+          const balance = balanceResults[i];
           if (balance > 0n) {
+            const item = ITEM_CATALOG[i];
             items.push({
               tokenId: item.tokenId.toString(),
               name: item.name,

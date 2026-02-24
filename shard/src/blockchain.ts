@@ -14,6 +14,51 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBaseSepolia } from "./chain.js";
 
+// =============================================================================
+//  Balance Cache — avoids redundant RPC reads (TTL-based eviction)
+// =============================================================================
+
+interface CacheEntry<T> { value: T; expiresAt: number }
+
+class BalanceCache<T> {
+  private store = new Map<string, CacheEntry<T>>();
+  constructor(private ttlMs: number) {}
+
+  get(key: string): T | undefined {
+    const entry = this.store.get(key);
+    if (!entry) return undefined;
+    if (Date.now() > entry.expiresAt) { this.store.delete(key); return undefined; }
+    return entry.value;
+  }
+
+  set(key: string, value: T): void {
+    this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs });
+  }
+
+  /** Invalidate all entries for an address (prefix match) */
+  invalidate(addressPrefix: string): void {
+    const prefix = addressPrefix.toLowerCase();
+    for (const key of this.store.keys()) {
+      if (key.startsWith(prefix)) this.store.delete(key);
+    }
+  }
+
+  /** Evict expired entries (call periodically) */
+  prune(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.store) {
+      if (now > entry.expiresAt) this.store.delete(key);
+    }
+  }
+}
+
+const goldCache = new BalanceCache<string>(10_000);     // 10s TTL
+const itemCache = new BalanceCache<bigint>(10_000);      // 10s TTL
+const characterCache = new BalanceCache<any[]>(30_000);  // 30s TTL
+
+// Prune expired entries every 60s to prevent unbounded growth
+setInterval(() => { goldCache.prune(); itemCache.prune(); characterCache.prune(); }, 60_000);
+
 // Server wallet — holds minter role on both contracts
 const serverAccount = privateKeyToAccount({
   client: thirdwebClient,
@@ -208,13 +253,19 @@ export async function mintGold(toAddress: string, amount: string): Promise<strin
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
     txStats.goldMints++;
     recordTx("gold-mint", receipt.transactionHash);
+    goldCache.invalidate(toAddress.toLowerCase());
     return receipt.transactionHash;
   });
 }
 
-/** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). */
+/** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
 export async function getGoldBalance(address: string): Promise<string> {
+  const cacheKey = address.toLowerCase();
+  const cached = goldCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const result = await getBalance({ contract: goldContract, address });
+  goldCache.set(cacheKey, result.displayValue);
   return result.displayValue;
 }
 
@@ -235,6 +286,8 @@ export async function transferGoldFrom(
   const receipt = await sendTransaction({ transaction: tx, account: fromAccount });
   txStats.goldTransfers++;
   recordTx("gold-transfer", receipt.transactionHash);
+  goldCache.invalidate(fromAccount.address.toLowerCase());
+  goldCache.invalidate(toAddress.toLowerCase());
   return receipt.transactionHash;
 }
 
@@ -255,16 +308,23 @@ export async function mintItem(
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
     txStats.itemMints++;
     recordTx("item-mint", receipt.transactionHash);
+    itemCache.invalidate(toAddress.toLowerCase());
     return receipt.transactionHash;
   });
 }
 
-/** Get item balance for a specific tokenId. */
+/** Get item balance for a specific tokenId. Cached 10s. */
 export async function getItemBalance(
   address: string,
   tokenId: bigint
 ): Promise<bigint> {
-  return balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
+  const cacheKey = `${address.toLowerCase()}:${tokenId}`;
+  const cached = itemCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
+  itemCache.set(cacheKey, balance);
+  return balance;
 }
 
 /** Burn (destroy) ERC-1155 items from a player address. */
@@ -283,6 +343,7 @@ export async function burnItem(
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
     txStats.itemBurns++;
     recordTx("item-burn", receipt.transactionHash);
+    itemCache.invalidate(fromAddress.toLowerCase());
     return receipt.transactionHash;
   });
 }
@@ -309,13 +370,20 @@ export async function mintCharacter(
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
     txStats.characterMints++;
     recordTx("character-mint", receipt.transactionHash);
+    characterCache.invalidate(toAddress.toLowerCase());
     return receipt.transactionHash;
   });
 }
 
-/** Get all character NFTs owned by a wallet address. */
+/** Get all character NFTs owned by a wallet address. Cached 30s. */
 export async function getOwnedCharacters(address: string) {
-  return getOwnedNFTs({ contract: characterContract, owner: address });
+  const cacheKey = address.toLowerCase();
+  const cached = characterCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const nfts = await getOwnedNFTs({ contract: characterContract, owner: address });
+  characterCache.set(cacheKey, nfts);
+  return nfts;
 }
 
 /** Update on-chain NFT metadata after a level-up. Uploads new metadata to IPFS and sets token URI. */

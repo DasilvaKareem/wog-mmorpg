@@ -63,7 +63,7 @@ interface OnboardingFlowProps {
 
 export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactElement {
   const navigate = useNavigate();
-  const { syncAddress, address: walletAddress } = useWalletContext();
+  const { syncAddress, address: walletAddress, connect } = useWalletContext();
 
   // If already connected, skip login and go straight to character creation
   const [step, setStep] = React.useState<Step>(walletAddress ? "create-char" : "login");
@@ -82,6 +82,13 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const [raceId, setRaceId] = React.useState("");
   const [classId, setClassId] = React.useState("");
   const [successData, setSuccessData] = React.useState<SuccessData | null>(null);
+
+  // Sync wallet address into local state when it arrives (e.g. after Connect Wallet)
+  React.useEffect(() => {
+    if (walletAddress && !connectedAddress) {
+      setConnectedAddress(walletAddress);
+    }
+  }, [walletAddress, connectedAddress]);
 
   // Load races/classes when entering create-char step
   React.useEffect(() => {
@@ -296,6 +303,33 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   @
                 </span>
                 <span>Continue with Email</span>
+                <span className="ml-auto text-[7px] text-[#3a4260]">[→]</span>
+              </button>
+
+              <div className="flex items-center gap-2 my-1">
+                <div className="flex-1 border-t border-[#2a3450]" />
+                <span className="text-[7px] text-[#3a4260]">OR</span>
+                <div className="flex-1 border-t border-[#2a3450]" />
+              </div>
+
+              <button
+                onClick={async () => {
+                  setError(null);
+                  setStep("connecting");
+                  try {
+                    await connect();
+                    setStep("create-char");
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Wallet connection failed.");
+                    setStep("login");
+                  }
+                }}
+                className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left text-[10px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-[9px] font-bold text-[#54f28b]">
+                  W
+                </span>
+                <span>Connect Wallet</span>
                 <span className="ml-auto text-[7px] text-[#3a4260]">[→]</span>
               </button>
 

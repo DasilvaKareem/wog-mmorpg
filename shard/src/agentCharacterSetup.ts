@@ -59,7 +59,7 @@ export async function setupAgentCharacter(
     custodialAddress = existing;
     console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
   } else {
-    const wallet = createCustodialWallet();
+    const wallet = await createCustodialWallet();
     custodialAddress = wallet.address.toLowerCase();
     await setAgentCustodialWallet(userWallet, custodialAddress);
     console.log(`[agentSetup] Created custodial wallet ${custodialAddress} for ${userWallet}`);
