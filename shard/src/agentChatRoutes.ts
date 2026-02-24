@@ -382,7 +382,11 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     const actionsTaken: string[] = [];
 
     const choice = groqResponse.choices[0];
-    if (choice?.message?.content) {
+    const hasToolCalls = choice?.message?.tool_calls && choice.message.tool_calls.length > 0;
+
+    // Only use inline text when no tools were called — otherwise the LLM
+    // returns lazy filler like "Got it" that we'll replace with a follow-up
+    if (choice?.message?.content && !hasToolCalls) {
       agentResponse = choice.message.content;
     }
 
@@ -460,6 +464,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const repaired = await runner.repairGear();
+                actionsTaken.push(`[${repaired ? "repaired gear" : "failed to repair gear"}]`);
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
               }
             }
@@ -468,23 +473,25 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       }
     }
 
-    // If the LLM called tools but returned no text, do a quick follow-up call
-    // to get an in-character acknowledgment of what was done
-    if (!agentResponse && actionsTaken.length > 0) {
+    // When tools are called, the LLM often returns lazy filler ("Got it", "Sure")
+    // alongside the tool calls. Always do a follow-up call to get a proper
+    // in-character response that acknowledges what was actually done.
+    if (actionsTaken.length > 0) {
       try {
         const followUp = await groq.chat.completions.create({
           model: "openai/gpt-oss-120b",
           max_tokens: 120,
           messages: [
-            { role: "system", content: `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass}. Respond in character in 1 sentence. Stay in-world. No OOC.` },
+            { role: "system", content: `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva. Respond in character in 1-2 sentences. Be vivid and specific about what you're doing. Stay in-world. No OOC. Never say "got it" or generic confirmations.` },
             { role: "user", content: message },
-            { role: "assistant", content: `(actions taken: ${actionsTaken.join(", ")})` },
-            { role: "user", content: "Acknowledge what you just did, in character, in 1 sentence." },
+            { role: "assistant", content: `(I just: ${actionsTaken.join(", ")})` },
+            { role: "user", content: "Describe what you just did in character. Be specific and vivid." },
           ],
         });
-        agentResponse = followUp.choices[0]?.message?.content?.trim() || "";
+        const followUpText = followUp.choices[0]?.message?.content?.trim();
+        if (followUpText) agentResponse = followUpText;
       } catch {
-        // Fallback: build a simple response from action tags
+        // Fallback below
       }
     }
 

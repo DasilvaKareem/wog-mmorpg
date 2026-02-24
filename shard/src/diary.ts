@@ -12,6 +12,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { getRedis } from "./redis.js";
+import { getAgentCustodialWallet } from "./agentConfigStore.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -450,12 +451,48 @@ async function readDiary(
   return entries.slice(offset, offset + limit);
 }
 
+// ── Merged read (player wallet + custodial wallet) ────────────────
+
+/**
+ * Read diary entries from both the player's wallet and their agent's
+ * custodial wallet (if one exists), merged by timestamp descending.
+ * Agent gameplay writes entries under the custodial wallet, so without
+ * this merge the player's diary would appear empty.
+ */
+async function readMergedDiary(
+  walletAddress: string,
+  limit: number,
+  offset: number,
+): Promise<DiaryEntry[]> {
+  // Fetch a generous amount from both sources so we can merge & paginate
+  const fetchCount = offset + limit;
+
+  const custodial = await getAgentCustodialWallet(walletAddress);
+
+  let allEntries: DiaryEntry[];
+  if (custodial && custodial.toLowerCase() !== walletAddress.toLowerCase()) {
+    const [playerEntries, agentEntries] = await Promise.all([
+      readDiary(walletAddress, fetchCount, 0),
+      readDiary(custodial, fetchCount, 0),
+    ]);
+    // Merge and sort by timestamp descending (newest first)
+    allEntries = [...playerEntries, ...agentEntries].sort(
+      (a, b) => b.timestamp - a.timestamp,
+    );
+  } else {
+    allEntries = await readDiary(walletAddress, fetchCount, 0);
+  }
+
+  return allEntries.slice(offset, offset + limit);
+}
+
 // ── HTTP routes ────────────────────────────────────────────────────
 
 export function registerDiaryRoutes(server: FastifyInstance): void {
   /**
    * GET /diary/:walletAddress?limit=50&offset=0
    * Paginated diary entries for a character.
+   * Merges entries from both the player wallet and their agent's custodial wallet.
    */
   server.get<{
     Params: { walletAddress: string };
@@ -465,13 +502,14 @@ export function registerDiaryRoutes(server: FastifyInstance): void {
     const limit = Math.min(Math.max(parseInt(request.query.limit ?? "50", 10) || 50, 1), 200);
     const offset = Math.max(parseInt(request.query.offset ?? "0", 10) || 0, 0);
 
-    const entries = await readDiary(walletAddress, limit, offset);
+    const entries = await readMergedDiary(walletAddress, limit, offset);
     return { entries, count: entries.length, limit, offset };
   });
 
   /**
    * GET /diary/:walletAddress/recent?count=10
    * Most recent N diary entries.
+   * Merges entries from both the player wallet and their agent's custodial wallet.
    */
   server.get<{
     Params: { walletAddress: string };
@@ -480,7 +518,7 @@ export function registerDiaryRoutes(server: FastifyInstance): void {
     const { walletAddress } = request.params;
     const count = Math.min(Math.max(parseInt(request.query.count ?? "10", 10) || 10, 1), 200);
 
-    const entries = await readDiary(walletAddress, count, 0);
+    const entries = await readMergedDiary(walletAddress, count, 0);
     return { entries, count: entries.length };
   });
 }
