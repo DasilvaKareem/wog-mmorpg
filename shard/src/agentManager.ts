@@ -82,9 +82,21 @@ class AgentManager {
     const ref = await getAgentEntityRef(key);
     if (!ref) return false;
 
-    // Verify entity still exists in the zone
-    const zone = getAllZones().get(ref.zoneId);
-    if (!zone || !zone.entities.has(ref.entityId)) return false;
+    // Verify entity still exists — check ref zone first, then scan all zones
+    // (entity may have moved since Redis ref was written)
+    let found = false;
+    const refZone = getAllZones().get(ref.zoneId);
+    if (refZone?.entities.has(ref.entityId)) {
+      found = true;
+    } else {
+      for (const [, zone] of getAllZones()) {
+        if (zone.entities.has(ref.entityId)) {
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) return false;
 
     // Agent should be running but isn't — restart
     console.log(`[AgentManager] Self-heal: restarting agent for ${key.slice(0, 8)} (was dead but enabled + entity alive)`);

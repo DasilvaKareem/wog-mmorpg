@@ -258,6 +258,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   // ── Derived state ───────────────────────────────────────────────────────
 
   const isRunning = status?.running ?? false;
+  // Agent is deployed if config exists and enabled, even if runner loop died
+  const isDeployed = isRunning || (status?.config?.enabled === true && status?.entityId != null);
   const entityName = status?.entity?.name ?? "Agent";
   const entityLevel = status?.entity?.level ?? 1;
   const focus = status?.config?.focus ?? "idle";
@@ -266,8 +268,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const zoneForLog = status?.zoneId ?? currentZone ?? null;
   const scriptType = status?.currentScript?.type;
 
-  const statusColor = isRunning ? "#54f28b" : "#ff4d6d";
-  const statusLabel = isRunning ? "RUNNING" : "STOPPED";
+  const statusColor = isDeployed ? "#54f28b" : "#ff4d6d";
+  const statusLabel = isRunning ? "RUNNING" : isDeployed ? "ACTIVE" : "STOPPED";
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -321,7 +323,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               </span>
             )}
           </div>
-          {isRunning && status.currentActivity && (
+          {isDeployed && status.currentActivity && (
             <div className="text-[7px] text-[#e0af68] mt-0.5 truncate">
               {"▸ "}{status.currentActivity}
             </div>
@@ -349,10 +351,10 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {/* ── Controls tab ─────────────────────────────────────────── */}
       {activeTab === "controls" && (
         <div className="flex-1 overflow-y-auto px-3 py-2">
-          {!isRunning ? (
+          {!isDeployed ? (
             <div className="flex flex-col items-center gap-2 py-4">
               <p className="text-[9px] text-[#6b7a9e] text-center">
-                Agent is not running. Deploy to start.
+                Agent is not deployed. Deploy to start.
               </p>
               <button
                 onClick={() => setShowDeployPayment(true)}
@@ -441,7 +443,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           >
             {messages.length === 0 && !authLoading && (
               <p className="text-[8px] text-[#3a4260] italic">
-                {isRunning
+                {isDeployed
                   ? "Agent is active. Use Controls tab or chat here..."
                   : "Deploy your agent first."}
               </p>
