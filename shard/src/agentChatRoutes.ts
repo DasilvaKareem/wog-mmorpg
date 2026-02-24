@@ -179,7 +179,12 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const config = await getAgentConfig(authWallet);
     const ref = await getAgentEntityRef(authWallet);
     const custodial = await getAgentCustodialWallet(authWallet);
-    const running = agentManager.isRunning(authWallet);
+
+    // Self-heal: if agent should be running but isn't, restart it
+    let running = agentManager.isRunning(authWallet);
+    if (!running && config?.enabled) {
+      running = await agentManager.ensureRunning(authWallet);
+    }
 
     let entity: any = null;
     if (ref) {
@@ -519,5 +524,52 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       configUpdated,
       agentRunning: agentManager.isRunning(authWallet),
     });
+  });
+
+  // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────
+  server.patch<{
+    Body: { focus?: string; strategy?: string; targetZone?: string };
+  }>("/agent/config", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { focus, strategy, targetZone } = request.body ?? {};
+
+    const validFocus = new Set([
+      "questing", "combat", "enchanting", "crafting", "gathering",
+      "alchemy", "cooking", "trading", "shopping", "traveling", "idle",
+    ]);
+    const validStrategy = new Set(["aggressive", "balanced", "defensive"]);
+
+    const patch: Record<string, any> = {};
+    if (focus && validFocus.has(focus)) patch.focus = focus;
+    if (strategy && validStrategy.has(strategy)) patch.strategy = strategy;
+    if (targetZone !== undefined) patch.targetZone = targetZone;
+
+    if (Object.keys(patch).length === 0) {
+      return reply.code(400).send({ error: "No valid fields to update" });
+    }
+
+    await patchAgentConfig(authWallet, patch);
+
+    // Log the manual override in chat history so AI has context
+    const label = [
+      patch.focus ? `focus→${patch.focus}` : "",
+      patch.strategy ? `strategy→${patch.strategy}` : "",
+      patch.targetZone ? `travel→${patch.targetZone}` : "",
+    ].filter(Boolean).join(", ");
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[MANUAL] ${label}`,
+      ts: Date.now(),
+    });
+
+    // Force the runner to pick up the change immediately
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) {
+      runner.clearScript();
+    }
+
+    return reply.send({ ok: true, updated: patch });
   });
 }

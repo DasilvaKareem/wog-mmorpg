@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useZonePlayers, type ZoneLobby, type PlayerInfo } from "@/hooks/useZonePlayers";
 import { useLeaderboard, type LeaderboardEntry, type SortBy } from "@/hooks/useLeaderboard";
 import { cn } from "@/lib/utils";
+import { gameBus } from "@/lib/eventBus";
 
 interface PlayerPanelProps {
   className?: string;
@@ -52,12 +53,29 @@ const CLASS_COLORS: Record<string, string> = {
 
 /* ── Lobby sub-components ── */
 
-function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
+function PlayerRow({ player, zoneId }: { player: PlayerInfo; zoneId: string }): React.ReactElement {
   const healthPercent = player.maxHp > 0 ? (player.hp / player.maxHp) * 100 : 0;
   const classColor = player.classId ? CLASS_COLORS[player.classId] : undefined;
+  const clickable = Boolean(player.walletAddress);
+
+  function handleClick() {
+    if (!player.walletAddress) return;
+    // Switch to player's zone first, then lock camera after zone loads
+    gameBus.emit("switchZone", { zoneId });
+    setTimeout(() => {
+      gameBus.emit("lockToPlayer", { walletAddress: player.walletAddress! });
+    }, 300);
+  }
 
   return (
-    <div className="flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 hover:bg-[#1a2338] transition-colors">
+    <div
+      className={cn(
+        "flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 transition-colors",
+        clickable ? "cursor-pointer hover:bg-[#1a2338] hover:border-[#54f28b]" : "hover:bg-[#1a2338]"
+      )}
+      onClick={handleClick}
+      title={clickable ? `Click to follow ${player.name}` : undefined}
+    >
       <span
         className="w-2 h-2 rounded-full shrink-0 border border-black"
         style={{ backgroundColor: classColor ?? "#9aa7cc" }}
@@ -93,24 +111,34 @@ function ZoneLobbySection({ lobby }: { lobby: ZoneLobby }): React.ReactElement {
 
   return (
     <div className="space-y-1">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center justify-between border-2 border-black bg-[#283454] px-2 py-1 text-left text-[9px] shadow-[2px_2px_0_0_#000] transition hover:bg-[#324165]"
-        type="button"
-      >
-        <span className="truncate text-[#edf2ff] uppercase tracking-wide">
-          {expanded ? "▼" : "▶"} {lobby.zoneId}
-        </span>
-        <div className="inline-flex items-center gap-2">
-          <Badge variant="default">{lobby.players.length}</Badge>
-          <span className="text-[8px] text-[#9aa7cc]">{lobby.totalEntities} ents</span>
-        </div>
-      </button>
+      <div className="flex w-full items-center border-2 border-black bg-[#283454] shadow-[2px_2px_0_0_#000] transition hover:bg-[#324165]">
+        {/* Expand/collapse arrow */}
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="px-2 py-1 text-[9px] text-[#9aa7cc] hover:text-[#edf2ff] shrink-0"
+          type="button"
+        >
+          {expanded ? "▼" : "▶"}
+        </button>
+        {/* Zone name — click to navigate */}
+        <button
+          onClick={() => gameBus.emit("switchZone", { zoneId: lobby.zoneId })}
+          className="flex flex-1 items-center justify-between py-1 pr-2 text-left text-[9px] uppercase tracking-wide text-[#edf2ff]"
+          type="button"
+          title={`Go to ${lobby.zoneId}`}
+        >
+          <span className="truncate">{lobby.zoneId}</span>
+          <div className="inline-flex items-center gap-2 shrink-0">
+            <Badge variant="default">{lobby.players.length}</Badge>
+            <span className="text-[8px] text-[#9aa7cc]">{lobby.totalEntities} ents</span>
+          </div>
+        </button>
+      </div>
 
       {expanded && lobby.players.length > 0 && (
         <div className="border-2 border-black bg-[#0f1830] shadow-[2px_2px_0_0_#000]">
           {lobby.players.map((player) => (
-            <PlayerRow key={player.id} player={player} />
+            <PlayerRow key={player.id} player={player} zoneId={lobby.zoneId} />
           ))}
         </div>
       )}

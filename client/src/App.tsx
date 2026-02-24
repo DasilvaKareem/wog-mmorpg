@@ -77,7 +77,7 @@ function GameWorld(): React.ReactElement {
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
       <WalletPanel />
-      <PlayerPanel className="absolute top-12 left-1/2 -translate-x-1/2 z-30 w-72 md:w-80 lg:w-[420px] max-w-[40vw] max-h-[45vh] overflow-auto hidden md:block" />
+      <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
       {address ? (
         <AgentChatPanel
           walletAddress={address}

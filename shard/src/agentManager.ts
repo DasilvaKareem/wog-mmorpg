@@ -3,7 +3,8 @@
  */
 
 import { AgentRunner } from "./agentRunner.js";
-import { patchAgentConfig } from "./agentConfigStore.js";
+import { getAgentConfig, getAgentEntityRef, patchAgentConfig } from "./agentConfigStore.js";
+import { getAllZones } from "./zoneRuntime.js";
 import { getRedis } from "./redis.js";
 
 class AgentManager {
@@ -62,6 +63,40 @@ class AgentManager {
     return this.loops.get(key) ?? null;
   }
 
+  /**
+   * Self-healing check: if agent should be running (config.enabled + entity in zone)
+   * but isn't, restart it. Called from the status endpoint so polling auto-heals.
+   * Returns true if the agent is running after the check.
+   */
+  async ensureRunning(userWallet: string): Promise<boolean> {
+    const key = userWallet.toLowerCase();
+
+    // Already running — nothing to do
+    const existing = this.loops.get(key);
+    if (existing?.running) return true;
+
+    // Check if agent *should* be running
+    const config = await getAgentConfig(key);
+    if (!config?.enabled) return false;
+
+    const ref = await getAgentEntityRef(key);
+    if (!ref) return false;
+
+    // Verify entity still exists in the zone
+    const zone = getAllZones().get(ref.zoneId);
+    if (!zone || !zone.entities.has(ref.entityId)) return false;
+
+    // Agent should be running but isn't — restart
+    console.log(`[AgentManager] Self-heal: restarting agent for ${key.slice(0, 8)} (was dead but enabled + entity alive)`);
+    try {
+      await this.start(key);
+      return true;
+    } catch (err: any) {
+      console.warn(`[AgentManager] Self-heal restart failed for ${key.slice(0, 8)}: ${err.message?.slice(0, 80)}`);
+      return false;
+    }
+  }
+
   async stopAll(): Promise<void> {
     console.log(`[AgentManager] Stopping all ${this.loops.size} agents`);
     for (const [key, runner] of this.loops) {
@@ -96,6 +131,7 @@ class AgentManager {
     }
 
     let restored = 0;
+    let failed = 0;
     for (const key of keys) {
       try {
         const raw = await redis.get(key);
@@ -106,10 +142,14 @@ class AgentManager {
         const userWallet = key.replace("agent:config:", "");
         await this.start(userWallet);
         restored++;
-      } catch {}
+      } catch (err: any) {
+        failed++;
+        const wallet = key.replace("agent:config:", "").slice(0, 8);
+        console.warn(`[AgentManager] Boot restore failed for ${wallet}: ${err.message?.slice(0, 80)}`);
+      }
     }
 
-    console.log(`[AgentManager] Boot restore: ${restored} agent(s) resumed from Redis`);
+    console.log(`[AgentManager] Boot restore: ${restored} resumed, ${failed} failed (will self-heal on status poll)`);
   }
 }
 

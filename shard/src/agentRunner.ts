@@ -91,6 +91,11 @@ export class AgentRunner {
   private currentScript: BotScript | null = null;
   /** Expose current script for status endpoint */
   public get script(): BotScript | null { return this.currentScript; }
+  /** Force re-evaluation on next tick (called when user manually changes config) */
+  public clearScript(): void {
+    this.currentScript = null;
+    this.ticksSinceLastDecision = MAX_STALE_TICKS;
+  }
   /** Ticks since the last supervisor call (for MAX_STALE_TICKS safety net) */
   private ticksSinceLastDecision = 0;
   /** Snapshot values used to detect meaningful game-state change events */
