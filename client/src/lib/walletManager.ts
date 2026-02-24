@@ -97,10 +97,12 @@ export class WalletManager {
   }
 
   async connect(): Promise<string> {
-    const account = await this.wallet.connect({
-      client: thirdwebClient,
-      chain: skaleBaseSepolia,
-    });
+    const account = await Promise.race([
+      this.wallet.connect({ client: thirdwebClient, chain: skaleBaseSepolia }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Wallet popup timed out. Make sure MetaMask is installed and unlocked.")), 20000)
+      ),
+    ]);
 
     this._address = account.address;
 

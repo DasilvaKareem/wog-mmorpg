@@ -10,6 +10,7 @@ export interface PlayerInfo {
   xp?: number;
   raceId?: string;
   classId?: string;
+  walletAddress?: string;
   x: number;
   y: number;
 }
@@ -67,6 +68,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
             xp: e.xp,
             raceId: e.raceId,
             classId: e.classId,
+            walletAddress: e.walletAddress,
             x: e.x,
             y: e.y,
           }))

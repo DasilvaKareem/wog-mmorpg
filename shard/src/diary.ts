@@ -55,6 +55,15 @@ export interface DiaryEntry {
 const MAX_ENTRIES = 200;
 const REDIS_KEY_PREFIX = "diary:";
 
+// ── Instant-alert hook (set by telegramNotifications.ts) ───────────
+
+type DiaryAlertHook = (wallet: string, action: DiaryAction, entry: DiaryEntry) => void;
+let diaryAlertHook: DiaryAlertHook | null = null;
+
+export function setDiaryAlertHook(hook: DiaryAlertHook): void {
+  diaryAlertHook = hook;
+}
+
 // ── In-memory store ────────────────────────────────────────────────
 
 const memoryStore = new Map<string, DiaryEntry[]>();
@@ -417,6 +426,11 @@ export function logDiary(
         console.error(`[diary] Redis write failed for ${key}:`, err),
       );
   }
+
+  // Fire instant alert for significant events (level-up, death)
+  if (diaryAlertHook && (action === "level_up" || action === "death")) {
+    try { diaryAlertHook(walletAddress, action, entry); } catch { /* non-fatal */ }
+  }
 }
 
 // ── Read functions ─────────────────────────────────────────────────
@@ -459,7 +473,7 @@ async function readDiary(
  * Agent gameplay writes entries under the custodial wallet, so without
  * this merge the player's diary would appear empty.
  */
-async function readMergedDiary(
+export async function readMergedDiary(
   walletAddress: string,
   limit: number,
   offset: number,

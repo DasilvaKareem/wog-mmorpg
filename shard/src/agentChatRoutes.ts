@@ -207,6 +207,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     const runner = agentManager.getRunner(authWallet);
     const currentActivity = runner?.currentActivity ?? null;
+    const currentScript = runner?.script ?? null;
 
     return reply.send({
       running,
@@ -216,6 +217,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       custodialWallet: custodial ?? null,
       entity: entity ?? null,
       currentActivity,
+      currentScript,
     });
   });
 

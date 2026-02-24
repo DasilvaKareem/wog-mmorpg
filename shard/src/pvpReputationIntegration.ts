@@ -116,14 +116,14 @@ export class PvPReputationIntegration {
    * Update reputation for honorable/dishonorable behavior
    */
   async reportBehavior(
-    characterTokenId: bigint,
+    walletAddress: string,
     honorable: boolean,
     reason: string
   ): Promise<void> {
     const delta = honorable ? 10 : -20;
 
     await reputationManager.submitFeedback(
-      characterTokenId.toString(),
+      walletAddress,
       ReputationCategory.Combat,
       delta,
       reason
@@ -134,7 +134,7 @@ export class PvPReputationIntegration {
    * Batch update reputation for tournament results
    */
   async updateTournamentReputation(
-    winners: Array<{ characterTokenId: bigint; placement: number }>,
+    winners: Array<{ walletAddress: string; placement: number }>,
     tournamentName: string
   ): Promise<void> {
     for (const winner of winners) {
@@ -156,7 +156,7 @@ export class PvPReputationIntegration {
       }
 
       await reputationManager.submitFeedback(
-        winner.characterTokenId.toString(),
+        winner.walletAddress,
         ReputationCategory.Combat,
         delta,
         `Placed ${this.getOrdinal(winner.placement)} in ${tournamentName}`

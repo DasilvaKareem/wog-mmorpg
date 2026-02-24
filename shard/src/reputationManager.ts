@@ -1,8 +1,12 @@
 /**
- * Reputation Manager (In-Memory)
+ * Reputation Manager (In-Memory + On-Chain)
  * Manages ERC-8004 reputation system for WoG characters
- * Keyed by wallet address — no on-chain contracts required
+ * In-memory is the read source; chain writes are fire-and-forget backup
  */
+import {
+  initReputationOnChain,
+  submitFeedbackOnChain,
+} from "./reputationChain.js";
 
 export enum ReputationCategory {
   Combat = 0,
@@ -67,6 +71,7 @@ export class ReputationManager {
       overall: DEFAULT_SCORE,
       lastUpdated: Date.now(),
     });
+    initReputationOnChain(key).catch(() => {});
   }
 
   /** Get reputation scores for a wallet */
@@ -118,6 +123,8 @@ export class ReputationManager {
     if (this.feedbackLog.length > 5000) {
       this.feedbackLog = this.feedbackLog.slice(-2500);
     }
+
+    submitFeedbackOnChain(key, category, delta, reason).catch(() => {});
   }
 
   /** Batch update multiple categories at once */

@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useZonePlayers, type ZoneLobby, type PlayerInfo } from "@/hooks/useZonePlayers";
 import { cn } from "@/lib/utils";
+import { gameBus } from "@/lib/eventBus";
 
 interface LobbyViewerProps {
   className?: string;
@@ -36,8 +37,22 @@ function PlayerRow({ player }: { player: PlayerInfo }): React.ReactElement {
   const healthPercent = player.maxHp > 0 ? (player.hp / player.maxHp) * 100 : 0;
   const classColor = player.classId ? CLASS_COLORS[player.classId] : undefined;
 
+  function handleClick() {
+    if (player.walletAddress) {
+      gameBus.emit("lockToPlayer", { walletAddress: player.walletAddress });
+    }
+  }
+
   return (
-    <div className="flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 hover:bg-[#1a2338] transition-colors">
+    <div
+      className={cn(
+        "flex items-center gap-2 border-b-2 border-[#1a2338] px-1 py-1.5 transition-colors",
+        player.walletAddress
+          ? "cursor-pointer hover:bg-[#1a2338] hover:border-[#54f28b]"
+          : "hover:bg-[#1a2338]"
+      )}
+      onClick={handleClick}
+    >
       {/* Class color dot */}
       <span
         className="w-2 h-2 rounded-full shrink-0 border border-black"

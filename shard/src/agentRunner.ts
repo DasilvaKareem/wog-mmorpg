@@ -16,6 +16,11 @@ import {
 import { exportCustodialWallet } from "./custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "./authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS } from "./worldLayout.js";
+import { runSupervisor } from "./agentSupervisor.js";
+import { type BotScript, type TriggerEvent, type TriggerType } from "./botScriptTypes.js";
+
+/** Safety-net: call supervisor if no trigger has fired in this many ticks (~30s). */
+const MAX_STALE_TICKS = 25;
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 const TICK_MS = 1200;
@@ -25,6 +30,42 @@ function sleep(ms: number) {
 }
 
 type ApiCaller = ReturnType<typeof createAuthenticatedAPI>;
+
+/** Convert config focus → natural-language directive for supervisor context. */
+function focusToDirective(focus: AgentFocus, targetZone?: string): string {
+  switch (focus) {
+    case "questing":   return "Accept and complete quests. Use combat to progress objectives.";
+    case "combat":     return "Hunt mobs for XP and gold. Fight the strongest you can handle.";
+    case "gathering":  return "Gather ore and herbs. Build up material stockpile.";
+    case "crafting":   return "Craft items at the forge. Gather materials first if needed.";
+    case "alchemy":    return "Brew potions and elixirs. Gather herbs if ingredients are low.";
+    case "cooking":    return "Cook food for HP recovery. Gather ingredients if needed.";
+    case "enchanting": return "Enchant your weapon. Brew elixirs first if you have none.";
+    case "shopping":   return "Buy and equip the best gear you can afford.";
+    case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
+    case "idle":       return "Rest. Only act if something urgent happens.";
+    default:           return "Be autonomous — quest and improve your character.";
+  }
+}
+
+/** Convert config focus → initial BotScript when supervisor is unavailable. */
+function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: string): BotScript {
+  const levelOffset = strategy === "aggressive" ? 5 : strategy === "defensive" ? 0 : 2;
+  switch (focus) {
+    case "questing":   return { type: "quest",   reason: "User focus: questing" };
+    case "combat":     return { type: "combat",  maxLevelOffset: levelOffset, reason: "User focus: combat" };
+    case "gathering":  return { type: "gather",  nodeType: "both", reason: "User focus: gathering" };
+    case "crafting":   return { type: "craft",   reason: "User focus: crafting" };
+    case "alchemy":    return { type: "brew",    reason: "User focus: alchemy" };
+    case "cooking":    return { type: "cook",    reason: "User focus: cooking" };
+    case "enchanting": return { type: "combat",  maxLevelOffset: levelOffset, reason: "Enchanting — need to farm XP first" };
+    case "shopping":
+    case "trading":    return { type: "shop",    reason: "User focus: shopping" };
+    case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
+    case "idle":       return { type: "idle",    reason: "User focus: idle" };
+    default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
+  }
+}
 
 export class AgentRunner {
   private userWallet: string;
@@ -44,6 +85,17 @@ export class AgentRunner {
   private combatFallbackCount = 0;
   /** Live description of what the agent is doing right now */
   public currentActivity = "Idle";
+  /** Circular buffer of recent activity strings for supervisor context */
+  private recentActivities: string[] = [];
+  /** Current bot script being executed. Null = supervisor must decide. */
+  private currentScript: BotScript | null = null;
+  /** Expose current script for status endpoint */
+  public get script(): BotScript | null { return this.currentScript; }
+  /** Ticks since the last supervisor call (for MAX_STALE_TICKS safety net) */
+  private ticksSinceLastDecision = 0;
+  /** Snapshot values used to detect meaningful game-state change events */
+  private lastKnownLevel = 0;
+  private lastKnownZone = "";
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
@@ -52,6 +104,7 @@ export class AgentRunner {
   /** Log an activity message to the agent's chat history (visible to spectators). */
   private async logActivity(text: string): Promise<void> {
     this.currentActivity = text;
+    this.recentActivities = [...this.recentActivities, text].slice(-8);
     try {
       await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
     } catch {}
@@ -993,6 +1046,152 @@ export class AgentRunner {
     }
   }
 
+  // ── Bot script execution ─────────────────────────────────────────────────
+
+  /**
+   * Execute the current BotScript for one tick.
+   * The bot handles all the mechanical execution; the supervisor decides *which* script runs.
+   */
+  private async executeCurrentScript(entity: any, entities: Record<string, any>, strategy: AgentStrategy): Promise<void> {
+    const script = this.currentScript;
+    if (!script) return;
+
+    switch (script.type) {
+      case "combat":  await this.doCombat(strategy); break;
+      case "gather":  await this.doGathering(strategy); break;
+      case "travel":  await this.doTravel(strategy); break;
+      case "shop":    await this.doShopping(strategy); break;
+      case "craft":   await this.doCrafting(strategy); break;
+      case "brew":    await this.doAlchemy(strategy); break;
+      case "cook":    await this.doCooking(strategy); break;
+      case "quest":   await this.doQuesting(strategy); break;
+      case "idle":    break;
+    }
+  }
+
+  /**
+   * Detect whether a significant game-state event has occurred that should
+   * trigger the AI supervisor to re-evaluate the bot's script.
+   * Returns an event on trigger, or null to keep executing the current script.
+   */
+  private detectTrigger(entity: any, entities: Record<string, any>): TriggerEvent | null {
+    // No script → supervisor must assign one
+    if (!this.currentScript) {
+      return { type: "no_script", detail: "Agent needs an initial script" };
+    }
+
+    this.ticksSinceLastDecision++;
+
+    // Universal: level up
+    const level = entity.level ?? 1;
+    if (level > this.lastKnownLevel && this.lastKnownLevel > 0) {
+      return { type: "level_up", detail: `Reached level ${level} — re-evaluating strategy` };
+    }
+
+    // Universal: arrived in a new zone
+    if (this.currentZone !== this.lastKnownZone && this.lastKnownZone !== "") {
+      return { type: "zone_arrived", detail: `Arrived in ${this.currentZone}` };
+    }
+
+    // Script-specific triggers
+    switch (this.currentScript.type) {
+      case "combat": {
+        const offset = this.currentScript.maxLevelOffset ?? 2;
+        const hasTargets = Object.values(entities).some(
+          (e: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= level + offset
+        );
+        if (!hasTargets) {
+          return { type: "no_targets", detail: "No eligible mobs in zone — zone may be cleared" };
+        }
+        break;
+      }
+
+      case "gather": {
+        const nt = this.currentScript.nodeType ?? "both";
+        const hasNodes = Object.values(entities).some((e: any) =>
+          (nt !== "herb" && e.type === "ore-node") ||
+          (nt !== "ore"  && e.type === "flower-node")
+        );
+        if (!hasNodes) {
+          return { type: "no_targets", detail: "No resource nodes in zone" };
+        }
+        break;
+      }
+
+      case "travel": {
+        if (this.currentScript.targetZone && this.currentScript.targetZone === this.currentZone) {
+          return { type: "script_done", detail: `Arrived at destination: ${this.currentZone}` };
+        }
+        break;
+      }
+
+      case "shop": {
+        const eq = entity.equipment ?? {};
+        const emptySlots = ["weapon", "chest", "legs", "boots", "helm"].filter((s) => !eq[s]);
+        if (emptySlots.length === 0) {
+          return { type: "script_done", detail: "Fully equipped — shopping complete" };
+        }
+        break;
+      }
+    }
+
+    // Safety-net: supervisor hasn't been called in too long
+    if (this.ticksSinceLastDecision >= MAX_STALE_TICKS) {
+      return { type: "periodic", detail: "Periodic strategic review" };
+    }
+
+    return null;
+  }
+
+  /**
+   * Core method: detects triggers → calls supervisor on events → executes current script.
+   */
+  private async decideAndAct(
+    entity: any,
+    entities: Record<string, any>,
+    config: { focus: AgentFocus; strategy: AgentStrategy; targetZone?: string },
+    strategy: AgentStrategy,
+  ): Promise<void> {
+    const trigger = this.detectTrigger(entity, entities);
+
+    if (trigger) {
+      const prevLevel = this.lastKnownLevel;
+      this.ticksSinceLastDecision = 0;
+      this.lastKnownLevel = entity.level ?? 1;
+      this.lastKnownZone = this.currentZone;
+
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Trigger [${trigger.type}]: ${trigger.detail}`);
+
+      // Derive user's natural-language directive from focus
+      const userDirective = focusToDirective(config.focus, config.targetZone);
+
+      try {
+        const newScript = await runSupervisor(trigger, {
+          entity,
+          entities,
+          entityId: this.entityId!,
+          currentZone: this.currentZone,
+          custodialWallet: this.custodialWallet!,
+          currentScript: this.currentScript,
+          recentActivities: this.recentActivities,
+          userDirective,
+          apiCall: this.api!,
+        });
+        this.currentScript = newScript;
+        void this.logActivity(`[AI] ${newScript.type}: ${newScript.reason ?? ""}`);
+      } catch (err: any) {
+        console.warn(`[agent:${this.userWallet.slice(0, 8)}] Supervisor failed: ${err.message?.slice(0, 60)}`);
+        // Fallback: derive a script from the current focus so the bot doesn't stop
+        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+      }
+    }
+
+    await this.executeCurrentScript(entity, entities, strategy);
+  }
+
+  // ── Placeholder for old LLM decision engine methods (replaced by supervisor) ──
+
+
   // ── Main loop ─────────────────────────────────────────────────────────────
 
   private async loop(
@@ -1035,9 +1234,9 @@ export class AgentRunner {
           continue;
         }
 
-        // Get entity state
-        const entity = await this.getEntityState();
-        if (!entity) {
+        // Get zone state (entity + all entities needed by the decision engine)
+        const zs = await this.getZoneState();
+        if (!zs) {
           if (!firstTickDone) {
             onFirstTickFail(new Error("Could not read entity state from zone"));
             this.running = false;
@@ -1046,6 +1245,7 @@ export class AgentRunner {
           await sleep(TICK_MS);
           continue;
         }
+        const entity = zs.me;
 
         // ── First tick verified — agent is alive and well ──
         if (!firstTickDone) {
@@ -1057,13 +1257,15 @@ export class AgentRunner {
         const strategy: AgentStrategy = config.strategy ?? "balanced";
         const focus: AgentFocus = config.focus;
 
-        // Track focus changes
+        // Track focus changes — null-out current script so supervisor gets a "user_directive" trigger
         if (focus !== this.lastFocus) {
           this.lastFocus = focus;
           this.ticksSinceFocusChange = 0;
           this.combatFallbackCount = 0;
+          this.currentScript = null;
+          this.ticksSinceLastDecision = MAX_STALE_TICKS; // ensure trigger fires this tick
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Focus changed → ${focus} (${strategy})`);
-          void this.logActivity(`Switching focus → ${focus}`);
+          void this.logActivity(`Focus changed → ${focus}`);
         }
         this.ticksSinceFocusChange++;
 
@@ -1075,44 +1277,21 @@ export class AgentRunner {
         // Every 30 ticks (~36s), check situational needs
         if (focus !== "idle" && this.ticksSinceFocusChange % 30 === 0 && this.ticksSinceFocusChange > 0) {
           const adapted = await this.checkSelfAdaptation(entity, strategy);
-          if (adapted) { await sleep(TICK_MS); continue; }
+          if (adapted) { this.currentScript = null; await sleep(TICK_MS); continue; }
         }
 
         // Auto-repair if gear is badly damaged
         const repairing = await this.handleRepair(entity);
         if (repairing) { await sleep(TICK_MS); continue; }
 
-        // If targetZone is set and we're not there yet, override focus to travel
+        // If targetZone is set, push focus to traveling so supervisor picks it up
         if (config.targetZone && config.targetZone !== this.currentZone && focus !== "traveling") {
           await patchAgentConfig(this.userWallet, { focus: "traveling" });
-          await this.doTravel(strategy);
-        } else {
-          // Execute focus (strategy flows through to combat decisions)
-          // Set baseline activity — specific methods will refine it via logActivity()
-          const focusLabels: Record<string, string> = {
-            questing: "Looking for quests", combat: "Hunting mobs",
-            gathering: "Gathering resources", enchanting: "Enchanting gear",
-            crafting: "Crafting at the forge", alchemy: "Brewing potions",
-            cooking: "Cooking food", trading: "Browsing trades",
-            shopping: "Shopping at merchant", traveling: "Traveling",
-            idle: "Resting",
-          };
-          this.currentActivity = focusLabels[focus] ?? focus;
-
-          switch (focus) {
-            case "questing":   await this.doQuesting(strategy); break;
-            case "combat":     await this.doCombat(strategy); break;
-            case "gathering":  await this.doGathering(strategy); break;
-            case "enchanting": await this.doEnchanting(strategy); break;
-            case "crafting":   await this.doCrafting(strategy); break;
-            case "alchemy":    await this.doAlchemy(strategy); break;
-            case "cooking":    await this.doCooking(strategy); break;
-            case "trading":    await this.doShopping(strategy); break;
-            case "shopping":   await this.doShopping(strategy); break;
-            case "traveling":  await this.doTravel(strategy); break;
-            case "idle":       break;
-          }
+          this.currentScript = null; // supervisor will assign travel script
         }
+
+        // Event-driven bot: execute current script, trigger supervisor on significant events
+        await this.decideAndAct(entity, zs.entities, config, strategy);
       } catch (err: any) {
         console.warn(`[agent:${this.userWallet.slice(0, 8)}] Loop error: ${err.message?.slice(0, 80)}`);
         if (!firstTickDone) {

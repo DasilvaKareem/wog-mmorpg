@@ -23,6 +23,7 @@
     "viem": "^2.45.3"
   },
   "devDependencies": {
+    "@openzeppelin/contracts": "^4.9.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.0",
     "solc": "^0.8.33",

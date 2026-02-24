@@ -27,8 +27,16 @@ export function HpBar({ hp, maxHp, className }: HpBarProps): ReactElement {
       </div>
       <div className="relative h-4 border-2 border-black bg-[#0f1528] shadow-[2px_2px_0_0_#000]">
         <div
-          className="h-full bg-[repeating-linear-gradient(45deg,#ff4d6d_0px,#ff4d6d_4px,#e63859_4px,#e63859_8px)]"
-          style={{ width: `${progressPercent}%` }}
+          className="h-full transition-all"
+          style={{
+            width: `${progressPercent}%`,
+            background:
+              progressPercent > 66
+                ? "repeating-linear-gradient(45deg,#54f28b 0px,#54f28b 4px,#3dd775 4px,#3dd775 8px)"
+                : progressPercent > 33
+                ? "repeating-linear-gradient(45deg,#ffcc00 0px,#ffcc00 4px,#e6b800 4px,#e6b800 8px)"
+                : "repeating-linear-gradient(45deg,#ff4d6d 0px,#ff4d6d 4px,#e63859 4px,#e63859 8px)",
+          }}
         />
       </div>
     </div>

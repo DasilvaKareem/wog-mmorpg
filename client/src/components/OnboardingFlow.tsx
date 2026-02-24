@@ -19,7 +19,9 @@ type Step =
   | "create-char"
   | "payment-char"
   | "minting"
-  | "success";
+  | "success"
+  | "telegram-signup"
+  | "done";
 
 interface SuccessData {
   name: string;
@@ -83,6 +85,10 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const [classId, setClassId] = React.useState("");
   const [successData, setSuccessData] = React.useState<SuccessData | null>(null);
 
+  // Telegram signup
+  const [telegramLinked, setTelegramLinked] = React.useState(false);
+  const [botLinkUrl, setBotLinkUrl] = React.useState<string | null>(null);
+
   // Sync wallet address into local state when it arrives (e.g. after Connect Wallet)
   React.useEffect(() => {
     if (walletAddress && !connectedAddress) {
@@ -97,6 +103,42 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
       setRaces(r);
       setClasses(c);
     });
+  }, [step]);
+
+  // Fetch bot link URL when entering telegram-signup
+  React.useEffect(() => {
+    if (step !== "telegram-signup" || !connectedAddress) return;
+    fetch(`${API_URL}/notifications/telegram/bot-link/${connectedAddress}`)
+      .then((r) => r.json())
+      .then((data) => setBotLinkUrl(data.url ?? null))
+      .catch(() => {});
+  }, [step, connectedAddress]);
+
+  // Poll for Telegram link status (every 2s, auto-skip after 2 min)
+  React.useEffect(() => {
+    if (step !== "telegram-signup" || !connectedAddress) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/notifications/telegram/status/${connectedAddress}`);
+        const { linked } = await res.json();
+        if (linked) setTelegramLinked(true);
+      } catch { /* non-fatal */ }
+    }, 2000);
+    const timeout = setTimeout(() => {
+      clearInterval(poll);
+      setStep("done");
+    }, 120_000);
+    return () => { clearInterval(poll); clearTimeout(timeout); };
+  }, [step, connectedAddress]);
+
+  // "done" step — close modal and enter world
+  React.useEffect(() => {
+    if (step !== "done") return;
+    onClose();
+    navigate("/world");
+    if (connectedAddress) {
+      setTimeout(() => gameBus.emit("lockToPlayer", { walletAddress: connectedAddress }), 500);
+    }
   }, [step]);
 
   async function connectSocial(strategy: SocialStrategy) {
@@ -254,6 +296,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               ? ">> CHARACTER MINT FEE"
               : step === "minting"
               ? ">> MINTING NFT..."
+              : step === "telegram-signup"
+              ? ">> TELEGRAM UPDATES"
               : ">> CHARACTER CREATED!"}
           </span>
           <button
@@ -317,7 +361,12 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   setError(null);
                   setStep("connecting");
                   try {
-                    await connect();
+                    await Promise.race([
+                      connect(),
+                      new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error("Connection timed out. Is a wallet extension installed?")), 15000)
+                      ),
+                    ]);
                     setStep("create-char");
                   } catch (e) {
                     setError(e instanceof Error ? e.message : "Wallet connection failed.");
@@ -330,6 +379,26 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   W
                 </span>
                 <span>Connect Wallet</span>
+                <span className="ml-auto text-[7px] text-[#3a4260]">[→]</span>
+              </button>
+
+              <div className="flex items-center gap-2 my-1">
+                <div className="flex-1 border-t border-[#2a3450]" />
+                <span className="text-[7px] text-[#3a4260]">OR</span>
+                <div className="flex-1 border-t border-[#2a3450]" />
+              </div>
+
+              <button
+                onClick={() => { onClose(); navigate("/world"); }}
+                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[10px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#9aa7cc] hover:text-[#d6deff] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#9aa7cc] text-[9px] font-bold text-[#9aa7cc]">
+                  👁
+                </span>
+                <div className="flex flex-col">
+                  <span>Spectate World</span>
+                  <span className="text-[7px] text-[#3a4260]">Watch without signing in</span>
+                </div>
                 <span className="ml-auto text-[7px] text-[#3a4260]">[→]</span>
               </button>
 
@@ -598,25 +667,86 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               )}
 
               <button
-                onClick={() => {
-                  onClose();
-                  navigate("/world");
-                  if (connectedAddress) {
-                    setTimeout(() => gameBus.emit("lockToPlayer", { walletAddress: connectedAddress }), 500);
-                  }
-                }}
+                onClick={() => setStep("telegram-signup")}
                 className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[11px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
                 disabled={successData.agentDeploying}
               >
-                {successData.agentDeploying ? "..." : ">>> Enter World <<<"}
+                {successData.agentDeploying ? "..." : "Continue →"}
               </button>
 
               <button
-                onClick={onClose}
+                onClick={() => setStep("done")}
                 className="text-[8px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors text-center"
               >
-                Close
+                Skip &amp; Enter World
               </button>
+            </div>
+          )}
+          {/* ── STEP: TELEGRAM SIGNUP ── */}
+          {step === "telegram-signup" && (
+            <div className="flex flex-col gap-3">
+              {!telegramLinked ? (
+                <>
+                  <p className="text-[8px] leading-relaxed text-[#9aa7cc]">
+                    Get agent summaries and alerts delivered to your Telegram.
+                  </p>
+
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[7px] text-[#565f89]">
+                    <p className="text-[#9aa7cc] mb-1">You'll receive:</p>
+                    <p>• 4-hour activity summaries (kills, quests, zones)</p>
+                    <p>• Instant level-up &amp; death alerts</p>
+                  </div>
+
+                  {botLinkUrl ? (
+                    <a
+                      href={botLinkUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-full items-center justify-center gap-2 border-2 border-[#26a5e4] bg-[#0a1020] px-4 py-3 text-[10px] text-[#26a5e4] shadow-[3px_3px_0_0_#000] transition hover:bg-[#0e1830] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+                    >
+                      <span className="flex h-5 w-5 items-center justify-center border border-[#26a5e4] text-[9px] font-bold">T</span>
+                      Open Telegram Bot
+                      <span className="ml-auto text-[7px] text-[#3a4260]">[→]</span>
+                    </a>
+                  ) : (
+                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-4 py-3 text-[8px] text-[#565f89] text-center">
+                      Telegram bot not configured
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 text-[7px] text-[#565f89]">
+                    <span className="animate-pulse">●</span>
+                    <span className="animate-pulse" style={{ animationDelay: "0.3s" }}>●</span>
+                    <span className="opacity-30">●</span>
+                    <span className="ml-1">Waiting for connection...</span>
+                  </div>
+
+                  <button
+                    onClick={() => setStep("done")}
+                    className="text-[8px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors text-center"
+                  >
+                    Skip →
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3">
+                    <p className="text-[10px] text-[#54f28b] mb-2">[✓] Connected!</p>
+                    <div className="text-[7px] text-[#9aa7cc] flex flex-col gap-0.5">
+                      <p>You'll receive:</p>
+                      <p>• 4-hour activity summaries</p>
+                      <p>• Instant level-up / death alerts</p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setStep("done")}
+                    className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[11px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
+                  >
+                    Continue →
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

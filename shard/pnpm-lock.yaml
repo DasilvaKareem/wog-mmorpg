@@ -45,6 +45,9 @@ importers:
         specifier: ^2.45.3
         version: 2.45.3(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@3.25.75)
     devDependencies:
+      '@openzeppelin/contracts':
+        specifier: ^4.9.6
+        version: 4.9.6
       '@types/jsonwebtoken':
         specifier: ^9.0.10
         version: 9.0.10
@@ -628,6 +631,9 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@openzeppelin/contracts@4.9.6':
+    resolution: {integrity: sha512-xSmezSupL+y9VkHZJGDoCBpmnB2ogM13ccaYDWqJTfS3dbuHkgjuwDFUmaFauBCboQMGB/S5UqUl2y54X99BmA==}
 
   '@passwordless-id/webauthn@2.3.4':
     resolution: {integrity: sha512-AGEg6RanNcxuyr4mFnqAB9QnWUcuOU+d0Z7KBV1PknsQ0a8/9YDrqM2QDK/Uw6KAFKINRihkobOXY1PtS2KE1Q==}
@@ -4585,6 +4591,8 @@ snapshots:
   '@noble/hashes@1.7.2': {}
 
   '@noble/hashes@1.8.0': {}
+
+  '@openzeppelin/contracts@4.9.6': {}
 
   '@passwordless-id/webauthn@2.3.4': {}
 

@@ -32,8 +32,9 @@ export function XpBar({ level, xp, className }: XpBarProps): ReactElement {
       <div className="flex items-center justify-between text-[8px] uppercase tracking-wide text-[#9aa7cc]">
         <span>XP</span>
         <span>
-          Lv {currentLevel} 
-          {currentLevel >= MAX_LEVEL ? "(MAX)" : `${currentInLevel}/${span}`}
+          {currentLevel >= MAX_LEVEL
+            ? `L${currentLevel} (MAX)`
+            : `L${currentLevel} · ${currentInLevel}/${span}`}
         </span>
       </div>
       <div className="relative h-4 border-2 border-black bg-[#0f1528] shadow-[2px_2px_0_0_#000]">

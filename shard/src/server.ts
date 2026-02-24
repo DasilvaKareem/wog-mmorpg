@@ -57,6 +57,8 @@ import { startGuildNameCacheRefresh } from "./guildChain.js";
 import { registerWorldMapRoutes } from "./worldMapRoutes.js";
 import { registerDiaryRoutes } from "./diary.js";
 import { registerFarcasterAuthRoutes } from "./farcasterAuth.js";
+import { registerNotificationRoutes } from "./notificationRoutes.js";
+import { initTelegramBot } from "./telegramNotifications.js";
 import { initWorldMapStore } from "./worldMapStore.js";
 import { restoreReservations } from "./goldLedger.js";
 import { getTxStats } from "./blockchain.js";
@@ -198,6 +200,7 @@ registerEssenceTechniqueRoutes(server);
 registerDungeonGateTick(server);
 registerWorldMapRoutes(server);
 registerDiaryRoutes(server);
+registerNotificationRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh();
 spawnNpcs();
@@ -218,6 +221,11 @@ const start = async () => {
   // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
   rebuildAuctionCache().catch((err: any) => {
     server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  // Start Telegram bot (non-blocking — no bot token = graceful no-op)
+  initTelegramBot().catch((err: any) => {
+    server.log.warn(`[telegram] Bot init failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
   // Restore agent loops that were running before last restart
