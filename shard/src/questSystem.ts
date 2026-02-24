@@ -2311,13 +2311,68 @@ export function registerQuestRoutes(server: FastifyInstance) {
           zoneId: e.zoneId,
         }));
 
+      // Resolve NPC entity IDs for turn-in (find entity in zone whose name matches quest.npcId)
+      const npcByName = new Map<string, string>();
+      const zone = getOrCreateZone(playerZoneId);
+      for (const e of zone.entities.values()) {
+        if (e.name) npcByName.set(e.name, e.id);
+      }
+
+      const activeQuestsWithNpc = activeQuests.map((aq) => {
+        const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
+        return { ...aq, npcEntityId: npcByName.get(quest?.npcId ?? "") ?? null };
+      });
+
       return {
+        entityId: player.id,
         playerName: player.name,
         zoneId: playerZoneId,
-        activeQuests,
+        activeQuests: activeQuestsWithNpc,
         completedQuests,
         activity,
       };
+    }
+  );
+
+  // GET /quests/zone/:zoneId/:playerId — all available quests across every quest-giver NPC in the zone
+  server.get<{ Params: { zoneId: string; playerId: string } }>(
+    "/quests/zone/:zoneId/:playerId",
+    async (request, reply) => {
+      const { zoneId, playerId } = request.params;
+      const zone = getOrCreateZone(zoneId);
+      const player = zone.entities.get(playerId);
+
+      if (!player || player.type !== "player") {
+        reply.code(404);
+        return { error: "Player not found" };
+      }
+
+      const completedQuestIds = player.completedQuests ?? [];
+      const activeQuestIds = (player.activeQuests ?? []).map((aq) => aq.questId);
+
+      const available: Array<{
+        questId: string; title: string; description: string;
+        npcEntityId: string; npcName: string;
+        objective: Quest["objective"]; rewards: Quest["rewards"];
+      }> = [];
+
+      for (const entity of zone.entities.values()) {
+        if (entity.type !== "quest-giver") continue;
+        const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
+        for (const q of quests) {
+          available.push({
+            questId: q.id,
+            title: q.title,
+            description: q.description,
+            npcEntityId: entity.id,
+            npcName: entity.name,
+            objective: q.objective,
+            rewards: q.rewards,
+          });
+        }
+      }
+
+      return { quests: available };
     }
   );
 }

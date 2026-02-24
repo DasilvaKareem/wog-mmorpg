@@ -1,5 +1,7 @@
 import * as React from "react";
-import { useQuestLog, type ActiveQuestEntry, type CompletedQuestEntry, type ActivityEntry } from "@/hooks/useQuestLog";
+import { useQuestLog, type ActiveQuestEntry, type AvailableQuestEntry, type CompletedQuestEntry, type ActivityEntry } from "@/hooks/useQuestLog";
+import { getAuthToken } from "@/lib/agentAuth";
+import { API_URL } from "@/config";
 
 /* ── 8-bit retro palette (matches InspectDialog) ──────────── */
 const BG = "#11182b";
@@ -9,9 +11,10 @@ const DIM = "#6b7a9e";
 const ACCENT = "#54f28b";
 
 /* ── Tab types ────────────────────────────────────────────── */
-type TabId = "active" | "completed" | "activity";
+type TabId = "available" | "active" | "completed" | "activity";
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: "available", label: "Available" },
   { id: "active", label: "Active" },
   { id: "completed", label: "Done" },
   { id: "activity", label: "Activity" },
@@ -54,8 +57,82 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+/* ── Small action button ──────────────────────────────────── */
+function ActionBtn({
+  label, color, disabled, loading, onClick,
+}: {
+  label: string; color: string; disabled?: boolean; loading?: boolean; onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      className="text-[9px] font-bold px-2 py-0.5 border"
+      style={{
+        borderColor: disabled ? BORDER : color,
+        color: disabled ? DIM : color,
+        background: "transparent",
+        cursor: disabled || loading ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >
+      {loading ? "..." : label}
+    </button>
+  );
+}
+
+/* ── Available Quests Tab ─────────────────────────────────── */
+function AvailableTab({
+  quests, onAccept, loadingId,
+}: {
+  quests: AvailableQuestEntry[];
+  onAccept: (q: AvailableQuestEntry) => void;
+  loadingId: string | null;
+}): React.ReactElement {
+  if (quests.length === 0) {
+    return <div className="text-[11px]" style={{ color: DIM }}>No quests available in this zone</div>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {quests.map((q) => (
+        <div key={q.questId} className="border p-2" style={{ borderColor: "#1e2842" }}>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-bold" style={{ color: TEXT }}>{q.title}</span>
+            <ActionBtn
+              label="Accept"
+              color={ACCENT}
+              loading={loadingId === q.questId}
+              onClick={() => onAccept(q)}
+            />
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: DIM }}>{q.description}</div>
+          <div className="text-[9px] mt-1" style={{ color: "#8899bb" }}>
+            {q.objective.type === "kill"
+              ? `Kill ${q.objective.count}× ${q.objective.targetMobName ?? "enemies"}`
+              : q.objective.type === "gather"
+              ? `Gather ${q.objective.count}× ${q.objective.targetItemName ?? "items"}`
+              : `Talk to ${q.objective.targetNpcName ?? "NPC"}`}
+            {" · "}from {q.npcName}
+          </div>
+          <div className="flex gap-2 mt-1 text-[9px]" style={{ color: "#f2c854" }}>
+            <span>{q.rewards.xp} XP</span>
+            <span>{q.rewards.copper} Gold</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ── Active Quests Tab ────────────────────────────────────── */
-function ActiveTab({ quests }: { quests: ActiveQuestEntry[] }): React.ReactElement {
+function ActiveTab({
+  quests, onTurnIn, loadingId,
+}: {
+  quests: ActiveQuestEntry[];
+  onTurnIn: (q: ActiveQuestEntry) => void;
+  loadingId: string | null;
+}): React.ReactElement {
   if (quests.length === 0) {
     return <div className="text-[11px]" style={{ color: DIM }}>No active quests</div>;
   }
@@ -64,12 +141,20 @@ function ActiveTab({ quests }: { quests: ActiveQuestEntry[] }): React.ReactEleme
     <div className="space-y-2">
       {quests.map((q) => (
         <div key={q.questId} className="border p-2" style={{ borderColor: q.complete ? ACCENT : "#1e2842" }}>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold" style={{ color: q.complete ? ACCENT : TEXT }}>
               {q.title}
             </span>
-            {q.complete && (
-              <span className="text-[9px] font-bold" style={{ color: ACCENT }}>READY</span>
+            {q.complete && q.npcEntityId && (
+              <ActionBtn
+                label="Turn In"
+                color="#f2c854"
+                loading={loadingId === q.questId}
+                onClick={() => onTurnIn(q)}
+              />
+            )}
+            {q.complete && !q.npcEntityId && (
+              <span className="text-[9px] font-bold" style={{ color: ACCENT }}>COMPLETE</span>
             )}
           </div>
           <div className="text-[10px] mt-0.5" style={{ color: DIM }}>{q.description}</div>
@@ -77,6 +162,8 @@ function ActiveTab({ quests }: { quests: ActiveQuestEntry[] }): React.ReactEleme
             <div className="text-[9px] mb-0.5" style={{ color: DIM }}>
               {q.objective.type === "kill"
                 ? `Kill ${q.objective.targetMobName ?? "enemies"}`
+                : q.objective.type === "gather"
+                ? `Gather ${(q.objective as any).targetItemName ?? "items"}`
                 : `Talk to ${q.objective.targetNpcName ?? "NPC"}`}
             </div>
             <ProgressBar value={q.progress} max={q.required} />
@@ -143,8 +230,102 @@ interface QuestLogDialogProps {
 }
 
 export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogProps): React.ReactElement | null {
-  const [tab, setTab] = React.useState<TabId>("active");
-  const { data, loading, error } = useQuestLog(open ? walletAddress : null);
+  const [tab, setTab] = React.useState<TabId>("available");
+  const { data, loading, error, refresh } = useQuestLog(open ? walletAddress : null);
+
+  // Available quests (zone-wide)
+  const [available, setAvailable] = React.useState<AvailableQuestEntry[]>([]);
+  const [availLoading, setAvailLoading] = React.useState(false);
+
+  // Action feedback
+  const [actionLoading, setActionLoading] = React.useState<string | null>(null);
+  const [feedback, setFeedback] = React.useState<{ msg: string; ok: boolean } | null>(null);
+
+  // Fetch available quests when we have entityId + zoneId
+  React.useEffect(() => {
+    if (!data?.entityId || !data?.zoneId) return;
+    let cancelled = false;
+
+    async function fetchAvail() {
+      setAvailLoading(true);
+      try {
+        const res = await fetch(`${API_URL}/quests/zone/${data!.zoneId}/${data!.entityId}`);
+        if (res.ok && !cancelled) {
+          const json = await res.json() as { quests: AvailableQuestEntry[] };
+          setAvailable(json.quests ?? []);
+        }
+      } catch {}
+      if (!cancelled) setAvailLoading(false);
+    }
+
+    void fetchAvail();
+    const id = setInterval(fetchAvail, 8000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [data?.entityId, data?.zoneId]);
+
+  function showFeedback(msg: string, ok: boolean) {
+    setFeedback({ msg, ok });
+    setTimeout(() => setFeedback(null), 3500);
+  }
+
+  async function handleAccept(q: AvailableQuestEntry) {
+    if (!walletAddress || !data?.entityId || !data?.zoneId) return;
+    setActionLoading(q.questId);
+    try {
+      const token = await getAuthToken(walletAddress);
+      if (!token) { showFeedback("Not authenticated", false); return; }
+
+      const res = await fetch(`${API_URL}/quests/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ zoneId: data.zoneId, playerId: data.entityId, questId: q.questId }),
+      });
+      const json = await res.json() as any;
+      if (res.ok) {
+        showFeedback(`Accepted: ${q.title}`, true);
+        refresh();
+        setAvailable((prev) => prev.filter((a) => a.questId !== q.questId));
+        setTab("active");
+      } else {
+        showFeedback(json.error ?? "Failed to accept quest", false);
+      }
+    } catch {
+      showFeedback("Network error", false);
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleTurnIn(q: ActiveQuestEntry) {
+    if (!walletAddress || !data?.entityId || !data?.zoneId || !q.npcEntityId) return;
+    setActionLoading(q.questId);
+    try {
+      const token = await getAuthToken(walletAddress);
+      if (!token) { showFeedback("Not authenticated", false); return; }
+
+      const res = await fetch(`${API_URL}/quests/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          zoneId: data.zoneId,
+          playerId: data.entityId,
+          questId: q.questId,
+          npcId: q.npcEntityId,
+        }),
+      });
+      const json = await res.json() as any;
+      if (res.ok) {
+        showFeedback(`Quest complete! +${json.rewards?.xp ?? 0} XP, +${json.rewards?.copper ?? 0} Gold`, true);
+        refresh();
+      } else {
+        showFeedback(json.error ?? "Failed to turn in quest", false);
+      }
+    } catch {
+      showFeedback("Network error", false);
+    } finally {
+      setActionLoading(null);
+    }
+  }
 
   if (!open) return null;
 
@@ -171,7 +352,7 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
           <div className="text-sm font-bold" style={{ color: TEXT }}>Quest Log</div>
           {data && (
             <div className="text-[10px]" style={{ color: DIM }}>
-              {data.playerName} | {data.zoneId} | {data.completedQuests.length} quests done
+              {data.playerName} | {data.zoneId} | {data.completedQuests.length} done
             </div>
           )}
         </div>
@@ -199,21 +380,41 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
             }}
           >
             {t.label}
+            {t.id === "available" ? ` (${available.length})` : ""}
             {t.id === "active" && data ? ` (${data.activeQuests.length})` : ""}
             {t.id === "completed" && data ? ` (${data.completedQuests.length})` : ""}
           </button>
         ))}
       </div>
 
+      {/* Feedback banner */}
+      {feedback && (
+        <div
+          className="px-3 py-1 text-[10px] font-bold border-b"
+          style={{
+            borderColor: BORDER,
+            background: feedback.ok ? "#0d2b1a" : "#2b0d0d",
+            color: feedback.ok ? ACCENT : "#f25454",
+          }}
+        >
+          {feedback.msg}
+        </div>
+      )}
+
       {/* Content */}
       <div className="px-3 py-2 overflow-y-auto" style={{ minHeight: 120, maxHeight: "60vh" }}>
-        {loading && !data && (
+        {(loading || availLoading) && !data && (
           <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>
         )}
         {error && !data && (
           <div className="text-[11px]" style={{ color: "#f25454" }}>{error}</div>
         )}
-        {data && tab === "active" && <ActiveTab quests={data.activeQuests} />}
+        {tab === "available" && (
+          <AvailableTab quests={available} onAccept={handleAccept} loadingId={actionLoading} />
+        )}
+        {data && tab === "active" && (
+          <ActiveTab quests={data.activeQuests} onTurnIn={handleTurnIn} loadingId={actionLoading} />
+        )}
         {data && tab === "completed" && <CompletedTab quests={data.completedQuests} />}
         {data && tab === "activity" && <ActivityTab events={data.activity} />}
       </div>

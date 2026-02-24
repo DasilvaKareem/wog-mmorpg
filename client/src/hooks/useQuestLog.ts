@@ -10,6 +10,18 @@ export interface ActiveQuestEntry {
   required: number;
   complete: boolean;
   rewards: { copper: number; xp: number; items?: Array<{ tokenId: number; quantity: number }> };
+  /** Entity ID of the NPC that gave this quest (for turn-in) */
+  npcEntityId: string | null;
+}
+
+export interface AvailableQuestEntry {
+  questId: string;
+  title: string;
+  description: string;
+  npcEntityId: string;
+  npcName: string;
+  objective: { type: string; targetMobName?: string; targetNpcName?: string; targetItemName?: string; count: number };
+  rewards: { copper: number; xp: number; items?: Array<{ tokenId: number; quantity: number }> };
 }
 
 export interface CompletedQuestEntry {
@@ -27,6 +39,7 @@ export interface ActivityEntry {
 }
 
 export interface QuestLogData {
+  entityId: string;
   playerName: string;
   zoneId: string;
   activeQuests: ActiveQuestEntry[];
@@ -38,10 +51,14 @@ export function useQuestLog(walletAddress: string | null): {
   data: QuestLogData | null;
   loading: boolean;
   error: string | null;
+  refresh: () => void;
 } {
   const [data, setData] = React.useState<QuestLogData | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [tick, setTick] = React.useState(0);
+
+  const refresh = React.useCallback(() => setTick((t) => t + 1), []);
 
   React.useEffect(() => {
     if (!walletAddress) return;
@@ -74,7 +91,7 @@ export function useQuestLog(walletAddress: string | null): {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [walletAddress]);
+  }, [walletAddress, tick]);
 
-  return { data, loading, error };
+  return { data, loading, error, refresh };
 }

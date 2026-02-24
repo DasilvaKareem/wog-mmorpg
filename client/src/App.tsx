@@ -19,8 +19,6 @@ import { X402AgentPage } from "@/components/X402AgentPage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
-import { ProfessionPanel } from "@/components/ProfessionPanel";
-import { ZoneSelector } from "@/components/ZoneSelector";
 import { ChatLog } from "@/components/ChatLog";
 import { AgentChatPanel } from "@/components/AgentChatPanel";
 import { HotkeyBar } from "@/components/HotkeyBar";
@@ -79,8 +77,6 @@ function GameWorld(): React.ReactElement {
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
       <WalletPanel />
-      <ProfessionPanel />
-      <ZoneSelector />
       <PlayerPanel className="absolute top-12 left-1/2 -translate-x-1/2 z-30 w-72 md:w-80 lg:w-[420px] max-w-[40vw] max-h-[45vh] overflow-auto hidden md:block" />
       {address ? (
         <AgentChatPanel

@@ -4,7 +4,7 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "./blockchain.js";
 import { getAllZones } from "./zoneRuntime.js";
-import { loadCharacter } from "./characterStore.js";
+import { loadCharacter, saveCharacter } from "./characterStore.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -65,6 +65,22 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     try {
       const txHash = await mintCharacter(walletAddress, metadata);
       server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
+
+      // Seed character store so level/xp are always in Redis from the start
+      void saveCharacter(walletAddress, character.name, {
+        name: character.name,
+        level: 1,
+        xp: 0,
+        raceId: character.race.id,
+        classId: character.class.id,
+        zone: "village-square",
+        x: 0,
+        y: 0,
+        kills: 0,
+        completedQuests: [],
+        learnedTechniques: [],
+        professions: [],
+      });
 
       return {
         ok: true,
@@ -153,7 +169,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             if (baseName) {
               try {
                 const saved = await loadCharacter(walletAddress, baseName);
-                if (saved && saved.level > 1) {
+                if (saved) {
                   return {
                     tokenId: nft.id.toString(),
                     name: nft.metadata.name,
