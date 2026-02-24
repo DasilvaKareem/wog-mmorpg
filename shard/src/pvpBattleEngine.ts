@@ -164,12 +164,15 @@ export class PvPBattleEngine {
    * Update statistics based on turn record
    */
   private updateStatistics(turn: TurnRecord): void {
+    if (!turn.actorId) return;
     const actorStats = this.statistics.combatantStats.get(turn.actorId);
     if (!actorStats) return;
 
     // Track action usage
-    const count = actorStats.actionsUsed.get(turn.actionId) || 0;
-    actorStats.actionsUsed.set(turn.actionId, count + 1);
+    if (turn.actionId) {
+      const count = actorStats.actionsUsed.get(turn.actionId) || 0;
+      actorStats.actionsUsed.set(turn.actionId, count + 1);
+    }
 
     // Track damage
     if (turn.damage && turn.targetId) {
@@ -249,6 +252,7 @@ export class PvPBattleEngine {
 
     return {
       ...baseState,
+      battleId: this.config.battleId,
       config: this.config,
       status: this.status,
       winner: this.winner,

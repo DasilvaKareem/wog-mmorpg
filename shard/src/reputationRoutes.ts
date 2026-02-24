@@ -4,6 +4,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
 
 export async function registerReputationRoutes(app: FastifyInstance) {
@@ -66,7 +67,9 @@ export async function registerReputationRoutes(app: FastifyInstance) {
       delta: number;
       reason: string;
     };
-  }>("/api/reputation/feedback", async (req, reply) => {
+  }>("/api/reputation/feedback", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { walletAddress, category, delta, reason } = req.body;
 
     if (!walletAddress || !category || delta === undefined || !reason) {
@@ -122,7 +125,9 @@ export async function registerReputationRoutes(app: FastifyInstance) {
       };
       reason: string;
     };
-  }>("/api/reputation/batch-update", async (req, reply) => {
+  }>("/api/reputation/batch-update", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { walletAddress, deltas, reason } = req.body;
 
     if (!walletAddress || !deltas || !reason) {

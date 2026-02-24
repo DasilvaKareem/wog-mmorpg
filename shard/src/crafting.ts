@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem, getItemBalance } from "./blockchain.js";
+import { mintItem, burnItem, getItemBalance, getGoldBalance } from "./blockchain.js";
+import { getAvailableGold, formatGold, recordGoldSpend } from "./goldLedger.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { authenticateRequest } from "./auth.js";
 import { rollCraftedItem } from "./itemRng.js";
@@ -425,8 +426,21 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       };
     }
 
-    // TODO: Check gold balance and deduct cost
-    // For now, we'll skip the gold check
+    // Check gold balance and deduct crafting cost
+    if (recipe.copperCost > 0) {
+      const onChainGold = parseFloat(await getGoldBalance(walletAddress));
+      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+      if (availableGold < recipe.copperCost) {
+        reply.code(400);
+        return {
+          error: "Insufficient gold for crafting",
+          required: recipe.copperCost,
+          available: formatGold(availableGold),
+        };
+      }
+      recordGoldSpend(walletAddress, recipe.copperCost);
+    }
 
     // PRE-CHECK: Verify on-chain balances before attempting burn (avoids costly reverts)
     for (const material of recipe.requiredMaterials) {

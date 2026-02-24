@@ -24,6 +24,7 @@ function truncateAddress(address: string): string {
 
 export function WalletPanel(): React.ReactElement {
   const [equippingTokenId, setEquippingTokenId] = React.useState<string | null>(null);
+  const [collapsed, setCollapsed] = React.useState(false);
   const {
     address,
     balance,
@@ -40,12 +41,23 @@ export function WalletPanel(): React.ReactElement {
   const { notify } = useToast();
 
   return (
-    <Card className="pointer-events-auto absolute right-2 top-2 z-30 w-64 md:w-80 md:right-4 md:top-4">
+    <Card className="pointer-events-auto absolute right-2 top-2 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm md:text-base">Wallet</CardTitle>
-        <CardDescription className="text-xs">Spectator inventory</CardDescription>
+        <CardTitle className="flex items-center justify-between text-sm md:text-base">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCollapsed(!collapsed)}
+              className="text-[10px] text-[#9aa7cc] hover:text-[#edf2ff] transition-colors"
+              type="button"
+            >
+              {collapsed ? "+" : "−"}
+            </button>
+            Wallet
+          </div>
+        </CardTitle>
+        {!collapsed && <CardDescription className="text-xs">Spectator inventory</CardDescription>}
       </CardHeader>
-      <CardContent className="space-y-3 text-[9px]">
+      {!collapsed && <CardContent className="space-y-3 text-[9px]">
         {!isConnected ? (
           <Button
             className="w-full"
@@ -171,7 +183,7 @@ export function WalletPanel(): React.ReactElement {
             </div>
           </>
         )}
-      </CardContent>
+      </CardContent>}
     </Card>
   );
 }

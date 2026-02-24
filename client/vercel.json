@@ -4,7 +4,7 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "env": {
-    "VITE_API_URL": "http://35.239.126.131:3000",
+    "VITE_API_URL": "https://private-accessible-asia-qualified.trycloudflare.com",
     "VITE_THIRDWEB_CLIENT_ID": "231a06443d1568f83d2d4f2c8e7dfe3b"
   },
   "redirects": [

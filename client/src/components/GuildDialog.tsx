@@ -211,8 +211,8 @@ export function GuildDialog(): React.ReactElement {
     setActiveTab("guilds");
   };
 
-  const getRankBadgeVariant = (rank: string) => {
-    if (rank === "Founder") return "destructive";
+  const getRankBadgeVariant = (rank: string): "danger" | "default" | "secondary" => {
+    if (rank === "Founder") return "danger";
     if (rank === "Officer") return "default";
     return "secondary";
   };
@@ -244,7 +244,7 @@ export function GuildDialog(): React.ReactElement {
           {selectedGuild ? (
             // Guild Details View
             <div className="space-y-4">
-              <Button onClick={handleBackToGuilds} size="sm" variant="outline">
+              <Button onClick={handleBackToGuilds} size="sm" variant="secondary">
                 ← Back to Guilds
               </Button>
 
@@ -323,7 +323,7 @@ export function GuildDialog(): React.ReactElement {
                               {truncateAddress(member.address)}
                             </TableCell>
                             <TableCell>
-                              <Badge size="sm" variant={getRankBadgeVariant(member.rank)}>
+                              <Badge variant={getRankBadgeVariant(member.rank)}>
                                 {member.rank}
                               </Badge>
                             </TableCell>
@@ -445,7 +445,7 @@ export function GuildDialog(): React.ReactElement {
                                       </div>
                                     </TableCell>
                                     <TableCell>
-                                      <Badge size="sm" variant="secondary">{item.category}</Badge>
+                                      <Badge variant="secondary">{item.category}</Badge>
                                     </TableCell>
                                     <TableCell className="text-[9px]">{item.quantity}</TableCell>
                                     <TableCell className="text-[9px] text-[#00ff88]">{item.available}</TableCell>
@@ -486,7 +486,7 @@ export function GuildDialog(): React.ReactElement {
                                             Loan #{loan.loanId}
                                           </div>
                                         </div>
-                                        <Badge variant={loan.isOverdue ? "destructive" : "success"}>
+                                        <Badge variant={loan.isOverdue ? "danger" : "success"}>
                                           {loan.isOverdue ? "Overdue" : "Active"}
                                         </Badge>
                                       </div>

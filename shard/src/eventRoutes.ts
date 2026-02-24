@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getZoneEvents, getAllZoneEvents, logZoneEvent } from "./zoneEvents.js";
 import { getOrCreateZone } from "./zoneRuntime.js";
 
@@ -49,7 +50,9 @@ export function registerEventRoutes(server: FastifyInstance) {
   server.post<{
     Params: { zoneId: string };
     Body: { entityId: string; message: string };
-  }>("/chat/:zoneId", async (request, reply) => {
+  }>("/chat/:zoneId", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId } = request.params;
     const { entityId, message } = request.body;
 

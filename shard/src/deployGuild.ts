@@ -65,7 +65,12 @@ async function main() {
   const bytecode = "0x" + compiled.evm.bytecode.object;
 
   console.log(`Compiled successfully. Bytecode size: ${bytecode.length / 2} bytes`);
-  console.log(`Deployer address: ${biteWallet.address}`);
+  if (!biteWallet) {
+    console.error("SERVER_PRIVATE_KEY not set — cannot deploy");
+    process.exit(1);
+  }
+  const deployerAddress = await biteWallet.getAddress();
+  console.log(`Deployer address: ${deployerAddress}`);
 
   // 3. Deploy
   console.log("Deploying to BITE v2 Sandbox...");

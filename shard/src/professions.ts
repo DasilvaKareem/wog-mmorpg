@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { getGoldBalance } from "./blockchain.js";
+import { getAvailableGold, formatGold, recordGoldSpend } from "./goldLedger.js";
 import { saveCharacter } from "./characterStore.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
@@ -125,7 +128,9 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       trainerId: string; // Trainer NPC entity ID
       professionId: ProfessionType;
     };
-  }>("/professions/learn", async (request, reply) => {
+  }>("/professions/learn", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, trainerId, professionId } = request.body;
 
     // Validate wallet
@@ -187,8 +192,21 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       };
     }
 
-    // TODO: Check gold balance and deduct cost
-    // For now, we'll skip the gold check since the gold ledger system is separate
+    // Check gold balance and deduct learning cost
+    if (professionInfo.cost > 0) {
+      const onChainGold = parseFloat(await getGoldBalance(walletAddress));
+      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+      if (availableGold < professionInfo.cost) {
+        reply.code(400);
+        return {
+          error: "Insufficient gold to learn this profession",
+          required: professionInfo.cost,
+          available: formatGold(availableGold),
+        };
+      }
+      recordGoldSpend(walletAddress, professionInfo.cost);
+    }
 
     // Learn the profession
     learnProfession(walletAddress, professionId);

@@ -16,6 +16,12 @@ export interface TurnRecord {
   turn: number;
   actions: BattleAction[];
   timestamp: number;
+  actorId?: string;
+  actionId?: string;
+  targetId?: string;
+  damage?: number;
+  healing?: number;
+  killed?: boolean;
 }
 
 export interface BattleResult {

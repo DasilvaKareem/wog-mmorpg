@@ -224,7 +224,14 @@ const start = async () => {
     server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
-  await initWorldMapStore();
+  await Promise.race([
+    initWorldMapStore(),
+    new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error("initWorldMapStore timed out after 10s")), 10_000)
+    ),
+  ]).catch((err) => {
+    server.log.warn(`[worldMapStore] Init failed (non-fatal): ${err.message}`);
+  });
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";

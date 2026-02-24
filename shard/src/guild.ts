@@ -301,7 +301,9 @@ export function registerGuildRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { memberAddress: string };
-  }>("/guild/:guildId/invite", async (request, reply) => {
+  }>("/guild/:guildId/invite", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { memberAddress } = request.body;
 
@@ -392,13 +394,21 @@ export function registerGuildRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { memberAddress: string };
-  }>("/guild/:guildId/leave", async (request, reply) => {
+  }>("/guild/:guildId/leave", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { memberAddress } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!memberAddress || !/^0x[a-fA-F0-9]{40}$/.test(memberAddress)) {
       reply.code(400);
       return { error: "Invalid member address" };
+    }
+
+    if (memberAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     try {
@@ -555,13 +565,21 @@ export function registerGuildRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { proposalId: number; voterAddress: string; vote: boolean };
-  }>("/guild/:guildId/vote", async (request, reply) => {
+  }>("/guild/:guildId/vote", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const guildId = parseInt(request.params.guildId, 10);
     const { proposalId, voterAddress, vote } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
 
     if (!voterAddress || !/^0x[a-fA-F0-9]{40}$/.test(voterAddress)) {
       reply.code(400);
       return { error: "Invalid voter address" };
+    }
+
+    if (voterAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
     }
 
     try {

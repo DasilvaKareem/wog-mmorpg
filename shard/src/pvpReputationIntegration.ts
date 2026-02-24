@@ -17,10 +17,6 @@ export class PvPReputationIntegration {
         const won = result.winner === "red";
         const isMVP = player.agentId === result.mvp.agentId;
 
-        // Get character token ID (in production, fetch from database)
-        // For now, we'll use agentId as placeholder
-        const characterTokenId = BigInt(1); // TODO: Get actual character token ID
-
         // Calculate performance score (0-100) based on ELO change
         const performanceScore = this.calculatePerformanceScore(
           player.eloChange,
@@ -28,9 +24,9 @@ export class PvPReputationIntegration {
           isMVP
         );
 
-        // Update combat reputation
+        // Update combat reputation using wallet address
         await reputationManager.updateCombatReputation(
-          characterTokenId,
+          player.walletAddress,
           won,
           performanceScore
         );
@@ -38,7 +34,7 @@ export class PvPReputationIntegration {
         // MVP bonus
         if (isMVP) {
           await reputationManager.submitFeedback(
-            characterTokenId,
+            player.walletAddress,
             ReputationCategory.Combat,
             25,
             "Awarded MVP in PvP battle"
@@ -51,8 +47,6 @@ export class PvPReputationIntegration {
         const won = result.winner === "blue";
         const isMVP = player.agentId === result.mvp.agentId;
 
-        const characterTokenId = BigInt(1); // TODO: Get actual character token ID
-
         const performanceScore = this.calculatePerformanceScore(
           player.eloChange,
           won,
@@ -60,14 +54,14 @@ export class PvPReputationIntegration {
         );
 
         await reputationManager.updateCombatReputation(
-          characterTokenId,
+          player.walletAddress,
           won,
           performanceScore
         );
 
         if (isMVP) {
           await reputationManager.submitFeedback(
-            characterTokenId,
+            player.walletAddress,
             ReputationCategory.Combat,
             25,
             "Awarded MVP in PvP battle"
@@ -129,7 +123,7 @@ export class PvPReputationIntegration {
     const delta = honorable ? 10 : -20;
 
     await reputationManager.submitFeedback(
-      characterTokenId,
+      characterTokenId.toString(),
       ReputationCategory.Combat,
       delta,
       reason
@@ -162,7 +156,7 @@ export class PvPReputationIntegration {
       }
 
       await reputationManager.submitFeedback(
-        winner.characterTokenId,
+        winner.characterTokenId.toString(),
         ReputationCategory.Combat,
         delta,
         `Placed ${this.getOrdinal(winner.placement)} in ${tournamentName}`

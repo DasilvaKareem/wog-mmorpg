@@ -92,7 +92,7 @@ export function Navbar(): React.ReactElement {
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const navRef = React.useRef<HTMLElement>(null);
 
-  const isWorldRoute = location.pathname === "/world";
+  const isGameRoute = location.pathname === "/world" || location.pathname === "/spectate";
 
   // Close dropdown on outside click
   React.useEffect(() => {
@@ -121,40 +121,36 @@ export function Navbar(): React.ReactElement {
   const isMenuActive = (menu: DropdownMenu) =>
     menu.items.some((item) => item.to && item.to === location.pathname);
 
+  // On /world and /spectate, show only the logo as a home button
+  if (isGameRoute) {
+    return (
+      <nav className="pointer-events-none fixed top-0 left-0 right-0 z-[60]">
+        <div className="mx-auto flex max-w-6xl px-4 py-0">
+          <Link to="/" className="pointer-events-auto flex items-center py-1 opacity-70 hover:opacity-100 transition-opacity">
+            <img
+              src="/assets/logo.png"
+              alt="World of Geneva"
+              className="h-8 w-auto object-contain"
+            />
+          </Link>
+        </div>
+      </nav>
+    );
+  }
+
   return (
     <nav
       ref={navRef}
-      className={`fixed top-0 left-0 right-0 z-[60] transition-all duration-300 ${
-        isWorldRoute
-          ? "pointer-events-none border-b-0 bg-transparent"
-          : "border-b-2 border-[#2a3450] bg-[#0d1526]"
-      }`}
+      className="fixed top-0 left-0 right-0 z-[60] border-b-2 border-[#2a3450] bg-[#0d1526]"
     >
-      <div className={`mx-auto flex max-w-6xl items-center justify-between px-4 py-0 ${
-        isWorldRoute ? "pointer-events-auto" : ""
-      }`}>
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-0">
         {/* Logo */}
-        <Link
-          to="/"
-          className="group flex items-center gap-2 py-2.5"
-        >
-          <div className="flex items-center gap-1.5">
-            <span
-              className="text-[10px] text-[#ffcc00] transition group-hover:text-[#ffd84d]"
-              style={{ textShadow: "1px 1px 0 #000" }}
-            >
-              {"//"}
-            </span>
-            <span
-              className="text-[13px] uppercase tracking-[0.2em] text-[#ffcc00] transition group-hover:text-[#ffd84d]"
-              style={{ textShadow: "2px 2px 0 #000" }}
-            >
-              WoG
-            </span>
-            <span className="hidden text-[7px] text-[#565f89] sm:inline">
-              World of Geneva
-            </span>
-          </div>
+        <Link to="/" className="flex items-center py-1">
+          <img
+            src="/assets/logo.png"
+            alt="World of Geneva"
+            className="h-10 w-auto object-contain transition-opacity hover:opacity-80"
+          />
         </Link>
 
         {/* Desktop menu */}
@@ -223,11 +219,7 @@ export function Navbar(): React.ReactElement {
           {/* Spectate link */}
           <Link
             to="/world"
-            className={`flex items-center gap-1.5 border-l border-[#2a3450] px-3 py-2 text-[9px] uppercase tracking-wide transition ${
-              isWorldRoute
-                ? "bg-[#112a1b] text-[#54f28b]"
-                : "text-[#54f28b]/70 hover:text-[#54f28b]"
-            }`}
+            className="flex items-center gap-1.5 border-l border-[#2a3450] px-3 py-2 text-[9px] uppercase tracking-wide transition text-[#54f28b]/70 hover:text-[#54f28b]"
           >
             <span className="inline-block animate-pulse text-[8px]">{">>>"}</span>
             Spectate

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getOrCreateZone, getAllZones, type Entity, recalculateEntityVitals } from "./zoneRuntime.js";
 import { mintGold, mintItem } from "./blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "./leveling.js";
@@ -1959,7 +1960,9 @@ export function registerQuestRoutes(server: FastifyInstance) {
   // POST /quests/accept - Accept a quest
   server.post<{
     Body: { zoneId: string; playerId: string; questId: string };
-  }>("/quests/accept", async (request, reply) => {
+  }>("/quests/accept", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, playerId, questId } = request.body;
     const zone = getOrCreateZone(zoneId);
     const player = zone.entities.get(playerId);
@@ -2053,7 +2056,9 @@ export function registerQuestRoutes(server: FastifyInstance) {
   // POST /quests/complete - Turn in a completed quest
   server.post<{
     Body: { zoneId: string; playerId: string; questId: string; npcId: string };
-  }>("/quests/complete", async (request, reply) => {
+  }>("/quests/complete", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, playerId, questId, npcId } = request.body;
     const zone = getOrCreateZone(zoneId);
     const player = zone.entities.get(playerId);
@@ -2123,7 +2128,9 @@ export function registerQuestRoutes(server: FastifyInstance) {
   // POST /quests/talk - Auto-accept + auto-complete a talk quest by visiting an NPC
   server.post<{
     Body: { zoneId: string; playerId: string; npcEntityId: string };
-  }>("/quests/talk", async (request, reply) => {
+  }>("/quests/talk", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { zoneId, playerId, npcEntityId } = request.body;
     const zone = getOrCreateZone(zoneId);
     const player = zone.entities.get(playerId);

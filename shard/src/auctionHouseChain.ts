@@ -23,10 +23,11 @@ const auctionHouseContract = AUCTION_HOUSE_CONTRACT_ADDRESS
   ? new ethers.Contract(AUCTION_HOUSE_CONTRACT_ADDRESS, AUCTION_HOUSE_ABI, biteWallet)
   : null;
 
-function ensureAuctionHouseEnabled(): asserts auctionHouseContract is ethers.Contract {
+function ensureAuctionHouseEnabled(): ethers.Contract {
   if (!auctionHouseContract) {
     throw new Error("Auction house contract not configured (missing AUCTION_HOUSE_CONTRACT_ADDRESS)");
   }
+  return auctionHouseContract;
 }
 
 // -- Types --
@@ -71,11 +72,11 @@ export async function createAuctionOnChain(
   durationSeconds: number,
   buyoutPrice: number
 ): Promise<{ auctionId: number; txHash: string }> {
-  ensureAuctionHouseEnabled();
+  const contract = ensureAuctionHouseEnabled();
   const startPriceWei = ethers.parseUnits(startPrice.toString(), 18);
   const buyoutPriceWei = buyoutPrice > 0 ? ethers.parseUnits(buyoutPrice.toString(), 18) : 0;
 
-  const tx = await auctionHouseContract.createAuction(
+  const tx = await contract.createAuction(
     zoneId,
     seller,
     tokenId,
@@ -89,7 +90,7 @@ export async function createAuctionOnChain(
   // Parse AuctionCreated event to extract auctionId and cache the auction
   for (const log of receipt.logs) {
     try {
-      const parsed = auctionHouseContract.interface.parseLog(log);
+      const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "AuctionCreated") {
         const auctionId = Number(parsed.args.auctionId);
         cacheAuction({
@@ -125,10 +126,10 @@ export async function placeBidOnChain(
   bidder: string,
   bidAmount: number
 ): Promise<{ txHash: string; previousBidder: string; previousBid: number }> {
-  ensureAuctionHouseEnabled();
+  const contract = ensureAuctionHouseEnabled();
   const bidAmountWei = ethers.parseUnits(bidAmount.toString(), 18);
 
-  const tx = await auctionHouseContract.placeBid(
+  const tx = await contract.placeBid(
     auctionId,
     bidder,
     bidAmountWei
@@ -138,7 +139,7 @@ export async function placeBidOnChain(
   // Parse BidPlaced event to get previous bidder and update cache
   for (const log of receipt.logs) {
     try {
-      const parsed = auctionHouseContract.interface.parseLog(log);
+      const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "BidPlaced") {
         const cached = auctionCache.get(auctionId);
         if (cached) {
@@ -168,8 +169,8 @@ export async function buyoutAuctionOnChain(
   auctionId: number,
   buyer: string
 ): Promise<{ txHash: string }> {
-  ensureAuctionHouseEnabled();
-  const tx = await auctionHouseContract.buyout(auctionId, buyer);
+  const contract = ensureAuctionHouseEnabled();
+  const tx = await contract.buyout(auctionId, buyer);
   const receipt = await tx.wait();
   return { txHash: receipt.hash };
 }
@@ -178,8 +179,8 @@ export async function buyoutAuctionOnChain(
  * End an expired auction (server calls this when time is up).
  */
 export async function endAuctionOnChain(auctionId: number): Promise<string> {
-  ensureAuctionHouseEnabled();
-  const tx = await auctionHouseContract.endAuction(auctionId);
+  const contract = ensureAuctionHouseEnabled();
+  const tx = await contract.endAuction(auctionId);
   const receipt = await tx.wait();
   const cached = auctionCache.get(auctionId);
   if (cached) cached.status = 1; // Ended
@@ -190,8 +191,8 @@ export async function endAuctionOnChain(auctionId: number): Promise<string> {
  * Cancel an auction (before any bids).
  */
 export async function cancelAuctionOnChain(auctionId: number): Promise<string> {
-  ensureAuctionHouseEnabled();
-  const tx = await auctionHouseContract.cancelAuction(auctionId);
+  const contract = ensureAuctionHouseEnabled();
+  const tx = await contract.cancelAuction(auctionId);
   const receipt = await tx.wait();
   const cached = auctionCache.get(auctionId);
   if (cached) cached.status = 2; // Cancelled
@@ -212,8 +213,8 @@ export async function getAuctionFromChain(auctionId: number): Promise<AuctionDat
  * Get the next auction ID (total number of auctions created).
  */
 export async function getNextAuctionId(): Promise<number> {
-  ensureAuctionHouseEnabled();
-  return Number(await auctionHouseContract.nextAuctionId());
+  const contract = ensureAuctionHouseEnabled();
+  return Number(await contract.nextAuctionId());
 }
 
 /**

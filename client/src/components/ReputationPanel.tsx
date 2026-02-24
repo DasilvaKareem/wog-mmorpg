@@ -101,10 +101,10 @@ export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
 
   const getRankBadgeVariant = (
     score: number
-  ): "default" | "destructive" | "outline" => {
+  ): "default" | "secondary" | "danger" => {
     if (score >= 700) return "default";
-    if (score >= 400) return "outline";
-    return "destructive";
+    if (score >= 400) return "secondary";
+    return "danger";
   };
 
   return (

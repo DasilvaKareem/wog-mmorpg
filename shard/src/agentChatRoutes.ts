@@ -205,6 +205,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       } catch {}
     }
 
+    const runner = agentManager.getRunner(authWallet);
+    const currentActivity = runner?.currentActivity ?? null;
+
     return reply.send({
       running,
       config: config ?? null,
@@ -212,6 +215,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       zoneId: ref?.zoneId ?? null,
       custodialWallet: custodial ?? null,
       entity: entity ?? null,
+      currentActivity,
     });
   });
 
@@ -464,12 +468,31 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       }
     }
 
-    // Build the response text — include tool action context so future LLM calls
-    // know what was actually done (the LLM only sees chat history, not tool calls)
+    // If the LLM called tools but returned no text, do a quick follow-up call
+    // to get an in-character acknowledgment of what was done
     if (!agentResponse && actionsTaken.length > 0) {
-      agentResponse = "Done.";
+      try {
+        const followUp = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b",
+          max_tokens: 120,
+          messages: [
+            { role: "system", content: `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass}. Respond in character in 1 sentence. Stay in-world. No OOC.` },
+            { role: "user", content: message },
+            { role: "assistant", content: `(actions taken: ${actionsTaken.join(", ")})` },
+            { role: "user", content: "Acknowledge what you just did, in character, in 1 sentence." },
+          ],
+        });
+        agentResponse = followUp.choices[0]?.message?.content?.trim() || "";
+      } catch {
+        // Fallback: build a simple response from action tags
+      }
+    }
+
+    // Final fallback if still empty
+    if (!agentResponse && actionsTaken.length > 0) {
+      agentResponse = `Aye, ${actionsTaken.join(" and ").replace(/[\[\]]/g, "")}.`;
     } else if (!agentResponse) {
-      agentResponse = "Got it.";
+      agentResponse = "Hmm, I'm not sure what you mean.";
     }
 
     // Append action tags to the saved history so the LLM has context next time

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getItemBalance, transferItem } from "./blockchain.js";
+import { getItemBalance } from "./blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { getMemberFromChain } from "./guildChain.js";
 import {

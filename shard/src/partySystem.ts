@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getOrCreateZone } from "./zoneRuntime.js";
 
 interface Party {
@@ -19,7 +20,9 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // Create a party
   server.post<{
     Body: { zoneId: string; leaderId: string };
-  }>("/party/create", async (req, reply) => {
+  }>("/party/create", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { zoneId, leaderId } = req.body;
 
     const zone = getOrCreateZone(zoneId);
@@ -62,7 +65,9 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // Invite player to party
   server.post<{
     Body: { partyId: string; invitedPlayerId: string };
-  }>("/party/invite", async (req, reply) => {
+  }>("/party/invite", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { partyId, invitedPlayerId } = req.body;
 
     const party = parties.get(partyId);
@@ -105,7 +110,9 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // Leave party
   server.post<{
     Body: { partyId: string; playerId: string };
-  }>("/party/leave", async (req, reply) => {
+  }>("/party/leave", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { partyId, playerId } = req.body;
 
     const party = parties.get(partyId);

@@ -42,6 +42,8 @@ export class AgentRunner {
   private lastFocus: AgentFocus = "questing";
   /** Tracks consecutive combat fallback ticks */
   private combatFallbackCount = 0;
+  /** Live description of what the agent is doing right now */
+  public currentActivity = "Idle";
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
@@ -49,6 +51,7 @@ export class AgentRunner {
 
   /** Log an activity message to the agent's chat history (visible to spectators). */
   private async logActivity(text: string): Promise<void> {
+    this.currentActivity = text;
     try {
       await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
     } catch {}
@@ -1085,6 +1088,17 @@ export class AgentRunner {
           await this.doTravel(strategy);
         } else {
           // Execute focus (strategy flows through to combat decisions)
+          // Set baseline activity — specific methods will refine it via logActivity()
+          const focusLabels: Record<string, string> = {
+            questing: "Looking for quests", combat: "Hunting mobs",
+            gathering: "Gathering resources", enchanting: "Enchanting gear",
+            crafting: "Crafting at the forge", alchemy: "Brewing potions",
+            cooking: "Cooking food", trading: "Browsing trades",
+            shopping: "Shopping at merchant", traveling: "Traveling",
+            idle: "Resting",
+          };
+          this.currentActivity = focusLabels[focus] ?? focus;
+
           switch (focus) {
             case "questing":   await this.doQuesting(strategy); break;
             case "combat":     await this.doCombat(strategy); break;

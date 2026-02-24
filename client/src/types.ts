@@ -97,6 +97,8 @@ export interface OwnedCharacter {
     level: number;
     xp: number;
     stats: CharacterStats;
+    equipment?: Record<string, { tokenId: number; durability: number; maxDurability: number; broken?: boolean }>;
+    activeQuests?: Array<{ questId: string; progress: string }>;
   };
 }
 

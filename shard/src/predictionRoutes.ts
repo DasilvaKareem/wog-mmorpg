@@ -4,6 +4,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { predictionPoolManager } from "./predictionPoolManager.js";
 import type { BetPlacementRequest, BetChoice } from "./types/prediction.js";
 import type { PvPTeam } from "./types/pvp.js";
@@ -55,7 +56,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
       amount: number;
       walletAddress: string;
     };
-  }>("/api/prediction/bet", async (req, reply) => {
+  }>("/api/prediction/bet", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { poolId, choice, amount, walletAddress } = req.body;
 
     // Validation
@@ -113,7 +116,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
     Params: {
       poolId: string;
     };
-  }>("/api/prediction/pool/:poolId/lock", async (req, reply) => {
+  }>("/api/prediction/pool/:poolId/lock", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { poolId } = req.params;
 
     try {
@@ -141,7 +146,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
     Body: {
       winner: PvPTeam;
     };
-  }>("/api/prediction/pool/:poolId/settle", async (req, reply) => {
+  }>("/api/prediction/pool/:poolId/settle", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { poolId } = req.params;
     const { winner } = req.body;
 
@@ -188,7 +195,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
     Body: {
       walletAddress: string;
     };
-  }>("/api/prediction/pool/:poolId/claim", async (req, reply) => {
+  }>("/api/prediction/pool/:poolId/claim", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { poolId } = req.params;
     const { walletAddress } = req.body;
 
@@ -257,7 +266,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
     Body: {
       reason: string;
     };
-  }>("/api/prediction/pool/:poolId/cancel", async (req, reply) => {
+  }>("/api/prediction/pool/:poolId/cancel", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { poolId } = req.params;
     const { reason } = req.body;
 
@@ -344,7 +355,9 @@ export async function registerPredictionRoutes(app: FastifyInstance) {
       encryptedPayload: string;
       agentSignature: string;
     };
-  }>("/api/x402/prediction/bet", async (req, reply) => {
+  }>("/api/x402/prediction/bet", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { encryptedPayload, agentSignature } = req.body;
 
     // In production, this would decrypt and validate the x402 payload

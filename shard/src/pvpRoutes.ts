@@ -4,6 +4,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { pvpBattleManager } from "./pvpBattleManager.js";
 import type { PvPFormat, MatchmakingEntry } from "./types/pvp.js";
 import type { BattleAction } from "./types/battle.js";
@@ -105,7 +106,9 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       format: PvPFormat;
       preferredTeam?: "red" | "blue";
     };
-  }>("/api/pvp/queue/join", async (req, reply) => {
+  }>("/api/pvp/queue/join", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { agentId, walletAddress, characterTokenId, level, format, preferredTeam } =
       req.body;
 
@@ -156,7 +159,9 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       agentId: string;
       format: PvPFormat;
     };
-  }>("/api/pvp/queue/leave", async (req, reply) => {
+  }>("/api/pvp/queue/leave", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { agentId, format } = req.body;
 
     if (!agentId || !format) {
@@ -243,14 +248,16 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       battleId: string;
     };
     Body: BattleAction;
-  }>("/api/pvp/battle/:battleId/action", async (req, reply) => {
+  }>("/api/pvp/battle/:battleId/action", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { battleId } = req.params;
     const action = req.body;
 
     // Validation
-    if (!action.actorId || !action.actionId) {
+    if (!action.actorId || !action.type) {
       return reply.code(400).send({
-        error: "Missing required fields: actorId, actionId",
+        error: "Missing required fields: actorId, type",
       });
     }
 
@@ -331,7 +338,9 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     Params: {
       battleId: string;
     };
-  }>("/api/pvp/battle/:battleId/cancel", async (req, reply) => {
+  }>("/api/pvp/battle/:battleId/cancel", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
     const { battleId } = req.params;
 
     const cancelled = pvpBattleManager.cancelBattle(battleId);

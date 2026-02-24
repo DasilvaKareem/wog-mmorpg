@@ -32,6 +32,7 @@ interface AgentStatusData {
     hp: number;
     maxHp: number;
   } | null;
+  currentActivity: string | null;
 }
 
 type Tab = "agent" | "zone";
@@ -52,6 +53,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [token, setToken] = React.useState<string | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [activeTab, setActiveTab] = React.useState<Tab>("agent");
+  const [collapsed, setCollapsed] = React.useState(false);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   /** Track the ts of the last server-synced message to detect new activity */
   const lastSyncTs = React.useRef(0);
@@ -221,16 +223,24 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
   return (
     <div
-      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${className}`}
-      style={{ width: 384, height: 360 }}
+      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] w-80 lg:w-96 max-w-[45vw] ${collapsed ? "" : "h-[45vh] max-h-[400px]"} ${className}`}
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
-        <span className="text-[9px] text-[#54f28b] uppercase tracking-widest">
-          {">> AGENT: "}
-          <span className="text-[#ffcc00]">{entityName}</span>
-          {entityLevel > 1 && <span className="text-[#9aa7cc]"> Lv{entityLevel}</span>}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="text-[10px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+            type="button"
+          >
+            {collapsed ? "+" : "−"}
+          </button>
+          <span className="text-[9px] text-[#54f28b] uppercase tracking-widest">
+            {">> AGENT: "}
+            <span className="text-[#ffcc00]">{entityName}</span>
+            {entityLevel > 1 && <span className="text-[#9aa7cc]"> Lv{entityLevel}</span>}
+          </span>
+        </div>
         <span
           className="text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 border"
           style={{ color: statusColor, borderColor: statusColor }}
@@ -239,19 +249,27 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         </span>
       </div>
 
+      {!collapsed && <>
       {/* Status bar */}
       {status && (
-        <div className="flex items-center gap-3 border-b border-[#1a2a18] bg-[#080f0a] px-3 py-1">
-          <span className="text-[7px] text-[#3a4260]">
-            FOCUS: <span className="text-[#ffcc00]">{focus.toUpperCase()}</span>
-          </span>
-          <span className="text-[7px] text-[#3a4260]">
-            ZONE: <span className="text-[#9aa7cc]">{zoneId}</span>
-          </span>
-          {status.entity && (
+        <div className="border-b border-[#1a2a18] bg-[#080f0a] px-3 py-1">
+          <div className="flex items-center gap-3">
             <span className="text-[7px] text-[#3a4260]">
-              HP: <span className="text-[#54f28b]">{status.entity.hp}/{status.entity.maxHp}</span>
+              FOCUS: <span className="text-[#ffcc00]">{focus.toUpperCase()}</span>
             </span>
+            <span className="text-[7px] text-[#3a4260]">
+              ZONE: <span className="text-[#9aa7cc]">{zoneId}</span>
+            </span>
+            {status.entity && (
+              <span className="text-[7px] text-[#3a4260]">
+                HP: <span className="text-[#54f28b]">{status.entity.hp}/{status.entity.maxHp}</span>
+              </span>
+            )}
+          </div>
+          {isRunning && status.currentActivity && (
+            <div className="text-[7px] text-[#e0af68] mt-0.5 truncate">
+              {"▸ "}{status.currentActivity}
+            </div>
           )}
         </div>
       )}
@@ -406,6 +424,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           embedded
         />
       )}
+      </>}
     </div>
   );
 }

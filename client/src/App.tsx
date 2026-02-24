@@ -23,6 +23,7 @@ import { ProfessionPanel } from "@/components/ProfessionPanel";
 import { ZoneSelector } from "@/components/ZoneSelector";
 import { ChatLog } from "@/components/ChatLog";
 import { AgentChatPanel } from "@/components/AgentChatPanel";
+import { HotkeyBar } from "@/components/HotkeyBar";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { WorldMap } from "@/components/WorldMap";
 import { FarcasterMiniApp } from "@/pages/FarcasterMiniApp";
@@ -80,7 +81,7 @@ function GameWorld(): React.ReactElement {
       <WalletPanel />
       <ProfessionPanel />
       <ZoneSelector />
-      <PlayerPanel className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-[420px] hidden md:block" />
+      <PlayerPanel className="absolute top-14 left-1/2 -translate-x-1/2 z-30 w-72 md:w-80 lg:w-[420px] max-w-[40vw] max-h-[45vh] overflow-auto hidden md:block" />
       {address ? (
         <AgentChatPanel
           walletAddress={address}
@@ -90,7 +91,7 @@ function GameWorld(): React.ReactElement {
       ) : (
         <ChatLog
           zoneId={currentZone}
-          className="absolute bottom-4 right-4 z-30 w-96 hidden md:block"
+          className="absolute bottom-4 right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto hidden md:block"
         />
       )}
       <ShopDialog />
@@ -101,6 +102,18 @@ function GameWorld(): React.ReactElement {
       <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
       <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-30">
+        <HotkeyBar
+          onCharacter={() => setCharacterOpen((c) => !c)}
+          onMap={() => setMapOpen((c) => !c)}
+          onQuestLog={() => setQuestLogOpen((c) => !c)}
+          onInspect={() => {
+            if (address && currentZone) {
+              gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getGoldBalance, getItemBalance, mintItem } from "./blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "./goldLedger.js";
 import {
@@ -26,8 +27,16 @@ export function registerTradeRoutes(server: FastifyInstance) {
       quantity: number;
       askPrice: number;
     };
-  }>("/trade/list", async (request, reply) => {
+  }>("/trade/list", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { sellerAddress, tokenId, quantity, askPrice } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (sellerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
 
     if (!sellerAddress || !/^0x[a-fA-F0-9]{40}$/.test(sellerAddress)) {
       reply.code(400);
@@ -87,8 +96,16 @@ export function registerTradeRoutes(server: FastifyInstance) {
    */
   server.post<{
     Body: { tradeId: number; buyerAddress: string; bidPrice: number };
-  }>("/trade/offer", async (request, reply) => {
+  }>("/trade/offer", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { tradeId, buyerAddress, bidPrice } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (buyerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized to use this wallet" };
+    }
 
     if (!buyerAddress || !/^0x[a-fA-F0-9]{40}$/.test(buyerAddress)) {
       reply.code(400);
@@ -245,6 +262,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
    */
   server.post<{ Body: { tradeId: number } }>(
     "/trade/cancel",
+    { preHandler: authenticateRequest },
     async (request, reply) => {
       const { tradeId } = request.body;
 

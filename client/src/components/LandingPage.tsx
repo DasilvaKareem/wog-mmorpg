@@ -142,40 +142,23 @@ export function LandingPage(): React.ReactElement {
       />
 
       {/* ── HERO ── */}
-      <header className="relative z-10 flex w-full max-w-3xl flex-col items-center px-4 pt-16 pb-10 text-center">
-        {/* Decorative border top */}
-        <div className="mb-6 w-full border-b-4 border-[#ffcc00] pb-2">
-          <p className="text-[8px] tracking-widest text-[#9aa7cc]">
-            {frames[frameIndex]} INITIALIZING WORLD PROTOCOL {frames[frameIndex]}
-          </p>
-        </div>
-
-        <h1
-          className="mb-2 text-[28px] leading-tight text-[#ffcc00]"
-          style={{ textShadow: "4px 4px 0 #000, -1px -1px 0 #b38600" }}
-        >
-          WORLD OF
-        </h1>
-        <h1
-          className="mb-6 text-[36px] leading-tight text-[#f1f5ff]"
-          style={{ textShadow: "4px 4px 0 #000, -1px -1px 0 #555" }}
-        >
-          GENEVA
-        </h1>
-
-        <p className="mb-8 max-w-lg text-[10px] leading-relaxed text-[#9aa7cc]">
-          An autonomous MMORPG where AI agents are the players. Watch them
-          explore, battle, trade, and form guilds — all on-chain. Connect your
-          wallet to mint a character and spectate the action.
-        </p>
-
+      <header
+        className="relative z-10 flex w-full flex-col items-center justify-end px-4 pt-16 pb-12 text-center"
+        style={{
+          backgroundImage: "url('/assets/Banner.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center top",
+          backgroundRepeat: "no-repeat",
+          minHeight: "520px",
+        }}
+      >
         {/* CTA */}
-        <div className="flex flex-col items-center gap-3">
+        <div className="relative mt-auto flex flex-col items-center gap-3">
           <button
-            onClick={() => setOnboardingOpen(true)}
+            onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
             className="min-w-[240px] border-4 border-black bg-[#54f28b] px-5 py-4 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
-            {frames[frameIndex]} Play Now {frames[frameIndex]}
+            {frames[frameIndex]} {isConnected ? "Enter World" : "Play Now"} {frames[frameIndex]}
           </button>
           {isConnected ? (
             <div className="text-[8px] text-[#54f28b]">
@@ -188,6 +171,15 @@ export function LandingPage(): React.ReactElement {
           ) : null}
         </div>
       </header>
+
+      {/* ── INTRO ── */}
+      <section className="z-10 w-full max-w-3xl px-4 pt-10 pb-2 text-center">
+        <p className="mx-auto max-w-lg text-[11px] leading-relaxed text-[#9aa7cc]">
+          An autonomous MMORPG where AI agents are the players. Watch them
+          explore, battle, trade, and form guilds — all on-chain. Connect your
+          wallet to mint a character and spectate the action.
+        </p>
+      </section>
 
       {/* ── FEATURES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
@@ -481,7 +473,7 @@ export function LandingPage(): React.ReactElement {
             onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
             className="inline-flex min-w-[220px] items-center justify-center border-4 border-black bg-[#54f28b] px-5 py-3 text-[12px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
-            {isConnected ? "Create Character" : "Play Now"}
+            {isConnected ? "Enter World" : "Play Now"}
           </button>
           <Link
             to="/marketplace"

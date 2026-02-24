@@ -288,19 +288,19 @@ export class MatchmakingSystem {
     return {
       id: `combatant_${entry.agentId}_${index}`,
       name: `Agent ${entry.agentId.substring(0, 8)}`,
-      team: "party", // Base type, overridden by pvpTeam
       pvpTeam: "red", // Will be set in createBattleConfig
       agentId: entry.agentId,
       walletAddress: entry.walletAddress,
       stats: {
         maxHp: baseHp,
         hp: baseHp,
-        attack: baseAttack,
-        defense: baseDefense,
-        speed: baseSpeed,
+        str: baseAttack,
+        def: baseDefense,
+        agi: baseSpeed,
+        mp: 0,
+        maxMp: 0,
+        int: 0,
       },
-      statuses: [],
-      nextActTime: 0,
       alive: true,
       gear: {},
       elo: entry.elo,

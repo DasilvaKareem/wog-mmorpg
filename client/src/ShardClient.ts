@@ -82,9 +82,14 @@ export async function createCharacter(
   }
 }
 
-export async function fetchCharacters(
+export interface FetchCharactersResult {
+  characters: OwnedCharacter[];
+  liveEntity: WalletCharacterProgress | null;
+}
+
+export async function fetchCharactersWithLive(
   walletAddress: string
-): Promise<OwnedCharacter[]> {
+): Promise<FetchCharactersResult> {
   try {
     const res = await fetch(`${API_URL}/character/${walletAddress}`);
     if (!res.ok) {
@@ -95,13 +100,14 @@ export async function fetchCharacters(
         detail = "";
       }
       console.error("Failed to fetch characters:", res.status, detail);
-      return [];
+      return { characters: [], liveEntity: null };
     }
     const data: {
       characters: Array<Partial<OwnedCharacter> & { tokenId?: string; name?: string; description?: string }>;
+      liveEntity?: { name: string; level: number; xp: number; hp: number; maxHp: number; zoneId: string };
     } = await res.json();
 
-    return data.characters.map((character) => ({
+    const characters = data.characters.map((character) => ({
       tokenId: character.tokenId ?? "unknown",
       name: character.name ?? "Unnamed Character",
       description: character.description ?? "",
@@ -122,10 +128,34 @@ export async function fetchCharacters(
         },
       },
     }));
+
+    let liveEntity: WalletCharacterProgress | null = null;
+    if (data.liveEntity) {
+      const le = data.liveEntity;
+      liveEntity = {
+        name: le.name,
+        level: le.level,
+        xp: le.xp,
+        hp: le.hp,
+        maxHp: le.maxHp,
+        zoneId: le.zoneId,
+        source: "live",
+      };
+    }
+
+    return { characters, liveEntity };
   } catch {
     console.error("Failed to fetch characters: network error");
-    return [];
+    return { characters: [], liveEntity: null };
   }
+}
+
+/** @deprecated Use fetchCharactersWithLive instead */
+export async function fetchCharacters(
+  walletAddress: string
+): Promise<OwnedCharacter[]> {
+  const result = await fetchCharactersWithLive(walletAddress);
+  return result.characters;
 }
 
 export interface WalletCharacterProgress {
@@ -164,6 +194,7 @@ export async function fetchWalletCharacterInZone(
 
   return null;
 }
+
 
 export async function fetchTerrainGrid(
   zoneId: string

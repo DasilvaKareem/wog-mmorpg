@@ -16,7 +16,7 @@ export function ZoneSelector(): React.ReactElement {
   });
 
   return (
-    <Card className="pointer-events-auto absolute bottom-2 left-2 z-30 w-72 md:w-96 md:bottom-4 md:left-4">
+    <Card className="pointer-events-auto absolute bottom-2 left-2 z-30 w-56 sm:w-64 md:w-72 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto md:bottom-4 md:left-4">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
           <div className="flex items-center gap-2">

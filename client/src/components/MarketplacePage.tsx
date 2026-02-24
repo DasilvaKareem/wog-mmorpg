@@ -123,7 +123,7 @@ function formatStatBonuses(bonuses: Record<string, number>): string {
 export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactElement {
   const navigate = useNavigate();
   const goBack = onBack ?? (() => navigate("/"));
-  const { address, balance, isConnected, connect, loading: walletLoading, refreshBalance } = useWalletContext();
+  const { address, balance, isConnected, connect, loading: walletLoading, refreshBalance } = useWalletContext(); // connect/walletLoading used in sell/bids tabs
   const { notify } = useToast();
 
   // State
@@ -206,6 +206,12 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
         setStats(await res.json());
       }
     } catch {}
+  }, []);
+
+  // Fetch balance on mount so wallet header shows correctly
+  React.useEffect(() => {
+    if (address) void refreshBalance();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Initial load + polling
@@ -378,6 +384,19 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   // ── Owned items for sell tab ──
   const ownedItems: OwnedItem[] = balance?.items ?? [];
 
+  // Refresh balance when entering sell tab
+  React.useEffect(() => {
+    if (activeTab === "sell" && address) {
+      void refreshBalance();
+    }
+  }, [activeTab, address, refreshBalance]);
+
+  // Derive item metadata from token ID selection
+  const selectedItem = React.useMemo(
+    () => ownedItems.find((item) => item.tokenId === sellTokenId),
+    [ownedItems, sellTokenId]
+  );
+
   // ── Render ──
 
   return (
@@ -392,50 +411,30 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
       />
 
       {/* ── HEADER ── */}
-      <header className="sticky top-0 z-40 border-b-4 border-black bg-[#0d1526] shadow-[0_4px_0_0_#000]">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={goBack}
-              className="border-2 border-[#6b7394] bg-[#1b2236] px-3 py-1.5 text-[9px] uppercase tracking-wide text-[#e8eeff] transition hover:bg-[#252d45]"
-            >
-              {"<< Back"}
-            </button>
-            <div>
-              <h1
-                className="text-[14px] uppercase tracking-widest text-[#ffcc00]"
-                style={{ textShadow: "3px 3px 0 #000" }}
-              >
-                NFT Marketplace
-              </h1>
-              <p className="text-[8px] text-[#9aa7cc]">
-                Buy, sell, and trade items across all zones
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            {isConnected && balance ? (
-              <div className="flex items-center gap-3">
-                <div className="border-2 border-[#29334d] bg-[#0a0f1a] px-3 py-1.5 text-[9px]">
-                  <CurrencyDisplay amount={balance.gold} size="sm" />
-                </div>
-                <div className="border-2 border-[#54f28b] bg-[#112a1b] px-3 py-1.5 text-[8px] text-[#54f28b]">
-                  {truncateAddress(address!)}
-                </div>
-              </div>
-            ) : (
-              <Button
-                onClick={() => void connect()}
-                disabled={walletLoading}
-                size="sm"
-              >
-                {walletLoading ? "Connecting..." : "Connect Wallet"}
-              </Button>
-            )}
-          </div>
+      <div className="mx-auto flex w-full max-w-6xl items-center gap-4 px-4 pt-4 pb-2">
+        <button
+          onClick={goBack}
+          className="border-2 border-[#6b7394] bg-[#1b2236] px-3 py-1.5 text-[9px] uppercase tracking-wide text-[#e8eeff] transition hover:bg-[#252d45]"
+        >
+          {"<< Back"}
+        </button>
+        <div>
+          <h1
+            className="text-[14px] uppercase tracking-widest text-[#ffcc00]"
+            style={{ textShadow: "3px 3px 0 #000" }}
+          >
+            NFT Marketplace
+          </h1>
+          <p className="text-[8px] text-[#9aa7cc]">
+            Buy, sell, and trade items across all zones
+          </p>
         </div>
-      </header>
+        {isConnected && balance && (
+          <div className="ml-auto border-2 border-[#29334d] bg-[#0a0f1a] px-3 py-1.5 text-[9px]">
+            <CurrencyDisplay amount={balance.gold} size="sm" />
+          </div>
+        )}
+      </div>
 
       {/* ── STATS BAR ── */}
       {stats && (
@@ -612,6 +611,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                           <TableHeader>
                             <TableRow>
                               <TableHead className="text-[8px]">Item</TableHead>
+                              <TableHead className="text-[8px]">ID</TableHead>
                               <TableHead className="text-[8px]">Qty</TableHead>
                               <TableHead className="text-[8px]">Action</TableHead>
                             </TableRow>
@@ -620,7 +620,14 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                             {ownedItems
                               .filter((item) => parseInt(item.balance) > 0)
                               .map((item) => (
-                                <TableRow key={item.tokenId}>
+                                <TableRow
+                                  key={item.tokenId}
+                                  className={
+                                    sellTokenId === item.tokenId
+                                      ? "bg-[#1a2e1a]"
+                                      : ""
+                                  }
+                                >
                                   <TableCell>
                                     <div>
                                       <span className="text-[9px] font-semibold text-[#00ff88]">
@@ -636,6 +643,9 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                                       )}
                                     </div>
                                   </TableCell>
+                                  <TableCell className="font-mono text-[8px] text-[#565f89]">
+                                    #{item.tokenId}
+                                  </TableCell>
                                   <TableCell className="text-[9px]">
                                     x{item.balance}
                                   </TableCell>
@@ -648,7 +658,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                                         setSellQuantity("1");
                                       }}
                                     >
-                                      Sell
+                                      {sellTokenId === item.tokenId ? "Selected" : "Sell"}
                                     </Button>
                                   </TableCell>
                                 </TableRow>
@@ -669,31 +679,63 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                     <div className="space-y-4">
                       <div className="space-y-1">
                         <label className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">
-                          Item Token ID
+                          Selected Item
                         </label>
-                        <Input
-                          type="number"
-                          placeholder="Select from inventory or enter token ID..."
-                          value={sellTokenId}
-                          onChange={(e) => setSellTokenId(e.target.value)}
-                          className="h-8 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
-                        />
-                        {sellTokenId && (
-                          <p className="text-[8px] text-[#54f28b]">
-                            Selected: Token #{sellTokenId}
-                          </p>
+                        {selectedItem ? (
+                          <div className="border-2 border-[#54f28b] bg-[#0a1a0d] p-2">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <p className="text-[10px] font-bold text-[#54f28b]">
+                                  {selectedItem.name}
+                                </p>
+                                <div className="mt-0.5 flex items-center gap-2">
+                                  <span className="font-mono text-[7px] text-[#565f89]">
+                                    Token #{selectedItem.tokenId}
+                                  </span>
+                                  {selectedItem.category && (
+                                    <Badge variant="secondary" className="text-[6px]">
+                                      {selectedItem.category}
+                                    </Badge>
+                                  )}
+                                </div>
+                                {selectedItem.statBonuses && Object.keys(selectedItem.statBonuses).length > 0 && (
+                                  <p className="mt-0.5 text-[7px] text-[#9ab9ff]">
+                                    {formatStatBonuses(selectedItem.statBonuses)}
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                className="ml-2 border border-[#6b7394] bg-[#1b2236] px-2 py-0.5 text-[7px] text-[#9aa7cc] hover:bg-[#252d45]"
+                                onClick={() => { setSellTokenId(""); setSellQuantity("1"); }}
+                              >
+                                clear
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="border-2 border-dashed border-[#29334d] bg-[#0a0f1a] p-3 text-center">
+                            <p className="text-[8px] text-[#565f89]">
+                              ← Click <span className="text-[#ffcc00]">Sell</span> on an item in your inventory
+                            </p>
+                          </div>
                         )}
                       </div>
 
                       <div className="space-y-1">
                         <label className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">
                           Quantity
+                          {selectedItem && (
+                            <span className="ml-1 text-[#565f89]">
+                              (max: {selectedItem.balance})
+                            </span>
+                          )}
                         </label>
                         <Input
                           type="number"
                           value={sellQuantity}
                           onChange={(e) => setSellQuantity(e.target.value)}
                           min="1"
+                          max={selectedItem ? selectedItem.balance : undefined}
                           className="h-8 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
                         />
                       </div>

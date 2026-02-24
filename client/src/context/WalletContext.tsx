@@ -1,7 +1,7 @@
 import * as React from "react";
 
 import {
-  fetchCharacters,
+  fetchCharactersWithLive,
   fetchWalletCharacterInZone,
   fetchProfessions,
   type WalletCharacterProgress,
@@ -40,7 +40,7 @@ interface WalletContextValue {
 const WalletContext = React.createContext<WalletContextValue | null>(null);
 
 function pickPrimaryCharacterProgress(
-  characters: Awaited<ReturnType<typeof fetchCharacters>>
+  characters: OwnedCharacter[]
 ): WalletCharacterProgress | null {
   if (characters.length === 0) return null;
 
@@ -100,17 +100,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
 
     setCharacterLoading(true);
     try {
-      const [liveCharacter, ownedCharacters] = await Promise.all([
+      // Single API call returns both NFT characters and live entity data
+      const [liveCharacter, { characters: ownedCharacters, liveEntity: liveCharacterGlobal }] = await Promise.all([
         fetchWalletCharacterInZone(walletManager.address, zoneId),
-        fetchCharacters(walletManager.address),
+        fetchCharactersWithLive(walletManager.address),
       ]);
 
       // Always store all characters for the selector
       setCharacters(ownedCharacters);
 
-      // If a live agent is in the zone, show that
+      // If a live agent is in the current zone, show that
       if (liveCharacter) {
         setCharacterProgress(liveCharacter);
+        lastCharacterFetchRef.current = now;
+        return;
+      }
+
+      // If a live agent exists in any zone, show that
+      if (liveCharacterGlobal) {
+        setCharacterProgress(liveCharacterGlobal);
         lastCharacterFetchRef.current = now;
         return;
       }

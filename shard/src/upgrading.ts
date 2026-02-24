@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "./auth.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "./blockchain.js";
@@ -162,7 +163,9 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
       forgeId: string;
       recipeId: string;
     };
-  }>("/crafting/upgrade", async (request, reply) => {
+  }>("/crafting/upgrade", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, forgeId, recipeId } = request.body;
 
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {

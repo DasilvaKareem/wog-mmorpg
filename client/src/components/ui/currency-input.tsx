@@ -229,7 +229,7 @@ export function SimpleCurrencyInput({
           onChange(val);
         }}
         disabled={disabled}
-        className={cn("w-32", sizeClasses[size])}
+        className={cn("w-full", sizeClasses[size])}
         placeholder="0.0000"
       />
       <span className="text-[8px] text-gray-500">
