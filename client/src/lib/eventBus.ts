@@ -10,6 +10,8 @@ export interface GameEventMap {
   switchZone: { zoneId: string };
   zoneChanged: { zoneId: string };
   lockToPlayer: { walletAddress: string };
+  /** Pan + lock camera to any entity by its zone entity ID */
+  focusEntity: { entityId: string };
 }
 
 type GameEventKey = keyof GameEventMap;

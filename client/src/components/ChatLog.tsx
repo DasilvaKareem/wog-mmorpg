@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useZoneEvents, type ZoneEvent } from "@/hooks/useZoneEvents";
 import { cn } from "@/lib/utils";
+import { gameBus } from "@/lib/eventBus";
 
 interface ChatLogProps {
   zoneId: string | null;
@@ -89,24 +90,39 @@ export function ChatLog({ zoneId, className, embedded = false }: ChatLogProps): 
           </p>
         )}
 
-        {events.map((event) => (
-          <div
-            key={event.id}
-            className={cn(
-              "leading-tight px-1 py-0.5 hover:bg-[#1a2338] transition-colors",
-              getEventColor(event.type)
-            )}
-          >
-            <span className="text-[#565f89] mr-1">
-              [{new Date(event.timestamp).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit"
-              })}]
-            </span>
-            {event.message}
-          </div>
-        ))}
+        {events.map((event) => {
+          const clickable = Boolean(event.entityId);
+          return (
+            <div
+              key={event.id}
+              className={cn(
+                "leading-tight px-1 py-0.5 transition-colors",
+                getEventColor(event.type),
+                clickable
+                  ? "cursor-pointer hover:bg-[#1a2e1a] hover:outline hover:outline-1 hover:outline-[#54f28b]"
+                  : "hover:bg-[#1a2338]"
+              )}
+              title={clickable ? `Focus ${event.entityName ?? event.entityId}` : undefined}
+              onClick={
+                clickable
+                  ? () => gameBus.emit("focusEntity", { entityId: event.entityId! })
+                  : undefined
+              }
+            >
+              <span className="text-[#565f89] mr-1">
+                [{new Date(event.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit"
+                })}]
+              </span>
+              {event.message}
+              {clickable && (
+                <span className="ml-1 text-[#54f28b] opacity-50">⊕</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Auto-scroll button */}

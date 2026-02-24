@@ -53,6 +53,7 @@ export class WorldScene extends Phaser.Scene {
   /** Wallet address we're locking the camera to */
   private lockedWalletAddress: string | null = null;
   private unsubscribeLockToPlayer: (() => void) | null = null;
+  private unsubscribeFocusEntity: (() => void) | null = null;
 
   constructor() {
     super({ key: "WorldScene" });
@@ -182,11 +183,24 @@ export class WorldScene extends Phaser.Scene {
       this.lockToPlayerWallet(walletAddress);
     });
 
+    // Pan + lock camera to any entity by its entity ID (e.g. from zone log click)
+    this.unsubscribeFocusEntity = gameBus.on("focusEntity", ({ entityId }) => {
+      this.lockedWalletAddress = null;
+      this.followTarget = entityId;
+      this.isDragging = false;
+      const spritePos = this.entityRenderer.getSpritePosition(entityId);
+      if (spritePos) {
+        this.cameras.main.centerOn(spritePos.x, spritePos.y);
+      }
+    });
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubscribeSwitchZone?.();
       this.unsubscribeSwitchZone = null;
       this.unsubscribeLockToPlayer?.();
       this.unsubscribeLockToPlayer = null;
+      this.unsubscribeFocusEntity?.();
+      this.unsubscribeFocusEntity = null;
     });
 
     // Initialize seamless world
