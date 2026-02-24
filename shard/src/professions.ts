@@ -3,7 +3,7 @@ import { authenticateRequest } from "./auth.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { getGoldBalance } from "./blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "./goldLedger.js";
-import { saveCharacter } from "./characterStore.js";
+import { saveCharacter, getProfessionsForWallet } from "./characterStore.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
@@ -111,7 +111,19 @@ export function registerProfessionRoutes(server: FastifyInstance) {
         return { error: "Invalid wallet address" };
       }
 
-      const learned = getLearnedProfessions(walletAddress);
+      let learned = getLearnedProfessions(walletAddress);
+
+      // If in-memory is empty (champion offline / server restarted),
+      // fall back to the persisted character data in Redis
+      if (learned.length === 0) {
+        const fromRedis = await getProfessionsForWallet(walletAddress);
+        // Restore into memory so future calls are fast
+        if (fromRedis.length > 0) {
+          restoreProfessions(walletAddress, fromRedis);
+          learned = getLearnedProfessions(walletAddress);
+        }
+      }
+
       return {
         walletAddress,
         professions: learned,

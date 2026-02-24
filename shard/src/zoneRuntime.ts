@@ -235,7 +235,13 @@ const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
 const DEATH_XP_LOSS_PERCENT = 0.1; // Lose 10% of current XP on death
 const TAG_TIMEOUT_TICKS = 60;      // 60 ticks = 60s before mob tag expires
 const OOC_REGEN_DELAY_TICKS = 10;  // 10 ticks = 10s out of combat before regen starts
-const OOC_REGEN_PERCENT = 0.03;    // 3% of maxHp per tick while out of combat
+const OOC_REGEN_PERCENT = 0.03;    // 3% of maxHp per tick while out of combat (mobs)
+// Player HP regen: base 0.5% maxHp/tick OOC + faith * 0.003% per tick
+const PLAYER_HP_REGEN_BASE = 0.005;
+const PLAYER_HP_REGEN_FAITH_COEFF = 0.003;
+// Essence regen: base 2%/tick + int * 0.02% per tick (casters regen ~50% faster)
+const ESSENCE_REGEN_BASE = 0.02;
+const ESSENCE_REGEN_INT_COEFF = 0.0002;
 
 function emptyStats(): CharacterStats {
   return {
@@ -810,11 +816,12 @@ async function worldTick() {
   for (const zone of zones.values()) {
     zone.tick++;
 
-    // Regenerate essence for all player entities
+    // Regenerate essence for all player entities (INT-scaled)
     for (const entity of zone.entities.values()) {
       if (entity.type === "player" && entity.essence != null && entity.maxEssence != null) {
-        // Regenerate 2% of max essence per tick (500ms), or 4% per second
-        const regenAmount = Math.ceil(entity.maxEssence * 0.02);
+        const intStat = entity.effectiveStats?.int ?? entity.stats?.int ?? 0;
+        const regenRate = ESSENCE_REGEN_BASE + intStat * ESSENCE_REGEN_INT_COEFF;
+        const regenAmount = Math.ceil(entity.maxEssence * regenRate);
         entity.essence = Math.min(entity.maxEssence, entity.essence + regenAmount);
       }
     }
@@ -835,6 +842,17 @@ async function worldTick() {
       if (entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
       if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
       const healAmount = Math.max(1, Math.ceil(entity.maxHp * OOC_REGEN_PERCENT));
+      entity.hp = Math.min(entity.maxHp, entity.hp + healAmount);
+    }
+
+    // Out-of-combat HP regeneration for players (FAITH-scaled)
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player") continue;
+      if (entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
+      if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
+      const faithStat = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
+      const regenRate = PLAYER_HP_REGEN_BASE + faithStat * PLAYER_HP_REGEN_FAITH_COEFF;
+      const healAmount = Math.max(1, Math.ceil(entity.maxHp * regenRate));
       entity.hp = Math.min(entity.maxHp, entity.hp + healAmount);
     }
 

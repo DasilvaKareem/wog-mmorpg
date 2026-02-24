@@ -43,6 +43,13 @@ const MENUS: DropdownMenu[] = [
       { label: "News & Roadmap", to: "/news", icon: "!!" },
     ],
   },
+  {
+    label: "Champions",
+    icon: "@@",
+    items: [
+      { label: "My Champion", to: "/champions", icon: "@>" },
+    ],
+  },
 ];
 
 function DropdownLink({

@@ -186,9 +186,18 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       running = await agentManager.ensureRunning(authWallet);
     }
 
-    let entity: any = null;
+    // Pick only serializable fields from the raw zone entity (avoid BigInt crash)
+    let entity: { name: string; level: number; hp: number | null; maxHp: number | null } | null = null;
     if (ref) {
-      entity = await getEntityState(ref.entityId, ref.zoneId);
+      const raw = await getEntityState(ref.entityId, ref.zoneId);
+      if (raw) {
+        entity = {
+          name: raw.name ?? "Agent",
+          level: Number(raw.level ?? 1),
+          hp: raw.hp != null ? Number(raw.hp) : null,
+          maxHp: raw.maxHp != null ? Number(raw.maxHp) : null,
+        };
+      }
     }
 
     // If entity not in zone, fall back to NFT metadata for name
@@ -212,7 +221,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     const runner = agentManager.getRunner(authWallet);
     const currentActivity = runner?.currentActivity ?? null;
-    const currentScript = runner?.script ?? null;
+    const script = runner?.script ?? null;
+    const currentScript = script ? { type: script.type, reason: script.reason ?? null } : null;
 
     return reply.send({
       running,
@@ -220,9 +230,25 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
       custodialWallet: custodial ?? null,
-      entity: entity ?? null,
+      entity,
       currentActivity,
       currentScript,
+    });
+  });
+
+  // ── GET /agent/wallet/:ownerWallet ───────────────────────────────────────
+  // Public (no auth) — returns the custodial wallet address for an owner.
+  // The custodial address is a public blockchain address, not sensitive.
+  server.get<{
+    Params: { ownerWallet: string };
+  }>("/agent/wallet/:ownerWallet", async (request, reply) => {
+    const { ownerWallet } = request.params;
+    const custodial = await getAgentCustodialWallet(ownerWallet);
+    const ref = await getAgentEntityRef(ownerWallet);
+    return reply.send({
+      custodialWallet: custodial ?? null,
+      entityId: ref?.entityId ?? null,
+      zoneId: ref?.zoneId ?? null,
     });
   });
 

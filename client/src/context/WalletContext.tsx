@@ -39,8 +39,11 @@ interface WalletContextValue {
 
 const WalletContext = React.createContext<WalletContextValue | null>(null);
 
-// Matches shard/src/leveling.ts GROWTH_RATE
-const STAT_GROWTH_RATE = 0.02;
+// Matches shard/src/leveling.ts statScale() — quadratic growth
+function statScale(level: number): number {
+  const l = Math.max(1, level) - 1;
+  return 1 + l * 0.04 + l * l * 0.001;
+}
 
 function pickPrimaryCharacterProgress(
   characters: OwnedCharacter[]
@@ -58,9 +61,8 @@ function pickPrimaryCharacterProgress(
   });
 
   const level = primary.properties.level ?? 1;
-  // NFT stats.hp is the level-1 base value — scale it to the character's current level
-  const scale = 1 + STAT_GROWTH_RATE * (level - 1);
-  const maxHp = Math.max(1, Math.round((primary.properties.stats.hp ?? 1) * scale));
+  // NFT stats.hp is the level-1 base — scale to current level using quadratic formula
+  const maxHp = Math.max(1, Math.round((primary.properties.stats.hp ?? 1) * statScale(level)));
 
   return {
     name: primary.name,

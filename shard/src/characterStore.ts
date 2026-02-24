@@ -108,6 +108,39 @@ export async function loadCharacter(
   };
 }
 
+/**
+ * Scan for learned professions by wallet address without knowing the character name.
+ * Used by the professions endpoint to serve offline champions.
+ */
+export async function getProfessionsForWallet(walletAddress: string): Promise<string[]> {
+  const prefix = `character:${walletAddress.toLowerCase()}:`;
+
+  // Try Redis scan first
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const keys: string[] = await redis.keys(`${prefix}*`);
+      for (const k of keys) {
+        const data: Record<string, string> = await redis.hgetall(k);
+        if (data?.professions) {
+          return JSON.parse(data.professions) as string[];
+        }
+      }
+    } catch {
+      // fall through to in-memory
+    }
+  }
+
+  // In-memory fallback
+  for (const [k, data] of memoryStore.entries()) {
+    if (k.startsWith(prefix) && data.professions) {
+      return JSON.parse(data.professions) as string[];
+    }
+  }
+
+  return [];
+}
+
 export async function deleteCharacter(walletAddress: string, characterName: string): Promise<void> {
   const k = key(walletAddress, characterName);
   memoryStore.delete(k);

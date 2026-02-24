@@ -3,7 +3,17 @@ import { getClassById } from "./classes.js";
 import { getRaceById } from "./races.js";
 
 export const MAX_LEVEL = 60;
-export const GROWTH_RATE = 0.02;
+
+/**
+ * Quadratic stat scaling: accelerates at higher levels so late-game feels impactful.
+ * scale = 1 + (level-1) * 0.04 + (level-1)^2 * 0.001
+ *
+ * L1 = 1.00×  L10 = 1.45×  L25 = 2.54×  L42 = 4.34×  L60 = 6.95×
+ */
+export function statScale(level: number): number {
+  const l = Math.max(1, level) - 1;
+  return 1 + l * 0.04 + l * l * 0.001;
+}
 
 /** Cumulative XP required to reach a given level. L1 = 0. */
 export function xpForLevel(level: number): number {
@@ -18,8 +28,7 @@ export function xpToNextLevel(currentLevel: number, currentXp: number): number {
 }
 
 /**
- * Compute character stats at a given level.
- * Applies race modifiers to class base stats, then scales by 1 + 0.02 * (level - 1).
+ * Compute character stats at a given level using quadratic scaling.
  */
 export function computeStatsAtLevel(
   raceId: string,
@@ -28,7 +37,7 @@ export function computeStatsAtLevel(
 ): CharacterStats {
   const race = getRaceById(raceId)!;
   const classDef = getClassById(classId)!;
-  const scale = 1 + GROWTH_RATE * (level - 1);
+  const scale = statScale(level);
 
   return {
     str: Math.round(classDef.baseStats.str * race.statModifiers.str * scale),
@@ -39,6 +48,6 @@ export function computeStatsAtLevel(
     mp: Math.round(classDef.baseStats.mp * race.statModifiers.mp * scale),
     faith: Math.round(classDef.baseStats.faith * race.statModifiers.faith * scale),
     luck: Math.round(classDef.baseStats.luck * race.statModifiers.luck * scale),
-    essence: Math.round(classDef.baseStats.essence * race.statModifiers.mp * scale), // Essence scales like MP
+    essence: Math.round(classDef.baseStats.essence * race.statModifiers.mp * scale),
   };
 }

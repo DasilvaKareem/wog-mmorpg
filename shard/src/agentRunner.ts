@@ -411,27 +411,91 @@ export class AgentRunner {
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
-      const questsRes = await this.api("GET", `/quests/available/${this.currentZone}/${this.entityId}`);
-      const available = questsRes?.quests ?? [];
-      if (available.length === 0) {
-        await this.doCombat(strategy);
-        return;
+      // 1. Check for completed quests and turn them in
+      const activeRes = await this.api("GET", `/quests/active/${this.currentZone}/${this.entityId}`);
+      const activeQuests: any[] = activeRes?.activeQuests ?? [];
+
+      for (const aq of activeQuests) {
+        if (aq.complete && aq.quest?.npcId) {
+          // Find the NPC entity in the zone to turn in
+          try {
+            const zoneRes = await this.api("GET", `/quests/zone/${this.currentZone}/${this.entityId}`);
+            // The quest.npcId is the NPC name — find matching entity from available quests or zone
+            // For turn-in, try talk endpoint first (handles talk quests + proximity)
+            // Then try the complete endpoint with each quest-giver NPC
+            const availableQuests: any[] = zoneRes?.quests ?? [];
+            // Find any NPC entity ID from available quests that matches
+            const npcEntityId = availableQuests.find((q: any) => q.npcName === aq.quest?.npcId)?.npcEntityId;
+            if (npcEntityId) {
+              const completeRes = await this.api("POST", "/quests/complete", {
+                zoneId: this.currentZone,
+                playerId: this.entityId,
+                questId: aq.questId,
+                npcId: npcEntityId,
+              });
+              if (completeRes?.completed) {
+                void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}g`);
+              }
+            }
+          } catch {
+            // NPC not in zone or turn-in failed — keep going
+          }
+        }
       }
 
-      const q = available[0];
-      try {
-        await this.api("POST", "/quests/accept", {
-          zoneId: this.currentZone,
-          playerId: this.entityId,
-          questId: q.id,
-        });
-      } catch {
-        // Already accepted — just progress it
+      // 2. Accept new quests if we don't have many active
+      const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
+      if (currentActive < 3) {
+        try {
+          const availRes = await this.api("GET", `/quests/zone/${this.currentZone}/${this.entityId}`);
+          const available: any[] = availRes?.quests ?? [];
+          if (available.length > 0) {
+            const q = available[0];
+            const acceptRes = await this.api("POST", "/quests/accept", {
+              zoneId: this.currentZone,
+              playerId: this.entityId,
+              questId: q.questId,
+            });
+            if (acceptRes?.accepted) {
+              void this.logActivity(`Accepted quest: "${q.title}" from ${q.npcName}`);
+            }
+          }
+        } catch {
+          // Quest accept failed — no big deal
+        }
       }
 
+      // 3. Handle talk quests — walk to NPCs for talk objectives
+      const talkQuests = activeQuests.filter(
+        (aq: any) => !aq.complete && aq.quest?.objective?.type === "talk"
+      );
+      if (talkQuests.length > 0) {
+        // Try talking to all quest-giver NPCs in zone
+        try {
+          const zoneState = await this.api("GET", `/zones/${this.currentZone}`);
+          const entities: any[] = zoneState?.entities ?? [];
+          for (const e of entities) {
+            if (e.type === "quest-giver") {
+              try {
+                await this.api("POST", "/quests/talk", {
+                  zoneId: this.currentZone,
+                  playerId: this.entityId,
+                  npcEntityId: e.id,
+                });
+              } catch {
+                // Not in range or no talk quest for this NPC
+              }
+            }
+          }
+        } catch {}
+      }
+
+      // 4. Progress kill quests by fighting mobs
       await this.doCombat(strategy);
     } catch (err: any) {
       console.debug(`[agent] questing tick: ${err.message?.slice(0, 60)}`);
+      // Fallback to combat if quest system errors
+      await this.doCombat(strategy);
     }
   }
 

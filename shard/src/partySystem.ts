@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "./auth.js";
-import { getOrCreateZone } from "./zoneRuntime.js";
+import { getOrCreateZone, getAllZones } from "./zoneRuntime.js";
 
 interface Party {
   id: string;
@@ -12,9 +12,44 @@ interface Party {
   shareGold: boolean;
 }
 
-// In-memory party storage (could be moved to database)
+// ── In-memory party storage ───────────────────────────────────────────────
 const parties = new Map<string, Party>();
-const playerToParty = new Map<string, string>(); // playerId -> partyId
+const playerToParty = new Map<string, string>(); // entityId -> partyId
+
+// ── Pending party invites (wallet-based, for Champions page UI) ───────────
+interface PartyInvite {
+  id: string;
+  fromEntityId: string;
+  fromName: string;
+  fromCustodialWallet: string;
+  toCustodialWallet: string;
+  partyId: string;
+  createdAt: number;
+}
+const INVITE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const pendingInvites = new Map<string, PartyInvite[]>(); // custodialWallet → invites
+
+function freshInvites(wallet: string): PartyInvite[] {
+  const now = Date.now();
+  const list = (pendingInvites.get(wallet.toLowerCase()) ?? []).filter(
+    (i) => now - i.createdAt < INVITE_TTL_MS,
+  );
+  pendingInvites.set(wallet.toLowerCase(), list);
+  return list;
+}
+
+// Helper: find entity by custodial wallet across all zones
+function findEntityByCustodialWallet(custodialWallet: string): { entityId: string; zoneId: string } | null {
+  const lower = custodialWallet.toLowerCase();
+  for (const [zId, zone] of getAllZones()) {
+    for (const [eId, entity] of zone.entities) {
+      if ((entity as any).walletAddress?.toLowerCase() === lower) {
+        return { entityId: eId, zoneId: zId };
+      }
+    }
+  }
+  return null;
+}
 
 export function registerPartyRoutes(server: FastifyInstance): void {
   // Create a party
@@ -247,6 +282,220 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       party,
     });
   });
+
+  // ── Wallet-based party endpoints (for Champions page UI) ──────────────────
+
+  // GET /party/search?q=  — find online champions by name
+  server.get<{ Querystring: { q?: string } }>("/party/search", async (req, reply) => {
+    const q = (req.query.q ?? "").toLowerCase().trim();
+    const results: any[] = [];
+    for (const [zId, zone] of getAllZones()) {
+      for (const [eId, entity] of zone.entities) {
+        const e = entity as any;
+        if (e.type !== "player") continue;
+        if (q && !e.name.toLowerCase().includes(q)) continue;
+        results.push({
+          entityId: eId,
+          zoneId: zId,
+          name: e.name,
+          level: e.level ?? 1,
+          classId: e.classId,
+          raceId: e.raceId,
+          walletAddress: e.walletAddress ?? null,
+          inParty: playerToParty.has(eId),
+        });
+        if (results.length >= 20) break;
+      }
+      if (results.length >= 20) break;
+    }
+    return reply.send({ results });
+  });
+
+  // POST /party/invite-champion  { fromEntityId, fromZoneId, toCustodialWallet }
+  // Creates party for fromEntity if they don't have one, then queues invite
+  server.post<{
+    Body: { fromEntityId: string; fromZoneId: string; toCustodialWallet: string };
+  }>("/party/invite-champion", async (req, reply) => {
+    const { fromEntityId, fromZoneId, toCustodialWallet } = req.body;
+
+    const fromZone = getAllZones().get(fromZoneId);
+    const fromEntity = fromZone?.entities.get(fromEntityId) as any;
+    if (!fromEntity || fromEntity.type !== "player") {
+      return reply.code(404).send({ error: "Your champion is not online" });
+    }
+
+    // Prevent self-invite
+    if (fromEntity.walletAddress?.toLowerCase() === toCustodialWallet.toLowerCase()) {
+      return reply.code(400).send({ error: "Cannot invite yourself" });
+    }
+
+    // Create party if needed
+    let partyId = playerToParty.get(fromEntityId);
+    if (!partyId) {
+      partyId = `party_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const party: Party = {
+        id: partyId,
+        leaderId: fromEntityId,
+        memberIds: [fromEntityId],
+        zoneId: fromZoneId,
+        createdAt: Date.now(),
+        shareXp: true,
+        shareGold: true,
+      };
+      parties.set(partyId, party);
+      playerToParty.set(fromEntityId, partyId);
+    }
+
+    const party = parties.get(partyId)!;
+    if (party.memberIds.length >= 5) {
+      return reply.code(400).send({ error: "Party is full (max 5)" });
+    }
+
+    // Check target isn't already in this party
+    const targetRef = findEntityByCustodialWallet(toCustodialWallet);
+    if (targetRef && playerToParty.get(targetRef.entityId) === partyId) {
+      return reply.code(400).send({ error: "Champion is already in your party" });
+    }
+
+    // Queue invite
+    const invite: PartyInvite = {
+      id: `inv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      fromEntityId,
+      fromName: fromEntity.name,
+      fromCustodialWallet: (fromEntity.walletAddress ?? "").toLowerCase(),
+      toCustodialWallet: toCustodialWallet.toLowerCase(),
+      partyId,
+      createdAt: Date.now(),
+    };
+    const existing = freshInvites(toCustodialWallet);
+    // Dedupe: remove any existing invite from same party
+    const deduped = existing.filter((i) => i.partyId !== partyId || i.fromEntityId !== fromEntityId);
+    pendingInvites.set(toCustodialWallet.toLowerCase(), [...deduped, invite]);
+
+    return reply.send({ success: true, inviteId: invite.id });
+  });
+
+  // GET /party/invites/:custodialWallet  — pending invites for a champion
+  server.get<{ Params: { custodialWallet: string } }>(
+    "/party/invites/:custodialWallet",
+    async (req, reply) => {
+      const invites = freshInvites(req.params.custodialWallet);
+      return reply.send({ invites });
+    },
+  );
+
+  // POST /party/accept-invite  { custodialWallet, inviteId }
+  server.post<{
+    Body: { custodialWallet: string; inviteId: string };
+  }>("/party/accept-invite", async (req, reply) => {
+    const { custodialWallet, inviteId } = req.body;
+    const invites = freshInvites(custodialWallet);
+    const invite = invites.find((i) => i.id === inviteId);
+    if (!invite) return reply.code(404).send({ error: "Invite not found or expired" });
+
+    const party = parties.get(invite.partyId);
+    if (!party) return reply.code(404).send({ error: "Party no longer exists" });
+    if (party.memberIds.length >= 5) return reply.code(400).send({ error: "Party is full" });
+
+    // Find accepting champion's entity
+    const ref = findEntityByCustodialWallet(custodialWallet);
+    if (!ref) return reply.code(400).send({ error: "Your champion must be online to join a party" });
+
+    if (playerToParty.has(ref.entityId)) {
+      return reply.code(400).send({ error: "Your champion is already in a party" });
+    }
+
+    party.memberIds.push(ref.entityId);
+    playerToParty.set(ref.entityId, invite.partyId);
+
+    // Remove accepted invite
+    pendingInvites.set(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
+
+    return reply.send({ success: true, party });
+  });
+
+  // POST /party/decline-invite  { custodialWallet, inviteId }
+  server.post<{
+    Body: { custodialWallet: string; inviteId: string };
+  }>("/party/decline-invite", async (req, reply) => {
+    const { custodialWallet, inviteId } = req.body;
+    const invites = freshInvites(custodialWallet);
+    pendingInvites.set(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
+    return reply.send({ success: true });
+  });
+
+  // GET /party/status/:custodialWallet  — current party + all members
+  server.get<{ Params: { custodialWallet: string } }>(
+    "/party/status/:custodialWallet",
+    async (req, reply) => {
+      const ref = findEntityByCustodialWallet(req.params.custodialWallet);
+      if (!ref) return reply.send({ inParty: false, members: [], entityId: null, zoneId: null });
+
+      const partyId = playerToParty.get(ref.entityId);
+      if (!partyId) {
+        return reply.send({ inParty: false, members: [], entityId: ref.entityId, zoneId: ref.zoneId });
+      }
+
+      const party = parties.get(partyId);
+      if (!party) {
+        return reply.send({ inParty: false, members: [], entityId: ref.entityId, zoneId: ref.zoneId });
+      }
+
+      const members = party.memberIds.map((mId) => {
+        for (const [zId, zone] of getAllZones()) {
+          const e = zone.entities.get(mId) as any;
+          if (e) {
+            return {
+              entityId: mId,
+              zoneId: zId,
+              name: e.name,
+              level: e.level ?? 1,
+              hp: e.hp ?? 0,
+              maxHp: e.maxHp ?? 100,
+              classId: e.classId,
+              raceId: e.raceId,
+              walletAddress: e.walletAddress ?? null,
+              isLeader: mId === party.leaderId,
+            };
+          }
+        }
+        return { entityId: mId, name: "Offline", isLeader: mId === party.leaderId, level: 0, hp: 0, maxHp: 1 };
+      });
+
+      return reply.send({ inParty: true, partyId, party, members, entityId: ref.entityId, zoneId: ref.zoneId });
+    },
+  );
+
+  // POST /party/leave-wallet  { custodialWallet }  — leave from Champions page
+  server.post<{ Body: { custodialWallet: string } }>(
+    "/party/leave-wallet",
+    async (req, reply) => {
+      const ref = findEntityByCustodialWallet(req.body.custodialWallet);
+      if (!ref) return reply.code(404).send({ error: "Champion not online" });
+
+      const partyId = playerToParty.get(ref.entityId);
+      if (!partyId) return reply.code(400).send({ error: "Not in a party" });
+
+      const party = parties.get(partyId);
+      if (!party) return reply.code(404).send({ error: "Party not found" });
+
+      party.memberIds = party.memberIds.filter((id) => id !== ref.entityId);
+      playerToParty.delete(ref.entityId);
+
+      if (ref.entityId === party.leaderId || party.memberIds.length === 0) {
+        party.memberIds.forEach((id) => playerToParty.delete(id));
+        parties.delete(partyId);
+        return reply.send({ success: true, disbanded: true });
+      }
+
+      // Promote next member to leader
+      if (ref.entityId === party.leaderId) {
+        party.leaderId = party.memberIds[0];
+      }
+
+      return reply.send({ success: true, party });
+    },
+  );
 }
 
 // Helper to get party members

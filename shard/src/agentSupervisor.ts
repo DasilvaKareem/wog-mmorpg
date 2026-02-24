@@ -204,7 +204,7 @@ async function executeTool(
 
     case "read_quests": {
       try {
-        const res = await ctx.apiCall("GET", `/quests/available/${ctx.currentZone}/${ctx.entityId}`);
+        const res = await ctx.apiCall("GET", `/quests/zone/${ctx.currentZone}/${ctx.entityId}`);
         return { quests: res?.quests ?? [] };
       } catch {
         return { quests: [] };

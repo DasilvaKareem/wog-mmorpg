@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -125,6 +126,14 @@ export function WalletPanel(): React.ReactElement {
                 <p className="text-[8px] text-[#9aa7cc]">No character data.</p>
               )}
             </div>
+            <Link
+              to="/champions"
+              className="flex w-full items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+            >
+              <span className="text-[7px]">@@</span>
+              View Champion
+            </Link>
+
             <div>
               <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Items</p>
               <div className="max-h-24 space-y-1 overflow-auto pr-1">
