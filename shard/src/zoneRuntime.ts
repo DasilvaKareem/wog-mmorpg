@@ -113,7 +113,7 @@ export interface Entity {
   classId?: string;
   /** Character gender (players only). */
   gender?: "male" | "female";
-  /** Live computed stats (players only). */
+  /** Live computed stats (players + mobs/bosses). */
   stats?: CharacterStats;
   /** Equipped item state by slot (players only). */
   equipment?: Partial<Record<EquipmentSlot, EquippedItemState>>;
@@ -131,6 +131,8 @@ export interface Entity {
   nectarType?: string;
   /** Profession trainer fields. */
   teachesProfession?: ProfessionType;
+  /** Class trainer fields. */
+  teachesClass?: string;
   /** Active quests (players only). */
   activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
   /** Completed quest IDs (players only) - used for quest chain prerequisites. */
@@ -874,7 +876,8 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
-      if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
+      // Must have been in combat at least once AND be out of combat long enough
+      if (entity.lastCombatTick == null || zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
       const healAmount = Math.max(1, Math.ceil(entity.maxHp * OOC_REGEN_PERCENT));
       entity.hp = Math.min(entity.maxHp, entity.hp + healAmount);
     }
@@ -883,7 +886,8 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
       if (entity.hp <= 0 || entity.hp >= entity.maxHp) continue;
-      if (entity.lastCombatTick != null && zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
+      // Must have been in combat at least once AND be out of combat long enough
+      if (entity.lastCombatTick == null || zone.tick - entity.lastCombatTick < OOC_REGEN_DELAY_TICKS) continue;
       const faithStat = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
       const regenRate = PLAYER_HP_REGEN_BASE + faithStat * PLAYER_HP_REGEN_FAITH_COEFF;
       const healAmount = Math.max(1, Math.ceil(entity.maxHp * regenRate));
@@ -1384,7 +1388,52 @@ async function worldTick() {
       }
     }
 
-    // Smart auto-combat AI: players pick techniques or basic attack
+    // ── Mob aggro AI: mobs attack nearby players ─────────────────────
+    // Mobs proactively seek and attack players within aggro range.
+    // Bosses have larger aggro range. Mobs prefer their tagged target.
+    const MOB_AGGRO_RANGE = 60;
+    const BOSS_AGGRO_RANGE = 100;
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "mob" && entity.type !== "boss") continue;
+      if (entity.order) continue;
+      if (entity.hp <= 0) continue;
+
+      const aggroRange = entity.type === "boss" ? BOSS_AGGRO_RANGE : MOB_AGGRO_RANGE;
+
+      // Prefer the player who tagged us (most recent attacker)
+      let target: Entity | null = null;
+      if (entity.taggedBy) {
+        const tagged = zone.entities.get(entity.taggedBy);
+        if (tagged && tagged.type === "player" && tagged.hp > 0) {
+          const dx = tagged.x - entity.x;
+          const dy = tagged.y - entity.y;
+          if (Math.sqrt(dx * dx + dy * dy) < aggroRange * 1.5) {
+            target = tagged;
+          }
+        }
+      }
+
+      // Otherwise find nearest player in aggro range
+      if (!target) {
+        let nearestDist = aggroRange;
+        for (const other of zone.entities.values()) {
+          if (other.type !== "player") continue;
+          if (other.hp <= 0) continue;
+          const dx = other.x - entity.x;
+          const dy = other.y - entity.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            target = other;
+          }
+        }
+      }
+
+      if (!target) continue;
+      entity.order = { action: "attack", targetId: target.id };
+    }
+
+    // ── Player auto-combat AI: players pick techniques or basic attack ──
     // Only engages mobs within AUTO_COMBAT_RANGE so agents can walk to
     // portals, merchants, etc. without being hijacked.
     const AUTO_COMBAT_RANGE = 80;
@@ -1412,8 +1461,11 @@ async function worldTick() {
 
       if (!nearestMob) continue;
 
-      // Auto-grant qualifying techniques for server-controlled auto-combat
-      ensureTechniquesForAutoCombat(entity);
+      // Auto-grant techniques only for synthetic server-side test players.
+      // Real player/agent wallets must learn from class trainers via API.
+      if (!entity.walletAddress) {
+        ensureTechniquesForAutoCombat(entity);
+      }
 
       // Try to pick a technique
       const chosenTech = pickTechnique(entity, nearestMob, zone);

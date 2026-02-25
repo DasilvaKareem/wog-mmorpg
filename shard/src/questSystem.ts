@@ -1766,6 +1766,21 @@ export const QUEST_CATALOG: Quest[] = [
   },
 ];
 
+// ── Economy scaling ─────────────────────────────────────────────────────────
+// Gold is scarce: 5 maxed characters should accumulate ~3 gold total.
+// Early quests give pure copper (1-15c), endgame quests can reach up to 20 silver (2000c).
+// Graduated scale: heavy reduction for low rewards, lighter for endgame.
+for (const quest of QUEST_CATALOG) {
+  const c = quest.rewards.copper;
+  if (c <= 100) {
+    quest.rewards.copper = Math.max(1, Math.round(c / 10));       // 10-100 → 1-10c
+  } else if (c <= 500) {
+    quest.rewards.copper = Math.max(1, Math.round(c / 5));        // 100-500 → 20-100c
+  } else {
+    quest.rewards.copper = Math.max(1, Math.round(c / 2.5));      // 500-1000 → 200-400c (2-4s)
+  }
+}
+
 /**
  * Get all quests available from an NPC (by NPC name)
  */

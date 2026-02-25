@@ -32,7 +32,7 @@ export function registerWalletRoutes(server: FastifyInstance) {
         const sfuelTx = await distributeSFuel(address);
         server.log.info(`sFUEL sent to ${address}: ${sfuelTx}`);
 
-        const welcomeCopper = 500; // 500 copper = 5 silver welcome bonus
+        const welcomeCopper = 50; // 50 copper welcome bonus (gold is scarce)
         const welcomeGold = copperToGold(welcomeCopper);
         const goldTx = await mintGold(address, welcomeGold.toString());
         server.log.info(`${welcomeCopper}c (${welcomeGold}g) welcome bonus minted to ${address}: ${goldTx}`);

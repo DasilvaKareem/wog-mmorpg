@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
 import type { ProfessionType } from "./professions.js";
+import type { CharacterStats } from "./classes.js";
+import { statScale } from "./leveling.js";
 
 /**
  * Static NPC definitions that auto-spawn when the shard boots.
@@ -17,6 +19,29 @@ export interface NpcDef {
   level?: number;
   xpReward?: number;
   teachesProfession?: ProfessionType;
+  teachesClass?: string;
+}
+
+// ── Mob combat stats ────────────────────────────────────────────────
+// Base stats for mobs (L1). Scaled by statScale(level) like player stats.
+// Mobs are individually weaker than players but dangerous in groups.
+const MOB_BASE_STATS = { str: 55, def: 40, agi: 30, int: 25, faith: 15, luck: 20 };
+const BOSS_STAT_MULT = 1.4; // Bosses hit 40% harder and are 40% tankier
+
+export function computeMobStats(level: number, hp: number, isBoss: boolean): CharacterStats {
+  const scale = statScale(level);
+  const mult = isBoss ? BOSS_STAT_MULT : 1;
+  return {
+    str:     Math.round(MOB_BASE_STATS.str * scale * mult),
+    def:     Math.round(MOB_BASE_STATS.def * scale * mult),
+    hp,      // Keep hand-tuned HP from NPC_DEFS
+    agi:     Math.round(MOB_BASE_STATS.agi * scale * mult),
+    int:     Math.round(MOB_BASE_STATS.int * scale * mult),
+    mp:      0,
+    faith:   Math.round(MOB_BASE_STATS.faith * scale * mult),
+    luck:    Math.round(MOB_BASE_STATS.luck * scale * mult),
+    essence: 0,
+  };
 }
 
 export const NPC_DEFS: NpcDef[] = [
@@ -220,6 +245,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 60,
     y: 80,
     hp: 999,
+    teachesClass: "warrior",
   },
   {
     zoneId: "village-square",
@@ -228,6 +254,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 200,
     y: 80,
     hp: 999,
+    teachesClass: "paladin",
   },
   {
     zoneId: "village-square",
@@ -236,6 +263,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 340,
     y: 80,
     hp: 999,
+    teachesClass: "rogue",
   },
   {
     zoneId: "village-square",
@@ -244,6 +272,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 480,
     y: 80,
     hp: 999,
+    teachesClass: "ranger",
   },
   {
     zoneId: "village-square",
@@ -252,6 +281,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 60,
     y: 160,
     hp: 999,
+    teachesClass: "mage",
   },
   {
     zoneId: "village-square",
@@ -260,6 +290,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 200,
     y: 160,
     hp: 999,
+    teachesClass: "cleric",
   },
   {
     zoneId: "village-square",
@@ -268,6 +299,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 340,
     y: 160,
     hp: 999,
+    teachesClass: "warlock",
   },
   {
     zoneId: "village-square",
@@ -276,6 +308,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 480,
     y: 160,
     hp: 999,
+    teachesClass: "monk",
   },
 
   // Auctioneers in other zones
@@ -2787,6 +2820,8 @@ export function spawnNpcs(): void {
 function spawnSingleNpc(def: NpcDef): void {
   const zone = getOrCreateZone(def.zoneId);
 
+  const isCombatant = def.type === "mob" || def.type === "boss";
+
   const entity: Entity = {
     id: randomUUID(),
     type: def.type,
@@ -2800,15 +2835,26 @@ function spawnSingleNpc(def: NpcDef): void {
     ...(def.level != null && { level: def.level }),
     ...(def.xpReward != null && { xpReward: def.xpReward }),
     ...(def.teachesProfession != null && { teachesProfession: def.teachesProfession }),
+    ...(def.teachesClass != null && { teachesClass: def.teachesClass }),
+    // Give mobs/bosses real combat stats so they use the stat-based damage formula
+    ...(isCombatant && def.level != null && {
+      stats: computeMobStats(def.level, def.hp, def.type === "boss"),
+    }),
   };
+
+  // Pre-compute effective stats for mobs so combat uses them immediately
+  if (isCombatant && entity.stats) {
+    entity.effectiveStats = { ...entity.stats };
+  }
 
   zone.entities.set(entity.id, entity);
   spawnedNpcIds.set(def, entity.id);
   npcIdsByName.set(def.name, entity.id);
 
   const professionInfo = def.teachesProfession ? ` (teaches ${def.teachesProfession})` : "";
+  const classInfo = def.teachesClass ? ` (teaches ${def.teachesClass})` : "";
   console.log(
-    `[npc] Spawned ${def.type} "${def.name}" in ${def.zoneId} at (${def.x}, ${def.y})${professionInfo}`
+    `[npc] Spawned ${def.type} "${def.name}" in ${def.zoneId} at (${def.x}, ${def.y})${professionInfo}${classInfo}`
   );
 }
 

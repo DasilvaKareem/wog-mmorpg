@@ -506,6 +506,18 @@ export class AgentRunner {
       if (!zs) return;
       const { entities, me } = zs;
 
+      // Don't engage if HP is too low — disengage and let regen kick in
+      const hpPct = (me.hp ?? 0) / Math.max(me.maxHp ?? 1, 1);
+      const retreatThreshold: Record<AgentStrategy, number> = {
+        aggressive: 0.15,
+        balanced:   0.30,
+        defensive:  0.50,
+      };
+      if (hpPct < retreatThreshold[strategy]) {
+        void this.logActivity(`Low HP (${Math.round(hpPct * 100)}%) — disengaging`);
+        return;
+      }
+
       const myLevel = me.level ?? 1;
       const levelCap: Record<AgentStrategy, number> = {
         aggressive: myLevel + 5,

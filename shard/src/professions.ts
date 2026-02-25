@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest } from "./auth.js";
+import { authenticateRequest, verifyEntityOwnership } from "./auth.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { getGoldBalance } from "./blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "./goldLedger.js";
@@ -145,11 +145,16 @@ export function registerProfessionRoutes(server: FastifyInstance) {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const { walletAddress, zoneId, entityId, trainerId, professionId } = request.body;
+    const authenticatedWallet = (request as any).walletAddress as string;
 
     // Validate wallet
     if (!walletAddress || !/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
       reply.code(400);
       return { error: "Invalid wallet address" };
+    }
+    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+      reply.code(403);
+      return { error: "Not authorized for this wallet address" };
     }
 
     // Validate profession
@@ -175,6 +180,18 @@ export function registerProfessionRoutes(server: FastifyInstance) {
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+    if (entity.type !== "player") {
+      reply.code(400);
+      return { error: "Only player entities can learn professions" };
+    }
+    if (!verifyEntityOwnership(entity.walletAddress, authenticatedWallet)) {
+      reply.code(403);
+      return { error: "Not authorized to control this player" };
+    }
+    if (entity.walletAddress!.toLowerCase() !== walletAddress.toLowerCase()) {
+      reply.code(400);
+      return { error: "walletAddress does not match entity owner" };
     }
 
     const trainer = zone.entities.get(trainerId);

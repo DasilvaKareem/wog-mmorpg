@@ -97,6 +97,10 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       return reply.status(404).send({ error: "Player entity not found" });
     }
 
+    if (player.type !== "player") {
+      return reply.status(400).send({ error: "Only player entities can learn techniques" });
+    }
+
     // Verify ownership
     if (!verifyEntityOwnership(player.walletAddress, authenticatedWallet)) {
       return reply.status(403).send({ error: "Not authorized to control this player" });
@@ -118,6 +122,18 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     // Validate class matches
     if (player.classId !== technique.className) {
       return reply.status(400).send({ error: "This trainer cannot teach your class" });
+    }
+
+    const trainerClass = getTrainerClass(trainer);
+    if (!trainerClass) {
+      return reply.status(400).send({ error: "Trainer is not configured to teach a class" });
+    }
+    if (!player.classId || trainerClass !== player.classId) {
+      return reply.status(400).send({
+        error: "Wrong class trainer",
+        trainerClass,
+        playerClass: player.classId ?? null,
+      });
     }
 
     // Validate level requirement
@@ -144,7 +160,8 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     // Check gold balance
     const onChainGoldStr = await getGoldBalance(player.walletAddress);
     const onChainGold = Number(onChainGoldStr);
-    const availableGold = getAvailableGold(player.walletAddress, onChainGold);
+    const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+    const availableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
 
     const goldCost = copperToGold(technique.copperCost);
     if (availableGold < goldCost) {
@@ -167,7 +184,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       learnedTechniques: player.learnedTechniques,
     }).catch((err) => console.error(`[persistence] Save failed after technique learn:`, err));
 
-    const newAvailableGold = getAvailableGold(player.walletAddress, onChainGold);
+    const newAvailableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
 
     return reply.send({
       success: true,
@@ -280,6 +297,14 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       result,
     });
   });
+}
+
+function getTrainerClass(trainer: Entity): string | null {
+  if (trainer.teachesClass) return trainer.teachesClass.toLowerCase();
+
+  // Backward-compatible fallback if older NPC data is still live.
+  const match = trainer.name.toLowerCase().match(/(warrior|paladin|rogue|ranger|mage|cleric|warlock|monk)\s+trainer/);
+  return match?.[1] ?? null;
 }
 
 function addActiveEffect(entity: Entity, effect: ActiveEffect): void {
