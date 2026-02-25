@@ -8,7 +8,7 @@ import "dotenv/config";
 import { getContract, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { mintTo } from "thirdweb/extensions/erc1155";
-import { thirdwebClient, skaleBaseSepolia } from "./chain.js";
+import { thirdwebClient, skaleBase } from "./chain.js";
 import { ITEM_CATALOG } from "./itemCatalog.js";
 
 const serverAccount = privateKeyToAccount({
@@ -18,7 +18,7 @@ const serverAccount = privateKeyToAccount({
 
 const itemsContract = getContract({
   client: thirdwebClient,
-  chain: skaleBaseSepolia,
+  chain: skaleBase,
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
 

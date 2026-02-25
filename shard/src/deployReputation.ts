@@ -6,7 +6,7 @@
  *
  * Requires env vars:
  *   SERVER_PRIVATE_KEY — deployer wallet private key
- *   BITE_V2_RPC_URL    — (optional) override RPC URL for BITE v2 sandbox
+ *   SKALE_BASE_RPC_URL — (optional) override RPC URL for SKALE Base mainnet
  */
 import "dotenv/config";
 import { readFileSync } from "node:fs";
@@ -94,7 +94,7 @@ async function main() {
   console.log(`Deployer address: ${deployerAddress}`);
 
   // 3. Deploy
-  console.log("Deploying to BITE v2 Sandbox...");
+  console.log("Deploying to SKALE Base mainnet...");
   const factory = new ethers.ContractFactory(abi, bytecode, biteWallet);
   const contract = await factory.deploy();
   await contract.waitForDeployment();

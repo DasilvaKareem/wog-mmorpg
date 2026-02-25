@@ -12,7 +12,7 @@ import type { CharacterStats } from "./classes.js";
 import { ITEM_CATALOG } from "./itemCatalog.js";
 import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
-import { thirdwebClient, skaleBaseSepolia } from "./chain.js";
+import { thirdwebClient, skaleBase } from "./chain.js";
 
 // =============================================================================
 //  Balance Cache — avoids redundant RPC reads (TTL-based eviction)
@@ -164,13 +164,13 @@ async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
 
 const goldContract = getContract({
   client: thirdwebClient,
-  chain: skaleBaseSepolia,
+  chain: skaleBase,
   address: process.env.GOLD_CONTRACT_ADDRESS!,
 });
 
 const itemsContract = getContract({
   client: thirdwebClient,
-  chain: skaleBaseSepolia,
+  chain: skaleBase,
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
 
@@ -232,7 +232,7 @@ export async function distributeSFuel(toAddress: string): Promise<string> {
     const tx = prepareTransaction({
       to: toAddress,
       value: toWei("0.00001"),
-      chain: skaleBaseSepolia,
+      chain: skaleBase,
       client: thirdwebClient,
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
@@ -352,7 +352,7 @@ export async function burnItem(
 
 const characterContract = getContract({
   client: thirdwebClient,
-  chain: skaleBaseSepolia,
+  chain: skaleBase,
   address: process.env.CHARACTER_CONTRACT_ADDRESS!,
 });
 

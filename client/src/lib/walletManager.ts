@@ -3,28 +3,28 @@ import { API_URL } from "../config.js";
 import { defineChain } from "thirdweb";
 import { createWallet } from "thirdweb/wallets";
 
-const SKALE_CHAIN_ID = 324705682;
+const SKALE_CHAIN_ID = 1187947933;
 
 const thirdwebClient = createThirdwebClient({
   clientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID || "placeholder",
 });
 
-const skaleBaseSepolia = defineChain({
+const skaleBase = defineChain({
   id: SKALE_CHAIN_ID,
-  name: "SKALE Base Sepolia Testnet",
-  rpc: "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
+  name: "SKALE Base",
+  rpc: "https://skale-base.skalenodes.com/v1/base",
   nativeCurrency: {
-    name: "sFUEL",
-    symbol: "sFUEL",
+    name: "Credits",
+    symbol: "CREDIT",
     decimals: 18,
   },
   blockExplorers: [
     {
       name: "SKALE Explorer",
-      url: "https://base-sepolia-testnet.skalenodes.com",
+      url: "https://skale-base-explorer.skalenodes.com",
     },
   ],
-  testnet: true,
+  testnet: false,
 });
 
 export interface WalletBalance {
@@ -98,7 +98,7 @@ export class WalletManager {
 
   async connect(): Promise<string> {
     const account = await Promise.race([
-      this.wallet.connect({ client: thirdwebClient, chain: skaleBaseSepolia }),
+      this.wallet.connect({ client: thirdwebClient, chain: skaleBase }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Wallet popup timed out. Make sure MetaMask is installed and unlocked.")), 20000)
       ),

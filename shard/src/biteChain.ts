@@ -1,26 +1,26 @@
 import { ethers } from "ethers";
 import { BITE } from "@skalenetwork/bite";
 
-/** BITE v2 Sandbox chain (ID 103698795) */
-export const BITE_V2_CHAIN_ID = 103698795;
+/** SKALE Base mainnet chain (ID 1187947933) — BITE V1 encryption */
+export const SKALE_BASE_CHAIN_ID = 1187947933;
 
-const BITE_V2_RPC =
-  process.env.BITE_V2_RPC_URL ||
-  "https://base-sepolia-testnet.skalenodes.com/v1/bite-v2-sandbox-2";
+const SKALE_BASE_RPC =
+  process.env.SKALE_BASE_RPC_URL ||
+  "https://skale-base.skalenodes.com/v1/base";
 
-/** JSON-RPC provider for the BITE v2 sandbox chain. */
-export const biteProvider = new ethers.JsonRpcProvider(BITE_V2_RPC);
+/** JSON-RPC provider for SKALE Base mainnet. */
+export const biteProvider = new ethers.JsonRpcProvider(SKALE_BASE_RPC);
 
-/** Server wallet on the BITE v2 sandbox chain (same private key, different chain).
+/** Server wallet on SKALE Base mainnet.
  *  Wrapped in NonceManager to prevent nonce collisions from concurrent transactions
- *  (auction house, guild, prediction market all share this signer). */
+ *  (auction house, guild, reputation all share this signer). */
 export const biteWallet = process.env.SERVER_PRIVATE_KEY
   ? new ethers.NonceManager(new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, biteProvider))
   : null;
 
 if (!biteWallet) {
-  console.warn("[bite] SERVER_PRIVATE_KEY not set — BITE chain wallet disabled");
+  console.warn("[skaleBase] SERVER_PRIVATE_KEY not set — chain wallet disabled");
 }
 
-/** BITE SDK instance for encrypting values. */
-export const bite = new BITE(BITE_V2_RPC);
+/** BITE SDK instance for encrypting values (V1 on mainnet). */
+export const bite = new BITE(SKALE_BASE_RPC);

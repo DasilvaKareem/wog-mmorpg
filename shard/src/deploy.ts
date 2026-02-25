@@ -1,24 +1,25 @@
 /**
- * One-time deployment script for WoG contracts on SKALE Base Sepolia.
+ * One-time deployment script for WoG contracts on SKALE Base mainnet.
  * Run: npx tsx src/deploy.ts
  *
  * Deploys:
- * 1. TokenERC20 — "WoG Gold" (GOLD)
+ * 1. TokenERC20  — "WoG Gold" (GOLD)
  * 2. TokenERC1155 — "WoG Items" (WOGI)
+ * 3. TokenERC721  — "WoG Characters" (WOGC)
  *
  * After deployment, paste the printed addresses into .env.
  */
 import "dotenv/config";
 import { deployPublishedContract } from "thirdweb/deploys";
 import { privateKeyToAccount } from "thirdweb/wallets";
-import { thirdwebClient, skaleBaseSepolia } from "./chain.js";
+import { thirdwebClient, skaleBase } from "./chain.js";
 
 const rawAccount = privateKeyToAccount({
   client: thirdwebClient,
   privateKey: process.env.SERVER_PRIVATE_KEY!,
 });
 
-// Wrap account to force gas limit to 1M — required by this SKALE chain
+// Wrap account to force gas limit — required by SKALE
 const serverAccount: typeof rawAccount = {
   ...rawAccount,
   async sendTransaction(tx) {
@@ -30,16 +31,54 @@ async function main() {
   const serverAddress = serverAccount.address;
   console.log(`Deploying from server wallet: ${serverAddress}`);
 
-  // GOLD + ITEMS already deployed — skip to Characters
-  const goldAddress = "0x421699e71bBeC7d05FCbc79C690afD5D8585f182";
-  const itemsAddress = "0xAe68cdA079fd699780506cc49381EE732837Ec35";
-  console.log(`  GOLD_CONTRACT_ADDRESS=${goldAddress} (already deployed)`);
-  console.log(`  ITEMS_CONTRACT_ADDRESS=${itemsAddress} (already deployed)`);
+  // 1. Deploy GOLD (ERC-20)
+  console.log("\nDeploying TokenERC20 (WoG Gold)...");
+  const goldAddress = await deployPublishedContract({
+    client: thirdwebClient,
+    chain: skaleBase,
+    account: serverAccount,
+    contractId: "TokenERC20",
+    contractParams: {
+      _defaultAdmin: serverAddress,
+      _name: "WoG Gold",
+      _symbol: "GOLD",
+      _contractURI: "",
+      _trustedForwarders: [],
+      _primarySaleRecipient: serverAddress,
+      _platformFeeBps: 0n,
+      _platformFeeRecipient: serverAddress,
+    },
+  });
+  console.log(`  GOLD_CONTRACT_ADDRESS=${goldAddress}`);
 
+  // 2. Deploy WOGI (ERC-1155)
+  console.log("\nDeploying TokenERC1155 (WoG Items)...");
+  const itemsAddress = await deployPublishedContract({
+    client: thirdwebClient,
+    chain: skaleBase,
+    account: serverAccount,
+    contractId: "TokenERC1155",
+    contractParams: {
+      _defaultAdmin: serverAddress,
+      _name: "WoG Items",
+      _symbol: "WOGI",
+      _contractURI: "",
+      _trustedForwarders: [],
+      _primarySaleRecipient: serverAddress,
+      _saleRecipient: serverAddress,
+      _royaltyRecipient: serverAddress,
+      _royaltyBps: 0n,
+      _platformFeeBps: 0n,
+      _platformFeeRecipient: serverAddress,
+    },
+  });
+  console.log(`  ITEMS_CONTRACT_ADDRESS=${itemsAddress}`);
+
+  // 3. Deploy WOGC (ERC-721)
   console.log("\nDeploying TokenERC721 (WoG Characters)...");
   const characterAddress = await deployPublishedContract({
     client: thirdwebClient,
-    chain: skaleBaseSepolia,
+    chain: skaleBase,
     account: serverAccount,
     contractId: "TokenERC721",
     contractParams: {
