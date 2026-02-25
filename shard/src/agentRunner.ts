@@ -292,6 +292,54 @@ export class AgentRunner {
     }
   }
 
+  /**
+   * Learn one available class technique from the matching class trainer.
+   * Returns true when the agent is busy training (moving or learning).
+   */
+  private async learnNextTechnique(): Promise<boolean> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    try {
+      const zs = await this.getZoneState();
+      if (!zs) return false;
+      const { entities, me } = zs;
+      const classId = (me.classId ?? "").toLowerCase();
+      if (!classId) return false;
+
+      const availableRes = await this.api("GET", `/techniques/available/${this.currentZone}/${this.entityId}`);
+      const available: Array<{ id: string; name?: string; isLearned?: boolean }> = availableRes?.techniques ?? [];
+      const nextToLearn = available.find((t) => !t.isLearned);
+      if (!nextToLearn) return false;
+
+      const trainer = this.findNearestEntity(
+        entities,
+        me,
+        (e) => {
+          if (e.type !== "trainer") return false;
+          const teachesClass = (e.teachesClass ?? "").toLowerCase();
+          if (teachesClass) return teachesClass === classId;
+          return new RegExp(`${classId}\\s+trainer`, "i").test(String(e.name ?? ""));
+        },
+      );
+      if (!trainer) return false;
+
+      const moving = await this.moveToEntity(me, trainer[1]);
+      if (moving) return true;
+
+      await this.api("POST", "/techniques/learn", {
+        zoneId: this.currentZone,
+        playerEntityId: this.entityId,
+        techniqueId: nextToLearn.id,
+        trainerEntityId: trainer[0],
+      });
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned technique ${nextToLearn.id}`);
+      void this.logActivity(`Learned technique: ${nextToLearn.name ?? nextToLearn.id}`);
+      return true;
+    } catch (err: any) {
+      console.debug(`[agent] learnNextTechnique: ${err.message?.slice(0, 60)}`);
+      return false;
+    }
+  }
+
   // ── Public actions (called from chat routes) ────────────────────────────
 
   /**
@@ -502,6 +550,9 @@ export class AgentRunner {
   private async doCombat(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
+      const trainingBusy = await this.learnNextTechnique();
+      if (trainingBusy) return;
+
       const zs = await this.getZoneState();
       if (!zs) return;
       const { entities, me } = zs;
