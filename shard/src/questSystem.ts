@@ -1926,7 +1926,8 @@ export async function awardQuestRewards(
       questId: quest.id,
       questTitle: quest.title,
       xpReward: quest.rewards.xp,
-      goldReward: quest.rewards.copper,
+      copperReward: quest.rewards.copper,
+      goldReward: quest.rewards.copper, // legacy field for older clients
     });
   }
 

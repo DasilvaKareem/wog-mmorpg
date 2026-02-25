@@ -6,6 +6,7 @@
  */
 
 import { getRedis } from "./redis.js";
+import { CLASS_DEFINITIONS } from "./classes.js";
 
 export interface CharacterSaveData {
   name: string;
@@ -27,9 +28,85 @@ export interface CharacterSaveData {
 
 // In-memory fallback (always available)
 const memoryStore = new Map<string, Record<string, string>>();
+const CLASS_SUFFIXES = CLASS_DEFINITIONS.map((c) => c.name.toLowerCase());
 
 function key(walletAddress: string, characterName: string): string {
   return `character:${walletAddress.toLowerCase()}:${characterName}`;
+}
+
+function collapseWhitespace(input: string): string {
+  return input.trim().replace(/\s+/g, " ");
+}
+
+function stripKnownClassSuffix(input: string): string {
+  const collapsed = collapseWhitespace(input);
+  const lower = collapsed.toLowerCase();
+  for (const className of CLASS_SUFFIXES) {
+    const suffix = ` the ${className}`;
+    if (lower.endsWith(suffix)) {
+      return collapsed.slice(0, collapsed.length - suffix.length).trim();
+    }
+  }
+  return collapsed;
+}
+
+function buildLookupNameCandidates(characterName: string): string[] {
+  const candidates: string[] = [];
+  const add = (v: string) => {
+    if (!v) return;
+    if (!candidates.includes(v)) candidates.push(v);
+  };
+
+  const collapsed = collapseWhitespace(characterName);
+  add(characterName);
+  add(collapsed);
+
+  const stripped = stripKnownClassSuffix(collapsed);
+  add(stripped);
+  add(collapseWhitespace(stripped));
+
+  return candidates;
+}
+
+function normalizeForLookup(input: string): string {
+  return stripKnownClassSuffix(input).toLowerCase();
+}
+
+async function resolveFallbackKey(
+  walletAddress: string,
+  characterName: string,
+  exactKey: string
+): Promise<string | null> {
+  const prefix = `character:${walletAddress.toLowerCase()}:`;
+  const nameCandidates = buildLookupNameCandidates(characterName);
+  const normalizedCandidates = new Set(nameCandidates.map(normalizeForLookup));
+
+  // Try in-memory keys first.
+  for (const k of memoryStore.keys()) {
+    if (!k.startsWith(prefix) || k === exactKey) continue;
+    const storedName = k.slice(prefix.length);
+    if (normalizedCandidates.has(normalizeForLookup(storedName))) {
+      return k;
+    }
+  }
+
+  const redis = getRedis();
+  if (!redis) return null;
+
+  try {
+    const keys: string[] = await redis.keys(`${prefix}*`);
+    for (const k of keys) {
+      if (k === exactKey) continue;
+      const storedName = k.slice(prefix.length);
+      if (normalizedCandidates.has(normalizeForLookup(storedName))) {
+        return k;
+      }
+    }
+  } catch {
+    // Redis scan failed, ignore and keep default behavior.
+  }
+
+  return null;
 }
 
 export async function saveCharacter(
@@ -68,14 +145,14 @@ export async function loadCharacter(
   characterName: string
 ): Promise<CharacterSaveData | null> {
   let raw: Record<string, string> = {};
-
   const k = key(walletAddress, characterName);
+  let resolvedKey = k;
 
   // Try Redis first
   const redis = getRedis();
   if (redis) {
     try {
-      raw = await redis.hgetall(k);
+      raw = await redis.hgetall(resolvedKey);
     } catch {
       // Redis failed, fall through to in-memory
     }
@@ -83,7 +160,28 @@ export async function loadCharacter(
 
   // Fall back to in-memory if Redis returned nothing
   if (!raw || Object.keys(raw).length === 0) {
-    raw = memoryStore.get(k) ?? {};
+    raw = memoryStore.get(resolvedKey) ?? {};
+  }
+
+  // Alias fallback: tolerate "Name" vs "Name the Class" style lookups.
+  if (!raw || Object.keys(raw).length === 0) {
+    const fallbackKey = await resolveFallbackKey(walletAddress, characterName, k);
+    if (fallbackKey) {
+      resolvedKey = fallbackKey;
+      if (redis) {
+        try {
+          raw = await redis.hgetall(resolvedKey);
+        } catch {
+          // Redis failed, fall through to in-memory
+        }
+      }
+      if (!raw || Object.keys(raw).length === 0) {
+        raw = memoryStore.get(resolvedKey) ?? {};
+      }
+      if (Object.keys(raw).length > 0) {
+        console.log(`[persistence] Character alias restore matched key "${resolvedKey}" for lookup "${characterName}"`);
+      }
+    }
   }
 
   // Empty hash = no saved character

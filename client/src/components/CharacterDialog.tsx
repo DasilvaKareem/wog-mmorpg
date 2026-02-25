@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import { getAuthToken } from "@/lib/agentAuth";
+import { validateCharacterName } from "@/lib/characterNameValidation";
 import { API_URL } from "@/config";
 import { fetchDiary, type DiaryEntry } from "@/ShardClient";
 import type { CharacterCreateResponse, CharacterStats } from "@/types";
@@ -100,6 +101,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   const [raceId, setRaceId] = React.useState("");
   const [classId, setClassId] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const [createError, setCreateError] = React.useState<string | null>(null);
   const [result, setResult] = React.useState<CharacterCreateResponse | null>(null);
   const [selectedCharacter, setSelectedCharacter] = React.useState<typeof characters[number] | null>(null);
   const [deploying, setDeploying] = React.useState(false);
@@ -121,6 +123,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
       setClassId("");
       setResult(null);
       setSubmitting(false);
+      setCreateError(null);
       setDeployResult(null);
       setDiaryEntries([]);
       setExpandedEntry(null);
@@ -176,11 +179,11 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
     selectedRace && selectedClass
       ? combineStats(selectedClass.baseStats, selectedRace.statModifiers)
       : null;
+  const nameValidationError = validateCharacterName(name);
 
   const canCreate = Boolean(
     address &&
-      name.trim().length >= 2 &&
-      name.trim().length <= 24 &&
+      !nameValidationError &&
       selectedRace &&
       selectedClass &&
       !submitting
@@ -271,10 +274,16 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                 <label className="mb-1 block text-[8px] uppercase tracking-wide text-[#9aa7cc]">Name</label>
                 <Input
                   maxLength={24}
-                  onChange={(event) => setName(event.target.value)}
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    if (createError) setCreateError(null);
+                  }}
                   placeholder="2-24 characters"
                   value={name}
                 />
+                {nameValidationError && name.trim().length > 0 ? (
+                  <p className="mt-1 text-[7px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                ) : null}
               </div>
 
               <div>
@@ -335,6 +344,12 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                 disabled={!canCreate}
                 onClick={() => {
                   if (!address || !selectedRace || !selectedClass) return;
+                  setCreateError(null);
+                  const localNameError = validateCharacterName(name.trim());
+                  if (localNameError) {
+                    setCreateError(localNameError);
+                    return;
+                  }
                   setSubmitting(true);
                   void create({
                     walletAddress: address,
@@ -346,6 +361,8 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                       if ("ok" in createResult && createResult.ok) {
                         setResult(createResult);
                         setView("result");
+                      } else {
+                        setCreateError(createResult.error);
                       }
                     })
                     .finally(() => {
@@ -357,6 +374,11 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                 {submitting ? "Creating..." : "Mint Character"}
               </Button>
             </DialogFooter>
+            {createError ? (
+              <p className="text-[8px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                [ERR] {createError}
+              </p>
+            ) : null}
           </div>
         ) : null}
 

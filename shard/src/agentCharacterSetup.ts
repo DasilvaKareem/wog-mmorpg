@@ -142,9 +142,10 @@ export async function setupAgentCharacter(
 
   const entityId: string = spawnResult.spawned?.id;
   if (!entityId) throw new Error("Spawn failed — no entity ID returned");
+  const resolvedZoneId: string = spawnResult.zone ?? startZone;
 
   // ── Step 7: Persist entity ref ────────────────────────────────────────
-  await setAgentEntityRef(userWallet, { entityId, zoneId: startZone });
+  await setAgentEntityRef(userWallet, { entityId, zoneId: resolvedZoneId });
 
   // ── Step 8: Init config if not already set ────────────────────────────
   const existingConfig = await getAgentConfig(userWallet);
@@ -152,12 +153,12 @@ export async function setupAgentCharacter(
     await setAgentConfig(userWallet, defaultConfig());
   }
 
-  console.log(`[agentSetup] Agent ready: entity=${entityId} zone=${startZone}`);
+  console.log(`[agentSetup] Agent ready: entity=${entityId} zone=${resolvedZoneId}`);
 
   return {
     custodialWallet: custodialAddress,
     entityId,
-    zoneId: startZone,
+    zoneId: resolvedZoneId,
     characterName: spawnName,
     alreadyExisted: false,
   };

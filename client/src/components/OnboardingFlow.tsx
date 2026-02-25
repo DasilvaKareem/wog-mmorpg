@@ -5,6 +5,7 @@ import { fetchClasses, fetchRaces, createCharacter } from "@/ShardClient";
 import { useWalletContext } from "@/context/WalletContext";
 import { thirdwebClient, skaleChain, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { getAuthToken } from "@/lib/agentAuth";
+import { validateCharacterName } from "@/lib/characterNameValidation";
 import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import { PaymentGate } from "@/components/PaymentGate";
@@ -195,21 +196,30 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     selectedRace && selectedClass
       ? combineStats(selectedClass.baseStats, selectedRace.statModifiers)
       : null;
+  const nameValidationError = validateCharacterName(charName);
 
   const canCreate =
     Boolean(connectedAddress) &&
-    charName.trim().length >= 2 &&
-    charName.trim().length <= 24 &&
+    !nameValidationError &&
     Boolean(selectedRace) &&
     Boolean(selectedClass);
 
   function handleRequestMint() {
+    if (nameValidationError) {
+      setError(nameValidationError);
+      return;
+    }
     if (!canCreate) return;
     setError(null);
     setStep("payment-char");
   }
 
   async function handleCreate() {
+    if (nameValidationError) {
+      setError(nameValidationError);
+      setStep("create-char");
+      return;
+    }
     if (!connectedAddress || !canCreate) return;
     setError(null);
     setStep("minting");
@@ -261,6 +271,12 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           } else {
             setSuccessData({ ...successBase, agentDeploying: false, agentError: deployData.error });
           }
+        } else {
+          setSuccessData({
+            ...successBase,
+            agentDeploying: false,
+            agentError: "Could not authenticate wallet for agent deploy.",
+          });
         }
       } catch (deployErr: any) {
         setSuccessData({ ...successBase, agentDeploying: false, agentError: deployErr.message });
@@ -513,10 +529,16 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   placeholder="2–24 characters"
                   value={charName}
                   maxLength={24}
-                  onChange={(e) => setCharName(e.target.value)}
+                  onChange={(e) => {
+                    setCharName(e.target.value);
+                    if (error) setError(null);
+                  }}
                   className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[10px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#ffcc00]"
                   autoFocus
                 />
+                {nameValidationError && charName.trim().length > 0 && (
+                  <p className="mt-1 text-[7px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                )}
               </div>
 
               {/* Race */}

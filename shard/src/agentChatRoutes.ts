@@ -28,6 +28,10 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getEntityState(entityId: string, zoneId: string): Promise<any | null> {
   try {
     const zone = getAllZones().get(zoneId);
@@ -78,6 +82,11 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
+    const requestedWallet = request.body.walletAddress;
+
+    if (requestedWallet && requestedWallet.toLowerCase() !== authWallet.toLowerCase()) {
+      return reply.code(403).send({ error: "Request wallet does not match authenticated wallet" });
+    }
 
     // Use the character data the client selected (from their NFT)
     let characterName = request.body.characterName;
@@ -132,8 +141,27 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       config.lastUpdated = Date.now();
       await setAgentConfig(authWallet, config);
 
-      // Start agent loop — wait for first tick to verify it's actually alive
-      await agentManager.start(authWallet, /* waitForFirstTick */ true);
+      // Start agent loop — wait for first tick to verify it's actually alive.
+      // Retry once for transient boot races (spawn visibility/auth timing).
+      let started = false;
+      let startErr: Error | null = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          await agentManager.start(authWallet, /* waitForFirstTick */ true);
+          started = true;
+          if (attempt > 1) {
+            server.log.info(`[agent/deploy] Start succeeded on retry ${attempt} for ${authWallet}`);
+          }
+          break;
+        } catch (err: any) {
+          startErr = err instanceof Error ? err : new Error(String(err));
+          server.log.warn(`[agent/deploy] Start attempt ${attempt} failed for ${authWallet}: ${startErr.message}`);
+          if (attempt < 2) await sleep(750);
+        }
+      }
+      if (!started) {
+        throw (startErr ?? new Error("Agent start failed"));
+      }
 
       return reply.send({
         ok: true,

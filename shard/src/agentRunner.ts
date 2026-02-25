@@ -482,7 +482,7 @@ export class AgentRunner {
                 npcId: npcEntityId,
               });
               if (completeRes?.completed) {
-                void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}g`);
+                void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}c`);
               }
             }
           } catch {

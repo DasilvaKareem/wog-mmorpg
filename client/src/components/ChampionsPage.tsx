@@ -4,6 +4,7 @@ import { API_URL } from "@/config";
 import { useWalletContext } from "@/context/WalletContext";
 import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
+import { formatCopperString } from "@/lib/currency";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -509,8 +510,8 @@ function QuestsTab({ diary }: { diary: DiaryEntry[] }) {
       ) : (
         <div>
           {quests.map((e) => {
-            const xp   = (e.details.xpReward as number) ?? 0;
-            const gold = (e.details.goldReward as number) ?? 0;
+            const xp = (e.details.xpReward as number) ?? 0;
+            const copperReward = ((e.details.copperReward as number) ?? (e.details.goldReward as number) ?? 0);
             return (
               <div key={e.id} className="flex items-start justify-between border-b border-[#1e2842] px-4 py-3 last:border-b-0 font-mono hover:bg-[#1a2240]/30 transition">
                 <div className="flex-1 min-w-0">
@@ -518,8 +519,10 @@ function QuestsTab({ diary }: { diary: DiaryEntry[] }) {
                   <p className="text-[13px] text-[#565f89] mt-0.5">{zoneLabel(e.zoneId)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0 ml-3">
-                  {xp   > 0 && <span className="text-[13px] text-[#ffcc00]">+{xp} XP</span>}
-                  {gold > 0 && <span className="text-[13px] text-[#ffcc00]">+{gold} G</span>}
+                  {xp > 0 && <span className="text-[13px] text-[#ffcc00]">+{xp} XP</span>}
+                  {copperReward > 0 && (
+                    <span className="text-[13px] text-[#ffcc00]">+{formatCopperString(copperReward)}</span>
+                  )}
                   <span className="text-[12px] text-[#3a4260]">{timeAgo(e.timestamp)}</span>
                 </div>
               </div>

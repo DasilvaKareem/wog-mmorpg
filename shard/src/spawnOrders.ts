@@ -109,12 +109,12 @@ export function registerSpawnOrders(server: FastifyInstance) {
       restoreProfessions(walletAddress, saved.professions);
       restored = true;
       server.log.info(
-        `[persistence] Restored character "${entity.name}" L${entity.level} (${saved.completedQuests.length} quests, ${saved.learnedTechniques.length} techniques, ${saved.professions.length} professions)`
+        `[persistence] Restored character "${entity.name}" from spawn name "${name}" L${entity.level} (${saved.completedQuests.length} quests, ${saved.learnedTechniques.length} techniques, ${saved.professions.length} professions)`
       );
     } else if (saved) {
       restored = true;
       server.log.info(
-        `[persistence] Restored character "${entity.name}" L${entity.level}`
+        `[persistence] Restored character "${entity.name}" from spawn name "${name}" L${entity.level}`
       );
     }
 

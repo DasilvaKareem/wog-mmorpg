@@ -144,8 +144,11 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           nfts.map(async (nft) => {
             const props = nft.metadata.properties as Record<string, unknown> | undefined;
             const nftName = (nft.metadata.name as string) ?? "";
-            // Extract base name: "Grondar the Warrior" → "Grondar"
-            const baseName = nftName.includes(" the ") ? nftName.split(" the ")[0] : nftName;
+            // Extract base name by removing only the trailing class suffix:
+            // "Grondar the Warrior" -> "Grondar"
+            // "Ari the Bold the Warrior" -> "Ari the Bold"
+            const strippedName = nftName.replace(/\s+the\s+\w+$/i, "").trim();
+            const baseName = strippedName || nftName;
 
             // 1) Overlay live entity data if character is currently spawned
             if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {

@@ -13,6 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { getRedis } from "./redis.js";
 import { getAgentCustodialWallet } from "./agentConfigStore.js";
+import { formatCopperString } from "./currency.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -366,12 +367,13 @@ export function narrativeQuestComplete(
   zoneId: string,
   questTitle: string,
   xpReward: number,
-  goldReward: number,
+  copperReward: number,
 ): { headline: string; narrative: string } {
   const title = charTitle(name, raceId, classId);
+  const rewardText = formatCopperString(copperReward);
   return {
     headline: `Completed "${questTitle}"`,
-    narrative: `${title} completed the quest "${questTitle}" in ${zoneName(zoneId)}, earning ${xpReward} experience and ${goldReward} gold as a grateful quest-giver bestowed their rewards.`,
+    narrative: `${title} completed the quest "${questTitle}" in ${zoneName(zoneId)}, earning ${xpReward} experience and ${rewardText} as a grateful quest-giver bestowed their rewards.`,
   };
 }
 
