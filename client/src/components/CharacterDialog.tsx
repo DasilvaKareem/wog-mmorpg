@@ -133,11 +133,17 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   React.useEffect(() => {
     if (view !== "detail" || !address) return;
     setDiaryLoading(true);
-    void fetchDiary(address, 20).then((entries) => {
-      setDiaryEntries(entries);
+    // Strip class suffix to get the base character name for filtering
+    const baseName = selectedCharacter?.name?.replace(/\s+the\s+\w+$/i, "").trim() ?? "";
+    void fetchDiary(address, 50).then((entries) => {
+      // Filter to only this character's diary entries
+      const filtered = baseName
+        ? entries.filter((e) => e.characterName === baseName)
+        : entries;
+      setDiaryEntries(filtered.slice(0, 20));
       setDiaryLoading(false);
     });
-  }, [view, address]);
+  }, [view, address, selectedCharacter]);
 
   async function handleDeploy(character: typeof characters[number]) {
     if (!address || deploying) return;

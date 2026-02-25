@@ -5,6 +5,7 @@ import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "./blockchain.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
+import { computeStatsAtLevel } from "./leveling.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -213,6 +214,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           const name = saved.name;
           const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
           const fullName = classDef ? `${name} the ${classDef.name}` : name;
+          const stats = computeStatsAtLevel(saved.raceId, saved.classId, saved.level);
 
           // Overlay live entity data if available
           if (liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name))) {
@@ -225,7 +227,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                 class: saved.classId,
                 level: liveEntity.level,
                 xp: liveEntity.xp,
-                stats: { hp: liveEntity.maxHp },
+                stats: computeStatsAtLevel(saved.raceId, saved.classId, liveEntity.level),
               },
             };
           }
@@ -239,7 +241,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
               class: saved.classId,
               level: saved.level,
               xp: saved.xp,
-              stats: {},
+              stats,
             },
           };
         });
