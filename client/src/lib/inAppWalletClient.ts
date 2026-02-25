@@ -9,7 +9,10 @@ export const thirdwebClient = createThirdwebClient({
   clientId: import.meta.env.VITE_THIRDWEB_CLIENT_ID || "placeholder",
 });
 
-export const skaleChain = defineChain({ id: 1187947933 });
+export const skaleChain = defineChain({
+  id: 1187947933,
+  rpc: "https://skale-base.skalenodes.com/v1/base",
+});
 
 // Singleton wallet — both OnboardingFlow and auto-connect use this same instance
 export const sharedInAppWallet = inAppWallet();

@@ -375,14 +375,17 @@ export async function mintCharacter(
   });
 }
 
-/** Get all character NFTs owned by a wallet address. Cached 30s. */
+/** Get all character NFTs owned by a wallet address. Cached 30s (empty results not cached). */
 export async function getOwnedCharacters(address: string) {
   const cacheKey = address.toLowerCase();
   const cached = characterCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
   const nfts = await getOwnedNFTs({ contract: characterContract, owner: address });
-  characterCache.set(cacheKey, nfts);
+  // Don't cache empty results — a mint may be pending confirmation
+  if (nfts.length > 0) {
+    characterCache.set(cacheKey, nfts);
+  }
   return nfts;
 }
 

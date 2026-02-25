@@ -72,6 +72,26 @@ function normalizeForLookup(input: string): string {
   return stripKnownClassSuffix(input).toLowerCase();
 }
 
+function parseCharacter(raw: Record<string, string>): CharacterSaveData {
+  return {
+    name: raw.name ?? "Unknown",
+    level: parseInt(raw.level ?? "1", 10),
+    xp: parseInt(raw.xp ?? "0", 10),
+    raceId: raw.raceId ?? "human",
+    classId: raw.classId ?? "warrior",
+    gender: raw.gender,
+    zone: raw.zone ?? "village-square",
+    x: parseFloat(raw.x ?? "0"),
+    y: parseFloat(raw.y ?? "0"),
+    kills: parseInt(raw.kills ?? "0", 10),
+    completedQuests: raw.completedQuests ? JSON.parse(raw.completedQuests) : [],
+    learnedTechniques: raw.learnedTechniques ? JSON.parse(raw.learnedTechniques) : [],
+    professions: raw.professions ? JSON.parse(raw.professions) : [],
+    signatureTechniqueId: raw.signatureTechniqueId || undefined,
+    ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
+  };
+}
+
 async function resolveFallbackKey(
   walletAddress: string,
   characterName: string,
@@ -187,23 +207,56 @@ export async function loadCharacter(
   // Empty hash = no saved character
   if (Object.keys(raw).length === 0) return null;
 
-  return {
-    name: raw.name ?? "Unknown",
-    level: parseInt(raw.level ?? "1", 10),
-    xp: parseInt(raw.xp ?? "0", 10),
-    raceId: raw.raceId ?? "human",
-    classId: raw.classId ?? "warrior",
-    gender: raw.gender,
-    zone: raw.zone ?? "village-square",
-    x: parseFloat(raw.x ?? "0"),
-    y: parseFloat(raw.y ?? "0"),
-    kills: parseInt(raw.kills ?? "0", 10),
-    completedQuests: raw.completedQuests ? JSON.parse(raw.completedQuests) : [],
-    learnedTechniques: raw.learnedTechniques ? JSON.parse(raw.learnedTechniques) : [],
-    professions: raw.professions ? JSON.parse(raw.professions) : [],
-    signatureTechniqueId: raw.signatureTechniqueId || undefined,
-    ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
-  };
+  return parseCharacter(raw);
+}
+
+/**
+ * Load any saved character for a wallet when the name is unknown.
+ * Useful for boot-time rehydration fallbacks.
+ */
+export async function loadAnyCharacterForWallet(
+  walletAddress: string
+): Promise<CharacterSaveData | null> {
+  const all = await loadAllCharactersForWallet(walletAddress);
+  return all.length > 0 ? all[0] : null;
+}
+
+/**
+ * Load ALL saved characters for a wallet.
+ * Used as a fallback when on-chain NFT enumeration is unavailable.
+ */
+export async function loadAllCharactersForWallet(
+  walletAddress: string
+): Promise<CharacterSaveData[]> {
+  const prefix = `character:${walletAddress.toLowerCase()}:`;
+  const seen = new Set<string>();
+  const results: CharacterSaveData[] = [];
+
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const keys: string[] = await redis.keys(`${prefix}*`);
+      for (const k of keys) {
+        const raw = await redis.hgetall(k);
+        if (raw && Object.keys(raw).length > 0) {
+          const parsed = parseCharacter(raw);
+          seen.add(k);
+          results.push(parsed);
+        }
+      }
+    } catch {
+      // Redis read failed; try in-memory fallback.
+    }
+  }
+
+  for (const [k, raw] of memoryStore.entries()) {
+    if (!k.startsWith(prefix) || seen.has(k)) continue;
+    if (raw && Object.keys(raw).length > 0) {
+      results.push(parseCharacter(raw));
+    }
+  }
+
+  return results;
 }
 
 /**

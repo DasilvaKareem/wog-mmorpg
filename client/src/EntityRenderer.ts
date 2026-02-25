@@ -24,9 +24,10 @@ const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
 
-const NPC_TYPES = new Set([
+const HIDE_LABEL_TYPES = new Set([
   "merchant", "trainer", "profession-trainer", "guild-registrar",
   "auctioneer", "arena-master", "quest-giver", "lore-npc", "npc",
+  "ore-node", "herb-node",
 ]);
 
 const PARTY_COLORS = [
@@ -190,7 +191,7 @@ export class EntityRenderer {
       .setDepth(entityDepth)
       .setInteractive({ useHandCursor: true });
 
-    const isNpc = NPC_TYPES.has(entity.type);
+    const isNpc = HIDE_LABEL_TYPES.has(entity.type);
 
     sprite.on("pointerdown", () => {
       const ent = this.entities.get(id);

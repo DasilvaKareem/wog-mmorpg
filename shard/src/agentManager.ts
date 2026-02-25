@@ -12,6 +12,7 @@ import {
 import { getAllZones } from "./zoneRuntime.js";
 import { getRedis } from "./redis.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
+import { loadAnyCharacterForWallet } from "./characterStore.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -125,10 +126,14 @@ class AgentManager {
       return false;
     }
 
-    const character = await this.getPrimaryCharacter(custodialWallet);
-    const characterName = this.extractRawName(character?.name);
-    const raceId = character?.properties?.race ?? "human";
-    const classId = character?.properties?.class ?? "warrior";
+    // Prefer persisted character data first; this avoids hard dependency on NFT RPC.
+    const persisted = await loadAnyCharacterForWallet(custodialWallet);
+    const persistedName = this.extractRawName(persisted?.name);
+
+    const character = persistedName ? null : await this.getPrimaryCharacter(custodialWallet);
+    const characterName = persistedName ?? this.extractRawName(character?.name);
+    const raceId = persisted?.raceId ?? character?.properties?.race ?? "human";
+    const classId = persisted?.classId ?? character?.properties?.class ?? "warrior";
 
     if (!characterName) {
       console.warn(`[AgentManager] Rehydrate skipped for ${key.slice(0, 8)}: no character NFT found`);

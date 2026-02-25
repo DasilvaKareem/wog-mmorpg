@@ -4,7 +4,7 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "./blockchain.js";
 import { getAllZones } from "./zoneRuntime.js";
-import { loadCharacter, saveCharacter } from "./characterStore.js";
+import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -117,8 +117,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       }
 
       try {
-        const nfts = await getOwnedCharacters(walletAddress);
-
         // Find live entity for this wallet across all zones
         const normalizedWallet = walletAddress.toLowerCase();
         let liveEntity: { level: number; xp: number; hp: number; maxHp: number; zoneId: string; name: string } | null = null;
@@ -139,71 +137,114 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           if (liveEntity) break;
         }
 
-        // Build character list with live entity overlay → Redis fallback → NFT metadata
-        const characters = await Promise.all(
-          nfts.map(async (nft) => {
-            const props = nft.metadata.properties as Record<string, unknown> | undefined;
-            const nftName = (nft.metadata.name as string) ?? "";
-            // Extract base name by removing only the trailing class suffix:
-            // "Grondar the Warrior" -> "Grondar"
-            // "Ari the Bold the Warrior" -> "Ari the Bold"
-            const strippedName = nftName.replace(/\s+the\s+\w+$/i, "").trim();
-            const baseName = strippedName || nftName;
+        // Try on-chain NFT enumeration first
+        let nfts: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
+        try {
+          nfts = await getOwnedCharacters(walletAddress);
+        } catch (nftErr) {
+          server.log.warn(nftErr, `[characters] getOwnedNFTs failed for ${walletAddress}, falling back to Redis`);
+        }
 
-            // 1) Overlay live entity data if character is currently spawned
-            if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
+        // If on-chain returned results, use the NFT-based flow
+        if (nfts.length > 0) {
+          const characters = await Promise.all(
+            nfts.map(async (nft) => {
+              const props = nft.metadata.properties as Record<string, unknown> | undefined;
+              const nftName = (nft.metadata.name as string) ?? "";
+              const strippedName = nftName.replace(/\s+the\s+\w+$/i, "").trim();
+              const baseName = strippedName || nftName;
+
+              if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
+                return {
+                  tokenId: nft.id.toString(),
+                  name: nft.metadata.name,
+                  description: nft.metadata.description,
+                  properties: {
+                    ...props,
+                    level: liveEntity.level,
+                    xp: liveEntity.xp,
+                    stats: {
+                      ...(props?.stats as Record<string, unknown> ?? {}),
+                      hp: liveEntity.maxHp,
+                    },
+                  },
+                };
+              }
+
+              if (baseName) {
+                try {
+                  const saved = await loadCharacter(walletAddress, baseName);
+                  if (saved) {
+                    return {
+                      tokenId: nft.id.toString(),
+                      name: nft.metadata.name,
+                      description: nft.metadata.description,
+                      properties: {
+                        ...props,
+                        level: saved.level,
+                        xp: saved.xp,
+                      },
+                    };
+                  }
+                } catch {
+                  // Redis lookup failed, fall through to raw NFT metadata
+                }
+              }
+
               return {
                 tokenId: nft.id.toString(),
                 name: nft.metadata.name,
                 description: nft.metadata.description,
-                properties: {
-                  ...props,
-                  level: liveEntity.level,
-                  xp: liveEntity.xp,
-                  stats: {
-                    ...(props?.stats as Record<string, unknown> ?? {}),
-                    hp: liveEntity.maxHp,
-                  },
-                },
+                properties: props,
               };
-            }
+            })
+          );
 
-            // 2) Fall back to Redis-persisted data (level, xp, zone, kills, etc.)
-            if (baseName) {
-              try {
-                const saved = await loadCharacter(walletAddress, baseName);
-                if (saved) {
-                  return {
-                    tokenId: nft.id.toString(),
-                    name: nft.metadata.name,
-                    description: nft.metadata.description,
-                    properties: {
-                      ...props,
-                      level: saved.level,
-                      xp: saved.xp,
-                    },
-                  };
-                }
-              } catch {
-                // Redis lookup failed, fall through to raw NFT metadata
-              }
-            }
+          return { walletAddress, liveEntity, characters };
+        }
 
-            // 3) Raw NFT metadata (mint-time values)
+        // Fallback: on-chain returned empty — build characters from Redis
+        const savedChars = await loadAllCharactersForWallet(walletAddress);
+        if (savedChars.length > 0) {
+          server.log.info(`[characters] On-chain empty for ${walletAddress}, serving ${savedChars.length} character(s) from Redis`);
+        }
+
+        const characters = savedChars.map((saved, i) => {
+          const name = saved.name;
+          const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
+          const fullName = classDef ? `${name} the ${classDef.name}` : name;
+
+          // Overlay live entity data if available
+          if (liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name))) {
             return {
-              tokenId: nft.id.toString(),
-              name: nft.metadata.name,
-              description: nft.metadata.description,
-              properties: props,
+              tokenId: `redis-${i}`,
+              name: fullName,
+              description: `Level ${liveEntity.level} ${saved.raceId} ${saved.classId}`,
+              properties: {
+                race: saved.raceId,
+                class: saved.classId,
+                level: liveEntity.level,
+                xp: liveEntity.xp,
+                stats: { hp: liveEntity.maxHp },
+              },
             };
-          })
-        );
+          }
 
-        return {
-          walletAddress,
-          liveEntity,
-          characters,
-        };
+          return {
+            tokenId: `redis-${i}`,
+            name: fullName,
+            description: `Level ${saved.level} ${saved.raceId} ${saved.classId}`,
+            properties: {
+              race: saved.raceId,
+              class: saved.classId,
+              level: saved.level,
+              xp: saved.xp,
+              stats: {},
+            },
+          };
+        });
+
+        return { walletAddress, liveEntity, characters };
       } catch (err) {
         server.log.error(err, `Failed to fetch characters for ${walletAddress}`);
         reply.code(500);
