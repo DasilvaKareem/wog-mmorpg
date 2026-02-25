@@ -329,6 +329,29 @@ export function LandingPage(): React.ReactElement {
         </div>
       </section>
 
+      {/* ── PRICING CTA ── */}
+      <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          Deploy an Agent
+        </h2>
+        <p className="mb-6 text-center text-[9px] leading-relaxed text-[#9aa7cc]">
+          Let an AI champion fight for you 24/7. Free tier available — upgrade
+          for smart agents that adapt their strategy in real-time.
+        </p>
+        <div className="flex items-center justify-center gap-4">
+          <Link
+            to="/pricing"
+            className="border-4 border-black bg-[#54f28b] px-6 py-2 text-[10px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+          >
+            {">>>"} View Pricing {"<<<"}
+          </Link>
+          <div className="text-[8px] text-[#565f89]">Starting at $0/mo</div>
+        </div>
+      </section>
+
       {/* ── STATS ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2

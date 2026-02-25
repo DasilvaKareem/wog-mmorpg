@@ -33,6 +33,7 @@ const MENUS: DropdownMenu[] = [
     icon: "$$",
     items: [
       { label: "NFT Marketplace", to: "/marketplace", icon: "$$" },
+      { label: "Agent Pricing", to: "/pricing", icon: "&&" },
     ],
   },
   {
