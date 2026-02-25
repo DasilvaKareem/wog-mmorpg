@@ -343,6 +343,9 @@ export function recalculateEntityVitals(entity: Entity): void {
   entity.effectiveStats = effective;
   if (!effective) return;
 
+  // Don't resurrect dead entities — only recalc if alive
+  if (entity.hp <= 0) return;
+
   const previousMaxHp = entity.maxHp > 0 ? entity.maxHp : effective.hp;
   const ratio = previousMaxHp > 0 ? entity.hp / previousMaxHp : 1;
 
