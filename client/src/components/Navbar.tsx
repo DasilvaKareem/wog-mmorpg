@@ -26,6 +26,7 @@ const MENUS: DropdownMenu[] = [
       { label: "Story & Lore", to: "/story", icon: "<<" },
       { label: "Media", to: "/media", icon: "[]" },
       { label: "x402 Agent Deploy", to: "/x402", icon: "$>" },
+      { label: "Pricing", to: "/pricing", icon: "&&" },
     ],
   },
   {

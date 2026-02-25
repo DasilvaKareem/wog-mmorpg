@@ -84,6 +84,40 @@ export function getZoneConnections(zoneId: string): string[] {
   return result;
 }
 
+function normalizeZoneKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Resolve a user-provided zone label to a canonical zone ID.
+ * Accepts common variants like spaces/underscores/punctuation.
+ */
+export function resolveZoneId(zoneInput?: string | null): string | null {
+  if (!zoneInput) return null;
+  const raw = String(zoneInput).trim();
+  if (!raw) return null;
+
+  const layout = loadLayout();
+  const zoneIds = Object.keys(layout.zones);
+
+  const direct = raw.toLowerCase();
+  if (zoneIds.includes(direct)) return direct;
+
+  const slug = direct
+    .replace(/[_\s]+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  if (zoneIds.includes(slug)) return slug;
+
+  const targetKey = normalizeZoneKey(raw);
+  if (!targetKey) return null;
+  const keyedMatches = zoneIds.filter((id) => normalizeZoneKey(id) === targetKey);
+  if (keyedMatches.length === 1) return keyedMatches[0];
+
+  return null;
+}
+
 /**
  * Determine the shared edge direction between two adjacent zones based on world offsets.
  * Returns 'east'|'west'|'north'|'south' if they share a full edge, or null (corner-only).

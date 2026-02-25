@@ -23,6 +23,7 @@ import {
 } from "./agentConfigStore.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { getAllZones } from "./zoneRuntime.js";
+import { getWorldLayout, resolveZoneId } from "./worldLayout.js";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -69,6 +70,7 @@ async function getFullGameState(userWallet: string) {
 }
 
 export function registerAgentChatRoutes(server: FastifyInstance): void {
+  const availableZoneIds = Object.keys(getWorldLayout().zones);
 
   // ── POST /agent/deploy ────────────────────────────────────────────────────
   server.post<{
@@ -353,8 +355,9 @@ RULES:
 2. ALWAYS call update_focus when the user wants you to change what you're doing. ANY request to fight, gather, craft, shop, brew, cook, quest, or idle MUST trigger update_focus. Do NOT just say you'll do it — call the tool.
 3. Call take_action for one-off actions: learning a profession, buying a specific item, equipping gear.
 4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
+5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
 
     // Build message history — include tool action context so the LLM knows what it did
@@ -463,11 +466,30 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             };
             const patch: any = { focus: input.focus };
             if (input.strategy) patch.strategy = input.strategy;
-            if (input.targetZone) patch.targetZone = input.targetZone;
+            const hasTargetZoneText = typeof input.targetZone === "string" && input.targetZone.trim().length > 0;
+            if (input.focus === "traveling") {
+              const normalizedTargetZone = resolveZoneId(input.targetZone);
+              if (normalizedTargetZone) {
+                patch.targetZone = normalizedTargetZone;
+              } else if (hasTargetZoneText) {
+                patch.targetZone = undefined;
+                actionsTaken.push(`[unknown zone "${input.targetZone}"]`);
+              }
+            } else {
+              // Prevent stale travel directives from overriding non-travel focus.
+              patch.targetZone = undefined;
+            }
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
-            actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}]`);
-            server.log.info(`[agent/chat] Config updated: focus=${input.focus} strategy=${input.strategy ?? "unchanged"}`);
+            actionsTaken.push(
+              `[switched to ${input.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
+            );
+            server.log.info(
+              `[agent/chat] Config updated: focus=${input.focus} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
+            );
+
+            const runner = agentManager.getRunner(authWallet);
+            if (runner) runner.clearScript();
           } catch {}
         }
         if (toolCall.function.name === "take_action") {
@@ -598,7 +620,28 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     const patch: Record<string, any> = {};
     if (focus && validFocus.has(focus)) patch.focus = focus;
     if (strategy && validStrategy.has(strategy)) patch.strategy = strategy;
-    if (targetZone !== undefined) patch.targetZone = targetZone;
+
+    if (targetZone !== undefined) {
+      if (targetZone == null || (typeof targetZone === "string" && targetZone.trim() === "")) {
+        patch.targetZone = undefined;
+      } else if (typeof targetZone === "string") {
+        const normalizedTargetZone = resolveZoneId(targetZone);
+        if (!normalizedTargetZone) {
+          return reply.code(400).send({
+            error: `Unknown targetZone: ${targetZone}`,
+            validZones: availableZoneIds,
+          });
+        }
+        patch.targetZone = normalizedTargetZone;
+      } else {
+        return reply.code(400).send({ error: "targetZone must be a string" });
+      }
+    }
+
+    // Prevent stale travel targets from forcing travel when user switches focus.
+    if (patch.focus && patch.focus !== "traveling") {
+      patch.targetZone = undefined;
+    }
 
     if (Object.keys(patch).length === 0) {
       return reply.code(400).send({ error: "No valid fields to update" });

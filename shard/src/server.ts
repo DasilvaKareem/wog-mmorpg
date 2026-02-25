@@ -228,11 +228,6 @@ const start = async () => {
     server.log.warn(`[telegram] Bot init failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
-  // Restore agent loops that were running before last restart
-  agentManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
   // Restore gold reservations from Redis (prevents double-spend after restart)
   restoreReservations().catch((err: any) => {
     server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
@@ -252,6 +247,12 @@ const start = async () => {
 
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
+
+  // Restore agent loops only after HTTP server is live.
+  // Agent auth + setup uses API calls that fail pre-listen.
+  agentManager.restoreFromRedis().catch((err: any) => {
+    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
 };
 
 // Graceful shutdown: stop all agent loops

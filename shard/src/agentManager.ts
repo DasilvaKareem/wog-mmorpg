@@ -3,9 +3,25 @@
  */
 
 import { AgentRunner } from "./agentRunner.js";
-import { getAgentConfig, getAgentEntityRef, patchAgentConfig } from "./agentConfigStore.js";
+import {
+  getAgentConfig,
+  getAgentCustodialWallet,
+  getAgentEntityRef,
+  patchAgentConfig,
+} from "./agentConfigStore.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { getRedis } from "./redis.js";
+import { setupAgentCharacter } from "./agentCharacterSetup.js";
+
+const API_URL = process.env.API_URL || "http://localhost:3000";
+
+interface CharacterMetadata {
+  name?: string;
+  properties?: {
+    race?: string;
+    class?: string;
+  };
+}
 
 class AgentManager {
   private loops = new Map<string, AgentRunner>();
@@ -14,8 +30,7 @@ class AgentManager {
    * Start an agent loop.
    * @param waitForFirstTick  If true, waits for the first game tick to succeed
    *                          before resolving. Throws if the tick fails (bad auth,
-   *                          missing entity, etc). Use true for deploys, false for
-   *                          boot restores.
+   *                          missing entity, etc).
    */
   async start(userWallet: string, waitForFirstTick = false): Promise<void> {
     const key = userWallet.toLowerCase();
@@ -63,6 +78,75 @@ class AgentManager {
     return this.loops.get(key) ?? null;
   }
 
+  private async hasLiveEntity(userWallet: string): Promise<boolean> {
+    const key = userWallet.toLowerCase();
+    const ref = await getAgentEntityRef(key);
+    if (!ref) return false;
+
+    const refZone = getAllZones().get(ref.zoneId);
+    if (refZone?.entities.has(ref.entityId)) return true;
+
+    for (const [, zone] of getAllZones()) {
+      if (zone.entities.has(ref.entityId)) return true;
+    }
+    return false;
+  }
+
+  private async getPrimaryCharacter(custodialWallet: string): Promise<CharacterMetadata | null> {
+    try {
+      const res = await fetch(`${API_URL}/character/${custodialWallet}`);
+      if (!res.ok) return null;
+      const data = await res.json() as { characters?: CharacterMetadata[] };
+      return data.characters?.[0] ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private extractRawName(characterName?: string): string | null {
+    if (!characterName) return null;
+    const trimmed = characterName.trim();
+    if (!trimmed) return null;
+    const suffixMatch = trimmed.match(/^(.+?)\s+the\s+\w+$/i);
+    return suffixMatch ? suffixMatch[1] : trimmed;
+  }
+
+  /**
+   * If an enabled agent has no live entity (common after process restart),
+   * respawn from its custodial wallet character metadata.
+   */
+  private async rehydrateMissingEntity(userWallet: string): Promise<boolean> {
+    const key = userWallet.toLowerCase();
+    if (await this.hasLiveEntity(key)) return true;
+
+    const custodialWallet = await getAgentCustodialWallet(key);
+    if (!custodialWallet) {
+      console.warn(`[AgentManager] Rehydrate skipped for ${key.slice(0, 8)}: no custodial wallet mapping`);
+      return false;
+    }
+
+    const character = await this.getPrimaryCharacter(custodialWallet);
+    const characterName = this.extractRawName(character?.name);
+    const raceId = character?.properties?.race ?? "human";
+    const classId = character?.properties?.class ?? "warrior";
+
+    if (!characterName) {
+      console.warn(`[AgentManager] Rehydrate skipped for ${key.slice(0, 8)}: no character NFT found`);
+      return false;
+    }
+
+    try {
+      const setup = await setupAgentCharacter(key, characterName, raceId, classId);
+      console.log(
+        `[AgentManager] Rehydrated ${key.slice(0, 8)}: entity=${setup.entityId} zone=${setup.zoneId}${setup.alreadyExisted ? " [EXISTING]" : " [RESPAWNED]"}`
+      );
+      return true;
+    } catch (err: any) {
+      console.warn(`[AgentManager] Rehydrate failed for ${key.slice(0, 8)}: ${err.message?.slice(0, 120)}`);
+      return false;
+    }
+  }
+
   /**
    * Self-healing check: if agent should be running (config.enabled + entity in zone)
    * but isn't, restart it. Called from the status endpoint so polling auto-heals.
@@ -79,29 +163,16 @@ class AgentManager {
     const config = await getAgentConfig(key);
     if (!config?.enabled) return false;
 
-    const ref = await getAgentEntityRef(key);
-    if (!ref) return false;
-
-    // Verify entity still exists — check ref zone first, then scan all zones
-    // (entity may have moved since Redis ref was written)
-    let found = false;
-    const refZone = getAllZones().get(ref.zoneId);
-    if (refZone?.entities.has(ref.entityId)) {
-      found = true;
-    } else {
-      for (const [, zone] of getAllZones()) {
-        if (zone.entities.has(ref.entityId)) {
-          found = true;
-          break;
-        }
-      }
+    let found = await this.hasLiveEntity(key);
+    if (!found) {
+      found = await this.rehydrateMissingEntity(key);
     }
     if (!found) return false;
 
     // Agent should be running but isn't — restart
     console.log(`[AgentManager] Self-heal: restarting agent for ${key.slice(0, 8)} (was dead but enabled + entity alive)`);
     try {
-      await this.start(key);
+      await this.start(key, true);
       return true;
     } catch (err: any) {
       console.warn(`[AgentManager] Self-heal restart failed for ${key.slice(0, 8)}: ${err.message?.slice(0, 80)}`);
@@ -152,7 +223,13 @@ class AgentManager {
         if (!config.enabled) continue;
 
         const userWallet = key.replace("agent:config:", "");
-        await this.start(userWallet);
+        const rehydrated = await this.rehydrateMissingEntity(userWallet);
+        if (!rehydrated) {
+          failed++;
+          console.warn(`[AgentManager] Boot restore skipped for ${userWallet.slice(0, 8)}: could not rehydrate entity`);
+          continue;
+        }
+        await this.start(userWallet, true);
         restored++;
       } catch (err: any) {
         failed++;

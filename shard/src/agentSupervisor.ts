@@ -17,7 +17,7 @@ import Groq from "groq-sdk";
 import type { BotScript, TriggerEvent } from "./botScriptTypes.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const SUPERVISOR_MODEL = process.env.AGENT_SUPERVISOR_MODEL ?? "llama-3.3-70b-versatile";
+const SUPERVISOR_MODEL = process.env.AGENT_SUPERVISOR_MODEL ?? "openai/gpt-oss-120b";
 const MAX_TURNS = 5;
 
 // ── Context ───────────────────────────────────────────────────────────────
@@ -287,9 +287,8 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
   const entity = ctx.entity;
   const eq = entity.equipment ?? {};
   const hasWeapon = Boolean(eq.weapon);
-  const gold = Number(entity.gold ?? 0);
 
-  if (!hasWeapon && gold >= 10) return { type: "shop", reason: "No weapon — need gear first" };
+  if (!hasWeapon) return { type: "shop", reason: "No weapon — need gear first" };
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
   if (event.type === "zone_arrived") return { type: "quest", reason: "New zone — check for quests" };
   if (event.type === "no_targets") {

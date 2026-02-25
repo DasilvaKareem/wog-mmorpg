@@ -10,7 +10,7 @@ const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 /** How many ticks between LLM decisions. Default 5 = ~6s at 1200ms/tick. */
 export const DECISION_INTERVAL = parseInt(process.env.AGENT_DECISION_INTERVAL ?? "5", 10);
-const DECISION_MODEL = process.env.AGENT_DECISION_MODEL ?? "llama-3.3-70b-versatile";
+const DECISION_MODEL = process.env.AGENT_DECISION_MODEL ?? "openai/gpt-oss-120b";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 

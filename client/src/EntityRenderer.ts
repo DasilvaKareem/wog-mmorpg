@@ -15,12 +15,19 @@ interface EntityVisual {
   lastY: number;
   facing: "down" | "left" | "right" | "up";
   moving: boolean;
+  isNpc: boolean;
+  hovered: boolean;
 }
 
 const SPRITE_SIZE = 16;
 const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
+
+const NPC_TYPES = new Set([
+  "merchant", "trainer", "profession-trainer", "guild-registrar",
+  "auctioneer", "arena-master", "quest-giver", "lore-npc", "npc",
+]);
 
 const PARTY_COLORS = [
   0x54f28b, 0xffcc00, 0x9ab9ff, 0xff8800,
@@ -167,6 +174,8 @@ export class EntityRenderer {
         lastY: py,
         facing: "down",
         moving: false,
+        isNpc: false,
+        hovered: false,
       };
     }
 
@@ -181,10 +190,32 @@ export class EntityRenderer {
       .setDepth(entityDepth)
       .setInteractive({ useHandCursor: true });
 
+    const isNpc = NPC_TYPES.has(entity.type);
+
     sprite.on("pointerdown", () => {
       const ent = this.entities.get(id);
       if (ent && this.onClickCallback) {
         this.onClickCallback(ent);
+      }
+    });
+
+    sprite.on("pointerover", () => {
+      const v = this.visuals.get(id);
+      if (v && v.isNpc) {
+        v.hovered = true;
+        v.label.setVisible(true);
+        v.hpBar.setVisible(true);
+        v.hpBg.setVisible(true);
+      }
+    });
+
+    sprite.on("pointerout", () => {
+      const v = this.visuals.get(id);
+      if (v && v.isNpc) {
+        v.hovered = false;
+        v.label.setVisible(false);
+        v.hpBar.setVisible(false);
+        v.hpBg.setVisible(false);
       }
     });
 
@@ -235,6 +266,13 @@ export class EntityRenderer {
         .setDepth(entityDepth - 1);
     }
 
+    // Hide NPC labels and HP bars by default — shown on hover
+    if (isNpc) {
+      label.setVisible(false);
+      hpBar.setVisible(false);
+      hpBg.setVisible(false);
+    }
+
     return {
       sprite,
       label,
@@ -245,6 +283,8 @@ export class EntityRenderer {
       lastY: py,
       facing: "down",
       moving: false,
+      isNpc,
+      hovered: false,
     };
   }
 
@@ -392,9 +432,11 @@ export class EntityRenderer {
   setSpritesVisible(visible: boolean): void {
     for (const visual of this.visuals.values()) {
       visual.sprite.setVisible(visible);
-      visual.label.setVisible(visible);
-      visual.hpBar.setVisible(visible);
-      visual.hpBg.setVisible(visible);
+      // NPC labels/HP stay hidden unless hovered
+      const showDetails = visible && (!visual.isNpc || visual.hovered);
+      visual.label.setVisible(showDetails);
+      visual.hpBar.setVisible(showDetails);
+      visual.hpBg.setVisible(showDetails);
       visual.partyRing?.setVisible(visible);
     }
   }

@@ -15,7 +15,8 @@ import {
 } from "./agentConfigStore.js";
 import { exportCustodialWallet } from "./custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "./authHelper.js";
-import { ZONE_LEVEL_REQUIREMENTS } from "./worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, resolveZoneId } from "./worldLayout.js";
+import { goldToCopper } from "./currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { type BotScript, type TriggerEvent, type TriggerType } from "./botScriptTypes.js";
 
@@ -467,13 +468,13 @@ export class AgentRunner {
         if (aq.complete && aq.quest?.npcId) {
           // Find the NPC entity in the zone to turn in
           try {
-            const zoneRes = await this.api("GET", `/quests/zone/${this.currentZone}/${this.entityId}`);
-            // The quest.npcId is the NPC name — find matching entity from available quests or zone
-            // For turn-in, try talk endpoint first (handles talk quests + proximity)
-            // Then try the complete endpoint with each quest-giver NPC
-            const availableQuests: any[] = zoneRes?.quests ?? [];
-            // Find any NPC entity ID from available quests that matches
-            const npcEntityId = availableQuests.find((q: any) => q.npcName === aq.quest?.npcId)?.npcEntityId;
+            const zoneState = await this.api("GET", `/zones/${this.currentZone}`);
+            const entityEntries = Object.entries(zoneState?.entities ?? {});
+            const npcName = String(aq.quest?.npcId ?? "").toLowerCase();
+            const npcEntityId = entityEntries.find(([, e]: [string, any]) => {
+              if (!e || e.type !== "quest-giver") return false;
+              return String(e.name ?? "").toLowerCase() === npcName;
+            })?.[0];
             if (npcEntityId) {
               const completeRes = await this.api("POST", "/quests/complete", {
                 zoneId: this.currentZone,
@@ -521,14 +522,14 @@ export class AgentRunner {
         // Try talking to all quest-giver NPCs in zone
         try {
           const zoneState = await this.api("GET", `/zones/${this.currentZone}`);
-          const entities: any[] = zoneState?.entities ?? [];
-          for (const e of entities) {
+          const entities = Object.entries(zoneState?.entities ?? {}) as Array<[string, any]>;
+          for (const [entityId, e] of entities) {
             if (e.type === "quest-giver") {
               try {
                 await this.api("POST", "/quests/talk", {
                   zoneId: this.currentZone,
                   playerId: this.entityId,
-                  npcEntityId: e.id,
+                  npcEntityId: entityId,
                 });
               } catch {
                 // Not in range or no talk quest for this NPC
@@ -879,7 +880,11 @@ export class AgentRunner {
       try {
         inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
       } catch {}
-      const goldBalance = Number(inv?.gold ?? 0);
+      const walletCopper = Number(inv?.copper ?? NaN);
+      const walletGold = Number(inv?.gold ?? 0);
+      const copperBalance = Number.isFinite(walletCopper)
+        ? walletCopper
+        : goldToCopper(walletGold);
 
       // For each empty slot, find cheapest matching item and buy+equip
       for (const slot of emptySlots) {
@@ -892,8 +897,8 @@ export class AgentRunner {
         if (matching.length === 0) continue;
 
         const cheapest = matching[0];
-        const price = cheapest.copperPrice ?? cheapest.buyPrice ?? 0;
-        if (price > goldBalance) continue;
+        const priceCopper = cheapest.currentPrice ?? cheapest.copperPrice ?? cheapest.buyPrice ?? 0;
+        if (priceCopper > copperBalance) continue;
 
         // Buy
         const tokenId = Number(cheapest.tokenId);
@@ -923,7 +928,15 @@ export class AgentRunner {
     if (!this.api || !this.entityId) return;
     try {
       const config = await getAgentConfig(this.userWallet);
-      const targetZone = config?.targetZone;
+      const rawTargetZone = config?.targetZone;
+      const targetZone = resolveZoneId(rawTargetZone);
+
+      if (rawTargetZone && !targetZone) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Invalid travel target zone: ${rawTargetZone}`);
+        void this.logActivity(`Unknown destination "${rawTargetZone}" — clearing travel target`);
+        await patchAgentConfig(this.userWallet, { focus: "questing", targetZone: undefined });
+        return;
+      }
 
       if (!targetZone || targetZone === this.currentZone) {
         // Already arrived or no target — switch back to questing
@@ -944,6 +957,7 @@ export class AgentRunner {
         const myLevel = (await this.getEntityState())?.level ?? 1;
         if (myLevel < direct.levelReq) {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${direct.levelReq} for ${targetZone}, currently ${myLevel} — grinding`);
+          void this.logActivity(`Need Lv${direct.levelReq} for ${targetZone} (Lv${myLevel}) — training here`);
           await this.doCombat(strategy);
           return;
         }
@@ -967,6 +981,7 @@ export class AgentRunner {
         const nextLevelReq = ZONE_LEVEL_REQUIREMENTS[nextZone] ?? 1;
         if (myLevel < nextLevelReq) {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${nextLevelReq} for ${nextZone}, currently ${myLevel} — grinding`);
+          void this.logActivity(`Need Lv${nextLevelReq} for ${nextZone} (Lv${myLevel}) — training here`);
           await this.doCombat(strategy);
           return;
         }
@@ -984,6 +999,7 @@ export class AgentRunner {
 
       // Can't find a path — fall back to combat
       console.log(`[agent:${this.userWallet.slice(0, 8)}] No path from ${this.currentZone} to ${targetZone}`);
+      void this.logActivity(`No path from ${this.currentZone} to ${targetZone} — training here`);
       await this.doCombat(strategy);
     } catch (err: any) {
       console.debug(`[agent] travel tick: ${err.message?.slice(0, 80)}`);
@@ -1136,14 +1152,18 @@ export class AgentRunner {
       let inv: any = null;
       try { inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`); } catch {}
       const items: any[] = inv?.items ?? [];
-      const gold = Number(inv?.gold ?? 0);
+      const walletCopper = Number(inv?.copper ?? NaN);
+      const walletGold = Number(inv?.gold ?? 0);
+      const copper = Number.isFinite(walletCopper)
+        ? walletCopper
+        : goldToCopper(walletGold);
       const hasFood = items.some((i: any) => i.category === "food" && Number(i.balance) > 0);
       const hasPotions = items.some((i: any) => (i.category === "potion" || i.category === "consumable") && Number(i.balance) > 0);
       const equipment = entity.equipment ?? {};
       const hasWeapon = Boolean(equipment.weapon);
 
-      // Priority 1: No weapon + have gold → go shopping
-      if (!hasWeapon && gold >= 10) {
+      // Priority 1: No weapon + enough copper for starter gear → go shopping
+      if (!hasWeapon && copper >= 10) {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no weapon, going shopping`);
         void this.logActivity("No weapon equipped — heading to shop");
         await patchAgentConfig(this.userWallet, { focus: "shopping" });
@@ -1416,8 +1436,17 @@ export class AgentRunner {
         const repairing = await this.handleRepair(entity);
         if (repairing) { await sleep(TICK_MS); continue; }
 
-        // If targetZone is set, push focus to traveling so supervisor picks it up
-        if (config.targetZone && config.targetZone !== this.currentZone && focus !== "traveling") {
+        // If targetZone is set, push focus to traveling so supervisor picks it up.
+        // Normalize or clear malformed zone labels from chat/tool output.
+        const normalizedTargetZone = resolveZoneId(config.targetZone);
+        if (config.targetZone && !normalizedTargetZone) {
+          await patchAgentConfig(this.userWallet, { targetZone: undefined });
+          this.currentScript = null;
+        }
+        if (normalizedTargetZone && normalizedTargetZone !== config.targetZone) {
+          await patchAgentConfig(this.userWallet, { targetZone: normalizedTargetZone });
+        }
+        if (normalizedTargetZone && normalizedTargetZone !== this.currentZone && focus !== "traveling") {
           await patchAgentConfig(this.userWallet, { focus: "traveling" });
           this.currentScript = null; // supervisor will assign travel script
         }
