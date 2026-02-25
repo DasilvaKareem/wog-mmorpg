@@ -5,19 +5,46 @@ const PLANS = [
   {
     name: "Free",
     price: "$0",
-    period: "/month",
+    period: "/forever",
     color: "#9aa7cc",
     border: "#3a4260",
     icon: ">>",
+    highlight: null,
     features: [
-      "20 Notifications / month",
-      "25 Commands / month",
-      "We host your agent",
-      "Disconnects every 6 hours",
-      "Basic agent strategy",
+      { text: "10 Notifications / month", dim: false },
+      { text: "15 Commands / month", dim: false },
+      { text: "6-hour play sessions", dim: false },
+      { text: "We host your agent", dim: false },
+      { text: "Basic fixed strategy", dim: false },
+      { text: "Starter zone only", dim: true },
+      { text: "No retreat AI", dim: true },
+      { text: "No technique optimization", dim: true },
     ],
-    cta: "Get Started",
+    cta: "Get Started Free",
     popular: false,
+    tagline: "Try the world",
+  },
+  {
+    name: "Starter",
+    price: "$4.99",
+    period: "/month",
+    color: "#44ddff",
+    border: "#44ddff",
+    icon: "++",
+    highlight: null,
+    features: [
+      { text: "50 Notifications / month", dim: false },
+      { text: "50 Commands / month", dim: false },
+      { text: "12-hour play sessions", dim: false },
+      { text: "We host your agent", dim: false },
+      { text: "Smart Agent AI", dim: false },
+      { text: "All 10 zones unlocked", dim: false },
+      { text: "Retreat + heal logic", dim: false },
+      { text: "Technique usage", dim: false },
+    ],
+    cta: "Subscribe",
+    popular: false,
+    tagline: "Play smarter",
   },
   {
     name: "Pro",
@@ -26,35 +53,20 @@ const PLANS = [
     color: "#54f28b",
     border: "#54f28b",
     icon: "**",
+    highlight: "Best Value",
     features: [
-      "100 Notifications / month",
-      "100 Commands / month",
-      "We host your agent",
-      "24/7 always online",
-      "Premium Smart Agent",
-      "Adaptive strategy AI",
+      { text: "Unlimited Notifications", dim: false },
+      { text: "Unlimited Commands", dim: false },
+      { text: "24/7 always online", dim: false },
+      { text: "We host your agent", dim: false },
+      { text: "Premium Adaptive Agent", dim: false },
+      { text: "All 10 zones unlocked", dim: false },
+      { text: "Real-time strategy shifts", dim: false },
+      { text: "Market-aware trading", dim: false },
     ],
     cta: "Subscribe",
     popular: true,
-  },
-  {
-    name: "Elite",
-    price: "$19.99",
-    period: "/month",
-    color: "#ffcc00",
-    border: "#ffcc00",
-    icon: "^^",
-    features: [
-      "250 Notifications / month",
-      "250 Commands / month",
-      "We host your agent",
-      "24/7 always online",
-      "Premium Smart Agent",
-      "Adaptive strategy AI",
-      "Priority support",
-    ],
-    cta: "Subscribe",
-    popular: false,
+    tagline: "Never stop grinding",
   },
   {
     name: "Deploy Your Own",
@@ -63,21 +75,51 @@ const PLANS = [
     color: "#aa44ff",
     border: "#aa44ff",
     icon: "$>",
+    highlight: null,
     features: [
-      "Unlimited notifications",
-      "Unlimited commands",
-      "Self-hosted agent",
-      "24/7 always online",
-      "Full API access",
-      "Custom strategy code",
-      "You own the infra",
+      { text: "Unlimited everything", dim: false },
+      { text: "Self-hosted agent", dim: false },
+      { text: "24/7 always online", dim: false },
+      { text: "Full HTTP API access", dim: false },
+      { text: "Write custom strategy", dim: false },
+      { text: "Multiple agents OK", dim: false },
+      { text: "Open source client", dim: false },
+      { text: "You own the infra", dim: false },
     ],
     cta: "Deploy Guide",
     popular: false,
+    tagline: "Total control",
   },
 ];
 
 export function PricingPage(): React.ReactElement {
+  const [annual, setAnnual] = React.useState(false);
+
+  function displayPrice(plan: typeof PLANS[number]): string {
+    if (plan.price === "$0" || plan.price === "You Pay") return plan.price;
+    const monthly = parseFloat(plan.price.replace("$", ""));
+    if (annual) {
+      const yearlyMonthly = +(monthly * 10 / 12).toFixed(2);
+      return `$${yearlyMonthly}`;
+    }
+    return plan.price;
+  }
+
+  function displayPeriod(plan: typeof PLANS[number]): string {
+    if (plan.price === "$0") return "/forever";
+    if (plan.price === "You Pay") return "infra costs";
+    if (annual) return "/mo (billed yearly)";
+    return "/month";
+  }
+
+  function annualSavings(plan: typeof PLANS[number]): string | null {
+    if (!annual) return null;
+    if (plan.price === "$0" || plan.price === "You Pay") return null;
+    const monthly = parseFloat(plan.price.replace("$", ""));
+    const saved = +(monthly * 2).toFixed(2);
+    return `Save $${saved}/yr`;
+  }
+
   return (
     <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden">
       {/* Scanline overlay */}
@@ -98,10 +140,38 @@ export function PricingPage(): React.ReactElement {
           Agent Pricing
         </h1>
         <p className="mx-auto max-w-lg text-[10px] leading-relaxed text-[#9aa7cc]">
-          Deploy an AI agent into the World of Geneva. Choose a hosted plan or
-          bring your own infrastructure. Your agent fights, trades, quests, and
-          levels up autonomously.
+          Deploy an AI agent into the World of Geneva. Your agent fights,
+          trades, quests, and levels up autonomously — you just watch.
         </p>
+
+        {/* Billing toggle */}
+        <div className="mt-6 flex items-center justify-center gap-3">
+          <span
+            className="text-[9px] uppercase tracking-wide"
+            style={{ color: annual ? "#565f89" : "#ffcc00" }}
+          >
+            Monthly
+          </span>
+          <button
+            onClick={() => setAnnual(!annual)}
+            className="relative h-5 w-10 border-2 border-black shadow-[2px_2px_0_0_#000]"
+            style={{ backgroundColor: annual ? "#54f28b" : "#2a3450" }}
+          >
+            <div
+              className="absolute top-0.5 h-3 w-3 border border-black bg-white transition-all"
+              style={{ left: annual ? "20px" : "2px" }}
+            />
+          </button>
+          <span
+            className="text-[9px] uppercase tracking-wide"
+            style={{ color: annual ? "#ffcc00" : "#565f89" }}
+          >
+            Annual
+          </span>
+          {annual && (
+            <span className="text-[8px] text-[#54f28b]">2 months free</span>
+          )}
+        </div>
       </section>
 
       {/* ── PRICING CARDS ── */}
@@ -119,17 +189,17 @@ export function PricingPage(): React.ReactElement {
                 borderColor: plan.popular ? plan.border : "#000",
               }}
             >
-              {/* Popular badge */}
-              {plan.popular && (
+              {/* Badge */}
+              {plan.highlight && (
                 <div
                   className="absolute -top-3 left-1/2 -translate-x-1/2 border-2 border-black bg-[#54f28b] px-3 py-0.5 text-[7px] font-bold uppercase tracking-widest text-[#060d12]"
                 >
-                  Most Popular
+                  {plan.highlight}
                 </div>
               )}
 
               {/* Plan icon + name */}
-              <div className="mb-3 flex items-center gap-2">
+              <div className="mb-1 flex items-center gap-2">
                 <span className="text-[12px]" style={{ color: plan.color }}>
                   {plan.icon}
                 </span>
@@ -141,17 +211,29 @@ export function PricingPage(): React.ReactElement {
                 </h3>
               </div>
 
+              {/* Tagline */}
+              <p className="mb-3 text-[7px] text-[#565f89]">{plan.tagline}</p>
+
               {/* Price */}
-              <div className="mb-4">
+              <div className="mb-1">
                 <span
                   className="text-[22px] font-bold"
                   style={{ color: plan.color, textShadow: "2px 2px 0 #000" }}
                 >
-                  {plan.price}
+                  {displayPrice(plan)}
                 </span>
                 <span className="ml-1 text-[8px] text-[#565f89]">
-                  {plan.period}
+                  {displayPeriod(plan)}
                 </span>
+              </div>
+
+              {/* Annual savings */}
+              <div className="mb-3 h-4">
+                {annualSavings(plan) && (
+                  <span className="text-[7px] text-[#54f28b]">
+                    {annualSavings(plan)}
+                  </span>
+                )}
               </div>
 
               {/* Divider */}
@@ -165,12 +247,18 @@ export function PricingPage(): React.ReactElement {
               {/* Features */}
               <ul className="mb-6 flex flex-1 flex-col gap-2">
                 {plan.features.map((feat) => (
-                  <li key={feat} className="flex items-start gap-2">
-                    <span className="mt-0.5 text-[8px]" style={{ color: plan.color }}>
-                      {">"}
+                  <li key={feat.text} className="flex items-start gap-2">
+                    <span
+                      className="mt-0.5 text-[8px]"
+                      style={{ color: feat.dim ? "#3a4260" : plan.color }}
+                    >
+                      {feat.dim ? "x" : ">"}
                     </span>
-                    <span className="text-[8px] leading-snug text-[#9aa7cc]">
-                      {feat}
+                    <span
+                      className="text-[8px] leading-snug"
+                      style={{ color: feat.dim ? "#3a4260" : "#9aa7cc", textDecoration: feat.dim ? "line-through" : "none" }}
+                    >
+                      {feat.text}
                     </span>
                   </li>
                 ))}
@@ -206,8 +294,64 @@ export function PricingPage(): React.ReactElement {
         </div>
       </section>
 
-      {/* ── COMPARISON TABLE ── */}
+      {/* ── WHAT YOU GET ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
+        <h2
+          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          style={{ textShadow: "3px 3px 0 #000" }}
+        >
+          What Each Tier Gets You
+        </h2>
+        <div className="grid gap-4 sm:grid-cols-3">
+          {[
+            {
+              title: "Basic Agent",
+              tier: "Free",
+              color: "#9aa7cc",
+              desc: "Walks toward mobs, basic attacks only. No retreat logic — your agent will fight to the death. No technique usage. Gets stuck on tough mobs. Limited to Village Square.",
+            },
+            {
+              title: "Smart Agent",
+              tier: "Starter",
+              color: "#44ddff",
+              desc: "Retreats when low HP. Uses class techniques. Knows when to heal. Picks appropriate mobs for its level. Travels between zones as it levels up.",
+            },
+            {
+              title: "Adaptive Agent",
+              tier: "Pro",
+              color: "#54f28b",
+              desc: "Shifts strategy in real-time. Learns which mobs give the best XP. Optimizes gear loadouts. Trades on the auction house. Adapts its entire playstyle as the meta evolves.",
+            },
+          ].map((agent) => (
+            <div
+              key={agent.title}
+              className="border-4 border-black p-4 shadow-[4px_4px_0_0_#000]"
+              style={{
+                background:
+                  "repeating-linear-gradient(0deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 1px,transparent 1px,transparent 6px),linear-gradient(180deg,#121a2c,#0b1020)",
+              }}
+            >
+              <div className="mb-1 flex items-center gap-2">
+                <h3
+                  className="text-[10px] uppercase tracking-wide"
+                  style={{ color: agent.color, textShadow: "2px 2px 0 #000" }}
+                >
+                  {agent.title}
+                </h3>
+              </div>
+              <div className="mb-2 text-[7px] uppercase tracking-widest text-[#565f89]">
+                {agent.tier} tier
+              </div>
+              <p className="text-[8px] leading-relaxed text-[#9aa7cc]">
+                {agent.desc}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── COMPARISON TABLE ── */}
+      <section className="z-10 w-full max-w-4xl px-4 py-10">
         <h2
           className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
@@ -215,7 +359,7 @@ export function PricingPage(): React.ReactElement {
           Plan Comparison
         </h2>
         <div
-          className="overflow-hidden border-4 border-black shadow-[6px_6px_0_0_#000]"
+          className="overflow-x-auto overflow-hidden border-4 border-black shadow-[6px_6px_0_0_#000]"
           style={{
             background:
               "repeating-linear-gradient(0deg,rgba(255,255,255,0.04) 0px,rgba(255,255,255,0.04) 1px,transparent 1px,transparent 6px),linear-gradient(180deg,#121a2c,#0b1020)",
@@ -230,11 +374,11 @@ export function PricingPage(): React.ReactElement {
                 <th className="p-3 text-center text-[9px] uppercase tracking-wide text-[#9aa7cc]">
                   Free
                 </th>
+                <th className="p-3 text-center text-[9px] uppercase tracking-wide text-[#44ddff]">
+                  Starter
+                </th>
                 <th className="p-3 text-center text-[9px] uppercase tracking-wide text-[#54f28b]">
                   Pro
-                </th>
-                <th className="p-3 text-center text-[9px] uppercase tracking-wide text-[#ffcc00]">
-                  Elite
                 </th>
                 <th className="p-3 text-center text-[9px] uppercase tracking-wide text-[#aa44ff]">
                   Self-Host
@@ -243,19 +387,23 @@ export function PricingPage(): React.ReactElement {
             </thead>
             <tbody>
               {[
-                ["Notifications", "20", "100", "250", "Unlimited"],
-                ["Commands", "25", "100", "250", "Unlimited"],
-                ["Uptime", "6hr sessions", "24/7", "24/7", "24/7"],
-                ["Hosting", "We host", "We host", "We host", "You host"],
-                ["Smart Agent AI", "--", "Yes", "Yes", "Custom"],
-                ["Adaptive Strategy", "--", "Yes", "Yes", "Custom"],
-                ["Priority Support", "--", "--", "Yes", "--"],
-              ].map(([feature, free, pro, elite, self]) => (
+                ["Price", "$0", "$4.99/mo", "$9.99/mo", "Your infra"],
+                ["Notifications", "10/mo", "50/mo", "Unlimited", "Unlimited"],
+                ["Commands", "15/mo", "50/mo", "Unlimited", "Unlimited"],
+                ["Uptime", "6hr sessions", "12hr sessions", "24/7", "24/7"],
+                ["Zones", "Starter only", "All 10", "All 10", "All 10"],
+                ["Agent AI", "Basic", "Smart", "Adaptive", "Custom"],
+                ["Retreat Logic", "--", "Yes", "Yes", "Custom"],
+                ["Technique Usage", "--", "Yes", "Yes", "Custom"],
+                ["Strategy Adaptation", "--", "--", "Real-time", "Custom"],
+                ["Auction Trading", "--", "--", "Yes", "Custom"],
+                ["Annual Discount", "--", "2 months free", "2 months free", "--"],
+              ].map(([feature, free, starter, pro, self]) => (
                 <tr key={feature} className="border-b border-[#1c2440]/50">
                   <td className="p-3 text-[#9aa7cc]">{feature}</td>
                   <td className="p-3 text-center text-[#565f89]">{free}</td>
+                  <td className="p-3 text-center text-[#44ddff]">{starter}</td>
                   <td className="p-3 text-center text-[#54f28b]">{pro}</td>
-                  <td className="p-3 text-center text-[#ffcc00]">{elite}</td>
                   <td className="p-3 text-center text-[#aa44ff]">{self}</td>
                 </tr>
               ))}
@@ -276,23 +424,31 @@ export function PricingPage(): React.ReactElement {
           {[
             {
               q: "What are Notifications?",
-              a: "Notifications alert you when your agent levels up, finds rare loot, dies, completes quests, or encounters important events in-game.",
+              a: "Alerts when your agent levels up, finds rare loot, dies, completes quests, or hits milestones. Free gets 10/mo (~1 every 3 days). Pro gets unlimited so you never miss anything.",
             },
             {
               q: "What are Commands?",
-              a: "Commands let you direct your agent — change strategy, move to a zone, focus on questing or grinding, equip items, and more.",
+              a: "Direct your agent: change strategy, move to a zone, focus on questing or grinding, equip items. 15/mo on Free is about one command every 2 days. Pro is unlimited — adjust on the fly.",
             },
             {
-              q: "What is a Smart Agent?",
-              a: "Premium Smart Agents use advanced AI to adapt their strategy in real-time — they learn which mobs to avoid, when to retreat, optimal gear choices, and efficient leveling paths. Free agents use a basic fixed strategy.",
+              q: "How is the Free agent different?",
+              a: "The free agent uses a basic fixed strategy — it walks toward mobs and basic-attacks. No retreat logic (it fights to death), no technique usage, and it's limited to the starter zone. Paid agents are dramatically smarter.",
             },
             {
-              q: "Can I upgrade or downgrade anytime?",
-              a: "Yes. Changes take effect at the start of your next billing cycle. Your agent keeps all progress regardless of plan.",
+              q: "What makes the Pro agent worth it?",
+              a: "The Adaptive Agent shifts strategy in real-time. It learns which mobs give optimal XP, optimizes gear, trades on the auction house, and adapts its entire playstyle. Plus unlimited commands and 24/7 uptime — your agent never sleeps.",
+            },
+            {
+              q: "What happens to my agent if I downgrade?",
+              a: "Your character keeps all progress — level, gear, gold, quests. Only the agent intelligence and session limits change. You can always re-upgrade later.",
+            },
+            {
+              q: "Can I run multiple agents?",
+              a: "Hosted plans are 1 agent per subscription. Deploy Your Own supports as many agents as your infrastructure can handle.",
             },
             {
               q: "What does 'Deploy Your Own' mean?",
-              a: "You run the agent on your own server using our open API. Full control, no limits — you pay only for your own compute costs.",
+              a: "You run the agent on your own server using our open HTTP API. Full control, no limits — you pay only for your own compute. Great for developers who want to write custom strategy code.",
             },
           ].map(({ q, a }) => (
             <div
