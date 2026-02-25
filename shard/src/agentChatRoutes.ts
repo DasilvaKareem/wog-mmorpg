@@ -24,6 +24,7 @@ import {
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { getAllZones } from "./zoneRuntime.js";
 import { getWorldLayout, resolveZoneId } from "./worldLayout.js";
+import { loadAnyCharacterForWallet } from "./characterStore.js";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -31,6 +32,14 @@ const groq = new Groq({
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractRawCharacterName(name?: string): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(.+?)\s+the\s+\w+$/i);
+  return match ? match[1] : trimmed;
 }
 
 async function getEntityState(entityId: string, zoneId: string): Promise<any | null> {
@@ -96,17 +105,14 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     let classId = request.body.classId ?? "warrior";
 
     // The client sends the formatted NFT name like "Zephyr the Mage".
-    // Extract the raw name by stripping the " the ClassName" suffix,
-    // since the character mint will re-add it.
-    if (characterName) {
-      const suffixMatch = characterName.match(/^(.+?)\s+the\s+\w+$/i);
-      if (suffixMatch) {
-        characterName = suffixMatch[1];
-        server.log.info(`[agent/deploy] Extracted raw name: "${characterName}" from formatted NFT name`);
-      }
+    // Extract the raw name by stripping the " the ClassName" suffix.
+    const rawProvidedName = extractRawCharacterName(characterName);
+    if (rawProvidedName && rawProvidedName !== characterName) {
+      characterName = rawProvidedName;
+      server.log.info(`[agent/deploy] Extracted raw name: "${characterName}" from formatted NFT name`);
     }
 
-    // Fallback: if client didn't send a name, try to look it up from their wallet's NFTs
+    // If client didn't send a name, try owner wallet characters first.
     if (!characterName) {
       try {
         const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${authWallet}`);
@@ -114,15 +120,52 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           const charData = await charRes.json() as { characters?: any[] };
           const nft = charData.characters?.[0];
           if (nft) {
-            // NFT name is formatted as "Name the Class" — extract raw name
-            const rawMatch = (nft.name as string)?.match(/^(.+?)\s+the\s+\w+$/i);
-            characterName = rawMatch ? rawMatch[1] : nft.name;
+            characterName = extractRawCharacterName(nft.name as string) ?? undefined;
             raceId = nft.properties?.race ?? raceId;
             classId = nft.properties?.class ?? classId;
-            server.log.info(`[agent/deploy] Resolved from wallet NFT: "${characterName}" (${raceId}/${classId})`);
+            server.log.info(`[agent/deploy] Resolved from owner wallet character: "${characterName}" (${raceId}/${classId})`);
           }
         }
       } catch {}
+    }
+
+    // Next, try saved character state for the owner wallet.
+    if (!characterName) {
+      const saved = await loadAnyCharacterForWallet(authWallet);
+      if (saved) {
+        characterName = extractRawCharacterName(saved.name) ?? saved.name;
+        raceId = saved.raceId ?? raceId;
+        classId = saved.classId ?? classId;
+        server.log.info(`[agent/deploy] Resolved from owner saved character: "${characterName}" (${raceId}/${classId})`);
+      }
+    }
+
+    // Last, try the user's custodial wallet (existing agent redeploy path).
+    if (!characterName) {
+      const custodial = await getAgentCustodialWallet(authWallet);
+      if (custodial) {
+        const saved = await loadAnyCharacterForWallet(custodial);
+        if (saved) {
+          characterName = extractRawCharacterName(saved.name) ?? saved.name;
+          raceId = saved.raceId ?? raceId;
+          classId = saved.classId ?? classId;
+          server.log.info(`[agent/deploy] Resolved from custodial saved character: "${characterName}" (${raceId}/${classId})`);
+        } else {
+          try {
+            const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
+            if (charRes.ok) {
+              const charData = await charRes.json() as { characters?: any[] };
+              const nft = charData.characters?.[0];
+              if (nft) {
+                characterName = extractRawCharacterName(nft.name as string) ?? undefined;
+                raceId = nft.properties?.race ?? raceId;
+                classId = nft.properties?.class ?? classId;
+                server.log.info(`[agent/deploy] Resolved from custodial wallet character: "${characterName}" (${raceId}/${classId})`);
+              }
+            }
+          } catch {}
+        }
+      }
     }
 
     if (!characterName) {

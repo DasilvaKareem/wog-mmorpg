@@ -158,8 +158,8 @@ export function LandingPage(): React.ReactElement {
             style={{ filter: "drop-shadow(2px 6px 16px rgba(0,0,0,0.7))" }}
           />
         </div>
-        {/* CTA — bottom-center */}
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+        {/* CTA — just below logo */}
+        <div className="absolute top-[clamp(140px,28vw,280px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
           <button
             onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
             className="whitespace-nowrap border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"

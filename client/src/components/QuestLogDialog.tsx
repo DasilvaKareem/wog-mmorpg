@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQuestLog, type ActiveQuestEntry, type AvailableQuestEntry, type CompletedQuestEntry, type ActivityEntry } from "@/hooks/useQuestLog";
 import { getAuthToken } from "@/lib/agentAuth";
 import { API_URL } from "@/config";
+import { formatCopperString } from "@/lib/currency";
 
 /* ── 8-bit retro palette (matches InspectDialog) ──────────── */
 const BG = "#11182b";
@@ -117,7 +118,7 @@ function AvailableTab({
           </div>
           <div className="flex gap-2 mt-1 text-[9px]" style={{ color: "#f2c854" }}>
             <span>{q.rewards.xp} XP</span>
-            <span>{q.rewards.copper} Gold</span>
+            <span>{formatCopperString(q.rewards.copper)}</span>
           </div>
         </div>
       ))}
@@ -170,7 +171,7 @@ function ActiveTab({
           </div>
           <div className="flex gap-2 mt-1 text-[9px]" style={{ color: "#f2c854" }}>
             <span>{q.rewards.xp} XP</span>
-            <span>{q.rewards.copper} Gold</span>
+            <span>{formatCopperString(q.rewards.copper)}</span>
           </div>
         </div>
       ))}
@@ -192,7 +193,7 @@ function CompletedTab({ quests }: { quests: CompletedQuestEntry[] }): React.Reac
           <div className="flex-1">
             <span style={{ color: TEXT }}>{q.title}</span>
             <div className="text-[9px]" style={{ color: DIM }}>
-              {q.rewards.xp} XP | {q.rewards.copper} Gold
+              {q.rewards.xp} XP | {formatCopperString(q.rewards.copper)}
             </div>
           </div>
         </div>
@@ -315,7 +316,7 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
       });
       const json = await res.json() as any;
       if (res.ok) {
-        showFeedback(`Quest complete! +${json.rewards?.xp ?? 0} XP, +${json.rewards?.copper ?? 0} Gold`, true);
+        showFeedback(`Quest complete! +${json.rewards?.xp ?? 0} XP, +${formatCopperString(json.rewards?.copper ?? 0)}`, true);
         refresh();
       } else {
         showFeedback(json.error ?? "Failed to turn in quest", false);

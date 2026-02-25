@@ -72,6 +72,17 @@ function normalizeForLookup(input: string): string {
   return stripKnownClassSuffix(input).toLowerCase();
 }
 
+function parseStringArray(value: string | undefined): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((v) => String(v));
+  } catch {
+    return [];
+  }
+}
+
 function parseCharacter(raw: Record<string, string>): CharacterSaveData {
   return {
     name: raw.name ?? "Unknown",
@@ -84,9 +95,9 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     x: parseFloat(raw.x ?? "0"),
     y: parseFloat(raw.y ?? "0"),
     kills: parseInt(raw.kills ?? "0", 10),
-    completedQuests: raw.completedQuests ? JSON.parse(raw.completedQuests) : [],
-    learnedTechniques: raw.learnedTechniques ? JSON.parse(raw.learnedTechniques) : [],
-    professions: raw.professions ? JSON.parse(raw.professions) : [],
+    completedQuests: parseStringArray(raw.completedQuests),
+    learnedTechniques: parseStringArray(raw.learnedTechniques),
+    professions: parseStringArray(raw.professions),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
   };

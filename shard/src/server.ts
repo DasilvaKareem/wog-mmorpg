@@ -67,8 +67,19 @@ import { getAllZones, clearMobTagsForPlayer } from "./zoneRuntime.js";
 import { saveCharacter } from "./characterStore.js";
 import { authenticateRequest } from "./auth.js";
 import { getLearnedProfessions } from "./professions.js";
+import { biteProvider, SKALE_BASE_CHAIN_ID } from "./biteChain.js";
 
 const server = Fastify({ logger: true });
+
+async function assertMainnetRpc(): Promise<void> {
+  const network = await biteProvider.getNetwork();
+  const chainId = Number(network.chainId);
+  if (chainId !== SKALE_BASE_CHAIN_ID) {
+    throw new Error(
+      `RPC chainId mismatch: expected ${SKALE_BASE_CHAIN_ID} (SKALE Base mainnet), got ${chainId}`
+    );
+  }
+}
 
 // Health check — GCP and you use this to know the shard is alive
 server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
@@ -241,6 +252,9 @@ const start = async () => {
   ]).catch((err) => {
     server.log.warn(`[worldMapStore] Init failed (non-fatal): ${err.message}`);
   });
+
+  await assertMainnetRpc();
+  server.log.info(`[chain] Verified SKALE Base mainnet (chainId=${SKALE_BASE_CHAIN_ID})`);
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";

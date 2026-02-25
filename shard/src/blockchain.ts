@@ -381,7 +381,17 @@ export async function getOwnedCharacters(address: string) {
   const cached = characterCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const nfts = await getOwnedNFTs({ contract: characterContract, owner: address });
+  let nfts: any[] = [];
+  try {
+    nfts = await getOwnedNFTs({ contract: characterContract, owner: address });
+  } catch (err: any) {
+    const message = String(err?.message ?? err ?? "");
+    console.warn(
+      `[blockchain] getOwnedNFTs failed for ${address}: ${message.slice(0, 200)}`
+    );
+    return [];
+  }
+
   // Don't cache empty results — a mint may be pending confirmation
   if (nfts.length > 0) {
     characterCache.set(cacheKey, nfts);

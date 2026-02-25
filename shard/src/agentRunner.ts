@@ -20,8 +20,8 @@ import { goldToCopper } from "./currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { type BotScript, type TriggerEvent, type TriggerType } from "./botScriptTypes.js";
 
-/** Safety-net: call supervisor if no trigger has fired in this many ticks (~30s). */
-const MAX_STALE_TICKS = 25;
+/** Safety-net: call supervisor if no trigger has fired in this many ticks (~18s). */
+const MAX_STALE_TICKS = 15;
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 const TICK_MS = 1200;
@@ -460,22 +460,31 @@ export class AgentRunner {
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
-      // 1. Check for completed quests and turn them in
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      // 1. Check for completed quests and turn them in (walk to NPC first)
       const activeRes = await this.api("GET", `/quests/active/${this.currentZone}/${this.entityId}`);
       const activeQuests: any[] = activeRes?.activeQuests ?? [];
 
       for (const aq of activeQuests) {
         if (aq.complete && aq.quest?.npcId) {
-          // Find the NPC entity in the zone to turn in
-          try {
-            const zoneState = await this.api("GET", `/zones/${this.currentZone}`);
-            const entityEntries = Object.entries(zoneState?.entities ?? {});
-            const npcName = String(aq.quest?.npcId ?? "").toLowerCase();
-            const npcEntityId = entityEntries.find(([, e]: [string, any]) => {
-              if (!e || e.type !== "quest-giver") return false;
-              return String(e.name ?? "").toLowerCase() === npcName;
-            })?.[0];
-            if (npcEntityId) {
+          // Find the quest-giver NPC to turn in
+          const npcName = String(aq.quest?.npcId ?? "").toLowerCase();
+          const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
+            if (!e || e.type !== "quest-giver") return false;
+            return String(e.name ?? "").toLowerCase() === npcName;
+          });
+          if (npcEntry) {
+            const [npcEntityId, npcEntity] = npcEntry;
+            // Walk to the NPC first
+            const moving = await this.moveToEntity(me, npcEntity);
+            if (moving) {
+              void this.logActivity(`Walking to ${aq.quest?.npcId} to turn in "${aq.quest?.title}"`);
+              return; // still walking — continue next tick
+            }
+            try {
               const completeRes = await this.api("POST", "/quests/complete", {
                 zoneId: this.currentZone,
                 playerId: this.entityId,
@@ -484,15 +493,57 @@ export class AgentRunner {
               });
               if (completeRes?.completed) {
                 void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}c`);
+                return; // one action per tick
               }
-            }
-          } catch {
-            // NPC not in zone or turn-in failed — keep going
+            } catch {}
           }
         }
       }
 
-      // 2. Accept new quests if we don't have many active
+      // 2. Handle talk quests — walk to the specific NPC for talk objectives
+      const talkQuests = activeQuests.filter(
+        (aq: any) => !aq.complete && aq.quest?.objective?.type === "talk"
+      );
+      if (talkQuests.length > 0) {
+        for (const tq of talkQuests) {
+          const targetNpcName = String(tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId ?? "").toLowerCase();
+          const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
+            if (!e || e.type !== "quest-giver") return false;
+            return String(e.name ?? "").toLowerCase() === targetNpcName;
+          });
+          if (npcEntry) {
+            const [npcEntityId, npcEntity] = npcEntry;
+            const moving = await this.moveToEntity(me, npcEntity);
+            if (moving) {
+              void this.logActivity(`Walking to ${targetNpcName} for talk quest`);
+              return;
+            }
+            try {
+              await this.api("POST", "/quests/talk", {
+                zoneId: this.currentZone,
+                playerId: this.entityId,
+                npcEntityId,
+              });
+              void this.logActivity(`Talked to ${targetNpcName} for "${tq.quest?.title}"`);
+              return;
+            } catch {}
+          }
+        }
+        // Fallback: try all quest-givers for talk quests
+        for (const [entityId, e] of Object.entries(entities)) {
+          if ((e as any).type === "quest-giver") {
+            try {
+              await this.api("POST", "/quests/talk", {
+                zoneId: this.currentZone,
+                playerId: this.entityId,
+                npcEntityId: entityId,
+              });
+            } catch {}
+          }
+        }
+      }
+
+      // 3. Accept new quests if we don't have many active
       const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
       if (currentActive < 3) {
         try {
@@ -508,39 +559,38 @@ export class AgentRunner {
             if (acceptRes?.accepted) {
               void this.logActivity(`Accepted quest: "${q.title}" from ${q.npcName}`);
             }
-          }
-        } catch {
-          // Quest accept failed — no big deal
-        }
-      }
-
-      // 3. Handle talk quests — walk to NPCs for talk objectives
-      const talkQuests = activeQuests.filter(
-        (aq: any) => !aq.complete && aq.quest?.objective?.type === "talk"
-      );
-      if (talkQuests.length > 0) {
-        // Try talking to all quest-giver NPCs in zone
-        try {
-          const zoneState = await this.api("GET", `/zones/${this.currentZone}`);
-          const entities = Object.entries(zoneState?.entities ?? {}) as Array<[string, any]>;
-          for (const [entityId, e] of entities) {
-            if (e.type === "quest-giver") {
-              try {
-                await this.api("POST", "/quests/talk", {
-                  zoneId: this.currentZone,
-                  playerId: this.entityId,
-                  npcEntityId: entityId,
-                });
-              } catch {
-                // Not in range or no talk quest for this NPC
-              }
+          } else if (currentActive === 0) {
+            // No available quests and no active quests — this zone is exhausted
+            // Check if we should travel to the next zone
+            const myLevel = me.level ?? 1;
+            const nextZone = this.findNextZoneForLevel(myLevel);
+            if (nextZone && nextZone !== this.currentZone) {
+              console.log(`[agent:${this.userWallet.slice(0, 8)}] No quests left in ${this.currentZone}, traveling to ${nextZone}`);
+              void this.logActivity(`No quests remaining — traveling to ${nextZone}`);
+              await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: nextZone });
+              this.currentScript = null;
+              return;
             }
           }
         } catch {}
       }
 
-      // 4. Progress kill quests by fighting mobs
-      await this.doCombat(strategy);
+      // 4. Progress kill/gather quests by fighting mobs or gathering
+      const hasKillQuest = activeQuests.some(
+        (aq: any) => !aq.complete && aq.quest?.objective?.type === "kill"
+      );
+      const hasGatherQuest = activeQuests.some(
+        (aq: any) => !aq.complete && (aq.quest?.objective?.type === "gather" || aq.quest?.objective?.type === "craft")
+      );
+
+      if (hasKillQuest) {
+        await this.doCombat(strategy);
+      } else if (hasGatherQuest) {
+        await this.doGathering(strategy);
+      } else {
+        // No active objectives — combat for XP while waiting
+        await this.doCombat(strategy);
+      }
     } catch (err: any) {
       console.debug(`[agent] questing tick: ${err.message?.slice(0, 60)}`);
       // Fallback to combat if quest system errors
@@ -1181,8 +1231,8 @@ export class AgentRunner {
       // Priority 3: Outleveled current zone → travel to next zone
       const myLevel = entity.level ?? 1;
       const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[this.currentZone] ?? 1;
-      // If agent is 5+ levels above the zone's requirement, find the next zone
-      if (myLevel >= currentZoneLevelReq + 5) {
+      // If agent is 3+ levels above the zone's requirement, find the next zone
+      if (myLevel >= currentZoneLevelReq + 3) {
         const nextZone = this.findNextZoneForLevel(myLevel);
         if (nextZone && nextZone !== this.currentZone) {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: level ${myLevel} outleveled ${this.currentZone} (req ${currentZoneLevelReq}), traveling to ${nextZone}`);
@@ -1282,6 +1332,17 @@ export class AgentRunner {
         const emptySlots = ["weapon", "chest", "legs", "boots", "helm"].filter((s) => !eq[s]);
         if (emptySlots.length === 0) {
           return { type: "script_done", detail: "Fully equipped — shopping complete" };
+        }
+        break;
+      }
+
+      case "quest": {
+        // If no mobs left and questing involves kill quests, trigger re-evaluation
+        const hasEligibleMobs = Object.values(entities).some(
+          (e: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= level + 3
+        );
+        if (!hasEligibleMobs) {
+          return { type: "no_targets", detail: "No mobs for quest progression — zone may be exhausted" };
         }
         break;
       }
@@ -1426,8 +1487,8 @@ export class AgentRunner {
         if (usedPotion) { await sleep(TICK_MS); continue; }
 
         // ── Self-adaptation: periodically check if we should auto-adjust ──
-        // Every 30 ticks (~36s), check situational needs
-        if (focus !== "idle" && this.ticksSinceFocusChange % 30 === 0 && this.ticksSinceFocusChange > 0) {
+        // Every 10 ticks (~12s), check situational needs
+        if (focus !== "idle" && this.ticksSinceFocusChange % 10 === 0 && this.ticksSinceFocusChange > 0) {
           const adapted = await this.checkSelfAdaptation(entity, strategy);
           if (adapted) { this.currentScript = null; await sleep(TICK_MS); continue; }
         }
