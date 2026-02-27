@@ -72,10 +72,12 @@ Your job: Decide the next bot script to execute.
 - Call read tools only if you need more information (zone, inventory, connections, quests)
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold
+- HP REGEN: You passively regenerate HP when out of combat (after ~10s). Do NOT gather herbs, cook, or shop for food just because HP is low — simply wait or keep moving and HP will recover on its own. Only use food/potions during active combat emergencies (below 20% HP). Never switch to gathering or cooking solely because of low HP.
 - ECONOMY RULES: Gold earned from mob kills takes time to confirm on-chain. Agents start with 0 gold.
+  * EARLY GAME (< 100c): FIGHT mobs (Giant Rats, etc.) until you have at least 100 copper. Do NOT quest, gather, cook, or craft until you have 100c. Buy a weapon as soon as you can afford one (≥ 10c).
   * No weapon AND no gold (< 10c): FIGHT — agents can attack unarmed. Earn gold first.
   * No weapon AND has gold (≥ 10c): SHOP — buy the cheapest weapon available.
-  * Has weapon: quest or combat based on zone and level.
+  * Has weapon + ≥ 100c: quest or combat based on zone and level.
   * If outleveled: travel to an easier zone.`.trim();
 }
 

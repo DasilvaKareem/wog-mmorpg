@@ -41,7 +41,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "gathering":  return "Gather ore and herbs. Build up material stockpile.";
     case "crafting":   return "Craft items at the forge. Gather materials first if needed.";
     case "alchemy":    return "Brew potions and elixirs. Gather herbs if ingredients are low.";
-    case "cooking":    return "Cook food for HP recovery. Gather ingredients if needed.";
+    case "cooking":    return "Cook food from ingredients you already own. HP regenerates passively out of combat — only cook if you have ingredients on hand.";
     case "enchanting": return "Enchant your weapon. Brew elixirs first if you have none.";
     case "shopping":   return "Buy and equip the best gear you can afford.";
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
@@ -1472,6 +1472,17 @@ export class AgentRunner {
       const equipment = entity.equipment ?? {};
       const hasWeapon = Boolean(equipment.weapon);
 
+      // Priority 0: Early-game bootstrap — keep killing mobs until 100 copper
+      if (copper < 100) {
+        const currentFocus = (await getAgentConfig(this.userWallet))?.focus;
+        if (currentFocus !== "combat" && currentFocus !== "shopping") {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: only ${copper}c, need 100c — staying in combat`);
+          void this.logActivity(`Only ${copper}c — killing mobs for starter gold`);
+          await patchAgentConfig(this.userWallet, { focus: "combat" });
+          return true;
+        }
+      }
+
       // Priority 1: No weapon + enough copper for starter gear → go shopping
       if (!hasWeapon && copper >= 10) {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no weapon, going shopping`);
@@ -1480,9 +1491,10 @@ export class AgentRunner {
         return true;
       }
 
-      // Priority 2: Low on consumables after combat → try shopping for food first,
-      // only cook if we have ingredients. Avoid cooking trap (agents can't cook without ingredients).
-      if (!hasFood && !hasPotions && hpPct < 0.7) {
+      // Priority 2: Critically low HP with no consumables → try shopping for food first,
+      // only cook if we have ingredients. HP passively regenerates out of combat (~0.5-1.5%/tick),
+      // so only trigger this at very low HP where regen alone isn't enough.
+      if (!hasFood && !hasPotions && hpPct < 0.3) {
         // Check if we have any cooking ingredients before switching to cooking
         const hasCookingIngredients = items.some((i: any) =>
           (i.category === "material" || i.category === "ingredient" || i.category === "meat" || i.category === "herb") && Number(i.balance) > 0
@@ -1666,9 +1678,24 @@ export class AgentRunner {
 
       // Hard-respect focus when the runner has no script yet (startup/focus change).
       if (trigger.type === "no_script") {
-        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
-        this.ticksOnCurrentScript = 0;
-        void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+        // Early-game bootstrap: kill Giant Rats until 100 copper before doing anything else
+        let earlyGameCopper = 0;
+        try {
+          const inv = await this.api!("GET", `/wallet/${this.custodialWallet}/balance`);
+          const wc = Number(inv?.copper ?? NaN);
+          const wg = Number(inv?.gold ?? 0);
+          earlyGameCopper = Number.isFinite(wc) ? wc : goldToCopper(wg);
+        } catch { /* non-fatal */ }
+
+        if (earlyGameCopper < 100) {
+          this.currentScript = { type: "combat", maxLevelOffset: 2, reason: "Early game — killing rats to earn starter gold" };
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity("[AI] combat: Killing rats to earn starter gold (need 100c)");
+        } else {
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+        }
       } else {
       try {
         // Fetch real on-chain gold balance — entity.gold is always 0 (not a zone field)
