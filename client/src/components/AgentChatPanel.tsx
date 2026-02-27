@@ -78,6 +78,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [authLoading, setAuthLoading] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
+  const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string } | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const lastSyncTs = React.useRef(0);
 
@@ -223,28 +224,30 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setMessages((prev) => [...prev, { role: "system", text, ts: Date.now() }]);
   }
 
-  // Listen for NPC clicks from the game canvas and send the agent there
+  // Listen for NPC clicks — show a confirmation prompt, don't auto-redirect
   React.useEffect(() => {
-    if (!token) return;
-    return gameBus.on("agentGoToNpc", async ({ entityId, zoneId, name }) => {
-      addSystemMsg(`Sending agent to ${name} (${zoneId})…`);
-      try {
-        const res = await fetch(`${API_URL}/agent/goto-npc`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ entityId, zoneId, name }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-          addSystemMsg(`Agent is heading to ${name}`);
-        } else {
-          addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
-        }
-      } catch (err: any) {
-        addSystemMsg(`[ERR] ${err.message}`);
-      }
+    return gameBus.on("agentGoToNpc", ({ entityId, zoneId, name }) => {
+      setPendingGoto({ entityId, zoneId, name });
     });
-  }, [token]);
+  }, []);
+
+  async function confirmGoto() {
+    if (!pendingGoto || !token) return;
+    const { entityId, zoneId, name } = pendingGoto;
+    setPendingGoto(null);
+    addSystemMsg(`Sending agent to ${name}…`);
+    try {
+      const res = await fetch(`${API_URL}/agent/goto-npc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entityId, zoneId, name }),
+      });
+      const data = await res.json();
+      if (!res.ok) addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
+    } catch (err: any) {
+      addSystemMsg(`[ERR] ${err.message}`);
+    }
+  }
 
   // ── Derived state ───────────────────────────────────────────────────────
 
@@ -449,6 +452,30 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       )}
 
       {/* ── Stop confirmation ──────────────────────────────────────── */}
+      {/* ── Send-agent-here confirmation ─────────────────────────── */}
+      {pendingGoto && (
+        <div className="absolute bottom-[56px] left-0 right-0 z-40 border-t border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono flex items-center justify-between gap-2">
+          <span className="text-[11px] text-[#e0af68] truncate">
+            → Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?
+          </span>
+          <div className="flex gap-2 shrink-0">
+            <button
+              onClick={() => void confirmGoto()}
+              disabled={!token || !isRunning}
+              className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+            >
+              Go
+            </button>
+            <button
+              onClick={() => setPendingGoto(null)}
+              className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {showStopConfirm && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="border border-[#ff4d6d] bg-[#0a0508] p-4 font-mono text-center">
