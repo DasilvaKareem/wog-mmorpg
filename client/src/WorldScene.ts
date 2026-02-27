@@ -134,6 +134,21 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
+      // Agent go-to: clicking any NPC lets the user send their agent there
+      const NPC_TYPES = new Set([
+        "merchant", "auctioneer", "guild-registrar", "arena-master",
+        "quest-giver", "trainer", "profession-trainer", "lore-npc",
+        "crafting-master", "blacksmith", "innkeeper",
+      ]);
+      if (NPC_TYPES.has(entity.type)) {
+        gameBus.emit("agentGoToNpc", {
+          entityId: entity.id,
+          zoneId: entity.zoneId ?? this.currentZoneLabel,
+          name: entity.name,
+          type: entity.type,
+        });
+      }
+
       // Spectate: click any entity -> snap camera, then follow
       this.followTarget = entity.id;
       this.isDragging = false;

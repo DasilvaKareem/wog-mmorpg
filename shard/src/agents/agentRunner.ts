@@ -13,6 +13,7 @@ import {
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
+import { peekInbox, ackInboxMessages, type InboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveZoneId } from "../world/worldLayout.js";
@@ -44,6 +45,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "enchanting": return "Enchant your weapon. Brew elixirs first if you have none.";
     case "shopping":   return "Buy and equip the best gear you can afford.";
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
+    case "goto":       return "Walk to the target NPC the user pointed at.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     default:           return "Be autonomous — quest and improve your character.";
   }
@@ -63,6 +65,7 @@ function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: 
     case "shopping":
     case "trading":    return { type: "shop",    reason: "User focus: shopping" };
     case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
+    case "goto":       return { type: "goto",    reason: "User clicked an NPC" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
   }
@@ -107,6 +110,11 @@ export class AgentRunner {
     this.currentScript = null;
     this.ticksSinceLastDecision = MAX_STALE_TICKS;
   }
+  /** Immediately direct the agent to walk to a specific NPC (called from goto-npc route) */
+  public setGotoTarget(entityId: string, zoneId: string, name?: string): void {
+    this.currentScript = { type: "goto", targetEntityId: entityId, targetName: name, reason: `User directed agent to ${name ?? entityId}` };
+    this.ticksSinceLastDecision = 0;
+  }
   /** Ticks since the last supervisor call (for MAX_STALE_TICKS safety net) */
   private ticksSinceLastDecision = 0;
   /** Cached zone state for current tick — cleared each iteration to avoid stale data */
@@ -116,6 +124,8 @@ export class AgentRunner {
   /** Snapshot values used to detect meaningful game-state change events */
   private lastKnownLevel = 0;
   private lastKnownZone = "";
+  /** Last processed inbox stream ID — only fetch messages newer than this */
+  private lastInboxId = "0-0";
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
@@ -158,6 +168,35 @@ export class AgentRunner {
       await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
     } catch (err: any) {
       console.debug(`[agent:${this.userWallet.slice(0, 8)}] logActivity: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  /**
+   * Check inbox for new agent-to-agent messages and log them as activities.
+   * Automatically acknowledges processed messages so they don't repeat.
+   */
+  private async processInbox(): Promise<void> {
+    try {
+      const messages = await peekInbox(this.userWallet, 5);
+      // Filter to only messages newer than our last-seen ID
+      const newMessages = messages.filter((m) => m.id > this.lastInboxId);
+      if (newMessages.length === 0) return;
+
+      const idsToAck: string[] = [];
+      for (const msg of newMessages) {
+        const label = msg.type === "broadcast" ? "BROADCAST" : "MSG";
+        void this.logActivity(`[${label}] ${msg.fromName}: ${msg.body.slice(0, 120)}`);
+        idsToAck.push(msg.id);
+        if (msg.id > this.lastInboxId) this.lastInboxId = msg.id;
+      }
+
+      // Ack so messages don't pile up
+      if (idsToAck.length > 0) {
+        await ackInboxMessages(this.userWallet, idsToAck);
+      }
+    } catch (err: any) {
+      // Non-fatal — inbox is best-effort
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] Inbox check failed: ${err.message?.slice(0, 60)}`);
     }
   }
 
@@ -1177,6 +1216,76 @@ export class AgentRunner {
   }
 
   /**
+   * Walk to a specific NPC entity that the user clicked on.
+   * If the NPC is in a different zone, travel there first.
+   * Once arrived, clears the goto target and resumes questing.
+   */
+  private async doGotoNpc(): Promise<void> {
+    if (!this.api || !this.entityId) return;
+    try {
+      const config = await getAgentConfig(this.userWallet);
+      const target = config?.gotoTarget;
+      if (!target) {
+        await patchAgentConfig(this.userWallet, { focus: "questing" });
+        this.currentScript = null;
+        return;
+      }
+
+      const { entityId: targetEntityId, zoneId: targetZoneId, name: targetName } = target;
+
+      // Wrong zone — travel there first
+      if (targetZoneId !== this.currentZone) {
+        const neighborsRes = await this.api("GET", `/neighbors/${this.currentZone}`);
+        const neighbors: Array<{ zone: string; levelReq: number }> = neighborsRes?.neighbors ?? [];
+        const nextZone = neighbors.find((n) => n.zone === targetZoneId)
+          ? targetZoneId
+          : this.findNextZoneOnPath(neighbors, targetZoneId);
+        if (nextZone) {
+          await this.api("POST", "/command", {
+            zoneId: this.currentZone, entityId: this.entityId, action: "travel", targetZone: nextZone,
+          });
+          void this.logActivity(`Heading to ${targetZoneId} to find ${targetName ?? targetEntityId}`);
+        }
+        return;
+      }
+
+      // In the right zone — find the entity by ID then by name fallback
+      const zs = await this.getZoneState();
+      if (!zs) return;
+      const { entities, me } = zs;
+
+      let targetEntity: any = entities[targetEntityId];
+      if (!targetEntity && targetName) {
+        const found = Object.entries(entities).find(([, e]: [string, any]) =>
+          String(e.name ?? "").toLowerCase() === targetName.toLowerCase()
+        );
+        if (found) targetEntity = found[1];
+      }
+
+      if (!targetEntity) {
+        void this.logActivity(`Could not find ${targetName ?? targetEntityId} in ${this.currentZone}`);
+        await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
+        this.currentScript = null;
+        return;
+      }
+
+      const moving = await this.moveToEntity(me, targetEntity);
+      if (moving) {
+        void this.logActivity(`Walking to ${targetName ?? "NPC"}`);
+        return;
+      }
+
+      // Arrived!
+      void this.logActivity(`Arrived at ${targetName ?? "NPC"}`);
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at goto target: ${targetName ?? targetEntityId}`);
+      await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
+      this.currentScript = null;
+    } catch (err: any) {
+      console.debug(`[agent] doGotoNpc: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  /**
    * Simple BFS to find the next hop from current neighbors toward a target zone.
    * Uses the zone connection graph via /neighbors endpoints.
    */
@@ -1396,6 +1505,7 @@ export class AgentRunner {
       case "combat":  await this.doCombat(strategy); break;
       case "gather":  await this.doGathering(strategy); break;
       case "travel":  await this.doTravel(strategy); break;
+      case "goto":    await this.doGotoNpc(); break;
       case "shop":    await this.doShopping(strategy); break;
       case "craft":   await this.doCrafting(strategy); break;
       case "brew":    await this.doAlchemy(strategy); break;
@@ -1634,6 +1744,11 @@ export class AgentRunner {
           void this.logActivity(`Focus changed → ${focus}`);
         }
         this.ticksSinceFocusChange++;
+
+        // ── Inbox check: every 5 ticks (~6s), peek for new agent-to-agent messages ──
+        if (this.ticksSinceFocusChange % 5 === 0) {
+          await this.processInbox();
+        }
 
         // Handle low HP first (strategy affects thresholds)
         const usedPotion = await this.handleLowHp(entity, strategy);

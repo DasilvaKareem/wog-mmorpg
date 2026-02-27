@@ -14,7 +14,8 @@ export type BotScriptType =
   | "brew"
   | "cook"
   | "quest"
-  | "idle";
+  | "idle"
+  | "goto";
 
 export interface BotScript {
   type: BotScriptType;
@@ -28,6 +29,10 @@ export interface BotScript {
   maxGold?: number;
   /** Why the supervisor chose this script — shown in activity log */
   reason?: string;
+  /** goto: target NPC entity ID */
+  targetEntityId?: string;
+  /** goto: human-readable NPC name for activity log */
+  targetName?: string;
 }
 
 /** Events that fire during bot script execution and trigger the AI supervisor. */

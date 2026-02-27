@@ -19,7 +19,8 @@ export type AgentFocus =
   | "trading"
   | "shopping"
   | "traveling"
-  | "idle";
+  | "idle"
+  | "goto";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 
@@ -34,6 +35,8 @@ export interface AgentConfig {
   focus: AgentFocus;
   strategy: AgentStrategy;
   targetZone?: string;
+  /** Set when user clicks "send agent here" on an NPC. Cleared once agent arrives. */
+  gotoTarget?: { entityId: string; zoneId: string; name?: string };
   lastUpdated: number;
   /** @deprecated Chat history now lives in agent:chat:{wallet} Redis list. Kept for type compat. */
   chatHistory: ChatMessage[];

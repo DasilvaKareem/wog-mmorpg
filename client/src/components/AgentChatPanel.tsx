@@ -8,6 +8,7 @@ import * as React from "react";
 import { API_URL } from "@/config";
 import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
+import { gameBus } from "@/lib/eventBus";
 
 interface ChatMessage {
   role: "user" | "agent" | "activity" | "system";
@@ -221,6 +222,29 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   function addSystemMsg(text: string) {
     setMessages((prev) => [...prev, { role: "system", text, ts: Date.now() }]);
   }
+
+  // Listen for NPC clicks from the game canvas and send the agent there
+  React.useEffect(() => {
+    if (!token) return;
+    return gameBus.on("agentGoToNpc", async ({ entityId, zoneId, name }) => {
+      addSystemMsg(`Sending agent to ${name} (${zoneId})…`);
+      try {
+        const res = await fetch(`${API_URL}/agent/goto-npc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId, zoneId, name }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          addSystemMsg(`Agent is heading to ${name}`);
+        } else {
+          addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
+        }
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      }
+    });
+  }, [token]);
 
   // ── Derived state ───────────────────────────────────────────────────────
 

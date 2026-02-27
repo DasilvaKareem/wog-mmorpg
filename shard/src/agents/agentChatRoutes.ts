@@ -897,6 +897,38 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     });
   });
 
+  // ── POST /agent/goto-npc — Send agent to a specific NPC (UI click) ─────────
+  server.post<{
+    Body: { entityId: string; zoneId: string; name?: string };
+  }>("/agent/goto-npc", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { entityId, zoneId, name } = request.body ?? {};
+
+    if (!entityId || !zoneId) {
+      return reply.code(400).send({ error: "entityId and zoneId are required" });
+    }
+
+    await patchAgentConfig(authWallet, {
+      focus: "goto",
+      gotoTarget: { entityId, zoneId, name },
+    });
+
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`,
+      ts: Date.now(),
+    });
+
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) {
+      runner.setGotoTarget(entityId, zoneId, name);
+    }
+
+    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name } });
+  });
+
   // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────
   server.patch<{
     Body: { focus?: string; strategy?: string; targetZone?: string };
