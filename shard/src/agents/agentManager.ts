@@ -199,6 +199,11 @@ class AgentManager {
       .map(([k]) => k);
   }
 
+  /** Return all runners (running or not) for the dashboard. */
+  listRunners(): AgentRunner[] {
+    return Array.from(this.loops.values());
+  }
+
   /**
    * On server boot: scan Redis for all agent:config:* keys with enabled=true
    * and restart those loops. Called once from server.ts after Redis is ready.

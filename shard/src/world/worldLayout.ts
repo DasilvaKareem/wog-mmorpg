@@ -9,9 +9,12 @@ function resolveDataDir(): string {
   // Production flat deploy: __dirname is dist/ → ../src/data/
   const prodPath = join(__dirname, "../src/data");
   if (existsSync(join(prodPath, "world.json"))) return prodPath;
-  // Dev: __dirname is shard/src/ or shard/dist/ → ../../src/data/
-  const devPath = join(__dirname, "../../src/data");
+  // Dev: __dirname is shard/src/world/ → ../../../src/data/
+  const devPath = join(__dirname, "../../../src/data");
   if (existsSync(join(devPath, "world.json"))) return devPath;
+  // Legacy: __dirname is shard/src/ → ../../src/data/
+  const legacyPath = join(__dirname, "../../src/data");
+  if (existsSync(join(legacyPath, "world.json"))) return legacyPath;
   // Fallback: cwd-relative
   const cwdPath = join(process.cwd(), "src/data");
   if (existsSync(join(cwdPath, "world.json"))) return cwdPath;

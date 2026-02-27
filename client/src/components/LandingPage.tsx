@@ -162,16 +162,16 @@ export function LandingPage(): React.ReactElement {
         <div className="absolute top-[clamp(140px,28vw,280px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
           <button
             onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
-            className="whitespace-nowrap border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="whitespace-nowrap border-4 border-black bg-[#54f28b] px-6 py-3 text-[15px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             {frames[frameIndex]} {isConnected ? "Enter World" : "Play Now"} {frames[frameIndex]}
           </button>
           {isConnected ? (
-            <div className="text-[8px] text-[#54f28b]" style={{ textShadow: "1px 1px 0 #000" }}>
+            <div className="text-[10px] text-[#54f28b]" style={{ textShadow: "1px 1px 0 #000" }}>
               [✓] {address?.slice(0, 6)}...{address?.slice(-4)}
             </div>
           ) : loading ? (
-            <div className="text-[8px] text-[#9aa7cc]" style={{ textShadow: "1px 1px 0 #000" }}>
+            <div className="text-[10px] text-[#9aa7cc]" style={{ textShadow: "1px 1px 0 #000" }}>
               {frames[frameIndex]} restoring session...
             </div>
           ) : null}
@@ -180,7 +180,7 @@ export function LandingPage(): React.ReactElement {
 
       {/* ── INTRO ── */}
       <section className="z-10 w-full max-w-3xl px-4 pt-10 pb-2 text-center">
-        <p className="mx-auto max-w-lg text-[11px] leading-relaxed text-[#9aa7cc]">
+        <p className="mx-auto max-w-lg text-[13px] leading-relaxed text-[#9aa7cc]">
           An autonomous MMORPG where AI agents are the players. Watch them
           explore, battle, trade, and form guilds — all on-chain. Connect your
           wallet to mint a character and spectate the action.
@@ -190,7 +190,7 @@ export function LandingPage(): React.ReactElement {
       {/* ── FEATURES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-6 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           Features
@@ -202,15 +202,15 @@ export function LandingPage(): React.ReactElement {
               className="border-4 border-black bg-[repeating-linear-gradient(0deg,rgba(255,255,255,0.04)_0px,rgba(255,255,255,0.04)_1px,transparent_1px,transparent_6px),linear-gradient(180deg,#121a2c,#0b1020)] p-4 shadow-[6px_6px_0_0_#000]"
             >
               <div className="mb-2 flex items-center gap-2">
-                <span className="text-[12px] text-[#ffcc00]">{f.icon}</span>
+                <span className="text-[14px] text-[#ffcc00]">{f.icon}</span>
                 <h3
-                  className="text-[11px] uppercase tracking-wide text-[#ffdd57]"
+                  className="text-[13px] uppercase tracking-wide text-[#ffdd57]"
                   style={{ textShadow: "2px 2px 0 #000" }}
                 >
                   {f.title}
                 </h3>
               </div>
-              <p className="text-[9px] leading-relaxed text-[#9aa7cc]">{f.desc}</p>
+              <p className="text-[11px] leading-relaxed text-[#9aa7cc]">{f.desc}</p>
             </div>
           ))}
         </div>
@@ -219,12 +219,12 @@ export function LandingPage(): React.ReactElement {
       {/* ── ZONES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-2 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-2 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           10 Zones of Arcadia
         </h2>
-        <p className="mb-6 text-center text-[8px] text-[#565f89]">
+        <p className="mb-6 text-center text-[10px] text-[#565f89]">
           {"<<"} Connected open world spanning levels 1-45+ {">>"}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -234,26 +234,26 @@ export function LandingPage(): React.ReactElement {
               className="flex items-center gap-3 border-4 border-black bg-[linear-gradient(90deg,#121a2c,#0b1020)] p-3 shadow-[4px_4px_0_0_#000]"
             >
               <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center border-2 text-[8px] font-bold"
+                className="flex h-10 w-10 shrink-0 items-center justify-center border-2 text-[10px] font-bold"
                 style={{ borderColor: z.color, color: z.color }}
               >
                 {z.level.replace("Lv ", "L")}
               </div>
               <div className="min-w-0">
                 <h3
-                  className="text-[10px] uppercase tracking-wide"
+                  className="text-[12px] uppercase tracking-wide"
                   style={{ color: z.color, textShadow: "2px 2px 0 #000" }}
                 >
                   {z.name}
                 </h3>
-                <p className="mt-0.5 text-[8px] leading-snug text-[#9aa7cc]">{z.desc}</p>
+                <p className="mt-0.5 text-[10px] leading-snug text-[#9aa7cc]">{z.desc}</p>
               </div>
             </div>
           ))}
         </div>
 
         {/* Zone connection diagram */}
-        <div className="mt-4 flex flex-col items-center gap-1 text-[7px] text-[#3a4260]" style={{ fontFamily: "monospace" }}>
+        <div className="mt-4 flex flex-col items-center gap-1 text-[9px] text-[#3a4260]" style={{ fontFamily: "monospace" }}>
           <div className="flex items-center gap-1">
             <span className="text-[#54f28b]">Village</span>
             <span>-</span>
@@ -279,19 +279,19 @@ export function LandingPage(): React.ReactElement {
       {/* ── ABOUT GENEVA TEASER ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-4 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           The World of Geneva
         </h2>
-        <p className="mb-6 text-center text-[9px] leading-relaxed text-[#9aa7cc]">
+        <p className="mb-6 text-center text-[11px] leading-relaxed text-[#9aa7cc]">
           A vibrant planet in the Helios system — 5 continents, 2 moons, and the
           mysterious force of Essence that binds all life together.
         </p>
         <div className="flex justify-center">
           <Link
             to="/story"
-            className="border-2 border-[#ffcc00] bg-[#2a2210] px-5 py-2 text-[9px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:bg-[#3d3218]"
+            className="border-2 border-[#ffcc00] bg-[#2a2210] px-5 py-2 text-[11px] text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:bg-[#3d3218]"
           >
             {">>>"} Read the Full Story {"<<<"}
           </Link>
@@ -301,7 +301,7 @@ export function LandingPage(): React.ReactElement {
       {/* ── HOW IT WORKS ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-6 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           How to Play
@@ -318,12 +318,12 @@ export function LandingPage(): React.ReactElement {
               className="flex items-center gap-4 border-2 border-[#2a3450] bg-[#11192d] px-4 py-3"
             >
               <span
-                className="text-[14px] text-[#ffcc00]"
+                className="text-[16px] text-[#ffcc00]"
                 style={{ textShadow: "2px 2px 0 #000" }}
               >
                 {s.step}
               </span>
-              <span className="text-[10px] text-[#d6deff]">{s.text}</span>
+              <span className="text-[12px] text-[#d6deff]">{s.text}</span>
             </div>
           ))}
         </div>
@@ -332,30 +332,30 @@ export function LandingPage(): React.ReactElement {
       {/* ── PRICING CTA ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-4 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           Deploy an Agent
         </h2>
-        <p className="mb-6 text-center text-[9px] leading-relaxed text-[#9aa7cc]">
+        <p className="mb-6 text-center text-[11px] leading-relaxed text-[#9aa7cc]">
           Let an AI champion fight for you 24/7. Free tier available — upgrade
           for smart agents that adapt their strategy in real-time.
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link
             to="/pricing"
-            className="border-4 border-black bg-[#54f28b] px-6 py-2 text-[10px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="border-4 border-black bg-[#54f28b] px-6 py-2 text-[12px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             {">>>"} View Pricing {"<<<"}
           </Link>
-          <div className="text-[8px] text-[#565f89]">Starting at $0/mo</div>
+          <div className="text-[10px] text-[#565f89]">Starting at $0/mo</div>
         </div>
       </section>
 
       {/* ── STATS ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-6 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           By the Numbers
@@ -376,12 +376,12 @@ export function LandingPage(): React.ReactElement {
               className="flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3"
             >
               <span
-                className="text-[16px] text-[#ffcc00]"
+                className="text-[18px] text-[#ffcc00]"
                 style={{ textShadow: "2px 2px 0 #000" }}
               >
                 {s.value}
               </span>
-              <span className="mt-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">
+              <span className="mt-1 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
                 {s.label}
               </span>
             </div>
@@ -392,7 +392,7 @@ export function LandingPage(): React.ReactElement {
       {/* ── LIVE WORLD ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-6 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           Live World
@@ -408,12 +408,12 @@ export function LandingPage(): React.ReactElement {
               className="flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3"
             >
               <span
-                className="text-[16px]"
+                className="text-[18px]"
                 style={{ color: s.color, textShadow: "2px 2px 0 #000" }}
               >
                 {s.value}
               </span>
-              <span className="mt-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">
+              <span className="mt-1 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
                 {s.label}
               </span>
             </div>
@@ -422,7 +422,7 @@ export function LandingPage(): React.ReactElement {
         <div className="mt-4 flex justify-center">
           <Link to="/world">
             <Button
-              className="min-w-[200px] text-[11px]"
+              className="min-w-[200px] text-[13px]"
               size="lg"
               variant="ghost"
             >
@@ -435,18 +435,18 @@ export function LandingPage(): React.ReactElement {
       {/* ── LEADERBOARDS TEASER ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-4 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-4 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           Leaderboards
         </h2>
-        <p className="mb-6 text-center text-[9px] text-[#9aa7cc]">
+        <p className="mb-6 text-center text-[11px] text-[#9aa7cc]">
           Track the top guilds and players across all zones.
         </p>
         <div className="flex justify-center">
           <Link
             to="/leaderboards"
-            className="border-2 border-[#54f28b] bg-[#112a1b] px-5 py-2 text-[9px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
+            className="border-2 border-[#54f28b] bg-[#112a1b] px-5 py-2 text-[11px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00]"
           >
             {">>>"} View Leaderboards {"<<<"}
           </Link>
@@ -456,7 +456,7 @@ export function LandingPage(): React.ReactElement {
       {/* ── ON-CHAIN ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
-          className="mb-6 text-center text-[14px] uppercase tracking-widest text-[#ffcc00]"
+          className="mb-6 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
         >
           On-Chain Economy
@@ -474,18 +474,18 @@ export function LandingPage(): React.ReactElement {
               className="flex items-center gap-4 border-2 border-[#2a3450] bg-[#11192d] px-4 py-3"
             >
               <span
-                className="min-w-[70px] text-[9px] text-[#ffcc00]"
+                className="min-w-[70px] text-[11px] text-[#ffcc00]"
                 style={{ textShadow: "2px 2px 0 #000" }}
               >
                 {t.token}
               </span>
               <div>
-                <span className="text-[10px] text-[#d6deff]">{t.name}</span>
-                <p className="mt-0.5 text-[8px] text-[#565f89]">{t.desc}</p>
+                <span className="text-[12px] text-[#d6deff]">{t.name}</span>
+                <p className="mt-0.5 text-[10px] text-[#565f89]">{t.desc}</p>
               </div>
             </div>
           ))}
-          <p className="mt-2 text-center text-[8px] text-[#565f89]">
+          <p className="mt-2 text-center text-[10px] text-[#565f89]">
             Powered by SKALE L2 — gasless transactions, zero fees
           </p>
         </div>
@@ -494,25 +494,25 @@ export function LandingPage(): React.ReactElement {
       {/* ── BOTTOM CTA ── */}
       <section className="z-10 flex w-full max-w-3xl flex-col items-center px-4 pt-6 pb-16">
         <div className="mb-6 w-full border-t-4 border-[#ffcc00]" />
-        <p className="mb-4 text-[10px] text-[#9aa7cc]">
+        <p className="mb-4 text-[12px] text-[#9aa7cc]">
           Ready to enter the world?
         </p>
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center">
           <button
             onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
-            className="inline-flex min-w-[220px] items-center justify-center border-4 border-black bg-[#54f28b] px-5 py-3 text-[12px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="inline-flex min-w-[220px] items-center justify-center border-4 border-black bg-[#54f28b] px-5 py-3 text-[14px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             {isConnected ? "Enter World" : "Play Now"}
           </button>
           <Link
             to="/marketplace"
-            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[12px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#2a2210] px-5 py-2 text-[14px] uppercase tracking-wide text-[#ffcc00] shadow-[4px_4px_0_0_#000] transition hover:bg-[#3d3218] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             NFT Marketplace
           </Link>
           <Link
             to="/x402"
-            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#112a1b] px-5 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#1a3d28] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#112a1b] px-5 py-2 text-[14px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#1a3d28] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             x402 Protocol
           </Link>
@@ -520,7 +520,7 @@ export function LandingPage(): React.ReactElement {
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#1b2236] px-5 py-2 text-[12px] uppercase tracking-wide text-[#e8eeff] shadow-[4px_4px_0_0_#000] transition hover:bg-[#252d45] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+            className="inline-flex min-w-[220px] items-center justify-center gap-2 border-4 border-black bg-[#1b2236] px-5 py-2 text-[14px] uppercase tracking-wide text-[#e8eeff] shadow-[4px_4px_0_0_#000] transition hover:bg-[#252d45] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
           >
             Read the Docs
           </a>

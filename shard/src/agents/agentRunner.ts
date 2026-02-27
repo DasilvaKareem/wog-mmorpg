@@ -87,11 +87,21 @@ export class AgentRunner {
   /** Live description of what the agent is doing right now */
   public currentActivity = "Idle";
   /** Circular buffer of recent activity strings for supervisor context */
-  private recentActivities: string[] = [];
+  public recentActivities: string[] = [];
   /** Current bot script being executed. Null = supervisor must decide. */
   private currentScript: BotScript | null = null;
   /** Expose current script for status endpoint */
   public get script(): BotScript | null { return this.currentScript; }
+  /** Last trigger event that fired the supervisor */
+  public lastTrigger: TriggerEvent | null = null;
+  /** Expose current zone for dashboard */
+  public get zone(): string { return this.currentZone; }
+  /** Expose entity ID for dashboard */
+  public get entity(): string | null { return this.entityId; }
+  /** Expose wallet for dashboard */
+  public get wallet(): string { return this.userWallet; }
+  /** Expose custodial wallet for dashboard */
+  public get custodial(): string | null { return this.custodialWallet; }
   /** Force re-evaluation on next tick (called when user manually changes config) */
   public clearScript(): void {
     this.currentScript = null;
@@ -99,6 +109,10 @@ export class AgentRunner {
   }
   /** Ticks since the last supervisor call (for MAX_STALE_TICKS safety net) */
   private ticksSinceLastDecision = 0;
+  /** Cached zone state for current tick — cleared each iteration to avoid stale data */
+  private cachedZoneState: { entities: Record<string, any>; me: any } | null = null;
+  /** Tracks how many ticks the current script has been running without a supervisor call */
+  private ticksOnCurrentScript = 0;
   /** Snapshot values used to detect meaningful game-state change events */
   private lastKnownLevel = 0;
   private lastKnownZone = "";
@@ -107,13 +121,44 @@ export class AgentRunner {
     this.userWallet = userWallet;
   }
 
+  /** Dashboard snapshot — lightweight summary of this agent's state. */
+  public getSnapshot(): {
+    wallet: string;
+    zone: string;
+    entityId: string | null;
+    custodialWallet: string | null;
+    currentActivity: string;
+    recentActivities: string[];
+    script: { type: string; reason: string | null } | null;
+    lastTrigger: { type: string; detail: string } | null;
+    running: boolean;
+  } {
+    return {
+      wallet: this.userWallet,
+      zone: this.currentZone,
+      entityId: this.entityId,
+      custodialWallet: this.custodialWallet,
+      currentActivity: this.currentActivity,
+      recentActivities: [...this.recentActivities],
+      script: this.currentScript
+        ? { type: this.currentScript.type, reason: this.currentScript.reason ?? null }
+        : null,
+      lastTrigger: this.lastTrigger
+        ? { type: this.lastTrigger.type, detail: this.lastTrigger.detail }
+        : null,
+      running: this.running,
+    };
+  }
+
   /** Log an activity message to the agent's chat history (visible to spectators). */
   private async logActivity(text: string): Promise<void> {
     this.currentActivity = text;
     this.recentActivities = [...this.recentActivities, text].slice(-8);
     try {
       await appendChatMessage(this.userWallet, { role: "activity", text, ts: Date.now() });
-    } catch {}
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] logActivity: ${err.message?.slice(0, 60)}`);
+    }
   }
 
   /**
@@ -185,7 +230,9 @@ export class AgentRunner {
     try {
       const state = await this.api("GET", `/zones/${this.currentZone}`);
       if (state?.entities?.[this.entityId]) return true;
-    } catch {}
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] zone check: ${err.message?.slice(0, 60)}`);
+    }
 
     // Entity not in expected zone — scan all zones (handles server-side transitions)
     try {
@@ -202,7 +249,9 @@ export class AgentRunner {
           return true;
         }
       }
-    } catch {}
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] zone scan: ${err.message?.slice(0, 60)}`);
+    }
 
     return false;
   }
@@ -212,7 +261,8 @@ export class AgentRunner {
     try {
       const state = await this.api("GET", `/zones/${this.currentZone}`);
       return state?.entities?.[this.entityId] ?? null;
-    } catch {
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] getEntityState: ${err.message?.slice(0, 60)}`);
       return null;
     }
   }
@@ -220,12 +270,14 @@ export class AgentRunner {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   private async getZoneState(): Promise<{ entities: Record<string, any>; me: any } | null> {
+    if (this.cachedZoneState) return this.cachedZoneState;
     if (!this.api || !this.entityId) return null;
     const state = await this.api("GET", `/zones/${this.currentZone}`);
     const entities = state?.entities ?? {};
     const me = entities[this.entityId];
     if (!me) return null;
-    return { entities, me };
+    this.cachedZoneState = { entities, me };
+    return this.cachedZoneState;
   }
 
   private findNearestEntity(entities: Record<string, any>, me: any, typePredicate: (e: any) => boolean): [string, any] | null {
@@ -235,16 +287,37 @@ export class AgentRunner {
     return matches[0] as [string, any] ?? null;
   }
 
+  /** Tracks consecutive move-to-entity ticks for stale walk detection */
+  private moveToStaleCount = 0;
+  private moveToLastTarget = "";
+
   private async moveToEntity(me: any, target: any): Promise<boolean> {
     if (!this.api || !this.entityId) return false;
     const dist = Math.hypot(target.x - me.x, target.y - me.y);
+    const targetKey = `${Math.round(target.x)},${Math.round(target.y)}`;
+
+    // Track stale walks — if we've been walking to the same target for 5+ ticks, give up
+    if (targetKey === this.moveToLastTarget) {
+      this.moveToStaleCount++;
+    } else {
+      this.moveToStaleCount = 0;
+      this.moveToLastTarget = targetKey;
+    }
+    if (this.moveToStaleCount >= 5) {
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Stale walk detected (${this.moveToStaleCount} ticks), forcing arrival`);
+      this.moveToStaleCount = 0;
+      return false; // force "close enough" to unblock the action
+    }
+
     if (dist > 80) {
+      void this.logActivity(`Walking to ${target.name ?? "target"} (${Math.round(dist)} away)`);
       await this.api("POST", "/command", {
         zoneId: this.currentZone, entityId: this.entityId, action: "move",
         x: target.x, y: target.y,
       });
       return true; // still moving
     }
+    this.moveToStaleCount = 0;
     return false; // close enough
   }
 
@@ -455,6 +528,17 @@ export class AgentRunner {
     return false;
   }
 
+  // ── Explained fallback ────────────────────────────────────────────────────
+
+  /**
+   * Fall back to combat with a visible explanation so users know WHY
+   * the agent switched away from their requested focus.
+   */
+  private async fallbackToCombat(reason: string, strategy: AgentStrategy): Promise<void> {
+    void this.logActivity(`⚠ ${reason} — fighting to earn XP/gold`);
+    await this.doCombat(strategy);
+  }
+
   // ── Focus behaviours ──────────────────────────────────────────────────────
 
   private async doQuesting(strategy: AgentStrategy): Promise<void> {
@@ -495,7 +579,9 @@ export class AgentRunner {
                 void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}c`);
                 return; // one action per tick
               }
-            } catch {}
+            } catch (err: any) {
+              console.debug(`[agent:${this.userWallet.slice(0, 8)}] quest complete: ${err.message?.slice(0, 60)}`);
+            }
           }
         }
       }
@@ -526,7 +612,9 @@ export class AgentRunner {
               });
               void this.logActivity(`Talked to ${targetNpcName} for "${tq.quest?.title}"`);
               return;
-            } catch {}
+            } catch (err: any) {
+              console.debug(`[agent:${this.userWallet.slice(0, 8)}] quest talk: ${err.message?.slice(0, 60)}`);
+            }
           }
         }
         // Fallback: try all quest-givers for talk quests
@@ -538,7 +626,9 @@ export class AgentRunner {
                 playerId: this.entityId,
                 npcEntityId: entityId,
               });
-            } catch {}
+            } catch (err: any) {
+              console.debug(`[agent:${this.userWallet.slice(0, 8)}] quest talk fallback: ${err.message?.slice(0, 60)}`);
+            }
           }
         }
       }
@@ -572,7 +662,9 @@ export class AgentRunner {
               return;
             }
           }
-        } catch {}
+        } catch (err: any) {
+          console.debug(`[agent:${this.userWallet.slice(0, 8)}] quest accept: ${err.message?.slice(0, 60)}`);
+        }
       }
 
       // 4. Progress kill/gather quests by fighting mobs or gathering
@@ -584,17 +676,17 @@ export class AgentRunner {
       );
 
       if (hasKillQuest) {
+        void this.logActivity("Hunting mobs for kill quest");
         await this.doCombat(strategy);
       } else if (hasGatherQuest) {
+        void this.logActivity("Gathering resources for quest");
         await this.doGathering(strategy);
       } else {
-        // No active objectives — combat for XP while waiting
-        await this.doCombat(strategy);
+        await this.fallbackToCombat("No quest objectives to work on", strategy);
       }
     } catch (err: any) {
       console.debug(`[agent] questing tick: ${err.message?.slice(0, 60)}`);
-      // Fallback to combat if quest system errors
-      await this.doCombat(strategy);
+      await this.fallbackToCombat("Quest system error", strategy);
     }
   }
 
@@ -675,7 +767,7 @@ export class AgentRunner {
       const node = this.findNearestEntity(entities, me,
         (e) => e.type === "ore-node" || e.type === "flower-node"
       );
-      if (!node) { await this.doCombat(strategy); return; }
+      if (!node) { await this.fallbackToCombat("No resource nodes in this zone", strategy); return; }
 
       const [nodeId, nodeEntity] = node;
       const moving = await this.moveToEntity(me, nodeEntity);
@@ -725,7 +817,7 @@ export class AgentRunner {
       const lab = this.findNearestEntity(entities, me,
         (e) => e.type === "alchemy-lab"
       );
-      if (!lab) { await this.doGathering(strategy); return; }
+      if (!lab) { void this.logActivity("⚠ No alchemy lab here — gathering herbs instead"); await this.doGathering(strategy); return; }
 
       const [labId, labEntity] = lab;
       const moving = await this.moveToEntity(me, labEntity);
@@ -734,7 +826,7 @@ export class AgentRunner {
       // Step 4: Get recipes and try to brew
       const recipesRes = await this.api("GET", "/alchemy/recipes");
       const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
-      if (recipes.length === 0) { await this.doGathering(strategy); return; }
+      if (recipes.length === 0) { void this.logActivity("⚠ No alchemy recipes available — gathering materials"); await this.doGathering(strategy); return; }
 
       // Try recipes from simplest (tier 1) first
       for (const recipe of recipes) {
@@ -749,12 +841,13 @@ export class AgentRunner {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Brewed ${recipe.name ?? recipe.recipeId}`);
           void this.logActivity(`Brewed ${recipe.name ?? recipe.recipeId}`);
           return;
-        } catch {
-          // Missing materials — try next recipe
+        } catch (err: any) {
+          console.debug(`[agent:${this.userWallet.slice(0, 8)}] brew ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
         }
       }
 
       // No recipes craftable — go gather herbs for materials
+      void this.logActivity("⚠ Missing ingredients for all potions — gathering herbs");
       await this.doGathering(strategy);
     } catch (err: any) {
       console.debug(`[agent] alchemy tick: ${err.message?.slice(0, 60)}`);
@@ -776,7 +869,7 @@ export class AgentRunner {
       const campfire = this.findNearestEntity(entities, me,
         (e) => e.type === "campfire"
       );
-      if (!campfire) { await this.doGathering(strategy); return; }
+      if (!campfire) { void this.logActivity("⚠ No campfire here — gathering ingredients instead"); await this.doGathering(strategy); return; }
 
       const [campfireId, campfireEntity] = campfire;
       const moving = await this.moveToEntity(me, campfireEntity);
@@ -797,12 +890,13 @@ export class AgentRunner {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Cooked ${recipe.name ?? recipe.recipeId}`);
           void this.logActivity(`Cooked ${recipe.name ?? recipe.recipeId}`);
           return;
-        } catch {
-          // Missing materials
+        } catch (err: any) {
+          console.debug(`[agent:${this.userWallet.slice(0, 8)}] cook ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
         }
       }
 
       // No recipes possible — go gather
+      void this.logActivity("⚠ Can't cook anything — missing ingredients, going to gather");
       await this.doGathering(strategy);
     } catch (err: any) {
       console.debug(`[agent] cooking tick: ${err.message?.slice(0, 60)}`);
@@ -819,7 +913,7 @@ export class AgentRunner {
       const altar = this.findNearestEntity(entities, me,
         (e) => e.type === "enchanting-altar"
       );
-      if (!altar) { await this.doCombat(strategy); return; }
+      if (!altar) { await this.fallbackToCombat("No enchanting altar in this zone", strategy); return; }
 
       const [altarId, altarEntity] = altar;
       const moving = await this.moveToEntity(me, altarEntity);
@@ -831,7 +925,7 @@ export class AgentRunner {
         const elixir = (inv?.items ?? []).find((i: any) =>
           i.category === "enchantment-elixir" && Number(i.balance) > 0
         );
-        if (!elixir) { await this.doAlchemy(strategy); return; }
+        if (!elixir) { void this.logActivity("⚠ No enchantment elixirs — brewing some first"); await this.doAlchemy(strategy); return; }
 
         await this.api("POST", "/enchanting/apply", {
           walletAddress: this.custodialWallet,
@@ -842,6 +936,7 @@ export class AgentRunner {
           equipmentSlot: "weapon",
         });
       } else {
+        void this.logActivity("⚠ No weapon to enchant — gathering materials instead");
         await this.doGathering(strategy);
       }
     } catch (err: any) {
@@ -862,7 +957,7 @@ export class AgentRunner {
       const forge = this.findNearestEntity(entities, me,
         (e) => e.type === "forge"
       );
-      if (!forge) { await this.doCombat(strategy); return; }
+      if (!forge) { await this.fallbackToCombat("No forge in this zone", strategy); return; }
 
       const [forgeId, forgeEntity] = forge;
       const moving = await this.moveToEntity(me, forgeEntity);
@@ -884,12 +979,13 @@ export class AgentRunner {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Crafted ${recipe.name ?? recipe.recipeId}`);
           void this.logActivity(`Crafted ${recipe.name ?? recipe.recipeId}`);
           return;
-        } catch {
-          // Missing materials
+        } catch (err: any) {
+          console.debug(`[agent:${this.userWallet.slice(0, 8)}] craft ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
         }
       }
 
       // No recipes possible — go gather materials
+      void this.logActivity("⚠ Missing materials for all recipes — gathering ore");
       await this.doGathering(strategy);
     } catch (err: any) {
       console.debug(`[agent] crafting tick: ${err.message?.slice(0, 60)}`);
@@ -907,7 +1003,7 @@ export class AgentRunner {
       const merchant = this.findNearestEntity(entities, me,
         (e) => e.type === "merchant"
       );
-      if (!merchant) { await this.doCombat(strategy); return; }
+      if (!merchant) { await this.fallbackToCombat("No merchants in this zone", strategy); return; }
 
       const [merchantId, merchantEntity] = merchant;
 
@@ -918,7 +1014,7 @@ export class AgentRunner {
       // Fetch merchant catalog
       const shopData = await this.api("GET", `/shop/npc/${this.currentZone}/${merchantId}`);
       const items: any[] = shopData?.items ?? [];
-      if (items.length === 0) { await this.doCombat(strategy); return; }
+      if (items.length === 0) { await this.fallbackToCombat("Merchant has nothing to sell", strategy); return; }
 
       // Check current equipment — identify empty slots
       const equipment = me.equipment ?? {};
@@ -928,7 +1024,7 @@ export class AgentRunner {
       }
 
       if (emptySlots.length === 0) {
-        // Fully geared — fall back to combat
+        void this.logActivity("✓ Fully geared up — back to fighting");
         await this.doCombat(strategy);
         return;
       }
@@ -937,7 +1033,9 @@ export class AgentRunner {
       let inv: any = null;
       try {
         inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
-      } catch {}
+      } catch (err: any) {
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] shop balance: ${err.message?.slice(0, 60)}`);
+      }
       const walletCopper = Number(inv?.copper ?? NaN);
       const walletGold = Number(inv?.gold ?? 0);
       const copperBalance = Number.isFinite(walletCopper)
@@ -971,7 +1069,7 @@ export class AgentRunner {
       }
 
       // Nothing left to buy or can't afford — fall back to combat
-      await this.doCombat(strategy);
+      await this.fallbackToCombat("Can't afford any upgrades right now", strategy);
     } catch (err: any) {
       console.debug(`[agent] shopping tick: ${err.message?.slice(0, 60)}`);
     }
@@ -1125,7 +1223,9 @@ export class AgentRunner {
     let inv: any = null;
     try {
       inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
-    } catch {}
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] survival balance: ${err.message?.slice(0, 60)}`);
+    }
     const ownedItems: any[] = inv?.items ?? [];
 
     // Try food first (cooking/consume)
@@ -1141,7 +1241,9 @@ export class AgentRunner {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Ate ${food.name} at ${Math.round(hpPct * 100)}% HP`);
         void this.logActivity(`Ate ${food.name} (${Math.round(hpPct * 100)}% HP)`);
         return true;
-      } catch {}
+      } catch (err: any) {
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] eat food: ${err.message?.slice(0, 60)}`);
+      }
     }
 
     // Try potion (alchemy/consume)
@@ -1159,7 +1261,9 @@ export class AgentRunner {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Used ${potion.name} at ${Math.round(hpPct * 100)}% HP`);
         void this.logActivity(`Used ${potion.name} (${Math.round(hpPct * 100)}% HP)`);
         return true;
-      } catch {}
+      } catch (err: any) {
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] use potion: ${err.message?.slice(0, 60)}`);
+      }
     }
 
     // Flee threshold
@@ -1196,7 +1300,9 @@ export class AgentRunner {
 
       // Check inventory
       let inv: any = null;
-      try { inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`); } catch {}
+      try { inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`); } catch (err: any) {
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] adapt balance: ${err.message?.slice(0, 60)}`);
+      }
       const items: any[] = inv?.items ?? [];
       const walletCopper = Number(inv?.copper ?? NaN);
       const walletGold = Number(inv?.gold ?? 0);
@@ -1216,12 +1322,29 @@ export class AgentRunner {
         return true;
       }
 
-      // Priority 2: Low on consumables after combat → brew/cook some
+      // Priority 2: Low on consumables after combat → try shopping for food first,
+      // only cook if we have ingredients. Avoid cooking trap (agents can't cook without ingredients).
       if (!hasFood && !hasPotions && hpPct < 0.7) {
-        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables, going to cook/brew`);
-        void this.logActivity("Out of consumables — going to cook");
-        await patchAgentConfig(this.userWallet, { focus: "cooking" });
-        return true;
+        // Check if we have any cooking ingredients before switching to cooking
+        const hasCookingIngredients = items.some((i: any) =>
+          (i.category === "material" || i.category === "ingredient" || i.category === "meat" || i.category === "herb") && Number(i.balance) > 0
+        );
+        if (hasCookingIngredients) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: has ingredients, going to cook`);
+          void this.logActivity("Has ingredients — cooking food");
+          await patchAgentConfig(this.userWallet, { focus: "cooking" });
+          return true;
+        }
+        // No ingredients + low HP → go shopping for food or potions if we have gold
+        if (copper >= 10) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables, shopping for food`);
+          void this.logActivity("No consumables — shopping for food");
+          await patchAgentConfig(this.userWallet, { focus: "shopping" });
+          return true;
+        }
+        // No ingredients, no gold — just keep questing/fighting to earn gold
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables or gold, staying on task`);
+        return false;
       }
 
       // Priority 3: Outleveled current zone → travel to next zone
@@ -1239,7 +1362,8 @@ export class AgentRunner {
       }
 
       return false;
-    } catch {
+    } catch (err: any) {
+      console.debug(`[agent:${this.userWallet.slice(0, 8)}] self-adapt: ${err.message?.slice(0, 60)}`);
       return false;
     }
   }
@@ -1279,6 +1403,12 @@ export class AgentRunner {
     }
 
     this.ticksSinceLastDecision++;
+    this.ticksOnCurrentScript++;
+
+    // Script stuck too long — let supervisor re-evaluate any behavior
+    if (this.ticksOnCurrentScript >= 25) {
+      return { type: "stuck", detail: `Script "${this.currentScript.type}" running for ${this.ticksOnCurrentScript} ticks with no progress` };
+    }
 
     // Universal: level up
     const level = entity.level ?? 1;
@@ -1369,6 +1499,7 @@ export class AgentRunner {
       this.lastKnownLevel = entity.level ?? 1;
       this.lastKnownZone = this.currentZone;
 
+      this.lastTrigger = trigger;
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Trigger [${trigger.type}]: ${trigger.detail}`);
 
       // Derive user's natural-language directive from focus
@@ -1377,6 +1508,7 @@ export class AgentRunner {
       // Hard-respect focus when the runner has no script yet (startup/focus change).
       if (trigger.type === "no_script") {
         this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.ticksOnCurrentScript = 0;
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else {
       try {
@@ -1392,11 +1524,13 @@ export class AgentRunner {
           apiCall: this.api!,
         });
         this.currentScript = newScript;
+        this.ticksOnCurrentScript = 0;
         void this.logActivity(`[AI] ${newScript.type}: ${newScript.reason ?? ""}`);
       } catch (err: any) {
         console.warn(`[agent:${this.userWallet.slice(0, 8)}] Supervisor failed: ${err.message?.slice(0, 60)}`);
         // Fallback: derive a script from the current focus so the bot doesn't stop
         this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.ticksOnCurrentScript = 0;
       }
       }
     }
@@ -1417,6 +1551,9 @@ export class AgentRunner {
 
     while (this.running) {
       try {
+        // Clear per-tick cache so every iteration gets fresh zone state
+        this.cachedZoneState = null;
+
         // Read config fresh each tick
         const config = await getAgentConfig(this.userWallet);
         if (!config?.enabled) {
@@ -1489,8 +1626,11 @@ export class AgentRunner {
         if (usedPotion) { await sleep(TICK_MS); continue; }
 
         // ── Self-adaptation: periodically check if we should auto-adjust ──
-        // Every 10 ticks (~12s), check situational needs
-        const allowAutoAdapt = focus === "questing" || focus === "combat";
+        // Every 10 ticks (~12s), check situational needs.
+        // Allow adaptation from questing/combat (normal flow) AND from cooking/shopping
+        // (escape hatch — generic stuck detection in detectTrigger handles prolonged stalls).
+        const allowAutoAdapt = focus === "questing" || focus === "combat"
+          || focus === "cooking" || focus === "shopping";
         if (allowAutoAdapt && this.ticksSinceFocusChange % 10 === 0 && this.ticksSinceFocusChange > 0) {
           const adapted = await this.checkSelfAdaptation(entity, strategy);
           if (adapted) { this.currentScript = null; await sleep(TICK_MS); continue; }

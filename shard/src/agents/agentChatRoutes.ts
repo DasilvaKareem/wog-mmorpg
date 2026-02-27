@@ -17,6 +17,7 @@ import {
   getAgentCustodialWallet,
   getAgentEntityRef,
   appendChatMessage,
+  getChatHistory,
   defaultConfig,
   type AgentFocus,
   type AgentStrategy,
@@ -325,6 +326,57 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     });
   });
 
+  // ── GET /agents/dashboard ────────────────────────────────────────────────
+  // Public — returns all running agents' state in one call.
+  // Shows what each agent is doing, thinking, and why.
+  server.get("/agents/dashboard", async (_request, reply) => {
+    const runners = agentManager.listRunners();
+    const agents = [];
+
+    for (const runner of runners) {
+      const snap = runner.getSnapshot();
+      if (!snap.running) continue;
+
+      // Grab live entity data from zone for HP/level
+      let level: number | null = null;
+      let hp: number | null = null;
+      let maxHp: number | null = null;
+      let name: string | null = null;
+      let gold: number | null = null;
+
+      if (snap.entityId && snap.zone) {
+        const zone = getAllZones().get(snap.zone);
+        const entity = zone?.entities.get(snap.entityId) as any;
+        if (entity) {
+          level = Number(entity.level ?? 1);
+          hp = entity.hp != null ? Number(entity.hp) : null;
+          maxHp = entity.maxHp != null ? Number(entity.maxHp) : null;
+          name = entity.name ?? null;
+          gold = entity.gold != null ? Number(entity.gold) : null;
+        }
+      }
+
+      agents.push({
+        wallet: snap.wallet.slice(0, 10) + "...",
+        name: name ?? "Unknown",
+        level,
+        hp,
+        maxHp,
+        gold,
+        zone: snap.zone,
+        currentActivity: snap.currentActivity,
+        script: snap.script,
+        lastTrigger: snap.lastTrigger,
+        recentActivities: snap.recentActivities,
+      });
+    }
+
+    return reply.send({
+      count: agents.length,
+      agents,
+    });
+  });
+
   // ── POST /agent/chat ──────────────────────────────────────────────────────
   server.post<{
     Body: { message: string };
@@ -394,19 +446,21 @@ Nearby: ${nearbyDesc}
 ${inventoryDesc}
 
 RULES:
-1. Respond in character as ${charName} — 1-2 sentences max, stay in-world.
+1. Respond in character as ${charName} — 1-2 sentences max, stay in-world. Be vivid and specific.
 2. ALWAYS call update_focus when the user wants you to change what you're doing. ANY request to fight, gather, craft, shop, brew, cook, quest, or idle MUST trigger update_focus. Do NOT just say you'll do it — call the tool.
 3. Call take_action for one-off actions: learning a profession, buying a specific item, equipping gear.
 4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
 5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
+6. When calling tools, ALWAYS include a 1-2 sentence in-character response alongside the tool call. Never respond with just "Got it" or generic confirmations. Describe what you're about to do in vivid, in-world terms.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
 
-    // Build message history — include tool action context so the LLM knows what it did
+    // Build message history from Redis list (race-free)
+    const chatHistory = await getChatHistory(authWallet, 10);
     const history: Groq.Chat.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
-      ...config.chatHistory.slice(-10).map((m) => ({
+      ...chatHistory.map((m) => ({
         role: m.role === "user" ? "user" as const : "assistant" as const,
         content: m.text,
       })),
@@ -491,9 +545,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     const choice = groqResponse.choices[0];
     const hasToolCalls = choice?.message?.tool_calls && choice.message.tool_calls.length > 0;
 
-    // Only use inline text when no tools were called — otherwise the LLM
-    // returns lazy filler like "Got it" that we'll replace with a follow-up
-    if (choice?.message?.content && !hasToolCalls) {
+    // Trust the first response's content — the prompt now tells the model to
+    // always respond in character alongside tool calls (no more "Got it" filler).
+    if (choice?.message?.content) {
       agentResponse = choice.message.content;
     }
 
@@ -596,28 +650,6 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             }
           } catch {}
         }
-      }
-    }
-
-    // When tools are called, the LLM often returns lazy filler ("Got it", "Sure")
-    // alongside the tool calls. Always do a follow-up call to get a proper
-    // in-character response that acknowledges what was actually done.
-    if (actionsTaken.length > 0) {
-      try {
-        const followUp = await groq.chat.completions.create({
-          model: "openai/gpt-oss-120b",
-          max_tokens: 120,
-          messages: [
-            { role: "system", content: `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva. Respond in character in 1-2 sentences. Be vivid and specific about what you're doing. Stay in-world. No OOC. Never say "got it" or generic confirmations.` },
-            { role: "user", content: message },
-            { role: "assistant", content: `(I just: ${actionsTaken.join(", ")})` },
-            { role: "user", content: "Describe what you just did in character. Be specific and vivid." },
-          ],
-        });
-        const followUpText = followUp.choices[0]?.message?.content?.trim();
-        if (followUpText) agentResponse = followUpText;
-      } catch {
-        // Fallback below
       }
     }
 

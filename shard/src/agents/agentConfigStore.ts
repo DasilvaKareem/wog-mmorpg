@@ -35,6 +35,7 @@ export interface AgentConfig {
   strategy: AgentStrategy;
   targetZone?: string;
   lastUpdated: number;
+  /** @deprecated Chat history now lives in agent:chat:{wallet} Redis list. Kept for type compat. */
   chatHistory: ChatMessage[];
 }
 
@@ -94,15 +95,40 @@ export async function patchAgentConfig(
   return updated;
 }
 
+function chatKey(k: string) { return `agent:chat:${k.toLowerCase()}`; }
+
+// In-memory fallback for chat when Redis is unavailable
+const memChat = new Map<string, ChatMessage[]>();
+
 export async function appendChatMessage(
   userWallet: string,
   msg: ChatMessage,
   maxHistory = 50
 ): Promise<void> {
-  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
-  config.chatHistory = [...config.chatHistory, msg].slice(-maxHistory);
-  config.lastUpdated = Date.now();
-  await setAgentConfig(userWallet, config);
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    await redis.rpush(chatKey(key), JSON.stringify(msg));
+    await redis.ltrim(chatKey(key), -maxHistory, -1);
+  } else {
+    const list = memChat.get(key) ?? [];
+    list.push(msg);
+    if (list.length > maxHistory) list.splice(0, list.length - maxHistory);
+    memChat.set(key, list);
+  }
+}
+
+export async function getChatHistory(
+  userWallet: string,
+  limit = 50
+): Promise<ChatMessage[]> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    const raw = await redis.lrange(chatKey(key), -limit, -1);
+    return raw.map((s: string) => JSON.parse(s) as ChatMessage);
+  }
+  return (memChat.get(key) ?? []).slice(-limit);
 }
 
 // ── Custodial wallet mapping ─────────────────────────────────────────────────
