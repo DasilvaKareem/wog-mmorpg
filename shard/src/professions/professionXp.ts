@@ -68,8 +68,12 @@ export function awardProfessionXp(
 ): ProfessionXpResult {
   if (xpAmount <= 0) return { xpAwarded: 0, totalXp: entity.xp ?? 0, leveledUp: false };
 
+  // Ensure level and xp are proper numbers (safety fix)
+  if (typeof entity.level !== "number") entity.level = Number(entity.level) || 1;
+  if (typeof entity.xp !== "number") entity.xp = Number(entity.xp) || 0;
+
   // Add XP
-  entity.xp = (entity.xp ?? 0) + xpAmount;
+  entity.xp = entity.xp + xpAmount;
 
   // Check for level-up(s)
   let leveled = false;

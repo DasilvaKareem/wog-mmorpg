@@ -192,9 +192,29 @@ const itemsContract = getContract({
 const itemByTokenId = new Map(ITEM_CATALOG.map((item) => [item.tokenId, item]));
 let seedingPromise: Promise<void> | null = null;
 
+/** Read nextTokenIdToMint with retry for transient RPC errors (SKALE 0x). */
+async function safeNextTokenIdToMint(retries = 3): Promise<bigint> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await nextTokenIdToMint({ contract: itemsContract });
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
+      if (isTransient && attempt < retries) {
+        const delay = 2000 * 2 ** attempt; // 2s, 4s, 8s
+        console.warn(`[blockchain] nextTokenIdToMint RPC error (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("safeNextTokenIdToMint: exhausted retries");
+}
+
 async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
   const seedTask = async () => {
-    let nextId = await nextTokenIdToMint({ contract: itemsContract });
+    let nextId = await safeNextTokenIdToMint();
     while (nextId <= targetTokenId) {
       const item = itemByTokenId.get(nextId);
       if (!item) {
@@ -233,7 +253,7 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
 
     await seedingPromise;
 
-    const nextId = await nextTokenIdToMint({ contract: itemsContract });
+    const nextId = await safeNextTokenIdToMint();
     if (nextId > targetTokenId) return;
   }
 }
@@ -279,9 +299,19 @@ export async function getGoldBalance(address: string): Promise<string> {
   const cached = goldCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const result = await getBalance({ contract: goldContract, address });
-  goldCache.set(cacheKey, result.displayValue);
-  return result.displayValue;
+  try {
+    const result = await getBalance({ contract: goldContract, address });
+    goldCache.set(cacheKey, result.displayValue);
+    return result.displayValue;
+  } catch (err: any) {
+    const msg = String(err?.message ?? "");
+    // SKALE RPC sometimes returns 0x (empty data) for balanceOf — treat as 0
+    if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
+      console.warn(`[blockchain] getGoldBalance RPC error for ${address}, returning 0: ${msg.slice(0, 120)}`);
+      return "0";
+    }
+    throw err;
+  }
 }
 
 /**
@@ -337,9 +367,18 @@ export async function getItemBalance(
   const cached = itemCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
-  itemCache.set(cacheKey, balance);
-  return balance;
+  try {
+    const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
+    itemCache.set(cacheKey, balance);
+    return balance;
+  } catch (err: any) {
+    const msg = String(err?.message ?? "");
+    // SKALE RPC sometimes returns 0x (empty data) — treat as 0
+    if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
+      return 0n;
+    }
+    throw err;
+  }
 }
 
 /** Burn (destroy) ERC-1155 items from a player address. */

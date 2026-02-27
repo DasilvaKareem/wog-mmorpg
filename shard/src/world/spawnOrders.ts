@@ -91,7 +91,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const spawnZoneId = saved?.zone ?? zoneId;
     const zone = getOrCreateZone(spawnZoneId);
 
-    const resolvedLevel = saved?.level ?? level ?? 1;
+    const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
     const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;

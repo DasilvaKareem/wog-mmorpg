@@ -438,7 +438,10 @@ function handleLevelUp(entity: Entity, zone: ZoneState): void {
  * Each member's own potion multiplier is applied individually.
  */
 function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number): void {
-  if (baseXpReward <= 0 || xpRecipient.level == null) return;
+  if (baseXpReward <= 0 || xpRecipient.level == null) {
+    console.warn(`[xp-debug] SKIPPED XP: recipient=${xpRecipient.name} baseXp=${baseXpReward} level=${xpRecipient.level} levelIsNull=${xpRecipient.level == null}`);
+    return;
+  }
 
   const partyMemberIds = getPartyMembers(xpRecipient.id);
 
@@ -448,11 +451,16 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
     const member = zone.entities.get(memberId);
     if (member && member.type === "player" && member.hp > 0 && member.level != null) {
       eligibleMembers.push(member);
+    } else if (member) {
+      console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
+    } else {
+      console.warn(`[xp-debug] MEMBER NOT FOUND in zone: memberId=${memberId}`);
     }
   }
 
   // Fallback: if somehow no eligible members, give to tagger directly
   if (eligibleMembers.length === 0) {
+    console.warn(`[xp-debug] NO ELIGIBLE MEMBERS — using fallback to xpRecipient: ${xpRecipient.name} level=${xpRecipient.level}`);
     eligibleMembers.push(xpRecipient);
   }
 
@@ -462,18 +470,24 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
   const perMemberXp = Math.floor(totalXp / memberCount);
 
   for (const member of eligibleMembers) {
+    // Ensure level and xp are proper numbers (safety fix for type coercion bugs)
+    if (typeof member.level !== "number") member.level = Number(member.level) || 1;
+    if (typeof member.xp !== "number") member.xp = Number(member.xp) || 0;
+
     // Apply each member's own potion XP multiplier
     const xpMult = getActiveXpMultiplier(member.activeEffects);
     const finalXp = Math.round(perMemberXp * xpMult);
     if (finalXp <= 0) continue;
 
-    member.xp = (member.xp ?? 0) + finalXp;
+    member.xp = member.xp + finalXp;
+    console.log(`[xp-debug] AWARDED: ${member.name} +${finalXp} XP → total ${member.xp} (L${member.level}, need ${xpForLevel(member.level + 1)} for next)`);
 
     // Check for level-up(s)
     let leveled = false;
-    while (member.level! < MAX_LEVEL && member.xp! >= xpForLevel(member.level! + 1)) {
-      member.level!++;
+    while (member.level < MAX_LEVEL && member.xp >= xpForLevel(member.level + 1)) {
+      member.level++;
       leveled = true;
+      console.log(`[xp-debug] LEVEL UP! ${member.name} → L${member.level} (xp=${member.xp})`);
     }
 
     if (leveled) {

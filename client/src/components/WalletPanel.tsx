@@ -34,6 +34,7 @@ export function WalletPanel(): React.ReactElement {
     selectedCharacterTokenId,
     selectCharacter,
     connect,
+    disconnect,
     equipItem,
   } = useWallet();
   const { notify } = useToast();
@@ -79,7 +80,17 @@ export function WalletPanel(): React.ReactElement {
           <>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
-              <Badge>{dn(address!)}</Badge>
+              <div className="flex items-center gap-1">
+                <Badge>{dn(address!)}</Badge>
+                <button
+                  onClick={disconnect}
+                  className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"
+                  type="button"
+                  title="Disconnect wallet"
+                >
+                  X
+                </button>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Gold</span>

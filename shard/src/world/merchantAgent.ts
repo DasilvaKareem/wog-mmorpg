@@ -136,6 +136,7 @@ function findEntityByNpcDef(def: NpcDef): Entity | undefined {
 
 export async function initMerchantWallets(): Promise<void> {
   const merchantDefs = NPC_DEFS.filter((d) => d.type === "merchant" && d.shopItems && d.shopItems.length > 0);
+  const failedDefs: typeof merchantDefs = [];
 
   for (const def of merchantDefs) {
     const entity = findEntityByNpcDef(def);
@@ -192,10 +193,63 @@ export async function initMerchantWallets(): Promise<void> {
       );
     } catch (err) {
       console.error(`[merchant] Failed to init ${def.name}:`, err);
+      failedDefs.push(def);
     }
   }
 
   console.log(`[merchant] ${merchantStates.size} merchant agents initialized`);
+
+  // Retry failed merchants in the background (RPC may recover)
+  if (failedDefs.length > 0) {
+    console.log(`[merchant] ${failedDefs.length} merchant(s) failed — scheduling retry in 30s`);
+    setTimeout(() => void retryFailedMerchants(failedDefs), 30_000);
+  }
+}
+
+const MAX_MERCHANT_RETRIES = 3;
+
+async function retryFailedMerchants(defs: NpcDef[], attempt = 1): Promise<void> {
+  const stillFailed: NpcDef[] = [];
+  for (const def of defs) {
+    const entity = findEntityByNpcDef(def);
+    if (!entity || merchantStates.has(entity.id)) continue; // already initialized or gone
+
+    try {
+      const walletInfo = await createCustodialWallet();
+      entity.walletAddress = walletInfo.address;
+      await mintGold(walletInfo.address, String(INITIAL_GOLD_SEED));
+
+      const inventory = new Map<number, MerchantInventoryEntry>();
+      for (const tokenId of def.shopItems!) {
+        const item = getItemByTokenId(BigInt(tokenId));
+        if (!item) continue;
+        await mintItem(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
+        inventory.set(tokenId, {
+          tokenId, quantity: INITIAL_STOCK_PER_ITEM, basePrice: item.copperPrice,
+          currentPrice: item.copperPrice, targetStock: DEFAULT_TARGET_STOCK,
+          totalSold: 0, totalBought: 0, lastRestockedAt: Date.now(),
+        });
+      }
+
+      merchantStates.set(entity.id, {
+        entityId: entity.id, npcName: def.name, zoneId: def.zoneId,
+        walletAddress: walletInfo.address, shopItems: def.shopItems!,
+        inventory, goldBalance: INITIAL_GOLD_SEED, lastInventorySyncAt: Date.now(),
+        lastPriceUpdateAt: Date.now(), lastAnnouncementAt: 0, lastRestockAt: Date.now(),
+      });
+      console.log(`[merchant] Retry OK: ${def.name} initialized on attempt ${attempt}`);
+    } catch {
+      stillFailed.push(def);
+    }
+  }
+
+  if (stillFailed.length > 0 && attempt < MAX_MERCHANT_RETRIES) {
+    const delay = 30_000 * 2 ** (attempt - 1); // 30s, 60s, 120s
+    console.log(`[merchant] ${stillFailed.length} merchant(s) still failing — retry ${attempt + 1} in ${delay / 1000}s`);
+    setTimeout(() => void retryFailedMerchants(stillFailed, attempt + 1), delay);
+  } else if (stillFailed.length > 0) {
+    console.error(`[merchant] ${stillFailed.length} merchant(s) failed after ${MAX_MERCHANT_RETRIES} retries: ${stillFailed.map((d) => d.name).join(", ")}`);
+  }
 }
 
 // ── Tick Phases ──────────────────────────────────────────────────
