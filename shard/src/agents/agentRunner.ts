@@ -589,6 +589,10 @@ export class AgentRunner {
    */
   private async fallbackToCombat(reason: string, strategy: AgentStrategy): Promise<void> {
     void this.logActivity(`⚠ ${reason} — fighting to earn XP/gold`);
+    // Switch the active script to combat so the agent stays in combat mode for multiple ticks,
+    // rather than returning to the failing script next tick.
+    this.currentScript = { type: "combat", maxLevelOffset: 1, reason: `Farming gold: ${reason}` };
+    this.ticksOnCurrentScript = 0;
     await this.doCombat(strategy);
   }
 
@@ -1636,6 +1640,15 @@ export class AgentRunner {
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else {
       try {
+        // Fetch real on-chain gold balance — entity.gold is always 0 (not a zone field)
+        let walletGoldCopper = 0;
+        try {
+          const inv = await this.api!("GET", `/wallet/${this.custodialWallet}/balance`);
+          const wc = Number(inv?.copper ?? NaN);
+          const wg = Number(inv?.gold ?? 0);
+          walletGoldCopper = Number.isFinite(wc) ? wc : goldToCopper(wg);
+        } catch { /* non-fatal */ }
+
         const newScript = await runSupervisor(trigger, {
           entity,
           entities,
@@ -1646,6 +1659,7 @@ export class AgentRunner {
           recentActivities: this.recentActivities,
           userDirective,
           apiCall: this.api!,
+          walletGoldCopper,
         });
         this.currentScript = newScript;
         this.ticksOnCurrentScript = 0;

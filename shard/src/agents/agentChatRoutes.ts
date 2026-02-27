@@ -23,9 +23,12 @@ import {
   type AgentStrategy,
 } from "./agentConfigStore.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
+import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
+import { copperToGold } from "../blockchain/currency.js";
 import { getAllZones } from "../world/zoneRuntime.js";
 import { getWorldLayout, resolveZoneId } from "../world/worldLayout.js";
 import { loadAnyCharacterForWallet } from "../character/characterStore.js";
+import { sendInboxMessage } from "./agentInbox.js";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -180,6 +183,22 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         raceId,
         classId
       );
+
+      // Mint starter gold for brand-new custodial wallets (0 balance) so the agent
+      // can buy a first weapon instead of being permanently stuck unarmed.
+      if (!result.alreadyExisted) {
+        try {
+          const existingGoldStr = await getGoldBalance(result.custodialWallet);
+          const existingGold = Number(existingGoldStr ?? "0");
+          if (!Number.isFinite(existingGold) || existingGold < 0.001) {
+            const starterCopper = 200; // 0.02 gold — enough for the cheapest weapon
+            await mintGold(result.custodialWallet, copperToGold(starterCopper).toString());
+            server.log.info(`[agent/deploy] Minted ${starterCopper}c starter gold to ${result.custodialWallet}`);
+          }
+        } catch (err: any) {
+          server.log.warn(`[agent/deploy] Starter gold mint failed (non-fatal): ${err.message}`);
+        }
+      }
 
       // Enable agent config
       const config = (await getAgentConfig(authWallet)) ?? defaultConfig();
@@ -437,6 +456,23 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       .map((e: any) => `${e.name} (${e.type}, L${e.level ?? "?"}, HP ${e.hp}/${e.maxHp})`)
       .join(", ") || "none visible";
 
+    // Build list of nearby players the agent can message
+    const nearbyPlayers: { name: string; wallet: string; level: number }[] = [];
+    if (ref?.zoneId) {
+      const zone = getAllZones().get(ref.zoneId);
+      if (zone) {
+        for (const [id, e] of zone.entities) {
+          const ent = e as any;
+          if (ent.type === "player" && ent.walletAddress && ent.walletAddress.toLowerCase() !== authWallet.toLowerCase()) {
+            nearbyPlayers.push({ name: ent.name, wallet: ent.walletAddress, level: ent.level ?? 1 });
+          }
+        }
+      }
+    }
+    const nearbyPlayersDesc = nearbyPlayers.length > 0
+      ? nearbyPlayers.map((p) => `${p.name} (L${p.level}, wallet:${p.wallet.slice(0, 10)}…)`).join(", ")
+      : "none";
+
     const inventoryDesc = entity
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
@@ -445,6 +481,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 Zone: ${ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
+Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
 
 RULES:
@@ -455,6 +492,7 @@ RULES:
 5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
 6. When calling tools, ALWAYS include a 1-2 sentence in-character response alongside the tool call. Never respond with just "Got it" or generic confirmations. Describe what you're about to do in vivid, in-world terms.
 7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering — don't guess from the system prompt snapshot.
+8. Use send_message when the user wants to communicate with another player/agent. Match the player by name from the nearby players list and use their wallet address as the recipient.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
@@ -570,6 +608,32 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               name: "check_quests",
               description: "See your active quests and available quests in your current zone.",
               parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "send_message",
+              description: "Send a message to a nearby player/agent. Use this when the user wants to talk to, trade with, or invite another player. The message is delivered to their inbox and they'll see it on their next tick.",
+              parameters: {
+                type: "object",
+                properties: {
+                  toWallet: {
+                    type: "string",
+                    description: "The recipient's wallet address (from the nearby players list)",
+                  },
+                  body: {
+                    type: "string",
+                    description: "The message to send, written in-character",
+                  },
+                  type: {
+                    type: "string",
+                    enum: ["direct", "trade-request", "party-invite"],
+                    description: "Message type: direct for general chat, trade-request for trade offers, party-invite for group invites",
+                  },
+                },
+                required: ["toWallet", "body"],
+              },
             },
           },
         ],
@@ -767,6 +831,37 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, ...patch }) });
           } catch {
             toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Failed to update focus" }) });
+          }
+        }
+
+        else if (fnName === "send_message") {
+          try {
+            const input = JSON.parse(toolCall.function.arguments) as {
+              toWallet: string;
+              body: string;
+              type?: "direct" | "trade-request" | "party-invite";
+            };
+            if (!input.toWallet || !input.body) {
+              toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "toWallet and body are required" }) });
+            } else {
+              const msgId = await sendInboxMessage({
+                from: authWallet,
+                fromName: charName ?? "Unknown",
+                to: input.toWallet,
+                type: input.type ?? "direct",
+                body: input.body,
+              });
+              // Find recipient name for the action log
+              const recipientPlayer = nearbyPlayers.find(
+                (p) => p.wallet.toLowerCase() === input.toWallet.toLowerCase()
+              );
+              const recipientName = recipientPlayer?.name ?? input.toWallet.slice(0, 10);
+              actionsTaken.push(`[sent ${input.type ?? "direct"} message to ${recipientName}]`);
+              server.log.info(`[agent/chat] send_message to ${recipientName} (${input.toWallet.slice(0, 10)}): "${input.body.slice(0, 60)}"`);
+              toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, messageId: msgId, to: recipientName }) });
+            }
+          } catch {
+            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Failed to send message" }) });
           }
         }
 

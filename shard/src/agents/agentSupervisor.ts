@@ -33,6 +33,8 @@ export interface SupervisorContext {
   userDirective: string;
   /** Bound API caller from the runner (already authenticated) */
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
+  /** Real on-chain wallet balance in copper (pre-fetched by runner). entity.gold is always 0. */
+  walletGoldCopper?: number;
 }
 
 // ── Prompt ────────────────────────────────────────────────────────────────
@@ -46,12 +48,17 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext): string 
     .map(([slot, item]: any) => `${slot}:${item.name}`)
     .join(", ") || "nothing equipped";
 
+  const goldCopper = ctx.walletGoldCopper ?? 0;
+  const goldDisplay = goldCopper >= 10000
+    ? `${(goldCopper / 10000).toFixed(2)}g`
+    : `${goldCopper}c`;
+
   return `You are the strategic supervisor for ${entity.name ?? "Agent"}, a Level ${entity.level ?? 1} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"} in World of Geneva.
 
 EVENT: ${event.detail}
 
 AGENT STATE:
-  Zone: ${ctx.currentZone}  |  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%)  |  Gold: ${entity.gold ?? 0}g  |  Level: ${entity.level ?? 1}
+  Zone: ${ctx.currentZone}  |  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%)  |  Gold: ${goldDisplay}  |  Level: ${entity.level ?? 1}
   Equipped: ${equipped}
   Recent: ${ctx.recentActivities.slice(-4).join(" → ") || "none"}
 
@@ -65,7 +72,11 @@ Your job: Decide the next bot script to execute.
 - Call read tools only if you need more information (zone, inventory, connections, quests)
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold
-- If no weapon: shop. If outleveled: travel. If quests available: quest. Otherwise: combat.`.trim();
+- ECONOMY RULES: Gold earned from mob kills takes time to confirm on-chain. Agents start with 0 gold.
+  * No weapon AND no gold (< 10c): FIGHT — agents can attack unarmed. Earn gold first.
+  * No weapon AND has gold (≥ 10c): SHOP — buy the cheapest weapon available.
+  * Has weapon: quest or combat based on zone and level.
+  * If outleveled: travel to an easier zone.`.trim();
 }
 
 // ── Tools ─────────────────────────────────────────────────────────────────
@@ -289,8 +300,14 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
   const entity = ctx.entity;
   const eq = entity.equipment ?? {};
   const hasWeapon = Boolean(eq.weapon);
+  const goldCopper = ctx.walletGoldCopper ?? 0;
 
-  if (!hasWeapon) return { type: "shop", reason: "No weapon — need gear first" };
+  if (!hasWeapon) {
+    // Only go shopping if the agent can actually afford something
+    if (goldCopper >= 10) return { type: "shop", reason: "Has gold — buying a weapon" };
+    // Broke + no weapon → fight unarmed to earn gold first
+    return { type: "combat", maxLevelOffset: 0, reason: "No gold or weapon — fighting unarmed to earn gold" };
+  }
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
   if (event.type === "zone_arrived") return { type: "quest", reason: "New zone — check for quests" };
   if (event.type === "no_targets") {
