@@ -111,8 +111,11 @@ export class AgentRunner {
     this.ticksSinceLastDecision = MAX_STALE_TICKS;
   }
   /** Immediately direct the agent to walk to a specific NPC (called from goto-npc route) */
-  public setGotoTarget(entityId: string, zoneId: string, name?: string): void {
-    this.currentScript = { type: "goto", targetEntityId: entityId, targetName: name, reason: `User directed agent to ${name ?? entityId}` };
+  public setGotoTarget(entityId: string, zoneId: string, name?: string, action?: string, profession?: string): void {
+    const reason = action === "learn-profession" && profession
+      ? `User: learn ${profession} from ${name ?? entityId}`
+      : `User directed agent to ${name ?? entityId}`;
+    this.currentScript = { type: "goto", targetEntityId: entityId, targetName: name, reason };
     this.ticksSinceLastDecision = 0;
   }
   /** Ticks since the last supervisor call (for MAX_STALE_TICKS safety net) */
@@ -857,8 +860,6 @@ export class AgentRunner {
       if (moving) return;
 
       if (nodeEntity.type === "ore-node") {
-        // Ensure mining profession learned first
-        await this.learnProfession("mining");
         await this.api("POST", "/mining/gather", {
           walletAddress: this.custodialWallet,
           zoneId: this.currentZone,
@@ -867,8 +868,6 @@ export class AgentRunner {
         });
         void this.logActivity(`Gathered ore from ${nodeEntity.name ?? "ore node"}`);
       } else {
-        // Ensure herbalism profession learned first
-        await this.learnProfession("herbalism");
         await this.api("POST", "/herbalism/gather", {
           walletAddress: this.custodialWallet,
           zoneId: this.currentZone,
@@ -885,13 +884,6 @@ export class AgentRunner {
   private async doAlchemy(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      // Step 1: Learn alchemy if needed
-      const learned = await this.learnProfession("alchemy");
-      if (!learned) return; // still walking to trainer or no trainer
-
-      // Step 2: Also learn herbalism (needed for materials)
-      await this.learnProfession("herbalism");
-
       const zs = await this.getZoneState();
       if (!zs) return;
       const { entities, me } = zs;
@@ -940,10 +932,6 @@ export class AgentRunner {
   private async doCooking(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      // Learn cooking first
-      const learned = await this.learnProfession("cooking");
-      if (!learned) return;
-
       const zs = await this.getZoneState();
       if (!zs) return;
       const { entities, me } = zs;
@@ -1030,9 +1018,6 @@ export class AgentRunner {
   private async doCrafting(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId || !this.custodialWallet) return;
     try {
-      // Learn blacksmithing first
-      await this.learnProfession("blacksmithing");
-
       const zs = await this.getZoneState();
       if (!zs) return;
       const { entities, me } = zs;
@@ -1305,8 +1290,28 @@ export class AgentRunner {
         return;
       }
 
-      // Arrived!
-      void this.logActivity(`Arrived at ${targetName ?? "NPC"}`);
+      // Arrived — execute any on-arrival action
+      const arrivalAction = target.action;
+      const profession = target.profession;
+
+      if (arrivalAction === "learn-profession" && profession && this.custodialWallet) {
+        try {
+          await this.api("POST", "/professions/learn", {
+            walletAddress: this.custodialWallet,
+            zoneId: this.currentZone,
+            entityId: this.entityId,
+            trainerId: targetEntityId,
+            professionId: profession,
+          });
+          void this.logActivity(`Learned profession: ${profession}`);
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned profession ${profession} (user-initiated)`);
+        } catch (learnErr: any) {
+          void this.logActivity(`⚠ Could not learn ${profession}: ${learnErr.message?.slice(0, 60)}`);
+        }
+      } else {
+        void this.logActivity(`Arrived at ${targetName ?? "NPC"}`);
+      }
+
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at goto target: ${targetName ?? targetEntityId}`);
       await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
       this.currentScript = null;

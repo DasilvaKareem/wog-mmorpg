@@ -13,7 +13,7 @@ export interface GameEventMap {
   /** Pan + lock camera to any entity by its zone entity ID */
   focusEntity: { entityId: string };
   /** User clicked an NPC to send the agent there */
-  agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string };
+  agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string; teachesProfession?: string };
 }
 
 type GameEventKey = keyof GameEventMap;

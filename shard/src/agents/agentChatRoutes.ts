@@ -994,12 +994,12 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
   // ── POST /agent/goto-npc — Send agent to a specific NPC (UI click) ─────────
   server.post<{
-    Body: { entityId: string; zoneId: string; name?: string };
+    Body: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string };
   }>("/agent/goto-npc", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
-    const { entityId, zoneId, name } = request.body ?? {};
+    const { entityId, zoneId, name, action, profession } = request.body ?? {};
 
     if (!entityId || !zoneId) {
       return reply.code(400).send({ error: "entityId and zoneId are required" });
@@ -1007,21 +1007,25 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
     await patchAgentConfig(authWallet, {
       focus: "goto",
-      gotoTarget: { entityId, zoneId, name },
+      gotoTarget: { entityId, zoneId, name, action, profession },
     });
+
+    const logText = action === "learn-profession" && profession
+      ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}`
+      : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
 
     await appendChatMessage(authWallet, {
       role: "activity",
-      text: `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`,
+      text: logText,
       ts: Date.now(),
     });
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      runner.setGotoTarget(entityId, zoneId, name);
+      runner.setGotoTarget(entityId, zoneId, name, action, profession);
     }
 
-    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name } });
+    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession } });
   });
 
   // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────

@@ -146,6 +146,7 @@ export class WorldScene extends Phaser.Scene {
           zoneId: entity.zoneId ?? this.currentZoneLabel,
           name: entity.name,
           type: entity.type,
+          teachesProfession: (entity as any).teachesProfession,
         });
       }
 

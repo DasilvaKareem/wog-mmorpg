@@ -36,7 +36,7 @@ export interface AgentConfig {
   strategy: AgentStrategy;
   targetZone?: string;
   /** Set when user clicks "send agent here" on an NPC. Cleared once agent arrives. */
-  gotoTarget?: { entityId: string; zoneId: string; name?: string };
+  gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string };
   lastUpdated: number;
   /** @deprecated Chat history now lives in agent:chat:{wallet} Redis list. Kept for type compat. */
   chatHistory: ChatMessage[];

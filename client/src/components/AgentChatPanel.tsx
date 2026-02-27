@@ -78,7 +78,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [authLoading, setAuthLoading] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
-  const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string } | null>(null);
+  const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string } | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const lastSyncTs = React.useRef(0);
 
@@ -226,21 +226,29 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
   // Listen for NPC clicks — show a confirmation prompt, don't auto-redirect
   React.useEffect(() => {
-    return gameBus.on("agentGoToNpc", ({ entityId, zoneId, name }) => {
-      setPendingGoto({ entityId, zoneId, name });
+    return gameBus.on("agentGoToNpc", ({ entityId, zoneId, name, teachesProfession }) => {
+      setPendingGoto({ entityId, zoneId, name, teachesProfession });
     });
   }, []);
 
-  async function confirmGoto() {
+  async function confirmGoto(action?: "learn-profession") {
     if (!pendingGoto || !token) return;
-    const { entityId, zoneId, name } = pendingGoto;
+    const { entityId, zoneId, name, teachesProfession } = pendingGoto;
     setPendingGoto(null);
-    addSystemMsg(`Sending agent to ${name}…`);
+    const label = action === "learn-profession" && teachesProfession
+      ? `Learning ${teachesProfession} from ${name}…`
+      : `Sending agent to ${name}…`;
+    addSystemMsg(label);
     try {
+      const body: Record<string, string> = { entityId, zoneId, name };
+      if (action === "learn-profession" && teachesProfession) {
+        body.action = "learn-profession";
+        body.profession = teachesProfession;
+      }
       const res = await fetch(`${API_URL}/agent/goto-npc`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entityId, zoneId, name }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
@@ -456,9 +464,21 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {pendingGoto && (
         <div className="absolute bottom-[56px] left-0 right-0 z-40 border-t border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono flex items-center justify-between gap-2">
           <span className="text-[11px] text-[#e0af68] truncate">
-            → Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?
+            {pendingGoto.teachesProfession
+              ? <>Learn <span className="text-[#ffcc00]">{pendingGoto.teachesProfession}</span> from {pendingGoto.name}?</>
+              : <>→ Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?</>
+            }
           </span>
           <div className="flex gap-2 shrink-0">
+            {pendingGoto.teachesProfession && (
+              <button
+                onClick={() => void confirmGoto("learn-profession")}
+                disabled={!token || !isRunning}
+                className="border border-[#00ff9d] px-2 py-0.5 text-[10px] text-[#00ff9d] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+              >
+                Learn
+              </button>
+            )}
             <button
               onClick={() => void confirmGoto()}
               disabled={!token || !isRunning}
