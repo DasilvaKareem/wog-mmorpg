@@ -380,9 +380,23 @@ export class AgentRunner {
       if (!classId) return false;
 
       const availableRes = await this.api("GET", `/techniques/available/${this.currentZone}/${this.entityId}`);
-      const available: Array<{ id: string; name?: string; isLearned?: boolean }> = availableRes?.techniques ?? [];
+      const available: Array<{ id: string; name?: string; isLearned?: boolean; copperCost?: number }> = availableRes?.techniques ?? [];
       const nextToLearn = available.find((t) => !t.isLearned);
       if (!nextToLearn) return false;
+
+      // Affordability check — don't walk to trainer if we can't pay
+      if (nextToLearn.copperCost && nextToLearn.copperCost > 0) {
+        try {
+          const inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
+          const walletCopper = Number(inv?.copper ?? NaN);
+          const walletGold = Number(inv?.gold ?? 0);
+          const copperBalance = Number.isFinite(walletCopper) ? walletCopper : goldToCopper(walletGold);
+          if (copperBalance < nextToLearn.copperCost) {
+            console.debug(`[agent] learnNextTechnique: can't afford ${nextToLearn.copperCost}c (have ${copperBalance}c) — skipping trainer`);
+            return false;
+          }
+        } catch { /* skip affordability check on error */ }
+      }
 
       const trainer = this.findNearestEntity(
         entities,
