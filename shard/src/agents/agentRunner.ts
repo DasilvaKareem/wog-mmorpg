@@ -127,6 +127,11 @@ export class AgentRunner {
   /** Last processed inbox stream ID — only fetch messages newer than this */
   private lastInboxId = "0-0";
 
+  /** Cooldown: don't attempt technique learning before this timestamp (ms). */
+  private nextTechniqueCheckAt = 0;
+  /** Techniques that failed to learn this session — skip them permanently. */
+  private failedTechniqueIds = new Set<string>();
+
   constructor(userWallet: string) {
     this.userWallet = userWallet;
   }
@@ -411,6 +416,10 @@ export class AgentRunner {
    */
   private async learnNextTechnique(): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
+
+    // Rate-limit: don't spam the trainer every tick
+    if (Date.now() < this.nextTechniqueCheckAt) return false;
+
     try {
       const zs = await this.getZoneState();
       if (!zs) return false;
@@ -420,21 +429,28 @@ export class AgentRunner {
 
       const availableRes = await this.api("GET", `/techniques/available/${this.currentZone}/${this.entityId}`);
       const available: Array<{ id: string; name?: string; isLearned?: boolean; copperCost?: number }> = availableRes?.techniques ?? [];
-      const nextToLearn = available.find((t) => !t.isLearned);
+
+      // Skip already-learned and permanently-failed techniques
+      const nextToLearn = available.find((t) => !t.isLearned && !this.failedTechniqueIds.has(t.id));
       if (!nextToLearn) return false;
 
       // Affordability check — don't walk to trainer if we can't pay
-      if (nextToLearn.copperCost && nextToLearn.copperCost > 0) {
+      const cost = nextToLearn.copperCost ?? 0;
+      if (cost > 0) {
+        let copperBalance = 0;
         try {
           const inv = await this.api("GET", `/wallet/${this.custodialWallet}/balance`);
           const walletCopper = Number(inv?.copper ?? NaN);
           const walletGold = Number(inv?.gold ?? 0);
-          const copperBalance = Number.isFinite(walletCopper) ? walletCopper : goldToCopper(walletGold);
-          if (copperBalance < nextToLearn.copperCost) {
-            console.debug(`[agent] learnNextTechnique: can't afford ${nextToLearn.copperCost}c (have ${copperBalance}c) — skipping trainer`);
-            return false;
-          }
-        } catch { /* skip affordability check on error */ }
+          copperBalance = Number.isFinite(walletCopper) ? walletCopper : goldToCopper(walletGold);
+        } catch { /* treat as 0 if balance fetch fails */ }
+
+        if (copperBalance < cost) {
+          // Can't afford — back off for 2 minutes before checking again
+          this.nextTechniqueCheckAt = Date.now() + 120_000;
+          console.debug(`[agent] learnNextTechnique: can't afford ${cost}c (have ${copperBalance}c) — cooling down 2m`);
+          return false;
+        }
       }
 
       const trainer = this.findNearestEntity(
@@ -452,15 +468,25 @@ export class AgentRunner {
       const moving = await this.moveToEntity(me, trainer[1]);
       if (moving) return true;
 
-      await this.api("POST", "/techniques/learn", {
-        zoneId: this.currentZone,
-        playerEntityId: this.entityId,
-        techniqueId: nextToLearn.id,
-        trainerEntityId: trainer[0],
-      });
-      console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned technique ${nextToLearn.id}`);
-      void this.logActivity(`Learned technique: ${nextToLearn.name ?? nextToLearn.id}`);
-      return true;
+      try {
+        await this.api("POST", "/techniques/learn", {
+          zoneId: this.currentZone,
+          playerEntityId: this.entityId,
+          techniqueId: nextToLearn.id,
+          trainerEntityId: trainer[0],
+        });
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned technique ${nextToLearn.id}`);
+        void this.logActivity(`Learned technique: ${nextToLearn.name ?? nextToLearn.id}`);
+        // Wait 30s before trying to learn the next one — let the agent actually fight
+        this.nextTechniqueCheckAt = Date.now() + 30_000;
+        return true;
+      } catch (learnErr: any) {
+        // Learn call failed — skip this technique permanently for this session
+        this.failedTechniqueIds.add(nextToLearn.id);
+        this.nextTechniqueCheckAt = Date.now() + 300_000; // 5-min cooldown after failure
+        console.debug(`[agent] learnNextTechnique: failed (${learnErr.message?.slice(0, 60)}) — skipping ${nextToLearn.id}`);
+        return false;
+      }
     } catch (err: any) {
       console.debug(`[agent] learnNextTechnique: ${err.message?.slice(0, 60)}`);
       return false;
