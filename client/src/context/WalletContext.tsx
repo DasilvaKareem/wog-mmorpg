@@ -10,6 +10,7 @@ import {
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance, type ExternalWalletType } from "@/lib/walletManager";
 import { thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
+import { clearCachedToken } from "@/lib/agentAuth";
 import type { OwnedCharacter } from "@/types";
 
 interface WalletContextValue {
@@ -28,6 +29,7 @@ interface WalletContextValue {
   professions: ProfessionsResponse | null;
   professionsLoading: boolean;
   connect: (walletType?: ExternalWalletType) => Promise<void>;
+  disconnect: () => void;
   syncAddress: (address: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
   refreshCharacterProgress: () => Promise<void>;
@@ -214,6 +216,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     void Promise.all([refreshCharacterProgress(), refreshProfessions()]);
   }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
+  const disconnect = React.useCallback(() => {
+    const currentAddress = walletManager.address;
+    if (currentAddress) clearCachedToken(currentAddress);
+    walletManager.disconnect();
+    setAddress(null);
+    setBalance(null);
+    setCharacterProgress(null);
+    setCharacters([]);
+  }, [walletManager]);
+
   const syncAddress = React.useCallback(async (addr: string) => {
     setLoading(true);
     try {
@@ -326,6 +338,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       professions,
       professionsLoading,
       connect,
+      disconnect,
       syncAddress,
       refreshBalance,
       refreshCharacterProgress,
@@ -346,6 +359,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       professions,
       professionsLoading,
       connect,
+      disconnect,
       syncAddress,
       refreshBalance,
       refreshCharacterProgress,

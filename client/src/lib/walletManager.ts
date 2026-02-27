@@ -24,7 +24,6 @@ const skaleBase = defineChain({
       url: "https://skale-base-explorer.skalenodes.com",
     },
   ],
-  testnet: false,
 });
 
 export interface WalletBalance {
@@ -130,6 +129,12 @@ export class WalletManager {
     void this.fetchBalance().catch(() => {});
 
     return this._address;
+  }
+
+  disconnect(): void {
+    this._address = null;
+    this._account = null;
+    this._balance = null;
   }
 
   async fetchBalance(force = false): Promise<WalletBalance | null> {

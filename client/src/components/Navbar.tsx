@@ -96,7 +96,7 @@ function DropdownLink({
 
 export function Navbar(): React.ReactElement {
   const location = useLocation();
-  const { isConnected, connect, loading, address, balance } = useWalletContext();
+  const { isConnected, connect, disconnect, loading, address, balance } = useWalletContext();
   const [openMenu, setOpenMenu] = React.useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const navRef = React.useRef<HTMLElement>(null);
@@ -281,6 +281,14 @@ export function Navbar(): React.ReactElement {
               <div className="border-2 border-[#54f28b]/40 bg-[#112a1b] px-2.5 py-1.5 text-[8px] text-[#54f28b]">
                 {address?.slice(0, 6)}...{address?.slice(-4)}
               </div>
+              {/* Logout */}
+              <button
+                onClick={disconnect}
+                title="Disconnect wallet"
+                className="border-2 border-[#54f28b]/40 border-l-0 bg-[#112a1b] px-2 py-1.5 text-[8px] text-[#54f28b]/60 transition hover:bg-[#1a3d28] hover:text-[#ff4d6d]"
+              >
+                [x]
+              </button>
             </div>
           )}
 
