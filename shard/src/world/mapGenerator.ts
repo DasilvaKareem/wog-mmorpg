@@ -101,12 +101,52 @@ export interface GeneratedMap {
   biome: string;
 }
 
+// ── Terrain file persistence ─────────────────────────────────────────
+
+function resolveTerrainDir(): string {
+  // Production: ./world/content/terrain, Dev: ../world/content/terrain
+  const prodPath = path.join(process.cwd(), "world", "content", "terrain");
+  if (fs.existsSync(prodPath)) return prodPath;
+  const devPath = path.join(process.cwd(), "..", "world", "content", "terrain");
+  if (fs.existsSync(devPath)) return devPath;
+  // Create dev path if neither exists
+  fs.mkdirSync(devPath, { recursive: true });
+  return devPath;
+}
+
+function loadSavedTerrain(zoneId: string): GeneratedMap | null {
+  const dir = resolveTerrainDir();
+  const filePath = path.join(dir, `${zoneId}.json`);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (data.zoneId && Array.isArray(data.ground) && Array.isArray(data.overlay) && Array.isArray(data.elevation)) {
+      console.log(`[mapGenerator] Loaded saved terrain for ${zoneId}`);
+      return data as GeneratedMap;
+    }
+  } catch (err) {
+    console.warn(`[mapGenerator] Failed to load saved terrain for ${zoneId}:`, err);
+  }
+  return null;
+}
+
+export function saveTerrain(map: GeneratedMap): void {
+  const dir = resolveTerrainDir();
+  const filePath = path.join(dir, `${map.zoneId}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(map), "utf-8");
+  console.log(`[mapGenerator] Saved terrain for ${map.zoneId} to ${filePath}`);
+}
+
 // ── Cache ────────────────────────────────────────────────────────────
 
 const mapCache = new Map<string, GeneratedMap>();
 
 export function getGeneratedMap(zoneId: string): GeneratedMap | null {
   return mapCache.get(zoneId) ?? null;
+}
+
+export function setGeneratedMap(map: GeneratedMap): void {
+  mapCache.set(map.zoneId, map);
 }
 
 // ── World-space blending ─────────────────────────────────────────────
@@ -244,8 +284,14 @@ export function generateAllMaps(): void {
 
   for (const data of allZoneData.values()) {
     try {
-      const map = generateMap(data);
-      mapCache.set(map.zoneId, map);
+      // Check for hand-edited terrain file first
+      const saved = loadSavedTerrain(data.id);
+      if (saved) {
+        mapCache.set(data.id, saved);
+      } else {
+        const map = generateMap(data);
+        mapCache.set(map.zoneId, map);
+      }
     } catch (err) {
       console.error(`[mapGenerator] Failed to generate map for ${data.id}:`, err);
     }

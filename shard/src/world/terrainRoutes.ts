@@ -3,11 +3,14 @@ import fs from "fs";
 import path from "path";
 import {
   getGeneratedMap,
+  setGeneratedMap,
+  saveTerrain,
   generateAllMaps,
   getChunkFromMap,
   getChunksAroundPosition,
   getZoneChunkInfo,
   CHUNK_SIZE,
+  type GeneratedMap,
 } from "./mapGenerator.js";
 
 interface ZoneConfig {
@@ -101,6 +104,41 @@ export function registerTerrainRoutes(server: FastifyInstance): void {
       }
 
       return reply.send(map);
+    }
+  );
+
+  // ── v2 save (from map editor) ────────────────────────────────────
+  server.put<{ Params: { zoneId: string }; Body: GeneratedMap }>(
+    "/v2/terrain/zone/:zoneId",
+    async (req, reply) => {
+      const { zoneId } = req.params;
+      const body = req.body as GeneratedMap;
+
+      if (!body || !Array.isArray(body.ground) || !Array.isArray(body.overlay) || !Array.isArray(body.elevation)) {
+        return reply.status(400).send({ error: "Invalid terrain data" });
+      }
+
+      const size = body.width * body.height;
+      if (body.ground.length !== size || body.overlay.length !== size || body.elevation.length !== size) {
+        return reply.status(400).send({ error: `Array length mismatch: expected ${size}` });
+      }
+
+      const map: GeneratedMap = {
+        zoneId,
+        width: body.width,
+        height: body.height,
+        tileSize: body.tileSize ?? 10,
+        ground: body.ground,
+        overlay: body.overlay,
+        elevation: body.elevation,
+        biome: body.biome ?? "temperate",
+      };
+
+      // Update in-memory cache + write to disk
+      setGeneratedMap(map);
+      saveTerrain(map);
+
+      return reply.send({ ok: true, zoneId });
     }
   );
 

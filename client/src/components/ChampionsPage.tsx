@@ -219,7 +219,7 @@ function ChampionSidebar({
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 
-type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "party";
+type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "inbox" | "party" | "friends";
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
@@ -228,7 +228,9 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
     { id: "professions", label: "Professions"},
     { id: "quests",      label: "Quests"     },
     { id: "activity",    label: "Activity"   },
+    { id: "inbox",       label: "Inbox"      },
     { id: "party",       label: "Party"      },
+    { id: "friends",     label: "Friends"    },
   ];
   return (
     <div className="flex gap-0 border-b-2 border-[#2a3450] overflow-x-auto">
@@ -565,6 +567,106 @@ function ActivityTab({ diary }: { diary: DiaryEntry[] }) {
   );
 }
 
+// ── Inbox tab ─────────────────────────────────────────────────────────────
+
+interface InboxMessageEntry {
+  id: string;
+  from: string;
+  fromName: string;
+  to: string;
+  type: "direct" | "trade-request" | "party-invite" | "broadcast";
+  body: string;
+  data?: Record<string, unknown>;
+  ts: number;
+}
+
+const MSG_TYPE_COLORS: Record<string, string> = {
+  direct:         "#5dadec",
+  "trade-request": "#ffcc00",
+  "party-invite":  "#54f28b",
+  broadcast:       "#b48efa",
+};
+
+const MSG_TYPE_LABELS: Record<string, string> = {
+  direct:         "DM",
+  "trade-request": "TRADE",
+  "party-invite":  "PARTY",
+  broadcast:       "BROADCAST",
+};
+
+function InboxTab({ wallet }: { wallet: string }) {
+  const [messages, setMessages] = React.useState<InboxMessageEntry[]>([]);
+  const [total, setTotal]       = React.useState(0);
+  const [loading, setLoading]   = React.useState(true);
+
+  React.useEffect(() => {
+    if (!wallet) return;
+    let cancelled = false;
+
+    async function fetchHistory() {
+      try {
+        const res = await fetch(`${API_URL}/inbox/${wallet}/history?limit=200`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) {
+          setMessages(data.messages ?? []);
+          setTotal(data.total ?? 0);
+        }
+      } catch { /* non-fatal */ }
+      if (!cancelled) setLoading(false);
+    }
+
+    fetchHistory();
+    const interval = setInterval(fetchHistory, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [wallet]);
+
+  if (loading) {
+    return <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">Loading inbox...</p>;
+  }
+
+  // Show newest first
+  const sorted = [...messages].reverse();
+
+  return (
+    <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+      <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
+        <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Message History</span>
+        <span className="text-[17px] text-[#3a4260] font-mono">{total} messages</span>
+      </div>
+      {sorted.length === 0 ? (
+        <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">No messages received yet</p>
+      ) : (
+        <div className="max-h-[520px] overflow-y-auto">
+          {sorted.map((m, i) => (
+            <div key={m.id || i} className="border-b border-[#1a2030] px-4 py-2.5 last:border-b-0 font-mono hover:bg-[#1a2240]/20 transition">
+              <div className="flex items-center gap-2 mb-0.5">
+                <span
+                  className="text-[11px] uppercase tracking-wide shrink-0 px-1.5 py-0.5 border"
+                  style={{
+                    color: MSG_TYPE_COLORS[m.type] ?? "#565f89",
+                    borderColor: MSG_TYPE_COLORS[m.type] ?? "#565f89",
+                  }}
+                >
+                  {MSG_TYPE_LABELS[m.type] ?? m.type}
+                </span>
+                <span className="text-[13px] text-[#ffcc00] shrink-0">{m.fromName}</span>
+                <span className="text-[17px] text-[#d6deff] flex-1 truncate">{m.body}</span>
+                <span className="text-[12px] text-[#3a4260] shrink-0">{timeAgo(m.ts)}</span>
+              </div>
+              {m.data && Object.keys(m.data).length > 0 && (
+                <p className="text-[11px] text-[#3a4260] mt-0.5">
+                  {Object.entries(m.data).map(([k, v]) => `${k}: ${v}`).join(" | ")}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Party tab ─────────────────────────────────────────────────────────────
 
 interface PartyMember {
@@ -808,6 +910,379 @@ function PartyTab({
   );
 }
 
+// ── Friends tab ──────────────────────────────────────────────────────────
+
+const RANK_COLORS: Record<string, string> = {
+  "Legendary Hero":     "#FFD700",
+  "Renowned Champion":  "#9B59B6",
+  "Trusted Veteran":    "#3498DB",
+  "Reliable Ally":      "#2ECC71",
+  "Average Citizen":    "#95A5A6",
+  "Questionable":       "#F39C12",
+  "Untrustworthy":      "#E67E22",
+  "Notorious":          "#E74C3C",
+};
+
+interface FriendInfo {
+  wallet: string;
+  addedAt: number;
+  online: boolean;
+  name: string | null;
+  wogName: string | null;
+  level: number | null;
+  classId: string | null;
+  raceId: string | null;
+  zoneId: string | null;
+  reputation: number;
+  reputationRank: string;
+}
+
+interface FriendRequestInfo {
+  id: string;
+  fromWallet: string;
+  fromName: string;
+  createdAt: number;
+}
+
+function FriendsTab({
+  custodialWallet,
+  entityId,
+  entityZoneId,
+}: {
+  custodialWallet: string | null;
+  entityId: string | null;
+  entityZoneId: string | null;
+}) {
+  const [friends, setFriends] = React.useState<FriendInfo[]>([]);
+  const [requests, setRequests] = React.useState<FriendRequestInfo[]>([]);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [searchResults, setSearchResults] = React.useState<SearchResult[]>([]);
+  const [searching, setSearching] = React.useState(false);
+  const [wogNameInput, setWogNameInput] = React.useState("");
+  const [wogSending, setWogSending] = React.useState(false);
+  const [actionMsg, setActionMsg] = React.useState<string | null>(null);
+
+  const friendWallets = React.useMemo(
+    () => new Set(friends.map((f) => f.wallet.toLowerCase())),
+    [friends],
+  );
+
+  // Poll friends list
+  React.useEffect(() => {
+    if (!custodialWallet) return;
+    async function poll() {
+      try {
+        const res = await fetch(`${API_URL}/friends/${custodialWallet}`);
+        if (res.ok) {
+          const d = await res.json();
+          setFriends(d.friends ?? []);
+        }
+      } catch { /* non-fatal */ }
+    }
+    poll();
+    const interval = setInterval(poll, 10_000);
+    return () => clearInterval(interval);
+  }, [custodialWallet]);
+
+  // Poll friend requests
+  React.useEffect(() => {
+    if (!custodialWallet) return;
+    async function poll() {
+      try {
+        const res = await fetch(`${API_URL}/friends/requests/${custodialWallet}`);
+        if (res.ok) {
+          const d = await res.json();
+          setRequests(d.requests ?? []);
+        }
+      } catch { /* non-fatal */ }
+    }
+    poll();
+    const interval = setInterval(poll, 5_000);
+    return () => clearInterval(interval);
+  }, [custodialWallet]);
+
+  async function doSearch() {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(`${API_URL}/party/search?q=${encodeURIComponent(searchQuery.trim())}`);
+      if (res.ok) {
+        const d = await res.json();
+        setSearchResults(
+          (d.results ?? []).filter(
+            (r: SearchResult) => r.walletAddress?.toLowerCase() !== custodialWallet?.toLowerCase(),
+          ),
+        );
+      }
+    } catch { /* non-fatal */ }
+    finally { setSearching(false); }
+  }
+
+  async function sendFriendRequest(target: SearchResult) {
+    if (!custodialWallet || !target.walletAddress) return;
+    try {
+      const res = await fetch(`${API_URL}/friends/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromWallet: custodialWallet, toWallet: target.walletAddress }),
+      });
+      const d = await res.json();
+      if (res.ok) setActionMsg(`Friend request sent to ${target.name}!`);
+      else setActionMsg(`Error: ${d.error}`);
+    } catch { setActionMsg("Failed to send request"); }
+    setTimeout(() => setActionMsg(null), 4000);
+  }
+
+  async function sendByWogName() {
+    if (!custodialWallet || !wogNameInput.trim()) return;
+    setWogSending(true);
+    try {
+      const res = await fetch(`${API_URL}/friends/request-by-name`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromWallet: custodialWallet, toName: wogNameInput.trim() }),
+      });
+      const d = await res.json();
+      if (res.ok) { setActionMsg(`Friend request sent to ${wogNameInput.trim().replace(/\.wog$/i, "")}.wog!`); setWogNameInput(""); }
+      else setActionMsg(`Error: ${d.error}`);
+    } catch { setActionMsg("Failed to send request"); }
+    finally { setWogSending(false); }
+    setTimeout(() => setActionMsg(null), 4000);
+  }
+
+  async function acceptRequest(req: FriendRequestInfo) {
+    if (!custodialWallet) return;
+    try {
+      const res = await fetch(`${API_URL}/friends/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: custodialWallet, requestId: req.id }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setRequests((prev) => prev.filter((r) => r.id !== req.id));
+        setActionMsg(`You are now friends with ${req.fromName}!`);
+      } else setActionMsg(`Error: ${d.error}`);
+    } catch { setActionMsg("Failed to accept"); }
+    setTimeout(() => setActionMsg(null), 4000);
+  }
+
+  async function declineRequest(req: FriendRequestInfo) {
+    if (!custodialWallet) return;
+    await fetch(`${API_URL}/friends/decline`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet: custodialWallet, requestId: req.id }),
+    });
+    setRequests((prev) => prev.filter((r) => r.id !== req.id));
+  }
+
+  async function removeFriend(f: FriendInfo) {
+    if (!custodialWallet) return;
+    await fetch(`${API_URL}/friends/remove`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet: custodialWallet, targetWallet: f.wallet }),
+    });
+    setFriends((prev) => prev.filter((x) => x.wallet !== f.wallet));
+    setActionMsg("Friend removed.");
+    setTimeout(() => setActionMsg(null), 3000);
+  }
+
+  async function inviteFriend(f: FriendInfo) {
+    if (!entityId || !entityZoneId || !f.wallet) return;
+    try {
+      const res = await fetch(`${API_URL}/party/invite-champion`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromEntityId: entityId, fromZoneId: entityZoneId, toCustodialWallet: f.wallet }),
+      });
+      const d = await res.json();
+      if (res.ok) setActionMsg(`Party invite sent to ${f.name}!`);
+      else setActionMsg(`Error: ${d.error}`);
+    } catch { setActionMsg("Failed to invite"); }
+    setTimeout(() => setActionMsg(null), 4000);
+  }
+
+  const isOnline = Boolean(entityId);
+
+  return (
+    <div className="flex flex-col gap-4 font-mono">
+      {actionMsg && (
+        <div className="border-2 border-[#54f28b]/40 bg-[#0a1a0e] px-3 py-2 text-[17px] text-[#54f28b]">{actionMsg}</div>
+      )}
+
+      {/* Friend Requests */}
+      {requests.length > 0 && (
+        <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+          <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
+            <span className="text-[13px] uppercase tracking-widest text-[#ffcc00]">Friend Requests ({requests.length})</span>
+          </div>
+          {requests.map((req) => (
+            <div key={req.id} className="flex items-center justify-between gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
+              <div>
+                <p className="text-[12px] text-[#d6deff]"><span className="text-[#ffcc00]">{req.fromName}</span> wants to be friends</p>
+                <p className="text-[13px] text-[#3a4260] mt-0.5">{timeAgo(req.createdAt)}</p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => void acceptRequest(req)} className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1 text-[17px] text-[#54f28b] hover:bg-[#112a1b] shadow-[2px_2px_0_0_#000]">[&#10003;]</button>
+                <button onClick={() => void declineRequest(req)} className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#565f89] hover:text-[#9aa7cc]">[&#10007;]</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Friends List */}
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
+          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Friends List</span>
+          <span className="text-[17px] text-[#3a4260] font-mono">{friends.length} / {50}</span>
+        </div>
+        {friends.length === 0 ? (
+          <p className="px-4 py-6 text-center text-[17px] text-[#3a4260]">No friends yet — search below to add some!</p>
+        ) : (
+          <div>
+            {friends.map((f) => {
+              const lc = levelColor(f.level ?? 0);
+              return (
+                <div key={f.wallet} className="flex items-center gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      {f.online ? (
+                        <span className="text-[12px] text-[#54f28b]">●</span>
+                      ) : (
+                        <span className="text-[12px] text-[#3a4260]">●</span>
+                      )}
+                      <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? f.wallet.slice(0, 10)}</span>
+                      {f.wogName && <span className="text-[12px] text-[#5dadec]">{f.wogName}</span>}
+                      {f.level != null && <span className="text-[17px]" style={{ color: lc }}>Lv {f.level}</span>}
+                      {f.raceId && <span className="text-[13px] capitalize text-[#565f89]">{f.raceId} {f.classId}</span>}
+                      {f.reputationRank && (
+                        <span
+                          className="text-[12px] border px-1 py-0.5 uppercase tracking-wide"
+                          style={{ color: RANK_COLORS[f.reputationRank] ?? "#95A5A6", borderColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "44", backgroundColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "11" }}
+                        >
+                          {f.reputationRank}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[13px] text-[#3a4260]">
+                      {f.online && f.zoneId ? zoneLabel(f.zoneId) : "Offline"}
+                    </span>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {f.online && isOnline && (
+                      <button
+                        onClick={() => void inviteFriend(f)}
+                        className="border-2 border-[#26a5e4] bg-[#0a1020] px-3 py-1 text-[17px] text-[#26a5e4] shadow-[2px_2px_0_0_#000] hover:bg-[#0e1830]"
+                      >
+                        [Invite]
+                      </button>
+                    )}
+                    <button
+                      onClick={() => void removeFriend(f)}
+                      className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#565f89] hover:text-[#ff6b6b] hover:border-[#ff6b6b]/40"
+                    >
+                      [Remove]
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Add by .wog Name */}
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
+          <span className="text-[13px] uppercase tracking-widest text-[#5dadec]">Add by .wog Name</span>
+        </div>
+        <div className="p-4">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <input
+                type="text"
+                placeholder="e.g. Aelric"
+                value={wogNameInput}
+                onChange={(e) => setWogNameInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") void sendByWogName(); }}
+                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 pr-12 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#5dadec]"
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[#5dadec] pointer-events-none">.wog</span>
+            </div>
+            <button
+              onClick={() => void sendByWogName()}
+              disabled={wogSending || !wogNameInput.trim()}
+              className="border-2 border-[#5dadec] bg-[#0a1020] px-4 py-2 text-[12px] text-[#5dadec] shadow-[2px_2px_0_0_#000] hover:bg-[#0e1830] disabled:opacity-40"
+            >
+              {wogSending ? "..." : "[Add]"}
+            </button>
+          </div>
+          <p className="mt-2 text-[13px] text-[#3a4260]">Send a friend request by .wog name — works even if they're offline.</p>
+        </div>
+      </div>
+
+      {/* Search Online Champions */}
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
+          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Search Online Champions</span>
+        </div>
+        <div className="p-4 flex flex-col gap-3">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="Search by champion name..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
+              className="flex-1 border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b]"
+            />
+            <button
+              onClick={() => void doSearch()}
+              disabled={searching || !searchQuery.trim()}
+              className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[12px] text-[#54f28b] shadow-[2px_2px_0_0_#000] hover:bg-[#112a1b] disabled:opacity-40"
+            >
+              {searching ? "..." : "[Search]"}
+            </button>
+          </div>
+          {searchResults.length > 0 && (
+            <div className="flex flex-col gap-1">
+              {searchResults.map((r) => {
+                const lc = levelColor(r.level);
+                const alreadyFriend = r.walletAddress ? friendWallets.has(r.walletAddress.toLowerCase()) : false;
+                return (
+                  <div key={r.entityId} className="flex items-center justify-between border border-[#1e2842] bg-[#0b1020] px-3 py-2.5 hover:bg-[#1a2240]/30">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12px] font-bold text-[#d6deff]">{r.name}</span>
+                        <span className="text-[17px]" style={{ color: lc }}>Lv {r.level}</span>
+                        <span className="text-[13px] capitalize text-[#565f89]">{r.raceId} {r.classId}</span>
+                      </div>
+                      <span className="text-[13px] text-[#3a4260]">{zoneLabel(r.zoneId)}</span>
+                    </div>
+                    <button
+                      onClick={() => void sendFriendRequest(r)}
+                      disabled={alreadyFriend || !r.walletAddress}
+                      className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1 text-[17px] text-[#54f28b] shadow-[2px_2px_0_0_#000] hover:bg-[#112a1b] disabled:opacity-30"
+                    >
+                      {alreadyFriend ? "Friends" : "[Add]"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {searchResults.length === 0 && searchQuery && !searching && (
+            <p className="text-center text-[17px] text-[#3a4260]">No champions found online</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Character Switcher ────────────────────────────────────────────────────
 
 interface CharacterNft {
@@ -1027,7 +1502,9 @@ export function ChampionsPage(): React.ReactElement {
               {activeTab === "professions" && <ProfessionsTab learned={professions} />}
               {activeTab === "quests"      && <QuestsTab diary={diary} />}
               {activeTab === "activity"    && <ActivityTab diary={diary} />}
+              {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
               {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "friends"     && <FriendsTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
             </div>
           </div>
         </div>

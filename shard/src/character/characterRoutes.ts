@@ -6,6 +6,7 @@ import { mintCharacter, getOwnedCharacters } from "../blockchain/blockchain.js";
 import { getAllZones } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
+import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -82,6 +83,19 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         learnedTechniques: [],
         professions: [],
       });
+
+      // Auto-register character name as .wog name if wallet doesn't have one yet (fire-and-forget)
+      void (async () => {
+        try {
+          const existing = await reverseLookupOnChain(walletAddress);
+          if (!existing) {
+            await registerNameOnChain(walletAddress, character.name);
+            server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
+          }
+        } catch (err) {
+          server.log.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
+        }
+      })();
 
       return {
         ok: true,
