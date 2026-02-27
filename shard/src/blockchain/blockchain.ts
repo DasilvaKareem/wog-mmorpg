@@ -299,19 +299,27 @@ export async function getGoldBalance(address: string): Promise<string> {
   const cached = goldCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  try {
-    const result = await getBalance({ contract: goldContract, address });
-    goldCache.set(cacheKey, result.displayValue);
-    return result.displayValue;
-  } catch (err: any) {
-    const msg = String(err?.message ?? "");
-    // SKALE RPC sometimes returns 0x (empty data) for balanceOf — treat as 0
-    if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
-      console.warn(`[blockchain] getGoldBalance RPC error for ${address}, returning 0: ${msg.slice(0, 120)}`);
-      return "0";
+  // SKALE RPC sometimes returns 0x (empty data) transiently — retry up to 3 times
+  for (let attempt = 0; attempt <= 3; attempt++) {
+    try {
+      const result = await getBalance({ contract: goldContract, address });
+      goldCache.set(cacheKey, result.displayValue);
+      return result.displayValue;
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
+      if (isTransient && attempt < 3) {
+        await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
+        continue;
+      }
+      if (isTransient) {
+        console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning 0: ${msg.slice(0, 120)}`);
+        return "0";
+      }
+      throw err;
     }
-    throw err;
   }
+  return "0";
 }
 
 /**

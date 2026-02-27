@@ -720,10 +720,12 @@ async function handleMobDeath(
   if (killer?.walletAddress && lootTable) {
     // Roll copper loot and convert to on-chain gold (10,000 copper = 1 gold)
     const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
-    const goldAmount = copperToGold(copperAmount);
-    mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
-      console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
-    });
+    if (copperAmount > 0) {
+      const goldAmount = copperToGold(copperAmount);
+      mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
+        console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
+      });
+    }
 
     // Roll auto-drops
     const autoDrops = rollDrops(lootTable.autoDrops);

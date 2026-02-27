@@ -874,15 +874,8 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
 };
 
 // ── Economy scaling ─────────────────────────────────────────────────────────
-// Gold is scarce: kill grinding yields ~1 copper per kill on average.
-// Regular per-kill loot is modest. Real gold comes from endgame systems
-// (dungeons, crafting, PvP, trading) which can reward up to 20 silver.
-const LOOT_COPPER_DIVISOR = 40;
-for (const table of Object.values(LOOT_TABLES)) {
-  table.copperMin = Math.max(0, Math.round(table.copperMin / LOOT_COPPER_DIVISOR));
-  table.copperMax = Math.max(1, Math.round(table.copperMax / LOOT_COPPER_DIVISOR));
-  if (table.copperMax < table.copperMin) table.copperMax = table.copperMin;
-}
+// Copper drops use original values so players earn meaningful rewards per kill.
+// 1 gold = 10,000 copper; starter mobs drop 5-35 copper, bosses drop 200-900 copper.
 
 /**
  * Get loot table for a mob by name
