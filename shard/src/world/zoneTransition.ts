@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, clearMobTagsForPlayer, type Entity } from "./zoneRuntime.js";
+import { getOrCreateZone, clearMobTagsForPlayer, updateSpawnedWalletZone, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeZoneTransition } from "../social/diary.js";
@@ -359,6 +359,8 @@ export function registerZoneTransitionRoutes(server: FastifyInstance) {
     const destZone = getOrCreateZone(toZoneId);
     destZone.entities.set(entity.id, entity);
 
+    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, toZoneId);
+
     logZoneEvent({ zoneId: fromZoneId, type: "system", message: `${entity.name} vanished in a flash of light.`, tick: Date.now() });
     logZoneEvent({ zoneId: toZoneId,   type: "system", message: `${entity.name} materialized from thin air.`,   tick: Date.now() });
 
@@ -491,6 +493,8 @@ async function performTransition(
   // Add entity to destination zone
   const destZone = getOrCreateZone(destZoneId);
   destZone.entities.set(entity.id, entity);
+
+  if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, destZoneId);
 
   // Log zone events
   logZoneEvent({

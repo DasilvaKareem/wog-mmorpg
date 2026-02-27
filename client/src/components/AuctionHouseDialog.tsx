@@ -25,6 +25,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useWallet } from "@/hooks/useWallet";
+import { useWogNames } from "@/hooks/useWogNames";
 import type { Entity } from "@/types";
 
 interface Auction {
@@ -47,10 +48,6 @@ interface NpcInfo {
   npcName: string;
   zoneId: string;
   description: string;
-}
-
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function formatTimeRemaining(endsAt: number): string {
@@ -86,6 +83,9 @@ export function AuctionHouseDialog(): React.ReactElement {
 
   const { address, isConnected } = useWallet();
   const { notify } = useToast();
+
+  const auctionAddresses = React.useMemo(() => auctions.map((a) => a.seller), [auctions]);
+  const { dn } = useWogNames(auctionAddresses);
 
   useGameBridge("zoneChanged", ({ zoneId: nextZoneId }) => {
     setZoneId(nextZoneId);
@@ -334,7 +334,7 @@ export function AuctionHouseDialog(): React.ReactElement {
                             </div>
                           </TableCell>
                           <TableCell className="font-mono text-[8px] text-[#9aa7cc]">
-                            {truncateAddress(auction.seller)}
+                            {dn(auction.seller)}
                           </TableCell>
                           <TableCell className="text-[9px]">
                             <CurrencyDisplay
@@ -569,7 +569,7 @@ export function AuctionHouseDialog(): React.ReactElement {
                           {auction.currentBid} GOLD
                         </TableCell>
                         <TableCell className="font-mono text-[8px] text-[#9aa7cc]">
-                          {truncateAddress(auction.seller)}
+                          {dn(auction.seller)}
                         </TableCell>
                         <TableCell className="text-[9px] text-[#f1f5ff]">
                           {formatTimeRemaining(auction.endsAt)}

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { useWalletContext } from "@/context/WalletContext";
+import { useWogNames } from "@/hooks/useWogNames";
 
 // ── Types ──
 
@@ -95,10 +96,6 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 // ── Helpers ──
 
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 function formatTimeRemaining(endsAt: number): string {
   const seconds = Math.max(0, Math.floor(endsAt - Date.now() / 1000));
   if (seconds <= 0) return "Ended";
@@ -133,6 +130,12 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   const [myBids, setMyBids] = React.useState<MarketListing[]>([]);
   const [stats, setStats] = React.useState<MarketStats | null>(null);
   const [loadingListings, setLoadingListings] = React.useState(false);
+
+  const sellerAddresses = React.useMemo(
+    () => [...listings, ...myListings, ...myBids].map((l) => l.seller),
+    [listings, myListings, myBids]
+  );
+  const { dn } = useWogNames(sellerAddresses);
 
   // Filters
   const [category, setCategory] = React.useState("all");
@@ -486,6 +489,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                 listing={selectedListing}
                 address={address}
                 isConnected={isConnected}
+                dn={dn}
                 bidAmount={bidAmounts[selectedListing.auctionId] ?? 0}
                 onBidAmountChange={(amount) =>
                   setBidAmounts((prev) => ({ ...prev, [selectedListing.auctionId]: amount }))
@@ -571,6 +575,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                     listing={listing}
                     address={address}
                     isConnected={isConnected}
+                    dn={dn}
                     onSelect={() => setSelectedListing(listing)}
                     onBuyout={() => handleBuyout(listing)}
                     processing={processingId === listing.auctionId}
@@ -1020,7 +1025,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                         )}
                       </TableCell>
                       <TableCell className="font-mono text-[8px] text-[#9aa7cc]">
-                        {truncateAddress(listing.seller)}
+                        {dn(listing.seller)}
                       </TableCell>
                       <TableCell>
                         <span
@@ -1061,6 +1066,7 @@ function ListingCard({
   listing,
   address,
   isConnected,
+  dn,
   onSelect,
   onBuyout,
   processing,
@@ -1068,6 +1074,7 @@ function ListingCard({
   listing: MarketListing;
   address: string | null;
   isConnected: boolean;
+  dn: (addr: string) => string;
   onSelect: () => void;
   onBuyout: () => void;
   processing: boolean;
@@ -1131,7 +1138,7 @@ function ListingCard({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="font-mono text-[7px] text-[#565f89]">
-                {truncateAddress(listing.seller)}
+                {dn(listing.seller)}
               </span>
               {isMine && (
                 <Badge variant="success" className="text-[6px]">
@@ -1174,6 +1181,7 @@ function ListingDetail({
   listing,
   address,
   isConnected,
+  dn,
   bidAmount,
   onBidAmountChange,
   onBid,
@@ -1184,6 +1192,7 @@ function ListingDetail({
   listing: MarketListing;
   address: string | null;
   isConnected: boolean;
+  dn: (addr: string) => string;
   bidAmount: number;
   onBidAmountChange: (amount: number) => void;
   onBid: () => void;
@@ -1249,7 +1258,7 @@ function ListingDetail({
             <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-2">
               <p className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Seller</p>
               <p className="font-mono text-[9px] text-[#f1f5ff]">
-                {truncateAddress(listing.seller)}
+                {dn(listing.seller)}
                 {isMine && <span className="ml-1 text-[#54f28b]">(You)</span>}
               </p>
             </div>

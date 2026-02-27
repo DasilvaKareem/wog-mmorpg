@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWalletContext } from "@/context/WalletContext";
+import { useWogNames } from "@/hooks/useWogNames";
 
 interface DropdownItem {
   label: string;
@@ -97,6 +98,7 @@ function DropdownLink({
 export function Navbar(): React.ReactElement {
   const location = useLocation();
   const { isConnected, connect, disconnect, loading, address, balance } = useWalletContext();
+  const { dn } = useWogNames(address ? [address] : []);
   const [openMenu, setOpenMenu] = React.useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const navRef = React.useRef<HTMLElement>(null);
@@ -279,7 +281,7 @@ export function Navbar(): React.ReactElement {
               )}
               {/* Address */}
               <div className="border-2 border-[#54f28b]/40 bg-[#112a1b] px-2.5 py-1.5 text-[8px] text-[#54f28b]">
-                {address?.slice(0, 6)}...{address?.slice(-4)}
+                {address ? dn(address) : ""}
               </div>
               {/* Logout */}
               <button

@@ -66,7 +66,7 @@ import { initWorldMapStore } from "./world/worldMapStore.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats } from "./blockchain/blockchain.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllZones, clearMobTagsForPlayer } from "./world/zoneRuntime.js";
+import { getAllZones, clearMobTagsForPlayer, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
@@ -152,6 +152,7 @@ server.post<{
   const zone = getAllZones().get(foundZoneId!);
   if (zone) {
     clearMobTagsForPlayer(zone, entityId);
+    if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
     zone.entities.delete(entityId);
   }
 

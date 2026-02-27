@@ -4,6 +4,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { useWalletContext } from "@/context/WalletContext";
+import { useWogNames } from "@/hooks/useWogNames";
 import { API_URL } from "../config.js";
 
 const FEATURES = [
@@ -80,6 +81,7 @@ const ZONES = [
 
 export function LandingPage(): React.ReactElement {
   const { isConnected, connect, loading, address } = useWalletContext();
+  const { dn } = useWogNames(address ? [address] : []);
   const navigate = useNavigate();
 
   const [frameIndex, setFrameIndex] = React.useState(0);
@@ -168,7 +170,7 @@ export function LandingPage(): React.ReactElement {
           </button>
           {isConnected ? (
             <div className="text-[10px] text-[#54f28b]" style={{ textShadow: "1px 1px 0 #000" }}>
-              [✓] {address?.slice(0, 6)}...{address?.slice(-4)}
+              [✓] {address ? dn(address) : ""}
             </div>
           ) : loading ? (
             <div className="text-[10px] text-[#9aa7cc]" style={{ textShadow: "1px 1px 0 #000" }}>

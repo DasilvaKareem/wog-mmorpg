@@ -134,6 +134,16 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
+      // NPC info panel for NPCs without dedicated dialogs
+      const NPC_INFO_TYPES = new Set([
+        "quest-giver", "trainer", "profession-trainer", "lore-npc",
+        "crafting-master", "forge", "alchemy-lab", "enchanting-altar",
+        "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
+      ]);
+      if (NPC_INFO_TYPES.has(entity.type)) {
+        gameBus.emit("npcInfoClick", entity);
+      }
+
       // Agent go-to: clicking any NPC lets the user send their agent there
       const NPC_TYPES = new Set([
         "merchant", "auctioneer", "guild-registrar", "arena-master",

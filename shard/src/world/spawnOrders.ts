@@ -2,6 +2,9 @@ import type { FastifyInstance } from "fastify";
 import {
   getOrCreateZone,
   recalculateEntityVitals,
+  isWalletSpawned,
+  registerSpawnedWallet,
+  unregisterSpawnedWallet,
   type Entity,
 } from "./zoneRuntime.js";
 import { randomUUID } from "crypto";
@@ -62,6 +65,17 @@ export function registerSpawnOrders(server: FastifyInstance) {
       if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
         reply.code(403);
         return { error: "Not authorized to spawn entity for this wallet" };
+      }
+
+      // Enforce one player per wallet across the entire shard
+      const existing = isWalletSpawned(walletAddress);
+      if (existing) {
+        reply.code(409);
+        return {
+          error: "Wallet already has a live character on this shard",
+          entityId: existing.entityId,
+          zoneId: existing.zoneId,
+        };
       }
     }
 
@@ -151,6 +165,11 @@ export function registerSpawnOrders(server: FastifyInstance) {
 
     zone.entities.set(entity.id, entity);
 
+    // Register wallet in spawn registry (one player per shard)
+    if (type === "player" && walletAddress) {
+      registerSpawnedWallet(walletAddress, entity.id, spawnZoneId);
+    }
+
     // Log diary entry for player spawns
     if (type === "player" && walletAddress) {
       const { headline, narrative } = narrativeSpawn(entity.name, entity.raceId, entity.classId, spawnZoneId, restored);
@@ -195,6 +214,10 @@ export function registerSpawnOrders(server: FastifyInstance) {
         return { error: "Entity not found" };
       }
 
+      const entity = zone.entities.get(entityId)!;
+      if (entity.type === "player" && entity.walletAddress) {
+        unregisterSpawnedWallet(entity.walletAddress);
+      }
       zone.entities.delete(entityId);
       return { deleted: entityId };
     }

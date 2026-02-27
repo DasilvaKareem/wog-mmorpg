@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
 import { API_URL } from "../config.js";
+import { useWogNames } from "@/hooks/useWogNames";
 
 interface GuildEntry {
   guildId: number;
@@ -28,6 +29,12 @@ export function LeaderboardPage(): React.ReactElement {
   const [players, setPlayers] = React.useState<PlayerEntry[]>([]);
   const [activeTab, setActiveTab] = React.useState<"guilds" | "players">("guilds");
   const [lastUpdate, setLastUpdate] = React.useState<Date>(new Date());
+
+  const leaderboardAddresses = React.useMemo(
+    () => [...guilds.map((g) => g.founder), ...players.map((p) => p.walletAddress)],
+    [guilds, players]
+  );
+  const { dn } = useWogNames(leaderboardAddresses);
 
   React.useEffect(() => {
     const fetchGuilds = async () => {
@@ -207,7 +214,7 @@ export function LeaderboardPage(): React.ReactElement {
                           )}
                         </div>
                         <div className="text-[7px] text-[#3a4260] truncate">
-                          Founded by {g.founder.slice(0, 6)}...{g.founder.slice(-4)}
+                          Founded by {dn(g.founder)}
                         </div>
                       </div>
                       <span className="w-24 text-right text-[11px] font-bold text-[#ffcc00]">
@@ -294,7 +301,7 @@ export function LeaderboardPage(): React.ReactElement {
                           )}
                         </div>
                         <div className="text-[7px] text-[#3a4260] truncate">
-                          {p.walletAddress.slice(0, 6)}...{p.walletAddress.slice(-4)}
+                          {dn(p.walletAddress)}
                         </div>
                       </div>
                       <span className="w-20 text-right text-[9px] text-[#d6deff] capitalize">

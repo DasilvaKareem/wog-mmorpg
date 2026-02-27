@@ -202,6 +202,39 @@ export function deleteZone(zoneId: string): boolean {
   return zones.delete(zoneId);
 }
 
+// ── Wallet Spawn Registry ─────────────────────────────────────────────────
+// Enforces: one player entity per wallet address across the entire shard.
+// Checked at spawn time, updated on zone transitions and entity removal.
+
+interface SpawnedEntry { entityId: string; zoneId: string }
+const spawnedWallets = new Map<string, SpawnedEntry>();
+
+/** Check if a wallet already has a live player entity anywhere on the shard. */
+export function isWalletSpawned(wallet: string): SpawnedEntry | null {
+  return spawnedWallets.get(wallet.toLowerCase()) ?? null;
+}
+
+/** Register a wallet as having a live player entity. */
+export function registerSpawnedWallet(wallet: string, entityId: string, zoneId: string): void {
+  spawnedWallets.set(wallet.toLowerCase(), { entityId, zoneId });
+}
+
+/** Update the zone for a wallet's spawned entity (called on zone transition). */
+export function updateSpawnedWalletZone(wallet: string, newZoneId: string): void {
+  const entry = spawnedWallets.get(wallet.toLowerCase());
+  if (entry) entry.zoneId = newZoneId;
+}
+
+/** Unregister a wallet when its entity is removed (logout, death-despawn, etc). */
+export function unregisterSpawnedWallet(wallet: string): void {
+  spawnedWallets.delete(wallet.toLowerCase());
+}
+
+/** Get all spawned wallet entries (for debugging/admin). */
+export function getSpawnedWallets(): Map<string, SpawnedEntry> {
+  return spawnedWallets;
+}
+
 // Tick loop — advances the world every interval
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
@@ -1597,6 +1630,9 @@ async function worldTick() {
     const destZone = getOrCreateZone(dest.destZoneId);
     destZone.entities.set(entity.id, entity);
 
+    // Keep spawn registry in sync
+    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, dest.destZoneId);
+
     logZoneEvent({
       zoneId: sourceZoneId,
       type: "system",
@@ -1699,6 +1735,9 @@ async function worldTick() {
 
     const destZone = getOrCreateZone(destZoneId);
     destZone.entities.set(entity.id, entity);
+
+    // Keep spawn registry in sync
+    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, destZoneId);
 
     logZoneEvent({
       zoneId: sourceZoneId,

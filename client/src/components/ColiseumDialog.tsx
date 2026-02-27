@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useGameBridge } from "@/hooks/useGameBridge";
+import { useWogNames } from "@/hooks/useWogNames";
 import type { Entity } from "@/types";
 import { ColiseumViewer } from "./ColiseumViewer";
 import { MatchmakingQueue } from "./MatchmakingQueue";
@@ -36,10 +37,6 @@ interface LeaderboardEntry {
   draws: number;
 }
 
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 export function ColiseumDialog(): React.ReactElement {
   const [open, setOpen] = React.useState(false);
   const [npc, setNpc] = React.useState<Entity | null>(null);
@@ -48,6 +45,9 @@ export function ColiseumDialog(): React.ReactElement {
   const [activeBattles, setActiveBattles] = React.useState<ActiveBattle[]>([]);
   const [leaderboard, setLeaderboard] = React.useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = React.useState(false);
+
+  const leaderboardAddresses = React.useMemo(() => leaderboard.map((e) => e.walletAddress), [leaderboard]);
+  const { dn } = useWogNames(leaderboardAddresses);
 
   useGameBridge("zoneChanged", ({ zoneId: nextZoneId }) => {
     setZoneId(nextZoneId);
@@ -220,7 +220,7 @@ export function ColiseumDialog(): React.ReactElement {
                           #{i + 1}
                         </span>
                         <span className="font-mono text-[8px] text-[#9aa7cc]">
-                          {truncateAddress(entry.walletAddress)}
+                          {dn(entry.walletAddress)}
                         </span>
                         <span className="text-[9px] font-bold text-[#f1f5ff]">
                           {entry.elo} ELO

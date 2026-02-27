@@ -4,6 +4,7 @@ import type { Context } from "@farcaster/miniapp-sdk";
 import { fetchClasses, fetchRaces, createCharacter, fetchZone, fetchZoneList } from "@/ShardClient";
 import { validateCharacterName } from "@/lib/characterNameValidation";
 import { API_URL } from "@/config";
+import { useWogNames } from "@/hooks/useWogNames";
 import type { RaceInfo, ClassInfo, CharacterStats, Entity, ZoneListEntry } from "@/types";
 
 type Step =
@@ -288,6 +289,7 @@ export function FarcasterMiniApp(): React.ReactElement {
   const [fcUser, setFcUser] = React.useState<Context.UserContext | null>(null);
   const [walletAddress, setWalletAddress] = React.useState<string | null>(null);
   const [wogToken, setWogToken] = React.useState<string | null>(null);
+  const { dn } = useWogNames(walletAddress ? [walletAddress] : []);
 
   // Character creation
   const [races, setRaces] = React.useState<RaceInfo[]>([]);
@@ -547,7 +549,7 @@ export function FarcasterMiniApp(): React.ReactElement {
                       {fcUser.displayName || fcUser.username}
                     </span>
                     <span className="text-[6px] text-[#3a4260]">
-                      FID {fcUser.fid} · {walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4)}
+                      FID {fcUser.fid} · {walletAddress ? dn(walletAddress) : ""}
                     </span>
                   </div>
                 </div>

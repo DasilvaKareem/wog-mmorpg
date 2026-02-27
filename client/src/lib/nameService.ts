@@ -7,7 +7,8 @@
  *   // → "Zephyr.wog" or "0x1a2b...cdef"
  */
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+import { API_URL } from "../config.js";
+const API_BASE = API_URL;
 const CACHE_TTL_MS = 60_000;
 
 interface CacheEntry {

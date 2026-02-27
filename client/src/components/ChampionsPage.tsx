@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { API_URL } from "@/config";
 import { useWalletContext } from "@/context/WalletContext";
+import { useWogNames } from "@/hooks/useWogNames";
 import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
 import { formatCopperString } from "@/lib/currency";
@@ -958,6 +959,8 @@ function FriendsTab({
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchResults, setSearchResults] = React.useState<SearchResult[]>([]);
   const [searching, setSearching] = React.useState(false);
+  const friendAddresses = React.useMemo(() => friends.map((f) => f.wallet), [friends]);
+  const { dn } = useWogNames(friendAddresses);
   const [wogNameInput, setWogNameInput] = React.useState("");
   const [wogSending, setWogSending] = React.useState(false);
   const [actionMsg, setActionMsg] = React.useState<string | null>(null);
@@ -1154,7 +1157,7 @@ function FriendsTab({
                       ) : (
                         <span className="text-[12px] text-[#3a4260]">●</span>
                       )}
-                      <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? f.wallet.slice(0, 10)}</span>
+                      <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? dn(f.wallet)}</span>
                       {f.wogName && <span className="text-[12px] text-[#5dadec]">{f.wogName}</span>}
                       {f.level != null && <span className="text-[17px]" style={{ color: lc }}>Lv {f.level}</span>}
                       {f.raceId && <span className="text-[13px] capitalize text-[#565f89]">{f.raceId} {f.classId}</span>}

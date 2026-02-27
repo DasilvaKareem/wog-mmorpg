@@ -11,6 +11,7 @@ import {
   getAllZones,
   getOrCreateZone,
   deleteZone,
+  updateSpawnedWalletZone,
   type Entity,
 } from "./zoneRuntime.js";
 import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
@@ -243,6 +244,7 @@ export function cleanupDungeonInstance(instanceId: string, cleared: boolean): vo
         entity.x = instance.sourcePosition.x + randomInt(-20, 20);
         entity.y = instance.sourcePosition.y + randomInt(-20, 20);
         sourceZone.entities.set(entityId, entity);
+        if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, instance.sourceZoneId);
       }
     }
   }
@@ -594,6 +596,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
         member.x = spawnX + randomInt(-15, 15);
         member.y = spawnY + randomInt(-10, 10);
         dungeonZone.entities.set(memberId, member);
+        if (member.walletAddress) updateSpawnedWalletZone(member.walletAddress, dungeonZoneId);
       }
     }
 
@@ -755,6 +758,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
     player.x = foundInstance.sourcePosition.x + randomInt(-20, 20);
     player.y = foundInstance.sourcePosition.y + randomInt(-20, 20);
     sourceZone.entities.set(entityId, player);
+    if (player.walletAddress) updateSpawnedWalletZone(player.walletAddress, foundInstance.sourceZoneId);
 
     // Remove from instance members
     foundInstance.memberIds = foundInstance.memberIds.filter((id) => id !== entityId);

@@ -30,6 +30,8 @@ export interface Entity {
   activeEffects?: ActiveEffect[];
   kills?: number;
   zoneId?: string;
+  teachesProfession?: string;
+  teachesClass?: string;
 }
 
 export interface ActiveEffect {

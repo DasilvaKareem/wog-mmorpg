@@ -10,6 +10,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { XpBar } from "@/components/ui/xp-bar";
 import { useWallet } from "@/hooks/useWallet";
+import { useWogNames } from "@/hooks/useWogNames";
 
 const RARITY_COLORS: Record<string, string> = {
   common: "#9aa7cc",
@@ -18,10 +19,6 @@ const RARITY_COLORS: Record<string, string> = {
   epic: "#b48efa",
   legendary: "#ffcc00",
 };
-
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
 
 export function WalletPanel(): React.ReactElement {
   const [equippingTokenId, setEquippingTokenId] = React.useState<string | null>(null);
@@ -40,6 +37,7 @@ export function WalletPanel(): React.ReactElement {
     equipItem,
   } = useWallet();
   const { notify } = useToast();
+  const { dn } = useWogNames(address ? [address] : []);
 
   return (
     <Card className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4">
@@ -81,7 +79,7 @@ export function WalletPanel(): React.ReactElement {
           <>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
-              <Badge>{truncateAddress(address!)}</Badge>
+              <Badge>{dn(address!)}</Badge>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Gold</span>

@@ -5,6 +5,7 @@ import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { CharacterDialog } from "@/components/CharacterDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { InspectDialog } from "@/components/InspectDialog";
+import { NpcInfoDialog } from "@/components/NpcInfoDialog";
 import { QuestLogDialog } from "@/components/QuestLogDialog";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
@@ -125,6 +126,7 @@ function GameWorld(): React.ReactElement {
       <AuctionHouseDialog />
       <ColiseumDialog />
       <InspectDialog />
+      <NpcInfoDialog />
       <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
       <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
       <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />

@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useGameBridge } from "@/hooks/useGameBridge";
+import { useWogNames } from "@/hooks/useWogNames";
 import type { Entity } from "@/types";
 
 interface Guild {
@@ -99,10 +100,6 @@ interface RegistrarResponse {
     listGuilds: string;
     viewGuild: string;
   };
-}
-
-function truncateAddress(address: string): string {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
 function formatTimeAgo(timestamp: number): string {
@@ -198,6 +195,25 @@ export function GuildDialog(): React.ReactElement {
     void loadRegistrar(zoneId, entity.id);
   });
 
+  // Collect all addresses for .wog name resolution
+  const allAddresses = React.useMemo(() => {
+    const addrs: string[] = [];
+    for (const g of guilds) addrs.push(g.founder);
+    if (selectedGuild) {
+      addrs.push(selectedGuild.founder);
+      for (const m of selectedGuild.members ?? []) addrs.push(m.address);
+    }
+    for (const p of proposals) {
+      addrs.push(p.proposer);
+      if (p.targetAddress !== "0x0000000000000000000000000000000000000000") addrs.push(p.targetAddress);
+    }
+    if (vaultData) {
+      for (const l of vaultData.loans) addrs.push(l.borrower);
+    }
+    return addrs;
+  }, [guilds, selectedGuild, proposals, vaultData]);
+  const { dn } = useWogNames(allAddresses);
+
   const handleGuildClick = (guild: Guild) => {
     setSelectedGuild(guild);
     setActiveTab("details");
@@ -283,7 +299,7 @@ export function GuildDialog(): React.ReactElement {
                     </div>
                   </div>
                   <div className="border-2 border-[#29334d] bg-[#11182b] p-2">
-                    <span className="text-[#9aa7cc]">Founder:</span> {truncateAddress(selectedGuild.founder)}
+                    <span className="text-[#9aa7cc]">Founder:</span> {dn(selectedGuild.founder)}
                   </div>
                   <div className="border-2 border-[#29334d] bg-[#11182b] p-2">
                     <span className="text-[#9aa7cc]">Created:</span> {formatTimeAgo(selectedGuild.createdAt)}
@@ -320,7 +336,7 @@ export function GuildDialog(): React.ReactElement {
                         {selectedGuild.members?.map((member) => (
                           <TableRow key={member.address}>
                             <TableCell className="font-mono text-[9px]">
-                              {truncateAddress(member.address)}
+                              {dn(member.address)}
                             </TableCell>
                             <TableCell>
                               <Badge variant={getRankBadgeVariant(member.rank)}>
@@ -376,7 +392,7 @@ export function GuildDialog(): React.ReactElement {
                             <p className="text-[#f1f5ff]">{proposal.description}</p>
                             <div className="grid grid-cols-2 gap-2 border-t-2 border-[#29334d] pt-2">
                               <div>
-                                <span className="text-[#9aa7cc]">Proposer:</span> {truncateAddress(proposal.proposer)}
+                                <span className="text-[#9aa7cc]">Proposer:</span> {dn(proposal.proposer)}
                               </div>
                               <div>
                                 <span className="text-[#9aa7cc]">Time Left:</span> {formatTimeRemaining(proposal.timeRemaining)}
@@ -394,7 +410,7 @@ export function GuildDialog(): React.ReactElement {
                               )}
                               {proposal.targetAddress !== "0x0000000000000000000000000000000000000000" && (
                                 <div className="col-span-2">
-                                  <span className="text-[#9aa7cc]">Target:</span> {truncateAddress(proposal.targetAddress)}
+                                  <span className="text-[#9aa7cc]">Target:</span> {dn(proposal.targetAddress)}
                                 </div>
                               )}
                             </div>
@@ -494,7 +510,7 @@ export function GuildDialog(): React.ReactElement {
                                         <div>
                                           <span className="text-[#9aa7cc]">Borrower:</span>
                                           <div className="font-mono text-[8px]">
-                                            {truncateAddress(loan.borrower)}
+                                            {dn(loan.borrower)}
                                           </div>
                                         </div>
                                         <div>
@@ -565,7 +581,7 @@ export function GuildDialog(): React.ReactElement {
                           <Badge variant="secondary">Lvl {guild.level}</Badge>
                         </div>
                         <div className="text-[8px] text-[#9aa7cc]">
-                          Founded by {truncateAddress(guild.founder)} • {formatTimeAgo(guild.createdAt)}
+                          Founded by {dn(guild.founder)} • {formatTimeAgo(guild.createdAt)}
                         </div>
                       </CardContent>
                     </Card>

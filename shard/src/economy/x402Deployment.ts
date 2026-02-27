@@ -3,7 +3,7 @@ import { createCustodialWallet } from "../blockchain/custodialWallet.js";
 import { mintCharacter, mintGold, distributeSFuel } from "../blockchain/blockchain.js";
 import { generateAuthToken } from "../auth/auth.js";
 import { computeCharacter, validateCharacterInput } from "../character/characterCreate.js";
-import { getOrCreateZone, recalculateEntityVitals, type Entity } from "../world/zoneRuntime.js";
+import { getOrCreateZone, recalculateEntityVitals, isWalletSpawned, registerSpawnedWallet, type Entity } from "../world/zoneRuntime.js";
 import { processPayment, getPricingTier, type PaymentMethod } from "./x402Payment.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { reputationManager } from "./reputationManager.js";
@@ -195,7 +195,20 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     };
 
     recalculateEntityVitals(entity);
+
+    // Enforce one player per wallet across the shard
+    const existingSpawn = isWalletSpawned(wallet.address);
+    if (existingSpawn) {
+      return {
+        success: false,
+        error: "duplicate_wallet",
+        message: "Wallet already has a live character on this shard",
+        retry: false,
+      };
+    }
+
     zone.entities.set(entity.id, entity);
+    registerSpawnedWallet(wallet.address, entity.id, request.deploymentZone);
 
     // 8. Save character to persistent store
     await saveCharacter(wallet.address, request.character.name, {
