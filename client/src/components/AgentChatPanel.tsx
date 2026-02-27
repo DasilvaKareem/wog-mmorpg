@@ -46,7 +46,7 @@ const FOCUS_COLORS: Record<string, string> = {
   alchemy: "#54dbb8",
   cooking: "#f2a854",
   enchanting: "#c792ea",
-  idle: "#6b7a9e",
+  idle: "#8b9abc",
 };
 
 const QUICK_SUGGESTIONS = [
@@ -229,14 +229,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const entityName = status?.entity?.name ?? "Agent";
   const entityLevel = status?.entity?.level ?? 1;
   const focus = status?.config?.focus ?? "idle";
-  const focusColor = FOCUS_COLORS[focus] ?? "#6b7a9e";
+  const focusColor = FOCUS_COLORS[focus] ?? "#8b9abc";
   const hp = status?.entity?.hp;
   const maxHp = status?.entity?.maxHp;
   const zoneId = status?.zoneId ?? "—";
   const activity = status?.currentActivity;
 
   const hpPct = hp != null && maxHp ? Math.round((hp / Math.max(maxHp, 1)) * 100) : null;
-  const hpColor = hpPct == null ? "#6b7a9e" : hpPct > 60 ? "#54f28b" : hpPct > 30 ? "#e0af68" : "#f25454";
+  const hpColor = hpPct == null ? "#8b9abc" : hpPct > 60 ? "#54f28b" : hpPct > 30 ? "#e0af68" : "#f25454";
 
   // ── Render ──────────────────────────────────────────────────────────────
 
@@ -249,12 +249,12 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="text-[10px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+            className="text-[12px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
             type="button"
           >
             {collapsed ? "+" : "−"}
           </button>
-          <span className="text-[9px] text-[#54f28b] uppercase tracking-widest">
+          <span className="text-[11px] text-[#54f28b] uppercase tracking-widest">
             {">> "}
             <span className="text-[#ffcc00]">{entityName}</span>
             {entityLevel > 1 && <span className="text-[#9aa7cc]"> Lv{entityLevel}</span>}
@@ -264,7 +264,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           {isDeployed && (
             <button
               onClick={() => setShowStopConfirm(true)}
-              className="text-[7px] text-[#4a5568] hover:text-[#ff4d6d] transition-colors uppercase tracking-widest"
+              className="text-[11px] text-[#7a8b9e] hover:text-[#ff4d6d] transition-colors uppercase tracking-widest"
               title="Stop agent"
             >
               [stop]
@@ -286,13 +286,13 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           <div className="flex items-center gap-2 flex-wrap">
             {/* Focus pill */}
             <span
-              className="text-[7px] font-bold uppercase tracking-widest px-1.5 py-0.5 border rounded-sm"
+              className="text-[11px] font-bold uppercase tracking-widest px-1.5 py-0.5 border rounded-sm"
               style={{ color: focusColor, borderColor: `${focusColor}66`, background: `${focusColor}12` }}
             >
               {focus}
             </span>
             {/* Zone */}
-            <span className="text-[7px] text-[#6b7a9e]">{zoneId}</span>
+            <span className="text-[11px] text-[#8b9abc]">{zoneId}</span>
             {/* HP bar */}
             {hpPct != null && (
               <div className="flex items-center gap-1 ml-auto">
@@ -302,7 +302,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
                     style={{ width: `${hpPct}%`, background: hpColor }}
                   />
                 </div>
-                <span className="text-[7px]" style={{ color: hpColor }}>
+                <span className="text-[11px]" style={{ color: hpColor }}>
                   {hp}/{maxHp}
                 </span>
               </div>
@@ -310,7 +310,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </div>
           {/* Current activity ticker */}
           {activity && (
-            <div className="text-[7px] mt-1 truncate" style={{ color: activity.startsWith("⚠") ? "#e0af68" : "#4a7c5a" }}>
+            <div className="text-[11px] mt-1 truncate" style={{ color: activity.startsWith("⚠") ? "#e0af68" : "#7ab893" }}>
               {activity.startsWith("⚠") ? activity : `▸ ${activity}`}
             </div>
           )}
@@ -326,14 +326,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         {/* Not deployed state */}
         {!isDeployed && !authLoading && (
           <div className="flex flex-col items-center gap-3 py-6">
-            <p className="text-[9px] text-[#6b7a9e] text-center leading-relaxed">
+            <p className="text-[11px] text-[#8b9abc] text-center leading-relaxed">
               Deploy your AI agent to start.<br />
-              <span className="text-[#4a5568]">Talk to it in chat to control what it does.</span>
+              <span className="text-[#7a8b9e]">Talk to it in chat to control what it does.</span>
             </p>
             <button
               onClick={() => setShowDeployPayment(true)}
               disabled={deploying || authLoading || !token}
-              className="border border-[#54f28b] bg-[#0a1a0e] px-4 py-1.5 text-[8px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="border border-[#54f28b] bg-[#0a1a0e] px-4 py-1.5 text-[12px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {deploying ? "Deploying..." : "[▶] Deploy Agent"}
             </button>
@@ -341,19 +341,19 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         )}
 
         {authLoading && (
-          <p className="text-[8px] text-[#3a4260] animate-pulse py-4 text-center">Authenticating...</p>
+          <p className="text-[12px] text-[#6b7394] animate-pulse py-4 text-center">Authenticating...</p>
         )}
 
         {/* Empty state hint */}
         {isDeployed && messages.length === 0 && !authLoading && (
-          <p className="text-[8px] text-[#3a4260] italic text-center py-2">
+          <p className="text-[12px] text-[#6b7394] italic text-center py-2">
             Your agent is active. Try telling it what to do...
           </p>
         )}
 
         {/* Messages */}
         {messages.map((m, i) => (
-          <div key={i} className="text-[8px] leading-relaxed">
+          <div key={i} className="text-[12px] leading-relaxed">
             {m.role === "user" && (
               <div className="flex gap-1">
                 <span className="text-[#ffcc00] shrink-0">[You]</span>
@@ -367,20 +367,20 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               </div>
             )}
             {m.role === "activity" && (
-              <div className="flex gap-1" style={{ color: m.text.startsWith("⚠") ? "#e0af68" : m.text.startsWith("✓") ? "#54f28b" : "#4a5c5a" }}>
+              <div className="flex gap-1" style={{ color: m.text.startsWith("⚠") ? "#e0af68" : m.text.startsWith("✓") ? "#54f28b" : "#8bb8a4" }}>
                 <span className="shrink-0">{m.text.startsWith("⚠") ? "⚠" : m.text.startsWith("✓") ? "✓" : "▸"}</span>
-                <span style={{ opacity: m.text.startsWith("⚠") || m.text.startsWith("✓") ? 1 : 0.7 }}>
+                <span>
                   {m.text.startsWith("⚠") || m.text.startsWith("✓") ? m.text.slice(2) : m.text}
                 </span>
               </div>
             )}
             {m.role === "system" && (
-              <span className="text-[#565f89] italic">{m.text}</span>
+              <span className="text-[#7a84ad] italic">{m.text}</span>
             )}
           </div>
         ))}
         {sending && (
-          <div className="text-[8px] text-[#3a4260] animate-pulse">Agent thinking...</div>
+          <div className="text-[12px] text-[#6b7394] animate-pulse">Agent thinking...</div>
         )}
       </div>
 
@@ -392,7 +392,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               key={s}
               onClick={() => void handleSend(s)}
               disabled={!token || sending}
-              className="shrink-0 border border-[#1a2a18] bg-[#080f0a] px-2 py-0.5 text-[7px] text-[#4a7c5a] rounded-sm transition hover:border-[#2d5a3d] hover:text-[#54f28b] hover:bg-[#0a1a0e] disabled:opacity-40"
+              className="shrink-0 border border-[#1a2a18] bg-[#080f0a] px-2 py-0.5 text-[11px] text-[#7ab893] rounded-sm transition hover:border-[#2d5a3d] hover:text-[#54f28b] hover:bg-[#0a1a0e] disabled:opacity-40"
             >
               {s}
             </button>
@@ -411,12 +411,12 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void handleSend(); }}
               placeholder="Tell your agent what to do..."
               disabled={!token || sending || authLoading}
-              className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[8px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b] disabled:opacity-40"
+              className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[12px] text-[#d6deff] placeholder-[#6b7394] outline-none focus:border-[#54f28b] disabled:opacity-40"
             />
             <button
               onClick={() => void handleSend()}
               disabled={!input.trim() || !token || sending || authLoading}
-              className="border border-[#54f28b] bg-[#0a1a0e] px-2 py-1 text-[8px] text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="border border-[#54f28b] bg-[#0a1a0e] px-2 py-1 text-[12px] text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               [→]
             </button>
@@ -428,17 +428,17 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {showStopConfirm && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70">
           <div className="border border-[#ff4d6d] bg-[#0a0508] p-4 font-mono text-center">
-            <p className="text-[8px] text-[#9aa7cc] mb-3">Stop your agent?</p>
+            <p className="text-[12px] text-[#9aa7cc] mb-3">Stop your agent?</p>
             <div className="flex gap-2 justify-center">
               <button
                 onClick={() => void handleStop()}
-                className="border border-[#ff4d6d] px-3 py-1 text-[7px] text-[#ff4d6d] uppercase tracking-widest hover:bg-[#1a0a0e]"
+                className="border border-[#ff4d6d] px-3 py-1 text-[11px] text-[#ff4d6d] uppercase tracking-widest hover:bg-[#1a0a0e]"
               >
                 Stop
               </button>
               <button
                 onClick={() => setShowStopConfirm(false)}
-                className="border border-[#3a4260] px-3 py-1 text-[7px] text-[#6b7a9e] uppercase tracking-widest hover:bg-[#0a0e14]"
+                className="border border-[#6b7394] px-3 py-1 text-[11px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
               >
                 Cancel
               </button>
@@ -452,12 +452,12 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/80 px-4">
           <div className="w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] font-mono shadow-[8px_8px_0_0_#000]">
             <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
-              <span className="text-[9px] uppercase tracking-widest text-[#54f28b]">
+              <span className="text-[11px] uppercase tracking-widest text-[#54f28b]">
                 {">> AI AGENT HOSTING FEE"}
               </span>
               <button
                 onClick={() => setShowDeployPayment(false)}
-                className="text-[10px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+                className="text-[12px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
               >
                 [X]
               </button>

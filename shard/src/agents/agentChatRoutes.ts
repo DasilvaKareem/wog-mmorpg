@@ -392,6 +392,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     const config = await getAgentConfig(authWallet);
     const gameState = await getFullGameState(authWallet);
+    const custodialWallet = await getAgentCustodialWallet(authWallet);
+    const apiBase = process.env.API_URL || "http://localhost:3000";
 
     if (!config) {
       return reply.code(404).send({ error: "No agent config found. Deploy your agent first." });
@@ -452,6 +454,7 @@ RULES:
 4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
 5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
 6. When calling tools, ALWAYS include a 1-2 sentence in-character response alongside the tool call. Never respond with just "Got it" or generic confirmations. Describe what you're about to do in vivid, in-world terms.
+7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering — don't guess from the system prompt snapshot.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
@@ -529,6 +532,46 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               },
             },
           },
+          {
+            type: "function",
+            function: {
+              name: "scan_zone",
+              description: "Look around: see nearby mobs (sorted by level fit), NPCs, resource nodes, and portals in your current zone.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "check_inventory",
+              description: "Check your gold balance, all items in your inventory with quantities, and currently equipped gear.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "check_shop",
+              description: "See what the nearest merchant sells and what you can afford.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "what_can_i_craft",
+              description: "Check which crafting, alchemy, and cooking recipes you can make right now based on your inventory.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
+          {
+            type: "function",
+            function: {
+              name: "check_quests",
+              description: "See your active quests and available quests in your current zone.",
+              parameters: { type: "object", properties: {} },
+            },
+          },
         ],
         tool_choice: "auto",
       });
@@ -543,18 +586,152 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     const actionsTaken: string[] = [];
 
     const choice = groqResponse.choices[0];
-    const hasToolCalls = choice?.message?.tool_calls && choice.message.tool_calls.length > 0;
 
-    // Trust the first response's content — the prompt now tells the model to
-    // always respond in character alongside tool calls (no more "Got it" filler).
+    // Capture first response content
     if (choice?.message?.content) {
       agentResponse = choice.message.content;
     }
 
-    // Process tool calls
+    // Execute all tool calls and collect results for potential follow-up
+    const toolResults: { tool_call_id: string; content: string }[] = [];
+    let hasReadTools = false;
+
     if (choice?.message?.tool_calls) {
       for (const toolCall of choice.message.tool_calls) {
-        if (toolCall.function.name === "update_focus") {
+        const fnName = toolCall.function.name;
+
+        // ── Read tools ──────────────────────────────────────────────
+        if (fnName === "scan_zone") {
+          hasReadTools = true;
+          const zone = ref?.zoneId ? getAllZones().get(ref.zoneId) : null;
+          let scanResult: any = { error: "No zone data" };
+          if (zone && entity) {
+            const mobs: any[] = [];
+            const npcs: any[] = [];
+            const resources: any[] = [];
+            const portals: any[] = [];
+            const playerLevel = Number(entity.level ?? 1);
+            for (const [id, e] of zone.entities) {
+              if (id === ref!.entityId) continue;
+              const ent = e as any;
+              const dist = Math.round(Math.hypot((ent.x ?? 0) - (entity.x ?? 0), (ent.y ?? 0) - (entity.y ?? 0)));
+              if (ent.type === "mob") {
+                mobs.push({ name: ent.name, level: ent.level, hp: ent.hp, maxHp: ent.maxHp, distance: dist });
+              } else if (ent.type === "npc") {
+                npcs.push({ name: ent.name, role: ent.npcType ?? ent.role ?? ent.subType, entityId: id, distance: dist });
+              } else if (ent.type === "resource" || ent.type === "ore" || ent.type === "herb") {
+                resources.push({ name: ent.name, type: ent.resourceType ?? ent.type, distance: dist });
+              } else if (ent.type === "portal") {
+                portals.push({ destination: ent.targetZone ?? ent.destination, distance: dist });
+              }
+            }
+            mobs.sort((a, b) => Math.abs(a.level - playerLevel) - Math.abs(b.level - playerLevel));
+            scanResult = { zone: ref!.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10), portals };
+          }
+          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(scanResult) });
+        }
+
+        else if (fnName === "check_inventory") {
+          hasReadTools = true;
+          let invResult: any = { error: "No wallet" };
+          if (custodialWallet) {
+            try {
+              const res = await fetch(`${apiBase}/wallet/${custodialWallet}/balance`);
+              if (res.ok) {
+                const data = await res.json() as any;
+                invResult = {
+                  gold: data.gold ?? data.copper ?? 0,
+                  items: (data.items ?? []).map((i: any) => ({
+                    tokenId: i.tokenId, name: i.name, balance: i.balance,
+                    category: i.category, equipSlot: i.equipSlot, rarity: i.rarity,
+                  })),
+                  equipped: entity?.equipment ?? {},
+                };
+              }
+            } catch {}
+          }
+          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(invResult) });
+        }
+
+        else if (fnName === "check_shop") {
+          hasReadTools = true;
+          let shopResult: any = { error: "No merchant nearby" };
+          const shopZone = ref?.zoneId ? getAllZones().get(ref.zoneId) : null;
+          if (shopZone && ref) {
+            let merchantId: string | null = null;
+            let merchantDist = Infinity;
+            for (const [id, e] of shopZone.entities) {
+              const ent = e as any;
+              if (ent.type === "npc" && (ent.npcType === "merchant" || ent.subType === "merchant" || ent.role === "merchant")) {
+                const d = entity ? Math.hypot((ent.x ?? 0) - (entity.x ?? 0), (ent.y ?? 0) - (entity.y ?? 0)) : Infinity;
+                if (d < merchantDist) { merchantDist = d; merchantId = id; }
+              }
+            }
+            if (merchantId) {
+              try {
+                const res = await fetch(`${apiBase}/shop/npc/${ref.zoneId}/${merchantId}`);
+                if (res.ok) shopResult = await res.json();
+              } catch {}
+            }
+          }
+          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(shopResult) });
+        }
+
+        else if (fnName === "what_can_i_craft") {
+          hasReadTools = true;
+          let craftResult: any = { error: "Unable to check" };
+          try {
+            const [craftRes, alchRes, cookRes, invRes] = await Promise.all([
+              fetch(`${apiBase}/crafting/recipes`).then(r => r.ok ? r.json() : []),
+              fetch(`${apiBase}/alchemy/recipes`).then(r => r.ok ? r.json() : []),
+              fetch(`${apiBase}/cooking/recipes`).then(r => r.ok ? r.json() : []),
+              custodialWallet
+                ? fetch(`${apiBase}/wallet/${custodialWallet}/balance`).then(r => r.ok ? r.json() : null)
+                : Promise.resolve(null),
+            ]);
+            const inventory = new Map<number, number>();
+            if (invRes && (invRes as any).items) {
+              for (const item of (invRes as any).items) inventory.set(Number(item.tokenId), Number(item.balance));
+            }
+            const gold = Number((invRes as any)?.gold ?? (invRes as any)?.copper ?? 0);
+            const checkRecipe = (recipe: any) => {
+              const mats = recipe.materials ?? recipe.requiredMaterials ?? [];
+              const canCraft = mats.every((m: any) => (inventory.get(Number(m.tokenId)) ?? 0) >= (m.quantity ?? m.amount ?? 1));
+              return { recipeId: recipe.recipeId, name: recipe.output?.name ?? recipe.name, canCraft, affordable: gold >= (recipe.copperCost ?? 0) };
+            };
+            const allCrafting = (Array.isArray(craftRes) ? craftRes : (craftRes as any)?.recipes ?? []).map(checkRecipe);
+            const allAlchemy = (Array.isArray(alchRes) ? alchRes : (alchRes as any)?.recipes ?? []).map(checkRecipe);
+            const allCooking = (Array.isArray(cookRes) ? cookRes : (cookRes as any)?.recipes ?? []).map(checkRecipe);
+            craftResult = {
+              craftable: allCrafting.filter((r: any) => r.canCraft && r.affordable),
+              brewable: allAlchemy.filter((r: any) => r.canCraft && r.affordable),
+              cookable: allCooking.filter((r: any) => r.canCraft && r.affordable),
+              totalRecipes: { crafting: allCrafting.length, alchemy: allAlchemy.length, cooking: allCooking.length },
+            };
+          } catch {}
+          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(craftResult) });
+        }
+
+        else if (fnName === "check_quests") {
+          hasReadTools = true;
+          let questResult: any = { error: "No quest data" };
+          if (ref) {
+            try {
+              const [activeRes, zoneRes] = await Promise.all([
+                fetch(`${apiBase}/quests/active/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+                fetch(`${apiBase}/quests/zone/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+              ]);
+              questResult = {
+                activeQuests: (activeRes as any)?.activeQuests ?? [],
+                availableQuests: (zoneRes as any)?.quests ?? [],
+              };
+            } catch {}
+          }
+          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(questResult) });
+        }
+
+        // ── Action tools ─────────────────────────────────────────
+        else if (fnName === "update_focus") {
           try {
             const input = JSON.parse(toolCall.function.arguments) as {
               focus: AgentFocus;
@@ -587,9 +764,13 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
             const runner = agentManager.getRunner(authWallet);
             if (runner) runner.clearScript();
-          } catch {}
+            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, ...patch }) });
+          } catch {
+            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Failed to update focus" }) });
+          }
         }
-        if (toolCall.function.name === "take_action") {
+
+        else if (fnName === "take_action") {
           try {
             const input = JSON.parse(toolCall.function.arguments) as {
               action: string;
@@ -648,8 +829,47 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
               }
             }
-          } catch {}
+            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
+          } catch {
+            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Action failed" }) });
+          }
         }
+      }
+    }
+
+    // If read tools were called, do a follow-up Groq call with tool results
+    // so the LLM can formulate a response using the actual data
+    if (hasReadTools && toolResults.length > 0) {
+      try {
+        const followUpMessages: Groq.Chat.ChatCompletionMessageParam[] = [
+          ...history,
+          {
+            role: "assistant" as const,
+            content: choice?.message?.content ?? "",
+            tool_calls: choice?.message?.tool_calls?.map(tc => ({
+              id: tc.id,
+              type: "function" as const,
+              function: { name: tc.function.name, arguments: tc.function.arguments },
+            })),
+          },
+          ...toolResults.map(tr => ({
+            role: "tool" as const,
+            tool_call_id: tr.tool_call_id,
+            content: tr.content,
+          })),
+        ];
+
+        const followUp = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b",
+          max_tokens: 300,
+          messages: followUpMessages,
+        });
+
+        if (followUp.choices[0]?.message?.content) {
+          agentResponse = followUp.choices[0].message.content;
+        }
+      } catch (err: any) {
+        server.log.warn(`[agent/chat] Follow-up Groq call failed: ${err.message}`);
       }
     }
 
