@@ -33,7 +33,6 @@ export function GameCanvas(): React.ReactElement {
         target: isLowPowerDevice ? 45 : 60,
         forceSetTimeOut: true,
       },
-      resolution,
       scene: [WorldScene],
       scale: {
         mode: Phaser.Scale.RESIZE,

@@ -367,7 +367,7 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
                       if ("ok" in createResult && createResult.ok) {
                         setResult(createResult);
                         setView("result");
-                      } else {
+                      } else if ("error" in createResult) {
                         setCreateError(createResult.error);
                       }
                     })
