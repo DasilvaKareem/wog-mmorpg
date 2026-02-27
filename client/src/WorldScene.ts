@@ -147,9 +147,8 @@ export class WorldScene extends Phaser.Scene {
       // Agent go-to: clicking any NPC lets the user send their agent there
       const NPC_TYPES = new Set([
         "merchant", "auctioneer", "guild-registrar", "arena-master",
-        "quest-giver", "trainer", "profession-trainer", "lore-npc",
-        "crafting-master", "blacksmith", "innkeeper",
-      ]);
+        "quest-giver", "lore-npc", "crafting-master", "blacksmith", "innkeeper",
+      ]); // trainer + profession-trainer handled by NpcInfoDialog (has Learn buttons)
       if (NPC_TYPES.has(entity.type)) {
         gameBus.emit("agentGoToNpc", {
           entityId: entity.id,
