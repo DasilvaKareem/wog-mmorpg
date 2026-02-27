@@ -60,6 +60,8 @@ CURRENT SCRIPT: ${ctx.currentScript ? `${ctx.currentScript.type} — ${ctx.curre
 USER DIRECTIVE: ${ctx.userDirective}
 
 Your job: Decide the next bot script to execute.
+- IMPORTANT: If the current script is still valid and making progress, RE-ISSUE the same script type with the same parameters. Do NOT change scripts just because you were called. Walking to a distant target is normal progress — let it finish.
+- Only change scripts when: the current goal is impossible, completed, or a clearly better opportunity exists.
 - Call read tools only if you need more information (zone, inventory, connections, quests)
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold

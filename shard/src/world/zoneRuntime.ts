@@ -13,7 +13,7 @@ import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { ensureEssenceTechniqueInitialized } from "../combat/essenceTechniqueGenerator.js";
 import { randomUUID } from "crypto";
-import { getPlayerPartyId } from "../social/partySystem.js";
+import { getPlayerPartyId, getPartyMembers, areInSameParty } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
 import {
   getAdjacentZone,
@@ -351,6 +351,116 @@ export function recalculateEntityVitals(entity: Entity): void {
 
   entity.maxHp = Math.max(1, effective.hp);
   entity.hp = Math.max(1, Math.min(entity.maxHp, Math.round(entity.maxHp * ratio)));
+}
+
+/**
+ * Handle level-up side-effects for a single entity: stats recalc, zone event,
+ * diary entry, Redis persistence, and on-chain NFT metadata update.
+ */
+function handleLevelUp(entity: Entity, zone: ZoneState): void {
+  if (!entity.raceId || !entity.classId) return;
+
+  const newStats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level!);
+  entity.stats = newStats;
+  recalculateEntityVitals(entity);
+
+  logZoneEvent({
+    zoneId: zone.zoneId,
+    type: "levelup",
+    tick: zone.tick,
+    message: `*** ${entity.name} reached level ${entity.level}! ***`,
+    entityId: entity.id,
+    entityName: entity.name,
+    data: { level: entity.level, xp: entity.xp },
+  });
+
+  if (entity.walletAddress) {
+    const { headline, narrative } = narrativeLevelUp(entity.name, entity.raceId, entity.classId, zone.zoneId, entity.level!);
+    logDiary(entity.walletAddress, entity.name, zone.zoneId, entity.x, entity.y, "level_up", headline, narrative, {
+      newLevel: entity.level,
+      xp: entity.xp,
+    });
+  }
+
+  if (entity.walletAddress && entity.name) {
+    saveCharacter(entity.walletAddress, entity.name, {
+      level: entity.level,
+      xp: entity.xp,
+      zone: zone.zoneId,
+      x: entity.x,
+      y: entity.y,
+      kills: entity.kills,
+    }).catch((err) => console.error(`[persistence] Save failed for ${entity.id}:`, err));
+  }
+
+  if (entity.characterTokenId != null) {
+    updateCharacterMetadata(entity as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
+      .catch((err) => console.error(`NFT update failed for ${entity.id}:`, err));
+  }
+}
+
+/**
+ * Award XP to the tagger's party (or solo). All same-zone, alive party members
+ * share XP with a party-size bonus: 1.0 + (memberCount - 1) * 0.1.
+ * Each member's own potion multiplier is applied individually.
+ */
+function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number): void {
+  if (baseXpReward <= 0 || xpRecipient.level == null) return;
+
+  const partyMemberIds = getPartyMembers(xpRecipient.id);
+
+  // Filter to same-zone, alive, player-type members
+  const eligibleMembers: Entity[] = [];
+  for (const memberId of partyMemberIds) {
+    const member = zone.entities.get(memberId);
+    if (member && member.type === "player" && member.hp > 0 && member.level != null) {
+      eligibleMembers.push(member);
+    }
+  }
+
+  // Fallback: if somehow no eligible members, give to tagger directly
+  if (eligibleMembers.length === 0) {
+    eligibleMembers.push(xpRecipient);
+  }
+
+  const memberCount = eligibleMembers.length;
+  const partyBonus = 1.0 + (memberCount - 1) * 0.1;
+  const totalXp = Math.floor(baseXpReward * partyBonus);
+  const perMemberXp = Math.floor(totalXp / memberCount);
+
+  for (const member of eligibleMembers) {
+    // Apply each member's own potion XP multiplier
+    const xpMult = getActiveXpMultiplier(member.activeEffects);
+    const finalXp = Math.round(perMemberXp * xpMult);
+    if (finalXp <= 0) continue;
+
+    member.xp = (member.xp ?? 0) + finalXp;
+
+    // Check for level-up(s)
+    let leveled = false;
+    while (member.level! < MAX_LEVEL && member.xp! >= xpForLevel(member.level! + 1)) {
+      member.level!++;
+      leveled = true;
+    }
+
+    if (leveled) {
+      handleLevelUp(member, zone);
+    }
+  }
+
+  // Log party XP sharing if more than one member
+  if (memberCount > 1) {
+    const names = eligibleMembers.map(m => m.name).join(", ");
+    logZoneEvent({
+      zoneId: zone.zoneId,
+      type: "combat",
+      tick: zone.tick,
+      message: `Party XP: ${totalXp} XP (${partyBonus.toFixed(1)}x bonus) split among ${memberCount} members: ${names}`,
+      entityId: xpRecipient.id,
+      entityName: xpRecipient.name,
+      data: { totalXp, perMemberXp, memberCount, partyBonus },
+    });
+  }
 }
 
 function getAttackPower(entity: Entity): number {
@@ -982,6 +1092,12 @@ async function worldTick() {
           entity.order = undefined;
           continue;
         }
+        // Prevent party friendly fire
+        if (entity.type === "player" && target.type === "player"
+            && areInSameParty(entity.id, target.id)) {
+          entity.order = undefined;
+          continue;
+        }
         const dx = target.x - entity.x;
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1116,64 +1232,8 @@ async function worldTick() {
 
             entity.order = undefined;
 
-            // Grant XP on kill to reward recipient (only if target was mob/boss, not player)
-            const baseXpReward = target.xpReward ?? 0;
-            const xpMult = getActiveXpMultiplier(xpRecipient.activeEffects);
-            const xpReward = Math.round(baseXpReward * xpMult);
-            if (xpReward > 0 && xpRecipient.level != null) {
-              xpRecipient.xp = (xpRecipient.xp ?? 0) + xpReward;
-
-              // Check for level-up(s)
-              let leveled = false;
-              while (xpRecipient.level < MAX_LEVEL && xpRecipient.xp >= xpForLevel(xpRecipient.level + 1)) {
-                xpRecipient.level++;
-                leveled = true;
-              }
-
-              if (leveled && xpRecipient.raceId && xpRecipient.classId) {
-                const newStats = computeStatsAtLevel(xpRecipient.raceId, xpRecipient.classId, xpRecipient.level);
-                xpRecipient.stats = newStats;
-                recalculateEntityVitals(xpRecipient);
-
-                // Log level-up event
-                logZoneEvent({
-                  zoneId: zone.zoneId,
-                  type: "levelup",
-                  tick: zone.tick,
-                  message: `*** ${xpRecipient.name} reached level ${xpRecipient.level}! ***`,
-                  entityId: xpRecipient.id,
-                  entityName: xpRecipient.name,
-                  data: { level: xpRecipient.level, xp: xpRecipient.xp },
-                });
-
-                // Log level-up diary entry
-                if (xpRecipient.walletAddress) {
-                  const { headline, narrative } = narrativeLevelUp(xpRecipient.name, xpRecipient.raceId, xpRecipient.classId, zone.zoneId, xpRecipient.level);
-                  logDiary(xpRecipient.walletAddress, xpRecipient.name, zone.zoneId, xpRecipient.x, xpRecipient.y, "level_up", headline, narrative, {
-                    newLevel: xpRecipient.level,
-                    xp: xpRecipient.xp,
-                  });
-                }
-
-                // Persist character to Redis on level-up
-                if (xpRecipient.walletAddress && xpRecipient.name) {
-                  saveCharacter(xpRecipient.walletAddress, xpRecipient.name, {
-                    level: xpRecipient.level,
-                    xp: xpRecipient.xp,
-                    zone: zone.zoneId,
-                    x: xpRecipient.x,
-                    y: xpRecipient.y,
-                    kills: xpRecipient.kills,
-                  }).catch((err) => console.error(`[persistence] Save failed for ${xpRecipient.id}:`, err));
-                }
-
-                // Async on-chain sync (non-blocking, only if NFT character)
-                if (xpRecipient.characterTokenId != null) {
-                  updateCharacterMetadata(xpRecipient as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                    .catch((err) => console.error(`NFT update failed for ${xpRecipient.id}:`, err));
-                }
-              }
-            }
+            // Grant XP on kill — shared with party members in same zone
+            awardPartyXp(zone, xpRecipient, target.xpReward ?? 0);
           }
         }
       } else if (entity.order.action === "technique") {
@@ -1181,6 +1241,12 @@ async function worldTick() {
         const target = zone.entities.get(entity.order.targetId);
         const technique = getTechniqueById(entity.order.techniqueId);
         if (!target || !technique) {
+          entity.order = undefined;
+          continue;
+        }
+        // Prevent party friendly fire for attack techniques
+        if (technique.type === "attack" && entity.type === "player" && target.type === "player"
+            && areInSameParty(entity.id, target.id)) {
           entity.order = undefined;
           continue;
         }
@@ -1336,46 +1402,8 @@ async function worldTick() {
 
             entity.order = undefined;
 
-            // Grant XP on kill to reward recipient
-            const techBaseXpReward = target.xpReward ?? 0;
-            const techXpMult = getActiveXpMultiplier(techXpRecipient.activeEffects);
-            const xpReward = Math.round(techBaseXpReward * techXpMult);
-            if (xpReward > 0 && techXpRecipient.level != null) {
-              techXpRecipient.xp = (techXpRecipient.xp ?? 0) + xpReward;
-              let leveled = false;
-              while (techXpRecipient.level < MAX_LEVEL && techXpRecipient.xp >= xpForLevel(techXpRecipient.level + 1)) {
-                techXpRecipient.level++;
-                leveled = true;
-              }
-              if (leveled && techXpRecipient.raceId && techXpRecipient.classId) {
-                const newStats = computeStatsAtLevel(techXpRecipient.raceId, techXpRecipient.classId, techXpRecipient.level);
-                techXpRecipient.stats = newStats;
-                recalculateEntityVitals(techXpRecipient);
-                logZoneEvent({
-                  zoneId: zone.zoneId,
-                  type: "levelup",
-                  tick: zone.tick,
-                  message: `*** ${techXpRecipient.name} reached level ${techXpRecipient.level}! ***`,
-                  entityId: techXpRecipient.id,
-                  entityName: techXpRecipient.name,
-                  data: { level: techXpRecipient.level, xp: techXpRecipient.xp },
-                });
-
-                // Log level-up diary entry (technique path)
-                if (techXpRecipient.walletAddress) {
-                  const { headline, narrative } = narrativeLevelUp(techXpRecipient.name, techXpRecipient.raceId, techXpRecipient.classId, zone.zoneId, techXpRecipient.level);
-                  logDiary(techXpRecipient.walletAddress, techXpRecipient.name, zone.zoneId, techXpRecipient.x, techXpRecipient.y, "level_up", headline, narrative, {
-                    newLevel: techXpRecipient.level,
-                    xp: techXpRecipient.xp,
-                  });
-                }
-
-                if (techXpRecipient.characterTokenId != null) {
-                  updateCharacterMetadata(techXpRecipient as Required<Pick<Entity, 'characterTokenId' | 'name' | 'raceId' | 'classId' | 'level' | 'xp' | 'stats'>>)
-                    .catch((err) => console.error(`NFT update failed for ${techXpRecipient.id}:`, err));
-                }
-              }
-            }
+            // Grant XP on kill — shared with party members in same zone
+            awardPartyXp(zone, techXpRecipient, target.xpReward ?? 0);
           } else {
             // Technique fired — clear order so AI picks next action
             entity.order = undefined;

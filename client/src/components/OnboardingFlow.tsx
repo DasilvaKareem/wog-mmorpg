@@ -372,31 +372,40 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 
-              <button
-                onClick={async () => {
-                  setError(null);
-                  setStep("connecting");
-                  try {
-                    await Promise.race([
-                      connect(),
-                      new Promise<never>((_, reject) =>
-                        setTimeout(() => reject(new Error("Connection timed out. Is a wallet extension installed?")), 15000)
-                      ),
-                    ]);
-                    setStep("create-char");
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : "Wallet connection failed.");
-                    setStep("login");
-                  }
-                }}
-                className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left text-[12px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-[11px] font-bold text-[#54f28b]">
-                  W
-                </span>
-                <span>Connect Wallet</span>
-                <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
-              </button>
+              {[
+                { type: "walletconnect" as const, label: "Connect Wallet", sub: "WalletConnect — any wallet", icon: "W", border: "#54f28b" },
+                { type: "metamask" as const, label: "MetaMask", sub: "Browser extension", icon: "M", border: "#f6851b" },
+                { type: "coinbase" as const, label: "Coinbase Wallet", sub: "Browser extension", icon: "C", border: "#0052ff" },
+              ].map((w) => (
+                <button
+                  key={w.type}
+                  onClick={async () => {
+                    setError(null);
+                    setStep("connecting");
+                    try {
+                      await connect(w.type);
+                      setStep("create-char");
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : "Wallet connection failed.");
+                      setStep("login");
+                    }
+                  }}
+                  className="flex w-full items-center gap-3 border-2 bg-[#0a1a0e] px-4 py-2 text-left text-[11px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
+                  style={{ borderColor: w.border }}
+                >
+                  <span
+                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[11px] font-bold"
+                    style={{ borderColor: w.border, color: w.border }}
+                  >
+                    {w.icon}
+                  </span>
+                  <div className="flex flex-col">
+                    <span>{w.label}</span>
+                    <span className="text-[8px] text-[#3a4260]">{w.sub}</span>
+                  </div>
+                  <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                </button>
+              ))}
 
               <div className="flex items-center gap-2 my-1">
                 <div className="flex-1 border-t border-[#2a3450]" />

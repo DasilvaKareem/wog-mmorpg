@@ -1,7 +1,7 @@
 import { createThirdwebClient } from "thirdweb";
 import { API_URL } from "../config.js";
 import { defineChain } from "thirdweb";
-import { createWallet } from "thirdweb/wallets";
+import { createWallet, type WalletId } from "thirdweb/wallets";
 
 const SKALE_CHAIN_ID = 1187947933;
 
@@ -55,10 +55,19 @@ export type EquipmentSlot =
   | "gloves"
   | "belt";
 
+/** Supported external wallet types */
+export type ExternalWalletType = "metamask" | "coinbase" | "walletconnect";
+
+const WALLET_IDS: Record<ExternalWalletType, WalletId> = {
+  metamask: "io.metamask",
+  coinbase: "com.coinbase.wallet",
+  walletconnect: "walletConnect",
+};
+
 export class WalletManager {
   private static instance: WalletManager;
-  private wallet = createWallet("io.metamask");
   private _address: string | null = null;
+  private _account: { address: string; signMessage: (args: { message: string }) => Promise<string> } | null = null;
   private _balance: WalletBalance | null = null;
   private _lastBalanceFetch: number = 0;
   private _balanceCacheDuration: number = 3000; // 3 seconds cache
@@ -92,19 +101,25 @@ export class WalletManager {
     return this._balance;
   }
 
+  get account(): { address: string; signMessage: (args: { message: string }) => Promise<string> } | null {
+    return this._account;
+  }
+
   get isConnected(): boolean {
     return this._address !== null;
   }
 
-  async connect(): Promise<string> {
+  async connect(walletType: ExternalWalletType = "walletconnect"): Promise<string> {
+    const wallet = createWallet(WALLET_IDS[walletType]);
     const account = await Promise.race([
-      this.wallet.connect({ client: thirdwebClient, chain: skaleBase }),
+      wallet.connect({ client: thirdwebClient, chain: skaleBase }),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Wallet popup timed out. Make sure MetaMask is installed and unlocked.")), 20000)
+        setTimeout(() => reject(new Error("Wallet connection timed out. Please try again.")), 30000)
       ),
     ]);
 
     this._address = account.address;
+    this._account = account as any;
 
     // Fire-and-forget registration + balance — don't block on these
     void fetch(`${API_URL}/wallet/register`, {

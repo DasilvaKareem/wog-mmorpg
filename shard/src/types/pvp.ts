@@ -134,6 +134,8 @@ export interface MatchmakingEntry {
   format: PvPFormat;
   queuedAt: number;
   preferredTeam?: PvPTeam;
+  /** Party group ID — players with the same groupId are kept on the same team. */
+  groupId?: string;
 }
 
 export interface MatchmakingQueue {

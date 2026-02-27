@@ -20,8 +20,8 @@ import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { type BotScript, type TriggerEvent, type TriggerType } from "../types/botScriptTypes.js";
 
-/** Safety-net: call supervisor if no trigger has fired in this many ticks (~18s). */
-const MAX_STALE_TICKS = 15;
+/** Safety-net: call supervisor if no trigger has fired in this many ticks (~60s). */
+const MAX_STALE_TICKS = 120;
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 const TICK_MS = 1200;
@@ -1405,8 +1405,8 @@ export class AgentRunner {
     this.ticksSinceLastDecision++;
     this.ticksOnCurrentScript++;
 
-    // Script stuck too long — let supervisor re-evaluate any behavior
-    if (this.ticksOnCurrentScript >= 25) {
+    // Script stuck too long — let supervisor re-evaluate any behavior (~60s)
+    if (this.ticksOnCurrentScript >= 120) {
       return { type: "stuck", detail: `Script "${this.currentScript.type}" running for ${this.ticksOnCurrentScript} ticks with no progress` };
     }
 

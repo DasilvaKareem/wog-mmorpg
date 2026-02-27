@@ -394,6 +394,20 @@ export class PvPBattleManager {
   }
 
   /**
+   * Check if a player is currently in an active (non-completed) battle
+   */
+  isInActiveBattle(agentId: string): boolean {
+    for (const battle of this.activeBattles.values()) {
+      const state = battle.getState();
+      if (state.status === "completed" || state.status === "cancelled") continue;
+      const inRed = state.config.teamRed.some((c) => c.agentId === agentId);
+      const inBlue = state.config.teamBlue.some((c) => c.agentId === agentId);
+      if (inRed || inBlue) return true;
+    }
+    return false;
+  }
+
+  /**
    * Cancel a battle (admin function)
    */
   cancelBattle(battleId: string): boolean {

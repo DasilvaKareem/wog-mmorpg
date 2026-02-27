@@ -8,7 +8,7 @@ import {
   type ProfessionsResponse,
 } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
-import { WalletManager, type EquipmentSlot, type WalletBalance } from "@/lib/walletManager";
+import { WalletManager, type EquipmentSlot, type WalletBalance, type ExternalWalletType } from "@/lib/walletManager";
 import { thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import type { OwnedCharacter } from "@/types";
 
@@ -27,7 +27,7 @@ interface WalletContextValue {
   selectCharacter: (tokenId: string | null) => void;
   professions: ProfessionsResponse | null;
   professionsLoading: boolean;
-  connect: () => Promise<void>;
+  connect: (walletType?: ExternalWalletType) => Promise<void>;
   syncAddress: (address: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
   refreshCharacterProgress: () => Promise<void>;
@@ -201,10 +201,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     setCharacterProgress(pickPrimaryCharacterProgress(characters));
   }, [selectedCharacterTokenId, characters]);
 
-  const connect = React.useCallback(async () => {
+  const connect = React.useCallback(async (walletType?: ExternalWalletType) => {
     setLoading(true);
     try {
-      await walletManager.connect();
+      await walletManager.connect(walletType);
       setAddress(walletManager.address);
       setBalance(walletManager.balance);
     } finally {

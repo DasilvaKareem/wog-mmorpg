@@ -1,10 +1,12 @@
 /**
  * Client-side auth token management for agent API calls.
- * Obtains a JWT by challenge-signing with the thirdweb in-app wallet.
+ * Obtains a JWT by challenge-signing with the thirdweb in-app wallet,
+ * falling back to MetaMask / external wallet when in-app wallet is unavailable.
  */
 
 import { API_URL } from "@/config";
 import { sharedInAppWallet } from "@/lib/inAppWalletClient";
+import { WalletManager } from "@/lib/walletManager";
 
 const LEGACY_TOKEN_KEY = "wog:agent:jwt";
 const LEGACY_EXPIRY_KEY = "wog:agent:jwt:expiry";
@@ -86,8 +88,15 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
     if (!challengeRes.ok) return null;
     const { message, timestamp } = await challengeRes.json();
 
-    // Sign with in-app wallet
-    const account = await sharedInAppWallet.getAccount();
+    // Try in-app wallet first, then fall back to external (MetaMask) wallet
+    let account = await sharedInAppWallet.getAccount();
+    if (!account) {
+      // Fall back to MetaMask / external wallet
+      const externalAccount = WalletManager.getInstance().account;
+      if (externalAccount) {
+        account = externalAccount as any;
+      }
+    }
     if (!account) return null;
     if (account.address.toLowerCase() !== walletAddress.toLowerCase()) {
       console.warn(`[agentAuth] Wallet mismatch: connected=${account.address} requested=${walletAddress}`);

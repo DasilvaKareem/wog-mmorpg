@@ -184,26 +184,51 @@ export class MatchmakingSystem {
   }
 
   /**
-   * Balance teams by ELO (snake draft style)
+   * Balance teams by ELO (snake draft style), keeping grouped players together.
+   * Players sharing a groupId are always placed on the same team.
    */
   private balanceTeams(players: MatchmakingEntry[]): MatchmakingEntry[] {
-    // Sort by ELO descending
-    const sorted = [...players].sort((a, b) => b.elo - a.elo);
+    const half = Math.floor(players.length / 2);
 
-    // Snake draft: 1->2, 2->1, 1->2, 2->1...
-    const balanced: MatchmakingEntry[] = [];
-    let teamToggle = true;
+    // Separate grouped and ungrouped players
+    const groupMap = new Map<string, MatchmakingEntry[]>();
+    const ungrouped: MatchmakingEntry[] = [];
 
-    for (let i = 0; i < sorted.length; i++) {
-      if (i % 2 === 0) {
-        teamToggle = true;
+    for (const p of players) {
+      if (p.groupId) {
+        if (!groupMap.has(p.groupId)) groupMap.set(p.groupId, []);
+        groupMap.get(p.groupId)!.push(p);
       } else {
-        teamToggle = !teamToggle;
+        ungrouped.push(p);
       }
-      balanced.push(sorted[i]);
     }
 
-    return balanced;
+    // Place groups first: assign each group to a team, balancing by count
+    const teamA: MatchmakingEntry[] = [];
+    const teamB: MatchmakingEntry[] = [];
+
+    // Sort groups by size descending for better packing
+    const groups = [...groupMap.values()].sort((a, b) => b.length - a.length);
+    for (const group of groups) {
+      if (teamA.length <= teamB.length) {
+        teamA.push(...group);
+      } else {
+        teamB.push(...group);
+      }
+    }
+
+    // Fill remaining slots with ungrouped players via ELO snake draft
+    ungrouped.sort((a, b) => b.elo - a.elo);
+    for (const p of ungrouped) {
+      if (teamA.length < half) {
+        teamA.push(p);
+      } else {
+        teamB.push(p);
+      }
+    }
+
+    // Return teamA first (will become red), teamB second (will become blue)
+    return [...teamA, ...teamB];
   }
 
   /**

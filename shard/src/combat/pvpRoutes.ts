@@ -10,6 +10,7 @@ import type { PvPFormat, MatchmakingEntry } from "../types/pvp.js";
 import type { BattleAction } from "../types/battle.js";
 import { getAllZones } from "../world/zoneRuntime.js";
 import { COLISEUM_MAPS } from "./coliseumMaps.js";
+import { getPartyMembers } from "../social/partySystem.js";
 
 export async function registerPvPRoutes(app: FastifyInstance) {
   /**
@@ -66,6 +67,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
         endpoints: {
           matchmaking: {
             joinQueue: { method: "POST", path: "/api/pvp/queue/join", body: "agentId, walletAddress, characterTokenId, level, format" },
+            joinPartyQueue: { method: "POST", path: "/api/pvp/queue/join-party", body: "leaderId, format (2v2|5v5)" },
             leaveQueue: { method: "POST", path: "/api/pvp/queue/leave", body: "agentId, format" },
             queueStatus: { method: "GET", path: "/api/pvp/queue/status/:format" },
             allQueues: { method: "GET", path: "/api/pvp/queue/all" },
@@ -126,6 +128,13 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       });
     }
 
+    // Reject if already in an active battle
+    if (pvpBattleManager.isInActiveBattle(agentId)) {
+      return reply.code(400).send({
+        error: "Already in an active PvP battle",
+      });
+    }
+
     // Get or create player ELO
     const existingStats = pvpBattleManager.getPlayerStats(agentId);
     const elo = existingStats?.elo || 1000;
@@ -146,6 +155,108 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     return reply.send({
       success: true,
       message: "Added to queue",
+      queueStatus: pvpBattleManager.getQueueStatus(format),
+    });
+  });
+
+  /**
+   * POST /api/pvp/queue/join-party
+   * Queue an entire party as a team for 2v2 or 5v5
+   */
+  app.post<{
+    Body: {
+      leaderId: string;
+      format: "2v2" | "5v5";
+    };
+  }>("/api/pvp/queue/join-party", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
+    const { leaderId, format } = req.body;
+
+    if (!leaderId || !format) {
+      return reply.code(400).send({
+        error: "Missing required fields: leaderId, format",
+      });
+    }
+
+    if (format !== "2v2" && format !== "5v5") {
+      return reply.code(400).send({
+        error: "Party queue only supports 2v2 and 5v5 formats",
+      });
+    }
+
+    const requiredSize = format === "2v2" ? 2 : 5;
+    const memberIds = getPartyMembers(leaderId);
+
+    if (memberIds.length < 2 || (memberIds.length === 1 && memberIds[0] === leaderId)) {
+      return reply.code(400).send({
+        error: "You must be in a party to use party queue",
+      });
+    }
+
+    if (memberIds.length !== requiredSize) {
+      return reply.code(400).send({
+        error: `Party size (${memberIds.length}) does not match format ${format} (requires ${requiredSize} members)`,
+      });
+    }
+
+    // Resolve all party members from zone entities
+    const groupId = `party_${leaderId}_${Date.now()}`;
+    const queued: string[] = [];
+    const errors: string[] = [];
+
+    for (const memberId of memberIds) {
+      // Find this member across all zones
+      let memberEntity: any = null;
+      for (const [, zone] of getAllZones()) {
+        const entity = zone.entities.get(memberId);
+        if (entity && entity.type === "player") {
+          memberEntity = entity;
+          break;
+        }
+      }
+
+      if (!memberEntity) {
+        errors.push(`Member ${memberId} not found online`);
+        continue;
+      }
+
+      if (pvpBattleManager.isInActiveBattle(memberId)) {
+        errors.push(`${memberEntity.name} is already in an active PvP battle`);
+        continue;
+      }
+
+      const existingStats = pvpBattleManager.getPlayerStats(memberId);
+      const elo = existingStats?.elo || 1000;
+
+      const entry: MatchmakingEntry = {
+        agentId: memberId,
+        walletAddress: memberEntity.walletAddress ?? "",
+        characterTokenId: memberEntity.characterTokenId ?? 0n,
+        level: memberEntity.level ?? 1,
+        elo,
+        format,
+        queuedAt: Date.now(),
+        groupId,
+      };
+
+      pvpBattleManager.joinQueue(entry);
+      queued.push(memberEntity.name);
+    }
+
+    if (errors.length > 0 && queued.length === 0) {
+      return reply.code(400).send({
+        error: "No party members could be queued",
+        details: errors,
+      });
+    }
+
+    return reply.send({
+      success: true,
+      message: `Party queued for ${format}`,
+      groupId,
+      queued,
+      errors: errors.length > 0 ? errors : undefined,
       queueStatus: pvpBattleManager.getQueueStatus(format),
     });
   });
