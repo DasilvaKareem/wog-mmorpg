@@ -8,7 +8,7 @@
  * and zone-wide broadcasts to each other through the shard server.
  */
 
-import { getRedis } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -118,8 +118,11 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
       appendToHistory(to, logEntry);
       return id;
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XADD failed, using in-memory: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("sendInboxMessage");
   }
 
   // In-memory fallback
@@ -175,8 +178,11 @@ export async function readInbox(
       const raw: Array<[string, string[]]> = await redis.xrange(key, startId, "+", "COUNT", String(limit));
       return raw.map(([id, fields]) => parseStreamEntry(id, fields));
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XRANGE failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("readInbox");
   }
 
   // In-memory fallback
@@ -205,8 +211,11 @@ export async function peekInbox(
       const raw: Array<[string, string[]]> = await redis.xrevrange(key, "+", "-", "COUNT", String(limit));
       return raw.map(([id, fields]) => parseStreamEntry(id, fields)).reverse();
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XREVRANGE failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("peekInbox");
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -229,8 +238,11 @@ export async function ackInboxMessages(wallet: string, messageIds: string[]): Pr
       const deleted: number = await redis.xdel(key, ...messageIds);
       return deleted;
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XDEL failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("ackInboxMessages");
   }
 
   // In-memory fallback
@@ -256,8 +268,11 @@ export async function countInbox(wallet: string): Promise<number> {
     try {
       return await redis.xlen(key);
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XLEN failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("countInbox");
   }
 
   return (memInbox.get(wallet.toLowerCase()) ?? []).length;
@@ -276,8 +291,11 @@ export async function countNewMessages(wallet: string, since: string): Promise<n
       const raw: Array<[string, string[]]> = await redis.xrange(key, startId, "+");
       return raw.length;
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] Redis XRANGE count failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("countNewMessages");
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -301,12 +319,14 @@ function appendToHistory(wallet: string, msg: InboxMessage): void {
     ).catch((err: any) => {
       console.debug(`[inbox] History append failed: ${err.message?.slice(0, 60)}`);
     });
-  } else {
+  } else if (isMemoryFallbackAllowed()) {
     const k = wallet.toLowerCase();
     const list = memHistory.get(k) ?? [];
     list.push(msg);
     if (list.length > MAX_HISTORY_SIZE) list.splice(0, list.length - MAX_HISTORY_SIZE);
     memHistory.set(k, list);
+  } else {
+    console.error("[inbox] appendToHistory skipped: Redis required but unavailable");
   }
 }
 
@@ -332,8 +352,11 @@ export async function getMessageHistory(
       const messages = raw.map((s: string) => JSON.parse(s) as InboxMessage);
       return { messages, total };
     } catch (err: any) {
+      if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] History read failed: ${err.message}`);
     }
+  } else {
+    assertRedisAvailable("getMessageHistory");
   }
 
   const list = memHistory.get(wallet.toLowerCase()) ?? [];

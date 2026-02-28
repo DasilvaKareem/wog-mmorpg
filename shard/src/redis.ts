@@ -1,11 +1,14 @@
 /**
  * Shared Redis client singleton.
- * Lazy-loads ioredis if REDIS_URL is set, otherwise returns null (in-memory fallback).
- * If Redis becomes unreachable, automatically falls back to null so callers use in-memory.
+ * In production (REDIS_URL set), Redis is the authoritative persistent store.
+ * In local/dev without Redis URL, callers may use in-memory fallback.
  */
 
 let redis: any = null;
 let initialized = false;
+let redisConfigured = false;
+let memoryFallbackAllowed = true;
+let lastRedisError: string | null = null;
 
 function resolveRedisUrl(): { url: string | null; source: string | null } {
   const candidates: Array<[string, string | undefined]> = [
@@ -29,11 +32,22 @@ function resolveRedisUrl(): { url: string | null; source: string | null } {
   return { url: null, source: null };
 }
 
+function parseBooleanEnv(value: string | undefined): boolean | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return null;
+}
+
 async function init() {
   if (initialized) return;
   initialized = true;
 
   const { url: redisUrl, source } = resolveRedisUrl();
+  redisConfigured = Boolean(redisUrl);
+  const fallbackOverride = parseBooleanEnv(process.env.REDIS_ALLOW_MEMORY_FALLBACK);
+  memoryFallbackAllowed = fallbackOverride ?? !redisConfigured;
 
   if (redisUrl) {
     try {
@@ -41,10 +55,6 @@ async function init() {
       const client = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
         retryStrategy(times: number) {
-          if (times > 5) {
-            console.warn("[redis] Max reconnect attempts reached, falling back to in-memory");
-            return null; // stop retrying
-          }
           return Math.min(times * 500, 3000);
         },
         connectTimeout: 5000,
@@ -52,22 +62,29 @@ async function init() {
       });
 
       client.on("error", (err: Error) => {
-        if (redis) {
-          console.warn("[redis] Connection lost, falling back to in-memory:", err.message);
-          redis = null;
-        }
+        lastRedisError = err.message;
+        console.warn("[redis] Connection error:", err.message);
       });
 
       client.on("connect", () => {
+        lastRedisError = null;
         console.log("[redis] Connected");
-        redis = client;
       });
 
-      await client.connect();
+      client.on("close", () => {
+        console.warn("[redis] Connection closed; client will retry");
+      });
+
       redis = client;
+      await client.connect();
       console.log(`[redis] Ready (${source}):`, redisUrl.replace(/\/\/.*@/, "//***@"));
     } catch (err: any) {
-      console.warn("[redis] Failed to connect, using in-memory fallback:", err.message);
+      lastRedisError = err?.message ?? String(err);
+      if (memoryFallbackAllowed) {
+        console.warn("[redis] Failed to connect, using in-memory fallback:", lastRedisError);
+      } else {
+        console.error("[redis] Failed to connect and memory fallback is disabled:", lastRedisError);
+      }
       redis = null;
     }
   } else {
@@ -81,4 +98,25 @@ await init();
 /** Returns the shared Redis client, or null if unavailable */
 export function getRedis(): any {
   return redis;
+}
+
+/** True when REDIS_URL (or equivalent) is configured. */
+export function isRedisConfigured(): boolean {
+  return redisConfigured;
+}
+
+/**
+ * In-memory fallback is only expected for local/dev unless explicitly enabled.
+ * Set REDIS_ALLOW_MEMORY_FALLBACK=true to force dual-mode behavior.
+ */
+export function isMemoryFallbackAllowed(): boolean {
+  return memoryFallbackAllowed;
+}
+
+/** Throw in strict mode when Redis is required but unavailable. */
+export function assertRedisAvailable(context: string): void {
+  if (redis) return;
+  if (memoryFallbackAllowed) return;
+  const suffix = lastRedisError ? ` (${lastRedisError})` : "";
+  throw new Error(`[redis] ${context}: Redis is required but unavailable${suffix}`);
 }

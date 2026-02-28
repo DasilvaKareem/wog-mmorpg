@@ -4,7 +4,7 @@ import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
 import { goldToCopper, copperToGold } from "./currency.js";
 import { createCustodialWallet, getCustodialWallet } from "./custodialWalletRedis.js";
-import { getRedis } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -36,21 +36,33 @@ async function getStoredTreasuryAddress(): Promise<string | null> {
         treasuryAddressCache = normalizeAddress(fromRedis);
         return treasuryAddressCache;
       }
-    } catch {}
+      return null;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getStoredTreasuryAddress");
   }
   return null;
 }
 
 async function storeTreasuryAddress(address: string): Promise<void> {
   const normalized = normalizeAddress(address);
-  treasuryAddressCache = normalized;
 
   const redis = getRedis();
   if (redis) {
     try {
       await redis.set(TREASURY_ADDRESS_KEY, normalized);
-    } catch {}
+      treasuryAddressCache = normalized;
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("storeTreasuryAddress");
   }
+
+  treasuryAddressCache = normalized;
 }
 
 async function isTreasurySeeded(): Promise<boolean> {
@@ -64,20 +76,31 @@ async function isTreasurySeeded(): Promise<boolean> {
         treasurySeededMem = true;
         return true;
       }
-    } catch {}
+      return false;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("isTreasurySeeded");
   }
   return false;
 }
 
 async function markTreasurySeeded(): Promise<void> {
-  treasurySeededMem = true;
-
   const redis = getRedis();
   if (redis) {
     try {
       await redis.set(TREASURY_SEEDED_KEY, "1");
-    } catch {}
+      treasurySeededMem = true;
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("markTreasurySeeded");
   }
+
+  treasurySeededMem = true;
 }
 
 async function isWalletRegistered(address: string): Promise<boolean> {
@@ -92,7 +115,12 @@ async function isWalletRegistered(address: string): Promise<boolean> {
         registeredWallets.add(normalized);
         return true;
       }
-    } catch {}
+      return false;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("isWalletRegistered");
   }
 
   return false;
@@ -100,14 +128,21 @@ async function isWalletRegistered(address: string): Promise<boolean> {
 
 async function markWalletRegistered(address: string): Promise<void> {
   const normalized = normalizeAddress(address);
-  registeredWallets.add(normalized);
 
   const redis = getRedis();
   if (redis) {
     try {
       await redis.set(`${REGISTERED_WALLET_KEY_PREFIX}${normalized}`, "1");
-    } catch {}
+      registeredWallets.add(normalized);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("markWalletRegistered");
   }
+
+  registeredWallets.add(normalized);
 }
 
 async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {

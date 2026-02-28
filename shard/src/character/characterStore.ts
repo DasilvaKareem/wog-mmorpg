@@ -2,10 +2,11 @@
  * Character persistence via Redis hashes.
  * Key pattern: character:{walletAddress}:{characterName}
  *
- * Falls back to in-memory Map when Redis is unavailable or errors.
+ * Local/dev can fall back to in-memory Map when Redis is not configured.
+ * When Redis is configured, Redis is authoritative.
  */
 
-import { getRedis } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 
 export interface CharacterSaveData {
@@ -112,17 +113,22 @@ async function resolveFallbackKey(
   const nameCandidates = buildLookupNameCandidates(characterName);
   const normalizedCandidates = new Set(nameCandidates.map(normalizeForLookup));
 
-  // Try in-memory keys first.
-  for (const k of memoryStore.keys()) {
-    if (!k.startsWith(prefix) || k === exactKey) continue;
-    const storedName = k.slice(prefix.length);
-    if (normalizedCandidates.has(normalizeForLookup(storedName))) {
-      return k;
+  if (isMemoryFallbackAllowed()) {
+    // Try in-memory keys first in local/dev fallback mode.
+    for (const k of memoryStore.keys()) {
+      if (!k.startsWith(prefix) || k === exactKey) continue;
+      const storedName = k.slice(prefix.length);
+      if (normalizedCandidates.has(normalizeForLookup(storedName))) {
+        return k;
+      }
     }
   }
 
   const redis = getRedis();
-  if (!redis) return null;
+  if (!redis) {
+    assertRedisAvailable("resolveFallbackKey");
+    return null;
+  }
 
   try {
     const keys: string[] = await redis.keys(`${prefix}*`);
@@ -133,8 +139,8 @@ async function resolveFallbackKey(
         return k;
       }
     }
-  } catch {
-    // Redis scan failed, ignore and keep default behavior.
+  } catch (err) {
+    if (!isMemoryFallbackAllowed()) throw err;
   }
 
   return null;
@@ -155,20 +161,20 @@ export async function saveCharacter(
   if (Object.keys(flat).length === 0) return;
 
   const k = key(walletAddress, characterName);
-
-  // Always write to in-memory
-  const existing = memoryStore.get(k) ?? {};
-  memoryStore.set(k, { ...existing, ...flat });
-
-  // Try Redis too
   const redis = getRedis();
+
   if (redis) {
     try {
       await redis.hset(k, flat);
-    } catch {
-      // Redis failed, in-memory already has the data
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
     }
   }
+
+  assertRedisAvailable("saveCharacter");
+  const existing = memoryStore.get(k) ?? {};
+  memoryStore.set(k, { ...existing, ...flat });
 }
 
 export async function loadCharacter(
@@ -179,18 +185,20 @@ export async function loadCharacter(
   const k = key(walletAddress, characterName);
   let resolvedKey = k;
 
-  // Try Redis first
+  // Try Redis first.
   const redis = getRedis();
   if (redis) {
     try {
       raw = await redis.hgetall(resolvedKey);
-    } catch {
-      // Redis failed, fall through to in-memory
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
     }
+  } else {
+    assertRedisAvailable("loadCharacter");
   }
 
-  // Fall back to in-memory if Redis returned nothing
-  if (!raw || Object.keys(raw).length === 0) {
+  // Fall back to in-memory only in local/dev mode.
+  if (isMemoryFallbackAllowed() && (!raw || Object.keys(raw).length === 0)) {
     raw = memoryStore.get(resolvedKey) ?? {};
   }
 
@@ -202,11 +210,11 @@ export async function loadCharacter(
       if (redis) {
         try {
           raw = await redis.hgetall(resolvedKey);
-        } catch {
-          // Redis failed, fall through to in-memory
+        } catch (err) {
+          if (!isMemoryFallbackAllowed()) throw err;
         }
       }
-      if (!raw || Object.keys(raw).length === 0) {
+      if (isMemoryFallbackAllowed() && (!raw || Object.keys(raw).length === 0)) {
         raw = memoryStore.get(resolvedKey) ?? {};
       }
       if (Object.keys(raw).length > 0) {
@@ -255,15 +263,19 @@ export async function loadAllCharactersForWallet(
           results.push(parsed);
         }
       }
-    } catch {
-      // Redis read failed; try in-memory fallback.
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
     }
+  } else {
+    assertRedisAvailable("loadAllCharactersForWallet");
   }
 
-  for (const [k, raw] of memoryStore.entries()) {
-    if (!k.startsWith(prefix) || seen.has(k)) continue;
-    if (raw && Object.keys(raw).length > 0) {
-      results.push(parseCharacter(raw));
+  if (isMemoryFallbackAllowed()) {
+    for (const [k, raw] of memoryStore.entries()) {
+      if (!k.startsWith(prefix) || seen.has(k)) continue;
+      if (raw && Object.keys(raw).length > 0) {
+        results.push(parseCharacter(raw));
+      }
     }
   }
 
@@ -288,15 +300,19 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
           return JSON.parse(data.professions) as string[];
         }
       }
-    } catch {
-      // fall through to in-memory
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
     }
+  } else {
+    assertRedisAvailable("getProfessionsForWallet");
   }
 
-  // In-memory fallback
-  for (const [k, data] of memoryStore.entries()) {
-    if (k.startsWith(prefix) && data.professions) {
-      return JSON.parse(data.professions) as string[];
+  // In-memory fallback (local/dev only)
+  if (isMemoryFallbackAllowed()) {
+    for (const [k, data] of memoryStore.entries()) {
+      if (k.startsWith(prefix) && data.professions) {
+        return JSON.parse(data.professions) as string[];
+      }
     }
   }
 
@@ -305,14 +321,19 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
 
 export async function deleteCharacter(walletAddress: string, characterName: string): Promise<void> {
   const k = key(walletAddress, characterName);
-  memoryStore.delete(k);
-
   const redis = getRedis();
   if (redis) {
     try {
       await redis.del(k);
-    } catch {
-      // Redis failed, in-memory already cleared
+      if (isMemoryFallbackAllowed()) {
+        memoryStore.delete(k);
+      }
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
     }
   }
+
+  assertRedisAvailable("deleteCharacter");
+  memoryStore.delete(k);
 }

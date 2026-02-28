@@ -1,14 +1,14 @@
 import { randomPrivateKey, privateKeyToAccount } from "thirdweb/wallets";
 import { thirdwebClient } from "./chain.js";
 import { encrypt, decrypt } from "./encryption.js";
-import { getRedis } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import type { Account } from "thirdweb/wallets";
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-production";
 
 /**
  * Redis-backed storage for custodial wallets (production)
- * Falls back to in-memory if Redis not configured or errors.
+ * Falls back to in-memory only in local/dev mode without Redis.
  * Uses shared Redis client from redis.ts
  */
 
@@ -31,14 +31,21 @@ export async function createCustodialWallet(): Promise<CustodialWalletInfo> {
   // Encrypt private key before storing
   const encryptedPrivateKey = encrypt(privateKey, ENCRYPTION_KEY);
 
-  // Always write to in-memory
   const address = account.address.toLowerCase();
-  inMemoryStore.set(address, encryptedPrivateKey);
-
-  // Persist to Redis (awaited — private keys must not be lost)
   const redis = getRedis();
   if (redis) {
-    try { await redis.set(`wallet:${address}`, encryptedPrivateKey); } catch {}
+    try {
+      await redis.set(`wallet:${address}`, encryptedPrivateKey);
+      if (isMemoryFallbackAllowed()) {
+        inMemoryStore.set(address, encryptedPrivateKey);
+      }
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+      inMemoryStore.set(address, encryptedPrivateKey);
+    }
+  } else {
+    assertRedisAvailable("createCustodialWallet");
+    inMemoryStore.set(address, encryptedPrivateKey);
   }
 
   console.log(`[custodial] Created wallet: ${account.address}`);
@@ -59,9 +66,15 @@ export async function getCustodialWallet(address: string): Promise<Account> {
   let encryptedPrivateKey: string | null = null;
   const redis = getRedis();
   if (redis) {
-    try { encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`); } catch {}
+    try {
+      encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`);
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getCustodialWallet");
   }
-  if (!encryptedPrivateKey) {
+  if (!encryptedPrivateKey && isMemoryFallbackAllowed()) {
     encryptedPrivateKey = inMemoryStore.get(normalizedAddress) || null;
   }
 
@@ -85,7 +98,12 @@ export async function hasCustodialWallet(address: string): Promise<boolean> {
     try {
       const exists = await redis.exists(`wallet:${normalizedAddress}`);
       if (exists === 1) return true;
-    } catch {}
+      return false;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("hasCustodialWallet");
   }
   return inMemoryStore.has(normalizedAddress);
 }
@@ -100,9 +118,15 @@ export async function exportCustodialWallet(address: string): Promise<string> {
   let encryptedPrivateKey: string | null = null;
   const redis = getRedis();
   if (redis) {
-    try { encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`); } catch {}
+    try {
+      encryptedPrivateKey = await redis.get(`wallet:${normalizedAddress}`);
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("exportCustodialWallet");
   }
-  if (!encryptedPrivateKey) {
+  if (!encryptedPrivateKey && isMemoryFallbackAllowed()) {
     encryptedPrivateKey = inMemoryStore.get(normalizedAddress) || null;
   }
 
@@ -119,14 +143,20 @@ export async function exportCustodialWallet(address: string): Promise<string> {
  */
 export async function deleteCustodialWallet(address: string): Promise<boolean> {
   const normalizedAddress = address.toLowerCase();
-  const memDeleted = inMemoryStore.delete(normalizedAddress);
+  const memDeleted = isMemoryFallbackAllowed()
+    ? inMemoryStore.delete(normalizedAddress)
+    : false;
 
   const redis = getRedis();
   if (redis) {
     try {
       const deleted = await redis.del(`wallet:${normalizedAddress}`);
       return deleted === 1 || memDeleted;
-    } catch {}
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("deleteCustodialWallet");
   }
   return memDeleted;
 }
@@ -144,7 +174,11 @@ export async function getAllCustodialWallets(): Promise<CustodialWalletInfo[]> {
         address: key.replace("wallet:", ""),
         createdAt: Date.now(),
       }));
-    } catch {}
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAllCustodialWallets");
   }
   return Array.from(inMemoryStore.keys()).map(address => ({
     address,

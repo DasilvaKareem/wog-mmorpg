@@ -6,7 +6,7 @@
  *   agent:entity:{userWallet}  → JSON { entityId, zoneId }
  */
 
-import { getRedis } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 
 export type AgentFocus =
   | "questing"
@@ -74,18 +74,30 @@ export async function getAgentConfig(userWallet: string): Promise<AgentConfig | 
     try {
       const raw = await redis.get(walletKey(userWallet));
       if (raw) return JSON.parse(raw) as AgentConfig;
-    } catch {}
+      return null;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAgentConfig");
   }
   return memConfig.get(userWallet.toLowerCase()) ?? null;
 }
 
 export async function setAgentConfig(userWallet: string, config: AgentConfig): Promise<void> {
   const key = userWallet.toLowerCase();
-  memConfig.set(key, config);
   const redis = getRedis();
   if (redis) {
-    try { await redis.set(walletKey(key), JSON.stringify(config)); } catch {}
+    try {
+      await redis.set(walletKey(key), JSON.stringify(config));
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("setAgentConfig");
   }
+  memConfig.set(key, config);
 }
 
 export async function patchAgentConfig(
@@ -111,14 +123,21 @@ export async function appendChatMessage(
   const key = userWallet.toLowerCase();
   const redis = getRedis();
   if (redis) {
-    await redis.rpush(chatKey(key), JSON.stringify(msg));
-    await redis.ltrim(chatKey(key), -maxHistory, -1);
+    try {
+      await redis.rpush(chatKey(key), JSON.stringify(msg));
+      await redis.ltrim(chatKey(key), -maxHistory, -1);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
   } else {
-    const list = memChat.get(key) ?? [];
-    list.push(msg);
-    if (list.length > maxHistory) list.splice(0, list.length - maxHistory);
-    memChat.set(key, list);
+    assertRedisAvailable("appendChatMessage");
   }
+
+  const list = memChat.get(key) ?? [];
+  list.push(msg);
+  if (list.length > maxHistory) list.splice(0, list.length - maxHistory);
+  memChat.set(key, list);
 }
 
 export async function getChatHistory(
@@ -128,8 +147,14 @@ export async function getChatHistory(
   const key = userWallet.toLowerCase();
   const redis = getRedis();
   if (redis) {
-    const raw = await redis.lrange(chatKey(key), -limit, -1);
-    return raw.map((s: string) => JSON.parse(s) as ChatMessage);
+    try {
+      const raw = await redis.lrange(chatKey(key), -limit, -1);
+      return raw.map((s: string) => JSON.parse(s) as ChatMessage);
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getChatHistory");
   }
   return (memChat.get(key) ?? []).slice(-limit);
 }
@@ -142,18 +167,31 @@ export async function getAgentCustodialWallet(userWallet: string): Promise<strin
     try {
       const addr = await redis.get(custWalletKey(userWallet));
       if (addr) return addr;
-    } catch {}
+      return null;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAgentCustodialWallet");
   }
   return memWallet.get(userWallet.toLowerCase()) ?? null;
 }
 
 export async function setAgentCustodialWallet(userWallet: string, custodialAddress: string): Promise<void> {
   const key = userWallet.toLowerCase();
-  memWallet.set(key, custodialAddress.toLowerCase());
+  const normalized = custodialAddress.toLowerCase();
   const redis = getRedis();
   if (redis) {
-    try { await redis.set(custWalletKey(key), custodialAddress.toLowerCase()); } catch {}
+    try {
+      await redis.set(custWalletKey(key), normalized);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("setAgentCustodialWallet");
   }
+  memWallet.set(key, normalized);
 }
 
 // ── Entity ref ───────────────────────────────────────────────────────────────
@@ -164,16 +202,28 @@ export async function getAgentEntityRef(userWallet: string): Promise<AgentEntity
     try {
       const raw = await redis.get(entityKey(userWallet));
       if (raw) return JSON.parse(raw) as AgentEntityRef;
-    } catch {}
+      return null;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAgentEntityRef");
   }
   return memEntity.get(userWallet.toLowerCase()) ?? null;
 }
 
 export async function setAgentEntityRef(userWallet: string, ref: AgentEntityRef): Promise<void> {
   const key = userWallet.toLowerCase();
-  memEntity.set(key, ref);
   const redis = getRedis();
   if (redis) {
-    try { await redis.set(entityKey(key), JSON.stringify(ref)); } catch {}
+    try {
+      await redis.set(entityKey(key), JSON.stringify(ref));
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("setAgentEntityRef");
   }
+  memEntity.set(key, ref);
 }
