@@ -73,19 +73,19 @@ export function registerAuthTools(server: McpServer): void {
   );
 
   /**
-   * Register a new wallet (get sFUEL + 50 welcome gold).
+   * Register a new wallet (get sFUEL + 200 copper welcome bonus).
    */
   server.registerTool(
     "wallet_register",
     {
       description:
-        "Register a new wallet with WoG for the first time. Grants sFUEL (gas) and 50 welcome GOLD tokens. Must be called before spawning a character.",
+        "Register a new wallet with WoG for the first time. Grants sFUEL (gas) and transfers a 200 copper welcome bonus from the treasury wallet. Must be called before spawning a character.",
       inputSchema: {
         walletAddress: z.string().describe("Ethereum wallet address to register"),
       },
     },
     async ({ walletAddress }) => {
-      const data = await shard.post<unknown>("/wallet/register", { walletAddress });
+      const data = await shard.post<unknown>("/wallet/register", { address: walletAddress });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
       };

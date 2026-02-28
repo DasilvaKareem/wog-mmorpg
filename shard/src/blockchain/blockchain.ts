@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { getContract, prepareTransaction, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
+import type { Account } from "thirdweb/wallets";
 import { mintTo as mintERC20, transfer as transferERC20 } from "thirdweb/extensions/erc20";
 import { getBalance } from "thirdweb/extensions/erc20";
 import { mintAdditionalSupplyTo } from "thirdweb/extensions/erc1155";
@@ -189,6 +190,11 @@ const itemsContract = getContract({
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
 
+// Default dust amount for gas funding. Override via SFUEL_DISTRIBUTION_AMOUNT if needed.
+const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.001";
+const TX_GAS_PRICE_CACHE_MS = 5_000;
+let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
+
 const itemByTokenId = new Map(ITEM_CATALOG.map((item) => [item.tokenId, item]));
 let seedingPromise: Promise<void> | null = null;
 
@@ -233,7 +239,7 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
             description: item.description,
           },
         });
-        return sendTransaction({ transaction: tx, account: serverAccount });
+        return sendTransactionWithManagedGas(tx, serverAccount);
       });
       txStats.itemSeeds++;
       recordTx("item-seed", receipt.transactionHash);
@@ -259,6 +265,58 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
 }
 
 /**
+ * Resolve an explicit gasPrice and force legacy tx fee mode.
+ * This avoids automatic EIP-1559 maxFee inflation (baseFee * 2 + tip),
+ * which can make affordability checks fail for otherwise valid txs.
+ */
+async function resolveManagedGasPrice(): Promise<bigint> {
+  const now = Date.now();
+  if (cachedGasPrice && cachedGasPrice.expiresAt > now) {
+    return cachedGasPrice.value;
+  }
+
+  try {
+    const feeData = await biteProvider.getFeeData();
+    if (feeData.gasPrice && feeData.gasPrice > 0n) {
+      cachedGasPrice = {
+        value: feeData.gasPrice,
+        expiresAt: now + TX_GAS_PRICE_CACHE_MS,
+      };
+      return feeData.gasPrice;
+    }
+  } catch {
+    // fallback to raw eth_gasPrice
+  }
+
+  const hexGasPrice = await biteProvider.send("eth_gasPrice", []);
+  const gasPrice = BigInt(hexGasPrice);
+  if (gasPrice <= 0n) {
+    throw new Error(`Invalid eth_gasPrice response: ${String(hexGasPrice)}`);
+  }
+
+  cachedGasPrice = {
+    value: gasPrice,
+    expiresAt: now + TX_GAS_PRICE_CACHE_MS,
+  };
+  return gasPrice;
+}
+
+async function sendTransactionWithManagedGas(
+  transaction: any,
+  account: Account
+): Promise<Awaited<ReturnType<typeof sendTransaction>>> {
+  const gasPrice = await resolveManagedGasPrice();
+  const tx = {
+    ...transaction,
+    gasPrice,
+    maxFeePerGas: undefined,
+    maxPriorityFeePerGas: undefined,
+    type: "legacy" as const,
+  };
+  return sendTransaction({ transaction: tx, account });
+}
+
+/**
  * Send a small amount of sFUEL so the wallet can transact on SKALE.
  * SKALE sFUEL is the native gas token — free, but wallets need a dust amount.
  */
@@ -266,11 +324,11 @@ export async function distributeSFuel(toAddress: string): Promise<string> {
   return queueTransaction(async () => {
     const tx = prepareTransaction({
       to: toAddress,
-      value: toWei("0.00001"),
+      value: toWei(SFUEL_DISTRIBUTION_AMOUNT),
       chain: skaleBase,
       client: thirdwebClient,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.sfuelDistributions++;
     recordTx("sfuel", receipt.transactionHash);
     return receipt.transactionHash;
@@ -285,7 +343,7 @@ export async function mintGold(toAddress: string, amount: string): Promise<strin
       to: toAddress,
       amount,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.goldMints++;
     recordTx("gold-mint", receipt.transactionHash);
     goldCache.invalidate(toAddress.toLowerCase());
@@ -336,7 +394,7 @@ export async function transferGoldFrom(
     to: toAddress,
     amount,
   });
-  const receipt = await sendTransaction({ transaction: tx, account: fromAccount });
+  const receipt = await sendTransactionWithManagedGas(tx, fromAccount);
   txStats.goldTransfers++;
   recordTx("gold-transfer", receipt.transactionHash);
   goldCache.invalidate(fromAccount.address.toLowerCase());
@@ -358,7 +416,7 @@ export async function mintItem(
       tokenId,
       supply: quantity,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.itemMints++;
     recordTx("item-mint", receipt.transactionHash);
     itemCache.invalidate(toAddress.toLowerCase());
@@ -402,7 +460,7 @@ export async function burnItem(
       id: tokenId,
       value: quantity,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.itemBurns++;
     recordTx("item-burn", receipt.transactionHash);
     itemCache.invalidate(fromAddress.toLowerCase());
@@ -462,7 +520,7 @@ export async function mintCharacter(
       to: toAddress,
       nft,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.characterMints++;
     recordTx("character-mint", receipt.transactionHash);
     characterCache.invalidate(toAddress.toLowerCase());
@@ -550,7 +608,7 @@ export async function updateCharacterMetadata(entity: {
       tokenId: entity.characterTokenId,
       uri,
     });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
     txStats.metadataUpdates++;
     recordTx("metadata-update", receipt.transactionHash);
     return receipt.transactionHash;

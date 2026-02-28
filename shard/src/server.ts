@@ -16,7 +16,7 @@ import { registerGuildRoutes } from "./economy/guild.js";
 import { registerGuildTick } from "./economy/guildTick.js";
 import { registerGuildVaultRoutes } from "./economy/guildVault.js";
 import { spawnNpcs, tickMobRespawner } from "./world/npcSpawner.js";
-import { initMerchantWallets, registerMerchantAgentTick } from "./world/merchantAgent.js";
+import { initMerchantWallets, registerMerchantAgentTick, getMerchantCount } from "./world/merchantAgent.js";
 import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
@@ -40,7 +40,7 @@ import { registerLeaderboardRoutes } from "./social/leaderboard.js";
 import { registerLeatherworkingRoutes } from "./professions/leatherworking.js";
 import { registerUpgradingRoutes } from "./items/upgrading.js";
 import { registerJewelcraftingRoutes } from "./professions/jewelcrafting.js";
-import { rebuildAuctionCache } from "./economy/auctionHouseChain.js";
+import { rebuildAuctionCache, getAllAuctionsFromCache } from "./economy/auctionHouseChain.js";
 import { registerPvPRoutes } from "./combat/pvpRoutes.js";
 import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
@@ -92,6 +92,57 @@ server.get("/stats/transactions", async () => getTxStats());
 
 // World layout — zone positions for seamless world rendering
 server.get("/world/layout", async () => getWorldLayout());
+
+// Admin dashboard — aggregated server health + game state
+server.get("/admin/dashboard", async () => {
+  const mem = process.memoryUsage();
+  const zones = getAllZones();
+  let totalEntities = 0, playerCount = 0, mobCount = 0, npcCount = 0;
+  const perZone: Array<{ zoneId: string; entities: number; players: number; mobs: number; npcs: number; tick: number }> = [];
+  const onlinePlayers: Array<{ name: string; level: number; race: string; class: string; zone: string; hp: number; maxHp: number; kills: number }> = [];
+
+  for (const [zoneId, zone] of zones) {
+    let zPlayers = 0, zMobs = 0, zNpcs = 0;
+    for (const e of zone.entities.values()) {
+      totalEntities++;
+      if (e.type === "player") {
+        zPlayers++;
+        onlinePlayers.push({
+          name: e.name, level: e.level ?? 1, race: e.raceId ?? "?", class: e.classId ?? "?",
+          zone: zoneId, hp: e.hp ?? 0, maxHp: e.maxHp ?? 0, kills: (e as any).kills ?? 0,
+        });
+      } else if (e.type === "mob") zMobs++;
+      else if (e.type === "npc") zNpcs++;
+    }
+    playerCount += zPlayers; mobCount += zMobs; npcCount += zNpcs;
+    perZone.push({ zoneId, entities: zone.entities.size, players: zPlayers, mobs: zMobs, npcs: zNpcs, tick: zone.tick });
+  }
+
+  let rpcHealthy = false;
+  let lastBlockNumber: number | null = null;
+  try {
+    const bn = await biteProvider.getBlockNumber();
+    lastBlockNumber = Number(bn);
+    rpcHealthy = lastBlockNumber > 0;
+  } catch { /* RPC down */ }
+
+  const activeAuctions = getAllAuctionsFromCache(0);
+  const endedAuctions = getAllAuctionsFromCache(1);
+  const totalVolume = endedAuctions.reduce((s, a) => s + a.highBid, 0);
+
+  const runners = agentManager.listRunners();
+  const agentSnapshots = runners.filter(r => r.running).map(r => r.getSnapshot());
+
+  return {
+    server: { uptime: process.uptime(), startedAt: Date.now() - process.uptime() * 1000, memoryMB: Math.round(mem.rss / 1048576) },
+    blockchain: { rpcHealthy, lastBlockNumber, chainId: SKALE_BASE_CHAIN_ID, txStats: getTxStats() },
+    zones: { count: zones.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
+    agents: { active: agentSnapshots.length, list: agentSnapshots },
+    merchants: { initialized: getMerchantCount(), total: perZone.reduce((s, z) => s + z.npcs, 0) },
+    economy: { activeListings: activeAuctions.length, totalSales: endedAuctions.length, totalVolume },
+    players: { online: onlinePlayers },
+  };
+});
 
 // POST /logout — save character state and despawn entity
 server.post<{

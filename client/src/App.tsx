@@ -19,6 +19,7 @@ import { StoryPage } from "@/components/StoryPage";
 import { X402AgentPage } from "@/components/X402AgentPage";
 import { ChampionsPage } from "@/components/ChampionsPage";
 import { PricingPage } from "@/components/PricingPage";
+import { AdminDashboardPage } from "@/components/AdminDashboardPage";
 import { ShopDialog } from "@/components/ShopDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { WalletPanel } from "@/components/WalletPanel";
@@ -175,6 +176,7 @@ function AppShell(): React.ReactElement {
           <Route path="/news" element={<NewsPage />} />
           <Route path="/champions" element={<ChampionsPage />} />
           <Route path="/pricing" element={<PricingPage />} />
+          <Route path="/admin" element={<AdminDashboardPage />} />
           <Route path="*" element={<LandingPage />} />
         </Routes>
       )}

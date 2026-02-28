@@ -289,7 +289,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
   // Shared wrapper style
   const panelCls =
-    "w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] shadow-[8px_8px_0_0_#000] font-mono";
+    "w-full max-w-2xl border-4 border-[#54f28b] bg-[#060d12] shadow-[8px_8px_0_0_#000] font-mono";
 
   return (
     <div

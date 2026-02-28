@@ -54,6 +54,10 @@ const merchantStates = new Map<string, MerchantState>();
 
 // ── Helpers (consumed by shop.ts) ────────────────────────────────
 
+export function getMerchantCount(): number {
+  return merchantStates.size;
+}
+
 export function getMerchantState(entityId: string): MerchantState | undefined {
   return merchantStates.get(entityId);
 }

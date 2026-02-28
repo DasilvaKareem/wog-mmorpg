@@ -78,6 +78,7 @@ export default defineConfig({
       "/essence-technique": API_URL,
       "/agent": API_URL,
       "/diary": API_URL,
+      "/admin": API_URL,
     },
   },
 });
