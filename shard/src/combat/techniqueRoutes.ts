@@ -9,6 +9,7 @@ import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import { randomUUID } from "crypto";
 import { saveCharacter } from "../character/characterStore.js";
 import { copperToGold } from "../blockchain/currency.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -288,6 +289,30 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
 
     // Apply technique effects
     const result = applyTechniqueEffects(caster, target, technique, zone);
+
+    // Log ability event for VFX pipeline
+    logZoneEvent({
+      zoneId,
+      type: "ability",
+      tick: zone.tick,
+      message: `${caster.name} uses ${technique.name}!`,
+      entityId: caster.id,
+      entityName: caster.name,
+      targetId: target.id !== caster.id ? target.id : undefined,
+      targetName: target.id !== caster.id ? target.name : undefined,
+      data: {
+        techniqueId: technique.id,
+        techniqueName: technique.name,
+        techniqueType: technique.type,
+        animStyle: technique.animStyle,
+        damage: result.damage,
+        healing: result.healing,
+        casterX: caster.x,
+        casterZ: caster.y,
+        targetX: target.id !== caster.id ? target.x : undefined,
+        targetZ: target.id !== caster.id ? target.y : undefined,
+      },
+    });
 
     return reply.send({
       success: true,

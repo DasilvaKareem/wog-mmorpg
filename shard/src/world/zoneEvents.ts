@@ -15,7 +15,8 @@ export type ZoneEventType =
   | "trade"
   | "shop"
   | "quest"
-  | "system";
+  | "system"
+  | "ability";
 
 export interface ZoneEvent {
   id: string;
@@ -104,6 +105,20 @@ export function getAllZoneEvents(limit = 100, since?: number): ZoneEvent[] {
   }
 
   return filtered.slice(0, limit);
+}
+
+/**
+ * Get recent events for a zone filtered by timestamp and optional type list.
+ */
+export function getRecentZoneEvents(
+  zoneId: string,
+  sinceMs: number,
+  types?: ZoneEventType[]
+): ZoneEvent[] {
+  const log = zoneEventLogs.get(zoneId) ?? [];
+  return log.filter(
+    (e) => e.timestamp >= sinceMs && (!types || types.includes(e.type))
+  );
 }
 
 /**

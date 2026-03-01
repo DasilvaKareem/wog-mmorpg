@@ -107,6 +107,64 @@ export class EntityRenderer {
     return { x: visual.sprite.x, y: visual.sprite.y };
   }
 
+  /**
+   * Play a melee attack animation: lunge the attacker toward the target then
+   * snap back, and flash the target red.  Safe to call at any time — if either
+   * entity is not tracked (e.g. just despawned) the call is a no-op.
+   */
+  triggerMeleeAttack(attackerId: string, targetId: string): void {
+    const attVisual = this.visuals.get(attackerId);
+    const tgtVisual = this.visuals.get(targetId);
+    if (!attVisual?.sprite || !tgtVisual?.sprite) return;
+
+    const ax = attVisual.sprite.x;
+    const ay = attVisual.sprite.y;
+    const tx = tgtVisual.sprite.x;
+    const ty = tgtVisual.sprite.y;
+
+    // Direction vector attacker → target, capped at 8px
+    const dist = Math.sqrt((tx - ax) ** 2 + (ty - ay) ** 2) || 1;
+    const lunge = Math.min(8, dist * 0.4);
+    const nx = (tx - ax) / dist;
+    const ny = (ty - ay) / dist;
+
+    // Lunge forward
+    this.scene.tweens.add({
+      targets: attVisual.sprite,
+      x: ax + nx * lunge,
+      y: ay + ny * lunge,
+      duration: 120,
+      ease: "Quad.easeOut",
+      onComplete: () => {
+        // Snap back
+        this.scene.tweens.add({
+          targets: attVisual.sprite,
+          x: ax,
+          y: ay,
+          duration: 180,
+          ease: "Quad.easeIn",
+        });
+      },
+    });
+
+    // Hit flash: tint target red then restore
+    tgtVisual.sprite.setTint(0xff3333);
+    this.scene.time.delayedCall(150, () => {
+      tgtVisual.sprite?.clearTint();
+    });
+  }
+
+  /** Snapshot pixel positions for all tracked entities (used by VFX layer). */
+  getPixelPositions(): Map<string, { x: number; y: number }> {
+    const out = new Map<string, { x: number; y: number }>();
+    for (const [id, visual] of this.visuals) {
+      if (visual.sprite) {
+        out.set(id, { x: visual.sprite.x, y: visual.sprite.y });
+      }
+    }
+    return out;
+  }
+
   /** Find closest entity at world position (within radius). */
   getEntityAt(worldX: number, worldY: number, radius: number): Entity | undefined {
     let closest: Entity | undefined;

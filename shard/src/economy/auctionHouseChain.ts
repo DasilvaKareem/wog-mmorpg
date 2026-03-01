@@ -259,6 +259,13 @@ export function getAllAuctionsFromCache(statusFilter?: number): AuctionData[] {
 export async function rebuildAuctionCache(): Promise<void> {
   if (!AUCTION_HOUSE_CONTRACT_ADDRESS || !biteProvider) return;
 
+  // Verify contract is actually deployed before calling methods
+  const code = await biteProvider.getCode(AUCTION_HOUSE_CONTRACT_ADDRESS);
+  if (!code || code === "0x") {
+    console.warn(`[auction] No contract deployed at ${AUCTION_HOUSE_CONTRACT_ADDRESS} — skipping cache rebuild`);
+    return;
+  }
+
   const readContract = new ethers.Contract(
     AUCTION_HOUSE_CONTRACT_ADDRESS,
     AUCTION_HOUSE_ABI,

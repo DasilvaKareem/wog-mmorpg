@@ -1881,7 +1881,7 @@ export async function awardQuestRewards(
   }
 
   // Award gold — convert copper reward to on-chain gold (10,000 copper = 1 gold)
-  if (player.walletAddress) {
+  if (player.walletAddress && quest.rewards.copper > 0) {
     const goldReward = copperToGold(quest.rewards.copper);
     await mintGold(player.walletAddress, goldReward.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)

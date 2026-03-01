@@ -5,6 +5,7 @@ import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
 import { ChunkStreamManager } from "@/ChunkStreamManager";
 import { WorldLayoutManager } from "@/WorldLayoutManager";
+import { AbilityEffectsLayer } from "@/AbilityEffectsLayer";
 import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
 import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
@@ -44,6 +45,7 @@ export class WorldScene extends Phaser.Scene {
   private tilemapRenderer!: TilemapRenderer;
   private chunkManager!: ChunkStreamManager;
   private worldLayout!: WorldLayoutManager;
+  private abilityLayer!: AbilityEffectsLayer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private hud!: Phaser.GameObjects.Text;
   private tooltip!: Phaser.GameObjects.Text;
@@ -117,6 +119,7 @@ export class WorldScene extends Phaser.Scene {
     this.worldLayout = new WorldLayoutManager();
     this.tilemapRenderer = new TilemapRenderer(this);
     this.entityRenderer = new EntityRenderer(this);
+    this.abilityLayer = new AbilityEffectsLayer(this);
 
     this.entityRenderer.onClick((entity) => {
       if (entity.type === "merchant" && entity.shopItems) {
@@ -663,6 +666,7 @@ export class WorldScene extends Phaser.Scene {
     this.entityRenderer.setElevationQuery((wx, wz) =>
       this.tilemapRenderer.getElevationAt(wx, wz)
     );
+    this.abilityLayer.setCoordScale(this.tilemapRenderer.coordScale);
 
     // Create multi-zone chunk manager
     this.chunkManager = new ChunkStreamManager(
@@ -714,6 +718,7 @@ export class WorldScene extends Phaser.Scene {
     this.entityRenderer.setElevationQuery((wx, wz) =>
       this.tilemapRenderer.getElevationAt(wx, wz)
     );
+    this.abilityLayer.setCoordScale(this.tilemapRenderer.coordScale);
 
     const { worldPixelW: w, worldPixelH: h } = this.tilemapRenderer;
     const cam = this.cameras.main;
@@ -911,6 +916,17 @@ export class WorldScene extends Phaser.Scene {
           this.connected = true;
           this.tick = data.tick;
           this.entityRenderer.update(data.entities);
+          const pixelPositions = this.entityRenderer.getPixelPositions();
+          for (const evt of data.recentEvents ?? []) {
+            this.abilityLayer.playEffect(evt, pixelPositions);
+            if (
+              (evt.data as Record<string, unknown> | undefined)?.techniqueType === "attack" &&
+              evt.entityId &&
+              evt.targetId
+            ) {
+              this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
+            }
+          }
         } else {
           this.connected = false;
         }
@@ -952,6 +968,21 @@ export class WorldScene extends Phaser.Scene {
       this.connected = anyConnected;
       this.tick = maxTick;
       this.entityRenderer.update(allEntities);
+
+      // Play ability VFX + melee animations for any new events in the last 3s
+      const pixelPositions = this.entityRenderer.getPixelPositions();
+      for (const { data } of results) {
+        for (const evt of data?.recentEvents ?? []) {
+          this.abilityLayer.playEffect(evt, pixelPositions);
+          if (
+            (evt.data as Record<string, unknown> | undefined)?.animStyle === "melee" &&
+            evt.entityId &&
+            evt.targetId
+          ) {
+            this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
+          }
+        }
+      }
 
       // Re-apply wallet lock after each poll (entity may have just spawned)
       if (this.lockedWalletAddress) {

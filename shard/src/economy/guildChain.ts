@@ -383,6 +383,16 @@ export async function refreshGuildNameCache(): Promise<void> {
   cacheRefreshing = true;
 
   try {
+    // Verify contract is actually deployed before calling methods
+    const provider = guildContract.runner?.provider;
+    if (provider && GUILD_CONTRACT_ADDRESS) {
+      const code = await provider.getCode(GUILD_CONTRACT_ADDRESS);
+      if (!code || code === "0x") {
+        console.warn(`[guild-cache] No contract deployed at ${GUILD_CONTRACT_ADDRESS} — skipping refresh`);
+        return;
+      }
+    }
+
     const nextId = Number(await guildContract.nextGuildId());
     const newCache = new Map<string, string>();
 

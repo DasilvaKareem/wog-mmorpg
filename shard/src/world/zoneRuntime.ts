@@ -7,7 +7,7 @@ import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
 import { type ProfessionType, getLearnedProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
-import { logZoneEvent } from "./zoneEvents.js";
+import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollCopper } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
@@ -1328,36 +1328,65 @@ async function worldTick() {
             const dmg = techResult.damage ?? 0;
             logZoneEvent({
               zoneId: zone.zoneId,
-              type: "combat",
+              type: "ability",
               tick: zone.tick,
               message: `${entity.name} casts ${technique.name} on ${target.name} for ${dmg} damage!`,
               entityId: entity.id,
               entityName: entity.name,
               targetId: target.id,
               targetName: target.name,
-              data: { damage: dmg, technique: technique.name, targetHp: target.hp },
+              data: {
+                techniqueId: technique.id,
+                techniqueName: technique.name,
+                techniqueType: technique.type,
+                animStyle: technique.animStyle,
+                damage: dmg,
+                targetHp: target.hp,
+                casterX: entity.x,
+                casterZ: entity.y,
+                targetX: target.x,
+                targetZ: target.y,
+              },
             });
           } else if (technique.type === "buff" || technique.type === "healing") {
             logZoneEvent({
               zoneId: zone.zoneId,
-              type: "combat",
+              type: "ability",
               tick: zone.tick,
               message: `${entity.name} casts ${technique.name}!`,
               entityId: entity.id,
               entityName: entity.name,
-              data: { technique: technique.name },
+              data: {
+                techniqueId: technique.id,
+                techniqueName: technique.name,
+                techniqueType: technique.type,
+                animStyle: technique.animStyle,
+                casterX: entity.x,
+                casterZ: entity.y,
+                targetX: entity.x,
+                targetZ: entity.y,
+              },
             });
           } else if (technique.type === "debuff") {
             logZoneEvent({
               zoneId: zone.zoneId,
-              type: "combat",
+              type: "ability",
               tick: zone.tick,
               message: `${entity.name} casts ${technique.name} on ${target.name}!`,
               entityId: entity.id,
               entityName: entity.name,
               targetId: target.id,
               targetName: target.name,
-              data: { technique: technique.name },
+              data: {
+                techniqueId: technique.id,
+                techniqueName: technique.name,
+                techniqueType: technique.type,
+                animStyle: technique.animStyle,
+                casterX: entity.x,
+                casterZ: entity.y,
+                targetX: target.x,
+                targetZ: target.y,
+              },
             });
           }
 
@@ -1857,6 +1886,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
+      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability"]);
       return {
         zoneId: zone.zoneId,
         tick: zone.tick,
@@ -1866,6 +1896,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
             toSerializableEntity(entity),
           ])
         ),
+        recentEvents,
       };
     }
   );

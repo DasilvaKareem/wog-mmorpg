@@ -7,7 +7,7 @@
  */
 
 import { createHash } from "crypto";
-import type { TechniqueDefinition, TechniqueType, TargetType, TechniqueEffect } from "./techniques.js";
+import type { TechniqueDefinition, TechniqueType, TargetType, TechniqueEffect, AnimStyle } from "./techniques.js";
 import { registerTechniqueFallbackLookup } from "./techniques.js";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -127,6 +127,26 @@ const CLASS_ARCHETYPES: Record<string, TypeWeights> = {
 };
 
 const DEFAULT_WEIGHTS: TypeWeights = { attack: 40, buff: 20, debuff: 20, healing: 20 };
+
+// ── AnimStyle per technique type + class ───────────────────────────────
+
+const MELEE_CLASSES = new Set(["warrior", "paladin", "rogue", "monk"]);
+
+function pickAnimStyle(
+  type: TechniqueType,
+  targetType: TargetType,
+  classId: string,
+): AnimStyle | undefined {
+  if (targetType === "area") return "area";
+  switch (type) {
+    case "attack":
+      return MELEE_CLASSES.has(classId) ? "melee" : "projectile";
+    case "debuff":
+      return "projectile";
+    default:
+      return undefined;
+  }
+}
 
 // ── Target type per technique type ─────────────────────────────────────
 
@@ -418,6 +438,7 @@ export function generateEssenceTechnique(
   const weights = CLASS_ARCHETYPES[classId] ?? DEFAULT_WEIGHTS;
   const type = rngWeightedPick(rng, weights);
   const targetType = pickTargetType(rng, type);
+  const animStyle = pickAnimStyle(type, targetType, classId);
 
   // Generate effects
   const effects = generateEffects(rng, type, targetType, config);
@@ -441,6 +462,7 @@ export function generateEssenceTechnique(
     type,
     targetType,
     effects,
+    animStyle,
     tier,
     walletAddress: wallet.toLowerCase(),
     seed: seedStr,

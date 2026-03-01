@@ -44,10 +44,25 @@ export interface ActiveEffect {
   shield?: number;
 }
 
+export interface ZoneEvent {
+  id: string;
+  zoneId: string;
+  type: string;
+  timestamp: number;
+  tick: number;
+  message: string;
+  entityId?: string;
+  entityName?: string;
+  targetId?: string;
+  targetName?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface ZoneResponse {
   zoneId: string;
   tick: number;
   entities: Record<string, Entity>;
+  recentEvents?: ZoneEvent[];
 }
 
 export interface CharacterStats {
