@@ -1886,7 +1886,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
-      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability"]);
+      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability", "combat"]);
       return {
         zoneId: zone.zoneId,
         tick: zone.tick,

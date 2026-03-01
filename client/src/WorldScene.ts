@@ -919,11 +919,9 @@ export class WorldScene extends Phaser.Scene {
           const pixelPositions = this.entityRenderer.getPixelPositions();
           for (const evt of data.recentEvents ?? []) {
             this.abilityLayer.playEffect(evt, pixelPositions);
-            if (
-              (evt.data as Record<string, unknown> | undefined)?.techniqueType === "attack" &&
-              evt.entityId &&
-              evt.targetId
-            ) {
+            const evtData = evt.data as Record<string, unknown> | undefined;
+            const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
+            if (isMelee && evt.entityId && evt.targetId) {
               this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
             }
           }
@@ -974,11 +972,9 @@ export class WorldScene extends Phaser.Scene {
       for (const { data } of results) {
         for (const evt of data?.recentEvents ?? []) {
           this.abilityLayer.playEffect(evt, pixelPositions);
-          if (
-            (evt.data as Record<string, unknown> | undefined)?.animStyle === "melee" &&
-            evt.entityId &&
-            evt.targetId
-          ) {
+          const evtData = evt.data as Record<string, unknown> | undefined;
+          const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
+          if (isMelee && evt.entityId && evt.targetId) {
             this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
           }
         }
