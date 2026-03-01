@@ -282,11 +282,12 @@ async function resolveManagedGasPrice(): Promise<bigint> {
   try {
     const feeData = await biteProvider.getFeeData();
     if (feeData.gasPrice && feeData.gasPrice > 0n) {
+      const buffered = (feeData.gasPrice * 125n) / 100n; // +25% buffer
       cachedGasPrice = {
-        value: feeData.gasPrice,
+        value: buffered,
         expiresAt: now + TX_GAS_PRICE_CACHE_MS,
       };
-      return feeData.gasPrice;
+      return buffered;
     }
   } catch {
     // fallback to raw eth_gasPrice
@@ -298,11 +299,12 @@ async function resolveManagedGasPrice(): Promise<bigint> {
     throw new Error(`Invalid eth_gasPrice response: ${String(hexGasPrice)}`);
   }
 
+  const buffered = (gasPrice * 125n) / 100n; // +25% buffer
   cachedGasPrice = {
-    value: gasPrice,
+    value: buffered,
     expiresAt: now + TX_GAS_PRICE_CACHE_MS,
   };
-  return gasPrice;
+  return buffered;
 }
 
 async function sendTransactionWithManagedGas(
