@@ -33,6 +33,7 @@ import {
 } from "./guildChain.js";
 import { getAllZones } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { addActiveProposal } from "./guildTick.js";
 
 const RANK_NAMES = ["Member", "Officer", "Founder"];
 const STATUS_NAMES = ["active", "disbanded"];
@@ -543,6 +544,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
       );
 
       server.log.info(`Proposal ${proposalId} created in guild ${guildId} by ${proposerAddress}`);
+      addActiveProposal(proposalId);
 
       return {
         ok: true,

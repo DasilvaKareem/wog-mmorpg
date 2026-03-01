@@ -52,13 +52,15 @@ async function init() {
   if (redisUrl) {
     try {
       const Redis = (await import("ioredis")).default as any;
+      const needsTls = redisUrl.startsWith("rediss://");
       const client = new Redis(redisUrl, {
         maxRetriesPerRequest: 3,
         retryStrategy(times: number) {
           return Math.min(times * 500, 3000);
         },
-        connectTimeout: 5000,
+        connectTimeout: 10000,
         lazyConnect: true,
+        ...(needsTls ? { tls: { rejectUnauthorized: false } } : {}),
       });
 
       client.on("error", (err: Error) => {

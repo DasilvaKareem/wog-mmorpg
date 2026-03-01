@@ -37,7 +37,7 @@ function combineStats(base: CharacterStats, modifiers: CharacterStats): Characte
 
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between text-[8px]">
+    <div className="flex items-center justify-between text-[10px]">
       <span className="text-[#9aa7cc]">{label}</span>
       <span className="text-[#ffcc00]">{value}</span>
     </div>
@@ -166,7 +166,7 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
     }
 
     // Zone label
-    ctx.fillStyle = "#3a4260";
+    ctx.fillStyle = "#6d77a3";
     ctx.font = "8px monospace";
     ctx.textAlign = "left";
     ctx.fillText(zoneId.replace(/-/g, " ").toUpperCase(), 4, 10);
@@ -187,7 +187,7 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
     levelup: "#ffcc00",
     chat: "#44ddff",
     loot: "#b48232",
-    system: "#3a4260",
+    system: "#6d77a3",
   };
 
   return (
@@ -200,10 +200,10 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
             <button
               key={z.zoneId}
               onClick={() => setZoneId(z.zoneId)}
-              className={`px-2 py-0.5 text-[7px] border transition ${
+              className={`px-2 py-0.5 text-[9px] border transition ${
                 zoneId === z.zoneId
                   ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
-                  : "border-[#2a3450] bg-[#0e1628] text-[#565f89] hover:text-[#9aa7cc]"
+                  : "border-[#2a3450] bg-[#0e1628] text-[#8b95c2] hover:text-[#9aa7cc]"
               }`}
             >
               {z.zoneId.split("-").map((w) => w[0].toUpperCase()).join("")}
@@ -221,13 +221,13 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
       {myAgent && (
         <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5 flex items-center justify-between">
           <div className="flex flex-col">
-            <span className="text-[8px] text-[#54f28b] font-bold">{myAgent.name}</span>
-            <span className="text-[6px] text-[#9aa7cc]">
+            <span className="text-[10px] text-[#54f28b] font-bold">{myAgent.name}</span>
+            <span className="text-[8px] text-[#9aa7cc]">
               L{myAgent.level} {myAgent.raceId} {myAgent.classId}
             </span>
           </div>
           <div className="flex flex-col items-end">
-            <span className="text-[7px] text-[#ff4d6d]">
+            <span className="text-[9px] text-[#ff4d6d]">
               HP {myAgent.hp}/{myAgent.maxHp}
             </span>
             <div className="w-16 h-1.5 bg-[#1a0a0e] border border-[#2a3450] mt-0.5">
@@ -245,16 +245,16 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
 
       {/* Legend */}
       <div className="flex gap-3 flex-wrap px-1">
-        <span className="text-[6px] text-[#3a4260]">
+        <span className="text-[8px] text-[#6d77a3]">
           <span className="inline-block w-2 h-2 rounded-full bg-[#44ddff] mr-1 align-middle" />
           Players ({players.length})
         </span>
-        <span className="text-[6px] text-[#3a4260]">
+        <span className="text-[8px] text-[#6d77a3]">
           <span className="inline-block w-2 h-2 rounded-full bg-[#e04040] mr-1 align-middle" />
           Mobs ({mobs.length})
         </span>
         {myAgent && (
-          <span className="text-[6px] text-[#54f28b]">
+          <span className="text-[8px] text-[#54f28b]">
             <span className="inline-block w-2 h-2 rounded-full bg-[#54f28b] mr-1 align-middle" />
             Your Agent
           </span>
@@ -263,13 +263,13 @@ function ZoneViewer({ highlightWallet, initialZoneId, characterName }: ZoneViewe
 
       {/* Live event log */}
       <div className="border border-[#2a3450] bg-[#0b1020] max-h-32 overflow-y-auto px-2 py-1">
-        <p className="text-[6px] text-[#3a4260] uppercase tracking-wider mb-1">Live Events</p>
+        <p className="text-[8px] text-[#6d77a3] uppercase tracking-wider mb-1">Live Events</p>
         {events.length === 0 ? (
-          <p className="text-[6px] text-[#565f89]">No recent events...</p>
+          <p className="text-[8px] text-[#8b95c2]">No recent events...</p>
         ) : (
           events.slice(-15).map((ev, i) => (
-            <p key={i} className="text-[7px] leading-tight" style={{ color: EVENT_COLORS[ev.type] || "#565f89" }}>
-              <span className="text-[#3a4260]">[{ev.type?.slice(0, 4).toUpperCase()}]</span>{" "}
+            <p key={i} className="text-[9px] leading-tight" style={{ color: EVENT_COLORS[ev.type] || "#8b95c2" }}>
+              <span className="text-[#6d77a3]">[{ev.type?.slice(0, 4).toUpperCase()}]</span>{" "}
               {ev.message || ev.text || JSON.stringify(ev).slice(0, 60)}
             </p>
           ))
@@ -485,7 +485,7 @@ export function FarcasterMiniApp(): React.ReactElement {
       <div className={panelCls}>
         {/* Header bar */}
         <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
-          <span className="text-[9px] uppercase tracking-widest text-[#54f28b]">
+          <span className="text-[11px] uppercase tracking-widest text-[#54f28b]">
             {step === "loading"
               ? ">> CONNECTING..."
               : step === "error-init"
@@ -499,7 +499,7 @@ export function FarcasterMiniApp(): React.ReactElement {
               : ">> CHARACTER CREATED!"}
           </span>
           {fcUser && (
-            <span className="text-[7px] text-[#3a4260]">
+            <span className="text-[9px] text-[#6d77a3]">
               @{fcUser.username || `fid:${fcUser.fid}`}
             </span>
           )}
@@ -510,8 +510,8 @@ export function FarcasterMiniApp(): React.ReactElement {
           {step === "loading" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="text-[20px] text-[#54f28b] animate-pulse">{">>>"}</div>
-              <p className="text-[9px] text-[#9aa7cc]">Connecting to Warpcast...</p>
-              <p className="text-[7px] text-[#3a4260]">
+              <p className="text-[11px] text-[#9aa7cc]">Connecting to Warpcast...</p>
+              <p className="text-[9px] text-[#6d77a3]">
                 Getting your wallet and Farcaster identity
               </p>
             </div>
@@ -521,9 +521,9 @@ export function FarcasterMiniApp(): React.ReactElement {
           {step === "error-init" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="text-[20px] text-[#ff4d6d]">!</div>
-              <p className="text-[9px] text-[#ff4d6d] text-center">{initError}</p>
+              <p className="text-[11px] text-[#ff4d6d] text-center">{initError}</p>
               {!isMiniApp && (
-                <p className="text-[7px] text-[#3a4260] text-center">
+                <p className="text-[9px] text-[#6d77a3] text-center">
                   This page is a Farcaster Mini App.
                   Open it from the Warpcast app store or a shared cast.
                 </p>
@@ -545,10 +545,10 @@ export function FarcasterMiniApp(): React.ReactElement {
                     />
                   )}
                   <div className="flex flex-col">
-                    <span className="text-[8px] text-[#54f28b]">
+                    <span className="text-[10px] text-[#54f28b]">
                       {fcUser.displayName || fcUser.username}
                     </span>
-                    <span className="text-[6px] text-[#3a4260]">
+                    <span className="text-[8px] text-[#6d77a3]">
                       FID {fcUser.fid} · {walletAddress ? dn(walletAddress) : ""}
                     </span>
                   </div>
@@ -557,7 +557,7 @@ export function FarcasterMiniApp(): React.ReactElement {
 
               {/* Name */}
               <div>
-                <label className="mb-1 block text-[8px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
                   Character Name
                 </label>
                 <input
@@ -569,17 +569,17 @@ export function FarcasterMiniApp(): React.ReactElement {
                     setCharName(e.target.value);
                     if (error) setError(null);
                   }}
-                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[10px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#ffcc00]"
+                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
                   autoFocus
                 />
                 {nameValidationError && charName.trim().length > 0 && (
-                  <p className="mt-1 text-[7px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                  <p className="mt-1 text-[9px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
                 )}
               </div>
 
               {/* Race */}
               <div>
-                <label className="mb-1 block text-[8px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
                   Race
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -587,7 +587,7 @@ export function FarcasterMiniApp(): React.ReactElement {
                     <button
                       key={r.id}
                       onClick={() => setRaceId(r.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[8px] transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-2 py-1.5 text-left text-[10px] transition shadow-[2px_2px_0_0_#000] ${
                         raceId === r.id
                           ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
                           : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
@@ -601,7 +601,7 @@ export function FarcasterMiniApp(): React.ReactElement {
 
               {/* Class */}
               <div>
-                <label className="mb-1 block text-[8px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
                   Class
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -609,7 +609,7 @@ export function FarcasterMiniApp(): React.ReactElement {
                     <button
                       key={c.id}
                       onClick={() => setClassId(c.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[8px] transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-2 py-1.5 text-left text-[10px] transition shadow-[2px_2px_0_0_#000] ${
                         classId === c.id
                           ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
                           : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
@@ -624,7 +624,7 @@ export function FarcasterMiniApp(): React.ReactElement {
               {/* Stat preview */}
               {previewStats && (
                 <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2">
-                  <p className="mb-1.5 text-[7px] uppercase tracking-wider text-[#3a4260]">
+                  <p className="mb-1.5 text-[9px] uppercase tracking-wider text-[#6d77a3]">
                     Base Stats — {selectedRace?.name} {selectedClass?.name}
                   </p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
@@ -639,7 +639,7 @@ export function FarcasterMiniApp(): React.ReactElement {
               )}
 
               {error && (
-                <p className="text-[8px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                <p className="text-[10px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
                   [ERR] {error}
                 </p>
               )}
@@ -647,12 +647,12 @@ export function FarcasterMiniApp(): React.ReactElement {
               <button
                 onClick={() => void handleCreate()}
                 disabled={!canCreate}
-                className="mt-1 w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[11px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+                className="mt-1 w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
                 [&gt;] Mint Character
               </button>
 
-              <p className="text-[7px] text-[#3a4260] text-center">
+              <p className="text-[9px] text-[#6d77a3] text-center">
                 Zero gas fees — powered by SKALE
               </p>
             </div>
@@ -662,10 +662,10 @@ export function FarcasterMiniApp(): React.ReactElement {
           {step === "minting" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="text-[20px] text-[#ffcc00] animate-pulse">{"$$"}</div>
-              <p className="text-[9px] text-[#9aa7cc]">
+              <p className="text-[11px] text-[#9aa7cc]">
                 Minting your character NFT on SKALE...
               </p>
-              <p className="text-[7px] text-[#3a4260]">Zero gas fees — powered by sFUEL</p>
+              <p className="text-[9px] text-[#6d77a3]">Zero gas fees — powered by sFUEL</p>
             </div>
           )}
 
@@ -673,18 +673,18 @@ export function FarcasterMiniApp(): React.ReactElement {
           {step === "success" && successData && (
             <div className="flex flex-col gap-3">
               <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3">
-                <p className="text-[8px] text-[#54f28b] mb-2">[OK] CHARACTER MINTED</p>
+                <p className="text-[10px] text-[#54f28b] mb-2">[OK] CHARACTER MINTED</p>
                 <p
                   className="text-[14px] text-[#ffcc00] mb-0.5"
                   style={{ textShadow: "2px 2px 0 #000" }}
                 >
                   {successData.name}
                 </p>
-                <p className="text-[9px] text-[#d6deff]">
+                <p className="text-[11px] text-[#d6deff]">
                   {successData.race} · {successData.className} · Level 1
                 </p>
                 {successData.txHash && (
-                  <p className="mt-2 text-[7px] text-[#3a4260] break-all">
+                  <p className="mt-2 text-[9px] text-[#6d77a3] break-all">
                     TX: {successData.txHash.slice(0, 12)}...{successData.txHash.slice(-8)}
                   </p>
                 )}
@@ -692,27 +692,27 @@ export function FarcasterMiniApp(): React.ReactElement {
 
               {/* Agent deploy status */}
               {successData.agentDeploying ? (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[7px]">
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[9px]">
                   <p className="text-[#9aa7cc] animate-pulse mb-1">
                     {">>>"} Deploying AI agent...
                   </p>
-                  <p className="text-[#565f89]">
+                  <p className="text-[#8b95c2]">
                     Creating custodial wallet + spawning character
                   </p>
                 </div>
               ) : successData.agentEntityId ? (
-                <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-2 text-[7px]">
+                <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-2 text-[9px]">
                   <p className="text-[#54f28b] mb-1">[OK] AGENT DEPLOYED</p>
                   <p className="text-[#9aa7cc]">
                     Your AI agent is live in{" "}
                     <span className="text-[#ffcc00]">{successData.agentZoneId}</span>
                   </p>
-                  <p className="text-[#565f89] mt-1">
+                  <p className="text-[#8b95c2] mt-1">
                     It will autonomously fight, quest, and trade.
                   </p>
                 </div>
               ) : (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[7px] text-[#565f89]">
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[9px] text-[#8b95c2]">
                   {successData.agentError ? (
                     <p className="text-[#ff4d6d]">
                       [!] Agent deploy skipped: {successData.agentError.slice(0, 80)}
@@ -726,14 +726,14 @@ export function FarcasterMiniApp(): React.ReactElement {
               {/* Share to Farcaster feed */}
               <button
                 onClick={() => void handleShareToCast()}
-                className="w-full border-4 border-black bg-[#7c3aed] px-4 py-3 text-[11px] uppercase tracking-wide text-white shadow-[4px_4px_0_0_#000] transition hover:bg-[#6d28d9] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
+                className="w-full border-4 border-black bg-[#7c3aed] px-4 py-3 text-[13px] uppercase tracking-wide text-white shadow-[4px_4px_0_0_#000] transition hover:bg-[#6d28d9] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
               >
                 Cast About Your Character
               </button>
 
               <button
                 onClick={() => setStep("world")}
-                className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[11px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
+                className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
               >
                 View World
               </button>
@@ -752,13 +752,13 @@ export function FarcasterMiniApp(): React.ReactElement {
               <div className="flex gap-2 mt-1">
                 <button
                   onClick={() => void handleShareToCast()}
-                  className="flex-1 border-2 border-[#7c3aed] bg-[#1a0e2e] px-2 py-2 text-[9px] uppercase text-[#7c3aed] transition hover:bg-[#2a1e3e] active:translate-x-[1px] active:translate-y-[1px]"
+                  className="flex-1 border-2 border-[#7c3aed] bg-[#1a0e2e] px-2 py-2 text-[11px] uppercase text-[#7c3aed] transition hover:bg-[#2a1e3e] active:translate-x-[1px] active:translate-y-[1px]"
                 >
                   Cast
                 </button>
                 <button
                   onClick={() => setStep("success")}
-                  className="flex-1 border-2 border-[#2a3450] bg-[#0e1628] px-2 py-2 text-[9px] uppercase text-[#9aa7cc] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
+                  className="flex-1 border-2 border-[#2a3450] bg-[#0e1628] px-2 py-2 text-[11px] uppercase text-[#9aa7cc] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px]"
                 >
                   Back
                 </button>
@@ -769,7 +769,7 @@ export function FarcasterMiniApp(): React.ReactElement {
 
         {/* Footer */}
         <div className="border-t border-[#1a3a22] px-4 py-2">
-          <p className="text-[6px] text-[#3a4260] text-center">
+          <p className="text-[8px] text-[#6d77a3] text-center">
             World of Geneva — AI agents play, humans watch. Powered by SKALE.
           </p>
         </div>

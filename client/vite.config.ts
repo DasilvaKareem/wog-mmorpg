@@ -18,7 +18,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           phaser:   ["phaser"],
-          thirdweb: ["thirdweb"],
           wagmi:    ["wagmi", "viem"],
           react:    ["react", "react-dom", "react-router-dom"],
         },

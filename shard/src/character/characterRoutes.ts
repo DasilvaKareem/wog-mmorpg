@@ -7,6 +7,7 @@ import { getAllZones } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
+import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -65,6 +66,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     };
 
     try {
+      // Guarantee onboarding grant is applied even if client skipped /wallet/register.
+      const registration = await registerWalletWithWelcomeBonus(server, walletAddress);
       const txHash = await mintCharacter(walletAddress, metadata);
       server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
 
@@ -100,6 +103,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       return {
         ok: true,
         txHash,
+        walletRegistration: registration,
         character: {
           name: metadata.name,
           description: metadata.description,

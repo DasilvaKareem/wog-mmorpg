@@ -386,17 +386,25 @@ export async function refreshGuildNameCache(): Promise<void> {
     const nextId = Number(await guildContract.nextGuildId());
     const newCache = new Map<string, string>();
 
-    for (let guildId = 1; guildId < nextId; guildId++) {
-      try {
-        const [name, , , , , , status, ,] = await guildContract.getGuild(guildId);
-        if (Number(status) !== GuildStatus.Active) continue;
-
-        const members: string[] = await guildContract.getGuildMembers(guildId);
-        for (const addr of members) {
-          newCache.set(addr.toLowerCase(), name);
+    // Read all guilds in parallel for faster refresh
+    const guildIds = Array.from({ length: nextId - 1 }, (_, i) => i + 1);
+    const results = await Promise.all(
+      guildIds.map(async (guildId) => {
+        try {
+          const [name, , , , , , status, ,] = await guildContract!.getGuild(guildId);
+          if (Number(status) !== GuildStatus.Active) return null;
+          const members: string[] = await guildContract!.getGuildMembers(guildId);
+          return { name, members };
+        } catch {
+          return null;
         }
-      } catch {
-        // Skip individual guild errors
+      })
+    );
+
+    for (const result of results) {
+      if (!result) continue;
+      for (const addr of result.members) {
+        newCache.set(addr.toLowerCase(), result.name);
       }
     }
 
@@ -410,7 +418,7 @@ export async function refreshGuildNameCache(): Promise<void> {
 }
 
 /** Start periodic guild cache refresh (call once at server boot). */
-export function startGuildNameCacheRefresh(intervalMs = 30_000): void {
+export function startGuildNameCacheRefresh(intervalMs = 300_000): void {
   // Initial load
   refreshGuildNameCache().catch(() => {});
   setInterval(() => refreshGuildNameCache().catch(() => {}), intervalMs);

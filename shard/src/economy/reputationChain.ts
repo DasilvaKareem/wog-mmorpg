@@ -7,6 +7,9 @@
  *
  * Key insight: every Ethereum address is a uint160 that fits in uint256,
  * so walletAddress → identityId is deterministic with no separate registry.
+ *
+ * submitFeedbackOnChain() now queues deltas and flushes every 15s via
+ * batchUpdateReputationOnChain() to reduce individual RPC transactions.
  */
 
 import { ethers } from "ethers";
@@ -58,32 +61,64 @@ export async function initReputationOnChain(
   }
 }
 
+// =============================================================================
+//  Batched feedback queue — accumulates deltas and flushes every 15s
+// =============================================================================
+
+const FLUSH_INTERVAL_MS = 15_000;
+
+/** Pending deltas per wallet: [combat, economic, social, crafting, agent] */
+const pendingFeedback = new Map<string, [number, number, number, number, number]>();
+
 /**
- * Submit feedback on-chain for a single category (fire-and-forget).
+ * Submit feedback on-chain for a single category.
+ * Instead of firing an immediate RPC transaction, the delta is queued
+ * and flushed every 15s via batchUpdateReputationOnChain().
  */
 export async function submitFeedbackOnChain(
   walletAddress: string,
   category: number,
   delta: number,
-  reason: string
+  _reason: string
 ): Promise<void> {
   if (!reputationContract) return;
-  try {
-    const identityId = walletToIdentityId(walletAddress);
-    const tx = await reputationContract.submitFeedback(
-      identityId,
-      category,
-      BigInt(delta),
-      reason
-    );
-    await tx.wait();
-  } catch (err) {
-    console.warn(
-      `[reputationChain] submitFeedback failed for ${walletAddress}:`,
-      err
-    );
+  if (category < 0 || category > 4) return;
+
+  const key = walletAddress.toLowerCase();
+  let deltas = pendingFeedback.get(key);
+  if (!deltas) {
+    deltas = [0, 0, 0, 0, 0];
+    pendingFeedback.set(key, deltas);
+  }
+  deltas[category] += delta;
+}
+
+/** Flush all pending feedback as batch transactions. */
+async function flushPendingFeedback(): Promise<void> {
+  if (pendingFeedback.size === 0) return;
+
+  // Snapshot and clear so new deltas during flush go to the next batch
+  const batch = new Map(pendingFeedback);
+  pendingFeedback.clear();
+
+  for (const [wallet, deltas] of batch) {
+    // Skip wallets with all-zero deltas
+    if (deltas.every((d) => d === 0)) continue;
+
+    try {
+      await batchUpdateReputationOnChain(wallet, deltas, "batched-feedback");
+    } catch (err) {
+      console.warn(`[reputationChain] flush failed for ${wallet}:`, err);
+    }
   }
 }
+
+// Start the flush interval
+setInterval(() => {
+  flushPendingFeedback().catch((err) => {
+    console.warn("[reputationChain] flushPendingFeedback error:", err);
+  });
+}, FLUSH_INTERVAL_MS);
 
 /**
  * Batch update multiple reputation categories on-chain (fire-and-forget).

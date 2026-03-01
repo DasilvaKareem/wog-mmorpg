@@ -274,9 +274,12 @@ initDungeonLootTables();
 startGuildNameCacheRefresh();
 spawnNpcs();
 registerMerchantAgentTick(server);
-initMerchantWallets().catch((err) => {
-  server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
-});
+// Defer merchant wallet init so the tx queue isn't flooded at boot
+setTimeout(() => {
+  initMerchantWallets().catch((err) => {
+    server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+}, 60_000);
 spawnOreNodes();
 spawnFlowerNodes();
 spawnNectarNodes();

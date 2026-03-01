@@ -53,7 +53,7 @@ function combineStats(base: CharacterStats, modifiers: CharacterStats): Characte
 
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex items-center justify-between text-[10px]">
+    <div className="flex items-center justify-between text-[12px]">
       <span className="text-[#9aa7cc]">{label}</span>
       <span className="text-[#ffcc00]">{value}</span>
     </div>
@@ -301,7 +301,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
       <div className={panelCls}>
         {/* Header bar */}
         <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
-          <span className="text-[11px] uppercase tracking-widest text-[#54f28b]">
+          <span className="text-[13px] uppercase tracking-widest text-[#54f28b]">
             {step === "login" || step === "email-input" || step === "email-otp"
               ? ">> ENTER THE WORLD <<"
               : step === "connecting"
@@ -318,7 +318,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           </span>
           <button
             onClick={onClose}
-            className="text-[12px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+            className="text-[14px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
           >
             [X]
           </button>
@@ -328,7 +328,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {/* ── STEP: LOGIN ── */}
           {(step === "login") && (
             <div className="flex flex-col gap-3">
-              <p className="text-[10px] leading-relaxed text-[#9aa7cc] mb-1">
+              <p className="text-[12px] leading-relaxed text-[#9aa7cc] mb-1">
                 Sign in instantly — no wallet extension needed. Your account is
                 secured by thirdweb in-app wallets.
               </p>
@@ -336,39 +336,39 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 <button
                   key={p.strategy}
                   onClick={() => void connectSocial(p.strategy)}
-                  className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[12px] text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+                  className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[14px] text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#54f28b] hover:text-[#54f28b] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
                 >
                   <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[11px] font-bold"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px] font-bold"
                     style={{ borderColor: p.color, color: p.color }}
                   >
                     {p.icon}
                   </span>
                   <span>Login with {p.label}</span>
-                  <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                  <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                 </button>
               ))}
 
               <div className="flex items-center gap-2 my-1">
                 <div className="flex-1 border-t border-[#2a3450]" />
-                <span className="text-[9px] text-[#3a4260]">OR</span>
+                <span className="text-[11px] text-[#6d77a3]">OR</span>
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 
               <button
                 onClick={() => { setError(null); setStep("email-input"); }}
-                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[12px] text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00] active:translate-x-[1px] active:translate-y-[1px]"
+                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[14px] text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00] active:translate-x-[1px] active:translate-y-[1px]"
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#ffcc00] text-[11px] font-bold text-[#ffcc00]">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#ffcc00] text-[13px] font-bold text-[#ffcc00]">
                   @
                 </span>
                 <span>Continue with Email</span>
-                <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
               </button>
 
               <div className="flex items-center gap-2 my-1">
                 <div className="flex-1 border-t border-[#2a3450]" />
-                <span className="text-[9px] text-[#3a4260]">OR</span>
+                <span className="text-[11px] text-[#6d77a3]">OR</span>
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 
@@ -390,45 +390,45 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                       setStep("login");
                     }
                   }}
-                  className="flex w-full items-center gap-3 border-2 bg-[#0a1a0e] px-4 py-2 text-left text-[11px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
+                  className="flex w-full items-center gap-3 border-2 bg-[#0a1a0e] px-4 py-2 text-left text-[13px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
                   style={{ borderColor: w.border }}
                 >
                   <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[11px] font-bold"
+                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px] font-bold"
                     style={{ borderColor: w.border, color: w.border }}
                   >
                     {w.icon}
                   </span>
                   <div className="flex flex-col">
                     <span>{w.label}</span>
-                    <span className="text-[8px] text-[#3a4260]">{w.sub}</span>
+                    <span className="text-[10px] text-[#6d77a3]">{w.sub}</span>
                   </div>
-                  <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                  <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                 </button>
               ))}
 
               <div className="flex items-center gap-2 my-1">
                 <div className="flex-1 border-t border-[#2a3450]" />
-                <span className="text-[9px] text-[#3a4260]">OR</span>
+                <span className="text-[11px] text-[#6d77a3]">OR</span>
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 
               <button
                 onClick={() => { onClose(); navigate("/world"); }}
-                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[12px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#9aa7cc] hover:text-[#d6deff] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[14px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#9aa7cc] hover:text-[#d6deff] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#9aa7cc] text-[11px] font-bold text-[#9aa7cc]">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#9aa7cc] text-[13px] font-bold text-[#9aa7cc]">
                   👁
                 </span>
                 <div className="flex flex-col">
                   <span>Spectate World</span>
-                  <span className="text-[9px] text-[#3a4260]">Watch without signing in</span>
+                  <span className="text-[11px] text-[#6d77a3]">Watch without signing in</span>
                 </div>
-                <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
               </button>
 
               {error && (
-                <p className="mt-1 text-[10px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                <p className="mt-1 text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
                   [ERR] {error}
                 </p>
               )}
@@ -438,7 +438,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {/* ── STEP: EMAIL INPUT ── */}
           {step === "email-input" && (
             <div className="flex flex-col gap-3">
-              <p className="text-[10px] text-[#9aa7cc]">
+              <p className="text-[12px] text-[#9aa7cc]">
                 Enter your email address to receive a verification code.
               </p>
               <input
@@ -447,24 +447,24 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void sendEmailOtp(); }}
-                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b]"
+                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[14px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#54f28b]"
                 autoFocus
               />
               <button
                 onClick={() => void sendEmailOtp()}
                 disabled={!email.trim() || sendingOtp}
-                className="w-full border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[12px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
+                className="w-full border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[14px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
               >
                 {sendingOtp ? "Sending..." : "[→] Send Code"}
               </button>
               <button
                 onClick={() => { setError(null); setStep("login"); }}
-                className="text-[10px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors"
+                className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors"
               >
                 ← Back
               </button>
               {error && (
-                <p className="text-[10px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                <p className="text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
                   [ERR] {error}
                 </p>
               )}
@@ -474,7 +474,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {/* ── STEP: EMAIL OTP ── */}
           {step === "email-otp" && (
             <div className="flex flex-col gap-3">
-              <p className="text-[10px] text-[#9aa7cc]">
+              <p className="text-[12px] text-[#9aa7cc]">
                 Code sent to <span className="text-[#ffcc00]">{email}</span>.
                 Check your inbox and enter the 6-digit code.
               </p>
@@ -486,24 +486,24 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 value={otp}
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
                 onKeyDown={(e) => { if (e.key === "Enter" && otp.length === 6) void verifyEmailOtp(); }}
-                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-center text-[16px] tracking-[0.5em] text-[#ffcc00] placeholder-[#3a4260] outline-none focus:border-[#ffcc00]"
+                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-center text-[16px] tracking-[0.5em] text-[#ffcc00] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
                 autoFocus
               />
               <button
                 onClick={() => void verifyEmailOtp()}
                 disabled={otp.length !== 6}
-                className="w-full border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[12px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
+                className="w-full border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[14px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[1px] active:translate-y-[1px]"
               >
                 [→] Verify & Continue
               </button>
               <button
                 onClick={() => { setOtp(""); setError(null); setStep("email-input"); }}
-                className="text-[10px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors"
+                className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors"
               >
                 ← Resend / Change email
               </button>
               {error && (
-                <p className="text-[10px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                <p className="text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
                   [ERR] {error}
                 </p>
               )}
@@ -514,8 +514,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {step === "connecting" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="text-[22px] text-[#54f28b] animate-pulse">{">>>"}</div>
-              <p className="text-[11px] text-[#9aa7cc]">Authenticating with thirdweb...</p>
-              <p className="text-[9px] text-[#3a4260]">A popup window may open. Please allow it.</p>
+              <p className="text-[13px] text-[#9aa7cc]">Authenticating with thirdweb...</p>
+              <p className="text-[11px] text-[#6d77a3]">A popup window may open. Please allow it.</p>
             </div>
           )}
 
@@ -523,14 +523,14 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {step === "create-char" && (
             <div className="flex flex-col gap-3">
               {connectedAddress && (
-                <div className="text-[9px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
+                <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
                   [AUTH] {connectedAddress.slice(0, 8)}...{connectedAddress.slice(-6)}
                 </div>
               )}
 
               {/* Name */}
               <div>
-                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
                   Character Name
                 </label>
                 <input
@@ -542,17 +542,17 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                     setCharName(e.target.value);
                     if (error) setError(null);
                   }}
-                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#ffcc00]"
+                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[14px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
                   autoFocus
                 />
                 {nameValidationError && charName.trim().length > 0 && (
-                  <p className="mt-1 text-[9px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                  <p className="mt-1 text-[11px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
                 )}
               </div>
 
               {/* Race */}
               <div>
-                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
                   Race
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -560,7 +560,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                     <button
                       key={r.id}
                       onClick={() => setRaceId(r.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[10px] transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
                         raceId === r.id
                           ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
                           : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
@@ -574,7 +574,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               {/* Class */}
               <div>
-                <label className="mb-1 block text-[10px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
                   Class
                 </label>
                 <div className="grid grid-cols-2 gap-1.5">
@@ -582,7 +582,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                     <button
                       key={c.id}
                       onClick={() => setClassId(c.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[10px] transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
                         classId === c.id
                           ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
                           : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
@@ -597,7 +597,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               {/* Stat preview */}
               {previewStats && (
                 <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2">
-                  <p className="mb-1.5 text-[9px] uppercase tracking-wider text-[#3a4260]">
+                  <p className="mb-1.5 text-[11px] uppercase tracking-wider text-[#6d77a3]">
                     Base Stats — {selectedRace?.name} {selectedClass?.name}
                   </p>
                   <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
@@ -612,7 +612,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               )}
 
               {error && (
-                <p className="text-[10px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
+                <p className="text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
                   [ERR] {error}
                 </p>
               )}
@@ -640,10 +640,10 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {step === "minting" && (
             <div className="flex flex-col items-center gap-4 py-6">
               <div className="text-[22px] text-[#ffcc00] animate-pulse">{"$$"}</div>
-              <p className="text-[11px] text-[#9aa7cc]">
+              <p className="text-[13px] text-[#9aa7cc]">
                 Minting your character NFT on SKALE...
               </p>
-              <p className="text-[9px] text-[#3a4260]">
+              <p className="text-[11px] text-[#6d77a3]">
                 Zero gas fees — powered by sFUEL
               </p>
             </div>
@@ -653,18 +653,18 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {step === "success" && successData && (
             <div className="flex flex-col gap-3">
               <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3">
-                <p className="text-[10px] text-[#54f28b] mb-2">[✓] CHARACTER MINTED</p>
+                <p className="text-[12px] text-[#54f28b] mb-2">[✓] CHARACTER MINTED</p>
                 <p
                   className="text-[16px] text-[#ffcc00] mb-0.5"
                   style={{ textShadow: "2px 2px 0 #000" }}
                 >
                   {successData.name}
                 </p>
-                <p className="text-[11px] text-[#d6deff]">
+                <p className="text-[13px] text-[#d6deff]">
                   {successData.race} · {successData.className} · Level 1
                 </p>
                 {successData.txHash && (
-                  <p className="mt-2 text-[9px] text-[#3a4260] break-all">
+                  <p className="mt-2 text-[11px] text-[#6d77a3] break-all">
                     TX: {successData.txHash.slice(0, 12)}...{successData.txHash.slice(-8)}
                   </p>
                 )}
@@ -672,20 +672,20 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               {/* Agent deploy status */}
               {successData.agentDeploying ? (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[9px]">
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[11px]">
                   <p className="text-[#9aa7cc] animate-pulse mb-1">[{">"}{">"}{">"}] Deploying AI agent...</p>
-                  <p className="text-[#565f89]">Creating custodial wallet + spawning character</p>
+                  <p className="text-[#8b95c2]">Creating custodial wallet + spawning character</p>
                 </div>
               ) : successData.agentEntityId ? (
-                <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-2 text-[9px]">
+                <div className="border border-[#54f28b] bg-[#0a1a0e] px-3 py-2 text-[11px]">
                   <p className="text-[#54f28b] mb-1">[✓] AGENT DEPLOYED</p>
                   <p className="text-[#9aa7cc]">
                     Your AI agent is live in <span className="text-[#ffcc00]">{successData.agentZoneId}</span>
                   </p>
-                  <p className="text-[#565f89] mt-1">Chat with it in the world view to give directives.</p>
+                  <p className="text-[#8b95c2] mt-1">Chat with it in the world view to give directives.</p>
                 </div>
               ) : (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[9px] text-[#565f89]">
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[11px] text-[#8b95c2]">
                   {successData.agentError ? (
                     <p className="text-[#ff4d6d]">[!] Agent deploy skipped: {successData.agentError?.slice(0, 80)}</p>
                   ) : (
@@ -707,7 +707,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               <button
                 onClick={() => setStep("done")}
-                className="text-[10px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors text-center"
+                className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
               >
                 Skip &amp; Enter World
               </button>
@@ -718,11 +718,11 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
             <div className="flex flex-col gap-3">
               {!telegramLinked ? (
                 <>
-                  <p className="text-[10px] leading-relaxed text-[#9aa7cc]">
+                  <p className="text-[12px] leading-relaxed text-[#9aa7cc]">
                     Get agent summaries and alerts delivered to your Telegram.
                   </p>
 
-                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[9px] text-[#565f89]">
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[11px] text-[#8b95c2]">
                     <p className="text-[#9aa7cc] mb-1">You'll receive:</p>
                     <p>• 4-hour activity summaries (kills, quests, zones)</p>
                     <p>• Instant level-up &amp; death alerts</p>
@@ -733,19 +733,19 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                       href={botLinkUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex w-full items-center justify-center gap-2 border-2 border-[#26a5e4] bg-[#0a1020] px-4 py-3 text-[12px] text-[#26a5e4] shadow-[3px_3px_0_0_#000] transition hover:bg-[#0e1830] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+                      className="flex w-full items-center justify-center gap-2 border-2 border-[#26a5e4] bg-[#0a1020] px-4 py-3 text-[14px] text-[#26a5e4] shadow-[3px_3px_0_0_#000] transition hover:bg-[#0e1830] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
                     >
-                      <span className="flex h-5 w-5 items-center justify-center border border-[#26a5e4] text-[11px] font-bold">T</span>
+                      <span className="flex h-5 w-5 items-center justify-center border border-[#26a5e4] text-[13px] font-bold">T</span>
                       Open Telegram Bot
-                      <span className="ml-auto text-[9px] text-[#3a4260]">[→]</span>
+                      <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                     </a>
                   ) : (
-                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-4 py-3 text-[10px] text-[#565f89] text-center">
+                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-4 py-3 text-[12px] text-[#8b95c2] text-center">
                       Telegram bot not configured
                     </div>
                   )}
 
-                  <div className="flex items-center gap-2 text-[9px] text-[#565f89]">
+                  <div className="flex items-center gap-2 text-[11px] text-[#8b95c2]">
                     <span className="animate-pulse">●</span>
                     <span className="animate-pulse" style={{ animationDelay: "0.3s" }}>●</span>
                     <span className="opacity-30">●</span>
@@ -754,7 +754,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
                   <button
                     onClick={() => setStep("done")}
-                    className="text-[10px] text-[#3a4260] hover:text-[#9aa7cc] transition-colors text-center"
+                    className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
                   >
                     Skip →
                   </button>
@@ -762,8 +762,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               ) : (
                 <>
                   <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3">
-                    <p className="text-[12px] text-[#54f28b] mb-2">[✓] Connected!</p>
-                    <div className="text-[9px] text-[#9aa7cc] flex flex-col gap-0.5">
+                    <p className="text-[14px] text-[#54f28b] mb-2">[✓] Connected!</p>
+                    <div className="text-[11px] text-[#9aa7cc] flex flex-col gap-0.5">
                       <p>You'll receive:</p>
                       <p>• 4-hour activity summaries</p>
                       <p>• Instant level-up / death alerts</p>

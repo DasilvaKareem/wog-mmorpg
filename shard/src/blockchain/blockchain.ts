@@ -61,6 +61,10 @@ const itemCache = new BalanceCache<bigint>(10_000);      // 10s TTL
 const characterCache = new BalanceCache<any[]>(30_000);  // 30s TTL
 const ownershipLookupWarnAt = new Map<string, number>();
 
+// Promise coalescing — if a read is already in-flight, concurrent callers reuse the same promise
+const inflightGold = new Map<string, Promise<string>>();
+const inflightItem = new Map<string, Promise<bigint>>();
+
 const ERC721_TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
 
 function shouldLogOwnershipWarning(address: string, ttlMs = 60_000): boolean {
@@ -199,7 +203,7 @@ const itemByTokenId = new Map(ITEM_CATALOG.map((item) => [item.tokenId, item]));
 let seedingPromise: Promise<void> | null = null;
 
 /** Read nextTokenIdToMint with retry for transient RPC errors (SKALE 0x). */
-async function safeNextTokenIdToMint(retries = 3): Promise<bigint> {
+async function safeNextTokenIdToMint(retries = 5): Promise<bigint> {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       return await nextTokenIdToMint({ contract: itemsContract });
@@ -207,7 +211,7 @@ async function safeNextTokenIdToMint(retries = 3): Promise<bigint> {
       const msg = String(err?.message ?? "");
       const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
       if (isTransient && attempt < retries) {
-        const delay = 2000 * 2 ** attempt; // 2s, 4s, 8s
+        const delay = 3000 * 2 ** attempt; // 3s, 6s, 12s, 24s, 48s
         console.warn(`[blockchain] nextTokenIdToMint RPC error (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms`);
         await new Promise((r) => setTimeout(r, delay));
         continue;
@@ -357,27 +361,39 @@ export async function getGoldBalance(address: string): Promise<string> {
   const cached = goldCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  // SKALE RPC sometimes returns 0x (empty data) transiently — retry up to 3 times
-  for (let attempt = 0; attempt <= 3; attempt++) {
-    try {
-      const result = await getBalance({ contract: goldContract, address });
-      goldCache.set(cacheKey, result.displayValue);
-      return result.displayValue;
-    } catch (err: any) {
-      const msg = String(err?.message ?? "");
-      const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
-      if (isTransient && attempt < 3) {
-        await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
-        continue;
+  // Promise coalescing — reuse in-flight request for the same address
+  const inflight = inflightGold.get(cacheKey);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<string> => {
+    // SKALE RPC sometimes returns 0x (empty data) transiently — retry up to 3 times
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        const result = await getBalance({ contract: goldContract, address });
+        goldCache.set(cacheKey, result.displayValue);
+        return result.displayValue;
+      } catch (err: any) {
+        const msg = String(err?.message ?? "");
+        const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
+        if (isTransient && attempt < 3) {
+          await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
+          continue;
+        }
+        if (isTransient) {
+          if (shouldLogOwnershipWarning(address)) {
+            console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning 0: ${msg.slice(0, 120)}`);
+          }
+          return "0";
+        }
+        throw err;
       }
-      if (isTransient) {
-        console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning 0: ${msg.slice(0, 120)}`);
-        return "0";
-      }
-      throw err;
     }
-  }
-  return "0";
+    return "0";
+  })();
+
+  inflightGold.set(cacheKey, promise);
+  promise.finally(() => inflightGold.delete(cacheKey));
+  return promise;
 }
 
 /**
@@ -433,18 +449,28 @@ export async function getItemBalance(
   const cached = itemCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  try {
-    const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
-    itemCache.set(cacheKey, balance);
-    return balance;
-  } catch (err: any) {
-    const msg = String(err?.message ?? "");
-    // SKALE RPC sometimes returns 0x (empty data) — treat as 0
-    if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
-      return 0n;
+  // Promise coalescing — reuse in-flight request for the same address:tokenId
+  const inflight = inflightItem.get(cacheKey);
+  if (inflight) return inflight;
+
+  const promise = (async (): Promise<bigint> => {
+    try {
+      const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
+      itemCache.set(cacheKey, balance);
+      return balance;
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      // SKALE RPC sometimes returns 0x (empty data) — treat as 0
+      if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
+        return 0n;
+      }
+      throw err;
     }
-    throw err;
-  }
+  })();
+
+  inflightItem.set(cacheKey, promise);
+  promise.finally(() => inflightItem.delete(cacheKey));
+  return promise;
 }
 
 /** Burn (destroy) ERC-1155 items from a player address. */
@@ -476,24 +502,43 @@ const characterContract = getContract({
   address: process.env.CHARACTER_CONTRACT_ADDRESS!,
 });
 
+/** getLogs with automatic chunking if the RPC enforces a block range limit. */
+async function paginatedGetLogs(
+  address: string,
+  topics: (string | null)[],
+  latestBlock: bigint,
+): Promise<ethers.Log[]> {
+  // Try the full range first — most RPCs allow it
+  try {
+    return await biteProvider.getLogs({ address, fromBlock: 0, toBlock: latestBlock, topics });
+  } catch (err: any) {
+    const msg = String(err?.message ?? "");
+    if (!msg.includes("Block range") && !msg.includes("block range") && !msg.includes("too many")) {
+      throw err;
+    }
+  }
+
+  // RPC enforces a 2000-block limit — paginate accordingly
+  const chunkSize = 1999n;
+  const all: ethers.Log[] = [];
+  for (let from = 0n; from <= latestBlock; from += chunkSize + 1n) {
+    const to = from + chunkSize > latestBlock ? latestBlock : from + chunkSize;
+    const logs = await biteProvider.getLogs({ address, fromBlock: from, toBlock: to, topics });
+    all.push(...logs);
+  }
+  return all;
+}
+
 async function getOwnedCharacterTokenIdsFromTransfers(owner: string): Promise<bigint[]> {
   const normalized = owner.toLowerCase();
   const ownerTopic = ethers.zeroPadValue(normalized as `0x${string}`, 32);
   const contractAddress = process.env.CHARACTER_CONTRACT_ADDRESS!;
 
+  const latestBlock = BigInt(await biteProvider.getBlockNumber());
+
   const [received, sent] = await Promise.all([
-    biteProvider.getLogs({
-      address: contractAddress,
-      fromBlock: 0n,
-      toBlock: "latest",
-      topics: [ERC721_TRANSFER_TOPIC, null, ownerTopic],
-    }),
-    biteProvider.getLogs({
-      address: contractAddress,
-      fromBlock: 0n,
-      toBlock: "latest",
-      topics: [ERC721_TRANSFER_TOPIC, ownerTopic, null],
-    }),
+    paginatedGetLogs(contractAddress, [ERC721_TRANSFER_TOPIC, null, ownerTopic], latestBlock),
+    paginatedGetLogs(contractAddress, [ERC721_TRANSFER_TOPIC, ownerTopic, null], latestBlock),
   ]);
 
   const owned = new Set<string>();
@@ -536,37 +581,26 @@ export async function getOwnedCharacters(address: string) {
 
   let nfts: any[] = [];
   try {
+    // Primary: use thirdweb getOwnedNFTs (requires ERC721Enumerable)
     nfts = await getOwnedNFTs({ contract: characterContract, owner: address });
   } catch (err: any) {
-    const message = String(err?.message ?? err ?? "");
+    // Fallback: parse Transfer event logs (slow but always works)
     if (shouldLogOwnershipWarning(address)) {
-      console.warn(
-        `[blockchain] getOwnedNFTs failed for ${address}: ${message.slice(0, 200)}`
-      );
+      console.warn(`[blockchain] getOwnedNFTs failed for ${address}, trying Transfer logs: ${String(err?.message ?? "").slice(0, 120)}`);
     }
-
     try {
       const tokenIds = await getOwnedCharacterTokenIdsFromTransfers(address);
       if (tokenIds.length > 0) {
-        const recovered = await Promise.all(
+        const results = await Promise.all(
           tokenIds.map(async (tokenId) => {
-            try {
-              return await getNFT({ contract: characterContract, tokenId });
-            } catch {
-              return null;
-            }
+            try { return await getNFT({ contract: characterContract, tokenId }); } catch { return null; }
           })
         );
-        nfts = recovered.filter((nft): nft is NonNullable<typeof nft> => nft !== null);
-        if (nfts.length > 0 && shouldLogOwnershipWarning(address, 5 * 60_000)) {
-          console.log(`[blockchain] Recovered ${nfts.length} character NFT(s) for ${address} via Transfer logs`);
-        }
+        nfts = results.filter((nft): nft is NonNullable<typeof nft> => nft !== null);
       }
     } catch (fallbackErr: any) {
       if (shouldLogOwnershipWarning(address)) {
-        console.warn(
-          `[blockchain] Transfer-log ownership lookup failed for ${address}: ${String(fallbackErr?.message ?? fallbackErr ?? "").slice(0, 200)}`
-        );
+        console.warn(`[blockchain] getOwnedCharacters fallback failed for ${address}: ${String(fallbackErr?.message ?? "").slice(0, 120)}`);
       }
     }
   }

@@ -37,7 +37,7 @@ export interface MerchantState {
 // ── Constants ────────────────────────────────────────────────────
 
 const MERCHANT_TICK_INTERVAL = 10_000;
-const INVENTORY_SYNC_INTERVAL = 60_000;
+const INVENTORY_SYNC_INTERVAL = 180_000;
 const PRICE_UPDATE_INTERVAL = 30_000;
 const RESTOCK_INTERVAL = 120_000;
 const ANNOUNCEMENT_COOLDOWN = 300_000;
@@ -195,8 +195,9 @@ export async function initMerchantWallets(): Promise<void> {
       console.log(
         `[merchant] Initialized ${def.name} in ${def.zoneId} — wallet ${walletInfo.address}, ${def.shopItems!.length} items stocked`
       );
-    } catch (err) {
-      console.error(`[merchant] Failed to init ${def.name}:`, err);
+    } catch (err: any) {
+      const msg = String(err?.message ?? "").slice(0, 150);
+      console.warn(`[merchant] Failed to init ${def.name} - ${def.zoneId}: ${msg}`);
       failedDefs.push(def);
     }
   }

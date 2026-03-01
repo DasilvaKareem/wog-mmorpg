@@ -149,31 +149,39 @@ async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
   const treasury = await createCustodialWallet();
   const treasuryAddress = normalizeAddress(treasury.address);
   await storeTreasuryAddress(treasuryAddress);
+  console.log(`[wallet/register] Created treasury wallet ${treasuryAddress}, funding...`);
 
   try {
     await distributeSFuel(treasuryAddress);
+    console.log(`[wallet/register] sFUEL sent to treasury ${treasuryAddress}`);
   } catch (err: any) {
-    server.log.warn(`[wallet/register] Failed to fund welcome treasury gas wallet ${treasuryAddress}: ${err.message}`);
+    console.warn(`[wallet/register] Failed to fund treasury gas ${treasuryAddress}: ${err.message}`);
   }
 
+  console.log(`[wallet/register] Minting ${TREASURY_SEED_GOLD} GOLD to treasury...`);
   const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
   await markTreasurySeeded();
-  server.log.info(`[wallet/register] Welcome treasury ${treasuryAddress} seeded with ${TREASURY_SEED_GOLD} GOLD: ${seedTx}`);
+  console.log(`[wallet/register] Treasury ${treasuryAddress} seeded with ${TREASURY_SEED_GOLD} GOLD: ${seedTx}`);
   return treasuryAddress;
 }
 
 async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
-  if (treasuryInitPromise) return treasuryInitPromise;
+  if (treasuryInitPromise) {
+    console.log(`[wallet/register] Treasury init already in progress, waiting...`);
+    return treasuryInitPromise;
+  }
 
   treasuryInitPromise = (async () => {
     let treasuryAddress = await getStoredTreasuryAddress();
+    console.log(`[wallet/register] Stored treasury address: ${treasuryAddress ?? "none"}`);
 
     if (treasuryAddress) {
       try {
         await getCustodialWallet(treasuryAddress);
+        console.log(`[wallet/register] Treasury wallet ${treasuryAddress} key found`);
       } catch (err: any) {
-        server.log.warn(
-          `[wallet/register] Stored welcome treasury key missing for ${treasuryAddress}; creating a new treasury wallet (${err.message})`
+        console.warn(
+          `[wallet/register] Treasury key missing for ${treasuryAddress}; creating new treasury (${err.message})`
         );
         treasuryAddress = null;
         treasurySeededMem = false;
@@ -185,9 +193,10 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
     }
 
     if (!(await isTreasurySeeded())) {
+      console.log(`[wallet/register] Treasury ${treasuryAddress} not seeded, minting ${TREASURY_SEED_GOLD} GOLD...`);
       const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
       await markTreasurySeeded();
-      server.log.info(`[wallet/register] Welcome treasury ${treasuryAddress} seeded with ${TREASURY_SEED_GOLD} GOLD: ${seedTx}`);
+      console.log(`[wallet/register] Treasury ${treasuryAddress} seeded: ${seedTx}`);
     }
 
     return treasuryAddress;
@@ -203,8 +212,8 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
 async function waitForTreasuryBalance(
   treasuryAddress: string,
   minimumGold: number,
-  attempts = 8,
-  delayMs = 1200
+  attempts = 20,
+  delayMs = 3000
 ): Promise<void> {
   for (let i = 0; i < attempts; i++) {
     const balance = parseFloat(await getGoldBalance(treasuryAddress));
@@ -251,6 +260,65 @@ async function transferWelcomeBonus(
   throw new Error("Failed to transfer welcome bonus");
 }
 
+export interface WalletRegistrationResult {
+  ok: true;
+  message: "Already registered" | "Wallet registered";
+  sfuelTx?: string;
+  goldTx?: string;
+  treasuryWallet?: string;
+  welcomeBonus?: {
+    copper: number;
+    gold: number;
+  };
+}
+
+/**
+ * Idempotent wallet registration flow:
+ * - first call gives sFUEL + marks registered immediately
+ * - welcome gold bonus is sent in the background (non-blocking)
+ * - subsequent calls return "Already registered"
+ */
+export async function registerWalletWithWelcomeBonus(
+  server: FastifyInstance,
+  address: string
+): Promise<WalletRegistrationResult> {
+  const normalized = address.toLowerCase();
+  if (await isWalletRegistered(normalized)) {
+    return { ok: true, message: "Already registered" };
+  }
+
+  const sfuelTx = await distributeSFuel(address);
+  console.log(`[wallet/register] sFUEL sent to ${address}: ${sfuelTx}`);
+
+  // Mark registered immediately so the API responds fast
+  await markWalletRegistered(normalized);
+
+  // Send welcome gold in the background — don't block the response
+  void (async () => {
+    try {
+      const treasuryAddress = await ensureWelcomeTreasury(server);
+      try { await distributeSFuel(treasuryAddress); } catch {}
+      await waitForTreasuryBalance(treasuryAddress, WELCOME_GOLD);
+      const goldTx = await transferWelcomeBonus(server, treasuryAddress, address, WELCOME_GOLD);
+      console.log(
+        `[wallet/register] Welcome bonus ${WELCOME_COPPER}c sent to ${address}: ${goldTx}`
+      );
+    } catch (err: any) {
+      console.warn(`[wallet/register] Background welcome bonus failed for ${address}: ${String(err?.message ?? "").slice(0, 150)}`);
+    }
+  })();
+
+  return {
+    ok: true,
+    message: "Wallet registered",
+    sfuelTx,
+    welcomeBonus: {
+      copper: WELCOME_COPPER,
+      gold: WELCOME_GOLD,
+    },
+  };
+}
+
 export function registerWalletRoutes(server: FastifyInstance) {
   /**
    * POST /wallet/register { address } (or { walletAddress })
@@ -266,45 +334,14 @@ export function registerWalletRoutes(server: FastifyInstance) {
         return { error: "Invalid Ethereum address" };
       }
 
-      const normalized = address.toLowerCase();
-
-      if (await isWalletRegistered(normalized)) {
-        return { ok: true, message: "Already registered" };
-      }
-
       try {
-        const sfuelTx = await distributeSFuel(address);
-        server.log.info(`sFUEL sent to ${address}: ${sfuelTx}`);
-
-        const treasuryAddress = await ensureWelcomeTreasury(server);
-        try {
-          await distributeSFuel(treasuryAddress);
-        } catch (err: any) {
-          server.log.warn(`[wallet/register] Failed to top up treasury gas ${treasuryAddress}: ${err.message}`);
-        }
-        await waitForTreasuryBalance(treasuryAddress, WELCOME_GOLD);
-        const goldTx = await transferWelcomeBonus(server, treasuryAddress, address, WELCOME_GOLD);
-        server.log.info(
-          `[wallet/register] Transferred welcome bonus ${WELCOME_COPPER}c (${WELCOME_GOLD}g) from treasury ${treasuryAddress} to ${address}: ${goldTx}`
-        );
-
-        await markWalletRegistered(normalized);
-
-        return {
-          ok: true,
-          message: "Wallet registered",
-          sfuelTx,
-          goldTx,
-          treasuryWallet: treasuryAddress,
-          welcomeBonus: {
-            copper: WELCOME_COPPER,
-            gold: WELCOME_GOLD,
-          },
-        };
-      } catch (err) {
+        return await registerWalletWithWelcomeBonus(server, address);
+      } catch (err: any) {
+        const msg = String(err?.message ?? err ?? "").slice(0, 300);
+        console.error(`[wallet/register] FAILED for ${address}: ${msg}`);
         server.log.error(err, `Failed to register wallet ${address}`);
         reply.code(500);
-        return { error: "Blockchain transaction failed" };
+        return { error: "Blockchain transaction failed", detail: msg };
       }
     }
   );

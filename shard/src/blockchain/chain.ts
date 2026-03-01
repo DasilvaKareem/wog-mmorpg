@@ -2,8 +2,8 @@ import { defineChain, createThirdwebClient } from "thirdweb";
 import type { Chain } from "thirdweb/chains";
 
 export const skaleBase: Chain = defineChain({
-  id: 1187947933,
-  rpc: "https://skale-base.skalenodes.com/v1/base",
+  id: 103698795,
+  rpc: "https://base-sepolia-testnet.skalenodes.com/v1/bite-v2-sandbox",
 });
 
 export const thirdwebClient = createThirdwebClient({

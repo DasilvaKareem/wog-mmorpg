@@ -8,22 +8,65 @@ import {
 } from "./guildChain.js";
 import { recordGoldSpend, unreserveGold } from "../blockchain/goldLedger.js";
 
-const TICK_INTERVAL_MS = 10000; // 10 seconds
+const TICK_INTERVAL_MS = 30_000; // 30 seconds (was 10s — proposals have 24hr voting)
+
+// Track known-active proposal IDs to avoid scanning all proposals each tick
+const activeProposals = new Set<number>();
+let initialScanDone = false;
+
+/** Call when a new proposal is created to add it to the active set. */
+export function addActiveProposal(proposalId: number): void {
+  activeProposals.add(proposalId);
+}
 
 /**
- * Check all active proposals and execute any where voting has ended.
+ * Initial scan: read all proposals to seed the active set.
+ * Only runs once on first tick.
  */
-async function guildTick(server: FastifyInstance) {
+async function seedActiveProposals(server: FastifyInstance): Promise<void> {
   try {
     const nextId = await getNextProposalId();
-    const now = Math.floor(Date.now() / 1000);
-
     for (let i = 0; i < nextId; i++) {
       try {
         const proposal = await getProposalFromChain(i);
+        if (proposal.status === ProposalStatus.Active) {
+          activeProposals.add(i);
+        }
+      } catch {
+        // Skip errors for individual proposals
+      }
+    }
+    server.log.info(`[guild-tick] Seeded ${activeProposals.size} active proposals (scanned ${nextId})`);
+  } catch (err) {
+    server.log.error(err, "[guild-tick] Failed to seed active proposals");
+  }
+  initialScanDone = true;
+}
 
-        // Skip if not active
-        if (proposal.status !== ProposalStatus.Active) continue;
+/**
+ * Check only known-active proposals and execute any where voting has ended.
+ */
+async function guildTick(server: FastifyInstance) {
+  if (!initialScanDone) {
+    await seedActiveProposals(server);
+    return; // give the first real tick a clean start
+  }
+
+  // Nothing to check
+  if (activeProposals.size === 0) return;
+
+  try {
+    const now = Math.floor(Date.now() / 1000);
+
+    for (const i of activeProposals) {
+      try {
+        const proposal = await getProposalFromChain(i);
+
+        // If no longer active, remove from tracking set
+        if (proposal.status !== ProposalStatus.Active) {
+          activeProposals.delete(i);
+          continue;
+        }
 
         // Check if voting period has ended
         if (now >= proposal.votingEndsAt) {
@@ -37,6 +80,9 @@ async function guildTick(server: FastifyInstance) {
           // Fetch updated proposal to see if it passed
           const updatedProposal = await getProposalFromChain(i);
           const passed = updatedProposal.status === ProposalStatus.Executed;
+
+          // Remove from active set regardless of pass/fail
+          activeProposals.delete(i);
 
           if (passed) {
             server.log.info(
@@ -75,10 +121,10 @@ async function guildTick(server: FastifyInstance) {
 
 /**
  * Register the guild tick with the server.
- * The tick runs every 10 seconds to check for proposals ready to execute.
+ * The tick runs every 30 seconds to check for proposals ready to execute.
  */
 export function registerGuildTick(server: FastifyInstance) {
-  server.log.info("Registering guild tick (10s interval)");
+  server.log.info("Registering guild tick (30s interval)");
 
   const tickInterval = setInterval(() => {
     guildTick(server).catch((err) => {

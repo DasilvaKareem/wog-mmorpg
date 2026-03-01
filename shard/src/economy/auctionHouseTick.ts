@@ -8,13 +8,27 @@ import {
 } from "./auctionHouseChain.js";
 
 const TICK_INTERVAL_MS = 5000; // 5 seconds
+const NEXT_ID_REFRESH_MS = 60_000; // only re-fetch nextAuctionId every 60s
+
+let cachedNextAuctionId = 0;
+let nextAuctionIdExpiresAt = 0;
 
 /**
  * Check all active auctions and settle any that have expired.
  */
 async function auctionTick(server: FastifyInstance) {
   try {
-    const nextId = await getNextAuctionId();
+    // Refresh nextAuctionId from chain only every 60s (not every 5s tick)
+    const now_ms = Date.now();
+    if (now_ms >= nextAuctionIdExpiresAt) {
+      cachedNextAuctionId = await getNextAuctionId();
+      nextAuctionIdExpiresAt = now_ms + NEXT_ID_REFRESH_MS;
+    }
+    const nextId = cachedNextAuctionId;
+
+    // Skip the entire loop if no auctions exist
+    if (nextId <= 0) return;
+
     const now = Math.floor(Date.now() / 1000);
 
     for (let i = 0; i < nextId; i++) {
