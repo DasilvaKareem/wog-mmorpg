@@ -16,6 +16,9 @@ import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider } from "./biteChain.js";
 import { ethers } from "ethers";
+
+// SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
+const skaleProvider = new ethers.JsonRpcProvider("https://skale-base.skalenodes.com/v1/base");
 import { getNFT } from "thirdweb/extensions/erc721";
 
 // =============================================================================
@@ -279,8 +282,9 @@ async function resolveManagedGasPrice(): Promise<bigint> {
     return cachedGasPrice.value;
   }
 
+  // Query gas price from SKALE chain (where gold/items live), not BITE governance chain
   try {
-    const feeData = await biteProvider.getFeeData();
+    const feeData = await skaleProvider.getFeeData();
     if (feeData.gasPrice && feeData.gasPrice > 0n) {
       const buffered = (feeData.gasPrice * 125n) / 100n; // +25% buffer
       cachedGasPrice = {
@@ -293,7 +297,7 @@ async function resolveManagedGasPrice(): Promise<bigint> {
     // fallback to raw eth_gasPrice
   }
 
-  const hexGasPrice = await biteProvider.send("eth_gasPrice", []);
+  const hexGasPrice = await skaleProvider.send("eth_gasPrice", []);
   const gasPrice = BigInt(hexGasPrice);
   if (gasPrice <= 0n) {
     throw new Error(`Invalid eth_gasPrice response: ${String(hexGasPrice)}`);
