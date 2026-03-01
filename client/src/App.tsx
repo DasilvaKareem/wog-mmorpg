@@ -106,7 +106,6 @@ function GameWorld(): React.ReactElement {
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
       {address && <PlayerHUD walletAddress={address} />}
-      {!isCompactWorldUI && <WalletPanel />}
       {!isCompactWorldUI && (
         <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
       )}

@@ -11,6 +11,50 @@ function xpForLevel(level: number): number {
   return 100 * level * level;
 }
 
+function ResourceBar({
+  value,
+  max,
+  color,
+  icon,
+  label,
+}: {
+  value: number;
+  max: number;
+  color: string;
+  icon: string;
+  label: string;
+}) {
+  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
+  return (
+    <div className="flex items-center gap-2">
+      {/* Number */}
+      <span
+        className="text-white text-[13px] font-black tabular-nums text-right"
+        style={{ minWidth: 64, textShadow: "1px 1px 0 #000, -1px -1px 0 #000" }}
+      >
+        {value.toLocaleString()}
+      </span>
+      {/* Bar */}
+      <div
+        className="h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_rgba(0,0,0,0.8)]"
+        style={{ width: 180, background: "rgba(0,0,0,0.55)" }}
+      >
+        <div
+          className="h-full transition-all duration-300"
+          style={{ width: `${pct}%`, background: color }}
+        />
+      </div>
+      {/* Full-size icon — no border, no box */}
+      <img
+        src={icon}
+        alt={label}
+        className="w-14 h-14 object-contain drop-shadow-xl flex-shrink-0"
+        draggable={false}
+      />
+    </div>
+  );
+}
+
 export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement | null {
   const { characterProgress, balance } = useWallet();
   const { lobbies } = useZonePlayers({ pollInterval: 2000 });
@@ -18,8 +62,8 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
   const liveEntity = React.useMemo(() => {
     const addr = walletAddress.toLowerCase();
     for (const lobby of lobbies) {
-      const found = lobby.players.find((p) => p.walletAddress?.toLowerCase() === addr);
-      if (found) return found;
+      const p = lobby.players.find((e) => e.walletAddress?.toLowerCase() === addr);
+      if (p) return p;
     }
     return null;
   }, [lobbies, walletAddress]);
@@ -29,65 +73,71 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
   const { hp, maxHp, level, xp, name } = characterProgress;
   const gold = balance?.gold ?? 0;
 
-  const hpPct = maxHp > 0 ? Math.max(0, Math.min(100, (hp / maxHp) * 100)) : 0;
-
+  // XP progress within current level
   const currentLevelXp = xpForLevel(level);
   const nextLevelXp = xpForLevel(level + 1);
   const span = Math.max(1, nextLevelXp - currentLevelXp);
   const xpInLevel = Math.max(0, xp - currentLevelXp);
   const xpPct = Math.max(0, Math.min(100, (xpInLevel / span) * 100));
 
+  // Use live HP if the entity is found in zone, else fall back to NFT data
+  const liveHp = liveEntity?.hp ?? hp;
+  const liveMaxHp = liveEntity?.maxHp ?? maxHp;
+
   const hpColor =
-    hpPct > 66
-      ? "from-green-700 to-green-500"
-      : hpPct > 33
-      ? "from-yellow-700 to-yellow-400"
-      : "from-red-800 to-red-500";
+    liveMaxHp > 0 && (liveHp / liveMaxHp) > 0.66
+      ? "linear-gradient(90deg,#1a7a30,#54f28b)"
+      : liveMaxHp > 0 && (liveHp / liveMaxHp) > 0.33
+      ? "linear-gradient(90deg,#7a5a00,#ffcc00)"
+      : "linear-gradient(90deg,#7a0000,#ff4444)";
 
   return (
     <>
       {/* ── TOP-LEFT: Level badge + name + XP bar ── */}
-      <div className="absolute top-2 left-2 z-30 flex items-center gap-2 pointer-events-none select-none">
-        {/* Level badge */}
-        <div className="relative w-14 h-14 flex-shrink-0">
+      <div
+        className="absolute z-30 flex items-center gap-3 pointer-events-none select-none"
+        style={{ top: 8, left: 8 }}
+      >
+        {/* Level badge — full size icon, number overlaid */}
+        <div className="relative w-16 h-16 flex-shrink-0">
           <img
             src="/icons/level.png"
             alt="Level"
-            className="w-full h-full object-contain drop-shadow-lg"
+            className="w-full h-full object-contain drop-shadow-xl"
             draggable={false}
           />
           <span
-            className="absolute inset-0 flex items-center justify-center text-white font-black text-xl leading-none"
-            style={{ textShadow: "0 0 6px #000, 1px 1px 0 #000, -1px -1px 0 #000" }}
+            className="absolute inset-0 flex items-center justify-center font-black text-2xl text-white leading-none"
+            style={{ textShadow: "0 0 8px #000, 1px 1px 0 #000, -1px -1px 0 #000" }}
           >
             {level}
           </span>
         </div>
 
         {/* Name + XP bar */}
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1.5">
           <span
-            className="text-white text-[12px] font-bold leading-none tracking-wide"
-            style={{ textShadow: "1px 1px 0 #000, -1px 1px 0 #000" }}
+            className="text-white text-[13px] font-black tracking-wide leading-none"
+            style={{ textShadow: "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000" }}
           >
             {name}
           </span>
-          {/* XP bar */}
+          {/* XP bar — same width as resource bars */}
           <div
-            className="w-36 h-4 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_#000]"
-            style={{ background: "rgba(0,0,0,0.6)" }}
+            className="h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_rgba(0,0,0,0.8)]"
+            style={{ width: 180, background: "rgba(0,0,0,0.55)" }}
           >
             <div
               className="h-full transition-all duration-500"
               style={{
                 width: `${xpPct}%`,
                 background:
-                  "repeating-linear-gradient(45deg,#54f28b 0px,#54f28b 4px,#3dd775 4px,#3dd775 8px)",
+                  "repeating-linear-gradient(45deg,#54f28b 0px,#54f28b 5px,#3dd775 5px,#3dd775 10px)",
               }}
             />
           </div>
           <span
-            className="text-[8px] text-[#54f28b] leading-none"
+            className="text-[9px] text-[#54f28b] leading-none font-bold"
             style={{ textShadow: "1px 1px 0 #000" }}
           >
             {xpInLevel.toLocaleString()} / {span.toLocaleString()} XP
@@ -95,81 +145,37 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
         </div>
       </div>
 
-      {/* ── TOP-RIGHT: HP, Essence, Gold bars ── */}
-      <div className="absolute top-2 right-2 z-30 flex flex-col gap-2 pointer-events-none select-none">
-        {/* HP row */}
-        <div className="flex items-center gap-2">
-          <span
-            className="text-white text-[10px] font-bold w-16 text-right leading-none tabular-nums"
-            style={{ textShadow: "1px 1px 0 #000" }}
-          >
-            {hp} / {maxHp}
-          </span>
-          <div
-            className="w-32 h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_#000]"
-            style={{ background: "rgba(0,0,0,0.6)" }}
-          >
-            <div
-              className={`h-full bg-gradient-to-r ${hpColor} transition-all duration-300`}
-              style={{ width: `${hpPct}%` }}
-            />
-          </div>
-          <img
-            src="/icons/heart.png"
-            alt="HP"
-            className="w-9 h-9 object-contain drop-shadow-lg flex-shrink-0"
-            draggable={false}
-          />
-        </div>
+      {/* ── TOP-RIGHT: HP, Essence, Gold ── */}
+      <div
+        className="absolute z-30 flex flex-col gap-2 pointer-events-none select-none"
+        style={{ top: 8, right: 8 }}
+      >
+        {/* HP */}
+        <ResourceBar
+          value={liveHp}
+          max={liveMaxHp}
+          color={hpColor}
+          icon="/icons/heart.png"
+          label="HP"
+        />
 
-        {/* Essence / EP row — shown when live entity exists */}
-        {liveEntity && (
-          <div className="flex items-center gap-2">
-            <span
-              className="text-purple-300 text-[10px] font-bold w-16 text-right leading-none"
-              style={{ textShadow: "1px 1px 0 #000" }}
-            >
-              — EP —
-            </span>
-            <div
-              className="w-32 h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_#000]"
-              style={{ background: "rgba(0,0,0,0.6)" }}
-            >
-              <div
-                className="h-full bg-gradient-to-r from-purple-900 to-purple-400"
-                style={{ width: "60%" }}
-              />
-            </div>
-            <img
-              src="/icons/essence.png"
-              alt="Essence"
-              className="w-9 h-9 object-contain drop-shadow-lg flex-shrink-0"
-              draggable={false}
-            />
-          </div>
-        )}
+        {/* Essence (EP) — always shown */}
+        <ResourceBar
+          value={100}
+          max={100}
+          color="linear-gradient(90deg,#4a0080,#b04aff)"
+          icon="/icons/essence.png"
+          label="Essence"
+        />
 
-        {/* Gold row */}
-        <div className="flex items-center gap-2">
-          <span
-            className="text-[#ffcc00] text-[10px] font-bold w-16 text-right leading-none tabular-nums"
-            style={{ textShadow: "1px 1px 0 #000" }}
-          >
-            {gold.toLocaleString()}
-          </span>
-          <div
-            className="w-32 h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_#000]"
-            style={{ background: "rgba(0,0,0,0.6)" }}
-          >
-            <div className="h-full bg-gradient-to-r from-yellow-800 to-yellow-400 w-full" />
-          </div>
-          <img
-            src="/icons/gold.png"
-            alt="Gold"
-            className="w-9 h-9 object-contain drop-shadow-lg flex-shrink-0"
-            draggable={false}
-          />
-        </div>
+        {/* Gold */}
+        <ResourceBar
+          value={gold}
+          max={Math.max(gold, 10000)}
+          color="linear-gradient(90deg,#7a5a00,#ffcc00)"
+          icon="/icons/gold.png"
+          label="Gold"
+        />
       </div>
     </>
   );
