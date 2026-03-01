@@ -68,11 +68,9 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     try {
       // Guarantee onboarding grant is applied even if client skipped /wallet/register.
       const registration = await registerWalletWithWelcomeBonus(server, walletAddress);
-      const txHash = await mintCharacter(walletAddress, metadata);
-      server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
 
       // Seed character store so level/xp are always in Redis from the start
-      void saveCharacter(walletAddress, character.name, {
+      await saveCharacter(walletAddress, character.name, {
         name: character.name,
         level: 1,
         xp: 0,
@@ -87,8 +85,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         professions: [],
       });
 
-      // Auto-register character name as .wog name if wallet doesn't have one yet (fire-and-forget)
+      // Mint NFT + register name in background — don't block the response
       void (async () => {
+        try {
+          const txHash = await mintCharacter(walletAddress, metadata);
+          server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
+        } catch (err) {
+          server.log.warn(`[character] NFT mint failed for ${walletAddress} (non-fatal, Redis has data): ${(err as Error).message}`);
+        }
+
         try {
           const existing = await reverseLookupOnChain(walletAddress);
           if (!existing) {
@@ -102,7 +107,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
       return {
         ok: true,
-        txHash,
         walletRegistration: registration,
         character: {
           name: metadata.name,
@@ -115,7 +119,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         },
       };
     } catch (err) {
-      server.log.error(err, `Character mint failed for ${walletAddress}`);
+      server.log.error(err, `Character creation failed for ${walletAddress}`);
       reply.code(500);
       return { error: "Character creation failed" };
     }
@@ -156,12 +160,17 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           if (liveEntity) break;
         }
 
-        // Try on-chain NFT enumeration first
+        // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)
         let nfts: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
         try {
-          nfts = await getOwnedCharacters(walletAddress);
+          nfts = await Promise.race([
+            getOwnedCharacters(walletAddress),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("NFT lookup timed out (10s)")), 10_000)
+            ),
+          ]);
         } catch (nftErr) {
-          server.log.warn(nftErr, `[characters] getOwnedNFTs failed for ${walletAddress}, falling back to Redis`);
+          server.log.warn(`[characters] getOwnedNFTs failed for ${walletAddress}, falling back to Redis: ${(nftErr as Error).message}`);
         }
 
         // If on-chain returned results, use the NFT-based flow

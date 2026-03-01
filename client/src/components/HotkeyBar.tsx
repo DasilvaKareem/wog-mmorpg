@@ -9,26 +9,33 @@ interface HotkeyBarProps {
 }
 
 const slots = [
-  { icon: "👤", key: "C", label: "Character" },
-  { icon: "🗺️", key: "M", label: "Map" },
-  { icon: "📜", key: "Q", label: "Quest Log" },
-  { icon: "🔍", key: "I", label: "Inspect" },
+  { icon: "/icons/armor.png", key: "C", label: "Character" },
+  { icon: "/icons/commet.png", key: "M", label: "Map" },
+  { icon: "/icons/quest.png", key: "Q", label: "Quest Log" },
+  { icon: "/icons/sword.png", key: "I", label: "Inspect" },
 ] as const;
 
 export function HotkeyBar({ onCharacter, onMap, onQuestLog, onInspect, mobile = false }: HotkeyBarProps): React.ReactElement {
   const actions = [onCharacter, onMap, onQuestLog, onInspect];
+  const size = mobile ? "w-14 h-14" : "w-12 h-12";
+  const imgSize = mobile ? "w-8 h-8" : "w-7 h-7";
 
   return (
-    <div className="flex gap-[2px]">
+    <div className="flex gap-1">
       {slots.map((slot, i) => (
         <button
           key={slot.key}
           onClick={actions[i]}
           title={`${slot.label} (${slot.key})`}
-          className={`flex flex-col items-center justify-center border-2 border-black bg-[#0f1830] shadow-[2px_2px_0_0_#000] hover:bg-[#1a2338] hover:border-[#54f28b] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-none cursor-pointer ${mobile ? "w-12 h-12" : "w-10 h-10"}`}
+          className={`relative flex flex-col items-center justify-center border-2 border-black bg-[#0f1830]/80 backdrop-blur-sm shadow-[2px_2px_0_0_#000] hover:border-[#54f28b] hover:bg-[#1a2338]/90 active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-none cursor-pointer ${size}`}
         >
-          <span className={mobile ? "text-[18px] leading-none" : "text-[16px] leading-none"}>{slot.icon}</span>
-          <span className={mobile ? "text-[8px] leading-none text-[#9aa7cc] mt-[2px]" : "text-[7px] leading-none text-[#9aa7cc] mt-[2px]"}>{slot.key}</span>
+          <img
+            src={slot.icon}
+            alt={slot.label}
+            className={`${imgSize} object-contain drop-shadow-lg`}
+            draggable={false}
+          />
+          <span className="text-[7px] leading-none text-[#9aa7cc] mt-[2px] font-bold">{slot.key}</span>
         </button>
       ))}
     </div>

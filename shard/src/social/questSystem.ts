@@ -1764,6 +1764,1054 @@ export const QUEST_CATALOG: Quest[] = [
       xp: 250,
     },
   },
+
+  // === AURORAL PLAINS QUESTS (Levels 15-20) ===
+
+  {
+    id: "auroral_welcome",
+    title: "Winds of Change",
+    description:
+      "Windcaller Aelara senses a shift in the auroral currents. She beckons you closer, her robes crackling with static. 'The plains speak to those who listen. Come, let me show you what the wind carries.'",
+    npcId: "Windcaller Aelara",
+    objective: {
+      type: "talk",
+      targetNpcName: "Windcaller Aelara",
+      count: 1,
+    },
+    rewards: {
+      copper: 150,
+      xp: 600,
+    },
+  },
+  {
+    id: "auroral_stalker_hunt",
+    title: "Stalkers on the Plains",
+    description:
+      "Aelara points toward the tall grass. 'Plains Stalkers hunt in silence — you won't see them until their claws are at your throat. Thin their numbers before they grow bolder.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_welcome",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Plains Stalker",
+      count: 4,
+    },
+    rewards: {
+      copper: 250,
+      xp: 800,
+      items: [{ tokenId: 50, quantity: 2 }],
+    },
+  },
+  {
+    id: "auroral_wisp_dance",
+    title: "Dancing Wisps",
+    description:
+      "Strange lights flicker across the plains at dusk. 'Aurora Wisps,' Aelara murmurs. 'Beautiful but dangerous — their touch drains life essence. Disperse four of them before they form a swarm.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_stalker_hunt",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Aurora Wisp",
+      count: 4,
+    },
+    rewards: {
+      copper: 300,
+      xp: 900,
+    },
+  },
+  {
+    id: "auroral_storm_harvest",
+    title: "Storm Harvest",
+    description:
+      "Aelara holds up a glowing petal. 'Starbloom only opens during electrical storms. I need five specimens for my research into auroral magic. Gather them from the charged meadows.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_wisp_dance",
+    objective: {
+      type: "gather",
+      targetItemName: "Starbloom",
+      count: 5,
+    },
+    rewards: {
+      copper: 350,
+      xp: 1000,
+      items: [{ tokenId: 116, quantity: 1 }],
+    },
+  },
+  {
+    id: "auroral_harpy_scourge",
+    title: "Harpy Scourge",
+    description:
+      "Shrieking echoes from the cliffs. 'Windborne Harpies nest in the upper crags. They dive-bomb anyone crossing the open plains. Kill three before they claim more victims.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_storm_harvest",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Windborne Harpy",
+      count: 3,
+    },
+    rewards: {
+      copper: 400,
+      xp: 1100,
+      items: [{ tokenId: 52, quantity: 1 }],
+    },
+  },
+  {
+    id: "auroral_wraith_purge",
+    title: "Purging the Wraiths",
+    description:
+      "Aelara's expression darkens. 'Essence Wraiths feed on the auroral energy itself. If left unchecked, they'll drain the plains dry. Destroy three of them.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_harpy_scourge",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Essence Wraith",
+      count: 3,
+    },
+    rewards: {
+      copper: 450,
+      xp: 1200,
+    },
+  },
+  {
+    id: "auroral_drake_slayer",
+    title: "The Skyward Drake",
+    description:
+      "Thunder rumbles overhead. Aelara looks up with reverence and fear. 'The Skyward Drake rules these skies. It must be brought down — or we'll never tame the plains.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_wraith_purge",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Skyward Drake",
+      count: 1,
+    },
+    rewards: {
+      copper: 700,
+      xp: 2000,
+      items: [{ tokenId: 71, quantity: 2 }, { tokenId: 117, quantity: 1 }],
+    },
+  },
+  {
+    id: "auroral_storm_master",
+    title: "Stormbreaker",
+    description:
+      "Aelara raises her staff. 'You've proven yourself against the worst the plains can muster — almost. The Storm Elementals gather at the auroral convergence. Destroy eight to earn the title of Stormbreaker.'",
+    npcId: "Windcaller Aelara",
+    prerequisiteQuestId: "auroral_drake_slayer",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Storm Elemental",
+      count: 8,
+    },
+    rewards: {
+      copper: 800,
+      xp: 2200,
+      items: [{ tokenId: 121, quantity: 1 }],
+    },
+  },
+
+  // === EMERALD WOODS QUESTS (Levels 20-25) ===
+
+  {
+    id: "emerald_wardens_call",
+    title: "The Warden's Call",
+    description:
+      "Verdant Warden Sylva emerges from the canopy, her armor woven from living vines. 'The Emerald Woods are ancient and proud — but something rots beneath the roots. If you would help, speak with me.'",
+    npcId: "Verdant Warden Sylva",
+    objective: {
+      type: "talk",
+      targetNpcName: "Verdant Warden Sylva",
+      count: 1,
+    },
+    rewards: {
+      copper: 200,
+      xp: 800,
+    },
+  },
+  {
+    id: "emerald_treant_menace",
+    title: "Treant Menace",
+    description:
+      "Sylva grips her spear. 'Thorned Treants have gone mad — their roots tear up the pathways and their thorns poison travelers. Cut down four of them before they spread further.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_wardens_call",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Thorned Treant",
+      count: 4,
+    },
+    rewards: {
+      copper: 350,
+      xp: 1000,
+      items: [{ tokenId: 51, quantity: 2 }],
+    },
+  },
+  {
+    id: "emerald_serpent_strike",
+    title: "Serpent Strike",
+    description:
+      "Sylva kneels beside a trail of shed scales. 'Emerald Serpents nest in the hollow logs. Their venom can fell an ox in seconds. Slay four before the next clutch hatches.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_treant_menace",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Emerald Serpent",
+      count: 4,
+    },
+    rewards: {
+      copper: 400,
+      xp: 1100,
+    },
+  },
+  {
+    id: "emerald_rare_bloom",
+    title: "Rare Blooms",
+    description:
+      "Sylva holds a crimson flower that pulses with heat. 'Dragon's Breath grows only where ancient fire magic lingers. I need five blooms to craft a ward against the forest corruption.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_serpent_strike",
+    objective: {
+      type: "gather",
+      targetItemName: "Dragon's Breath",
+      count: 5,
+    },
+    rewards: {
+      copper: 450,
+      xp: 1200,
+      items: [{ tokenId: 118, quantity: 1 }],
+    },
+  },
+  {
+    id: "emerald_worg_pack",
+    title: "The Worg Pack",
+    description:
+      "Howls echo through the woods at night. 'Feral Worgs — larger and meaner than any wolf. They hunt in packs and drag their prey into burrows. Kill three before they establish a den.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_rare_bloom",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Feral Worg",
+      count: 3,
+    },
+    rewards: {
+      copper: 500,
+      xp: 1300,
+      items: [{ tokenId: 53, quantity: 1 }],
+    },
+  },
+  {
+    id: "emerald_specter_hunt",
+    title: "Specter Hunt",
+    description:
+      "Sylva shivers despite the warm air. 'Selerion Specters — remnants of an ancient civilization. They phase through trees and strike from behind. Hunt three down.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_worg_pack",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Selerion Specter",
+      count: 3,
+    },
+    rewards: {
+      copper: 550,
+      xp: 1400,
+    },
+  },
+  {
+    id: "emerald_sentinel_fall",
+    title: "Fall of the Sentinel",
+    description:
+      "Sylva points to a towering stone figure in the distance. 'The Grom Sentinel was built to protect these woods. Now corrupted, it destroys everything it once guarded. It must fall.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_specter_hunt",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Grom Sentinel",
+      count: 1,
+    },
+    rewards: {
+      copper: 900,
+      xp: 2500,
+      items: [{ tokenId: 74, quantity: 1 }, { tokenId: 119, quantity: 1 }],
+    },
+  },
+  {
+    id: "emerald_guardian_trial",
+    title: "Guardian's Trial",
+    description:
+      "Sylva places a hand on your shoulder. 'You've earned my respect. But the final test remains — Ancient Guardians patrol the deepest groves. Defeat eight to prove you are the true guardian of these woods.'",
+    npcId: "Verdant Warden Sylva",
+    prerequisiteQuestId: "emerald_sentinel_fall",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Ancient Guardian",
+      count: 8,
+    },
+    rewards: {
+      copper: 1000,
+      xp: 2800,
+      items: [{ tokenId: 29, quantity: 1 }],
+    },
+  },
+
+  // === VIRIDIAN RANGE QUESTS (Levels 25-30) ===
+
+  {
+    id: "viridian_overseers_task",
+    title: "The Overseer's Task",
+    description:
+      "Gemloch Overseer Barak sits atop a boulder, surveying the mountain passes. His pickaxe rests beside him, still gleaming with ore dust. 'These peaks hold riches — and dangers. If you want to survive the Range, listen well.'",
+    npcId: "Gemloch Overseer Barak",
+    objective: {
+      type: "talk",
+      targetNpcName: "Gemloch Overseer Barak",
+      count: 1,
+    },
+    rewards: {
+      copper: 250,
+      xp: 1000,
+    },
+  },
+  {
+    id: "viridian_yeti_cull",
+    title: "Yeti Cull",
+    description:
+      "Barak stamps his feet against the cold. 'Mountain Yetis have claimed the lower passes. They tear apart supply caravans and hoard the wreckage. Cull four of them.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_overseers_task",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Mountain Yeti",
+      count: 4,
+    },
+    rewards: {
+      copper: 450,
+      xp: 1200,
+      items: [{ tokenId: 55, quantity: 1 }],
+    },
+  },
+  {
+    id: "viridian_basilisk_eyes",
+    title: "Basilisk Eyes",
+    description:
+      "Barak holds up a petrified bird. 'Rock Basilisks — one look and you turn to stone. Four of them nest along the ridge. Don't stare too long.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_yeti_cull",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Rock Basilisk",
+      count: 4,
+    },
+    rewards: {
+      copper: 500,
+      xp: 1300,
+    },
+  },
+  {
+    id: "viridian_ore_expedition",
+    title: "Ore Expedition",
+    description:
+      "Barak runs his thumb along a gold nugget. 'The Range is rich in gold, but miners won't go near the upper veins. Bring me five Gold Ore and I'll make it worth your while.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_basilisk_eyes",
+    objective: {
+      type: "gather",
+      targetItemName: "Gold Ore",
+      count: 5,
+    },
+    rewards: {
+      copper: 550,
+      xp: 1400,
+      items: [{ tokenId: 89, quantity: 1 }],
+    },
+  },
+  {
+    id: "viridian_condor_nests",
+    title: "Condor Nests",
+    description:
+      "A massive shadow passes overhead. 'Storm Condors — wingspan wider than a house. They snatch miners right off the cliffs. Bring down three.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_ore_expedition",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Storm Condor",
+      count: 3,
+    },
+    rewards: {
+      copper: 600,
+      xp: 1500,
+      items: [{ tokenId: 57, quantity: 1 }],
+    },
+  },
+  {
+    id: "viridian_golem_smash",
+    title: "Golem Smash",
+    description:
+      "Barak cracks his knuckles. 'Gemloch Golems — animated from the very ore we mine. They guard the deep tunnels and crush trespassers. Smash three apart.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_condor_nests",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Gemloch Golem",
+      count: 3,
+    },
+    rewards: {
+      copper: 650,
+      xp: 1600,
+      items: [{ tokenId: 74, quantity: 1 }],
+    },
+  },
+  {
+    id: "viridian_titan_fall",
+    title: "Fall of the Titan",
+    description:
+      "The mountain trembles. Barak steadies himself. 'The Avalanche Titan — a living mountain. It buries entire camps under rockslides. This is the fight of your life, adventurer.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_golem_smash",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Avalanche Titan",
+      count: 1,
+    },
+    rewards: {
+      copper: 1100,
+      xp: 3000,
+      items: [{ tokenId: 119, quantity: 2 }, { tokenId: 72, quantity: 3 }],
+    },
+  },
+  {
+    id: "viridian_frost_breaker",
+    title: "Frost Breaker",
+    description:
+      "Barak raises his pickaxe in salute. 'One trial remains. Frost Giants descend from the summit when the blizzards hit. Six of them block the high pass. Clear the way and the Range is yours.'",
+    npcId: "Gemloch Overseer Barak",
+    prerequisiteQuestId: "viridian_titan_fall",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Frost Giant",
+      count: 6,
+    },
+    rewards: {
+      copper: 1200,
+      xp: 3200,
+      items: [{ tokenId: 30, quantity: 1 }],
+    },
+  },
+
+  // === MOONDANCER GLADE QUESTS (Levels 30-35) ===
+
+  {
+    id: "moondancer_elder_wisdom",
+    title: "The Elder's Wisdom",
+    description:
+      "Elder Druid Moonwhisper sits cross-legged beneath the great silver tree, moonlight dancing across her antlered headdress. 'The Glade is in turmoil. Ancient pacts have been broken. If you would restore balance, listen to my words.'",
+    npcId: "Elder Druid Moonwhisper",
+    objective: {
+      type: "talk",
+      targetNpcName: "Elder Druid Moonwhisper",
+      count: 1,
+    },
+    rewards: {
+      copper: 300,
+      xp: 1200,
+    },
+  },
+  {
+    id: "moondancer_stalker_shadows",
+    title: "Shadows in the Moonlight",
+    description:
+      "Moonwhisper gazes into the silver mist. 'Moon Stalkers — they were guardians once, but the corruption turned them feral. They hunt by moonlight and leave no trace. Slay four before the full moon.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_elder_wisdom",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Moon Stalker",
+      count: 4,
+    },
+    rewards: {
+      copper: 550,
+      xp: 1400,
+      items: [{ tokenId: 56, quantity: 1 }],
+    },
+  },
+  {
+    id: "moondancer_fae_rebellion",
+    title: "Fae Rebellion",
+    description:
+      "Tiny lights dart angrily through the trees. 'The Fae Guardians have turned against us. Once allies, now they attack anyone who enters their groves. Put down four of them — gently, if you can.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_stalker_shadows",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Fae Guardian",
+      count: 4,
+    },
+    rewards: {
+      copper: 600,
+      xp: 1500,
+    },
+  },
+  {
+    id: "moondancer_moonflower_rite",
+    title: "Moonflower Rite",
+    description:
+      "Moonwhisper holds out a silver vial. 'The Moonflower only blooms when both moons align. I need six for the purification ritual. Search the sacred clearings where moonlight pools.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_fae_rebellion",
+    objective: {
+      type: "gather",
+      targetItemName: "Moonflower",
+      count: 6,
+    },
+    rewards: {
+      copper: 650,
+      xp: 1600,
+      items: [{ tokenId: 120, quantity: 1 }],
+    },
+  },
+  {
+    id: "moondancer_dryad_thorns",
+    title: "Dryad Thorns",
+    description:
+      "Thorny vines creep across the path. 'Twilight Dryads weave walls of thorns to trap travelers. They were gentle once. Now they must be stopped — kill three before the Glade is sealed off entirely.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_moonflower_rite",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Twilight Dryad",
+      count: 3,
+    },
+    rewards: {
+      copper: 700,
+      xp: 1700,
+      items: [{ tokenId: 58, quantity: 1 }],
+    },
+  },
+  {
+    id: "moondancer_druid_purge",
+    title: "Corrupted Druids",
+    description:
+      "Moonwhisper's voice drops to a whisper. 'The worst betrayal — Shadow Druids, my former students. They turned to dark magic and now spread the corruption from within. End three of them.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_dryad_thorns",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Shadow Druid",
+      count: 3,
+    },
+    rewards: {
+      copper: 750,
+      xp: 1800,
+      items: [{ tokenId: 75, quantity: 1 }],
+    },
+  },
+  {
+    id: "moondancer_archdruid_duel",
+    title: "The Archdruid's Duel",
+    description:
+      "The silver tree shudders. Moonwhisper stands. 'The Moondancer Archdruid — the one who started it all. He channels the corruption through the ley lines. Defeat him in single combat, or the Glade is lost.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_druid_purge",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Moondancer Archdruid",
+      count: 1,
+    },
+    rewards: {
+      copper: 1300,
+      xp: 3500,
+      items: [{ tokenId: 120, quantity: 2 }, { tokenId: 40, quantity: 3 }],
+    },
+  },
+  {
+    id: "moondancer_lunar_trial",
+    title: "Lunar Trial",
+    description:
+      "Moonwhisper bows her head. 'One final trial. Lunar Wraiths rise from the corrupted ley lines when the moons are full. Destroy six to sever the connection and restore the Glade's ancient peace.'",
+    npcId: "Elder Druid Moonwhisper",
+    prerequisiteQuestId: "moondancer_archdruid_duel",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Lunar Wraith",
+      count: 6,
+    },
+    rewards: {
+      copper: 1400,
+      xp: 3800,
+      items: [{ tokenId: 54, quantity: 1 }],
+    },
+  },
+
+  // === FELSROCK CITADEL QUESTS (Levels 35-40) ===
+
+  {
+    id: "felsrock_captains_orders",
+    title: "Captain's Orders",
+    description:
+      "Forgeguard Captain Haldor stands at the gatehouse, his plate armor scarred by a hundred battles. 'The Citadel's forges burn day and night — but the constructs have turned on their makers. Report to me for orders.'",
+    npcId: "Forgeguard Captain Haldor",
+    objective: {
+      type: "talk",
+      targetNpcName: "Forgeguard Captain Haldor",
+      count: 1,
+    },
+    rewards: {
+      copper: 350,
+      xp: 1400,
+    },
+  },
+  {
+    id: "felsrock_automaton_sweep",
+    title: "Automaton Sweep",
+    description:
+      "Haldor slams his fist on the battlement. 'Iron Automatons patrol the corridors. They were built to defend us — now they attack anyone on sight. Disable four.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_captains_orders",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Iron Automaton",
+      count: 4,
+    },
+    rewards: {
+      copper: 650,
+      xp: 1600,
+      items: [{ tokenId: 61, quantity: 1 }],
+    },
+  },
+  {
+    id: "felsrock_forgebound_fury",
+    title: "Forgebound Fury",
+    description:
+      "Heat shimmers in the air. 'Molten Forgebound — they crawled out of the great furnace itself. Living metal and slag, burning everything they touch. Destroy four.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_automaton_sweep",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Molten Forgebound",
+      count: 4,
+    },
+    rewards: {
+      copper: 700,
+      xp: 1700,
+    },
+  },
+  {
+    id: "felsrock_deep_salvage",
+    title: "Deep Salvage",
+    description:
+      "Haldor gestures at the ruined forges. 'We need materials to rebuild. Craft three Steel Alloys from salvaged metal — the smithing stations in the lower halls still function.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_forgebound_fury",
+    objective: {
+      type: "craft",
+      targetItemName: "Steel Alloy",
+      count: 3,
+    },
+    rewards: {
+      copper: 750,
+      xp: 1800,
+      items: [{ tokenId: 60, quantity: 1 }],
+    },
+  },
+  {
+    id: "felsrock_dweller_depths",
+    title: "From the Depths",
+    description:
+      "A rumble shakes the floor. 'Deep Dwellers burrow up from below — eyeless things with razor claws. They collapsed the east wing last week. Kill three before they undermine the whole citadel.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_deep_salvage",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Deep Dweller",
+      count: 3,
+    },
+    rewards: {
+      copper: 800,
+      xp: 1900,
+      items: [{ tokenId: 73, quantity: 2 }],
+    },
+  },
+  {
+    id: "felsrock_rune_breaker",
+    title: "Rune Breaker",
+    description:
+      "Haldor traces glowing symbols on the wall. 'Rune Golems — the old masters inscribed them with forbidden glyphs. They regenerate unless you shatter their core runes. Break three.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_dweller_depths",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Rune Golem",
+      count: 3,
+    },
+    rewards: {
+      copper: 850,
+      xp: 2000,
+      items: [{ tokenId: 74, quantity: 2 }],
+    },
+  },
+  {
+    id: "felsrock_forgemaster_end",
+    title: "The Forgemaster",
+    description:
+      "The great forge roars with unnatural flame. Haldor draws his blade. 'The Forgemaster Infernal — it seized control of every construct in the Citadel. End it, and the forges are ours again.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_rune_breaker",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Forgemaster Infernal",
+      count: 1,
+    },
+    rewards: {
+      copper: 1500,
+      xp: 4000,
+      items: [{ tokenId: 75, quantity: 2 }, { tokenId: 121, quantity: 2 }],
+    },
+  },
+  {
+    id: "felsrock_kings_reckoning",
+    title: "King's Reckoning",
+    description:
+      "Haldor salutes you. 'One last mission. Corrupted Dwarf Kings haunt the throne room — echoes of rulers who fell to greed. Five of them guard the vault. Lay them to rest and claim your reward.'",
+    npcId: "Forgeguard Captain Haldor",
+    prerequisiteQuestId: "felsrock_forgemaster_end",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Corrupted Dwarf King",
+      count: 5,
+    },
+    rewards: {
+      copper: 1600,
+      xp: 4200,
+      items: [{ tokenId: 44, quantity: 1 }],
+    },
+  },
+
+  // === LAKE LUMINA QUESTS (Levels 40-45) ===
+
+  {
+    id: "lumina_priestess_plea",
+    title: "The Priestess's Plea",
+    description:
+      "Lumen Priestess Aurelia kneels at the water's edge, her robes glowing with soft golden light. 'The Lake was once sacred — a place of healing. Now dark things stir in its depths. Will you help restore the light?'",
+    npcId: "Lumen Priestess Aurelia",
+    objective: {
+      type: "talk",
+      targetNpcName: "Lumen Priestess Aurelia",
+      count: 1,
+    },
+    rewards: {
+      copper: 400,
+      xp: 1600,
+    },
+  },
+  {
+    id: "lumina_wraith_light",
+    title: "Light Against Wraiths",
+    description:
+      "Aurelia channels golden light between her palms. 'Luminous Wraiths twist the Lake's own radiance into weapons. They blind their prey, then drain their life. Banish four with blessed steel.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_priestess_plea",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Luminous Wraith",
+      count: 4,
+    },
+    rewards: {
+      copper: 750,
+      xp: 1800,
+      items: [{ tokenId: 59, quantity: 1 }],
+    },
+  },
+  {
+    id: "lumina_crystal_crush",
+    title: "Crystal Crush",
+    description:
+      "Aurelia points to towering shapes along the shore. 'Crystal Golems — they grew from the Lake's mineral deposits. Beautiful, but deadly. Shatter four of them before they seal the waterways.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_wraith_light",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Crystal Golem",
+      count: 4,
+    },
+    rewards: {
+      copper: 800,
+      xp: 1900,
+    },
+  },
+  {
+    id: "lumina_sunken_relics",
+    title: "Sunken Relics",
+    description:
+      "Aurelia gazes into the shimmering water. 'Arcane Crystals lie scattered on the lakebed — remnants of the old temple. Retrieve five. Their power is essential for the purification ritual.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_crystal_crush",
+    objective: {
+      type: "gather",
+      targetItemName: "Arcane Crystal",
+      count: 5,
+    },
+    rewards: {
+      copper: 850,
+      xp: 2000,
+      items: [{ tokenId: 122, quantity: 1 }],
+    },
+  },
+  {
+    id: "lumina_drowned_honor",
+    title: "Drowned Honor",
+    description:
+      "Aurelia bows her head in sorrow. 'Drowned Knights — temple guardians who fell when the darkness came. They still patrol their posts, attacking anything that moves. Grant three of them peace.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_sunken_relics",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Drowned Knight",
+      count: 3,
+    },
+    rewards: {
+      copper: 900,
+      xp: 2100,
+      items: [{ tokenId: 53, quantity: 2 }],
+    },
+  },
+  {
+    id: "lumina_serpent_depths",
+    title: "Serpent of the Depths",
+    description:
+      "The water churns violently. 'Lumen Serpents coil around the sunken pillars. Their scales reflect light into blinding beams. Slay three — but shield your eyes.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_drowned_honor",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Lumen Serpent",
+      count: 3,
+    },
+    rewards: {
+      copper: 950,
+      xp: 2200,
+      items: [{ tokenId: 119, quantity: 1 }],
+    },
+  },
+  {
+    id: "lumina_solaris_warden",
+    title: "The Solaris Warden",
+    description:
+      "A column of golden light erupts from the center of the Lake. Aurelia grips her staff. 'The Solaris Warden — the temple's ultimate guardian, now twisted by corruption. Defeat it to unlock the inner sanctum.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_serpent_depths",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Solaris Warden",
+      count: 1,
+    },
+    rewards: {
+      copper: 1700,
+      xp: 4500,
+      items: [{ tokenId: 121, quantity: 3 }, { tokenId: 120, quantity: 2 }],
+    },
+  },
+  {
+    id: "lumina_horror_purge",
+    title: "Purge the Horrors",
+    description:
+      "Aurelia raises her staff high, light blazing. 'The final corruption — Sunken Horrors, abominations from the deepest trenches. Destroy five and the Lake will shine again. This is your destiny, champion.'",
+    npcId: "Lumen Priestess Aurelia",
+    prerequisiteQuestId: "lumina_solaris_warden",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Sunken Horror",
+      count: 5,
+    },
+    rewards: {
+      copper: 1800,
+      xp: 4800,
+      items: [{ tokenId: 79, quantity: 1 }],
+    },
+  },
+
+  // === AZURSHARD CHASM QUESTS (Levels 45-50) ===
+
+  {
+    id: "azurshard_watchers_warning",
+    title: "The Watcher's Warning",
+    description:
+      "Dragonkin Watcher Azael perches on a crystalline spire, his draconic eyes scanning the abyss below. 'You've come far, mortal. The Chasm devours the unprepared. Hear my warning before you descend.'",
+    npcId: "Dragonkin Watcher Azael",
+    objective: {
+      type: "talk",
+      targetNpcName: "Dragonkin Watcher Azael",
+      count: 1,
+    },
+    rewards: {
+      copper: 500,
+      xp: 1800,
+    },
+  },
+  {
+    id: "azurshard_dragonkin_clash",
+    title: "Dragonkin Clash",
+    description:
+      "Azael flexes his clawed hands. 'Azure Dragonkin — my kin, fallen to madness. They guard the crystal veins with primal fury. You must defeat four to prove your strength is worthy of the Chasm.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_watchers_warning",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Azure Dragonkin",
+      count: 4,
+    },
+    rewards: {
+      copper: 850,
+      xp: 2000,
+      items: [{ tokenId: 55, quantity: 2 }],
+    },
+  },
+  {
+    id: "azurshard_void_tear",
+    title: "Tear in the Void",
+    description:
+      "Reality warps at the edges of the Chasm. 'Void Weavers slip through tears in the fabric of space. They unravel anything they touch — flesh, stone, even magic. Seal four of them.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_dragonkin_clash",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Void Weaver",
+      count: 4,
+    },
+    rewards: {
+      copper: 900,
+      xp: 2200,
+    },
+  },
+  {
+    id: "azurshard_shard_harvest",
+    title: "Shard Harvest",
+    description:
+      "Azael holds up a pulsing blue crystal. 'Arcane Crystals form in the deepest fissures where raw magic crystallizes. Harvest six — they are the key to sealing the void rifts.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_void_tear",
+    objective: {
+      type: "gather",
+      targetItemName: "Arcane Crystal",
+      count: 6,
+    },
+    rewards: {
+      copper: 1000,
+      xp: 2400,
+      items: [{ tokenId: 119, quantity: 2 }],
+    },
+  },
+  {
+    id: "azurshard_sentinel_wall",
+    title: "The Sentinel Wall",
+    description:
+      "Crystalline giants block the descent. 'Shard Sentinels — living crystal, harder than diamond. They form an impassable wall at the mid-chasm. Shatter three to open the path.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_shard_harvest",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Shard Sentinel",
+      count: 3,
+    },
+    rewards: {
+      copper: 1100,
+      xp: 2600,
+      items: [{ tokenId: 54, quantity: 1 }],
+    },
+  },
+  {
+    id: "azurshard_wyrm_hunt",
+    title: "Wyrm Hunt",
+    description:
+      "The walls tremble. Azael grips his spear. 'Chasm Wyrms burrow through solid crystal. They're blind but sense vibrations — and they're always hungry. Hunt three before they tunnel to the surface.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_sentinel_wall",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Chasm Wyrm",
+      count: 3,
+    },
+    rewards: {
+      copper: 1200,
+      xp: 2800,
+      items: [{ tokenId: 75, quantity: 2 }],
+    },
+  },
+  {
+    id: "azurshard_dragon_end",
+    title: "The Azurshard Dragon",
+    description:
+      "A deafening roar echoes from the deepest chasm. Azael closes his eyes. 'The Azurshard Dragon — ancient beyond reckoning. It sleeps on a bed of crystals and dreams of the void. Wake it. End it. Or it will end everything.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_wyrm_hunt",
+    objective: {
+      type: "kill",
+      targetMobType: "boss",
+      targetMobName: "Azurshard Dragon",
+      count: 1,
+    },
+    rewards: {
+      copper: 2000,
+      xp: 5000,
+      items: [{ tokenId: 121, quantity: 3 }, { tokenId: 120, quantity: 3 }, { tokenId: 119, quantity: 2 }],
+    },
+  },
+  {
+    id: "azurshard_devourer_trial",
+    title: "Devourer's Trial",
+    description:
+      "Azael bows to you. 'You have done what no mortal has achieved. But the Chasm has one final test — Essence Devourers, creatures that consume magic itself. Destroy five and you will be legend.'",
+    npcId: "Dragonkin Watcher Azael",
+    prerequisiteQuestId: "azurshard_dragon_end",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Essence Devourer",
+      count: 5,
+    },
+    rewards: {
+      copper: 2200,
+      xp: 5500,
+      items: [{ tokenId: 54, quantity: 2 }],
+    },
+  },
 ];
 
 // ── Economy scaling ─────────────────────────────────────────────────────────

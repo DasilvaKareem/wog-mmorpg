@@ -26,6 +26,7 @@ import { WalletPanel } from "@/components/WalletPanel";
 import { ChatLog } from "@/components/ChatLog";
 import { AgentChatPanel } from "@/components/AgentChatPanel";
 import { HotkeyBar } from "@/components/HotkeyBar";
+import { PlayerHUD } from "@/components/PlayerHUD";
 import { PlayerPanel } from "@/components/PlayerPanel";
 import { WorldMap } from "@/components/WorldMap";
 import { FarcasterMiniApp } from "@/pages/FarcasterMiniApp";
@@ -104,6 +105,7 @@ function GameWorld(): React.ReactElement {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
+      {address && <PlayerHUD walletAddress={address} />}
       {!isCompactWorldUI && <WalletPanel />}
       {!isCompactWorldUI && (
         <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />

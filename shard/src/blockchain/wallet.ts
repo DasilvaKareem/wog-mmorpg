@@ -287,14 +287,18 @@ export async function registerWalletWithWelcomeBonus(
     return { ok: true, message: "Already registered" };
   }
 
-  const sfuelTx = await distributeSFuel(address);
-  console.log(`[wallet/register] sFUEL sent to ${address}: ${sfuelTx}`);
-
-  // Mark registered immediately so the API responds fast
+  // Mark registered immediately so the API responds fast — never block on blockchain
   await markWalletRegistered(normalized);
 
-  // Send welcome gold in the background — don't block the response
+  // sFUEL + welcome gold both run in background — don't block the response
   void (async () => {
+    try {
+      const sfuelTx = await distributeSFuel(address);
+      console.log(`[wallet/register] sFUEL sent to ${address}: ${sfuelTx}`);
+    } catch (err: any) {
+      console.warn(`[wallet/register] sFUEL distribution failed for ${address}: ${String(err?.message ?? "").slice(0, 150)}`);
+    }
+
     try {
       const treasuryAddress = await ensureWelcomeTreasury(server);
       try { await distributeSFuel(treasuryAddress); } catch {}
@@ -311,7 +315,6 @@ export async function registerWalletWithWelcomeBonus(
   return {
     ok: true,
     message: "Wallet registered",
-    sfuelTx,
     welcomeBonus: {
       copper: WELCOME_COPPER,
       gold: WELCOME_GOLD,
