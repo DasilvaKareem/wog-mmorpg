@@ -924,6 +924,11 @@ export class WorldScene extends Phaser.Scene {
               if (pos) this.abilityLayer.playDeath(pos);
               this.entityRenderer.triggerDeath(evt.entityId);
             }
+            if (evt.type === "levelup" && evt.entityId) {
+              const pos = pixelPositions.get(evt.entityId);
+              if (pos) this.abilityLayer.playLevelUp(pos);
+              this.entityRenderer.triggerLevelUp(evt.entityId);
+            }
             const evtData = evt.data as Record<string, unknown> | undefined;
             const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
             if (isMelee && evt.entityId && evt.targetId) {
@@ -981,6 +986,11 @@ export class WorldScene extends Phaser.Scene {
             const pos = pixelPositions.get(evt.entityId);
             if (pos) this.abilityLayer.playDeath(pos);
             this.entityRenderer.triggerDeath(evt.entityId);
+          }
+          if (evt.type === "levelup" && evt.entityId) {
+            const pos = pixelPositions.get(evt.entityId);
+            if (pos) this.abilityLayer.playLevelUp(pos);
+            this.entityRenderer.triggerLevelUp(evt.entityId);
           }
           const evtData = evt.data as Record<string, unknown> | undefined;
           const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";

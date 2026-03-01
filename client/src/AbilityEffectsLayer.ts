@@ -182,6 +182,25 @@ export class AbilityEffectsLayer {
     this.scene.time.delayedCall(450, () => this.burst(techType, dst));
   }
 
+  // ── Level up: gold particle shower ────────────────────────────────
+  playLevelUp(pos: Pos): void {
+    const emitter = this.emitters.get("buff")!;
+    emitter.explode(20, pos.x, pos.y);
+    this.scene.time.delayedCall(150, () => emitter.explode(16, pos.x, pos.y));
+
+    // Rising ring
+    const ring = this.scene.add.arc(pos.x, pos.y, 8, 0, 360, false);
+    ring.setStrokeStyle(2, 0xffd700, 1);
+    ring.setFillStyle();
+    ring.setDepth(92);
+    this.scene.tweens.add({
+      targets: ring,
+      scaleX: 6, scaleY: 6, alpha: 0,
+      duration: 600, ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   // ── Death: large multi-color burst + fading ring ──────────────────
   playDeath(pos: Pos): void {
     // Big particle burst using attack emitter

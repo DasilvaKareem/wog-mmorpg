@@ -194,6 +194,40 @@ export class EntityRenderer {
     partyRing?.destroy();
   }
 
+  /** Float a golden "LEVEL UP!" banner above the entity. */
+  triggerLevelUp(entityId: string): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    const x = visual.sprite.x;
+    const y = visual.sprite.y - 16;
+
+    // Golden flash on the sprite
+    visual.sprite.setTint(0xffd700);
+    this.scene.time.delayedCall(400, () => visual.sprite?.clearTint());
+
+    // Floating "LEVEL UP!" text
+    const text = this.scene.add
+      .text(x, y, "LEVEL UP!", {
+        fontSize: "11px",
+        fontFamily: "monospace",
+        color: "#ffd700",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(120);
+
+    this.scene.tweens.add({
+      targets: text,
+      y: y - 28,
+      alpha: 0,
+      duration: 1400,
+      ease: "Quad.easeOut",
+      onComplete: () => text.destroy(),
+    });
+  }
+
   /** Snapshot pixel positions for all tracked entities (used by VFX layer). */
   getPixelPositions(): Map<string, { x: number; y: number }> {
     const out = new Map<string, { x: number; y: number }>();
@@ -326,9 +360,10 @@ export class EntityRenderer {
 
     // Name label — colored if in a party, guild tag underneath
     const labelColor = entity.partyId ? colorToHex(partyColor(entity.partyId)) : "#ffffff";
+    const levelTag = entity.level != null ? ` Lv.${entity.level}` : "";
     const labelText = entity.guildName
-      ? `${entity.name}\n<${entity.guildName}>`
-      : entity.name;
+      ? `${entity.name}${levelTag}\n<${entity.guildName}>`
+      : `${entity.name}${levelTag}`;
     const label = this.scene.add
       .text(px, py - 12, labelText, {
         fontSize: "10px",
@@ -420,10 +455,11 @@ export class EntityRenderer {
     // Update party ring: create/destroy/recolor if partyId changed
     this.syncPartyRing(visual, entity);
 
-    // Update label text (guild name may appear/change)
+    // Update label text (guild name / level may appear/change)
+    const levelTag = entity.level != null ? ` Lv.${entity.level}` : "";
     const expectedLabel = entity.guildName
-      ? `${entity.name}\n<${entity.guildName}>`
-      : entity.name;
+      ? `${entity.name}${levelTag}\n<${entity.guildName}>`
+      : `${entity.name}${levelTag}`;
     if (visual.label.text !== expectedLabel) {
       visual.label.setText(expectedLabel);
     }
