@@ -182,6 +182,31 @@ export class AbilityEffectsLayer {
     this.scene.time.delayedCall(450, () => this.burst(techType, dst));
   }
 
+  // ── Death: large multi-color burst + fading ring ──────────────────
+  playDeath(pos: Pos): void {
+    // Big particle burst using attack emitter
+    const emitter = this.emitters.get("attack")!;
+    emitter.explode(28, pos.x, pos.y);
+
+    // Second burst of debuff (purple) particles for drama
+    const debuffEmitter = this.emitters.get("debuff")!;
+    this.scene.time.delayedCall(80, () => {
+      debuffEmitter.explode(14, pos.x, pos.y);
+    });
+
+    // Expanding skull-flash ring
+    const ring = this.scene.add.arc(pos.x, pos.y, 6, 0, 360, false);
+    ring.setStrokeStyle(3, 0xff2222, 1);
+    ring.setFillStyle();
+    ring.setDepth(92);
+    this.scene.tweens.add({
+      targets: ring,
+      scaleX: 8, scaleY: 8, alpha: 0,
+      duration: 500, ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────
   private burst(techType: string, pos: Pos): void {
     const emitter = this.emitters.get(techType) ?? this.emitters.get("attack")!;

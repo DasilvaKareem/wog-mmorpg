@@ -61,6 +61,7 @@ export class EntityRenderer {
   private visuals = new Map<string, EntityVisual>();
   private entities = new Map<string, Entity>();
   private onClickCallback: ((entity: Entity) => void) | null = null;
+  private dying = new Set<string>(); // entities mid-death animation
 
   /**
    * Scale factor: multiply entity world coords by this to get pixel position.
@@ -154,6 +155,45 @@ export class EntityRenderer {
     });
   }
 
+  /** Spin, shrink, and fade out a dying entity, then clean it up. */
+  triggerDeath(entityId: string): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite || this.dying.has(entityId)) return;
+
+    this.dying.add(entityId);
+
+    const { sprite, label, hpBar, hpBg, partyRing } = visual;
+
+    // Spin + shrink + fade the sprite
+    this.scene.tweens.add({
+      targets: sprite,
+      angle: 180,
+      scaleX: 0,
+      scaleY: 0,
+      alpha: 0,
+      duration: 600,
+      ease: "Quad.easeIn",
+      onComplete: () => {
+        sprite.destroy();
+        label.destroy();
+        hpBar.destroy();
+        hpBg.destroy();
+        partyRing?.destroy();
+        this.visuals.delete(entityId);
+        this.entities.delete(entityId);
+        this.dying.delete(entityId);
+      },
+    });
+
+    // Fade label + HP bar faster
+    this.scene.tweens.add({
+      targets: [label, hpBar, hpBg],
+      alpha: 0,
+      duration: 250,
+    });
+    partyRing?.destroy();
+  }
+
   /** Snapshot pixel positions for all tracked entities (used by VFX layer). */
   getPixelPositions(): Map<string, { x: number; y: number }> {
     const out = new Map<string, { x: number; y: number }>();
@@ -186,9 +226,9 @@ export class EntityRenderer {
   update(entities: Record<string, Entity>): void {
     const incoming = new Set(Object.keys(entities));
 
-    // Remove entities no longer present
+    // Remove entities no longer present (skip dying ones — animation cleans them up)
     for (const [id, visual] of this.visuals) {
-      if (!incoming.has(id)) {
+      if (!incoming.has(id) && !this.dying.has(id)) {
         visual.sprite.destroy();
         visual.label.destroy();
         visual.hpBar.destroy();

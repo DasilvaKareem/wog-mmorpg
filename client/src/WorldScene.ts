@@ -919,6 +919,11 @@ export class WorldScene extends Phaser.Scene {
           const pixelPositions = this.entityRenderer.getPixelPositions();
           for (const evt of data.recentEvents ?? []) {
             if (evt.type === "ability") this.abilityLayer.playEffect(evt, pixelPositions);
+            if (evt.type === "death" && evt.entityId) {
+              const pos = pixelPositions.get(evt.entityId);
+              if (pos) this.abilityLayer.playDeath(pos);
+              this.entityRenderer.triggerDeath(evt.entityId);
+            }
             const evtData = evt.data as Record<string, unknown> | undefined;
             const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
             if (isMelee && evt.entityId && evt.targetId) {
@@ -972,6 +977,11 @@ export class WorldScene extends Phaser.Scene {
       for (const { data } of results) {
         for (const evt of data?.recentEvents ?? []) {
           if (evt.type === "ability") this.abilityLayer.playEffect(evt, pixelPositions);
+          if (evt.type === "death" && evt.entityId) {
+            const pos = pixelPositions.get(evt.entityId);
+            if (pos) this.abilityLayer.playDeath(pos);
+            this.entityRenderer.triggerDeath(evt.entityId);
+          }
           const evtData = evt.data as Record<string, unknown> | undefined;
           const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
           if (isMelee && evt.entityId && evt.targetId) {
