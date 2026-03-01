@@ -64,7 +64,7 @@ import { registerNotificationRoutes } from "./social/notificationRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
-import { getTxStats } from "./blockchain/blockchain.js";
+import { getTxStats, mintGold } from "./blockchain/blockchain.js";
 import { getWorldLayout } from "./world/worldLayout.js";
 import { getAllZones, clearMobTagsForPlayer, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
@@ -86,6 +86,22 @@ async function assertMainnetRpc(): Promise<void> {
 
 // Health check — GCP and you use this to know the shard is alive
 server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
+
+// Admin: mint gold to any wallet — protected by ADMIN_SECRET env var
+server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", async (req, reply) => {
+  const secret = req.headers["x-admin-secret"];
+  if (secret !== (process.env.ADMIN_SECRET || "wog-admin")) {
+    return reply.code(401).send({ error: "Unauthorized" });
+  }
+  const { address, copper } = req.body;
+  if (!address || !copper || copper <= 0) return reply.code(400).send({ error: "address and copper required" });
+  try {
+    const tx = await mintGold(address, copper.toString());
+    return reply.send({ ok: true, tx, copper });
+  } catch (err: any) {
+    return reply.code(500).send({ error: err.message });
+  }
+});
 
 // Transaction stats — live blockchain activity dashboard
 server.get("/stats/transactions", async () => getTxStats());
@@ -323,11 +339,10 @@ const start = async () => {
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
 
-  // Restore agent loops only after HTTP server is live.
-  // Agent auth + setup uses API calls that fail pre-listen.
-  agentManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  // Agent boot restore disabled — agents deploy on demand via /agent/deploy.
+  // agentManager.restoreFromRedis().catch((err: any) => {
+  //   server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  // });
 };
 
 // Graceful shutdown: stop all agent loops
