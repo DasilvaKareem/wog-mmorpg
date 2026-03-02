@@ -470,9 +470,9 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
   const perMemberXp = Math.floor(totalXp / memberCount);
 
   for (const member of eligibleMembers) {
-    // Ensure level and xp are proper numbers (safety fix for type coercion bugs)
-    if (typeof member.level !== "number") member.level = Number(member.level) || 1;
-    if (typeof member.xp !== "number") member.xp = Number(member.xp) || 0;
+    // Ensure level and xp are proper numbers (NaN check: typeof NaN === "number")
+    if (typeof member.level !== "number" || Number.isNaN(member.level)) member.level = Number(member.level) || 1;
+    if (typeof member.xp !== "number" || Number.isNaN(member.xp)) member.xp = Number(member.xp) || 0;
 
     // Apply each member's own potion XP multiplier
     const xpMult = getActiveXpMultiplier(member.activeEffects);
@@ -1092,7 +1092,34 @@ async function worldTick() {
             if (entity.type === "player") {
               handlePlayerDeath(entity, zone.zoneId);
             } else {
+              // Award kill credit + XP for DoT kills
+              if (dotKiller && dotKiller.type === "player") {
+                dotKiller.kills = (dotKiller.kills ?? 0) + 1;
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "kill",
+                  tick: zone.tick,
+                  message: `${dotKiller.name} has slain ${entity.name}!`,
+                  entityId: dotKiller.id,
+                  entityName: dotKiller.name,
+                  targetId: entity.id,
+                  targetName: entity.name,
+                  data: { xpReward: entity.xpReward ?? 0 },
+                });
+                if (dotKiller.activeQuests) {
+                  for (const activeQuest of dotKiller.activeQuests) {
+                    const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
+                    if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
+                      activeQuest.progress++;
+                    }
+                  }
+                }
+              }
               await handleMobDeath(entity, dotKiller, zone);
+              // Grant XP for DoT kill
+              if (dotKiller) {
+                awardPartyXp(zone, dotKiller, entity.xpReward ?? 0);
+              }
             }
             break; // Entity is dead, stop processing effects
           }
@@ -1217,8 +1244,49 @@ async function worldTick() {
                 handlePlayerDeath(entity, zone.zoneId);
                 continue;
               } else {
+                // Mob/boss died from retaliation — award XP + kill credit to the retaliator
+                const retaliator = (entity.taggedBy && zone.entities.get(entity.taggedBy)?.type === "player")
+                  ? zone.entities.get(entity.taggedBy)!
+                  : (target.type === "player" ? target : undefined);
+                if (retaliator && retaliator.type === "player") {
+                  retaliator.kills = (retaliator.kills ?? 0) + 1;
+                  logZoneEvent({
+                    zoneId: zone.zoneId,
+                    type: "kill",
+                    tick: zone.tick,
+                    message: `${retaliator.name} has slain ${entity.name}!`,
+                    entityId: retaliator.id,
+                    entityName: retaliator.name,
+                    targetId: entity.id,
+                    targetName: entity.name,
+                    data: { xpReward: entity.xpReward ?? 0 },
+                  });
+                  if (retaliator.walletAddress) {
+                    const { headline, narrative } = narrativeKill(retaliator.name, retaliator.raceId, retaliator.classId, zone.zoneId, entity.name, entity.xpReward ?? 0);
+                    logDiary(retaliator.walletAddress, retaliator.name, zone.zoneId, retaliator.x, retaliator.y, "kill", headline, narrative, {
+                      targetName: entity.name,
+                      targetType: entity.type,
+                      xpReward: entity.xpReward ?? 0,
+                    });
+                  }
+                  // Track quest progress for retaliation kills
+                  if (retaliator.activeQuests) {
+                    for (const activeQuest of retaliator.activeQuests) {
+                      const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
+                      if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
+                        activeQuest.progress++;
+                      }
+                    }
+                  }
+                }
+
                 // Mobs/bosses: auto-loot + create corpse
-                await handleMobDeath(entity, target, zone);
+                await handleMobDeath(entity, retaliator ?? target, zone);
+
+                // Grant XP for retaliation kill
+                if (retaliator) {
+                  awardPartyXp(zone, retaliator, entity.xpReward ?? 0);
+                }
                 continue;
               }
             }

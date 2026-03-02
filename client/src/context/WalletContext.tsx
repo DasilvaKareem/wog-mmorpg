@@ -32,7 +32,7 @@ interface WalletContextValue {
   disconnect: () => void;
   syncAddress: (address: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
-  refreshCharacterProgress: () => Promise<void>;
+  refreshCharacterProgress: (force?: boolean) => Promise<void>;
   refreshProfessions: () => Promise<void>;
   buyItem: (tokenId: number, quantity: number) => Promise<boolean>;
   equipItem: (tokenId: number) => Promise<boolean>;

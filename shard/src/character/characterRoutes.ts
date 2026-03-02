@@ -38,10 +38,20 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
   /**
    * POST /character/create
-   * { walletAddress, name, race, className } → mint ERC-721 NFT with computed stats
+   * { walletAddress, name, race, className, tier?, paymentProof? } → mint ERC-721 NFT with computed stats
+   *
+   * Paid tiers (starter/pro) require a paymentProof.transactionHash.
+   * Internal callers (agentCharacterSetup) pass x-internal header to bypass the gate.
    */
   server.post<{
-    Body: { walletAddress: string; name: string; race: string; className: string };
+    Body: {
+      walletAddress: string;
+      name: string;
+      race: string;
+      className: string;
+      tier?: string;
+      paymentProof?: { transactionHash: string };
+    };
   }>("/character/create", async (request, reply) => {
     const { walletAddress, name, race, className } = request.body;
 
@@ -49,6 +59,30 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     if (error) {
       reply.code(400);
       return { error };
+    }
+
+    // Payment gate for paid tiers — skip for internal callers (agent setup)
+    const isInternal = request.headers["x-internal"] === "true";
+    const tier = request.body.tier ?? "free";
+    if (!isInternal && (tier === "starter" || tier === "pro")) {
+      if (!request.body.paymentProof?.transactionHash) {
+        const pricing: Record<string, { usd: number; description: string }> = {
+          starter: { usd: 4.99, description: "Starter tier — AI supervisor, 12h sessions, all zones" },
+          pro:     { usd: 9.99, description: "Pro tier — 24/7 sessions, market trading, full access" },
+        };
+        reply.code(402);
+        return {
+          error: "Payment required for this tier",
+          tier,
+          pricing: pricing[tier],
+          paymentInfo: {
+            chainId: 8453,
+            currency: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            note: "Pay with USDC on Base. Include paymentProof.transactionHash after payment.",
+          },
+        };
+      }
+      // TODO: verify paymentProof.transactionHash on-chain
     }
 
     const character = computeCharacter(name, race, className);
@@ -69,21 +103,27 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       // Guarantee onboarding grant is applied even if client skipped /wallet/register.
       const registration = await registerWalletWithWelcomeBonus(server, walletAddress);
 
-      // Seed character store so level/xp are always in Redis from the start
-      await saveCharacter(walletAddress, character.name, {
-        name: character.name,
-        level: 1,
-        xp: 0,
-        raceId: character.race.id,
-        classId: character.class.id,
-        zone: "village-square",
-        x: 0,
-        y: 0,
-        kills: 0,
-        completedQuests: [],
-        learnedTechniques: [],
-        professions: [],
-      });
+      // Seed character store so level/xp are always in Redis from the start.
+      // IMPORTANT: Only seed if no existing save exists — never overwrite progress.
+      const existingSave = await loadCharacter(walletAddress, character.name);
+      if (!existingSave) {
+        await saveCharacter(walletAddress, character.name, {
+          name: character.name,
+          level: 1,
+          xp: 0,
+          raceId: character.race.id,
+          classId: character.class.id,
+          zone: "village-square",
+          x: 0,
+          y: 0,
+          kills: 0,
+          completedQuests: [],
+          learnedTechniques: [],
+          professions: [],
+        });
+      } else {
+        server.log.info(`[character] Existing save found for "${character.name}" (L${existingSave.level}) — skipping seed`);
+      }
 
       // Mint NFT + register name in background — don't block the response
       void (async () => {

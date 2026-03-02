@@ -7,6 +7,7 @@
  */
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import type { AgentTier } from "./agentTiers.js";
 
 export type AgentFocus =
   | "questing"
@@ -38,6 +39,10 @@ export interface AgentConfig {
   /** Set when user clicks "send agent here" on an NPC. Cleared once agent arrives. */
   gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string };
   lastUpdated: number;
+  /** Pricing tier — defaults to "free" for backward compat */
+  tier?: AgentTier;
+  /** Epoch ms when the current session started (for session limit enforcement) */
+  sessionStartedAt?: number;
   /** @deprecated Chat history now lives in agent:chat:{wallet} Redis list. Kept for type compat. */
   chatHistory: ChatMessage[];
 }

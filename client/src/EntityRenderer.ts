@@ -5,6 +5,14 @@ import {
   inferDirection,
 } from "./EntitySpriteGenerator.js";
 
+/** Tracks which Phaser FX are applied to a sprite for a given effect type */
+interface AppliedFx {
+  types: Set<string>; // active effect types: "buff" | "debuff" | "dot" | "shield" | "hot"
+  glow: Phaser.FX.Glow | null;
+  colorMatrix: Phaser.FX.ColorMatrix | null;
+  shine: Phaser.FX.Shine | null;
+}
+
 interface EntityVisual {
   sprite: Phaser.GameObjects.Sprite;
   label: Phaser.GameObjects.Text;
@@ -17,6 +25,7 @@ interface EntityVisual {
   moving: boolean;
   isNpc: boolean;
   hovered: boolean;
+  fx: AppliedFx;
 }
 
 const SPRITE_SIZE = 16;
@@ -263,6 +272,7 @@ export class EntityRenderer {
     // Remove entities no longer present (skip dying ones — animation cleans them up)
     for (const [id, visual] of this.visuals) {
       if (!incoming.has(id) && !this.dying.has(id)) {
+        this.clearEffectFx(visual);
         visual.sprite.destroy();
         visual.label.destroy();
         visual.hpBar.destroy();
@@ -309,6 +319,7 @@ export class EntityRenderer {
         moving: false,
         isNpc: false,
         hovered: false,
+        fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
       };
     }
 
@@ -407,7 +418,7 @@ export class EntityRenderer {
       hpBg.setVisible(false);
     }
 
-    return {
+    const visual: EntityVisual = {
       sprite,
       label,
       hpBar,
@@ -419,7 +430,13 @@ export class EntityRenderer {
       moving: false,
       isNpc,
       hovered: false,
+      fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
     };
+
+    // Apply initial FX for any active effects
+    this.syncEffectFx(visual, entity);
+
+    return visual;
   }
 
   private updateVisual(
@@ -530,6 +547,9 @@ export class EntityRenderer {
       .setSize(HP_BAR_W * hpRatio, HP_BAR_H)
       .setFillStyle(hpColor(hpRatio));
 
+    // Sync buff/debuff FX
+    this.syncEffectFx(visual, entity);
+
     visual.lastX = px;
     visual.lastY = py;
   }
@@ -559,6 +579,90 @@ export class EntityRenderer {
     }
   }
 
+  // ─── Buff/Debuff FX Pipeline ──────────────────────────────────────────
+
+  /** Check if the renderer has WebGL FX support */
+  private get hasFxSupport(): boolean {
+    return this.scene.renderer?.type === Phaser.WEBGL;
+  }
+
+  /** Derive the set of active effect types from an entity */
+  private getEffectTypes(entity: Entity): Set<string> {
+    const types = new Set<string>();
+    for (const fx of entity.activeEffects ?? []) {
+      types.add(fx.type);
+    }
+    return types;
+  }
+
+  /** Sync Phaser FX on a sprite to match the entity's active effects.
+   *  Uses clear-and-reapply when the set of effect types changes. */
+  private syncEffectFx(visual: EntityVisual, entity: Entity): void {
+    if (!this.hasFxSupport || !visual.sprite?.preFX) return;
+
+    const newTypes = this.getEffectTypes(entity);
+    const applied = visual.fx;
+
+    // Quick check: if types haven't changed, nothing to do
+    if (setsEqual(newTypes, applied.types)) return;
+
+    // Clear all existing FX and rebuild
+    const preFX = visual.sprite.preFX;
+    preFX.clear();
+    preFX.setPadding(0);
+    applied.glow = null;
+    applied.colorMatrix = null;
+    applied.shine = null;
+
+    if (newTypes.size === 0) {
+      applied.types = newTypes;
+      return;
+    }
+
+    // Glow: shield (cyan) > buff (gold) > debuff (purple) — priority order
+    const needsGlow = newTypes.has("shield") || newTypes.has("buff") || newTypes.has("debuff");
+    if (needsGlow) {
+      preFX.setPadding(4);
+      if (newTypes.has("shield")) {
+        applied.glow = preFX.addGlow(0x44ccff, 3, 0, false);
+      } else if (newTypes.has("buff")) {
+        applied.glow = preFX.addGlow(0xfacc22, 2.5, 0, false);
+      } else {
+        applied.glow = preFX.addGlow(0xaa44ff, 2.5, 0, false);
+      }
+    }
+
+    // ColorMatrix: dot (green hue shift) and/or debuff (night darkening)
+    if (newTypes.has("dot") || newTypes.has("debuff")) {
+      applied.colorMatrix = preFX.addColorMatrix();
+      if (newTypes.has("dot")) {
+        applied.colorMatrix.hue(90, false);
+      }
+      if (newTypes.has("debuff")) {
+        applied.colorMatrix.night(0.15, true);
+      }
+    }
+
+    // Shine: hot (green shimmer)
+    if (newTypes.has("hot")) {
+      applied.shine = preFX.addShine(0.3, 0.5, 3, false);
+    }
+
+    applied.types = newTypes;
+  }
+
+  /** Remove all FX from a visual (called on destroy) */
+  private clearEffectFx(visual: EntityVisual): void {
+    if (!visual.sprite?.preFX) return;
+    if (visual.fx.glow || visual.fx.colorMatrix || visual.fx.shine) {
+      visual.sprite.preFX.clear();
+    }
+    visual.fx.glow = null;
+    visual.fx.colorMatrix = null;
+    visual.fx.shine = null;
+    visual.fx.types.clear();
+  }
+
   get entityCount(): number {
     return this.visuals.size;
   }
@@ -575,4 +679,11 @@ export class EntityRenderer {
       visual.partyRing?.setVisible(visible);
     }
   }
+}
+
+// ─── Set Utilities ─────────────────────────────────────────────────────
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) if (!b.has(v)) return false;
+  return true;
 }

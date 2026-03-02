@@ -19,6 +19,7 @@ import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelp
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveZoneId } from "../world/worldLayout.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
+import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
 import { type BotScript, type TriggerEvent, type TriggerType } from "../types/botScriptTypes.js";
 
 /** Safety-net: call supervisor if no trigger has fired in this many ticks (~60s). */
@@ -129,6 +130,9 @@ export class AgentRunner {
   private lastKnownZone = "";
   /** Last processed inbox stream ID — only fetch messages newer than this */
   private lastInboxId = "0-0";
+
+  /** Tier capabilities for the current tick — set once per loop iteration. */
+  private currentCaps: TierCapabilities = TIER_CAPABILITIES["free"];
 
   /** Cooldown: don't attempt technique learning before this timestamp (ms). */
   private nextTechniqueCheckAt = 0;
@@ -338,7 +342,7 @@ export class AgentRunner {
   private moveToStaleCount = 0;
   private moveToLastTarget = "";
 
-  private async moveToEntity(me: any, target: any): Promise<boolean> {
+  private async moveToEntity(me: any, target: any, closeEnoughDist = 35): Promise<boolean> {
     if (!this.api || !this.entityId) return false;
     const dist = Math.hypot(target.x - me.x, target.y - me.y);
     const targetKey = `${Math.round(target.x)},${Math.round(target.y)}`;
@@ -356,7 +360,7 @@ export class AgentRunner {
       return false; // force "close enough" to unblock the action
     }
 
-    if (dist > 80) {
+    if (dist > closeEnoughDist) {
       void this.logActivity(`Walking to ${target.name ?? "target"} (${Math.round(dist)} away)`);
       await this.api("POST", "/command", {
         zoneId: this.currentZone, entityId: this.entityId, action: "move",
@@ -484,10 +488,18 @@ export class AgentRunner {
         this.nextTechniqueCheckAt = Date.now() + 30_000;
         return true;
       } catch (learnErr: any) {
-        // Learn call failed — skip this technique permanently for this session
-        this.failedTechniqueIds.add(nextToLearn.id);
-        this.nextTechniqueCheckAt = Date.now() + 300_000; // 5-min cooldown after failure
-        console.debug(`[agent] learnNextTechnique: failed (${learnErr.message?.slice(0, 60)}) — skipping ${nextToLearn.id}`);
+        const msg = String(learnErr.message ?? "").toLowerCase();
+        // Only permanently blacklist on definitive failures (wrong class, already learned)
+        const isDefinitive = msg.includes("wrong class") || msg.includes("already learned")
+          || msg.includes("cannot teach") || msg.includes("not a player");
+        if (isDefinitive) {
+          this.failedTechniqueIds.add(nextToLearn.id);
+          this.nextTechniqueCheckAt = Date.now() + 300_000; // 5-min cooldown
+        } else {
+          // Transient failure (too far, not enough gold, etc.) — retry after 30s
+          this.nextTechniqueCheckAt = Date.now() + 30_000;
+        }
+        console.debug(`[agent] learnNextTechnique: failed (${learnErr.message?.slice(0, 60)}) — ${isDefinitive ? "skipping" : "will retry"}`);
         return false;
       }
     } catch (err: any) {
@@ -779,31 +791,35 @@ export class AgentRunner {
   private async doCombat(strategy: AgentStrategy): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
-      const trainingBusy = await this.learnNextTechnique();
-      if (trainingBusy) return;
+      if (this.currentCaps.techniquesEnabled) {
+        const trainingBusy = await this.learnNextTechnique();
+        if (trainingBusy) return;
+      }
 
       const zs = await this.getZoneState();
       if (!zs) return;
       const { entities, me } = zs;
 
       // Don't engage if HP is too low — disengage and let regen kick in
-      const hpPct = (me.hp ?? 0) / Math.max(me.maxHp ?? 1, 1);
-      const retreatThreshold: Record<AgentStrategy, number> = {
-        aggressive: 0.15,
-        balanced:   0.30,
-        defensive:  0.50,
-      };
-      if (hpPct < retreatThreshold[strategy]) {
-        // Override any existing attack order so the agent actually disengages.
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone,
-          entityId: this.entityId,
-          action: "move",
-          x: 150,
-          y: 150,
-        });
-        void this.logActivity(`Low HP (${Math.round(hpPct * 100)}%) — disengaging`);
-        return;
+      // (only if retreat is enabled for this tier)
+      if (this.currentCaps.retreatEnabled) {
+        const hpPct = (me.hp ?? 0) / Math.max(me.maxHp ?? 1, 1);
+        const retreatThreshold: Record<AgentStrategy, number> = {
+          aggressive: 0.15,
+          balanced:   0.30,
+          defensive:  0.50,
+        };
+        if (hpPct < retreatThreshold[strategy]) {
+          await this.api("POST", "/command", {
+            zoneId: this.currentZone,
+            entityId: this.entityId,
+            action: "move",
+            x: 150,
+            y: 150,
+          });
+          void this.logActivity(`Low HP (${Math.round(hpPct * 100)}%) — disengaging`);
+          return;
+        }
       }
 
       const myLevel = me.level ?? 1;
@@ -1367,6 +1383,8 @@ export class AgentRunner {
 
   private async handleLowHp(entity: any, strategy: AgentStrategy): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    if (!this.currentCaps.retreatEnabled) return false;
+
     const hpPct = entity.hp / (entity.maxHp || 1);
 
     const threshold: Record<AgentStrategy, number> = {
@@ -1472,10 +1490,19 @@ export class AgentRunner {
       const equipment = entity.equipment ?? {};
       const hasWeapon = Boolean(equipment.weapon);
 
+      const currentFocusEarly = (await getAgentConfig(this.userWallet))?.focus;
+
+      // Crafting escape hatch: if stuck in gathering/crafting for 60+ ticks (~72s), return to questing
+      if ((currentFocusEarly === "gathering" || currentFocusEarly === "crafting") && this.ticksSinceFocusChange > 60) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: stuck in ${currentFocusEarly} for ${this.ticksSinceFocusChange} ticks, returning to questing`);
+        void this.logActivity(`Done ${currentFocusEarly} — back to questing`);
+        await patchAgentConfig(this.userWallet, { focus: "questing" });
+        return true;
+      }
+
       // Priority 0: Early-game bootstrap — keep killing mobs until 100 copper
       if (copper < 100) {
-        const currentFocus = (await getAgentConfig(this.userWallet))?.focus;
-        if (currentFocus !== "combat" && currentFocus !== "shopping") {
+        if (currentFocusEarly !== "combat" && currentFocusEarly !== "shopping") {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: only ${copper}c, need 100c — staying in combat`);
           void this.logActivity(`Only ${copper}c — killing mobs for starter gold`);
           await patchAgentConfig(this.userWallet, { focus: "combat" });
@@ -1489,6 +1516,18 @@ export class AgentRunner {
         void this.logActivity("No weapon equipped — heading to shop");
         await patchAgentConfig(this.userWallet, { focus: "shopping" });
         return true;
+      }
+
+      // Priority 1b: Has weapon but missing armor pieces → go shopping for gear
+      const armorSlots = ["chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"];
+      const emptyArmorSlots = armorSlots.filter((s) => !equipment[s]);
+      if (emptyArmorSlots.length >= 2 && copper >= 40) {
+        if (currentFocusEarly !== "shopping") {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: ${emptyArmorSlots.length} empty armor slots (${emptyArmorSlots.join(", ")}), going shopping`);
+          void this.logActivity(`Missing ${emptyArmorSlots.length} armor pieces — heading to shop`);
+          await patchAgentConfig(this.userWallet, { focus: "shopping" });
+          return true;
+        }
       }
 
       // Priority 2: Critically low HP with no consumables → try shopping for food first,
@@ -1515,6 +1554,18 @@ export class AgentRunner {
         // No ingredients, no gold — just keep questing/fighting to earn gold
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: no consumables or gold, staying on task`);
         return false;
+      }
+
+      // Priority 2b: Periodically switch to gathering → crafting cycle for XP + gear
+      // Trigger: agent has been questing/fighting for 100+ ticks AND has 200+ copper
+      // This gives agents a natural "go craft some gear" cadence
+      if (this.ticksSinceFocusChange > 100
+        && copper >= 200
+        && (currentFocusEarly === "questing" || currentFocusEarly === "combat")) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: crafting cycle — ${this.ticksSinceFocusChange} ticks in ${currentFocusEarly}, ${copper}c available`);
+        void this.logActivity("Switching to gathering & crafting for gear upgrades");
+        await patchAgentConfig(this.userWallet, { focus: "gathering" });
+        return true;
       }
 
       // Priority 3: Outleveled current zone → travel to next zone
@@ -1696,6 +1747,11 @@ export class AgentRunner {
           this.ticksOnCurrentScript = 0;
           void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
         }
+      } else if (!this.currentCaps.supervisorEnabled) {
+        // Free tier: no LLM supervisor — always use scripted fallback
+        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.ticksOnCurrentScript = 0;
+        void this.logActivity(`[script] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else {
       try {
         // Fetch real on-chain gold balance — entity.gold is always 0 (not a zone field)
@@ -1756,6 +1812,21 @@ export class AgentRunner {
           if (!firstTickDone) onFirstTickFail(new Error("Agent config disabled"));
           this.running = false;
           break;
+        }
+
+        // Resolve tier capabilities for this tick
+        this.currentCaps = TIER_CAPABILITIES[config.tier ?? "free"];
+
+        // Session timeout enforcement
+        if (this.currentCaps.sessionLimitMs != null && config.sessionStartedAt) {
+          if (Date.now() - config.sessionStartedAt >= this.currentCaps.sessionLimitMs) {
+            const hours = Math.round(this.currentCaps.sessionLimitMs / 3600_000);
+            console.log(`[agent:${this.userWallet.slice(0, 8)}] Session limit reached (${hours}h for ${config.tier ?? "free"} tier) — stopping`);
+            void this.logActivity(`Session limit reached (${hours}h) — upgrade tier for longer sessions`);
+            await patchAgentConfig(this.userWallet, { enabled: false });
+            this.running = false;
+            break;
+          }
         }
 
         // Ensure we're authenticated
@@ -1830,8 +1901,8 @@ export class AgentRunner {
         // Every 10 ticks (~12s), check situational needs.
         // Allow adaptation from questing/combat (normal flow) AND from cooking/shopping
         // (escape hatch — generic stuck detection in detectTrigger handles prolonged stalls).
-        const allowAutoAdapt = focus === "questing" || focus === "combat"
-          || focus === "cooking" || focus === "shopping";
+        const allowAutoAdapt = this.currentCaps.selfAdaptationEnabled
+          && (focus === "questing" || focus === "combat" || focus === "cooking" || focus === "shopping" || focus === "gathering" || focus === "crafting");
         if (allowAutoAdapt && this.ticksSinceFocusChange % 10 === 0 && this.ticksSinceFocusChange > 0) {
           const adapted = await this.checkSelfAdaptation(entity, strategy);
           if (adapted) { this.currentScript = null; await sleep(TICK_MS); continue; }
@@ -1854,6 +1925,24 @@ export class AgentRunner {
         if (normalizedTargetZone && normalizedTargetZone !== this.currentZone && focus !== "traveling") {
           await patchAgentConfig(this.userWallet, { focus: "traveling" });
           this.currentScript = null; // supervisor will assign travel script
+        }
+
+        // Zone restriction enforcement — if agent is in a disallowed zone, force travel back
+        if (this.currentCaps.allowedZones !== "all") {
+          const allowed = this.currentCaps.allowedZones;
+          if (!allowed.includes(this.currentZone)) {
+            const fallbackZone = allowed[0] ?? "village-square";
+            console.log(`[agent:${this.userWallet.slice(0, 8)}] Zone ${this.currentZone} not allowed for ${config.tier ?? "free"} tier — forcing travel to ${fallbackZone}`);
+            void this.logActivity(`Zone restricted — returning to ${fallbackZone}`);
+            await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
+            this.currentScript = null;
+          }
+          // Clear disallowed target zones
+          if (normalizedTargetZone && !allowed.includes(normalizedTargetZone)) {
+            console.log(`[agent:${this.userWallet.slice(0, 8)}] Target zone ${normalizedTargetZone} not allowed for ${config.tier ?? "free"} tier — clearing`);
+            await patchAgentConfig(this.userWallet, { targetZone: undefined });
+            this.currentScript = null;
+          }
         }
 
         // Event-driven bot: execute current script, trigger supervisor on significant events

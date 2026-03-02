@@ -87,8 +87,8 @@ function parseStringArray(value: string | undefined): string[] {
 function parseCharacter(raw: Record<string, string>): CharacterSaveData {
   return {
     name: raw.name ?? "Unknown",
-    level: parseInt(raw.level ?? "1", 10),
-    xp: parseInt(raw.xp ?? "0", 10),
+    level: parseInt(raw.level ?? "1", 10) || 1,
+    xp: parseInt(raw.xp ?? "0", 10) || 0,
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
     gender: raw.gender,

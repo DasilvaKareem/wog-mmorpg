@@ -468,22 +468,21 @@ function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (i
     <div className="space-y-1">
       {effects.map((fx, i) => {
         const tech = getTechnique(fx.techniqueId);
-        const name = tech?.name ?? fx.techniqueId;
-        const remaining = Math.max(0, Math.round((fx.expiresAt - now) / 1000));
-        const isBuff = fx.type === "buff";
+        const name = fx.name ?? tech?.name ?? fx.techniqueId;
+        const remaining = Math.max(0, Math.round((fx.remainingTicks * 0.5)));
+        const typeColors: Record<string, string> = {
+          buff: "#54f28b", hot: "#54f28b", shield: "#5dadec",
+          debuff: "#b48efa", dot: "#f25454",
+        };
+        const borderColor = typeColors[fx.type] ?? "#b48efa";
 
         return (
-          <div key={i} className="flex justify-between text-[11px] border-l-2 pl-2" style={{ borderColor: isBuff ? "#54f28b" : "#b48efa" }}>
+          <div key={i} className="flex justify-between text-[11px] border-l-2 pl-2" style={{ borderColor }}>
             <div>
-              <span style={{ color: isBuff ? "#54f28b" : "#b48efa" }}>{name}</span>
-              {fx.statBonus && (
+              <span style={{ color: borderColor }}>{name}</span>
+              {fx.statModifiers && (
                 <span className="ml-1 text-[9px]" style={{ color: DIM }}>
-                  {Object.entries(fx.statBonus).map(([s, v]) => `+${v}% ${s}`).join(", ")}
-                </span>
-              )}
-              {fx.statReduction && (
-                <span className="ml-1 text-[9px]" style={{ color: DIM }}>
-                  {Object.entries(fx.statReduction).map(([s, v]) => `-${v}% ${s}`).join(", ")}
+                  {Object.entries(fx.statModifiers).map(([s, v]) => `${(v ?? 0) > 0 ? "+" : ""}${v ?? 0}% ${s}`).join(", ")}
                 </span>
               )}
               {fx.dotDamage && (
@@ -491,9 +490,14 @@ function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (i
                   {fx.dotDamage} dmg/tick
                 </span>
               )}
-              {fx.shield && (
+              {fx.hotHealPerTick && (
+                <span className="ml-1 text-[9px]" style={{ color: "#54f28b" }}>
+                  +{fx.hotHealPerTick} hp/tick
+                </span>
+              )}
+              {fx.shieldHp != null && fx.shieldMaxHp != null && (
                 <span className="ml-1 text-[9px]" style={{ color: "#5dadec" }}>
-                  shield: {fx.shield}%
+                  shield: {fx.shieldHp}/{fx.shieldMaxHp}
                 </span>
               )}
             </div>

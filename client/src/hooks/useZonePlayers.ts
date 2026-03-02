@@ -7,6 +7,8 @@ export interface PlayerInfo {
   level: number;
   hp: number;
   maxHp: number;
+  essence?: number;
+  maxEssence?: number;
   xp?: number;
   raceId?: string;
   classId?: string;
@@ -65,6 +67,8 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
             level: e.level ?? 1,
             hp: e.hp,
             maxHp: e.maxHp,
+            essence: e.essence,
+            maxEssence: e.maxEssence,
             xp: e.xp,
             raceId: e.raceId,
             classId: e.classId,

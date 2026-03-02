@@ -35,13 +35,16 @@ export interface Entity {
 }
 
 export interface ActiveEffect {
+  id: string;
   techniqueId: string;
-  type: "buff" | "debuff";
-  expiresAt: number;
-  statBonus?: Partial<Record<string, number>>;
-  statReduction?: Partial<Record<string, number>>;
+  name: string;
+  type: "buff" | "debuff" | "dot" | "shield" | "hot";
+  remainingTicks: number;
+  statModifiers?: Partial<Record<string, number>>;
   dotDamage?: number;
-  shield?: number;
+  hotHealPerTick?: number;
+  shieldHp?: number;
+  shieldMaxHp?: number;
 }
 
 export interface ZoneEvent {

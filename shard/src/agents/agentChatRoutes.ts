@@ -23,6 +23,7 @@ import {
   type AgentStrategy,
 } from "./agentConfigStore.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
+import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getAllZones } from "../world/zoneRuntime.js";
@@ -92,6 +93,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       characterName?: string;
       raceId?: string;
       classId?: string;
+      tier?: AgentTier;
     };
   }>("/agent/deploy", {
     preHandler: authenticateRequest,
@@ -200,10 +202,13 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         }
       }
 
-      // Enable agent config
+      // Enable agent config — persist tier + session start time
       const config = (await getAgentConfig(authWallet)) ?? defaultConfig();
       config.enabled = true;
       config.lastUpdated = Date.now();
+      const tier = request.body.tier ?? "free";
+      config.tier = tier;
+      config.sessionStartedAt = Date.now();
       await setAgentConfig(authWallet, config);
 
       // Start agent loop — wait for first tick to verify it's actually alive.
@@ -317,9 +322,19 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const script = runner?.script ?? null;
     const currentScript = script ? { type: script.type, reason: script.reason ?? null } : null;
 
+    // Compute session time remaining
+    const tierName = config?.tier ?? "free";
+    const caps = TIER_CAPABILITIES[tierName];
+    let sessionRemainingMs: number | null = null;
+    if (caps.sessionLimitMs != null && config?.sessionStartedAt) {
+      sessionRemainingMs = Math.max(0, caps.sessionLimitMs - (Date.now() - config.sessionStartedAt));
+    }
+
     return reply.send({
       running,
       config: config ?? null,
+      tier: tierName,
+      sessionRemainingMs,
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
       custodialWallet: custodial ?? null,

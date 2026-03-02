@@ -15,6 +15,7 @@ import {
   defaultConfig,
 } from "./agentConfigStore.js";
 import { authenticateWithWallet } from "../auth/authHelper.js";
+import { loadCharacter } from "../character/characterStore.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -94,18 +95,25 @@ export async function setupAgentCharacter(
     }
   }
 
-  // ── Step 3: Mint character NFT (idempotent — skips if already exists) ─
-  try {
-    await apiCall("POST", "/character/create", {
-      walletAddress: custodialAddress,
-      name: characterName,
-      race: raceId,
-      className: classId,
-    });
-    console.log(`[agentSetup] Minted character "${characterName}" for ${custodialAddress}`);
-  } catch (err: any) {
-    // Character may already exist (duplicate name or wallet) — that's fine
-    console.log(`[agentSetup] Char mint skipped: ${err.message?.slice(0, 80)}`);
+  // ── Step 3: Mint character NFT (only if no saved character exists) ────
+  // CRITICAL: /character/create used to overwrite Redis with level 1.
+  // Skip it entirely when a saved character already exists to preserve progress.
+  const existingSave = await loadCharacter(custodialAddress, characterName);
+  if (existingSave) {
+    console.log(`[agentSetup] Character "${characterName}" already saved (L${existingSave.level}) — skipping create`);
+  } else {
+    try {
+      await apiCall("POST", "/character/create", {
+        walletAddress: custodialAddress,
+        name: characterName,
+        race: raceId,
+        className: classId,
+      });
+      console.log(`[agentSetup] Minted character "${characterName}" for ${custodialAddress}`);
+    } catch (err: any) {
+      // Character may already exist (duplicate name or wallet) — that's fine
+      console.log(`[agentSetup] Char mint skipped: ${err.message?.slice(0, 80)}`);
+    }
   }
 
   // ── Step 4: Authenticate custodial wallet to get JWT ──────────────────

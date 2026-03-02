@@ -12,7 +12,7 @@ const TYPE_COLOR: Record<string, number> = {
   debuff:  0xaa44ff,
 };
 
-// ── Particle emitter configs per technique type ───────────────────────
+// ── Particle emitter configs — tuned for subtle, small-sprite visuals ──
 interface EmitterCfg {
   tint: number[];
   count: number;
@@ -23,10 +23,10 @@ interface EmitterCfg {
 }
 
 const EMITTER_CFGS: Record<string, EmitterCfg> = {
-  attack:  { tint: [0xf83600, 0xf89800, 0xfacc22], count: 14, speed: { min: 60,  max: 160 }, scale: { start: 0.9, end: 0 }, lifespan: 700, gravityY: 60  },
-  healing: { tint: [0x96e0da, 0x00ff88, 0xffffff], count: 10, speed: { min: 30,  max: 90  }, scale: { start: 0.7, end: 0 }, lifespan: 800, gravityY: -40 },
-  buff:    { tint: [0xfacc22, 0xffffff, 0xf0d060], count:  8, speed: { min: 20,  max: 70  }, scale: { start: 0.6, end: 0 }, lifespan: 750, gravityY: -30 },
-  debuff:  { tint: [0x937ef3, 0x5500aa, 0xdd00ff], count: 10, speed: { min: 40,  max: 110 }, scale: { start: 0.8, end: 0 }, lifespan: 700, gravityY: 50  },
+  attack:  { tint: [0xf89800, 0xfacc22], count: 5, speed: { min: 20, max: 50 }, scale: { start: 0.4, end: 0 }, lifespan: 350, gravityY: 20  },
+  healing: { tint: [0x00ff88, 0xccffee], count: 4, speed: { min: 10, max: 30 }, scale: { start: 0.3, end: 0 }, lifespan: 450, gravityY: -15 },
+  buff:    { tint: [0xfacc22, 0xf0d060], count: 3, speed: { min: 8,  max: 25 }, scale: { start: 0.3, end: 0 }, lifespan: 400, gravityY: -12 },
+  debuff:  { tint: [0xaa44ff, 0x7722cc], count: 4, speed: { min: 15, max: 40 }, scale: { start: 0.35, end: 0 }, lifespan: 350, gravityY: 15  },
 };
 
 type Pos = { x: number; y: number };
@@ -69,7 +69,7 @@ export class AbilityEffectsLayer {
     );
 
     switch (animStyle) {
-      case "melee":     this.playMelee(techType, casterPos, targetPos); break;
+      case "melee":     this.burst(techType, targetPos); break;
       case "projectile":this.playProjectile(techType, casterPos, targetPos); break;
       case "area":      this.playArea(techType, targetPos); break;
       case "channel":   this.playChannel(techType, casterPos, targetPos); break;
@@ -77,34 +77,18 @@ export class AbilityEffectsLayer {
     }
   }
 
-  // ── Melee: immediate burst at impact ──────────────────────────────
-  private playMelee(techType: string, _caster: Pos, target: Pos): void {
-    this.burst(techType, target);
-  }
-
-  // ── Projectile: dot travels from caster to target, then burst ─────
+  // ── Projectile: small dot travels caster→target, burst on impact ────
   private playProjectile(techType: string, src: Pos, dst: Pos): void {
     const color = TYPE_COLOR[techType] ?? 0xffffff;
     const dot = this.scene.add.graphics();
-    dot.fillStyle(color, 1);
-    dot.fillCircle(0, 0, 4);
+    dot.fillStyle(color, 0.9);
+    dot.fillCircle(0, 0, 2);
     dot.setPosition(src.x, src.y);
     dot.setDepth(95);
 
-    // Short flash at caster first
-    const srcFlash = this.scene.add.graphics();
-    srcFlash.fillStyle(color, 0.6);
-    srcFlash.fillCircle(0, 0, 6);
-    srcFlash.setPosition(src.x, src.y);
-    srcFlash.setDepth(94);
-    this.scene.tweens.add({
-      targets: srcFlash, alpha: 0, duration: 200,
-      onComplete: () => srcFlash.destroy(),
-    });
-
     const dist  = Math.sqrt((dst.x - src.x) ** 2 + (dst.y - src.y) ** 2);
-    const speed = Math.max(180, dist);          // px/s — faster for longer distances
-    const dur   = Math.min(500, (dist / speed) * 1000);
+    const speed = Math.max(180, dist);
+    const dur   = Math.min(400, (dist / speed) * 1000);
 
     this.scene.tweens.add({
       targets: dot,
@@ -119,114 +103,76 @@ export class AbilityEffectsLayer {
     });
   }
 
-  // ── Area: expanding ring + burst at center ─────────────────────────
+  // ── Area: single thin expanding ring + small burst ──────────────────
   private playArea(techType: string, center: Pos): void {
     const color = TYPE_COLOR[techType] ?? 0xffffff;
-
-    // Inner burst
     this.burst(techType, center);
 
-    // Expanding ring
-    const ring = this.scene.add.arc(center.x, center.y, 10, 0, 360, false);
-    ring.setStrokeStyle(2, color, 1);
+    const ring = this.scene.add.arc(center.x, center.y, 6, 0, 360, false);
+    ring.setStrokeStyle(1, color, 0.7);
     ring.setFillStyle();
     ring.setDepth(85);
-
-    // Second, slightly delayed outer ring
-    this.scene.time.delayedCall(80, () => {
-      const ring2 = this.scene.add.arc(center.x, center.y, 10, 0, 360, false);
-      ring2.setStrokeStyle(1.5, color, 0.6);
-      ring2.setFillStyle();
-      ring2.setDepth(84);
-      this.scene.tweens.add({
-        targets: ring2, scaleX: 7, scaleY: 7, alpha: 0,
-        duration: 500, ease: "Quad.easeOut",
-        onComplete: () => ring2.destroy(),
-      });
-    });
-
     this.scene.tweens.add({
-      targets: ring, scaleX: 5, scaleY: 5, alpha: 0,
-      duration: 420, ease: "Quad.easeOut",
+      targets: ring, scaleX: 4, scaleY: 4, alpha: 0,
+      duration: 350, ease: "Quad.easeOut",
       onComplete: () => ring.destroy(),
     });
   }
 
-  // ── Channel: 3 pulsed bursts at caster, beam line to target ───────
+  // ── Channel: thin beam line + burst at target ───────────────────────
   private playChannel(techType: string, src: Pos, dst: Pos): void {
     const color = TYPE_COLOR[techType] ?? 0xffffff;
-    const emitter = this.emitters.get(techType) ?? this.emitters.get("attack")!;
 
-    // Beam line from caster to target (fades out)
     const beam = this.scene.add.graphics();
-    beam.lineStyle(2, color, 0.8);
+    beam.lineStyle(1, color, 0.6);
     beam.beginPath();
     beam.moveTo(src.x, src.y);
     beam.lineTo(dst.x, dst.y);
     beam.strokePath();
     beam.setDepth(88);
     this.scene.tweens.add({
-      targets: beam, alpha: 0, duration: 600,
+      targets: beam, alpha: 0, duration: 400,
       onComplete: () => beam.destroy(),
     });
 
-    // 3 pulsed particle bursts at caster, 150ms apart
-    const pulse = (cfg: EmitterCfg) => Math.ceil(cfg.count * 0.5);
-    for (let i = 0; i < 3; i++) {
-      this.scene.time.delayedCall(i * 150, () => {
-        emitter.explode(pulse(EMITTER_CFGS[techType] ?? EMITTER_CFGS.attack), src.x, src.y);
-      });
-    }
-
-    // Final impact burst at target
-    this.scene.time.delayedCall(450, () => this.burst(techType, dst));
+    this.scene.time.delayedCall(200, () => this.burst(techType, dst));
   }
 
-  // ── Level up: gold particle shower ────────────────────────────────
+  // ── Level up: small gold pop ────────────────────────────────────────
   playLevelUp(pos: Pos): void {
     const emitter = this.emitters.get("buff")!;
-    emitter.explode(20, pos.x, pos.y);
-    this.scene.time.delayedCall(150, () => emitter.explode(16, pos.x, pos.y));
+    emitter.explode(6, pos.x, pos.y);
 
-    // Rising ring
-    const ring = this.scene.add.arc(pos.x, pos.y, 8, 0, 360, false);
-    ring.setStrokeStyle(2, 0xffd700, 1);
+    const ring = this.scene.add.arc(pos.x, pos.y, 5, 0, 360, false);
+    ring.setStrokeStyle(1, 0xffd700, 0.8);
     ring.setFillStyle();
     ring.setDepth(92);
     this.scene.tweens.add({
       targets: ring,
-      scaleX: 6, scaleY: 6, alpha: 0,
-      duration: 600, ease: "Quad.easeOut",
+      scaleX: 4, scaleY: 4, alpha: 0,
+      duration: 450, ease: "Quad.easeOut",
       onComplete: () => ring.destroy(),
     });
   }
 
-  // ── Death: large multi-color burst + fading ring ──────────────────
+  // ── Death: brief red flash ──────────────────────────────────────────
   playDeath(pos: Pos): void {
-    // Big particle burst using attack emitter
     const emitter = this.emitters.get("attack")!;
-    emitter.explode(28, pos.x, pos.y);
+    emitter.explode(8, pos.x, pos.y);
 
-    // Second burst of debuff (purple) particles for drama
-    const debuffEmitter = this.emitters.get("debuff")!;
-    this.scene.time.delayedCall(80, () => {
-      debuffEmitter.explode(14, pos.x, pos.y);
-    });
-
-    // Expanding skull-flash ring
-    const ring = this.scene.add.arc(pos.x, pos.y, 6, 0, 360, false);
-    ring.setStrokeStyle(3, 0xff2222, 1);
+    const ring = this.scene.add.arc(pos.x, pos.y, 4, 0, 360, false);
+    ring.setStrokeStyle(1.5, 0xff2222, 0.8);
     ring.setFillStyle();
     ring.setDepth(92);
     this.scene.tweens.add({
       targets: ring,
-      scaleX: 8, scaleY: 8, alpha: 0,
-      duration: 500, ease: "Quad.easeOut",
+      scaleX: 5, scaleY: 5, alpha: 0,
+      duration: 350, ease: "Quad.easeOut",
       onComplete: () => ring.destroy(),
     });
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────
+  // ── Helpers ─────────────────────────────────────────────────────────
   private burst(techType: string, pos: Pos): void {
     const emitter = this.emitters.get(techType) ?? this.emitters.get("attack")!;
     emitter.explode(emitter.quantity as number, pos.x, pos.y);
@@ -249,12 +195,13 @@ export class AbilityEffectsLayer {
     }
   }
 
+  /** 8×8 soft dot — smaller texture for subtler particles */
   private createTexture(): void {
     if (this.scene.textures.exists(TEXTURE_KEY)) return;
-    const rt = this.scene.add.renderTexture(0, 0, 16, 16);
-    const circle = this.scene.add.arc(8, 8, 6, 0, 360, false, 0xffffff, 1);
+    const rt = this.scene.add.renderTexture(0, 0, 8, 8);
+    const circle = this.scene.add.arc(4, 4, 3, 0, 360, false, 0xffffff, 1);
     circle.setDepth(-999);
-    rt.draw(circle, 8, 8);
+    rt.draw(circle, 4, 4);
     rt.saveTexture(TEXTURE_KEY);
     circle.destroy();
     rt.destroy();
@@ -265,7 +212,7 @@ export class AbilityEffectsLayer {
       speed: cfg.speed,
       scale: cfg.scale,
       lifespan: cfg.lifespan,
-      blendMode: Phaser.BlendModes.ADD,
+      blendMode: Phaser.BlendModes.NORMAL,
       tint: cfg.tint,
       gravityY: cfg.gravityY,
       quantity: cfg.count,

@@ -281,6 +281,135 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     requiredProfession: "blacksmithing",
     craftingTime: 12,
   },
+
+  // --- Elite Blacksmithing (Weapons) ---
+  {
+    recipeId: "voidsteel-greatsword",
+    outputTokenId: 180n, // Voidsteel Greatsword
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 4 }, // 4x Steel Alloy
+      { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
+      { tokenId: 178n, quantity: 1 }, // 1x Promic Crystal
+    ],
+    copperCost: 300,
+    requiredProfession: "blacksmithing",
+    craftingTime: 30,
+  },
+  {
+    recipeId: "promic-warstaff",
+    outputTokenId: 181n, // Promic Warstaff
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 89n, quantity: 3 }, // 3x Gold Bar
+      { tokenId: 178n, quantity: 2 }, // 2x Promic Crystal
+    ],
+    copperCost: 250,
+    requiredProfession: "blacksmithing",
+    craftingTime: 28,
+  },
+  {
+    recipeId: "caesaric-longbow",
+    outputTokenId: 182n, // Caesaric Longbow
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
+      { tokenId: 172n, quantity: 2 }, // 2x Caesaric Crystal
+    ],
+    copperCost: 200,
+    requiredProfession: "blacksmithing",
+    craftingTime: 25,
+  },
+  {
+    recipeId: "neodynic-battleaxe",
+    outputTokenId: 183n, // Neodynic Battleaxe
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 5 }, // 5x Steel Alloy
+      { tokenId: 177n, quantity: 2 }, // 2x Neodynic Ink
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+    ],
+    copperCost: 400,
+    requiredProfession: "blacksmithing",
+    craftingTime: 35,
+  },
+  {
+    recipeId: "lantharum-dagger",
+    outputTokenId: 184n, // Lantharum Dagger
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
+      { tokenId: 174n, quantity: 2 }, // 2x Lantharum Pigment
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+    ],
+    copperCost: 150,
+    requiredProfession: "blacksmithing",
+    craftingTime: 20,
+  },
+
+  // --- Elite Blacksmithing (Armor) ---
+  {
+    recipeId: "telluron-platemail",
+    outputTokenId: 185n, // Telluron Platemail
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 4 }, // 4x Steel Alloy
+      { tokenId: 170n, quantity: 2 }, // 2x Telluron Fiber
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+    ],
+    copperCost: 200,
+    requiredProfession: "blacksmithing",
+    craftingTime: 30,
+  },
+  {
+    recipeId: "prasic-warhelm",
+    outputTokenId: 186n, // Prasic Warhelm
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
+      { tokenId: 176n, quantity: 2 }, // 2x Prasic Glass
+    ],
+    copperCost: 150,
+    requiredProfession: "blacksmithing",
+    craftingTime: 22,
+  },
+  {
+    recipeId: "samaronic-greaves",
+    outputTokenId: 187n, // Samaronic Greaves
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
+      { tokenId: 179n, quantity: 2 }, // 2x Samaronic Silk
+    ],
+    copperCost: 175,
+    requiredProfession: "blacksmithing",
+    craftingTime: 25,
+  },
+  {
+    recipeId: "barylian-warboots",
+    outputTokenId: 188n, // Barylian Warboots
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
+      { tokenId: 173n, quantity: 2 }, // 2x Barylian Wax
+    ],
+    copperCost: 125,
+    requiredProfession: "blacksmithing",
+    craftingTime: 20,
+  },
+  {
+    recipeId: "ceric-pauldrons",
+    outputTokenId: 189n, // Ceric Pauldrons
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 3 }, // 3x Steel Alloy
+      { tokenId: 175n, quantity: 2 }, // 2x Ceric Foam
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+    ],
+    copperCost: 175,
+    requiredProfession: "blacksmithing",
+    craftingTime: 25,
+  },
 ];
 
 export function getRecipeById(recipeId: string): CraftingRecipe | undefined {

@@ -2815,17 +2815,16 @@ export const QUEST_CATALOG: Quest[] = [
 ];
 
 // ── Economy scaling ─────────────────────────────────────────────────────────
-// Gold is scarce: 5 maxed characters should accumulate ~3 gold total.
-// Early quests give pure copper (1-15c), endgame quests can reach up to 20 silver (2000c).
-// Graduated scale: heavy reduction for low rewards, lighter for endgame.
+// Gentle reduction so players can actually afford skills and gear.
+// Raw copper values are defined generously; this applies a light tax.
 for (const quest of QUEST_CATALOG) {
   const c = quest.rewards.copper;
   if (c <= 100) {
-    quest.rewards.copper = Math.max(1, Math.round(c / 10));       // 10-100 → 1-10c
+    quest.rewards.copper = Math.max(1, Math.round(c / 2));        // 10-100 → 5-50c
   } else if (c <= 500) {
-    quest.rewards.copper = Math.max(1, Math.round(c / 5));        // 100-500 → 20-100c
+    quest.rewards.copper = Math.max(1, Math.round(c / 1.5));      // 101-500 → 67-333c
   } else {
-    quest.rewards.copper = Math.max(1, Math.round(c / 2.5));      // 500-1000 → 200-400c (2-4s)
+    quest.rewards.copper = Math.max(1, Math.round(c / 1.25));     // 501+ → 400-1760c
   }
 }
 
@@ -2906,12 +2905,9 @@ export async function awardQuestRewards(
   player: Entity,
   quest: Quest
 ): Promise<void> {
-  // Award XP
-  if (player.xp != null) {
-    player.xp += quest.rewards.xp;
-  } else {
-    player.xp = quest.rewards.xp;
-  }
+  // Award XP (guard against NaN propagation)
+  const currentXp = (typeof player.xp === "number" && !Number.isNaN(player.xp)) ? player.xp : 0;
+  player.xp = currentXp + quest.rewards.xp;
 
   // Check for level-up(s) after XP award
   if (player.level != null && player.raceId && player.classId) {

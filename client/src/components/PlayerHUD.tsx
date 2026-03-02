@@ -27,14 +27,12 @@ function ResourceBar({
   const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
     <div className="flex items-center gap-2">
-      {/* Number */}
       <span
         className="text-white text-[13px] font-black tabular-nums text-right"
-        style={{ minWidth: 64, textShadow: "1px 1px 0 #000, -1px -1px 0 #000" }}
+        style={{ minWidth: 68, textShadow: "1px 1px 0 #000, -1px -1px 0 #000" }}
       >
-        {value.toLocaleString()}
+        {value.toLocaleString()} / {max.toLocaleString()}
       </span>
-      {/* Bar */}
       <div
         className="h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_rgba(0,0,0,0.8)]"
         style={{ width: 180, background: "rgba(0,0,0,0.55)" }}
@@ -44,7 +42,6 @@ function ResourceBar({
           style={{ width: `${pct}%`, background: color }}
         />
       </div>
-      {/* Full-size icon — no border, no box */}
       <img
         src={icon}
         alt={label}
@@ -56,38 +53,51 @@ function ResourceBar({
 }
 
 export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement | null {
-  const { characterProgress, balance } = useWallet();
+  const { characterProgress, balance, refreshBalance, refreshCharacterProgress } = useWallet();
   const { lobbies } = useZonePlayers({ pollInterval: 2000 });
 
-  const liveEntity = React.useMemo(() => {
+  // Auto-refresh gold and character progress every 3s
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      void refreshBalance();
+      void refreshCharacterProgress(true);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [refreshBalance, refreshCharacterProgress]);
+
+  // Find this wallet's live entity across all zones
+  const live = React.useMemo(() => {
     const addr = walletAddress.toLowerCase();
     for (const lobby of lobbies) {
-      const p = lobby.players.find((e) => e.walletAddress?.toLowerCase() === addr);
-      if (p) return p;
+      const found = lobby.players.find((p) => p.walletAddress?.toLowerCase() === addr);
+      if (found) return found;
     }
     return null;
   }, [lobbies, walletAddress]);
 
   if (!characterProgress) return null;
 
-  const { hp, maxHp, level, xp, name } = characterProgress;
-  const gold = balance?.gold ?? 0;
+  // Prefer live zone entity values — they update every 2s with real combat/xp changes
+  const name   = live?.name        ?? characterProgress.name;
+  const level  = live?.level       ?? characterProgress.level;
+  const xp     = live?.xp          ?? characterProgress.xp;
+  const hp     = live?.hp          ?? characterProgress.hp;
+  const maxHp  = live?.maxHp       ?? characterProgress.maxHp;
+  const ep     = live?.essence     ?? 0;
+  const maxEp  = live?.maxEssence  ?? 100;
+  const gold   = balance?.gold     ?? 0;
 
-  // XP progress within current level
   const currentLevelXp = xpForLevel(level);
-  const nextLevelXp = xpForLevel(level + 1);
-  const span = Math.max(1, nextLevelXp - currentLevelXp);
-  const xpInLevel = Math.max(0, xp - currentLevelXp);
-  const xpPct = Math.max(0, Math.min(100, (xpInLevel / span) * 100));
+  const nextLevelXp    = xpForLevel(level + 1);
+  const span           = Math.max(1, nextLevelXp - currentLevelXp);
+  const xpInLevel      = Math.max(0, xp - currentLevelXp);
+  const xpPct          = Math.max(0, Math.min(100, (xpInLevel / span) * 100));
 
-  // Use live HP if the entity is found in zone, else fall back to NFT data
-  const liveHp = liveEntity?.hp ?? hp;
-  const liveMaxHp = liveEntity?.maxHp ?? maxHp;
-
+  const hpPct = maxHp > 0 ? hp / maxHp : 0;
   const hpColor =
-    liveMaxHp > 0 && (liveHp / liveMaxHp) > 0.66
+    hpPct > 0.66
       ? "linear-gradient(90deg,#1a7a30,#54f28b)"
-      : liveMaxHp > 0 && (liveHp / liveMaxHp) > 0.33
+      : hpPct > 0.33
       ? "linear-gradient(90deg,#7a5a00,#ffcc00)"
       : "linear-gradient(90deg,#7a0000,#ff4444)";
 
@@ -98,7 +108,7 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
         className="absolute z-30 flex items-center gap-3 pointer-events-none select-none"
         style={{ top: 8, left: 8 }}
       >
-        {/* Level badge — full size icon, number overlaid */}
+        {/* Level badge */}
         <div className="relative w-16 h-16 flex-shrink-0">
           <img
             src="/icons/level.png"
@@ -118,11 +128,10 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
         <div className="flex flex-col gap-1.5">
           <span
             className="text-white text-[13px] font-black tracking-wide leading-none"
-            style={{ textShadow: "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000" }}
+            style={{ textShadow: "1px 1px 0 #000, -1px 1px 0 #000" }}
           >
             {name}
           </span>
-          {/* XP bar — same width as resource bars */}
           <div
             className="h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_rgba(0,0,0,0.8)]"
             style={{ width: 180, background: "rgba(0,0,0,0.55)" }}
@@ -137,7 +146,7 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
             />
           </div>
           <span
-            className="text-[9px] text-[#54f28b] leading-none font-bold"
+            className="text-[9px] text-[#54f28b] font-bold leading-none"
             style={{ textShadow: "1px 1px 0 #000" }}
           >
             {xpInLevel.toLocaleString()} / {span.toLocaleString()} XP
@@ -150,25 +159,20 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
         className="absolute z-30 flex flex-col gap-2 pointer-events-none select-none"
         style={{ top: 8, right: 8 }}
       >
-        {/* HP */}
         <ResourceBar
-          value={liveHp}
-          max={liveMaxHp}
+          value={hp}
+          max={maxHp}
           color={hpColor}
           icon="/icons/heart.png"
           label="HP"
         />
-
-        {/* Essence (EP) — always shown */}
         <ResourceBar
-          value={100}
-          max={100}
+          value={ep}
+          max={maxEp}
           color="linear-gradient(90deg,#4a0080,#b04aff)"
           icon="/icons/essence.png"
           label="Essence"
         />
-
-        {/* Gold */}
         <ResourceBar
           value={gold}
           max={Math.max(gold, 10000)}
