@@ -9,6 +9,7 @@ import { API_URL } from "@/config";
 import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
 import { gameBus } from "@/lib/eventBus";
+import { WalletManager } from "@/lib/walletManager";
 
 interface ChatMessage {
   role: "user" | "agent" | "activity" | "system";
@@ -27,6 +28,7 @@ interface AgentStatusData {
   } | null;
   entityId: string | null;
   zoneId: string | null;
+  custodialWallet: string | null;
   entity: {
     name: string;
     level: number;
@@ -114,6 +116,11 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           const data: AgentStatusData = await res.json();
           setStatus(data);
 
+          // Sync custodial wallet so balance queries hit the right address
+          if (data.custodialWallet) {
+            WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
+          }
+
           const serverHistory = data.config?.chatHistory ?? [];
           if (serverHistory.length > 0) {
             setMessages((prev) => {
@@ -159,6 +166,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       });
       const data = await res.json();
       if (res.ok) {
+        if (data.custodialWallet) {
+          WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
+        }
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
       } else {
         addSystemMsg(`[ERR] ${data.error ?? "Deploy failed"}`);

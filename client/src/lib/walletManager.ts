@@ -70,6 +70,9 @@ export class WalletManager {
   private _balance: WalletBalance | null = null;
   private _lastBalanceFetch: number = 0;
   private _balanceCacheDuration: number = 3000; // 3 seconds cache
+  /** Custodial wallet that the agent uses for all on-chain actions (gold, items). */
+  private _custodialAddress: string | null = null;
+  private _custodialResolved = false;
 
   private constructor() {}
 
@@ -135,6 +138,29 @@ export class WalletManager {
     this._address = null;
     this._account = null;
     this._balance = null;
+    this._custodialAddress = null;
+    this._custodialResolved = false;
+  }
+
+  /** Resolve the custodial wallet for the current user (cached after first call). */
+  private async resolveCustodialAddress(): Promise<string | null> {
+    if (this._custodialResolved) return this._custodialAddress;
+    if (!this._address) return null;
+    this._custodialResolved = true;
+    try {
+      const res = await fetch(`${API_URL}/agent/wallet/${this._address}`);
+      if (res.ok) {
+        const data = await res.json();
+        this._custodialAddress = data.custodialWallet ?? null;
+      }
+    } catch {}
+    return this._custodialAddress;
+  }
+
+  /** Force-set the custodial address (e.g. after agent deploy). */
+  setCustodialAddress(address: string | null): void {
+    this._custodialAddress = address;
+    this._custodialResolved = true;
   }
 
   async fetchBalance(force = false): Promise<WalletBalance | null> {
@@ -146,7 +172,11 @@ export class WalletManager {
       return this._balance;
     }
 
-    const res = await fetch(`${API_URL}/wallet/${this._address}/balance`);
+    // Use custodial wallet for balance if agent is deployed — that's where gold + items live
+    const custodial = await this.resolveCustodialAddress();
+    const balanceAddress = custodial || this._address;
+
+    const res = await fetch(`${API_URL}/wallet/${balanceAddress}/balance`);
     if (!res.ok) return null;
 
     this._balance = await res.json();

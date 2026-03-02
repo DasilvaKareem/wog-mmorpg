@@ -10,6 +10,7 @@ import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import { getAuthToken } from "@/lib/agentAuth";
 import { validateCharacterName } from "@/lib/characterNameValidation";
+import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { fetchDiary, type DiaryEntry } from "@/ShardClient";
 import type { CharacterCreateResponse, CharacterStats } from "@/types";
@@ -167,6 +168,9 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
       });
       const data = await res.json();
       if (res.ok) {
+        if (data.custodialWallet) {
+          WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
+        }
         setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
       } else {
         setDeployResult(data.error ?? "Deploy failed");

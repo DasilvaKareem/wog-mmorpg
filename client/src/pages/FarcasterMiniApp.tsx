@@ -3,6 +3,7 @@ import { sdk } from "@farcaster/miniapp-sdk";
 import type { Context } from "@farcaster/miniapp-sdk";
 import { fetchClasses, fetchRaces, createCharacter, fetchZone, fetchZoneList } from "@/ShardClient";
 import { validateCharacterName } from "@/lib/characterNameValidation";
+import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { useWogNames } from "@/hooks/useWogNames";
 import type { RaceInfo, ClassInfo, CharacterStats, Entity, ZoneListEntry } from "@/types";
@@ -437,6 +438,9 @@ export function FarcasterMiniApp(): React.ReactElement {
           });
           const deployData = await deployRes.json();
           if (deployRes.ok) {
+            if (deployData.custodialWallet) {
+              WalletManager.getInstance().setCustodialAddress(deployData.custodialWallet);
+            }
             setSuccessData({
               ...successBase,
               agentDeploying: false,

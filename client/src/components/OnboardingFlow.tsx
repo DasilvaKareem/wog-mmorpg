@@ -6,6 +6,7 @@ import { useWalletContext } from "@/context/WalletContext";
 import { thirdwebClient, skaleChain, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { getAuthToken } from "@/lib/agentAuth";
 import { validateCharacterName } from "@/lib/characterNameValidation";
+import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import { PaymentGate } from "@/components/PaymentGate";
@@ -262,6 +263,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           });
           const deployData = await deployRes.json();
           if (deployRes.ok) {
+            if (deployData.custodialWallet) {
+              WalletManager.getInstance().setCustodialAddress(deployData.custodialWallet);
+            }
             setSuccessData({
               ...successBase,
               agentDeploying: false,
