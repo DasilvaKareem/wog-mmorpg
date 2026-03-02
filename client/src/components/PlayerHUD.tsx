@@ -11,43 +11,33 @@ function xpForLevel(level: number): number {
   return 100 * level * level;
 }
 
-function ResourceBar({
+function StatLine({
   value,
   max,
-  color,
   icon,
   label,
+  color,
 }: {
   value: number;
-  max: number;
-  color: string;
+  max?: number;
   icon: string;
   label: string;
+  color: string;
 }) {
-  const pct = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
-    <div className="flex items-center gap-2">
-      <span
-        className="text-white text-[13px] font-black tabular-nums text-right"
-        style={{ minWidth: 68, textShadow: "1px 1px 0 #000, -1px -1px 0 #000" }}
-      >
-        {value.toLocaleString()} / {max.toLocaleString()}
-      </span>
-      <div
-        className="h-5 border-2 border-black overflow-hidden shadow-[2px_2px_0_0_rgba(0,0,0,0.8)]"
-        style={{ width: 180, background: "rgba(0,0,0,0.55)" }}
-      >
-        <div
-          className="h-full transition-all duration-300"
-          style={{ width: `${pct}%`, background: color }}
-        />
-      </div>
+    <div className="flex items-center gap-1.5">
       <img
         src={icon}
         alt={label}
-        className="w-14 h-14 object-contain drop-shadow-xl flex-shrink-0"
+        className="w-5 h-5 object-contain drop-shadow-md flex-shrink-0"
         draggable={false}
       />
+      <span
+        className="text-[13px] font-black tabular-nums leading-none"
+        style={{ color, textShadow: "1px 1px 0 #000, -1px -1px 0 #000" }}
+      >
+        {max != null ? `${value.toLocaleString()} / ${max.toLocaleString()}` : value.toLocaleString()}
+      </span>
     </div>
   );
 }
@@ -94,12 +84,7 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
   const xpPct          = Math.max(0, Math.min(100, (xpInLevel / span) * 100));
 
   const hpPct = maxHp > 0 ? hp / maxHp : 0;
-  const hpColor =
-    hpPct > 0.66
-      ? "linear-gradient(90deg,#1a7a30,#54f28b)"
-      : hpPct > 0.33
-      ? "linear-gradient(90deg,#7a5a00,#ffcc00)"
-      : "linear-gradient(90deg,#7a0000,#ff4444)";
+  const hpTextColor = hpPct > 0.66 ? "#54f28b" : hpPct > 0.33 ? "#ffcc00" : "#ff4444";
 
   return (
     <>
@@ -156,30 +141,12 @@ export function PlayerHUD({ walletAddress }: PlayerHUDProps): React.ReactElement
 
       {/* ── TOP-RIGHT: HP, Essence, Gold ── */}
       <div
-        className="absolute z-30 flex flex-col gap-2 pointer-events-none select-none"
+        className="absolute z-30 flex flex-col gap-1 pointer-events-none select-none"
         style={{ top: 8, right: 8 }}
       >
-        <ResourceBar
-          value={hp}
-          max={maxHp}
-          color={hpColor}
-          icon="/icons/heart.png"
-          label="HP"
-        />
-        <ResourceBar
-          value={ep}
-          max={maxEp}
-          color="linear-gradient(90deg,#4a0080,#b04aff)"
-          icon="/icons/essence.png"
-          label="Essence"
-        />
-        <ResourceBar
-          value={gold}
-          max={Math.max(gold, 10000)}
-          color="linear-gradient(90deg,#7a5a00,#ffcc00)"
-          icon="/icons/gold.png"
-          label="Gold"
-        />
+        <StatLine value={hp} max={maxHp} icon="/icons/heart.png" label="HP" color={hpTextColor} />
+        <StatLine value={ep} max={maxEp} icon="/icons/essence.png" label="Essence" color="#b04aff" />
+        <StatLine value={gold} icon="/icons/gold.png" label="Gold" color="#ffcc00" />
       </div>
     </>
   );
