@@ -1,12 +1,12 @@
 import { ethers } from "ethers";
 import { BITE } from "@skalenetwork/bite";
 
-/** SKALE Base Sepolia Testnet (ID 103698795) — BITE V2 encryption */
-export const SKALE_BASE_CHAIN_ID = 103698795;
+/** SKALE Base Mainnet (ID 1187947933) — BITE V2 encryption */
+export const SKALE_BASE_CHAIN_ID = 1187947933;
 
 const SKALE_BASE_RPC =
   process.env.SKALE_BASE_RPC_URL ||
-  "https://base-sepolia-testnet.skalenodes.com/v1/bite-v2-sandbox";
+  "https://skale-base.skalenodes.com/v1/base";
 
 /** JSON-RPC provider for SKALE Base mainnet. */
 export const biteProvider = new ethers.JsonRpcProvider(SKALE_BASE_RPC);

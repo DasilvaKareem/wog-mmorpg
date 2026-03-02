@@ -630,12 +630,24 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
   if (zone) clearMobTagsForPlayer(zone, player.id);
   player.lastCombatTick = undefined;
 
-  // Apply death penalty: lose 10% of current XP (min 0)
+  // Apply death penalty: lose 10% of XP *within* the current level (progress toward next)
+  // This prevents the death spiral where total-XP penalties outweigh kill rewards.
   let deathXpLoss = 0;
-  if (player.xp != null && player.xp > 0) {
-    deathXpLoss = Math.floor(player.xp * DEATH_XP_LOSS_PERCENT);
-    player.xp = Math.max(0, player.xp - deathXpLoss);
-    console.log(`[death] ${player.name} lost ${deathXpLoss} XP (${player.xp} remaining)`);
+  if (player.xp != null && player.xp > 0 && player.level != null) {
+    const levelFloor = xpForLevel(player.level);
+    const xpWithinLevel = Math.max(0, player.xp - levelFloor);
+    deathXpLoss = Math.floor(xpWithinLevel * DEATH_XP_LOSS_PERCENT);
+    player.xp = Math.max(levelFloor, player.xp - deathXpLoss);
+    console.log(`[death] ${player.name} lost ${deathXpLoss} XP (${player.xp} remaining, floor=${levelFloor})`);
+  }
+
+  // Persist XP after death penalty to Redis
+  if (player.walletAddress && player.name) {
+    saveCharacter(player.walletAddress, player.name, {
+      level: player.level ?? 1,
+      xp: player.xp ?? 0,
+      kills: player.kills ?? 0,
+    }).catch((err) => console.error(`[death] Save failed for ${player.name}:`, err));
   }
 
   // Gold tax on death: level * 10 copper (e.g. L42 = 420 copper = 0.042 GOLD)
