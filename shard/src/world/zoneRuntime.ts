@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { mintGold, mintItem, updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
+import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
+import { transferFromTreasury } from "../blockchain/wallet.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
@@ -716,14 +717,14 @@ async function handleMobDeath(
 ): Promise<void> {
   const lootTable = getLootTable(mob.name);
 
-  // Auto-loot: mint gold + common drops to killer's wallet
+  // Auto-loot: transfer gold from treasury + common drops to killer's wallet
   if (killer?.walletAddress && lootTable) {
     // Roll copper loot and convert to on-chain gold (10,000 copper = 1 gold)
     const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
     if (copperAmount > 0) {
       const goldAmount = copperToGold(copperAmount);
-      mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
-        console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
+      transferFromTreasury(killer.walletAddress, goldAmount.toString()).catch((err) => {
+        console.error(`[loot] Failed to transfer ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
       });
     }
 

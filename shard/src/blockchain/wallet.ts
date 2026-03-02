@@ -273,6 +273,25 @@ export interface WalletRegistrationResult {
 }
 
 /**
+ * Transfer gold from the treasury to a player wallet (e.g. mob loot rewards).
+ * Returns the transaction hash, or throws on failure.
+ * The treasury is lazily initialised on first call.
+ */
+export async function transferFromTreasury(
+  toAddress: string,
+  goldAmount: string
+): Promise<string> {
+  // Resolve treasury address (cached after first call)
+  if (!treasuryAddressCache) {
+    const stored = await getStoredTreasuryAddress();
+    if (!stored) throw new Error("Treasury not initialised — call registerWalletWithWelcomeBonus first");
+    treasuryAddressCache = stored;
+  }
+  const treasuryAccount = await getCustodialWallet(treasuryAddressCache);
+  return transferGoldFrom(treasuryAccount, toAddress, goldAmount);
+}
+
+/**
  * Idempotent wallet registration flow:
  * - first call gives sFUEL + marks registered immediately
  * - welcome gold bonus is sent in the background (non-blocking)
