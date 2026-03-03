@@ -86,6 +86,8 @@ export class AgentRunner {
   /** Tracks ticks since last focus change — used for self-adaptation */
   private ticksSinceFocusChange = 0;
   private lastFocus: AgentFocus = "questing";
+  /** Tracks ticks spent in the current zone — used for roaming behavior */
+  private ticksInCurrentZone = 0;
   /** Tracks consecutive combat fallback ticks */
   private combatFallbackCount = 0;
   /** Live description of what the agent is doing right now */
@@ -421,7 +423,7 @@ export class AgentRunner {
    * Learn one available class technique from the matching class trainer.
    * Returns true when the agent is busy training (moving or learning).
    */
-  private async learnNextTechnique(): Promise<boolean> {
+  async learnNextTechnique(): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
 
     // Rate-limit: don't spam the trainer every tick
@@ -1571,13 +1573,31 @@ export class AgentRunner {
       // Priority 3: Outleveled current zone → travel to next zone
       const myLevel = entity.level ?? 1;
       const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[this.currentZone] ?? 1;
-      // If agent is 3+ levels above the zone's requirement, find the next zone
-      if (myLevel >= currentZoneLevelReq + 3) {
+      // If agent is 2+ levels above the zone's requirement, find the next zone
+      if (myLevel >= currentZoneLevelReq + 2) {
         const nextZone = this.findNextZoneForLevel(myLevel);
         if (nextZone && nextZone !== this.currentZone) {
           console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: level ${myLevel} outleveled ${this.currentZone} (req ${currentZoneLevelReq}), traveling to ${nextZone}`);
           void this.logActivity(`Outleveled ${this.currentZone} (Lv${myLevel}) — traveling to ${nextZone}`);
           await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: nextZone });
+          return true;
+        }
+      }
+
+      // Priority 4: Roaming — been in the same zone too long, explore an adjacent zone
+      // ~4 minutes in one zone → pick a random accessible neighbor to keep things lively
+      if (this.ticksInCurrentZone >= 200
+        && (currentFocusEarly === "questing" || currentFocusEarly === "combat")) {
+        const neighbors = getZoneConnections(this.currentZone)
+          .filter((z) => {
+            const req = ZONE_LEVEL_REQUIREMENTS[z] ?? 1;
+            return myLevel >= req && z !== this.currentZone;
+          });
+        if (neighbors.length > 0) {
+          const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: roaming after ${this.ticksInCurrentZone} ticks in ${this.currentZone} → ${pick}`);
+          void this.logActivity(`Exploring new territory — heading to ${pick}`);
+          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
           return true;
         }
       }
@@ -1747,6 +1767,42 @@ export class AgentRunner {
           this.ticksOnCurrentScript = 0;
           void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
         }
+      } else if (trigger.type === "level_up") {
+        // On level-up, check if a new zone just became accessible
+        const lvl = entity.level ?? 1;
+        const bestZone = this.findNextZoneForLevel(lvl);
+        if (bestZone && bestZone !== this.currentZone
+          && lvl >= (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1)
+          && lvl < (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1) + 2) {
+          // Just unlocked this zone — go explore it
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Level ${lvl} unlocked ${bestZone}, heading there`);
+          void this.logActivity(`Level ${lvl}! New zone unlocked — heading to ${bestZone}`);
+          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: bestZone });
+          this.currentScript = { type: "travel", targetZone: bestZone, reason: `Level ${lvl} unlocked ${bestZone}` };
+          this.ticksOnCurrentScript = 0;
+        } else {
+          // Normal level-up — re-derive script from focus
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity(`Level ${lvl}! Continuing ${config.focus}`);
+        }
+      } else if (trigger.type === "no_targets") {
+        // No mobs/nodes in current zone — travel to an accessible neighbor
+        const lvl = entity.level ?? 1;
+        const accessibleNeighbors = getZoneConnections(this.currentZone)
+          .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1));
+        if (accessibleNeighbors.length > 0) {
+          const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] No targets in ${this.currentZone}, moving to ${pick}`);
+          void this.logActivity(`Zone cleared — exploring ${pick}`);
+          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
+          this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
+          this.ticksOnCurrentScript = 0;
+        } else {
+          // No accessible neighbors — fall back to waiting
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.ticksOnCurrentScript = 0;
+        }
       } else if (!this.currentCaps.supervisorEnabled) {
         // Free tier: no LLM supervisor — always use scripted fallback
         this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
@@ -1887,6 +1943,12 @@ export class AgentRunner {
           void this.logActivity(`Focus changed → ${focus}`);
         }
         this.ticksSinceFocusChange++;
+
+        // Track zone-stay duration (reset on zone change)
+        if (this.currentZone !== this.lastKnownZone && this.lastKnownZone !== "") {
+          this.ticksInCurrentZone = 0;
+        }
+        this.ticksInCurrentZone++;
 
         // ── Inbox check: every 5 ticks (~6s), peek for new agent-to-agent messages ──
         if (this.ticksSinceFocusChange % 5 === 0) {

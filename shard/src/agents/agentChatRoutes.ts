@@ -28,8 +28,13 @@ import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getAllZones } from "../world/zoneRuntime.js";
 import { getWorldLayout, resolveZoneId } from "../world/worldLayout.js";
-import { loadAnyCharacterForWallet } from "../character/characterStore.js";
+import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
+
+/** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
+function internalFetch(url: string, init?: RequestInit): Promise<Response> {
+  return fetch(url, { ...init, signal: AbortSignal.timeout(5_000) });
+}
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -118,59 +123,53 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       server.log.info(`[agent/deploy] Extracted raw name: "${characterName}" from formatted NFT name`);
     }
 
-    // If client didn't send a name, try owner wallet characters first.
+    // If client didn't send a name, look up directly from Redis (no self-fetch).
+    // Check owner wallet first, then custodial wallet.
     if (!characterName) {
       try {
-        const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${authWallet}`);
-        if (charRes.ok) {
-          const charData = await charRes.json() as { characters?: any[] };
-          const nft = charData.characters?.[0];
-          if (nft) {
-            characterName = extractRawCharacterName(nft.name as string) ?? undefined;
-            raceId = nft.properties?.race ?? raceId;
-            classId = nft.properties?.class ?? classId;
-            server.log.info(`[agent/deploy] Resolved from owner wallet character: "${characterName}" (${raceId}/${classId})`);
-          }
-        }
-      } catch {}
-    }
-
-    // Next, try saved character state for the owner wallet.
-    if (!characterName) {
-      const saved = await loadAnyCharacterForWallet(authWallet);
-      if (saved) {
-        characterName = extractRawCharacterName(saved.name) ?? saved.name;
-        raceId = saved.raceId ?? raceId;
-        classId = saved.classId ?? classId;
-        server.log.info(`[agent/deploy] Resolved from owner saved character: "${characterName}" (${raceId}/${classId})`);
-      }
-    }
-
-    // Last, try the user's custodial wallet (existing agent redeploy path).
-    if (!characterName) {
-      const custodial = await getAgentCustodialWallet(authWallet);
-      if (custodial) {
-        const saved = await loadAnyCharacterForWallet(custodial);
+        const saved = await loadAnyCharacterForWallet(authWallet);
         if (saved) {
           characterName = extractRawCharacterName(saved.name) ?? saved.name;
           raceId = saved.raceId ?? raceId;
           classId = saved.classId ?? classId;
-          server.log.info(`[agent/deploy] Resolved from custodial saved character: "${characterName}" (${raceId}/${classId})`);
-        } else {
-          try {
-            const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
-            if (charRes.ok) {
-              const charData = await charRes.json() as { characters?: any[] };
-              const nft = charData.characters?.[0];
-              if (nft) {
-                characterName = extractRawCharacterName(nft.name as string) ?? undefined;
-                raceId = nft.properties?.race ?? raceId;
-                classId = nft.properties?.class ?? classId;
-                server.log.info(`[agent/deploy] Resolved from custodial wallet character: "${characterName}" (${raceId}/${classId})`);
-              }
-            }
-          } catch {}
+          server.log.info(`[agent/deploy] Resolved from owner saved character: "${characterName}" (${raceId}/${classId})`);
         }
+      } catch (err) {
+        server.log.warn(`[agent/deploy] Failed to load character for owner ${authWallet}: ${(err as Error).message}`);
+      }
+    }
+
+    // Try the user's custodial wallet (existing agent redeploy path).
+    if (!characterName) {
+      try {
+        const custodial = await getAgentCustodialWallet(authWallet);
+        if (custodial) {
+          const saved = await loadAnyCharacterForWallet(custodial);
+          if (saved) {
+            characterName = extractRawCharacterName(saved.name) ?? saved.name;
+            raceId = saved.raceId ?? raceId;
+            classId = saved.classId ?? classId;
+            server.log.info(`[agent/deploy] Resolved from custodial saved character: "${characterName}" (${raceId}/${classId})`);
+          }
+        }
+      } catch (err) {
+        server.log.warn(`[agent/deploy] Failed to load custodial character for ${authWallet}: ${(err as Error).message}`);
+      }
+    }
+
+    // Last resort: scan all zones for a live entity belonging to this wallet.
+    if (!characterName) {
+      for (const [, zone] of getAllZones()) {
+        for (const entity of zone.entities.values()) {
+          if (entity.type !== "player") continue;
+          if ((entity as any).walletAddress?.toLowerCase() !== authWallet.toLowerCase()) continue;
+          characterName = extractRawCharacterName(entity.name) ?? entity.name;
+          raceId = (entity as any).raceId ?? raceId;
+          classId = (entity as any).classId ?? classId;
+          server.log.info(`[agent/deploy] Resolved from live entity: "${characterName}" (${raceId}/${classId})`);
+          break;
+        }
+        if (characterName) break;
       }
     }
 
@@ -298,23 +297,21 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       }
     }
 
-    // If entity not in zone, fall back to NFT metadata for name
+    // If entity not in zone, fall back to saved character data
     if (!entity && custodial) {
       try {
-        const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
-        if (charRes.ok) {
-          const charData = await charRes.json() as { characters?: any[] };
-          const nft = charData.characters?.[0];
-          if (nft) {
-            entity = {
-              name: nft.name,
-              level: nft.properties?.level ?? 1,
-              hp: null,
-              maxHp: null,
-            };
-          }
+        const saved = await loadAnyCharacterForWallet(custodial);
+        if (saved) {
+          entity = {
+            name: saved.name,
+            level: saved.level ?? 1,
+            hp: null,
+            maxHp: null,
+          };
         }
-      } catch {}
+      } catch (err) {
+        server.log.warn(`[agent/status] Failed to load character for ${custodial}: ${(err as Error).message}`);
+      }
     }
 
     const runner = agentManager.getRunner(authWallet);
@@ -424,6 +421,35 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       return reply.code(400).send({ error: "message is required" });
     }
 
+    // ── Keyword short-circuit: catch common commands the LLM often fumbles ──
+    const msgLower = message.toLowerCase().trim();
+
+    // "learn a spell / technique / ability" → directly trigger learn_technique
+    if (/\b(learn|train|study)\b.*(spell|technique|ability|skill|move|attack)\b/i.test(msgLower)
+      || /\b(spell|technique|ability)\b.*(learn|train|study)\b/i.test(msgLower)
+      || /\bgo\s+to\s+(class\s+)?trainer\b/i.test(msgLower)) {
+      const runner = agentManager.getRunner(authWallet);
+      let responseText: string;
+      if (runner) {
+        (runner as any).nextTechniqueCheckAt = 0;
+        const learned = await runner.learnNextTechnique();
+        responseText = learned
+          ? "Right, I'll head to the class trainer and see what new techniques I can pick up!"
+          : "I've checked with my trainer — no new techniques available for me right now.";
+        server.log.info(`[agent/chat] keyword shortcut: learn_technique → ${learned}`);
+      } else {
+        responseText = "My agent isn't running — deploy me first before I can train.";
+      }
+      const ts = Date.now();
+      await appendChatMessage(authWallet, { role: "user", text: message, ts });
+      await appendChatMessage(authWallet, { role: "agent", text: responseText, ts: ts + 1 });
+      return reply.send({
+        response: responseText,
+        configUpdated: false,
+        agentRunning: agentManager.isRunning(authWallet),
+      });
+    }
+
     const config = await getAgentConfig(authWallet);
     const gameState = await getFullGameState(authWallet);
     const custodialWallet = await getAgentCustodialWallet(authWallet);
@@ -442,28 +468,23 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const ref = gameState?.ref;
     const nearby = gameState?.nearby ?? [];
 
-    // Resolve character name — prefer live entity, fall back to NFT metadata
+    // Resolve character name — prefer live entity, fall back to saved character data
     let charName = entity?.name;
     let charRace = entity?.raceId ?? "human";
     let charClass = entity?.classId ?? "warrior";
     let charLevel = entity?.level ?? 1;
-    if (!charName) {
+    if (!charName && custodialWallet) {
       try {
-        const custodial = await getAgentCustodialWallet(authWallet);
-        if (custodial) {
-          const charRes = await fetch(`${process.env.API_URL || "http://localhost:3000"}/character/${custodial}`);
-          if (charRes.ok) {
-            const charData = await charRes.json() as { characters?: any[] };
-            const nft = charData.characters?.[0];
-            if (nft) {
-              charName = nft.name;
-              charRace = nft.properties?.race ?? charRace;
-              charClass = nft.properties?.class ?? charClass;
-              charLevel = nft.properties?.level ?? charLevel;
-            }
-          }
+        const saved = await loadAnyCharacterForWallet(custodialWallet);
+        if (saved) {
+          charName = saved.name;
+          charRace = saved.raceId ?? charRace;
+          charClass = saved.classId ?? charClass;
+          charLevel = saved.level ?? charLevel;
         }
-      } catch {}
+      } catch (err) {
+        server.log.warn(`[agent/chat] Failed to load character for ${custodialWallet}: ${(err as Error).message}`);
+      }
     }
     if (!charName) charName = "Unknown";
 
@@ -502,7 +523,7 @@ ${inventoryDesc}
 RULES:
 1. Respond in character as ${charName} — 1-2 sentences max, stay in-world. Be vivid and specific.
 2. ALWAYS call update_focus when the user wants you to change what you're doing. ANY request to fight, gather, craft, shop, brew, cook, quest, or idle MUST trigger update_focus. Do NOT just say you'll do it — call the tool.
-3. Call take_action for one-off actions: learning a profession, buying a specific item, equipping gear.
+3. Call take_action for one-off actions: learning a profession, learning a spell/technique from a class trainer (use learn_technique), buying a specific item, equipping gear.
 4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
 5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
 6. When calling tools, ALWAYS include a 1-2 sentence in-character response alongside the tool call. Never respond with just "Got it" or generic confirmations. Describe what you're about to do in vivid, in-world terms.
@@ -529,6 +550,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       groqResponse = await groq.chat.completions.create({
         model: "openai/gpt-oss-120b",
         max_tokens: 300,
+        temperature: 0.5,
         messages: history,
         tools: [
           {
@@ -562,14 +584,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             type: "function",
             function: {
               name: "take_action",
-              description: "Execute an immediate in-game action: learn a profession, buy an item from a merchant, equip an item, or repair damaged gear at a blacksmith.",
+              description: "Execute an immediate in-game action: learn a profession, learn a combat technique/spell from a class trainer, buy an item from a merchant, equip an item, or repair damaged gear at a blacksmith.",
               parameters: {
                 type: "object",
                 properties: {
                   action: {
                     type: "string",
-                    enum: ["learn_profession", "buy_item", "equip_item", "repair_gear"],
-                    description: "The action type",
+                    enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear"],
+                    description: "The action type. Use learn_technique when the user asks to learn a spell, ability, or technique.",
                   },
                   professionId: {
                     type: "string",
@@ -684,14 +706,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           hasReadTools = true;
           const zone = ref?.zoneId ? getAllZones().get(ref.zoneId) : null;
           let scanResult: any = { error: "No zone data" };
-          if (zone && entity) {
+          if (zone && entity && ref) {
             const mobs: any[] = [];
             const npcs: any[] = [];
             const resources: any[] = [];
             const portals: any[] = [];
             const playerLevel = Number(entity.level ?? 1);
             for (const [id, e] of zone.entities) {
-              if (id === ref!.entityId) continue;
+              if (id === ref.entityId) continue;
               const ent = e as any;
               const dist = Math.round(Math.hypot((ent.x ?? 0) - (entity.x ?? 0), (ent.y ?? 0) - (entity.y ?? 0)));
               if (ent.type === "mob") {
@@ -705,7 +727,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               }
             }
             mobs.sort((a, b) => Math.abs(a.level - playerLevel) - Math.abs(b.level - playerLevel));
-            scanResult = { zone: ref!.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10), portals };
+            scanResult = { zone: ref.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10), portals };
           }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(scanResult) });
         }
@@ -715,7 +737,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           let invResult: any = { error: "No wallet" };
           if (custodialWallet) {
             try {
-              const res = await fetch(`${apiBase}/wallet/${custodialWallet}/balance`);
+              const res = await internalFetch(`${apiBase}/wallet/${custodialWallet}/balance`);
               if (res.ok) {
                 const data = await res.json() as any;
                 invResult = {
@@ -727,7 +749,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                   equipped: entity?.equipment ?? {},
                 };
               }
-            } catch {}
+            } catch (err) {
+              server.log.warn(`[agent/chat] check_inventory fetch failed: ${(err as Error).message}`);
+            }
           }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(invResult) });
         }
@@ -748,9 +772,11 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             }
             if (merchantId) {
               try {
-                const res = await fetch(`${apiBase}/shop/npc/${ref.zoneId}/${merchantId}`);
+                const res = await internalFetch(`${apiBase}/shop/npc/${ref.zoneId}/${merchantId}`);
                 if (res.ok) shopResult = await res.json();
-              } catch {}
+              } catch (err) {
+                server.log.warn(`[agent/chat] check_shop fetch failed: ${(err as Error).message}`);
+              }
             }
           }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(shopResult) });
@@ -761,11 +787,11 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           let craftResult: any = { error: "Unable to check" };
           try {
             const [craftRes, alchRes, cookRes, invRes] = await Promise.all([
-              fetch(`${apiBase}/crafting/recipes`).then(r => r.ok ? r.json() : []),
-              fetch(`${apiBase}/alchemy/recipes`).then(r => r.ok ? r.json() : []),
-              fetch(`${apiBase}/cooking/recipes`).then(r => r.ok ? r.json() : []),
+              internalFetch(`${apiBase}/crafting/recipes`).then(r => r.ok ? r.json() : []),
+              internalFetch(`${apiBase}/alchemy/recipes`).then(r => r.ok ? r.json() : []),
+              internalFetch(`${apiBase}/cooking/recipes`).then(r => r.ok ? r.json() : []),
               custodialWallet
-                ? fetch(`${apiBase}/wallet/${custodialWallet}/balance`).then(r => r.ok ? r.json() : null)
+                ? internalFetch(`${apiBase}/wallet/${custodialWallet}/balance`).then(r => r.ok ? r.json() : null)
                 : Promise.resolve(null),
             ]);
             const inventory = new Map<number, number>();
@@ -787,7 +813,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               cookable: allCooking.filter((r: any) => r.canCraft && r.affordable),
               totalRecipes: { crafting: allCrafting.length, alchemy: allAlchemy.length, cooking: allCooking.length },
             };
-          } catch {}
+          } catch (err) {
+            server.log.warn(`[agent/chat] what_can_i_craft fetch failed: ${(err as Error).message}`);
+          }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(craftResult) });
         }
 
@@ -797,14 +825,16 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           if (ref) {
             try {
               const [activeRes, zoneRes] = await Promise.all([
-                fetch(`${apiBase}/quests/active/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
-                fetch(`${apiBase}/quests/zone/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+                internalFetch(`${apiBase}/quests/active/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+                internalFetch(`${apiBase}/quests/zone/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
               ]);
               questResult = {
                 activeQuests: (activeRes as any)?.activeQuests ?? [],
                 availableQuests: (zoneRes as any)?.quests ?? [],
               };
-            } catch {}
+            } catch (err) {
+              server.log.warn(`[agent/chat] check_quests fetch failed: ${(err as Error).message}`);
+            }
           }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(questResult) });
         }
@@ -907,8 +937,18 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 await patchAgentConfig(authWallet, { focus: newFocus });
                 configUpdated = true;
               }
-            }
-            if (input.action === "buy_item" && input.tokenId != null) {
+            } else if (input.action === "learn_technique") {
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                // Force-clear the technique cooldown so it tries immediately
+                (runner as any).nextTechniqueCheckAt = 0;
+                const learned = await runner.learnNextTechnique();
+                actionsTaken.push(learned ? "[heading to class trainer to learn a technique]" : "[no new techniques available right now]");
+                server.log.info(`[agent/chat] learn_technique → ${learned}`);
+              } else {
+                actionsTaken.push("[agent not running]");
+              }
+            } else if (input.action === "buy_item" && input.tokenId != null) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const bought = await runner.buyItem(input.tokenId);
@@ -922,16 +962,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               }
               await patchAgentConfig(authWallet, { focus: "shopping" });
               configUpdated = true;
-            }
-            if (input.action === "equip_item" && input.tokenId != null) {
+            } else if (input.action === "equip_item" && input.tokenId != null) {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const equipped = await runner.equipItem(input.tokenId);
                 actionsTaken.push(`[${equipped ? "equipped" : "failed to equip"} item #${input.tokenId}]`);
                 server.log.info(`[agent/chat] equip_item(${input.tokenId}) → ${equipped}`);
               }
-            }
-            if (input.action === "repair_gear") {
+            } else if (input.action === "repair_gear") {
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 const repaired = await runner.repairGear();
@@ -972,6 +1010,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         const followUp = await groq.chat.completions.create({
           model: "openai/gpt-oss-120b",
           max_tokens: 300,
+          temperature: 0.5,
           messages: followUpMessages,
         });
 
