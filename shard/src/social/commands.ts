@@ -98,20 +98,20 @@ export function registerCommands(server: FastifyInstance) {
         let ty: number;
         switch (edge) {
           case "east":
-            tx = zoneSize.width + 5;
+            tx = zoneSize.width + 35;
             ty = entity.y;
             break;
           case "west":
-            tx = -5;
+            tx = -35;
             ty = entity.y;
             break;
           case "north":
             tx = entity.x;
-            ty = -5;
+            ty = -35;
             break;
           case "south":
             tx = entity.x;
-            ty = zoneSize.height + 5;
+            ty = zoneSize.height + 35;
             break;
         }
 
