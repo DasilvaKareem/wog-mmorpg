@@ -217,13 +217,19 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   }, [walletManager, refreshCharacterProgress, refreshProfessions]);
 
   const disconnect = React.useCallback(() => {
-    const currentAddress = walletManager.address;
-    if (currentAddress) clearCachedToken(currentAddress);
+    // Clear all cached JWT tokens (not just current address) to prevent
+    // stale auth leaking across wallet switches
+    clearCachedToken();
     walletManager.disconnect();
+    // Destroy the thirdweb in-app wallet session so autoConnect won't
+    // restore the old user on next page load / new wallet connection
+    sharedInAppWallet.disconnect().catch(() => {});
     setAddress(null);
     setBalance(null);
     setCharacterProgress(null);
     setCharacters([]);
+    setSelectedCharacterTokenId(null);
+    setProfessions(null);
   }, [walletManager]);
 
   const syncAddress = React.useCallback(async (addr: string) => {

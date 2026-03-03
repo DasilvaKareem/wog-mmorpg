@@ -2836,6 +2836,8 @@ function spawnSingleNpc(def: NpcDef): void {
     ...(def.xpReward != null && { xpReward: def.xpReward }),
     ...(def.teachesProfession != null && { teachesProfession: def.teachesProfession }),
     ...(def.teachesClass != null && { teachesClass: def.teachesClass }),
+    // Store spawn origin for leash/de-aggro
+    ...(isCombatant && { spawnX: def.x, spawnY: def.y }),
     // Give mobs/bosses real combat stats so they use the stat-based damage formula
     ...(isCombatant && def.level != null && {
       stats: computeMobStats(def.level, def.hp, def.type === "boss"),

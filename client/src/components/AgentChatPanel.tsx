@@ -10,6 +10,7 @@ import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
+import { useWalletContext } from "@/context/WalletContext";
 
 interface ChatMessage {
   role: "user" | "agent" | "activity" | "system";
@@ -70,6 +71,7 @@ interface AgentChatPanelProps {
 }
 
 export function AgentChatPanel({ walletAddress, currentZone, className = "" }: AgentChatPanelProps): React.ReactElement {
+  const { characters } = useWalletContext();
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
@@ -159,10 +161,18 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setDeploying(true);
     addSystemMsg("Deploying agent...");
     try {
+      // Send character info so the server doesn't need to re-fetch it
+      const primary = characters[0];
+      const deployBody: Record<string, string | undefined> = { walletAddress };
+      if (primary) {
+        deployBody.characterName = primary.name;
+        deployBody.raceId = primary.properties.race;
+        deployBody.classId = primary.properties.class;
+      }
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ walletAddress }),
+        body: JSON.stringify(deployBody),
       });
       const data = await res.json();
       if (res.ok) {

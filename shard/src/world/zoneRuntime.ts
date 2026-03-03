@@ -1,8 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
-import { transferFromTreasury } from "../blockchain/wallet.js";
+import { mintItem, updateCharacterMetadata, burnItem, mintGold } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
@@ -163,6 +162,11 @@ export interface Entity {
   lastCombatTick?: number;
   /** Travel command: zone the entity is walking toward (for portal-based transitions). */
   travelTargetZone?: string;
+  /** Mob spawn origin — used for leash/de-aggro (mobs/bosses only). */
+  spawnX?: number;
+  spawnY?: number;
+  /** True when mob is leashing back to spawn (de-aggro walk home). */
+  leashing?: boolean;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -729,14 +733,21 @@ async function handleMobDeath(
 ): Promise<void> {
   const lootTable = getLootTable(mob.name);
 
-  // Auto-loot: transfer gold from treasury + common drops to killer's wallet
+  // Auto-loot: mint gold + common drops to killer's wallet
+  if (!killer) {
+    console.warn(`[loot] ${mob.name} died with no killer — gold skipped`);
+  } else if (!killer.walletAddress) {
+    console.warn(`[loot] ${mob.name} killed by ${killer.name} (${killer.type}) — no walletAddress, gold skipped`);
+  } else if (!lootTable) {
+    console.warn(`[loot] ${mob.name} killed by ${killer.name} — no loot table entry, gold skipped`);
+  }
   if (killer?.walletAddress && lootTable) {
     // Roll copper loot and convert to on-chain gold (10,000 copper = 1 gold)
     const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
     if (copperAmount > 0) {
       const goldAmount = copperToGold(copperAmount);
-      transferFromTreasury(killer.walletAddress, goldAmount.toString()).catch((err) => {
-        console.error(`[loot] Failed to transfer ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
+      mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
+        console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
       });
     }
 
@@ -753,7 +764,7 @@ async function handleMobDeath(
 
     if (autoDrops.length > 0 || copperAmount > 0) {
       console.log(
-        `[loot] ${killer.name} auto-looted ${copperAmount}c + ${autoDrops.length} items from ${mob.name}`
+        `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${copperAmount}c + ${autoDrops.length} items from ${mob.name}`
       );
     }
   }
@@ -1187,6 +1198,11 @@ async function worldTick() {
           entity.order = undefined;
           continue;
         }
+        // Can't attack leashing (evading) mobs
+        if (target.leashing) {
+          entity.order = undefined;
+          continue;
+        }
         const dx = target.x - entity.x;
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
@@ -1377,6 +1393,11 @@ async function worldTick() {
         // Prevent party friendly fire for attack techniques
         if (technique.type === "attack" && entity.type === "player" && target.type === "player"
             && areInSameParty(entity.id, target.id)) {
+          entity.order = undefined;
+          continue;
+        }
+        // Can't use techniques on leashing (evading) mobs
+        if (technique.type === "attack" && target.leashing) {
           entity.order = undefined;
           continue;
         }
@@ -1578,6 +1599,53 @@ async function worldTick() {
       }
     }
 
+    // ── Mob leash / de-aggro: mobs too far from spawn walk home ────
+    // If a mob is pulled beyond its leash range, it de-aggros, drops
+    // combat, and walks back to spawn. While leashing it regens HP
+    // each tick and ignores players entirely.
+    const MOB_LEASH_RANGE = 150;
+    const BOSS_LEASH_RANGE = 200;
+    const LEASH_REGEN_PCT = 0.05; // 5% maxHp per tick while walking home
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "mob" && entity.type !== "boss") continue;
+      if (entity.hp <= 0) continue;
+      if (entity.spawnX == null || entity.spawnY == null) continue;
+
+      const dxSpawn = entity.x - entity.spawnX;
+      const dySpawn = entity.y - entity.spawnY;
+      const distFromSpawn = Math.sqrt(dxSpawn * dxSpawn + dySpawn * dySpawn);
+      const leashRange = entity.type === "boss" ? BOSS_LEASH_RANGE : MOB_LEASH_RANGE;
+
+      if (entity.leashing) {
+        // Walking home — regen HP each tick
+        entity.hp = Math.min(entity.maxHp, entity.hp + Math.ceil(entity.maxHp * LEASH_REGEN_PCT));
+        // Clear any active effects picked up during combat
+        if (entity.activeEffects?.length) entity.activeEffects = [];
+
+        if (distFromSpawn < 5) {
+          // Arrived home — fully reset
+          entity.leashing = false;
+          entity.hp = entity.maxHp;
+          entity.x = entity.spawnX;
+          entity.y = entity.spawnY;
+          entity.order = undefined;
+        } else {
+          // Keep walking home
+          entity.order = { action: "move", x: entity.spawnX, y: entity.spawnY };
+        }
+        continue;
+      }
+
+      // Check if mob has been pulled too far from spawn
+      if (distFromSpawn > leashRange) {
+        entity.leashing = true;
+        entity.order = { action: "move", x: entity.spawnX, y: entity.spawnY };
+        entity.taggedBy = undefined;
+        entity.taggedAtTick = undefined;
+        continue;
+      }
+    }
+
     // ── Mob aggro AI: mobs attack nearby players ─────────────────────
     // Mobs proactively seek and attack players within aggro range.
     // Bosses have larger aggro range. Mobs prefer their tagged target.
@@ -1587,6 +1655,7 @@ async function worldTick() {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
       if (entity.hp <= 0) continue;
+      if (entity.leashing) continue; // Don't re-aggro while walking home
 
       const aggroRange = entity.type === "boss" ? BOSS_AGGRO_RANGE : MOB_AGGRO_RANGE;
 
