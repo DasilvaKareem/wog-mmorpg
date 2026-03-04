@@ -16,7 +16,8 @@ export type ZoneEventType =
   | "shop"
   | "quest"
   | "system"
-  | "ability";
+  | "ability"
+  | "technique";
 
 export interface ZoneEvent {
   id: string;

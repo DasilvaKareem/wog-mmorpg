@@ -22,6 +22,8 @@ function getEventColor(type: ZoneEvent["type"]): string {
       return "text-[#54f28b] font-bold"; // success green
     case "levelup":
       return "text-[#ffdd57] font-bold"; // yellow highlight
+    case "technique":
+      return "text-[#bb9af7] font-bold"; // purple highlight
     case "chat":
       return "text-[#7dcfff]"; // cyan blue
     case "loot":

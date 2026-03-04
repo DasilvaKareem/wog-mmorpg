@@ -4,7 +4,7 @@ import { API_URL } from "../config.js";
 export interface ZoneEvent {
   id: string;
   zoneId: string;
-  type: "combat" | "death" | "kill" | "move" | "chat" | "spawn" | "levelup" | "loot" | "trade" | "shop" | "quest" | "system";
+  type: "combat" | "death" | "kill" | "move" | "chat" | "spawn" | "levelup" | "loot" | "trade" | "shop" | "quest" | "system" | "technique" | "ability";
   timestamp: number;
   tick: number;
   message: string;

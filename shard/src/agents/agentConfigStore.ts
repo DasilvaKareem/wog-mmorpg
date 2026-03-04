@@ -37,7 +37,7 @@ export interface AgentConfig {
   strategy: AgentStrategy;
   targetZone?: string;
   /** Set when user clicks "send agent here" on an NPC. Cleared once agent arrives. */
-  gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string };
+  gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string; techniqueId?: string; techniqueName?: string };
   lastUpdated: number;
   /** Pricing tier — defaults to "free" for backward compat */
   tier?: AgentTier;

@@ -929,6 +929,12 @@ export class WorldScene extends Phaser.Scene {
               if (pos) this.abilityLayer.playLevelUp(pos);
               this.entityRenderer.triggerLevelUp(evt.entityId);
             }
+            if (evt.type === "technique" && evt.entityId) {
+              const pos = pixelPositions.get(evt.entityId);
+              if (pos) this.abilityLayer.playTechniqueLearned(pos);
+              const techName = (evt.data as Record<string, unknown> | undefined)?.techniqueName as string | undefined;
+              this.entityRenderer.triggerTechniqueLearned(evt.entityId, techName);
+            }
             const evtData = evt.data as Record<string, unknown> | undefined;
             const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
             if (isMelee && evt.entityId && evt.targetId) {

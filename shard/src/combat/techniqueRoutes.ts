@@ -185,6 +185,17 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       learnedTechniques: player.learnedTechniques,
     }).catch((err) => console.error(`[persistence] Save failed after technique learn:`, err));
 
+    // Emit zone event for client animation
+    logZoneEvent({
+      zoneId,
+      type: "technique",
+      tick: zone.tick,
+      message: `✦ ${player.name} learned ${technique.name}!`,
+      entityId: playerEntityId,
+      entityName: player.name,
+      data: { techniqueName: technique.name, techniqueId, techniqueType: technique.type },
+    });
+
     const newAvailableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
 
     return reply.send({

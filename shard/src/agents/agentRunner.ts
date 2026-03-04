@@ -17,6 +17,7 @@ import { peekInbox, ackInboxMessages, type InboxMessage } from "./agentInbox.js"
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveZoneId } from "../world/worldLayout.js";
+import { getAllZones } from "../world/zoneRuntime.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
@@ -340,6 +341,14 @@ export class AgentRunner {
     return matches[0] as [string, any] ?? null;
   }
 
+  /** Set/clear gotoMode flag on the entity to suppress auto-combat while navigating */
+  private setEntityGotoMode(on: boolean): void {
+    const zone = getAllZones().get(this.currentZone);
+    if (!zone || !this.entityId) return;
+    const entity = zone.entities.get(this.entityId);
+    if (entity) entity.gotoMode = on;
+  }
+
   /** Tracks consecutive move-to-entity ticks for stale walk detection */
   private moveToStaleCount = 0;
   private moveToLastTarget = "";
@@ -423,25 +432,41 @@ export class AgentRunner {
    * Learn one available class technique from the matching class trainer.
    * Returns true when the agent is busy training (moving or learning).
    */
-  async learnNextTechnique(): Promise<boolean> {
-    if (!this.api || !this.entityId || !this.custodialWallet) return false;
+  /**
+   * Learn one available class technique from the matching class trainer.
+   * Returns { ok, reason } — reason explains why it failed when ok=false.
+   */
+  async learnNextTechnique(): Promise<{ ok: boolean; reason: string }> {
+    if (!this.api || !this.entityId || !this.custodialWallet) {
+      return { ok: false, reason: "agent not fully initialized" };
+    }
 
     // Rate-limit: don't spam the trainer every tick
-    if (Date.now() < this.nextTechniqueCheckAt) return false;
+    if (Date.now() < this.nextTechniqueCheckAt) {
+      return { ok: false, reason: "on cooldown, try again shortly" };
+    }
 
     try {
       const zs = await this.getZoneState();
-      if (!zs) return false;
+      if (!zs) return { ok: false, reason: "could not read zone state" };
       const { entities, me } = zs;
       const classId = (me.classId ?? "").toLowerCase();
-      if (!classId) return false;
+      if (!classId) {
+        console.warn(`[agent] learnNextTechnique: entity ${this.entityId} has no classId`);
+        return { ok: false, reason: "my character has no class set — something went wrong during creation" };
+      }
 
       const availableRes = await this.api("GET", `/techniques/available/${this.currentZone}/${this.entityId}`);
       const available: Array<{ id: string; name?: string; isLearned?: boolean; copperCost?: number }> = availableRes?.techniques ?? [];
 
       // Skip already-learned and permanently-failed techniques
       const nextToLearn = available.find((t) => !t.isLearned && !this.failedTechniqueIds.has(t.id));
-      if (!nextToLearn) return false;
+      if (!nextToLearn) {
+        const allLearned = available.length > 0 && available.every((t) => t.isLearned);
+        if (allLearned) return { ok: false, reason: "I've already learned all techniques available at my level" };
+        if (available.length === 0) return { ok: false, reason: `no ${classId} techniques exist for my level (L${me.level ?? 1})` };
+        return { ok: false, reason: "all remaining techniques have been blacklisted due to previous failures" };
+      }
 
       // Affordability check — don't walk to trainer if we can't pay
       const cost = nextToLearn.copperCost ?? 0;
@@ -458,7 +483,7 @@ export class AgentRunner {
           // Can't afford — back off for 2 minutes before checking again
           this.nextTechniqueCheckAt = Date.now() + 120_000;
           console.debug(`[agent] learnNextTechnique: can't afford ${cost}c (have ${copperBalance}c) — cooling down 2m`);
-          return false;
+          return { ok: false, reason: `I need ${cost} copper to learn ${nextToLearn.name ?? nextToLearn.id} but only have ${copperBalance} copper — need to earn more gold first` };
         }
       }
 
@@ -472,10 +497,12 @@ export class AgentRunner {
           return new RegExp(`${classId}\\s+trainer`, "i").test(String(e.name ?? ""));
         },
       );
-      if (!trainer) return false;
+      if (!trainer) {
+        return { ok: false, reason: `no ${classId} trainer found in ${this.currentZone} — I may need to travel to a zone with one` };
+      }
 
       const moving = await this.moveToEntity(me, trainer[1]);
-      if (moving) return true;
+      if (moving) return { ok: true, reason: `heading to ${trainer[1].name ?? "trainer"} to learn ${nextToLearn.name ?? nextToLearn.id}` };
 
       try {
         await this.api("POST", "/techniques/learn", {
@@ -488,7 +515,7 @@ export class AgentRunner {
         void this.logActivity(`Learned technique: ${nextToLearn.name ?? nextToLearn.id}`);
         // Wait 30s before trying to learn the next one — let the agent actually fight
         this.nextTechniqueCheckAt = Date.now() + 30_000;
-        return true;
+        return { ok: true, reason: `learned ${nextToLearn.name ?? nextToLearn.id}!` };
       } catch (learnErr: any) {
         const msg = String(learnErr.message ?? "").toLowerCase();
         // Only permanently blacklist on definitive failures (wrong class, already learned)
@@ -502,11 +529,11 @@ export class AgentRunner {
           this.nextTechniqueCheckAt = Date.now() + 30_000;
         }
         console.debug(`[agent] learnNextTechnique: failed (${learnErr.message?.slice(0, 60)}) — ${isDefinitive ? "skipping" : "will retry"}`);
-        return false;
+        return { ok: false, reason: `failed to learn ${nextToLearn.name ?? nextToLearn.id}: ${learnErr.message?.slice(0, 80) ?? "unknown error"}` };
       }
     } catch (err: any) {
       console.debug(`[agent] learnNextTechnique: ${err.message?.slice(0, 60)}`);
-      return false;
+      return { ok: false, reason: `error: ${err.message?.slice(0, 80) ?? "unknown"}` };
     }
   }
 
@@ -794,8 +821,8 @@ export class AgentRunner {
     if (!this.api || !this.entityId) return;
     try {
       if (this.currentCaps.techniquesEnabled) {
-        const trainingBusy = await this.learnNextTechnique();
-        if (trainingBusy) return;
+        const trainResult = await this.learnNextTechnique();
+        if (trainResult.ok) return;
       }
 
       const zs = await this.getZoneState();
@@ -1256,9 +1283,13 @@ export class AgentRunner {
   private async doGotoNpc(): Promise<void> {
     if (!this.api || !this.entityId) return;
     try {
+      // Suppress auto-combat while navigating to an NPC
+      this.setEntityGotoMode(true);
+
       const config = await getAgentConfig(this.userWallet);
       const target = config?.gotoTarget;
       if (!target) {
+        this.setEntityGotoMode(false);
         await patchAgentConfig(this.userWallet, { focus: "questing" });
         this.currentScript = null;
         return;
@@ -1297,6 +1328,7 @@ export class AgentRunner {
 
       if (!targetEntity) {
         void this.logActivity(`Could not find ${targetName ?? targetEntityId} in ${this.currentZone}`);
+        this.setEntityGotoMode(false);
         await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
         this.currentScript = null;
         return;
@@ -1305,7 +1337,7 @@ export class AgentRunner {
       const moving = await this.moveToEntity(me, targetEntity);
       if (moving) {
         void this.logActivity(`Walking to ${targetName ?? "NPC"}`);
-        return;
+        return; // gotoMode stays true — auto-combat suppressed while walking
       }
 
       // Arrived — execute any on-arrival action
@@ -1326,14 +1358,29 @@ export class AgentRunner {
         } catch (learnErr: any) {
           void this.logActivity(`⚠ Could not learn ${profession}: ${learnErr.message?.slice(0, 60)}`);
         }
+      } else if (arrivalAction === "learn-technique" && target.techniqueId) {
+        try {
+          await this.api("POST", "/techniques/learn", {
+            zoneId: this.currentZone,
+            playerEntityId: this.entityId,
+            techniqueId: target.techniqueId,
+            trainerEntityId: targetEntityId,
+          });
+          void this.logActivity(`Learned technique: ${target.techniqueName ?? target.techniqueId}`);
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Learned technique ${target.techniqueId} (user-initiated)`);
+        } catch (learnErr: any) {
+          void this.logActivity(`⚠ Could not learn technique: ${learnErr.message?.slice(0, 60)}`);
+        }
       } else {
         void this.logActivity(`Arrived at ${targetName ?? "NPC"}`);
       }
 
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at goto target: ${targetName ?? targetEntityId}`);
+      this.setEntityGotoMode(false); // Re-enable auto-combat now that goto is complete
       await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
       this.currentScript = null;
     } catch (err: any) {
+      this.setEntityGotoMode(false); // Always re-enable on error
       console.debug(`[agent] doGotoNpc: ${err.message?.slice(0, 60)}`);
     }
   }
@@ -1749,6 +1796,12 @@ export class AgentRunner {
 
       // Hard-respect focus when the runner has no script yet (startup/focus change).
       if (trigger.type === "no_script") {
+        // Goto focus always takes priority — never override with early-game combat
+        if (config.focus === "goto") {
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+        } else {
         // Early-game bootstrap: kill Giant Rats until 100 copper before doing anything else
         let earlyGameCopper = 0;
         try {
@@ -1766,6 +1819,7 @@ export class AgentRunner {
           this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
           this.ticksOnCurrentScript = 0;
           void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+        }
         }
       } else if (trigger.type === "level_up") {
         // On level-up, check if a new zone just became accessible
@@ -1934,6 +1988,10 @@ export class AgentRunner {
 
         // Track focus changes — null-out current script so supervisor gets a "user_directive" trigger
         if (focus !== this.lastFocus) {
+          // If switching away from goto, clear the gotoMode flag so auto-combat resumes
+          if (this.lastFocus === "goto" && focus !== "goto") {
+            this.setEntityGotoMode(false);
+          }
           this.lastFocus = focus;
           this.ticksSinceFocusChange = 0;
           this.combatFallbackCount = 0;

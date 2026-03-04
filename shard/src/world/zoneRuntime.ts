@@ -167,6 +167,8 @@ export interface Entity {
   spawnY?: number;
   /** True when mob is leashing back to spawn (de-aggro walk home). */
   leashing?: boolean;
+  /** True when a player agent is navigating to an NPC — suppresses auto-combat. */
+  gotoMode?: boolean;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -248,6 +250,25 @@ const MOVE_SPEED = 30; // units per tick
 const ATTACK_RANGE = 40; // units
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
+
+// ── Stat-based combat mechanics (players only) ────────────────────────
+const DODGE_CAP = 0.40;
+const DODGE_K = 200;
+const DODGE_SCALE = 0.55;
+
+const CRIT_CAP = 0.50;
+const CRIT_K = 250;
+const CRIT_SCALE = 0.60;
+const CRIT_MULTIPLIER = 1.75;
+
+const BLOCK_CAP = 0.50;
+const BLOCK_K = 200;
+const BLOCK_SCALE = 0.60;
+const BLOCK_REDUCTION = 0.50;
+
+const FAITH_HEAL_K = 300;
+const FAITH_HEAL_SCALE = 0.60;
+const FAITH_HOLY_COEFF = 0.15;
 const ARMOR_SLOTS: ArmorSlot[] = [
   "chest",
   "legs",
@@ -539,8 +560,84 @@ function getDefensePower(entity: Entity): number {
   return Math.max(0, Math.round((entity.level ?? 1) * 2));
 }
 
+// ── Stat-based combat formula functions (players only) ─────────────────
+function getDodgeChance(entity: Entity): number {
+  if (entity.type !== "player") return 0;
+  const agi = entity.effectiveStats?.agi ?? entity.stats?.agi ?? 0;
+  if (agi <= 0) return 0;
+  return Math.min(DODGE_CAP, (agi / (agi + DODGE_K)) * DODGE_SCALE);
+}
+
+function getCritChance(entity: Entity): number {
+  if (entity.type !== "player") return 0;
+  const luck = entity.effectiveStats?.luck ?? entity.stats?.luck ?? 0;
+  if (luck <= 0) return 0;
+  return Math.min(CRIT_CAP, (luck / (luck + CRIT_K)) * CRIT_SCALE);
+}
+
+function getBlockChance(entity: Entity): number {
+  if (entity.type !== "player") return 0;
+  const def = entity.effectiveStats?.def ?? entity.stats?.def ?? 0;
+  if (def <= 0) return 0;
+  return Math.min(BLOCK_CAP, (def / (def + BLOCK_K)) * BLOCK_SCALE);
+}
+
+function getFaithHealMultiplier(entity: Entity): number {
+  const faith = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
+  if (faith <= 0) return 1.0;
+  return 1 + (faith / (faith + FAITH_HEAL_K)) * FAITH_HEAL_SCALE;
+}
+
+function getHolyDamageBonus(entity: Entity): number {
+  if (entity.type !== "player") return 0;
+  const classId = entity.classId ?? "";
+  if (classId !== "paladin" && classId !== "cleric") return 0;
+  const faith = entity.effectiveStats?.faith ?? entity.stats?.faith ?? 0;
+  return Math.floor(faith * FAITH_HOLY_COEFF);
+}
+
+// ── Hit resolution (dodge → crit → block) ──────────────────────────────
+interface HitResult {
+  finalDamage: number;
+  hpLost: number;
+  dodged: boolean;
+  critical: boolean;
+  blocked: boolean;
+}
+
+function resolveHit(attacker: Entity, defender: Entity, rawDamage: number): HitResult {
+  // 1. Dodge (defender is player)
+  if (defender.type === "player" && Math.random() < getDodgeChance(defender)) {
+    return { finalDamage: 0, hpLost: 0, dodged: true, critical: false, blocked: false };
+  }
+
+  let damage = rawDamage;
+
+  // 2. Critical hit (attacker is player)
+  let critical = false;
+  if (attacker.type === "player" && Math.random() < getCritChance(attacker)) {
+    damage = Math.round(damage * CRIT_MULTIPLIER);
+    critical = true;
+  }
+
+  // 3. Block (defender is player)
+  let blocked = false;
+  if (defender.type === "player" && Math.random() < getBlockChance(defender)) {
+    damage = Math.round(damage * BLOCK_REDUCTION);
+    blocked = true;
+  }
+
+  // 4. Clamp to MIN_DAMAGE
+  damage = Math.max(MIN_DAMAGE, damage);
+
+  // 5. Apply through shields → HP
+  const hpLost = applyDamageWithShield(defender, damage);
+
+  return { finalDamage: damage, hpLost, dodged: false, critical, blocked };
+}
+
 function computeDamage(attacker: Entity, defender: Entity, zoneId?: string): number {
-  const raw = getAttackPower(attacker) - getDefensePower(defender) * 0.35;
+  const raw = getAttackPower(attacker) - getDefensePower(defender) * 0.50;
   let damage = Math.max(MIN_DAMAGE, Math.round(raw));
 
   // Apply elemental modifiers in L25+ zones
@@ -906,14 +1003,21 @@ function pickTechnique(
  * Apply technique effects during the tick loop (mirrors techniqueRoutes.applyTechniqueEffects).
  * Returns { damage } for attack techniques.
  */
+interface TechniqueHitResult {
+  damage?: number;
+  dodged?: boolean;
+  critical?: boolean;
+  blocked?: boolean;
+}
+
 function applyTechniqueInCombat(
   caster: Entity,
   target: Entity,
   technique: TechniqueDefinition,
   zone: ZoneState,
-): { damage?: number } {
+): TechniqueHitResult {
   const { effects, type } = technique;
-  const result: { damage?: number } = {};
+  const result: TechniqueHitResult = {};
 
   // Attack techniques
   if (type === "attack" && effects.damageMultiplier) {
@@ -923,10 +1027,13 @@ function applyTechniqueInCombat(
       ? (stats?.int ?? caster.stats?.int ?? 10)
       : (stats?.str ?? caster.stats?.str ?? 10);
     const baseDmg = Math.floor(5 + primaryStat * 0.5);
-    const damage = Math.floor(baseDmg * effects.damageMultiplier);
+    let damage = Math.floor(baseDmg * effects.damageMultiplier);
+
+    // Holy damage bonus for paladin/cleric
+    damage += getHolyDamageBonus(caster);
 
     if (effects.maxTargets && effects.maxTargets > 1) {
-      // AoE — hit multiple targets
+      // AoE — hit multiple targets (each rolls dodge/crit/block independently)
       const nearby: Entity[] = [];
       for (const e of zone.entities.values()) {
         if (e.type !== "mob" && e.type !== "boss") continue;
@@ -939,25 +1046,30 @@ function applyTechniqueInCombat(
         }
       }
       for (const t of nearby) {
-        applyDamageWithShield(t, damage);
+        resolveHit(caster, t, damage);
       }
       result.damage = damage;
     } else {
-      applyDamageWithShield(target, damage);
-      result.damage = damage;
+      const hit = resolveHit(caster, target, damage);
+      result.damage = hit.finalDamage;
+      result.dodged = hit.dodged;
+      result.critical = hit.critical;
+      result.blocked = hit.blocked;
     }
 
-    // Lifesteal
-    if (effects.healAmount && type === "attack") {
-      const heal = Math.floor(damage * (effects.healAmount / 100));
+    // Lifesteal (amplified by faith for paladin/cleric)
+    if (effects.healAmount && !result.dodged) {
+      const healBase = Math.floor((result.damage ?? 0) * (effects.healAmount / 100));
+      const heal = Math.floor(healBase * getFaithHealMultiplier(caster));
       caster.hp = Math.min(caster.maxHp, caster.hp + heal);
     }
   }
 
-  // Healing techniques
+  // Healing techniques (amplified by faith)
   if (type === "healing" && effects.healAmount) {
+    const faithMult = getFaithHealMultiplier(caster);
     if (effects.duration && effects.duration > 0) {
-      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100) * faithMult);
       const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
       addActiveEffectInternal(target, {
         id: randomUUID(),
@@ -971,7 +1083,7 @@ function applyTechniqueInCombat(
         hotHealPerTick: healPerTick,
       });
     } else {
-      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100) * faithMult);
       const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
       target.hp = Math.min(target.maxHp, target.hp + actualHeal);
     }
@@ -1209,114 +1321,142 @@ async function worldTick() {
         if (dist > ATTACK_RANGE) {
           moveToward(entity, target.x, target.y);
         } else {
-          const dealt = computeDamage(entity, target, zone.zoneId);
-          applyDamageWithShield(target, dealt);
-          applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
-          applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
+          const rawDmg = computeDamage(entity, target, zone.zoneId);
+          const hit = resolveHit(entity, target, rawDmg);
 
-          // Mob tagging + combat tracking
+          // Mob tagging + combat tracking (even on dodge — still counts as engagement)
           trySetMobTag(target, entity.id, entity.type, zone.tick);
           entity.lastCombatTick = zone.tick;
           target.lastCombatTick = zone.tick;
 
-          // Log combat event
-          logZoneEvent({
-            zoneId: zone.zoneId,
-            type: "combat",
-            tick: zone.tick,
-            message: `${entity.name} hits ${target.name} for ${dealt} damage!`,
-            entityId: entity.id,
-            entityName: entity.name,
-            targetId: target.id,
-            targetName: target.name,
-            data: { damage: dealt, targetHp: target.hp },
-          });
-
-          // Basic retaliation: combatants trade hits while in range.
-          if (target.hp > 0 && canRetaliate(target)) {
-            const retaliation = computeDamage(target, entity, zone.zoneId);
-            applyDamageWithShield(entity, retaliation);
-            applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
-            applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
-
-            // Update combat tracking for retaliation
-            entity.lastCombatTick = zone.tick;
-            target.lastCombatTick = zone.tick;
-
-            // Log retaliation
+          if (hit.dodged) {
+            // Dodge: no damage, no durability loss, no retaliation, no death
             logZoneEvent({
               zoneId: zone.zoneId,
               type: "combat",
               tick: zone.tick,
-              message: `${target.name} retaliates for ${retaliation} damage!`,
-              entityId: target.id,
-              entityName: target.name,
-              targetId: entity.id,
-              targetName: entity.name,
-              data: { damage: retaliation, targetHp: entity.hp },
+              message: `${target.name} dodges ${entity.name}'s attack!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { damage: 0, dodged: true, targetHp: target.hp },
             });
-            if (entity.hp <= 0) {
-              // Log death
-              logZoneEvent({
-                zoneId: zone.zoneId,
-                type: "death",
-                tick: zone.tick,
-                message: `${entity.name} has been slain by ${target.name}!`,
-                entityId: entity.id,
-                entityName: entity.name,
-                targetId: target.id,
-                targetName: target.name,
-              });
+          } else {
+            // Hit landed — apply durability
+            applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
+            applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
 
-              // Handle death based on entity type
-              if (entity.type === "player") {
-                handlePlayerDeath(entity, zone.zoneId);
-                continue;
+            const hitTag = hit.critical ? "CRITICAL! " : "";
+            const blockTag = hit.blocked ? " (blocked)" : "";
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "combat",
+              tick: zone.tick,
+              message: `${hitTag}${entity.name} hits ${target.name} for ${hit.finalDamage} damage!${blockTag}`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: { damage: hit.finalDamage, critical: hit.critical, blocked: hit.blocked, targetHp: target.hp },
+            });
+
+            // Basic retaliation: combatants trade hits while in range.
+            if (target.hp > 0 && canRetaliate(target)) {
+              const retRaw = computeDamage(target, entity, zone.zoneId);
+              const retHit = resolveHit(target, entity, retRaw);
+
+              entity.lastCombatTick = zone.tick;
+              target.lastCombatTick = zone.tick;
+
+              if (retHit.dodged) {
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "combat",
+                  tick: zone.tick,
+                  message: `${entity.name} dodges ${target.name}'s retaliation!`,
+                  entityId: target.id,
+                  entityName: target.name,
+                  targetId: entity.id,
+                  targetName: entity.name,
+                  data: { damage: 0, dodged: true, targetHp: entity.hp },
+                });
               } else {
-                // Mob/boss died from retaliation — award XP + kill credit to the retaliator
-                const retaliator = (entity.taggedBy && zone.entities.get(entity.taggedBy)?.type === "player")
-                  ? zone.entities.get(entity.taggedBy)!
-                  : (target.type === "player" ? target : undefined);
-                if (retaliator && retaliator.type === "player") {
-                  retaliator.kills = (retaliator.kills ?? 0) + 1;
+                applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
+                applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
+
+                const retTag = retHit.critical ? "CRITICAL! " : "";
+                const retBlockTag = retHit.blocked ? " (blocked)" : "";
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "combat",
+                  tick: zone.tick,
+                  message: `${retTag}${target.name} retaliates for ${retHit.finalDamage} damage!${retBlockTag}`,
+                  entityId: target.id,
+                  entityName: target.name,
+                  targetId: entity.id,
+                  targetName: entity.name,
+                  data: { damage: retHit.finalDamage, critical: retHit.critical, blocked: retHit.blocked, targetHp: entity.hp },
+                });
+
+                if (entity.hp <= 0) {
                   logZoneEvent({
                     zoneId: zone.zoneId,
-                    type: "kill",
+                    type: "death",
                     tick: zone.tick,
-                    message: `${retaliator.name} has slain ${entity.name}!`,
-                    entityId: retaliator.id,
-                    entityName: retaliator.name,
-                    targetId: entity.id,
-                    targetName: entity.name,
-                    data: { xpReward: entity.xpReward ?? 0 },
+                    message: `${entity.name} has been slain by ${target.name}!`,
+                    entityId: entity.id,
+                    entityName: entity.name,
+                    targetId: target.id,
+                    targetName: target.name,
                   });
-                  if (retaliator.walletAddress) {
-                    const { headline, narrative } = narrativeKill(retaliator.name, retaliator.raceId, retaliator.classId, zone.zoneId, entity.name, entity.xpReward ?? 0);
-                    logDiary(retaliator.walletAddress, retaliator.name, zone.zoneId, retaliator.x, retaliator.y, "kill", headline, narrative, {
-                      targetName: entity.name,
-                      targetType: entity.type,
-                      xpReward: entity.xpReward ?? 0,
-                    });
-                  }
-                  // Track quest progress for retaliation kills
-                  if (retaliator.activeQuests) {
-                    for (const activeQuest of retaliator.activeQuests) {
-                      const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
-                      if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
-                        activeQuest.progress++;
+
+                  if (entity.type === "player") {
+                    handlePlayerDeath(entity, zone.zoneId);
+                    continue;
+                  } else {
+                    const retaliator = (entity.taggedBy && zone.entities.get(entity.taggedBy)?.type === "player")
+                      ? zone.entities.get(entity.taggedBy)!
+                      : (target.type === "player" ? target : undefined);
+                    if (retaliator && retaliator.type === "player") {
+                      retaliator.kills = (retaliator.kills ?? 0) + 1;
+                      logZoneEvent({
+                        zoneId: zone.zoneId,
+                        type: "kill",
+                        tick: zone.tick,
+                        message: `${retaliator.name} has slain ${entity.name}!`,
+                        entityId: retaliator.id,
+                        entityName: retaliator.name,
+                        targetId: entity.id,
+                        targetName: entity.name,
+                        data: { xpReward: entity.xpReward ?? 0 },
+                      });
+                      if (retaliator.walletAddress) {
+                        const { headline, narrative } = narrativeKill(retaliator.name, retaliator.raceId, retaliator.classId, zone.zoneId, entity.name, entity.xpReward ?? 0);
+                        logDiary(retaliator.walletAddress, retaliator.name, zone.zoneId, retaliator.x, retaliator.y, "kill", headline, narrative, {
+                          targetName: entity.name,
+                          targetType: entity.type,
+                          xpReward: entity.xpReward ?? 0,
+                        });
+                      }
+                      if (retaliator.activeQuests) {
+                        for (const activeQuest of retaliator.activeQuests) {
+                          const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
+                          if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
+                            activeQuest.progress++;
+                          }
+                        }
                       }
                     }
+
+                    await handleMobDeath(entity, retaliator ?? target, zone);
+
+                    if (retaliator) {
+                      awardPartyXp(zone, retaliator, entity.xpReward ?? 0);
+                    }
+                    continue;
                   }
                 }
-
-                // Mobs/bosses: auto-loot + create corpse
-                await handleMobDeath(entity, retaliator ?? target, zone);
-
-                // Grant XP for retaliation kill
-                if (retaliator) {
-                  awardPartyXp(zone, retaliator, entity.xpReward ?? 0);
-                }
-                continue;
               }
             }
           }
@@ -1427,29 +1567,59 @@ async function worldTick() {
 
           // Log the technique use
           if (technique.type === "attack") {
-            const dmg = techResult.damage ?? 0;
-            logZoneEvent({
-              zoneId: zone.zoneId,
-              type: "ability",
-              tick: zone.tick,
-              message: `${entity.name} casts ${technique.name} on ${target.name} for ${dmg} damage!`,
-              entityId: entity.id,
-              entityName: entity.name,
-              targetId: target.id,
-              targetName: target.name,
-              data: {
-                techniqueId: technique.id,
-                techniqueName: technique.name,
-                techniqueType: technique.type,
-                animStyle: technique.animStyle,
-                damage: dmg,
-                targetHp: target.hp,
-                casterX: entity.x,
-                casterZ: entity.y,
-                targetX: target.x,
-                targetZ: target.y,
-              },
-            });
+            if (techResult.dodged) {
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "ability",
+                tick: zone.tick,
+                message: `${target.name} dodges ${entity.name}'s ${technique.name}!`,
+                entityId: entity.id,
+                entityName: entity.name,
+                targetId: target.id,
+                targetName: target.name,
+                data: {
+                  techniqueId: technique.id,
+                  techniqueName: technique.name,
+                  techniqueType: technique.type,
+                  animStyle: technique.animStyle,
+                  damage: 0,
+                  dodged: true,
+                  targetHp: target.hp,
+                  casterX: entity.x,
+                  casterZ: entity.y,
+                  targetX: target.x,
+                  targetZ: target.y,
+                },
+              });
+            } else {
+              const dmg = techResult.damage ?? 0;
+              const critTag = techResult.critical ? "CRITICAL! " : "";
+              const blockTag = techResult.blocked ? " (blocked)" : "";
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "ability",
+                tick: zone.tick,
+                message: `${critTag}${entity.name} casts ${technique.name} on ${target.name} for ${dmg} damage!${blockTag}`,
+                entityId: entity.id,
+                entityName: entity.name,
+                targetId: target.id,
+                targetName: target.name,
+                data: {
+                  techniqueId: technique.id,
+                  techniqueName: technique.name,
+                  techniqueType: technique.type,
+                  animStyle: technique.animStyle,
+                  damage: dmg,
+                  critical: techResult.critical,
+                  blocked: techResult.blocked,
+                  targetHp: target.hp,
+                  casterX: entity.x,
+                  casterZ: entity.y,
+                  targetX: target.x,
+                  targetZ: target.y,
+                },
+              });
+            }
           } else if (technique.type === "buff" || technique.type === "healing") {
             logZoneEvent({
               zoneId: zone.zoneId,
@@ -1492,43 +1662,58 @@ async function worldTick() {
             });
           }
 
-          // Retaliation from target (same as basic attack)
-          if (technique.type === "attack" && target.hp > 0 && canRetaliate(target)) {
-            const retaliation = computeDamage(target, entity, zone.zoneId);
-            applyDamageWithShield(entity, retaliation);
+          // Retaliation from target (same as basic attack, with resolveHit)
+          if (technique.type === "attack" && !techResult.dodged && target.hp > 0 && canRetaliate(target)) {
+            const retRaw = computeDamage(target, entity, zone.zoneId);
+            const retHit = resolveHit(target, entity, retRaw);
 
-            // Update combat tracking for retaliation
             entity.lastCombatTick = zone.tick;
             target.lastCombatTick = zone.tick;
 
-            logZoneEvent({
-              zoneId: zone.zoneId,
-              type: "combat",
-              tick: zone.tick,
-              message: `${target.name} retaliates for ${retaliation} damage!`,
-              entityId: target.id,
-              entityName: target.name,
-              targetId: entity.id,
-              targetName: entity.name,
-              data: { damage: retaliation, targetHp: entity.hp },
-            });
-            if (entity.hp <= 0) {
+            if (retHit.dodged) {
               logZoneEvent({
                 zoneId: zone.zoneId,
-                type: "death",
+                type: "combat",
                 tick: zone.tick,
-                message: `${entity.name} has been slain by ${target.name}!`,
-                entityId: entity.id,
-                entityName: entity.name,
-                targetId: target.id,
-                targetName: target.name,
+                message: `${entity.name} dodges ${target.name}'s retaliation!`,
+                entityId: target.id,
+                entityName: target.name,
+                targetId: entity.id,
+                targetName: entity.name,
+                data: { damage: 0, dodged: true, targetHp: entity.hp },
               });
-              if (entity.type === "player") {
-                handlePlayerDeath(entity, zone.zoneId);
-                continue;
-              } else {
-                await handleMobDeath(entity, target, zone);
-                continue;
+            } else {
+              const retTag = retHit.critical ? "CRITICAL! " : "";
+              const retBlockTag = retHit.blocked ? " (blocked)" : "";
+              logZoneEvent({
+                zoneId: zone.zoneId,
+                type: "combat",
+                tick: zone.tick,
+                message: `${retTag}${target.name} retaliates for ${retHit.finalDamage} damage!${retBlockTag}`,
+                entityId: target.id,
+                entityName: target.name,
+                targetId: entity.id,
+                targetName: entity.name,
+                data: { damage: retHit.finalDamage, critical: retHit.critical, blocked: retHit.blocked, targetHp: entity.hp },
+              });
+              if (entity.hp <= 0) {
+                logZoneEvent({
+                  zoneId: zone.zoneId,
+                  type: "death",
+                  tick: zone.tick,
+                  message: `${entity.name} has been slain by ${target.name}!`,
+                  entityId: entity.id,
+                  entityName: entity.name,
+                  targetId: target.id,
+                  targetName: target.name,
+                });
+                if (entity.type === "player") {
+                  handlePlayerDeath(entity, zone.zoneId);
+                  continue;
+                } else {
+                  await handleMobDeath(entity, target, zone);
+                  continue;
+                }
               }
             }
           }
@@ -1702,6 +1887,8 @@ async function worldTick() {
       if (entity.hp <= 0) continue;
       // Skip players that are traveling to another zone
       if (entity.travelTargetZone) continue;
+      // Skip players in goto mode (navigating to NPC — don't interrupt with combat)
+      if (entity.gotoMode) continue;
 
       // Find nearest mob within range
       let nearestMob: Entity | null = null;
@@ -2036,7 +2223,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
-      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability", "combat", "death", "levelup"]);
+      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability", "combat", "death", "levelup", "technique"]);
       return {
         zoneId: zone.zoneId,
         tick: zone.tick,

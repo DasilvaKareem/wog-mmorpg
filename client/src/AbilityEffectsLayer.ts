@@ -155,6 +155,23 @@ export class AbilityEffectsLayer {
     });
   }
 
+  // ── Technique learned: purple sparkle burst ─────────────────────────
+  playTechniqueLearned(pos: Pos): void {
+    const emitter = this.emitters.get("debuff")!; // purple particles
+    emitter.explode(10, pos.x, pos.y);
+
+    const ring = this.scene.add.arc(pos.x, pos.y, 5, 0, 360, false);
+    ring.setStrokeStyle(1.5, 0xbb9af7, 0.9);
+    ring.setFillStyle();
+    ring.setDepth(92);
+    this.scene.tweens.add({
+      targets: ring,
+      scaleX: 5, scaleY: 5, alpha: 0,
+      duration: 550, ease: "Quad.easeOut",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
   // ── Death: brief red flash ──────────────────────────────────────────
   playDeath(pos: Pos): void {
     const emitter = this.emitters.get("attack")!;

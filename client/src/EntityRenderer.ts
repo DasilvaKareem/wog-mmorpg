@@ -237,6 +237,63 @@ export class EntityRenderer {
     });
   }
 
+  /** Float a purple "NEW SKILL!" banner + technique name above the entity. */
+  triggerTechniqueLearned(entityId: string, techniqueName?: string): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    const x = visual.sprite.x;
+    const y = visual.sprite.y - 16;
+
+    // Purple flash on the sprite
+    visual.sprite.setTint(0xbb9af7);
+    this.scene.time.delayedCall(500, () => visual.sprite?.clearTint());
+
+    // Floating "NEW SKILL!" text
+    const header = this.scene.add
+      .text(x, y, "NEW SKILL!", {
+        fontSize: "11px",
+        fontFamily: "monospace",
+        color: "#bb9af7",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(120);
+
+    this.scene.tweens.add({
+      targets: header,
+      y: y - 30,
+      alpha: 0,
+      duration: 1800,
+      ease: "Quad.easeOut",
+      onComplete: () => header.destroy(),
+    });
+
+    // Technique name below the header
+    if (techniqueName) {
+      const sub = this.scene.add
+        .text(x, y + 8, techniqueName, {
+          fontSize: "9px",
+          fontFamily: "monospace",
+          color: "#c792ea",
+          stroke: "#000000",
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(120);
+
+      this.scene.tweens.add({
+        targets: sub,
+        y: y - 18,
+        alpha: 0,
+        duration: 1800,
+        ease: "Quad.easeOut",
+        onComplete: () => sub.destroy(),
+      });
+    }
+  }
+
   /** Snapshot pixel positions for all tracked entities (used by VFX layer). */
   getPixelPositions(): Map<string, { x: number; y: number }> {
     const out = new Map<string, { x: number; y: number }>();

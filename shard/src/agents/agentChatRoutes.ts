@@ -27,6 +27,7 @@ import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getAllZones } from "../world/zoneRuntime.js";
+import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveZoneId } from "../world/worldLayout.js";
 import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
@@ -42,6 +43,46 @@ const groq = new Groq({
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Match common user messages to focus/strategy changes. Returns null if no match. */
+function matchFocusKeyword(msg: string): { focus: AgentFocus; strategy?: AgentStrategy; response: string } | null {
+  // Combat / fighting / kill
+  if (/\b(fight|kill|attack|combat|slay|battle|grind|farm)\b/i.test(msg)) {
+    const strat = /\b(aggressive|aggro)\b/i.test(msg) ? "aggressive" as const
+      : /\b(defensive|careful|safe)\b/i.test(msg) ? "defensive" as const
+      : undefined;
+    return { focus: "combat", strategy: strat, response: `Aye, time for battle! Switching to combat${strat ? ` with ${strat} strategy` : ""}.` };
+  }
+  // Questing
+  if (/\b(quest|questing|do\s+quest|mission)\b/i.test(msg)) {
+    return { focus: "questing", response: "On it — heading out to find quests and adventure!" };
+  }
+  // Gathering / mining / herbs
+  if (/\b(gather|mine|mining|herb|pick\s+flower|harvest|skin|forage)\b/i.test(msg)) {
+    return { focus: "gathering", response: "Right, I'll start gathering resources around the zone." };
+  }
+  // Shopping / buy / armor / gear
+  if (/\b(shop|buy|purchase|armor|gear up|get\s+gear|merchant|equip)\b/i.test(msg)) {
+    return { focus: "shopping", response: "Off to the merchant! Time to gear up." };
+  }
+  // Crafting
+  if (/\b(craft|crafting|smithing|forge|make\s+item)\b/i.test(msg)) {
+    return { focus: "crafting", response: "Heading to the crafting station — time to make something useful." };
+  }
+  // Alchemy / brew / potion
+  if (/\b(brew|alchemy|potion|elixir)\b/i.test(msg)) {
+    return { focus: "alchemy", response: "Time to brew some potions!" };
+  }
+  // Cooking
+  if (/\b(cook|cooking|food|recipe)\b/i.test(msg)) {
+    return { focus: "cooking", response: "Heading to the campfire to cook up something tasty." };
+  }
+  // Stop / idle / rest
+  if (/\b(stop|idle|rest|wait|afk|chill|relax)\b/i.test(msg) && !/\bstop\s+(fight|kill|attack)/i.test(msg)) {
+    return { focus: "idle", response: "Alright, taking a breather. I'll be here if you need me." };
+  }
+  return null;
 }
 
 function extractRawCharacterName(name?: string): string | null {
@@ -424,28 +465,105 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     // ── Keyword short-circuit: catch common commands the LLM often fumbles ──
     const msgLower = message.toLowerCase().trim();
 
-    // "learn a spell / technique / ability" → directly trigger learn_technique
+    // "learn a spell / technique / ability" → send agent to class trainer via goto system
     if (/\b(learn|train|study)\b.*(spell|technique|ability|skill|move|attack)\b/i.test(msgLower)
       || /\b(spell|technique|ability)\b.*(learn|train|study)\b/i.test(msgLower)
       || /\bgo\s+to\s+(class\s+)?trainer\b/i.test(msgLower)) {
       const runner = agentManager.getRunner(authWallet);
       let responseText: string;
-      if (runner) {
-        (runner as any).nextTechniqueCheckAt = 0;
-        const learned = await runner.learnNextTechnique();
-        responseText = learned
-          ? "Right, I'll head to the class trainer and see what new techniques I can pick up!"
-          : "I've checked with my trainer — no new techniques available for me right now.";
-        server.log.info(`[agent/chat] keyword shortcut: learn_technique → ${learned}`);
-      } else {
+      let configUpdated = false;
+
+      if (!runner) {
         responseText = "My agent isn't running — deploy me first before I can train.";
+      } else {
+        // Find the agent's entity to get classId and zone
+        const ref = await getAgentEntityRef(authWallet);
+        const zoneId = ref?.zoneId ?? "village-square";
+        const zone = getAllZones().get(zoneId);
+        const entity = ref?.entityId && zone ? zone.entities.get(ref.entityId) as any : null;
+        const classId = (entity?.classId ?? "").toLowerCase();
+
+        if (!classId) {
+          responseText = "Something's wrong — I don't seem to have a class. Try redeploying me.";
+        } else {
+          // Check what techniques are available
+          const available = getLearnedTechniques(classId, entity.level ?? 1);
+          const learnedIds: string[] = entity.learnedTechniques ?? [];
+          const nextToLearn = available.find((t) => !learnedIds.includes(t.id));
+
+          if (!nextToLearn) {
+            responseText = available.length > 0
+              ? "I've already learned all the techniques available at my level. I need to level up to unlock more!"
+              : `No ${classId} techniques exist for level ${entity.level ?? 1}.`;
+          } else {
+            // Find the class trainer in this zone
+            let trainerId: string | null = null;
+            let trainerName: string | null = null;
+            if (zone) {
+              for (const [id, e] of zone.entities) {
+                const ent = e as any;
+                if (ent.type === "trainer") {
+                  const teaches = (ent.teachesClass ?? "").toLowerCase();
+                  if (teaches === classId || new RegExp(`${classId}\\s+trainer`, "i").test(String(ent.name ?? ""))) {
+                    trainerId = id;
+                    trainerName = ent.name ?? "class trainer";
+                    break;
+                  }
+                }
+              }
+            }
+
+            if (!trainerId) {
+              responseText = `There's no ${classId} trainer in ${zoneId}. I might need to travel somewhere else.`;
+            } else {
+              // Set goto target — the agent loop will walk there and learn on arrival
+              await patchAgentConfig(authWallet, {
+                focus: "goto" as AgentFocus,
+                gotoTarget: {
+                  entityId: trainerId,
+                  zoneId,
+                  name: trainerName ?? undefined,
+                  action: "learn-technique",
+                  techniqueId: nextToLearn.id,
+                  techniqueName: nextToLearn.name,
+                },
+              });
+              runner.setGotoTarget(trainerId, zoneId, trainerName ?? undefined, "learn-technique");
+              configUpdated = true;
+              responseText = `On my way to ${trainerName} to learn ${nextToLearn.name}!`;
+              server.log.info(`[agent/chat] keyword shortcut: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
+            }
+          }
+        }
       }
+
       const ts = Date.now();
       await appendChatMessage(authWallet, { role: "user", text: message, ts });
       await appendChatMessage(authWallet, { role: "agent", text: responseText, ts: ts + 1 });
       return reply.send({
         response: responseText,
-        configUpdated: false,
+        configUpdated,
+        agentRunning: agentManager.isRunning(authWallet),
+      });
+    }
+
+    // ── Focus keyword shortcuts: catch common focus changes the LLM often fumbles ──
+    const focusMatch = matchFocusKeyword(msgLower);
+    if (focusMatch) {
+      const patch: Record<string, unknown> = { focus: focusMatch.focus };
+      if (focusMatch.strategy) patch.strategy = focusMatch.strategy;
+      await patchAgentConfig(authWallet, patch as any);
+      const runner = agentManager.getRunner(authWallet);
+      if (runner) runner.clearScript();
+
+      const responseText = focusMatch.response;
+      const ts = Date.now();
+      await appendChatMessage(authWallet, { role: "user", text: message, ts });
+      await appendChatMessage(authWallet, { role: "agent", text: responseText, ts: ts + 1 });
+      server.log.info(`[agent/chat] keyword shortcut: focus=${focusMatch.focus} strategy=${focusMatch.strategy ?? "unchanged"}`);
+      return reply.send({
+        response: responseText,
+        configUpdated: true,
         agentRunning: agentManager.isRunning(authWallet),
       });
     }
@@ -687,6 +805,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     const actionsTaken: string[] = [];
 
     const choice = groqResponse.choices[0];
+
+    // Debug: log what Groq actually returned
+    server.log.info(`[agent/chat] Groq response: finish_reason=${choice?.finish_reason} content=${JSON.stringify(choice?.message?.content)?.slice(0, 120)} tool_calls=${choice?.message?.tool_calls?.length ?? 0} model=${groqResponse.model}`);
+    if (choice?.message?.tool_calls?.length) {
+      for (const tc of choice.message.tool_calls) {
+        server.log.info(`[agent/chat] tool_call: ${tc.function.name}(${tc.function.arguments?.slice(0, 100)})`);
+      }
+    }
 
     // Capture first response content
     if (choice?.message?.content) {
@@ -942,9 +1068,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               if (runner) {
                 // Force-clear the technique cooldown so it tries immediately
                 (runner as any).nextTechniqueCheckAt = 0;
-                const learned = await runner.learnNextTechnique();
-                actionsTaken.push(learned ? "[heading to class trainer to learn a technique]" : "[no new techniques available right now]");
-                server.log.info(`[agent/chat] learn_technique → ${learned}`);
+                const result = await runner.learnNextTechnique();
+                actionsTaken.push(result.ok ? `[${result.reason}]` : `[can't learn: ${result.reason}]`);
+                server.log.info(`[agent/chat] learn_technique → ok=${result.ok}, reason=${result.reason}`);
               } else {
                 actionsTaken.push("[agent not running]");
               }
@@ -1022,11 +1148,73 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       }
     }
 
+    // If LLM returned nothing useful, retry once with tool_choice: "required"
+    if (!agentResponse && actionsTaken.length === 0) {
+      server.log.warn(`[agent/chat] Empty response from Groq — retrying with tool_choice=required`);
+      try {
+        const retryResponse = await groq.chat.completions.create({
+          model: "openai/gpt-oss-120b",
+          max_tokens: 300,
+          temperature: 0.3,
+          messages: history,
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "update_focus",
+                description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    focus: {
+                      type: "string",
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
+                      description: "The new activity focus",
+                    },
+                    strategy: {
+                      type: "string",
+                      enum: ["aggressive", "balanced", "defensive"],
+                    },
+                  },
+                  required: ["focus"],
+                },
+              },
+            },
+          ],
+          tool_choice: { type: "function", function: { name: "update_focus" } },
+        });
+        const retryChoice = retryResponse.choices[0];
+        if (retryChoice?.message?.content) {
+          agentResponse = retryChoice.message.content;
+        }
+        if (retryChoice?.message?.tool_calls) {
+          for (const tc of retryChoice.message.tool_calls) {
+            if (tc.function.name === "update_focus") {
+              try {
+                const input = JSON.parse(tc.function.arguments) as { focus: AgentFocus; strategy?: AgentStrategy };
+                const patch: any = { focus: input.focus };
+                if (input.strategy) patch.strategy = input.strategy;
+                patch.targetZone = undefined;
+                await patchAgentConfig(authWallet, patch);
+                configUpdated = true;
+                actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
+                const runner = agentManager.getRunner(authWallet);
+                if (runner) runner.clearScript();
+                server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
+              } catch { /* ignore parse errors */ }
+            }
+          }
+        }
+      } catch (retryErr: any) {
+        server.log.warn(`[agent/chat] Retry failed: ${retryErr.message?.slice(0, 60)}`);
+      }
+    }
+
     // Final fallback if still empty
     if (!agentResponse && actionsTaken.length > 0) {
       agentResponse = `Aye, ${actionsTaken.join(" and ").replace(/[\[\]]/g, "")}.`;
     } else if (!agentResponse) {
-      agentResponse = "Hmm, I'm not sure what you mean.";
+      agentResponse = "Hmm, I'm not sure what you mean. Try saying something like 'go quest', 'fight mobs', or 'go shopping'.";
     }
 
     // Append action tags to the saved history so the LLM has context next time
