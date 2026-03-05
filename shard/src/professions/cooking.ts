@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getOrCreateZone } from "../world/zoneRuntime.js";
 import { burnItem, mintItem } from "../blockchain/blockchain.js";
 import { hasLearnedProfession } from "./professions.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -205,6 +206,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
           : PROFESSION_XP.COOK_TIER3;
       const profXpResult = awardProfessionXp(entity, zoneId, cookXp, "cooking", recipe.name);
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 1, `Crafted: ${recipe.name}`);
       server.log.info(
         `[cooking] ${entity.name} cooked ${recipe.name} at ${campfire.name} → ${cookTx}`
       );

@@ -5,7 +5,7 @@ import { generateAuthToken } from "../auth/auth.js";
 import { computeCharacter, validateCharacterInput } from "../character/characterCreate.js";
 import { getOrCreateZone, recalculateEntityVitals, isWalletSpawned, registerSpawnedWallet, type Entity } from "../world/zoneRuntime.js";
 import { processPayment, getPricingTier, type PaymentMethod } from "./x402Payment.js";
-import { saveCharacter } from "../character/characterStore.js";
+import { saveCharacter, loadCharacter } from "../character/characterStore.js";
 import { reputationManager } from "./reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
 
@@ -171,6 +171,9 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     const spawnX = 150;
     const spawnY = 150;
 
+    // Restore from existing save if the wallet has prior progress
+    const existingSave = await loadCharacter(wallet.address, request.character.name);
+
     const entity: Entity = {
       id: randomUUID(),
       type: "player",
@@ -183,15 +186,15 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       maxEssence: characterData.stats.essence,
       createdAt: Date.now(),
       walletAddress: wallet.address,
-      level: 1,
-      xp: 0,
+      level: existingSave?.level ?? 1,
+      xp: existingSave?.xp ?? 0,
       raceId: request.character.race,
       classId: request.character.class,
       stats: characterData.stats,
       characterTokenId: BigInt(0),
-      kills: 0,
-      completedQuests: [],
-      learnedTechniques: [],
+      kills: existingSave?.kills ?? 0,
+      completedQuests: existingSave?.completedQuests ?? [],
+      learnedTechniques: existingSave?.learnedTechniques ?? [],
     };
 
     recalculateEntityVitals(entity);
@@ -210,33 +213,34 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     zone.entities.set(entity.id, entity);
     registerSpawnedWallet(wallet.address, entity.id, request.deploymentZone);
 
-    // 8. Save character to persistent store
+    // 8. Save character to persistent store (preserve existing progress if found)
     await saveCharacter(wallet.address, request.character.name, {
       name: request.character.name,
-      level: 1,
-      xp: 0,
+      level: existingSave?.level ?? 1,
+      xp: existingSave?.xp ?? 0,
       raceId: request.character.race,
       classId: request.character.class,
       zone: request.deploymentZone,
       x: spawnX,
       y: spawnY,
-      kills: 0,
-      completedQuests: [],
-      learnedTechniques: [],
-      professions: [],
+      kills: existingSave?.kills ?? 0,
+      completedQuests: existingSave?.completedQuests ?? [],
+      learnedTechniques: existingSave?.learnedTechniques ?? [],
+      professions: existingSave?.professions ?? [],
     });
 
     // 9. Initialize reputation
     reputationManager.ensureInitialized(wallet.address);
 
     // 10. Log diary entry
+    const isRestored = !!existingSave;
     const { headline, narrative } = narrativeSpawn(
-      entity.name, entity.raceId, entity.classId, request.deploymentZone, false
+      entity.name, entity.raceId, entity.classId, request.deploymentZone, isRestored
     );
     logDiary(wallet.address, entity.name, request.deploymentZone, spawnX, spawnY,
       "spawn", headline, narrative, {
-        restored: false,
-        level: 1,
+        restored: isRestored,
+        level: entity.level,
         raceId: entity.raceId,
         classId: entity.classId,
       });

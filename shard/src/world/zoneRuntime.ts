@@ -790,8 +790,9 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
   // Restore HP to full
   player.hp = player.maxHp;
 
-  // Clear any pending orders
+  // Clear any pending orders and travel state
   player.order = undefined;
+  player.travelTargetZone = undefined;
 
   // Clear all active effects and cooldowns on death
   player.activeEffects = [];

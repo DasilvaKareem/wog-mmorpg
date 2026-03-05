@@ -7,6 +7,7 @@ import {
   initReputationOnChain,
   submitFeedbackOnChain,
 } from "./reputationChain.js";
+import { getRedis } from "../redis.js";
 
 export enum ReputationCategory {
   Combat = 0,
@@ -62,6 +63,7 @@ export class ReputationManager {
   ensureInitialized(walletAddress: string): void {
     const key = walletAddress.toLowerCase();
     if (this.scores.has(key)) return;
+    // Set defaults synchronously so scores are always available
     this.scores.set(key, {
       combat: DEFAULT_SCORE,
       economic: DEFAULT_SCORE,
@@ -71,7 +73,27 @@ export class ReputationManager {
       overall: DEFAULT_SCORE,
       lastUpdated: Date.now(),
     });
-    initReputationOnChain(key).catch(() => {});
+    // Fire-and-forget Redis restore — overwrites defaults if persisted data exists
+    const redis = getRedis();
+    if (redis) {
+      redis.hgetall(`reputation:${key}`).then((stored: Record<string, string> | null) => {
+        if (stored && stored.overall) {
+          this.scores.set(key, {
+            combat: parseInt(stored.combat ?? String(DEFAULT_SCORE), 10),
+            economic: parseInt(stored.economic ?? String(DEFAULT_SCORE), 10),
+            social: parseInt(stored.social ?? String(DEFAULT_SCORE), 10),
+            crafting: parseInt(stored.crafting ?? String(DEFAULT_SCORE), 10),
+            agent: parseInt(stored.agent ?? String(DEFAULT_SCORE), 10),
+            overall: parseInt(stored.overall, 10),
+            lastUpdated: parseInt(stored.lastUpdated ?? String(Date.now()), 10),
+          });
+        } else {
+          initReputationOnChain(key).catch(() => {});
+        }
+      }).catch(() => {});
+    } else {
+      initReputationOnChain(key).catch(() => {});
+    }
   }
 
   /** Get reputation scores for a wallet */
@@ -125,6 +147,20 @@ export class ReputationManager {
     }
 
     submitFeedbackOnChain(key, category, delta, reason).catch(() => {});
+
+    // Persist to Redis (fire-and-forget)
+    const redis = getRedis();
+    if (redis) {
+      redis.hset(`reputation:${key}`, {
+        combat: String(rep.combat),
+        economic: String(rep.economic),
+        social: String(rep.social),
+        crafting: String(rep.crafting),
+        agent: String(rep.agent),
+        overall: String(rep.overall),
+        lastUpdated: String(rep.lastUpdated),
+      }).catch(() => {});
+    }
   }
 
   /** Batch update multiple categories at once */

@@ -7,6 +7,7 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 export interface JewelcraftingRecipe {
   recipeId: string;
@@ -243,6 +244,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
         : PROFESSION_XP.JEWEL_RING;
       const profXpResult = awardProfessionXp(entity, zoneId, jcXp, "jewelcrafting", outputItem?.name);
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(
         `[jewelcrafting] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );

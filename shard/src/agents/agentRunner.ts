@@ -22,6 +22,7 @@ import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
 import { type BotScript, type TriggerEvent, type TriggerType } from "../types/botScriptTypes.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 /** Safety-net: call supervisor if no trigger has fired in this many ticks (~60s). */
 const MAX_STALE_TICKS = 120;
@@ -704,6 +705,7 @@ export class AgentRunner {
               });
               if (completeRes?.completed) {
                 void this.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}c`);
+                reputationManager.submitFeedback(this.userWallet, ReputationCategory.Agent, Math.max(1, Math.floor((completeRes.rewards?.xp ?? 50) / 50)), `Agent completed quest: ${aq.quest?.title ?? "unknown"}`);
                 return; // one action per tick
               }
             } catch (err: any) {
@@ -1508,6 +1510,7 @@ export class AgentRunner {
       });
       console.log(`[agent:${this.userWallet.slice(0, 8)}] [${strategy}] Fleeing at ${Math.round(hpPct * 100)}% HP`);
       void this.logActivity(`Fleeing! (${Math.round(hpPct * 100)}% HP)`);
+      return true;
     }
     return false;
   }

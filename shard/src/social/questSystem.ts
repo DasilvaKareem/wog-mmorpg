@@ -8,6 +8,7 @@ import { getAllZoneEvents } from "../world/zoneEvents.js";
 import { logDiary, narrativeQuestComplete } from "./diary.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 // Quest definition
 export interface Quest {
@@ -2973,6 +2974,7 @@ export async function awardQuestRewards(
       copperReward: quest.rewards.copper,
       goldReward: quest.rewards.copper, // legacy field for older clients
     });
+    reputationManager.submitFeedback(player.walletAddress, ReputationCategory.Social, 5, `Completed quest: ${quest.title}`);
   }
 
   console.log(

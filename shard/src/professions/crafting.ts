@@ -10,6 +10,7 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { logDiary, narrativeCraft } from "../social/diary.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -641,6 +642,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         });
       }
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(
         `[crafting] ${entity.name} forged ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${craftTx}`
       );

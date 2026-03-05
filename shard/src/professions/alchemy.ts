@@ -7,6 +7,7 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeBrew, narrativeConsume } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getPotionEffect, type PotionEffect } from "./potionEffects.js";
@@ -626,6 +627,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           : PROFESSION_XP.BREW_TIER3;
       const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy", outputItem?.name);
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${outputItem?.name ?? recipeId}`);
       server.log.info(
         `[alchemy] ${entity.name} brewed ${outputItem?.name} at ${alchemyLab.name} → ${potionTx}`
       );

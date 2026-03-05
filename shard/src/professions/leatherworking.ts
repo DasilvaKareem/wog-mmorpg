@@ -7,6 +7,7 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 export interface LeatherworkingRecipe {
   recipeId: string;
@@ -339,6 +340,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
         : PROFESSION_XP.LEATHER_BASIC;
       const profXpResult = awardProfessionXp(entity, zoneId, lwXp, "leatherworking", outputItem?.name);
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(
         `[leatherworking] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );

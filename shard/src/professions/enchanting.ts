@@ -3,6 +3,7 @@ import { getAllZones, recalculateEntityVitals } from "../world/zoneRuntime.js";
 import { burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 export type EnchantmentType =
   | "fire"
@@ -236,6 +237,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
         );
       }
 
+      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);
       server.log.info(
         `[enchanting] ${entity.name} enchanted ${itemInfo.name} with ${enchantment.name} → ${burnTx}`
       );

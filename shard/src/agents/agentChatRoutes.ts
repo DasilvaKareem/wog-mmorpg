@@ -45,45 +45,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Match common user messages to focus/strategy changes. Returns null if no match. */
-function matchFocusKeyword(msg: string): { focus: AgentFocus; strategy?: AgentStrategy; response: string } | null {
-  // Combat / fighting / kill
-  if (/\b(fight|kill|attack|combat|slay|battle|grind|farm)\b/i.test(msg)) {
-    const strat = /\b(aggressive|aggro)\b/i.test(msg) ? "aggressive" as const
-      : /\b(defensive|careful|safe)\b/i.test(msg) ? "defensive" as const
-      : undefined;
-    return { focus: "combat", strategy: strat, response: `Aye, time for battle! Switching to combat${strat ? ` with ${strat} strategy` : ""}.` };
-  }
-  // Questing
-  if (/\b(quest|questing|do\s+quest|mission)\b/i.test(msg)) {
-    return { focus: "questing", response: "On it — heading out to find quests and adventure!" };
-  }
-  // Gathering / mining / herbs
-  if (/\b(gather|mine|mining|herb|pick\s+flower|harvest|skin|forage)\b/i.test(msg)) {
-    return { focus: "gathering", response: "Right, I'll start gathering resources around the zone." };
-  }
-  // Shopping / buy / armor / gear
-  if (/\b(shop|buy|purchase|armor|gear up|get\s+gear|merchant|equip)\b/i.test(msg)) {
-    return { focus: "shopping", response: "Off to the merchant! Time to gear up." };
-  }
-  // Crafting
-  if (/\b(craft|crafting|smithing|forge|make\s+item)\b/i.test(msg)) {
-    return { focus: "crafting", response: "Heading to the crafting station — time to make something useful." };
-  }
-  // Alchemy / brew / potion
-  if (/\b(brew|alchemy|potion|elixir)\b/i.test(msg)) {
-    return { focus: "alchemy", response: "Time to brew some potions!" };
-  }
-  // Cooking
-  if (/\b(cook|cooking|food|recipe)\b/i.test(msg)) {
-    return { focus: "cooking", response: "Heading to the campfire to cook up something tasty." };
-  }
-  // Stop / idle / rest
-  if (/\b(stop|idle|rest|wait|afk|chill|relax)\b/i.test(msg) && !/\bstop\s+(fight|kill|attack)/i.test(msg)) {
-    return { focus: "idle", response: "Alright, taking a breather. I'll be here if you need me." };
-  }
-  return null;
-}
 
 function extractRawCharacterName(name?: string): string | null {
   if (!name) return null;
@@ -462,112 +423,6 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       return reply.code(400).send({ error: "message is required" });
     }
 
-    // ── Keyword short-circuit: catch common commands the LLM often fumbles ──
-    const msgLower = message.toLowerCase().trim();
-
-    // "learn a spell / technique / ability" → send agent to class trainer via goto system
-    if (/\b(learn|train|study)\b.*(spell|technique|ability|skill|move|attack)\b/i.test(msgLower)
-      || /\b(spell|technique|ability)\b.*(learn|train|study)\b/i.test(msgLower)
-      || /\bgo\s+to\s+(class\s+)?trainer\b/i.test(msgLower)) {
-      const runner = agentManager.getRunner(authWallet);
-      let responseText: string;
-      let configUpdated = false;
-
-      if (!runner) {
-        responseText = "My agent isn't running — deploy me first before I can train.";
-      } else {
-        // Find the agent's entity to get classId and zone
-        const ref = await getAgentEntityRef(authWallet);
-        const zoneId = ref?.zoneId ?? "village-square";
-        const zone = getAllZones().get(zoneId);
-        const entity = ref?.entityId && zone ? zone.entities.get(ref.entityId) as any : null;
-        const classId = (entity?.classId ?? "").toLowerCase();
-
-        if (!classId) {
-          responseText = "Something's wrong — I don't seem to have a class. Try redeploying me.";
-        } else {
-          // Check what techniques are available
-          const available = getLearnedTechniques(classId, entity.level ?? 1);
-          const learnedIds: string[] = entity.learnedTechniques ?? [];
-          const nextToLearn = available.find((t) => !learnedIds.includes(t.id));
-
-          if (!nextToLearn) {
-            responseText = available.length > 0
-              ? "I've already learned all the techniques available at my level. I need to level up to unlock more!"
-              : `No ${classId} techniques exist for level ${entity.level ?? 1}.`;
-          } else {
-            // Find the class trainer in this zone
-            let trainerId: string | null = null;
-            let trainerName: string | null = null;
-            if (zone) {
-              for (const [id, e] of zone.entities) {
-                const ent = e as any;
-                if (ent.type === "trainer") {
-                  const teaches = (ent.teachesClass ?? "").toLowerCase();
-                  if (teaches === classId || new RegExp(`${classId}\\s+trainer`, "i").test(String(ent.name ?? ""))) {
-                    trainerId = id;
-                    trainerName = ent.name ?? "class trainer";
-                    break;
-                  }
-                }
-              }
-            }
-
-            if (!trainerId) {
-              responseText = `There's no ${classId} trainer in ${zoneId}. I might need to travel somewhere else.`;
-            } else {
-              // Set goto target — the agent loop will walk there and learn on arrival
-              await patchAgentConfig(authWallet, {
-                focus: "goto" as AgentFocus,
-                gotoTarget: {
-                  entityId: trainerId,
-                  zoneId,
-                  name: trainerName ?? undefined,
-                  action: "learn-technique",
-                  techniqueId: nextToLearn.id,
-                  techniqueName: nextToLearn.name,
-                },
-              });
-              runner.setGotoTarget(trainerId, zoneId, trainerName ?? undefined, "learn-technique");
-              configUpdated = true;
-              responseText = `On my way to ${trainerName} to learn ${nextToLearn.name}!`;
-              server.log.info(`[agent/chat] keyword shortcut: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
-            }
-          }
-        }
-      }
-
-      const ts = Date.now();
-      await appendChatMessage(authWallet, { role: "user", text: message, ts });
-      await appendChatMessage(authWallet, { role: "agent", text: responseText, ts: ts + 1 });
-      return reply.send({
-        response: responseText,
-        configUpdated,
-        agentRunning: agentManager.isRunning(authWallet),
-      });
-    }
-
-    // ── Focus keyword shortcuts: catch common focus changes the LLM often fumbles ──
-    const focusMatch = matchFocusKeyword(msgLower);
-    if (focusMatch) {
-      const patch: Record<string, unknown> = { focus: focusMatch.focus };
-      if (focusMatch.strategy) patch.strategy = focusMatch.strategy;
-      await patchAgentConfig(authWallet, patch as any);
-      const runner = agentManager.getRunner(authWallet);
-      if (runner) runner.clearScript();
-
-      const responseText = focusMatch.response;
-      const ts = Date.now();
-      await appendChatMessage(authWallet, { role: "user", text: message, ts });
-      await appendChatMessage(authWallet, { role: "agent", text: responseText, ts: ts + 1 });
-      server.log.info(`[agent/chat] keyword shortcut: focus=${focusMatch.focus} strategy=${focusMatch.strategy ?? "unchanged"}`);
-      return reply.send({
-        response: responseText,
-        configUpdated: true,
-        agentRunning: agentManager.isRunning(authWallet),
-      });
-    }
-
     const config = await getAgentConfig(authWallet);
     const gameState = await getFullGameState(authWallet);
     const custodialWallet = await getAgentCustodialWallet(authWallet);
@@ -702,14 +557,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             type: "function",
             function: {
               name: "take_action",
-              description: "Execute an immediate in-game action: learn a profession, learn a combat technique/spell from a class trainer, buy an item from a merchant, equip an item, or repair damaged gear at a blacksmith.",
+              description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith.",
               parameters: {
                 type: "object",
                 properties: {
                   action: {
                     type: "string",
                     enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear"],
-                    description: "The action type. Use learn_technique when the user asks to learn a spell, ability, or technique.",
+                    description: "The action type. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or go to a trainer.",
                   },
                   professionId: {
                     type: "string",
@@ -1065,14 +920,70 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               }
             } else if (input.action === "learn_technique") {
               const runner = agentManager.getRunner(authWallet);
-              if (runner) {
-                // Force-clear the technique cooldown so it tries immediately
-                (runner as any).nextTechniqueCheckAt = 0;
-                const result = await runner.learnNextTechnique();
-                actionsTaken.push(result.ok ? `[${result.reason}]` : `[can't learn: ${result.reason}]`);
-                server.log.info(`[agent/chat] learn_technique → ok=${result.ok}, reason=${result.reason}`);
-              } else {
+              if (!runner) {
                 actionsTaken.push("[agent not running]");
+              } else {
+                // Find entity to get class and zone info
+                const techRef = await getAgentEntityRef(authWallet);
+                const techZoneId = techRef?.zoneId ?? "village-square";
+                const techZone = getAllZones().get(techZoneId);
+                const techEntity = techRef?.entityId && techZone ? techZone.entities.get(techRef.entityId) as any : null;
+                const techClassId = (techEntity?.classId ?? "").toLowerCase();
+
+                if (!techClassId) {
+                  actionsTaken.push("[no class found]");
+                } else {
+                  const available = getLearnedTechniques(techClassId, techEntity.level ?? 1);
+                  const learnedIds: string[] = techEntity.learnedTechniques ?? [];
+                  const nextToLearn = available.find((t: any) => !learnedIds.includes(t.id));
+
+                  if (!nextToLearn) {
+                    actionsTaken.push(available.length > 0
+                      ? "[already learned all techniques at current level]"
+                      : `[no ${techClassId} techniques for level ${techEntity.level ?? 1}]`);
+                  } else {
+                    // Find the class trainer in this zone and navigate to them
+                    let trainerId: string | null = null;
+                    let trainerName: string | null = null;
+                    if (techZone) {
+                      for (const [id, e] of techZone.entities) {
+                        const ent = e as any;
+                        if (ent.type === "trainer") {
+                          const teaches = (ent.teachesClass ?? "").toLowerCase();
+                          if (teaches === techClassId || new RegExp(`${techClassId}\\s+trainer`, "i").test(String(ent.name ?? ""))) {
+                            trainerId = id;
+                            trainerName = ent.name ?? "class trainer";
+                            break;
+                          }
+                        }
+                      }
+                    }
+
+                    if (!trainerId) {
+                      // No trainer in zone — try learning directly
+                      (runner as any).nextTechniqueCheckAt = 0;
+                      const result = await runner.learnNextTechnique();
+                      actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer in ${techZoneId}]`);
+                    } else {
+                      // Navigate to trainer and learn on arrival
+                      await patchAgentConfig(authWallet, {
+                        focus: "goto" as AgentFocus,
+                        gotoTarget: {
+                          entityId: trainerId,
+                          zoneId: techZoneId,
+                          name: trainerName ?? undefined,
+                          action: "learn-technique",
+                          techniqueId: nextToLearn.id,
+                          techniqueName: nextToLearn.name,
+                        },
+                      });
+                      runner.setGotoTarget(trainerId, techZoneId, trainerName ?? undefined, "learn-technique");
+                      configUpdated = true;
+                      actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
+                      server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
+                    }
+                  }
+                }
               }
             } else if (input.action === "buy_item" && input.tokenId != null) {
               const runner = agentManager.getRunner(authWallet);
@@ -1214,7 +1125,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     if (!agentResponse && actionsTaken.length > 0) {
       agentResponse = `Aye, ${actionsTaken.join(" and ").replace(/[\[\]]/g, "")}.`;
     } else if (!agentResponse) {
-      agentResponse = "Hmm, I'm not sure what you mean. Try saying something like 'go quest', 'fight mobs', or 'go shopping'.";
+      agentResponse = "I heard ye, but I'm not quite sure how to act on that. Tell me what you'd like — anything from fighting to crafting to exploring, I'll figure it out.";
     }
 
     // Append action tags to the saved history so the LLM has context next time
