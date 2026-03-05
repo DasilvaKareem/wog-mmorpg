@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
+import { getOrCreateZone, getEntity, type Entity } from "./zoneRuntime.js";
 import type { ProfessionType } from "../professions/professions.js";
 import type { CharacterStats } from "../character/classes.js";
 import { statScale } from "../character/leveling.js";
@@ -46,6 +46,83 @@ export function computeMobStats(level: number, hp: number, isBoss: boolean): Cha
 }
 
 export const NPC_DEFS: NpcDef[] = [
+  // === TUTORIAL-ISLAND ZONE ===
+
+  // Tutorial Guide — quest giver
+  {
+    zoneId: "tutorial-island",
+    type: "quest-giver",
+    name: "Tutorial Master Aria",
+    x: 140,
+    y: 160,
+    hp: 999,
+  },
+
+  // Starter supply vendor
+  {
+    zoneId: "tutorial-island",
+    type: "merchant",
+    name: "Recruit Quartermaster",
+    x: 100,
+    y: 120,
+    hp: 999,
+    shopItems: [0, 1, 2, 4], // Health Potion, Mana Potion, starter weapons
+  },
+
+  // Training Dummies — very weak mobs for first kill quest
+  {
+    zoneId: "tutorial-island",
+    type: "mob",
+    name: "Straw Dummy",
+    x: 220,
+    y: 120,
+    hp: 15,
+    level: 1,
+    xpReward: 10,
+  },
+  {
+    zoneId: "tutorial-island",
+    type: "mob",
+    name: "Straw Dummy",
+    x: 260,
+    y: 140,
+    hp: 15,
+    level: 1,
+    xpReward: 10,
+  },
+  {
+    zoneId: "tutorial-island",
+    type: "mob",
+    name: "Straw Dummy",
+    x: 240,
+    y: 180,
+    hp: 15,
+    level: 1,
+    xpReward: 10,
+  },
+
+  // Slightly tougher training targets
+  {
+    zoneId: "tutorial-island",
+    type: "mob",
+    name: "Training Dummy",
+    x: 250,
+    y: 220,
+    hp: 30,
+    level: 1,
+    xpReward: 15,
+  },
+  {
+    zoneId: "tutorial-island",
+    type: "mob",
+    name: "Training Dummy",
+    x: 200,
+    y: 240,
+    hp: 30,
+    level: 1,
+    xpReward: 15,
+  },
+
   // === VILLAGE-SQUARE ZONE ===
 
   // Quest Giver - top-left corner
@@ -2881,8 +2958,7 @@ export function tickMobRespawner(): void {
     // Only respawn mobs (skip merchants, NPCs, etc.)
     if (def.type !== "mob" && def.type !== "boss") continue;
 
-    const zone = getOrCreateZone(def.zoneId);
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
 
     if (entity) {
       // Mob is alive — clear any pending respawn timer

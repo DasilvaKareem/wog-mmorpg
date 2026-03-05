@@ -26,9 +26,9 @@ import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear } from "../world/zoneRuntime.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
-import { getWorldLayout, resolveZoneId } from "../world/worldLayout.js";
+import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
 import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
 
@@ -54,11 +54,9 @@ function extractRawCharacterName(name?: string): string | null {
   return match ? match[1] : trimmed;
 }
 
-async function getEntityState(entityId: string, zoneId: string): Promise<any | null> {
+async function getEntityState(entityId: string, _zoneId?: string): Promise<any | null> {
   try {
-    const zone = getAllZones().get(zoneId);
-    if (!zone) return null;
-    return zone.entities.get(entityId) ?? null;
+    return getWorldEntity(entityId) ?? null;
   } catch {
     return null;
   }
@@ -68,24 +66,21 @@ async function getFullGameState(userWallet: string) {
   const ref = await getAgentEntityRef(userWallet);
   if (!ref) return null;
 
-  const entity = await getEntityState(ref.entityId, ref.zoneId);
+  const entity = await getEntityState(ref.entityId);
   if (!entity) return null;
 
-  // Get nearby entities
-  const zone = getAllZones().get(ref.zoneId);
+  // Get nearby entities from unified world
+  const nearbyEntities = getEntitiesNear(entity.x, entity.y, 200);
   const nearby: any[] = [];
-  if (zone) {
-    for (const [id, e] of zone.entities) {
-      if (id === ref.entityId) continue;
-      const dist = Math.hypot((e as any).x - entity.x, (e as any).y - entity.y);
-      if (dist < 200) nearby.push({ entityId: id, ...(e as any) });
-    }
-    nearby.sort((a, b) => {
-      const da = Math.hypot(a.x - entity.x, a.y - entity.y);
-      const db = Math.hypot(b.x - entity.x, b.y - entity.y);
-      return da - db;
-    });
+  for (const e of nearbyEntities) {
+    if (e.id === ref.entityId) continue;
+    nearby.push({ entityId: e.id, ...(e as any) });
   }
+  nearby.sort((a, b) => {
+    const da = Math.hypot(a.x - entity.x, a.y - entity.y);
+    const db = Math.hypot(b.x - entity.x, b.y - entity.y);
+    return da - db;
+  });
 
   return { entity, ref, nearby: nearby.slice(0, 10) };
 }
@@ -159,19 +154,16 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       }
     }
 
-    // Last resort: scan all zones for a live entity belonging to this wallet.
+    // Last resort: scan all live entities for one belonging to this wallet.
     if (!characterName) {
-      for (const [, zone] of getAllZones()) {
-        for (const entity of zone.entities.values()) {
-          if (entity.type !== "player") continue;
-          if ((entity as any).walletAddress?.toLowerCase() !== authWallet.toLowerCase()) continue;
-          characterName = extractRawCharacterName(entity.name) ?? entity.name;
-          raceId = (entity as any).raceId ?? raceId;
-          classId = (entity as any).classId ?? classId;
-          server.log.info(`[agent/deploy] Resolved from live entity: "${characterName}" (${raceId}/${classId})`);
-          break;
-        }
-        if (characterName) break;
+      for (const entity of getAllEntities().values()) {
+        if (entity.type !== "player") continue;
+        if ((entity as any).walletAddress?.toLowerCase() !== authWallet.toLowerCase()) continue;
+        characterName = extractRawCharacterName(entity.name) ?? entity.name;
+        raceId = (entity as any).raceId ?? raceId;
+        classId = (entity as any).classId ?? classId;
+        server.log.info(`[agent/deploy] Resolved from live entity: "${characterName}" (${raceId}/${classId})`);
+        break;
       }
     }
 
@@ -378,8 +370,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       let gold: number | null = null;
 
       if (snap.entityId && snap.zone) {
-        const zone = getAllZones().get(snap.zone);
-        const entity = zone?.entities.get(snap.entityId) as any;
+        const entity = getWorldEntity(snap.entityId) as any;
         if (entity) {
           level = Number(entity.level ?? 1);
           hp = entity.hp != null ? Number(entity.hp) : null;
@@ -467,14 +458,10 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     // Build list of nearby players the agent can message
     const nearbyPlayers: { name: string; wallet: string; level: number }[] = [];
-    if (ref?.zoneId) {
-      const zone = getAllZones().get(ref.zoneId);
-      if (zone) {
-        for (const [id, e] of zone.entities) {
-          const ent = e as any;
-          if (ent.type === "player" && ent.walletAddress && ent.walletAddress.toLowerCase() !== authWallet.toLowerCase()) {
-            nearbyPlayers.push({ name: ent.name, wallet: ent.walletAddress, level: ent.level ?? 1 });
-          }
+    if (entity) {
+      for (const e of getEntitiesNear(entity.x, entity.y, 200)) {
+        if (e.type === "player" && (e as any).walletAddress && (e as any).walletAddress.toLowerCase() !== authWallet.toLowerCase()) {
+          nearbyPlayers.push({ name: e.name, wallet: (e as any).walletAddress, level: e.level ?? 1 });
         }
       }
     }
@@ -487,7 +474,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       : "unknown";
 
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva.
-Zone: ${ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
+Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
 Nearby players: ${nearbyPlayersDesc}
@@ -685,30 +672,25 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         // ── Read tools ──────────────────────────────────────────────
         if (fnName === "scan_zone") {
           hasReadTools = true;
-          const zone = ref?.zoneId ? getAllZones().get(ref.zoneId) : null;
-          let scanResult: any = { error: "No zone data" };
-          if (zone && entity && ref) {
+          let scanResult: any = { error: "No entity data" };
+          if (entity && ref) {
             const mobs: any[] = [];
             const npcs: any[] = [];
             const resources: any[] = [];
-            const portals: any[] = [];
             const playerLevel = Number(entity.level ?? 1);
-            for (const [id, e] of zone.entities) {
-              if (id === ref.entityId) continue;
-              const ent = e as any;
-              const dist = Math.round(Math.hypot((ent.x ?? 0) - (entity.x ?? 0), (ent.y ?? 0) - (entity.y ?? 0)));
-              if (ent.type === "mob") {
-                mobs.push({ name: ent.name, level: ent.level, hp: ent.hp, maxHp: ent.maxHp, distance: dist });
-              } else if (ent.type === "npc") {
-                npcs.push({ name: ent.name, role: ent.npcType ?? ent.role ?? ent.subType, entityId: id, distance: dist });
-              } else if (ent.type === "resource" || ent.type === "ore" || ent.type === "herb") {
-                resources.push({ name: ent.name, type: ent.resourceType ?? ent.type, distance: dist });
-              } else if (ent.type === "portal") {
-                portals.push({ destination: ent.targetZone ?? ent.destination, distance: dist });
+            for (const e of getEntitiesNear(entity.x, entity.y, 300)) {
+              if (e.id === ref.entityId) continue;
+              const dist = Math.round(Math.hypot((e.x ?? 0) - (entity.x ?? 0), (e.y ?? 0) - (entity.y ?? 0)));
+              if (e.type === "mob") {
+                mobs.push({ name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, distance: dist });
+              } else if (e.type === "npc") {
+                npcs.push({ name: e.name, role: (e as any).npcType ?? (e as any).role ?? (e as any).subType, entityId: e.id, distance: dist });
+              } else if (e.type === "resource" || e.type === "ore" || e.type === "herb") {
+                resources.push({ name: e.name, type: (e as any).resourceType ?? e.type, distance: dist });
               }
             }
             mobs.sort((a, b) => Math.abs(a.level - playerLevel) - Math.abs(b.level - playerLevel));
-            scanResult = { zone: ref.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10), portals };
+            scanResult = { region: entity.region ?? ref.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10) };
           }
           toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(scanResult) });
         }
@@ -740,20 +722,18 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         else if (fnName === "check_shop") {
           hasReadTools = true;
           let shopResult: any = { error: "No merchant nearby" };
-          const shopZone = ref?.zoneId ? getAllZones().get(ref.zoneId) : null;
-          if (shopZone && ref) {
+          if (entity && ref) {
             let merchantId: string | null = null;
             let merchantDist = Infinity;
-            for (const [id, e] of shopZone.entities) {
-              const ent = e as any;
-              if (ent.type === "npc" && (ent.npcType === "merchant" || ent.subType === "merchant" || ent.role === "merchant")) {
-                const d = entity ? Math.hypot((ent.x ?? 0) - (entity.x ?? 0), (ent.y ?? 0) - (entity.y ?? 0)) : Infinity;
-                if (d < merchantDist) { merchantDist = d; merchantId = id; }
+            for (const e of getEntitiesNear(entity.x, entity.y, 300)) {
+              if (e.type === "npc" && ((e as any).npcType === "merchant" || (e as any).subType === "merchant" || (e as any).role === "merchant")) {
+                const d = Math.hypot((e.x ?? 0) - (entity.x ?? 0), (e.y ?? 0) - (entity.y ?? 0));
+                if (d < merchantDist) { merchantDist = d; merchantId = e.id; }
               }
             }
             if (merchantId) {
               try {
-                const res = await internalFetch(`${apiBase}/shop/npc/${ref.zoneId}/${merchantId}`);
+                const res = await internalFetch(`${apiBase}/shop/npc/${merchantId}`);
                 if (res.ok) shopResult = await res.json();
               } catch (err) {
                 server.log.warn(`[agent/chat] check_shop fetch failed: ${(err as Error).message}`);
@@ -806,8 +786,8 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           if (ref) {
             try {
               const [activeRes, zoneRes] = await Promise.all([
-                internalFetch(`${apiBase}/quests/active/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
-                internalFetch(`${apiBase}/quests/zone/${ref.zoneId}/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+                internalFetch(`${apiBase}/quests/active/${ref.entityId}`).then(r => r.ok ? r.json() : null),
+                internalFetch(`${apiBase}/quests/zone/${ref.entityId}`).then(r => r.ok ? r.json() : null),
               ]);
               questResult = {
                 activeQuests: (activeRes as any)?.activeQuests ?? [],
@@ -832,7 +812,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             if (input.strategy) patch.strategy = input.strategy;
             const hasTargetZoneText = typeof input.targetZone === "string" && input.targetZone.trim().length > 0;
             if (input.focus === "traveling") {
-              const normalizedTargetZone = resolveZoneId(input.targetZone);
+              const normalizedTargetZone = resolveRegionId(input.targetZone);
               if (normalizedTargetZone) {
                 patch.targetZone = normalizedTargetZone;
               } else if (hasTargetZoneText) {
@@ -923,11 +903,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               if (!runner) {
                 actionsTaken.push("[agent not running]");
               } else {
-                // Find entity to get class and zone info
+                // Find entity to get class info
                 const techRef = await getAgentEntityRef(authWallet);
-                const techZoneId = techRef?.zoneId ?? "village-square";
-                const techZone = getAllZones().get(techZoneId);
-                const techEntity = techRef?.entityId && techZone ? techZone.entities.get(techRef.entityId) as any : null;
+                const techEntity = techRef?.entityId ? getWorldEntity(techRef.entityId) as any : null;
                 const techClassId = (techEntity?.classId ?? "").toLowerCase();
 
                 if (!techClassId) {
@@ -942,17 +920,16 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                       ? "[already learned all techniques at current level]"
                       : `[no ${techClassId} techniques for level ${techEntity.level ?? 1}]`);
                   } else {
-                    // Find the class trainer in this zone and navigate to them
+                    // Find the class trainer nearby and navigate to them
                     let trainerId: string | null = null;
                     let trainerName: string | null = null;
-                    if (techZone) {
-                      for (const [id, e] of techZone.entities) {
-                        const ent = e as any;
-                        if (ent.type === "trainer") {
-                          const teaches = (ent.teachesClass ?? "").toLowerCase();
-                          if (teaches === techClassId || new RegExp(`${techClassId}\\s+trainer`, "i").test(String(ent.name ?? ""))) {
-                            trainerId = id;
-                            trainerName = ent.name ?? "class trainer";
+                    if (techEntity) {
+                      for (const e of getEntitiesNear(techEntity.x, techEntity.y, 500)) {
+                        if ((e as any).type === "trainer") {
+                          const teaches = ((e as any).teachesClass ?? "").toLowerCase();
+                          if (teaches === techClassId || new RegExp(`${techClassId}\\s+trainer`, "i").test(String(e.name ?? ""))) {
+                            trainerId = e.id;
+                            trainerName = e.name ?? "class trainer";
                             break;
                           }
                         }
@@ -963,21 +940,21 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                       // No trainer in zone — try learning directly
                       (runner as any).nextTechniqueCheckAt = 0;
                       const result = await runner.learnNextTechnique();
-                      actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer in ${techZoneId}]`);
+                      actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer nearby]`);
                     } else {
                       // Navigate to trainer and learn on arrival
                       await patchAgentConfig(authWallet, {
                         focus: "goto" as AgentFocus,
                         gotoTarget: {
                           entityId: trainerId,
-                          zoneId: techZoneId,
+                          zoneId: techEntity?.region ?? "village-square",
                           name: trainerName ?? undefined,
                           action: "learn-technique",
                           techniqueId: nextToLearn.id,
                           techniqueName: nextToLearn.name,
                         },
                       });
-                      runner.setGotoTarget(trainerId, techZoneId, trainerName ?? undefined, "learn-technique");
+                      runner.setGotoTarget(trainerId, techEntity?.region ?? "village-square", trainerName ?? undefined, "learn-technique");
                       configUpdated = true;
                       actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
                       server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
@@ -1204,7 +1181,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       if (targetZone == null || (typeof targetZone === "string" && targetZone.trim() === "")) {
         patch.targetZone = undefined;
       } else if (typeof targetZone === "string") {
-        const normalizedTargetZone = resolveZoneId(targetZone);
+        const normalizedTargetZone = resolveRegionId(targetZone);
         if (!normalizedTargetZone) {
           return reply.code(400).send({
             error: `Unknown targetZone: ${targetZone}`,

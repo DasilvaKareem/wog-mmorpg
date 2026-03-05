@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { getOrCreateZone, getAllZones } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
 
 interface Party {
   id: string;
@@ -38,14 +38,12 @@ function freshInvites(wallet: string): PartyInvite[] {
   return list;
 }
 
-// Helper: find entity by custodial wallet across all zones
+// Helper: find entity by custodial wallet in unified entity map
 function findEntityByCustodialWallet(custodialWallet: string): { entityId: string; zoneId: string } | null {
   const lower = custodialWallet.toLowerCase();
-  for (const [zId, zone] of getAllZones()) {
-    for (const [eId, entity] of zone.entities) {
-      if ((entity as any).walletAddress?.toLowerCase() === lower) {
-        return { entityId: eId, zoneId: zId };
-      }
+  for (const [eId, entity] of getAllEntities()) {
+    if ((entity as any).walletAddress?.toLowerCase() === lower) {
+      return { entityId: eId, zoneId: (entity as any).region ?? "unknown" };
     }
   }
   return null;
@@ -60,8 +58,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   }, async (req, reply) => {
     const { zoneId, leaderId } = req.body;
 
-    const zone = getOrCreateZone(zoneId);
-    const leader = zone.entities.get(leaderId);
+    const leader = getEntity(leaderId);
 
     if (!leader) {
       return reply.status(404).send({ error: "Leader entity not found" });
@@ -115,8 +112,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Player already in a party" });
     }
 
-    const zone = getOrCreateZone(party.zoneId);
-    const invitedPlayer = zone.entities.get(invitedPlayerId);
+    const invitedPlayer = getEntity(invitedPlayerId);
 
     if (!invitedPlayer) {
       return reply.status(404).send({ error: "Invited player not found" });
@@ -193,10 +189,9 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       return reply.status(404).send({ error: "Party not found" });
     }
 
-    const zone = getOrCreateZone(zoneId);
     const members = party.memberIds
       .map(id => {
-        const entity = zone.entities.get(id);
+        const entity = getEntity(id);
         if (!entity) return null;
         return {
           id,
@@ -226,8 +221,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   }>("/party/nearby/:zoneId/:playerId", async (req, reply) => {
     const { zoneId, playerId } = req.params;
 
-    const zone = getOrCreateZone(zoneId);
-    const player = zone.entities.get(playerId);
+    const player = getEntity(playerId);
 
     if (!player) {
       return reply.status(404).send({ error: "Player not found" });
@@ -236,7 +230,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
     // Find nearby players (within 100 units)
     const nearbyPlayers: any[] = [];
 
-    for (const [id, entity] of zone.entities.entries()) {
+    for (const [id, entity] of getAllEntities()) {
       if (id === playerId) continue;
       if (entity.type !== "player") continue;
       if (playerToParty.has(id)) continue; // Skip if already in a party
@@ -289,23 +283,20 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   server.get<{ Querystring: { q?: string } }>("/party/search", async (req, reply) => {
     const q = (req.query.q ?? "").toLowerCase().trim();
     const results: any[] = [];
-    for (const [zId, zone] of getAllZones()) {
-      for (const [eId, entity] of zone.entities) {
-        const e = entity as any;
-        if (e.type !== "player") continue;
-        if (q && !e.name.toLowerCase().includes(q)) continue;
-        results.push({
-          entityId: eId,
-          zoneId: zId,
-          name: e.name,
-          level: e.level ?? 1,
-          classId: e.classId,
-          raceId: e.raceId,
-          walletAddress: e.walletAddress ?? null,
-          inParty: playerToParty.has(eId),
-        });
-        if (results.length >= 20) break;
-      }
+    for (const [eId, entity] of getAllEntities()) {
+      const e = entity as any;
+      if (e.type !== "player") continue;
+      if (q && !e.name.toLowerCase().includes(q)) continue;
+      results.push({
+        entityId: eId,
+        zoneId: e.region ?? "unknown",
+        name: e.name,
+        level: e.level ?? 1,
+        classId: e.classId,
+        raceId: e.raceId,
+        walletAddress: e.walletAddress ?? null,
+        inParty: playerToParty.has(eId),
+      });
       if (results.length >= 20) break;
     }
     return reply.send({ results });
@@ -318,8 +309,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   }>("/party/invite-champion", async (req, reply) => {
     const { fromEntityId, fromZoneId, toCustodialWallet } = req.body;
 
-    const fromZone = getAllZones().get(fromZoneId);
-    const fromEntity = fromZone?.entities.get(fromEntityId) as any;
+    const fromEntity = getEntity(fromEntityId) as any;
     if (!fromEntity || fromEntity.type !== "player") {
       return reply.code(404).send({ error: "Your champion is not online" });
     }
@@ -442,22 +432,20 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       }
 
       const members = party.memberIds.map((mId) => {
-        for (const [zId, zone] of getAllZones()) {
-          const e = zone.entities.get(mId) as any;
-          if (e) {
-            return {
-              entityId: mId,
-              zoneId: zId,
-              name: e.name,
-              level: e.level ?? 1,
-              hp: e.hp ?? 0,
-              maxHp: e.maxHp ?? 100,
-              classId: e.classId,
-              raceId: e.raceId,
-              walletAddress: e.walletAddress ?? null,
-              isLeader: mId === party.leaderId,
-            };
-          }
+        const e = getEntity(mId) as any;
+        if (e) {
+          return {
+            entityId: mId,
+            zoneId: e.region ?? "unknown",
+            name: e.name,
+            level: e.level ?? 1,
+            hp: e.hp ?? 0,
+            maxHp: e.maxHp ?? 100,
+            classId: e.classId,
+            raceId: e.raceId,
+            walletAddress: e.walletAddress ?? null,
+            isLeader: mId === party.leaderId,
+          };
         }
         return { entityId: mId, name: "Offline", isLeader: mId === party.leaderId, level: 0, hp: 0, maxHp: 1 };
       });

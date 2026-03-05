@@ -20,7 +20,7 @@ import {
   getMessageHistory,
   type InboxMessageType,
 } from "./agentInbox.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 
 const VALID_TYPES: InboxMessageType[] = ["direct", "trade-request", "party-invite", "broadcast"];
 
@@ -158,15 +158,11 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
       return { error: "Missing required fields: zoneId, body" };
     }
 
-    // Find all player wallets in the zone
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: `Zone not found: ${zoneId}` };
-    }
+    // Find all player wallets in the region
+    const regionEntities = getEntitiesInRegion(zoneId);
 
     const recipientWallets: string[] = [];
-    for (const [, entity] of zone.entities) {
+    for (const entity of regionEntities) {
       if (entity.type === "player" && entity.walletAddress) {
         recipientWallets.push(entity.walletAddress);
       }
@@ -195,14 +191,12 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Look up entity name from wallet address across all zones. */
+/** Look up entity name from wallet address across all entities. */
 function resolveEntityName(wallet: string): string | null {
   const w = wallet.toLowerCase();
-  for (const [, zone] of getAllZones()) {
-    for (const [, entity] of zone.entities) {
-      if (entity.walletAddress?.toLowerCase() === w && entity.name) {
-        return entity.name;
-      }
+  for (const entity of getAllEntities().values()) {
+    if (entity.walletAddress?.toLowerCase() === w && entity.name) {
+      return entity.name;
     }
   }
   return null;

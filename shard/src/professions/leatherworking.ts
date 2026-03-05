@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -254,19 +254,13 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
       };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const station = zone.entities.get(stationId);
+    const station = getEntity(stationId);
     if (!station || station.type !== "tanning-rack") {
       reply.code(404);
       return { error: "Tanning Rack not found" };

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones, getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
+import { getEntity, getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
@@ -535,19 +535,13 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const alchemyLab = zone.entities.get(alchemyLabId);
+    const alchemyLab = getEntity(alchemyLabId);
     if (!alchemyLab || alchemyLab.type !== "alchemy-lab") {
       reply.code(404);
       return { error: "Alchemy Lab not found" };
@@ -695,12 +689,14 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getOrCreateZone(zoneId);
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
+
+    // Zone needed for tick reference
+    const zone = getOrCreateZone(zoneId);
 
     // Look up potion effect
     const effect = getPotionEffect(BigInt(tokenId));

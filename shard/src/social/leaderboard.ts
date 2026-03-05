@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones, type Entity } from "../world/zoneRuntime.js";
+import { getAllEntities, type Entity } from "../world/zoneRuntime.js";
 
 interface LeaderboardEntry {
   rank: number;
@@ -50,15 +50,13 @@ export function registerLeaderboardRoutes(server: FastifyInstance) {
 
     const players: Array<{ entity: Entity; zoneId: string; powerScore: number }> = [];
 
-    for (const [zoneId, zone] of getAllZones()) {
-      for (const entity of zone.entities.values()) {
-        if (entity.type !== "player") continue;
-        players.push({
-          entity,
-          zoneId,
-          powerScore: computePowerScore(entity),
-        });
-      }
+    for (const entity of getAllEntities().values()) {
+      if (entity.type !== "player") continue;
+      players.push({
+        entity,
+        zoneId: entity.region ?? "unknown",
+        powerScore: computePowerScore(entity),
+      });
     }
 
     // Sort

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { getEntity, recalculateEntityVitals } from "../world/zoneRuntime.js";
 import { burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -138,19 +138,13 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       return { error: "Invalid enchantment elixir token ID" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const altar = zone.entities.get(altarId);
+    const altar = getEntity(altarId);
     if (!altar || altar.type !== "enchanting-altar") {
       reply.code(404);
       return { error: "Enchanting Altar not found" };
@@ -280,13 +274,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
   }>("/enchanting/item/:zoneId/:entityId/:slot", async (request, reply) => {
     const { zoneId, entityId, slot } = request.params;
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
@@ -344,19 +332,13 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const altar = zone.entities.get(altarId);
+    const altar = getEntity(altarId);
     if (!altar || altar.type !== "enchanting-altar") {
       reply.code(404);
       return { error: "Enchanting Altar not found" };

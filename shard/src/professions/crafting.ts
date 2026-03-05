@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
@@ -526,19 +526,13 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const forge = zone.entities.get(forgeId);
+    const forge = getEntity(forgeId);
     if (!forge || forge.type !== "forge") {
       reply.code(404);
       return { error: "Forge not found" };

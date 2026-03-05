@@ -16,8 +16,8 @@ import {
 import { peekInbox, ackInboxMessages, type InboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
-import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveZoneId } from "../world/worldLayout.js";
-import { getAllZones, getEntity as getWorldEntity } from "../world/zoneRuntime.js";
+import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
+import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getRegionCenter } from "../world/worldLayout.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
@@ -1205,7 +1205,7 @@ export class AgentRunner {
     try {
       const config = await getAgentConfig(this.userWallet);
       const rawTargetZone = config?.targetZone;
-      const targetZone = resolveZoneId(rawTargetZone);
+      const targetZone = resolveRegionId(rawTargetZone);
 
       if (rawTargetZone && !targetZone) {
         console.log(`[agent:${this.userWallet.slice(0, 8)}] Invalid travel target zone: ${rawTargetZone}`);
@@ -1851,7 +1851,7 @@ export class AgentRunner {
           entity,
           entities,
           entityId: this.entityId!,
-          currentZone: this.currentRegion,
+          currentRegion: this.currentRegion,
           custodialWallet: this.custodialWallet!,
           currentScript: this.currentScript,
           recentActivities: this.recentActivities,
@@ -2009,7 +2009,7 @@ export class AgentRunner {
 
         // If targetZone is set, push focus to traveling so supervisor picks it up.
         // Normalize or clear malformed zone labels from chat/tool output.
-        const normalizedTargetZone = resolveZoneId(config.targetZone);
+        const normalizedTargetZone = resolveRegionId(config.targetZone);
         if (config.targetZone && !normalizedTargetZone) {
           await patchAgentConfig(this.userWallet, { targetZone: undefined });
           this.currentScript = null;

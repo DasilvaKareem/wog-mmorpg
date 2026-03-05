@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemsByTokenIds } from "../items/itemCatalog.js";
-import { getAllZones, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { burnItem, mintItem } from "../blockchain/blockchain.js";
 import { hasLearnedProfession } from "./professions.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
@@ -131,14 +131,13 @@ export function registerCookingRoutes(server: FastifyInstance) {
       return { error: "Cooking profession not learned. Visit a cooking trainer." };
     }
 
-    const zone = getOrCreateZone(zoneId);
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const campfire = zone.entities.get(campfireId);
+    const campfire = getEntity(campfireId);
     if (!campfire || campfire.type !== "campfire") {
       reply.code(404);
       return { error: "Campfire not found" };
@@ -264,8 +263,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getOrCreateZone(zoneId);
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };

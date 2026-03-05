@@ -7,7 +7,7 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone } from "../world/zoneRuntime.js";
+import { getEntity, getEntitiesNear } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { saveCharacter } from "../character/characterStore.js";
 import {
@@ -40,8 +40,7 @@ export function registerEssenceTechniqueRoutes(server: FastifyInstance): void {
         return reply.status(400).send({ error: `tier must be "signature" or "ultimate"` });
       }
 
-      const zone = getOrCreateZone(zoneId);
-      const player = zone.entities.get(playerEntityId);
+      const player = getEntity(playerEntityId);
 
       if (!player || player.type !== "player") {
         return reply.status(404).send({ error: "Player entity not found in zone" });
@@ -66,11 +65,8 @@ export function registerEssenceTechniqueRoutes(server: FastifyInstance): void {
 
       // Check NPC proximity
       let nearForge = false;
-      for (const entity of zone.entities.values()) {
-        if (entity.type !== "essence-forge") continue;
-        const dx = entity.x - player.x;
-        const dy = entity.y - player.y;
-        if (Math.sqrt(dx * dx + dy * dy) <= FORGE_RANGE) {
+      for (const entity of getEntitiesNear(player.x, player.y, FORGE_RANGE)) {
+        if (entity.type === "essence-forge") {
           nearForge = true;
           break;
         }

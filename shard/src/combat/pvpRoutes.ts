@@ -8,7 +8,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { pvpBattleManager } from "./pvpBattleManager.js";
 import type { PvPFormat, MatchmakingEntry } from "../types/pvp.js";
 import type { BattleAction } from "../types/battle.js";
-import { getAllZones, getEntity } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { COLISEUM_MAPS } from "./coliseumMaps.js";
 import { getPartyMembers } from "../social/partySystem.js";
 
@@ -203,14 +203,11 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     const errors: string[] = [];
 
     for (const memberId of memberIds) {
-      // Find this member across all zones
+      // Find this member in the unified entity map
       let memberEntity: any = null;
-      for (const [, zone] of getAllZones()) {
-        const entity = zone.entities.get(memberId);
-        if (entity && entity.type === "player") {
-          memberEntity = entity;
-          break;
-        }
+      const entity = getEntity(memberId);
+      if (entity && entity.type === "player") {
+        memberEntity = entity;
       }
 
       if (!memberEntity) {

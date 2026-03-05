@@ -4,7 +4,6 @@ import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/gol
 import { copperToGold } from "../blockchain/currency.js";
 import { getItemByTokenId, getItemRarity, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
 import {
-  getAllZones,
   getEntity,
   getAllEntities,
   getEntitiesInRegion,
@@ -538,18 +537,16 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
 
       // Find live entity equipment across zones
       const equippedByTokenId: Record<number, { slot: string; durability: number; maxDurability: number }> = {};
-      for (const [, zone] of getAllZones()) {
-        for (const [, entity] of zone.entities) {
-          if (entity.type === "player" && entity.walletAddress?.toLowerCase() === walletAddress.toLowerCase()) {
-            for (const [slot, e] of Object.entries(entity.equipment ?? {})) {
-              equippedByTokenId[(e as any).tokenId] = {
-                slot,
-                durability: (e as any).durability ?? (e as any).maxDurability ?? 0,
-                maxDurability: (e as any).maxDurability ?? 0,
-              };
-            }
-            break;
+      for (const entity of getAllEntities().values()) {
+        if (entity.type === "player" && entity.walletAddress?.toLowerCase() === walletAddress.toLowerCase()) {
+          for (const [slot, e] of Object.entries(entity.equipment ?? {})) {
+            equippedByTokenId[(e as any).tokenId] = {
+              slot,
+              durability: (e as any).durability ?? (e as any).maxDurability ?? 0,
+              maxDurability: (e as any).maxDurability ?? 0,
+            };
           }
+          break;
         }
       }
 

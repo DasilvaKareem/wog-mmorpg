@@ -4,7 +4,7 @@ import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { mintGold, mintItem, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
-import { getAllZones, type Entity } from "./zoneRuntime.js";
+import { getEntitiesInRegion, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 
 // ── Data Structures ──────────────────────────────────────────────
@@ -128,9 +128,7 @@ function calculateDynamicPrice(basePrice: number, currentStock: number, targetSt
 // ── Boot ─────────────────────────────────────────────────────────
 
 function findEntityByNpcDef(def: NpcDef): Entity | undefined {
-  const zone = getAllZones().get(def.zoneId);
-  if (!zone) return undefined;
-  for (const entity of zone.entities.values()) {
+  for (const entity of getEntitiesInRegion(def.zoneId)) {
     if (entity.name === def.name && entity.type === "merchant") {
       return entity;
     }

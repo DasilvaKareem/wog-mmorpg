@@ -141,8 +141,8 @@ export async function setupAgentCharacter(
   const spawnClass = character?.properties?.class ?? classId;
   const spawnTokenId = normalizeOnChainTokenId(character?.tokenId);
 
-  // ── Step 6: Spawn into last known zone (or village-square for new agents) ──
-  const startZone = existingRef?.zoneId ?? "village-square";
+  // ── Step 6: Spawn into last known zone (or tutorial-island for brand-new agents) ──
+  const startZone = existingRef?.zoneId ?? (existingSave ? (existingSave.zone ?? "village-square") : "tutorial-island");
   const spawnResult = await apiCall("POST", "/spawn", {
     zoneId: startZone,
     type: "player",

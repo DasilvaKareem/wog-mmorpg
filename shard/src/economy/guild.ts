@@ -31,7 +31,7 @@ import {
   type MemberData,
   type ProposalData,
 } from "./guildChain.js";
-import { getAllZones, getEntity } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { addActiveProposal } from "./guildTick.js";
 

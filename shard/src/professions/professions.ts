@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { saveCharacter, getProfessionsForWallet } from "../character/characterStore.js";
@@ -170,13 +170,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       return { error: "You have already learned this profession" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
@@ -194,7 +188,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       return { error: "walletAddress does not match entity owner" };
     }
 
-    const trainer = zone.entities.get(trainerId);
+    const trainer = getEntity(trainerId);
     if (!trainer || trainer.type !== "profession-trainer") {
       reply.code(404);
       return { error: "Profession trainer not found" };

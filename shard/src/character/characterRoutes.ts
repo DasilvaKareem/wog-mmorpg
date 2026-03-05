@@ -3,7 +3,7 @@ import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "../blockchain/blockchain.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllEntities } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
@@ -180,24 +180,21 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       }
 
       try {
-        // Find live entity for this wallet across all zones
+        // Find live entity for this wallet across all entities
         const normalizedWallet = walletAddress.toLowerCase();
         let liveEntity: { level: number; xp: number; hp: number; maxHp: number; zoneId: string; name: string } | null = null;
-        for (const [zoneId, zone] of getAllZones()) {
-          for (const entity of zone.entities.values()) {
-            if (entity.type !== "player") continue;
-            if (entity.walletAddress?.toLowerCase() !== normalizedWallet) continue;
-            liveEntity = {
-              level: entity.level ?? 1,
-              xp: entity.xp ?? 0,
-              hp: entity.hp,
-              maxHp: entity.maxHp,
-              zoneId,
-              name: entity.name,
-            };
-            break;
-          }
-          if (liveEntity) break;
+        for (const entity of getAllEntities().values()) {
+          if (entity.type !== "player") continue;
+          if (entity.walletAddress?.toLowerCase() !== normalizedWallet) continue;
+          liveEntity = {
+            level: entity.level ?? 1,
+            xp: entity.xp ?? 0,
+            hp: entity.hp,
+            maxHp: entity.maxHp,
+            zoneId: entity.region ?? "unknown",
+            name: entity.name,
+          };
+          break;
         }
 
         // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)

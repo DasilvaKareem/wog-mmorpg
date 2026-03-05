@@ -222,7 +222,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const authenticatedWallet = (req as any).walletAddress;
 
     const zone = getOrCreateZone(zoneId);
-    const caster = zone.entities.get(casterEntityId);
+    const caster = getEntity(casterEntityId);
 
     if (!caster) {
       return reply.status(404).send({ error: "Caster entity not found" });
@@ -281,7 +281,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       if (!targetEntityId) {
         return reply.status(400).send({ error: "Target required for this technique" });
       }
-      const targetEntity = zone.entities.get(targetEntityId);
+      const targetEntity = getEntity(targetEntityId);
       if (!targetEntity) {
         return reply.status(404).send({ error: "Target entity not found" });
       }

@@ -67,7 +67,7 @@ import { initWorldMapStore } from "./world/worldMapStore.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats, mintGold } from "./blockchain/blockchain.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllZones, clearMobTagsForPlayer, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
@@ -113,26 +113,31 @@ server.get("/world/layout", async () => getWorldLayout());
 // Admin dashboard — aggregated server health + game state
 server.get("/admin/dashboard", async () => {
   const mem = process.memoryUsage();
-  const zones = getAllZones();
+  const allEntities = getAllEntities();
   let totalEntities = 0, playerCount = 0, mobCount = 0, npcCount = 0;
-  const perZone: Array<{ zoneId: string; entities: number; players: number; mobs: number; npcs: number; tick: number }> = [];
+  const regionCounts = new Map<string, { entities: number; players: number; mobs: number; npcs: number }>();
   const onlinePlayers: Array<{ name: string; level: number; race: string; class: string; zone: string; hp: number; maxHp: number; kills: number }> = [];
 
-  for (const [zoneId, zone] of zones) {
-    let zPlayers = 0, zMobs = 0, zNpcs = 0;
-    for (const e of zone.entities.values()) {
-      totalEntities++;
-      if (e.type === "player") {
-        zPlayers++;
-        onlinePlayers.push({
-          name: e.name, level: e.level ?? 1, race: e.raceId ?? "?", class: e.classId ?? "?",
-          zone: zoneId, hp: e.hp ?? 0, maxHp: e.maxHp ?? 0, kills: (e as any).kills ?? 0,
-        });
-      } else if (e.type === "mob") zMobs++;
-      else if (e.type === "npc") zNpcs++;
-    }
-    playerCount += zPlayers; mobCount += zMobs; npcCount += zNpcs;
-    perZone.push({ zoneId, entities: zone.entities.size, players: zPlayers, mobs: zMobs, npcs: zNpcs, tick: zone.tick });
+  for (const e of allEntities.values()) {
+    totalEntities++;
+    const region = (e as any).region ?? "unknown";
+    if (!regionCounts.has(region)) regionCounts.set(region, { entities: 0, players: 0, mobs: 0, npcs: 0 });
+    const rc = regionCounts.get(region)!;
+    rc.entities++;
+    if (e.type === "player") {
+      playerCount++;
+      rc.players++;
+      onlinePlayers.push({
+        name: e.name, level: e.level ?? 1, race: e.raceId ?? "?", class: e.classId ?? "?",
+        zone: region, hp: e.hp ?? 0, maxHp: e.maxHp ?? 0, kills: (e as any).kills ?? 0,
+      });
+    } else if (e.type === "mob") { mobCount++; rc.mobs++; }
+    else if (e.type === "npc") { npcCount++; rc.npcs++; }
+  }
+
+  const perZone: Array<{ zoneId: string; entities: number; players: number; mobs: number; npcs: number; tick: number }> = [];
+  for (const [zoneId, counts] of regionCounts) {
+    perZone.push({ zoneId, entities: counts.entities, players: counts.players, mobs: counts.mobs, npcs: counts.npcs, tick: 0 });
   }
 
   let rpcHealthy = false;
@@ -153,7 +158,7 @@ server.get("/admin/dashboard", async () => {
   return {
     server: { uptime: process.uptime(), startedAt: Date.now() - process.uptime() * 1000, memoryMB: Math.round(mem.rss / 1048576) },
     blockchain: { rpcHealthy, lastBlockNumber, chainId: SKALE_BASE_CHAIN_ID, txStats: getTxStats() },
-    zones: { count: zones.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
+    zones: { count: regionCounts.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
     agents: { active: agentSnapshots.length, list: agentSnapshots },
     merchants: { initialized: getMerchantCount(), total: perZone.reduce((s, z) => s + z.npcs, 0) },
     economy: { activeListings: activeAuctions.length, totalSales: endedAuctions.length, totalVolume },
@@ -175,23 +180,15 @@ server.post<{
     return { error: "zoneId and entityId are required" };
   }
 
-  // Find the entity across all zones (might have transitioned)
-  let foundZoneId: string | null = null;
-  let entity: any = null;
-
-  for (const [zId, zone] of getAllZones()) {
-    const e = zone.entities.get(entityId);
-    if (e) {
-      foundZoneId = zId;
-      entity = e;
-      break;
-    }
-  }
+  // Find the entity in the unified world map
+  const entity: any = getEntity(entityId);
 
   if (!entity) {
     reply.code(404);
     return { error: "Entity not found" };
   }
+
+  const foundZoneId: string = (entity as any).region ?? zoneId;
 
   // Verify wallet ownership
   if (!entity.walletAddress || entity.walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
@@ -217,12 +214,14 @@ server.post<{
   });
 
   // Clear mob tags owned by this player before despawn
-  const zone = getAllZones().get(foundZoneId!);
-  if (zone) {
-    clearMobTagsForPlayer(zone, entityId);
-    if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
-    zone.entities.delete(entityId);
+  for (const e of getAllEntities().values()) {
+    if ((e.type === "mob" || e.type === "boss") && (e as any).taggedBy === entityId) {
+      (e as any).taggedBy = undefined;
+      (e as any).taggedAtTick = undefined;
+    }
   }
+  if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
+  getAllEntities().delete(entityId);
 
   server.log.info(`[logout] ${entity.name} saved and despawned from ${foundZoneId}`);
 

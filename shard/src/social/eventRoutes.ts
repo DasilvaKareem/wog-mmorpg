@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getZoneEvents, getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
-import { getOrCreateZone, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 
 export function registerEventRoutes(server: FastifyInstance) {
   /**

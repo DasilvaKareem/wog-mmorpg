@@ -16,12 +16,8 @@ import { randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
 import {
-  getAdjacentZone,
   clampToZoneBounds,
   ZONE_LEVEL_REQUIREMENTS,
-  getConnectionPortal,
-  findPortalInZone,
-  findDestPortalPosition,
   getRegionAtPosition,
   getZoneOffset,
 } from "./worldLayout.js";

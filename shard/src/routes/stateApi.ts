@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllEntities } from "../world/zoneRuntime.js";
 
 function serializeEntity(entity: any): any {
   return {
@@ -16,17 +16,20 @@ function serializeEntity(entity: any): any {
 export function registerStateApi(server: FastifyInstance) {
   // GET /state — full snapshot of the world (for persistence / debugging)
   server.get("/state", async () => {
+    // Group entities by region for backward-compatible response shape
+    const regionMap = new Map<string, Record<string, unknown>>();
+
+    for (const [id, entity] of getAllEntities()) {
+      const region = (entity as any).region ?? "unknown";
+      if (!regionMap.has(region)) regionMap.set(region, {});
+      regionMap.get(region)![id] = serializeEntity(entity);
+    }
+
     const snapshot: Record<string, unknown> = {};
-
-    for (const [zoneId, zone] of getAllZones()) {
-      const serializedEntities = new Map();
-      for (const [id, entity] of zone.entities) {
-        serializedEntities.set(id, serializeEntity(entity));
-      }
-
-      snapshot[zoneId] = {
-        tick: zone.tick,
-        entities: Object.fromEntries(serializedEntities),
+    for (const [region, entities] of regionMap) {
+      snapshot[region] = {
+        tick: 0,
+        entities,
       };
     }
 

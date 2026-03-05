@@ -17,7 +17,7 @@ import {
   getZoneAuctionsFromChain,
   type AuctionData,
 } from "./auctionHouseChain.js";
-import { getAllZones, getEntity } from "../world/zoneRuntime.js";
+import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { copperToGold } from "../blockchain/currency.js";
 

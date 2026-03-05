@@ -26,7 +26,7 @@ export interface SupervisorContext {
   entity: any;
   entities: Record<string, any>;
   entityId: string;
-  currentZone: string;
+  currentRegion: string;
   custodialWallet: string;
   currentScript: BotScript | null;
   recentActivities: string[];
@@ -58,7 +58,7 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext): string 
 EVENT: ${event.detail}
 
 AGENT STATE:
-  Zone: ${ctx.currentZone}  |  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%)  |  Gold: ${goldDisplay}  |  Level: ${entity.level ?? 1}
+  Region: ${ctx.currentRegion}  |  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%)  |  Gold: ${goldDisplay}  |  Level: ${entity.level ?? 1}
   Equipped: ${equipped}
   Recent: ${ctx.recentActivities.slice(-4).join(" → ") || "none"}
 
@@ -89,7 +89,7 @@ function buildTools(): Groq.Chat.ChatCompletionTool[] {
       type: "function",
       function: {
         name: "read_zone",
-        description: "Read the current zone — lists mobs, resource nodes, and NPCs with IDs, levels, and distances",
+        description: "Read the current region — lists mobs, resource nodes, and NPCs with IDs, levels, and distances",
         parameters: { type: "object", properties: {}, required: [] },
       },
     },
@@ -105,7 +105,7 @@ function buildTools(): Groq.Chat.ChatCompletionTool[] {
       type: "function",
       function: {
         name: "read_connections",
-        description: "Read zones reachable from the current zone and their level requirements",
+        description: "Read regions reachable from the current region and their level requirements",
         parameters: { type: "object", properties: {}, required: [] },
       },
     },
@@ -113,7 +113,7 @@ function buildTools(): Groq.Chat.ChatCompletionTool[] {
       type: "function",
       function: {
         name: "read_quests",
-        description: "Read available and active quests in the current zone",
+        description: "Read available and active quests in the current region",
         parameters: { type: "object", properties: {}, required: [] },
       },
     },
@@ -141,7 +141,7 @@ function buildTools(): Groq.Chat.ChatCompletionTool[] {
             },
             targetZone: {
               type: "string",
-              description: "travel only: destination zone ID",
+              description: "travel only: destination region ID",
             },
             maxGold: {
               type: "number",
@@ -191,7 +191,7 @@ async function executeTool(
       mobs.sort((a, b) => a.dist - b.dist);
       nodes.sort((a, b) => a.dist - b.dist);
 
-      return { zone: ctx.currentZone, mobs: mobs.slice(0, 8), nodes: nodes.slice(0, 6), npcs: npcs.slice(0, 8) };
+      return { region: ctx.currentRegion, mobs: mobs.slice(0, 8), nodes: nodes.slice(0, 6), npcs: npcs.slice(0, 8) };
     }
 
     case "read_inventory": {
@@ -210,7 +210,7 @@ async function executeTool(
 
     case "read_connections": {
       try {
-        const res = await ctx.apiCall("GET", `/neighbors/${ctx.currentZone}`);
+        const res = await ctx.apiCall("GET", `/neighbors/${ctx.currentRegion}`);
         return { connections: res?.neighbors ?? [] };
       } catch {
         return { connections: [] };
@@ -219,7 +219,7 @@ async function executeTool(
 
     case "read_quests": {
       try {
-        const res = await ctx.apiCall("GET", `/quests/zone/${ctx.currentZone}/${ctx.entityId}`);
+        const res = await ctx.apiCall("GET", `/quests/zone/${ctx.entityId}`);
         return { quests: res?.quests ?? [] };
       } catch {
         return { quests: [] };
@@ -311,9 +311,9 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
     return { type: "combat", maxLevelOffset: 0, reason: "No gold or weapon — fighting unarmed to earn gold" };
   }
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
-  if (event.type === "zone_arrived") return { type: "quest", reason: "New zone — check for quests" };
+  if (event.type === "zone_arrived") return { type: "quest", reason: "New region — check for quests" };
   if (event.type === "no_targets") {
-    return { type: "travel", reason: "Zone cleared — move on" };
+    return { type: "travel", reason: "Area cleared — move on" };
   }
   return { type: "combat", maxLevelOffset: 2, reason: "Default combat" };
 }

@@ -9,7 +9,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { reverseLookupOnChain, resolveNameOnChain } from "../blockchain/nameServiceChain.js";
 
@@ -130,7 +130,7 @@ async function ensureLoaded(wallet: string): Promise<void> {
   friendsStore.set(key, []);
 }
 
-/** Find player entity across all zones by custodial wallet. */
+/** Find player entity in the unified entity map by custodial wallet. */
 function findOnlinePlayer(wallet: string): {
   entityId: string;
   zoneId: string;
@@ -140,20 +140,18 @@ function findOnlinePlayer(wallet: string): {
   raceId?: string;
 } | null {
   const lower = norm(wallet);
-  for (const [zId, zone] of getAllZones()) {
-    for (const [eId, entity] of zone.entities) {
-      const e = entity as any;
-      if (e.type !== "player") continue;
-      if (e.walletAddress?.toLowerCase() === lower) {
-        return {
-          entityId: eId,
-          zoneId: zId,
-          name: e.name,
-          level: e.level ?? 1,
-          classId: e.classId,
-          raceId: e.raceId,
-        };
-      }
+  for (const [eId, entity] of getAllEntities()) {
+    const e = entity as any;
+    if (e.type !== "player") continue;
+    if (e.walletAddress?.toLowerCase() === lower) {
+      return {
+        entityId: eId,
+        zoneId: e.region ?? "unknown",
+        name: e.name,
+        level: e.level ?? 1,
+        classId: e.classId,
+        raceId: e.raceId,
+      };
     }
   }
   return null;

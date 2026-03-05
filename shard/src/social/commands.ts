@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, getEntity, type Order } from "../world/zoneRuntime.js";
+import { getEntity, type Order } from "../world/zoneRuntime.js";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import {
   getZoneConnections,
@@ -27,8 +27,7 @@ export function registerCommands(server: FastifyInstance) {
     const { zoneId, entityId, action, x, y, targetId, targetZone } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    const zone = getOrCreateZone(zoneId);
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };

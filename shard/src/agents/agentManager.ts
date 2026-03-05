@@ -9,7 +9,7 @@ import {
   getAgentEntityRef,
   patchAgentConfig,
 } from "./agentConfigStore.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getRedis } from "../redis.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { loadAnyCharacterForWallet } from "../character/characterStore.js";
@@ -84,13 +84,7 @@ class AgentManager {
     const ref = await getAgentEntityRef(key);
     if (!ref) return false;
 
-    const refZone = getAllZones().get(ref.zoneId);
-    if (refZone?.entities.has(ref.entityId)) return true;
-
-    for (const [, zone] of getAllZones()) {
-      if (zone.entities.has(ref.entityId)) return true;
-    }
-    return false;
+    return getWorldEntity(ref.entityId) != null;
   }
 
   private async getPrimaryCharacter(custodialWallet: string): Promise<CharacterMetadata | null> {

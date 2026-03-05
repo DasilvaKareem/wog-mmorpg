@@ -46,6 +46,7 @@ export interface WorldLayout {
 // ── Level requirements ───────────────────────────────────────────────
 
 export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
+  "tutorial-island": 1,
   "village-square": 1,
   "wild-meadow": 5,
   "dark-forest": 10,
@@ -95,7 +96,7 @@ function normalizeZoneKey(value: string): string {
  * Resolve a user-provided zone label to a canonical zone ID.
  * Accepts common variants like spaces/underscores/punctuation.
  */
-export function resolveZoneId(zoneInput?: string | null): string | null {
+export function resolveRegionId(zoneInput?: string | null): string | null {
   if (!zoneInput) return null;
   const raw = String(zoneInput).trim();
   if (!raw) return null;
@@ -145,19 +146,6 @@ export function getSharedEdge(
   if (dz === from.size.height && dx === 0) return "south";
 
   return null; // corner-only or not adjacent
-}
-
-/** Get the portal ID for a connection (from world.json). Returns null if not found. */
-export function getConnectionPortal(
-  fromZone: string,
-  toZone: string
-): string | null {
-  const conns = loadConnections();
-  for (const c of conns) {
-    if (c.from === fromZone && c.to === toZone) return c.portal;
-    if (c.to === fromZone && c.from === toZone) return c.portal;
-  }
-  return null;
 }
 
 // ── Load layout from data files at startup ───────────────────────────
@@ -255,81 +243,6 @@ export function getZoneOffset(zoneId: string): Vec2 | null {
   return zone?.offset ?? null;
 }
 
-/** Convert zone-local coordinates to world coordinates */
-export function localToWorld(
-  zoneId: string,
-  localX: number,
-  localZ: number
-): { worldX: number; worldZ: number } | null {
-  const layout = loadLayout();
-  const zone = layout.zones[zoneId];
-  if (!zone) return null;
-  return {
-    worldX: zone.offset.x + localX,
-    worldZ: zone.offset.z + localZ,
-  };
-}
-
-/** Convert world coordinates to zone-local coordinates. Returns the first zone containing the point. */
-export function worldToLocal(
-  worldX: number,
-  worldZ: number
-): { zoneId: string; localX: number; localZ: number } | null {
-  const layout = loadLayout();
-  for (const zone of Object.values(layout.zones)) {
-    const localX = worldX - zone.offset.x;
-    const localZ = worldZ - zone.offset.z;
-    if (
-      localX >= 0 &&
-      localX <= zone.size.width &&
-      localZ >= 0 &&
-      localZ <= zone.size.height
-    ) {
-      return { zoneId: zone.id, localX, localZ };
-    }
-  }
-  return null;
-}
-
-/**
- * When an entity moves out of its zone bounds, find the adjacent zone it entered.
- * Coordinates are now in world-space. Returns destination zone ID and world coordinates,
- * or null if still inside source zone or no adjacent zone found.
- */
-export function getAdjacentZone(
-  sourceZoneId: string,
-  worldX: number,
-  worldZ: number
-): { destZoneId: string; destLocalX: number; destLocalZ: number } | null {
-  const layout = loadLayout();
-  const source = layout.zones[sourceZoneId];
-  if (!source) return null;
-
-  // Check if entity is still inside source zone bounds (world-space)
-  const relX = worldX - source.offset.x;
-  const relZ = worldZ - source.offset.z;
-  if (relX >= 0 && relX <= source.size.width && relZ >= 0 && relZ <= source.size.height) {
-    return null; // Still inside source zone
-  }
-
-  // Find which zone contains this world position
-  for (const zone of Object.values(layout.zones)) {
-    if (zone.id === sourceZoneId) continue;
-    const destRelX = worldX - zone.offset.x;
-    const destRelZ = worldZ - zone.offset.z;
-    if (destRelX >= 0 && destRelX <= zone.size.width && destRelZ >= 0 && destRelZ <= zone.size.height) {
-      // Return world-space coordinates (entity already uses world-space)
-      return {
-        destZoneId: zone.id,
-        destLocalX: worldX,
-        destLocalZ: worldZ,
-      };
-    }
-  }
-
-  return null;
-}
-
 /** Clamp entity position to stay within zone bounds (world-space). Returns true if clamped. */
 export function clampToZoneBounds(
   entity: { x: number; y: number },
@@ -406,18 +319,3 @@ export function findPortalInZone(
   return portal?.position ?? null;
 }
 
-/** Find the destination portal position when traveling from sourceZone through a portal to destZone. */
-export function findDestPortalPosition(
-  sourceZone: string,
-  destZone: string
-): { x: number; z: number } | null {
-  const sourcePois = loadZonePois(sourceZone);
-  const sourcePortal = sourcePois.find(
-    (p) => p.type === "portal" && p.portal?.destinationZone === destZone
-  );
-  if (!sourcePortal?.portal?.destinationPoi) return null;
-
-  const destPois = loadZonePois(destZone);
-  const destPortal = destPois.find((p) => p.id === sourcePortal.portal!.destinationPoi);
-  return destPortal?.position ?? null;
-}
