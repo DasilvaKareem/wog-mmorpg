@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { mintItem } from "../blockchain/blockchain.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -19,17 +19,16 @@ const SKINNING_KNIFE_TIERS: Record<number, number> = {
 };
 
 export function registerSkinningRoutes(server: FastifyInstance) {
-  // GET /skinning/corpses/:zoneId - list available corpses to skin
-  server.get<{ Params: { zoneId: string } }>(
-    "/skinning/corpses/:zoneId",
-    async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
+  // GET /skinning/corpses - list available corpses to skin (optionally filtered by region)
+  server.get<{ Querystring: { region?: string } }>(
+    "/skinning/corpses",
+    async (request) => {
+      const { region } = request.query;
+      const entities = region
+        ? getEntitiesInRegion(region)
+        : [...getAllEntities().values()];
 
-      const corpses = Array.from(zone.entities.values())
+      const corpses = entities
         .filter((e) => e.type === "corpse" && !e.skinned)
         .map((e) => ({
           id: e.id,
@@ -39,17 +38,24 @@ export function registerSkinningRoutes(server: FastifyInstance) {
           mobName: e.mobName,
           skinnableUntil: e.skinnableUntil,
           timeRemaining: e.skinnableUntil ? Math.max(0, e.skinnableUntil - Date.now()) : 0,
+          region: e.region,
         }));
 
-      return { zoneId: request.params.zoneId, corpses };
+      return { region: region ?? "all", corpses };
     }
   );
+
+  // Backward compat alias
+  server.get("/skinning/corpses/:zoneId", async (request, reply) => {
+    const { zoneId } = (request as any).params;
+    return reply.redirect(`/skinning/corpses?region=${zoneId}`);
+  });
 
   // POST /skinning/harvest - skin a corpse for materials
   server.post<{
     Body: {
       walletAddress: string;
-      zoneId: string;
+      zoneId?: string;
       entityId: string;
       corpseId: string;
     };
@@ -77,19 +83,13 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       return { error: "Skinning profession not learned. Visit a skinning trainer." };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const corpse = zone.entities.get(corpseId);
+    const corpse = getEntity(corpseId);
     if (!corpse || corpse.type !== "corpse") {
       reply.code(404);
       return { error: "Corpse not found" };
@@ -182,7 +182,8 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       const txHashes = await Promise.all(mintPromises);
 
       // Award profession XP
-      const profXpResult = awardProfessionXp(entity, zoneId, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
+      const region = zoneId ?? entity.region ?? "unknown";
+      const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
 
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
@@ -190,8 +191,8 @@ export function registerSkinningRoutes(server: FastifyInstance) {
 
       // Log skin diary entry
       if (walletAddress) {
-        const { headline, narrative } = narrativeSkin(entity.name, entity.raceId, entity.classId, zoneId, corpse.name, mintedItems.length);
-        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "skin", headline, narrative, {
+        const { headline, narrative } = narrativeSkin(entity.name, entity.raceId, entity.classId, region, corpse.name, mintedItems.length);
+        logDiary(walletAddress, entity.name, region, entity.x, entity.y, "skin", headline, narrative, {
           corpseName: corpse.name,
           materialsCount: mintedItems.length,
           materials: mintedItems.map((i) => i.name),

@@ -25,6 +25,8 @@ export interface CharacterSaveData {
   professions: string[];
   signatureTechniqueId?: string;
   ultimateTechniqueId?: string;
+  /** Serialized equipment map — persisted as JSON string in Redis */
+  equipment?: Record<string, unknown>;
 }
 
 // In-memory fallback (always available)
@@ -101,6 +103,7 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     professions: parseStringArray(raw.professions),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
+    equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,
   };
 }
 
@@ -155,7 +158,7 @@ export async function saveCharacter(
   const flat: Record<string, string> = {};
   for (const [k, v] of Object.entries(data)) {
     if (v === undefined || v === null) continue;
-    flat[k] = Array.isArray(v) ? JSON.stringify(v) : String(v);
+    flat[k] = (Array.isArray(v) || typeof v === "object") ? JSON.stringify(v) : String(v);
   }
 
   if (Object.keys(flat).length === 0) return;

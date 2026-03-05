@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { getOrCreateZone, getAllZones, type Entity, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { getOrCreateZone, getAllZones, type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { mintGold, mintItem } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -2986,15 +2986,11 @@ export async function awardQuestRewards(
 }
 
 export function registerQuestRoutes(server: FastifyInstance) {
-  // GET /quests/:zoneId/:npcId?playerId=X - Get available quests from an NPC (filtered by player progress)
-  server.get<{
-    Params: { zoneId: string; npcId: string };
-    Querystring: { playerId?: string };
-  }>("/quests/:zoneId/:npcId", async (request, reply) => {
-    const { zoneId, npcId } = request.params;
+  // GET /quests/npc/:npcId?playerId=X - Get available quests from an NPC (filtered by player progress)
+  const questsNpcHandler = async (request: any, reply: any) => {
+    const npcId = request.params.npcId;
     const { playerId } = request.query;
-    const zone = getOrCreateZone(zoneId);
-    const npc = zone.entities.get(npcId);
+    const npc = getEntity(npcId);
 
     if (!npc) {
       reply.code(404);
@@ -3005,10 +3001,10 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
     // If playerId provided, filter by prerequisites
     if (playerId) {
-      const player = zone.entities.get(playerId);
+      const player = getEntity(playerId);
       if (player && player.type === "player") {
         const completedQuestIds = player.completedQuests ?? [];
-        const activeQuestIds = (player.activeQuests ?? []).map((aq) => aq.questId);
+        const activeQuestIds = (player.activeQuests ?? []).map((aq: ActiveQuest) => aq.questId);
         quests = getAvailableQuestsForPlayer(npc.name, completedQuestIds, activeQuestIds);
       } else {
         // Player not found, return all quests (for debugging)
@@ -3020,17 +3016,27 @@ export function registerQuestRoutes(server: FastifyInstance) {
     }
 
     return { npc: { id: npc.id, name: npc.name }, quests };
-  });
+  };
+
+  server.get<{
+    Params: { npcId: string };
+    Querystring: { playerId?: string };
+  }>("/quests/npc/:npcId", questsNpcHandler);
+
+  // Backward compat alias
+  server.get<{
+    Params: { zoneId: string; npcId: string };
+    Querystring: { playerId?: string };
+  }>("/quests/:zoneId/:npcId", questsNpcHandler);
 
   // POST /quests/accept - Accept a quest
   server.post<{
-    Body: { zoneId: string; playerId: string; questId: string };
+    Body: { zoneId?: string; playerId: string; questId: string };
   }>("/quests/accept", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, playerId, questId } = request.body;
-    const zone = getOrCreateZone(zoneId);
-    const player = zone.entities.get(playerId);
+    const { playerId, questId } = request.body;
+    const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
       reply.code(404);
@@ -3090,43 +3096,49 @@ export function registerQuestRoutes(server: FastifyInstance) {
     };
   });
 
-  // GET /quests/active/:zoneId/:playerId - Get player's active quests
+  // GET /quests/active/:playerId - Get player's active quests
+  const questsActiveHandler = async (request: any, reply: any) => {
+    const { playerId } = request.params;
+    const player = getEntity(playerId);
+
+    if (!player || player.type !== "player") {
+      reply.code(404);
+      return { error: "Player not found" };
+    }
+
+    const activeQuests = (player.activeQuests ?? []).map((aq: ActiveQuest) => {
+      const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
+      return {
+        questId: aq.questId,
+        progress: aq.progress,
+        required: quest?.objective.count ?? 0,
+        complete: quest ? isQuestComplete(quest, aq.progress) : false,
+        quest,
+      };
+    });
+
+    return { activeQuests };
+  };
+
+  server.get<{ Params: { playerId: string } }>(
+    "/quests/active/:playerId",
+    questsActiveHandler
+  );
+
+  // Backward compat alias
   server.get<{ Params: { zoneId: string; playerId: string } }>(
     "/quests/active/:zoneId/:playerId",
-    async (request, reply) => {
-      const { zoneId, playerId } = request.params;
-      const zone = getOrCreateZone(zoneId);
-      const player = zone.entities.get(playerId);
-
-      if (!player || player.type !== "player") {
-        reply.code(404);
-        return { error: "Player not found" };
-      }
-
-      const activeQuests = (player.activeQuests ?? []).map((aq) => {
-        const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
-        return {
-          questId: aq.questId,
-          progress: aq.progress,
-          required: quest?.objective.count ?? 0,
-          complete: quest ? isQuestComplete(quest, aq.progress) : false,
-          quest,
-        };
-      });
-
-      return { activeQuests };
-    }
+    questsActiveHandler
   );
 
   // POST /quests/complete - Turn in a completed quest
   server.post<{
-    Body: { zoneId: string; playerId: string; questId: string; npcId: string };
+    Body: { zoneId?: string; playerId: string; questId: string; npcId: string };
   }>("/quests/complete", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, playerId, questId, npcId } = request.body;
-    const zone = getOrCreateZone(zoneId);
-    const player = zone.entities.get(playerId);
+    const { playerId, questId, npcId } = request.body;
+    const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
       reply.code(404);
@@ -3140,7 +3152,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
     }
 
     // Verify quest is from this NPC
-    const npc = zone.entities.get(npcId);
+    const npc = getEntity(npcId);
     if (!npc || quest.npcId !== npc.name) {
       reply.code(400);
       return { error: "This NPC does not offer this quest" };
@@ -3192,20 +3204,19 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
   // POST /quests/talk - Auto-accept + auto-complete a talk quest by visiting an NPC
   server.post<{
-    Body: { zoneId: string; playerId: string; npcEntityId: string };
+    Body: { zoneId?: string; playerId: string; npcEntityId: string };
   }>("/quests/talk", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, playerId, npcEntityId } = request.body;
-    const zone = getOrCreateZone(zoneId);
-    const player = zone.entities.get(playerId);
+    const { playerId, npcEntityId } = request.body;
+    const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
       reply.code(404);
       return { error: "Player not found" };
     }
 
-    const npc = zone.entities.get(npcEntityId);
+    const npc = getEntity(npcEntityId);
     if (!npc) {
       reply.code(404);
       return { error: "NPC not found" };
@@ -3412,8 +3423,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
     "/quests/zone/:zoneId/:playerId",
     async (request, reply) => {
       const { zoneId, playerId } = request.params;
-      const zone = getOrCreateZone(zoneId);
-      const player = zone.entities.get(playerId);
+      const player = getEntity(playerId);
 
       if (!player || player.type !== "player") {
         reply.code(404);
@@ -3429,7 +3439,8 @@ export function registerQuestRoutes(server: FastifyInstance) {
         objective: Quest["objective"]; rewards: Quest["rewards"];
       }> = [];
 
-      for (const entity of zone.entities.values()) {
+      const zoneEntities = getEntitiesInRegion(zoneId);
+      for (const entity of zoneEntities) {
         if (entity.type !== "quest-giver") continue;
         const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
         for (const q of quests) {

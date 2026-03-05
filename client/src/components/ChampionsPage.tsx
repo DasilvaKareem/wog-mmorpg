@@ -6,6 +6,7 @@ import { useWogNames } from "@/hooks/useWogNames";
 import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
 import { formatCopperString } from "@/lib/currency";
+import { getAuthToken } from "@/lib/agentAuth";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -253,16 +254,41 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
   );
 }
 
+// ── Equipment slot config ─────────────────────────────────────────────────
+
+const SLOT_ORDER: { slot: string; label: string; icon: string }[] = [
+  { slot: "weapon",    label: "Weapon",    icon: "⚔" },
+  { slot: "helm",      label: "Helm",      icon: "🪖" },
+  { slot: "shoulders", label: "Shoulders", icon: "🛡" },
+  { slot: "chest",     label: "Chest",     icon: "🛡" },
+  { slot: "gloves",    label: "Gloves",    icon: "🧤" },
+  { slot: "belt",      label: "Belt",      icon: "📿" },
+  { slot: "legs",      label: "Legs",      icon: "🦿" },
+  { slot: "boots",     label: "Boots",     icon: "🥾" },
+  { slot: "ring",      label: "Ring",      icon: "💍" },
+  { slot: "amulet",    label: "Amulet",    icon: "📿" },
+];
+
 // ── Inventory tab ─────────────────────────────────────────────────────────
 
 function InventoryTab({
   items,
   loading,
+  wallet,
+  entityId,
+  zoneId,
+  onRefresh,
 }: {
   items: InventoryItem[];
   loading: boolean;
+  wallet: string | null;
+  entityId: string | null;
+  zoneId: string | null;
+  onRefresh: () => void;
 }) {
   const [filter, setFilter] = React.useState<string>("all");
+  const [busy, setBusy] = React.useState<number | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
 
   const categories = ["all", "weapon", "armor", "consumable", "material"] as const;
 
@@ -275,6 +301,55 @@ function InventoryTab({
     return a.name.localeCompare(b.name);
   });
 
+  // Build equipped slot map from items
+  const equippedBySlot = React.useMemo(() => {
+    const map: Record<string, InventoryItem> = {};
+    for (const item of items) {
+      if (item.equipped && item.equippedSlot) {
+        map[item.equippedSlot] = item;
+      }
+    }
+    return map;
+  }, [items]);
+
+  async function handleEquip(item: InventoryItem) {
+    if (!wallet || !zoneId) return;
+    setBusy(item.tokenId);
+    setError(null);
+    try {
+      const token = await getAuthToken(wallet);
+      if (!token) { setError("Auth failed — reconnect wallet"); return; }
+      const res = await fetch(`${API_URL}/equipment/equip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ zoneId, tokenId: item.tokenId, walletAddress: wallet, entityId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Equip failed"); return; }
+      onRefresh();
+    } catch { setError("Network error"); }
+    finally { setBusy(null); }
+  }
+
+  async function handleUnequip(slot: string) {
+    if (!wallet || !zoneId) return;
+    setBusy(-1);
+    setError(null);
+    try {
+      const token = await getAuthToken(wallet);
+      if (!token) { setError("Auth failed — reconnect wallet"); return; }
+      const res = await fetch(`${API_URL}/equipment/unequip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ zoneId, slot, walletAddress: wallet, entityId }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Unequip failed"); return; }
+      onRefresh();
+    } catch { setError("Network error"); }
+    finally { setBusy(null); }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -284,8 +359,75 @@ function InventoryTab({
   }
 
   return (
-    <div className="flex flex-col gap-3 font-mono">
-      {/* Filter bar */}
+    <div className="flex flex-col gap-4 font-mono">
+      {/* Error banner */}
+      {error && (
+        <div className="border-2 border-[#ff6b6b44] bg-[#1a0a0a] px-3 py-2 text-[11px] text-[#ff6b6b]">
+          {error}
+        </div>
+      )}
+
+      {/* ── Equipment Slots Panel ─────────────────────────────── */}
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-widest text-[#565f89]">{">> EQUIPPED GEAR"}</span>
+          {!zoneId && <span className="text-[9px] text-[#3a4260]">CHAMPION OFFLINE — EQUIP DISABLED</span>}
+        </div>
+        <div className="grid grid-cols-2 gap-1.5 p-3 sm:grid-cols-5">
+          {SLOT_ORDER.map(({ slot, label, icon }) => {
+            const eq = equippedBySlot[slot];
+            const rc = eq ? (RARITY_COLORS[eq.rarity] ?? "#9aa7cc") : "#2a3450";
+            const durPct = eq?.maxDurability && eq.maxDurability > 0
+              ? Math.round(((eq.durability ?? 0) / eq.maxDurability) * 100) : null;
+            const durColor = durPct === null ? null : durPct > 66 ? "#54f28b" : durPct > 33 ? "#ffcc00" : "#ff6b6b";
+
+            return (
+              <div
+                key={slot}
+                className="flex flex-col border-2 p-2 min-h-[80px] transition"
+                style={{
+                  borderColor: eq ? rc + "66" : "#2a3450",
+                  backgroundColor: eq ? rc + "08" : "#0a0f1a",
+                }}
+              >
+                <div className="flex items-center gap-1 mb-1">
+                  <span className="text-[13px]">{icon}</span>
+                  <span className="text-[9px] uppercase tracking-wide text-[#565f89]">{label}</span>
+                </div>
+                {eq ? (
+                  <>
+                    <span className="text-[10px] font-bold leading-tight truncate" style={{ color: rc }}>
+                      {eq.name}
+                    </span>
+                    <span className="text-[8px] uppercase mt-0.5" style={{ color: rc + "99" }}>{eq.rarity}</span>
+                    {durPct !== null && (
+                      <div className="flex items-center gap-1 mt-1">
+                        <div className="h-1 flex-1 border border-black bg-[#0f1528]">
+                          <div className="h-full" style={{ width: `${durPct}%`, backgroundColor: durColor ?? "#54f28b" }} />
+                        </div>
+                        <span className="text-[8px]" style={{ color: durColor ?? "#54f28b" }}>{durPct}%</span>
+                      </div>
+                    )}
+                    {zoneId && (
+                      <button
+                        onClick={() => handleUnequip(slot)}
+                        disabled={busy !== null}
+                        className="mt-auto pt-1 text-[9px] uppercase tracking-wide text-[#ff6b6b] hover:text-[#ff9b9b] transition disabled:opacity-40"
+                      >
+                        [REMOVE]
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[9px] text-[#2a3450] mt-auto">Empty</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Item List ─────────────────────────────────────────── */}
       <div className="flex gap-1 flex-wrap">
         {categories.map((cat) => (
           <button
@@ -319,6 +461,9 @@ function InventoryTab({
                 ? Math.round(((item.durability ?? 0) / item.maxDurability) * 100)
                 : null;
             const durColor = durPct === null ? null : durPct > 66 ? "#54f28b" : durPct > 33 ? "#ffcc00" : "#ff6b6b";
+            const canEquip = !!item.equipSlot && !item.equipped && !!zoneId;
+            const canUnequip = item.equipped && !!item.equippedSlot && !!zoneId;
+
             return (
               <div
                 key={item.tokenId}
@@ -330,7 +475,7 @@ function InventoryTab({
                 {/* Equipped badge */}
                 {item.equipped && (
                   <span
-                    className="absolute top-2 right-2 text-[12px] uppercase tracking-wide border px-1 py-0.5"
+                    className="absolute top-2 right-2 text-[10px] uppercase tracking-wide border px-1 py-0.5"
                     style={{ color: "#54f28b", borderColor: "#54f28b44", backgroundColor: "#0a1a0e" }}
                   >
                     EQUIPPED
@@ -346,46 +491,82 @@ function InventoryTab({
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[13px] font-bold text-[#d6deff]">{item.name}</span>
                       <span
-                        className="text-[13px] uppercase tracking-wide border px-1"
+                        className="text-[10px] uppercase tracking-wide border px-1"
                         style={{ color: rc, borderColor: rc + "44", backgroundColor: rc + "11" }}
                       >
                         {item.rarity}
                       </span>
                     </div>
-                    <p className="text-[13px] text-[#565f89] mt-0.5 leading-relaxed line-clamp-2">
+                    <p className="text-[10px] text-[#565f89] mt-0.5 leading-relaxed line-clamp-2">
                       {item.description}
                     </p>
 
                     <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                      {/* Token ID */}
+                      <span className="text-[9px] text-[#3a4260]">
+                        NFT #{item.tokenId}
+                      </span>
+
                       {/* Quantity */}
-                      <span className="text-[17px] text-[#9aa7cc]">
-                        <span className="text-[#3a4260]">QTY</span>{"  "}
+                      <span className="text-[10px] text-[#9aa7cc]">
+                        <span className="text-[#3a4260]">QTY</span>{" "}
                         <span className="font-bold text-[#ffcc00]">{item.quantity}</span>
                       </span>
 
                       {/* Equipped slot */}
                       {item.equippedSlot && (
-                        <span className="text-[13px] uppercase text-[#565f89]">
+                        <span className="text-[9px] uppercase text-[#565f89]">
                           [{item.equippedSlot}]
+                        </span>
+                      )}
+
+                      {/* Equip slot hint for unequipped items */}
+                      {!item.equipped && item.equipSlot && (
+                        <span className="text-[9px] uppercase text-[#3a4260]">
+                          SLOT: {item.equipSlot}
                         </span>
                       )}
 
                       {/* Durability */}
                       {durPct !== null && (
                         <div className="flex items-center gap-1">
-                          <span className="text-[13px] text-[#3a4260]">DUR</span>
+                          <span className="text-[9px] text-[#3a4260]">DUR</span>
                           <div className="h-1 w-12 border border-black bg-[#0f1528]">
                             <div
                               className="h-full transition-all"
                               style={{ width: `${durPct}%`, backgroundColor: durColor ?? "#54f28b" }}
                             />
                           </div>
-                          <span className="text-[13px]" style={{ color: durColor ?? "#54f28b" }}>
-                            {durPct}%
+                          <span className="text-[9px]" style={{ color: durColor ?? "#54f28b" }}>
+                            {item.durability}/{item.maxDurability}
                           </span>
                         </div>
                       )}
                     </div>
+
+                    {/* Equip / Unequip button */}
+                    {(canEquip || canUnequip) && (
+                      <div className="mt-2">
+                        {canEquip && (
+                          <button
+                            onClick={() => handleEquip(item)}
+                            disabled={busy !== null}
+                            className="border-2 border-[#54f28b66] bg-[#0a1a0e] px-3 py-1 text-[10px] uppercase tracking-wide text-[#54f28b] hover:bg-[#54f28b22] transition disabled:opacity-40"
+                          >
+                            {busy === item.tokenId ? "EQUIPPING..." : `EQUIP → ${item.equipSlot?.toUpperCase()}`}
+                          </button>
+                        )}
+                        {canUnequip && (
+                          <button
+                            onClick={() => handleUnequip(item.equippedSlot!)}
+                            disabled={busy !== null}
+                            className="border-2 border-[#ff6b6b44] bg-[#1a0a0a] px-3 py-1 text-[10px] uppercase tracking-wide text-[#ff6b6b] hover:bg-[#ff6b6b22] transition disabled:opacity-40"
+                          >
+                            {busy === -1 ? "REMOVING..." : "UNEQUIP"}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1500,7 +1681,11 @@ export function ChampionsPage(): React.ReactElement {
           <div className="flex-1 min-w-0 border-4 border-black bg-[#0a0f1a] shadow-[4px_4px_0_0_#000]">
             <TabBar active={activeTab} onChange={setActiveTab} />
             <div className="p-4">
-              {activeTab === "inventory"   && <InventoryTab items={items} loading={inventoryLoading} />}
+              {activeTab === "inventory"   && <InventoryTab items={items} loading={inventoryLoading} wallet={custodialWallet ?? wallet} entityId={agentEntityId} zoneId={agentZoneId} onRefresh={() => {
+                setInventoryLoading(true);
+                const profWallet = custodialWallet ?? wallet;
+                fetch(`${API_URL}/inventory/${profWallet}`).then(r => r.json()).then(d => setItems(d.items ?? [])).catch(() => {}).finally(() => setInventoryLoading(false));
+              }} />}
               {activeTab === "overview"    && <OverviewTab entity={entity} diary={diary} kills={kills} deaths={deaths} quests={quests} itemCount={items.length} />}
               {activeTab === "professions" && <ProfessionsTab learned={professions} />}
               {activeTab === "quests"      && <QuestsTab diary={diary} />}

@@ -5,6 +5,9 @@ import { copperToGold } from "../blockchain/currency.js";
 import { getItemByTokenId, getItemRarity, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
 import {
   getAllZones,
+  getEntity,
+  getAllEntities,
+  getEntitiesInRegion,
   getEffectiveStats,
   recalculateEntityVitals,
   type Entity,
@@ -13,6 +16,7 @@ import {
 import { authenticateRequest } from "../auth/auth.js";
 import { getItemInstance } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
+import { saveCharacter } from "../character/characterStore.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -66,13 +70,12 @@ function serializeEntityEquipment(entity: Entity) {
 }
 
 function resolvePlayer(
-  zone: ZoneState,
   options: { entityId?: string; walletAddress?: string }
 ): { entity?: Entity; error?: string } {
   const wallet = options.walletAddress?.toLowerCase();
 
   if (options.entityId) {
-    const entity = zone.entities.get(options.entityId);
+    const entity = getEntity(options.entityId);
     if (!entity) return { error: "Entity not found" };
     if (entity.type !== "player") return { error: "Entity is not a player" };
     if (wallet && entity.walletAddress?.toLowerCase() !== wallet) {
@@ -85,14 +88,14 @@ function resolvePlayer(
     return { error: "Provide entityId or walletAddress" };
   }
 
-  for (const entity of zone.entities.values()) {
+  for (const entity of getAllEntities().values()) {
     if (entity.type !== "player") continue;
     if (entity.walletAddress?.toLowerCase() === wallet) {
       return { entity };
     }
   }
 
-  return { error: "Player not found in zone" };
+  return { error: "Player not found" };
 }
 
 export function registerEquipmentRoutes(server: FastifyInstance) {
@@ -100,16 +103,10 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     slots: EQUIPMENT_SLOTS,
   }));
 
-  server.get<{ Params: { zoneId: string; entityId: string } }>(
-    "/equipment/:zoneId/:entityId",
+  server.get<{ Params: { entityId: string } }>(
+    "/equipment/:entityId",
     async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
-
-      const entity = zone.entities.get(request.params.entityId);
+      const entity = getEntity(request.params.entityId);
       if (!entity) {
         reply.code(404);
         return { error: "Entity not found" };
@@ -119,16 +116,29 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
   );
 
-  server.get<{ Params: { zoneId: string } }>(
-    "/equipment/blacksmiths/:zoneId",
+  // Compat alias: GET /equipment/:zoneId/:entityId
+  server.get<{ Params: { zoneId: string; entityId: string } }>(
+    "/equipment/:zoneId/:entityId",
     async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
+      const entity = getEntity(request.params.entityId);
+      if (!entity) {
         reply.code(404);
-        return { error: "Zone not found" };
+        return { error: "Entity not found" };
       }
 
-      const blacksmiths = Array.from(zone.entities.values())
+      return serializeEntityEquipment(entity);
+    }
+  );
+
+  server.get<{ Querystring: { region?: string } }>(
+    "/equipment/blacksmiths",
+    async (request, reply) => {
+      const { region } = request.query;
+      const entities = region
+        ? getEntitiesInRegion(region)
+        : Array.from(getAllEntities().values());
+
+      const blacksmiths = entities
         .filter((entity) => isBlacksmith(entity))
         .map((entity) => ({
           id: entity.id,
@@ -138,7 +148,30 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         }));
 
       return {
-        zoneId: zone.zoneId,
+        region: region ?? "all",
+        blacksmiths,
+      };
+    }
+  );
+
+  // Compat alias: GET /equipment/blacksmiths/:zoneId
+  server.get<{ Params: { zoneId: string } }>(
+    "/equipment/blacksmiths/:zoneId",
+    async (request, reply) => {
+      const region = request.params.zoneId;
+      const entities = getEntitiesInRegion(region);
+
+      const blacksmiths = entities
+        .filter((entity) => isBlacksmith(entity))
+        .map((entity) => ({
+          id: entity.id,
+          name: entity.name,
+          x: entity.x,
+          y: entity.y,
+        }));
+
+      return {
+        region,
         blacksmiths,
       };
     }
@@ -158,18 +191,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const { zoneId, tokenId, entityId, walletAddress, instanceId } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (!zoneId || !Number.isFinite(tokenId)) {
+    if (!Number.isFinite(tokenId)) {
       reply.code(400);
-      return { error: "zoneId and tokenId are required" };
+      return { error: "tokenId is required" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const resolved = resolvePlayer(zone, { entityId, walletAddress });
+    const resolved = resolvePlayer({ entityId, walletAddress });
     if (!resolved.entity) {
       reply.code(404);
       return { error: resolved.error ?? "Player not found" };
@@ -267,6 +294,8 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         tokenId: item.tokenId.toString(),
         slot: item.equipSlot,
       });
+      // Persist equipment to Redis
+      saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
     }
 
     return {
@@ -298,18 +327,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const { zoneId, slot, entityId, walletAddress } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (!zoneId || !slot || !isEquipmentSlot(slot)) {
+    if (!slot || !isEquipmentSlot(slot)) {
       reply.code(400);
-      return { error: "zoneId and valid equipment slot are required" };
+      return { error: "Valid equipment slot is required" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const resolved = resolvePlayer(zone, { entityId, walletAddress });
+    const resolved = resolvePlayer({ entityId, walletAddress });
     if (!resolved.entity) {
       reply.code(404);
       return { error: resolved.error ?? "Player not found" };
@@ -336,6 +359,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       logDiary(entity.walletAddress, entity.name, zoneId, entity.x, entity.y, "unequip", headline, narrative, {
         slot,
       });
+      saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment ?? {} }).catch(() => {});
     }
 
     return {
@@ -359,9 +383,9 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const { zoneId, npcId, slot, entityId, walletAddress } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (!zoneId || !npcId) {
+    if (!npcId) {
       reply.code(400);
-      return { error: "zoneId and npcId are required" };
+      return { error: "npcId is required" };
     }
 
     let selectedSlot: EquipmentSlot | undefined;
@@ -373,19 +397,13 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       selectedSlot = slot;
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const blacksmith = zone.entities.get(npcId);
+    const blacksmith = getEntity(npcId);
     if (!isBlacksmith(blacksmith)) {
       reply.code(400);
-      return { error: "npcId must reference a blacksmith merchant in this zone" };
+      return { error: "npcId must reference a blacksmith merchant" };
     }
 
-    const resolved = resolvePlayer(zone, { entityId, walletAddress });
+    const resolved = resolvePlayer({ entityId, walletAddress });
     if (!resolved.entity) {
       reply.code(404);
       return { error: resolved.error ?? "Player not found" };

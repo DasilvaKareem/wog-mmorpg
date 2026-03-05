@@ -3,6 +3,7 @@ import { getOrCreateZone, type Entity } from "./zoneRuntime.js";
 import type { ProfessionType } from "../professions/professions.js";
 import type { CharacterStats } from "../character/classes.js";
 import { statScale } from "../character/leveling.js";
+import { getZoneOffset } from "./worldLayout.js";
 
 /**
  * Static NPC definitions that auto-spawn when the shard boots.
@@ -2820,24 +2821,30 @@ export function spawnNpcs(): void {
 function spawnSingleNpc(def: NpcDef): void {
   const zone = getOrCreateZone(def.zoneId);
 
+  // Offset local coords to world-space
+  const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
+  const worldX = def.x + offset.x;
+  const worldY = def.y + offset.z;
+
   const isCombatant = def.type === "mob" || def.type === "boss";
 
   const entity: Entity = {
     id: randomUUID(),
     type: def.type,
     name: def.name,
-    x: def.x,
-    y: def.y,
+    x: worldX,
+    y: worldY,
     hp: def.hp,
     maxHp: def.hp,
+    region: def.zoneId,
     createdAt: Date.now(),
     shopItems: def.shopItems,
     ...(def.level != null && { level: def.level }),
     ...(def.xpReward != null && { xpReward: def.xpReward }),
     ...(def.teachesProfession != null && { teachesProfession: def.teachesProfession }),
     ...(def.teachesClass != null && { teachesClass: def.teachesClass }),
-    // Store spawn origin for leash/de-aggro
-    ...(isCombatant && { spawnX: def.x, spawnY: def.y }),
+    // Store spawn origin for leash/de-aggro (world-space)
+    ...(isCombatant && { spawnX: worldX, spawnY: worldY }),
     // Give mobs/bosses real combat stats so they use the stat-based damage formula
     ...(isCombatant && def.level != null && {
       stats: computeMobStats(def.level, def.hp, def.type === "boss"),
@@ -2856,7 +2863,7 @@ function spawnSingleNpc(def: NpcDef): void {
   const professionInfo = def.teachesProfession ? ` (teaches ${def.teachesProfession})` : "";
   const classInfo = def.teachesClass ? ` (teaches ${def.teachesClass})` : "";
   console.log(
-    `[npc] Spawned ${def.type} "${def.name}" in ${def.zoneId} at (${def.x}, ${def.y})${professionInfo}${classInfo}`
+    `[npc] Spawned ${def.type} "${def.name}" in ${def.zoneId} at world(${worldX}, ${worldY})${professionInfo}${classInfo}`
   );
 }
 

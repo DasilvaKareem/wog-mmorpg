@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
 import { mintItem } from "../blockchain/blockchain.js";
 import { ORE_CATALOG } from "../resources/oreCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -32,17 +32,16 @@ export function registerMiningRoutes(server: FastifyInstance) {
     }));
   });
 
-  // GET /mining/nodes/:zoneId - all ore nodes in zone
-  server.get<{ Params: { zoneId: string } }>(
-    "/mining/nodes/:zoneId",
-    async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
+  // GET /mining/nodes - all ore nodes (optionally filtered by region)
+  server.get<{ Querystring: { region?: string } }>(
+    "/mining/nodes",
+    async (request) => {
+      const { region } = request.query;
+      const entities = region
+        ? getEntitiesInRegion(region)
+        : [...getAllEntities().values()];
 
-      const oreNodes = Array.from(zone.entities.values())
+      const oreNodes = entities
         .filter((e) => e.type === "ore-node")
         .map((e) => ({
           id: e.id,
@@ -54,17 +53,24 @@ export function registerMiningRoutes(server: FastifyInstance) {
           maxCharges: e.maxCharges ?? 0,
           depleted: e.depletedAtTick != null,
           requiredPickaxeTier: e.oreType ? ORE_CATALOG[e.oreType].requiredPickaxeTier : 1,
+          region: e.region,
         }));
 
-      return { zoneId: request.params.zoneId, oreNodes };
+      return { region: region ?? "all", oreNodes };
     }
   );
+
+  // Backward compat alias
+  server.get("/mining/nodes/:zoneId", async (request, reply) => {
+    const { zoneId } = (request as any).params;
+    return reply.redirect(`/mining/nodes?region=${zoneId}`);
+  });
 
   // POST /mining/gather - mine ore with pickaxe
   server.post<{
     Body: {
       walletAddress: string;
-      zoneId: string;
+      zoneId?: string;
       entityId: string;
       oreNodeId: string;
     };
@@ -86,19 +92,13 @@ export function registerMiningRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const oreNode = zone.entities.get(oreNodeId);
+    const oreNode = getEntity(oreNodeId);
     if (!oreNode || oreNode.type !== "ore-node") {
       reply.code(404);
       return { error: "Ore node not found" };
@@ -156,7 +156,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
     oreNode.charges = (oreNode.charges ?? 0) - 1;
     const chargesRemaining = oreNode.charges;
     if (oreNode.charges <= 0) {
-      oreNode.depletedAtTick = zone.tick;
+      oreNode.depletedAtTick = getWorldTick();
     }
 
     // CRITICAL: Reduce pickaxe durability
@@ -175,12 +175,13 @@ export function registerMiningRoutes(server: FastifyInstance) {
 
       // Award profession XP
       const xpAmount = xpForRarity(oreProps.rarity);
-      const profXpResult = awardProfessionXp(entity, zoneId, xpAmount, "mining", undefined, oreProps.label);
+      const region = zoneId ?? entity.region ?? "unknown";
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "mining", undefined, oreProps.label);
 
       // Log mine diary entry
       if (walletAddress) {
-        const { headline, narrative } = narrativeMine(entity.name, entity.raceId, entity.classId, zoneId, oreProps.label, pickaxeItem.name);
-        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "mine", headline, narrative, {
+        const { headline, narrative } = narrativeMine(entity.name, entity.raceId, entity.classId, region, oreProps.label, pickaxeItem.name);
+        logDiary(walletAddress, entity.name, region, entity.x, entity.y, "mine", headline, narrative, {
           oreName: oreProps.label,
           pickaxeName: pickaxeItem.name,
           chargesRemaining,

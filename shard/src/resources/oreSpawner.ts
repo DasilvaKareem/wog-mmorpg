@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { ORE_CATALOG, type OreType } from "./oreCatalog.js";
+import { getZoneOffset } from "../world/worldLayout.js";
 
 interface OreSpawnDef {
   zoneId: string;
@@ -95,15 +96,17 @@ export function spawnOreNodes(): void {
   for (const def of ORE_SPAWN_DEFS) {
     const zone = getOrCreateZone(def.zoneId);
     const oreProps = ORE_CATALOG[def.oreType];
+    const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
 
     const entity: Entity = {
       id: randomUUID(),
       type: "ore-node",
       name: oreProps.label,
-      x: def.x,
-      y: def.y,
+      x: def.x + offset.x,
+      y: def.y + offset.z,
       hp: 9999,
       maxHp: 9999,
+      region: def.zoneId,
       createdAt: Date.now(),
       oreType: def.oreType,
       charges: oreProps.maxCharges,

@@ -224,6 +224,37 @@ export function getWorldLayout(): WorldLayout {
   return loadLayout();
 }
 
+/** Determine which region (zone) a world-space position falls into. */
+export function getRegionAtPosition(worldX: number, worldZ: number): string | null {
+  const layout = loadLayout();
+  for (const zone of Object.values(layout.zones)) {
+    const localX = worldX - zone.offset.x;
+    const localZ = worldZ - zone.offset.z;
+    if (localX >= 0 && localX <= zone.size.width && localZ >= 0 && localZ <= zone.size.height) {
+      return zone.id;
+    }
+  }
+  return null;
+}
+
+/** Get the world-space center of a region. */
+export function getRegionCenter(regionId: string): { x: number; z: number } | null {
+  const layout = loadLayout();
+  const zone = layout.zones[regionId];
+  if (!zone) return null;
+  return {
+    x: zone.offset.x + zone.size.width / 2,
+    z: zone.offset.z + zone.size.height / 2,
+  };
+}
+
+/** Get the world-space offset for a zone/region. */
+export function getZoneOffset(zoneId: string): Vec2 | null {
+  const layout = loadLayout();
+  const zone = layout.zones[zoneId];
+  return zone?.offset ?? null;
+}
+
 /** Convert zone-local coordinates to world coordinates */
 export function localToWorld(
   zoneId: string,
@@ -262,46 +293,36 @@ export function worldToLocal(
 
 /**
  * When an entity moves out of its zone bounds, find the adjacent zone it entered.
- * Returns destination zone ID and new local coordinates, or null if no adjacent zone.
+ * Coordinates are now in world-space. Returns destination zone ID and world coordinates,
+ * or null if still inside source zone or no adjacent zone found.
  */
 export function getAdjacentZone(
   sourceZoneId: string,
-  localX: number,
-  localZ: number
+  worldX: number,
+  worldZ: number
 ): { destZoneId: string; destLocalX: number; destLocalZ: number } | null {
   const layout = loadLayout();
   const source = layout.zones[sourceZoneId];
   if (!source) return null;
 
-  // Check if entity is actually out of bounds
-  if (
-    localX >= 0 &&
-    localX <= source.size.width &&
-    localZ >= 0 &&
-    localZ <= source.size.height
-  ) {
+  // Check if entity is still inside source zone bounds (world-space)
+  const relX = worldX - source.offset.x;
+  const relZ = worldZ - source.offset.z;
+  if (relX >= 0 && relX <= source.size.width && relZ >= 0 && relZ <= source.size.height) {
     return null; // Still inside source zone
   }
-
-  // Convert to world coords
-  const worldX = source.offset.x + localX;
-  const worldZ = source.offset.z + localZ;
 
   // Find which zone contains this world position
   for (const zone of Object.values(layout.zones)) {
     if (zone.id === sourceZoneId) continue;
-    const destLocalX = worldX - zone.offset.x;
-    const destLocalZ = worldZ - zone.offset.z;
-    if (
-      destLocalX >= 0 &&
-      destLocalX <= zone.size.width &&
-      destLocalZ >= 0 &&
-      destLocalZ <= zone.size.height
-    ) {
+    const destRelX = worldX - zone.offset.x;
+    const destRelZ = worldZ - zone.offset.z;
+    if (destRelX >= 0 && destRelX <= zone.size.width && destRelZ >= 0 && destRelZ <= zone.size.height) {
+      // Return world-space coordinates (entity already uses world-space)
       return {
         destZoneId: zone.id,
-        destLocalX,
-        destLocalZ,
+        destLocalX: worldX,
+        destLocalZ: worldZ,
       };
     }
   }
@@ -309,7 +330,7 @@ export function getAdjacentZone(
   return null;
 }
 
-/** Clamp entity position to stay within zone bounds. Returns true if clamped. */
+/** Clamp entity position to stay within zone bounds (world-space). Returns true if clamped. */
 export function clampToZoneBounds(
   entity: { x: number; y: number },
   zoneId: string
@@ -320,21 +341,25 @@ export function clampToZoneBounds(
 
   let clamped = false;
   const margin = 1; // Keep 1 unit inside bounds
+  const minX = zone.offset.x + margin;
+  const maxX = zone.offset.x + zone.size.width - margin;
+  const minY = zone.offset.z + margin;
+  const maxY = zone.offset.z + zone.size.height - margin;
 
-  if (entity.x < margin) {
-    entity.x = margin;
+  if (entity.x < minX) {
+    entity.x = minX;
     clamped = true;
   }
-  if (entity.x > zone.size.width - margin) {
-    entity.x = zone.size.width - margin;
+  if (entity.x > maxX) {
+    entity.x = maxX;
     clamped = true;
   }
-  if (entity.y < margin) {
-    entity.y = margin;
+  if (entity.y < minY) {
+    entity.y = minY;
     clamped = true;
   }
-  if (entity.y > zone.size.height - margin) {
-    entity.y = zone.size.height - margin;
+  if (entity.y > maxY) {
+    entity.y = maxY;
     clamped = true;
   }
 

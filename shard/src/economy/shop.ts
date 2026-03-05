@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemsByTokenIds } from "../items/itemCatalog.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllZones, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import {
@@ -36,57 +36,59 @@ export function registerShopRoutes(server: FastifyInstance) {
   });
 
   /**
-   * GET /shop/npc/:zoneId/:entityId
+   * GET /shop/npc/:entityId
    * Returns the catalog for a specific merchant NPC (filtered by their shopItems).
    * Includes dynamic pricing and stock if merchant agent is active.
    */
+  const shopNpcHandler = async (request: any, reply: any) => {
+    const entityId = request.params.entityId;
+
+    const entity = getEntity(entityId);
+    if (!entity || entity.type !== "merchant" || !entity.shopItems) {
+      reply.code(404);
+      return { error: "Merchant not found" };
+    }
+
+    const items = getItemsByTokenIds(entity.shopItems);
+    const merchantActive = !!getMerchantState(entityId);
+
+    return {
+      npcId: entity.id,
+      npcName: entity.name,
+      merchantActive,
+      items: items.map((item) => {
+        const tokenIdNum = Number(item.tokenId);
+        const dynamicPrice = getMerchantPrice(entityId, tokenIdNum);
+        const stock = getMerchantStock(entityId, tokenIdNum);
+        const buyPrice = getMerchantBuyPrice(entityId, tokenIdNum);
+
+        return {
+          tokenId: item.tokenId.toString(),
+          name: item.name,
+          description: item.description,
+          copperPrice: item.copperPrice,
+          currentPrice: dynamicPrice ?? item.copperPrice,
+          stock: stock ?? null,
+          buyPrice: buyPrice ?? null,
+          category: item.category,
+          equipSlot: item.equipSlot ?? null,
+          armorSlot: item.armorSlot ?? null,
+          statBonuses: item.statBonuses ?? {},
+          maxDurability: item.maxDurability ?? null,
+        };
+      }),
+    };
+  };
+
+  server.get<{ Params: { entityId: string } }>(
+    "/shop/npc/:entityId",
+    shopNpcHandler
+  );
+
+  // Backward compat alias
   server.get<{ Params: { zoneId: string; entityId: string } }>(
     "/shop/npc/:zoneId/:entityId",
-    async (request, reply) => {
-      const { zoneId, entityId } = request.params;
-
-      const zone = getAllZones().get(zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
-
-      const entity = zone.entities.get(entityId);
-      if (!entity || entity.type !== "merchant" || !entity.shopItems) {
-        reply.code(404);
-        return { error: "Merchant not found" };
-      }
-
-      const items = getItemsByTokenIds(entity.shopItems);
-      const merchantActive = !!getMerchantState(entityId);
-
-      return {
-        npcId: entity.id,
-        npcName: entity.name,
-        merchantActive,
-        items: items.map((item) => {
-          const tokenIdNum = Number(item.tokenId);
-          const dynamicPrice = getMerchantPrice(entityId, tokenIdNum);
-          const stock = getMerchantStock(entityId, tokenIdNum);
-          const buyPrice = getMerchantBuyPrice(entityId, tokenIdNum);
-
-          return {
-            tokenId: item.tokenId.toString(),
-            name: item.name,
-            description: item.description,
-            copperPrice: item.copperPrice,
-            currentPrice: dynamicPrice ?? item.copperPrice,
-            stock: stock ?? null,
-            buyPrice: buyPrice ?? null,
-            category: item.category,
-            equipSlot: item.equipSlot ?? null,
-            armorSlot: item.armorSlot ?? null,
-            statBonuses: item.statBonuses ?? {},
-            maxDurability: item.maxDurability ?? null,
-          };
-        }),
-      };
-    }
+    shopNpcHandler
   );
 
   /**
@@ -175,19 +177,15 @@ export function registerShopRoutes(server: FastifyInstance) {
 
       // Log buy diary entry
       {
-        let buyerEntity: { name: string; raceId?: string; classId?: string; x: number; y: number } | undefined;
-        let buyerZoneId = "unknown";
-        for (const [zId, zone] of getAllZones()) {
-          for (const e of zone.entities.values()) {
-            if (e.walletAddress?.toLowerCase() === buyerAddress.toLowerCase()) {
-              buyerEntity = e;
-              buyerZoneId = zId;
-              break;
-            }
+        let buyerEntity: { name: string; raceId?: string; classId?: string; region?: string; x: number; y: number } | undefined;
+        for (const e of getAllEntities().values()) {
+          if (e.walletAddress?.toLowerCase() === buyerAddress.toLowerCase()) {
+            buyerEntity = e;
+            break;
           }
-          if (buyerEntity) break;
         }
         if (buyerEntity) {
+          const buyerZoneId = (buyerEntity as any).region ?? "unknown";
           const { headline, narrative } = narrativeBuy(buyerEntity.name, buyerEntity.raceId, buyerEntity.classId, buyerZoneId, item.name, quantity, totalCost);
           logDiary(buyerAddress, buyerEntity.name, buyerZoneId, buyerEntity.x, buyerEntity.y, "buy", headline, narrative, {
             itemName: item.name,
@@ -217,7 +215,7 @@ export function registerShopRoutes(server: FastifyInstance) {
   });
 
   /**
-   * POST /shop/sell { sellerAddress, merchantEntityId, zoneId, tokenId, quantity }
+   * POST /shop/sell { sellerAddress, merchantEntityId, tokenId, quantity }
    * Sell items back to a merchant for gold.
    * PROTECTED - Requires authentication
    */
@@ -225,14 +223,14 @@ export function registerShopRoutes(server: FastifyInstance) {
     Body: {
       sellerAddress: string;
       merchantEntityId: string;
-      zoneId: string;
+      zoneId?: string;
       tokenId: number;
       quantity: number;
     };
   }>("/shop/sell", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { sellerAddress, merchantEntityId, zoneId, tokenId, quantity } = request.body;
+    const { sellerAddress, merchantEntityId, tokenId, quantity } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     if (!sellerAddress || !/^0x[a-fA-F0-9]{40}$/.test(sellerAddress)) {
@@ -251,13 +249,7 @@ export function registerShopRoutes(server: FastifyInstance) {
     }
 
     // Validate merchant entity exists and is a merchant
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(merchantEntityId);
+    const entity = getEntity(merchantEntityId);
     if (!entity || entity.type !== "merchant") {
       reply.code(404);
       return { error: "Merchant not found" };
@@ -319,14 +311,15 @@ export function registerShopRoutes(server: FastifyInstance) {
 
       // Log sell diary entry
       {
-        let sellerEntity: { name: string; raceId?: string; classId?: string; x: number; y: number } | undefined;
-        for (const e of zone.entities.values()) {
+        let sellerEntity: { name: string; raceId?: string; classId?: string; region?: string; x: number; y: number } | undefined;
+        for (const e of getAllEntities().values()) {
           if (e.walletAddress?.toLowerCase() === sellerAddress.toLowerCase()) {
             sellerEntity = e;
             break;
           }
         }
         if (sellerEntity) {
+          const zoneId = (sellerEntity as any).region ?? "unknown";
           const { headline, narrative } = narrativeSell(sellerEntity.name, sellerEntity.raceId, sellerEntity.classId, zoneId, item.name, quantity, totalPayout);
           logDiary(sellerAddress, sellerEntity.name, zoneId, sellerEntity.x, sellerEntity.y, "sell", headline, narrative, {
             itemName: item.name,

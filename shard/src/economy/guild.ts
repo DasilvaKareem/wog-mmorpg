@@ -31,7 +31,7 @@ import {
   type MemberData,
   type ProposalData,
 } from "./guildChain.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllZones, getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { addActiveProposal } from "./guildTick.js";
 
@@ -85,58 +85,55 @@ function formatProposalForResponse(proposal: ProposalData) {
 
 export function registerGuildRoutes(server: FastifyInstance) {
   /**
-   * GET /guild/registrar/:zoneId/:entityId
+   * GET /guild/registrar/:entityId
    * Interact with Guild Registrar NPC to browse/create guilds.
    */
-  server.get<{ Params: { zoneId: string; entityId: string } }>(
-    "/guild/registrar/:zoneId/:entityId",
-    async (request, reply) => {
-      const { zoneId, entityId } = request.params;
+  const guildRegistrarHandler = async (request: any, reply: any) => {
+    const entityId = request.params.entityId;
 
-      const zone = getAllZones().get(zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
-
-      const entity = zone.entities.get(entityId);
-      if (!entity || entity.type !== "guild-registrar") {
-        reply.code(404);
-        return { error: "Guild Registrar not found" };
-      }
-
-      try {
-        // Get all guilds
-        const nextId = await getNextGuildId();
-        const activeGuilds = [];
-
-        for (let i = 0; i < nextId; i++) {
-          const guild = await getGuildFromChain(i);
-          if (guild.status === GuildStatus.Active) {
-            activeGuilds.push(formatGuildForResponse(guild));
-          }
-        }
-
-        return {
-          npcId: entity.id,
-          npcName: entity.name,
-          npcType: entity.type,
-          zoneId,
-          description: `${entity.name} manages guild registration. Create a new guild (requires 50 gold creation fee + 100 gold minimum deposit = 150 gold total) or browse existing guilds to join.`,
-          activeGuilds,
-          endpoints: {
-            createGuild: "/guild/create",
-            listGuilds: "/guilds",
-            viewGuild: "/guild/:guildId",
-          },
-        };
-      } catch (err) {
-        server.log.error(err, `Failed to get guild registrar ${entityId}`);
-        reply.code(500);
-        return { error: "Failed to retrieve guild data" };
-      }
+    const entity = getEntity(entityId);
+    if (!entity || entity.type !== "guild-registrar") {
+      reply.code(404);
+      return { error: "Guild Registrar not found" };
     }
-  );
+
+    const zoneId = request.params.zoneId ?? entity.region ?? "unknown";
+
+    try {
+      // Get all guilds
+      const nextId = await getNextGuildId();
+      const activeGuilds = [];
+
+      for (let i = 0; i < nextId; i++) {
+        const guild = await getGuildFromChain(i);
+        if (guild.status === GuildStatus.Active) {
+          activeGuilds.push(formatGuildForResponse(guild));
+        }
+      }
+
+      return {
+        npcId: entity.id,
+        npcName: entity.name,
+        npcType: entity.type,
+        zoneId,
+        description: `${entity.name} manages guild registration. Create a new guild (requires 50 gold creation fee + 100 gold minimum deposit = 150 gold total) or browse existing guilds to join.`,
+        activeGuilds,
+        endpoints: {
+          createGuild: "/guild/create",
+          listGuilds: "/guilds",
+          viewGuild: "/guild/:guildId",
+        },
+      };
+    } catch (err) {
+      server.log.error(err, `Failed to get guild registrar ${entityId}`);
+      reply.code(500);
+      return { error: "Failed to retrieve guild data" };
+    }
+  };
+
+  server.get("/guild/registrar/:entityId", guildRegistrarHandler);
+  // Compat alias
+  server.get("/guild/registrar/:zoneId/:entityId", guildRegistrarHandler);
 
   /**
    * POST /guild/create

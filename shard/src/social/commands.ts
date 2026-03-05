@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getOrCreateZone, type Order } from "../world/zoneRuntime.js";
+import { getOrCreateZone, getEntity, type Order } from "../world/zoneRuntime.js";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import {
   getZoneConnections,
@@ -7,6 +7,7 @@ import {
   ZONE_LEVEL_REQUIREMENTS,
   getWorldLayout,
   findPortalInZone,
+  getRegionCenter,
 } from "../world/worldLayout.js";
 
 interface CommandBody {
@@ -52,7 +53,7 @@ export function registerCommands(server: FastifyInstance) {
         reply.code(400);
         return { error: "attack requires targetId" };
       }
-      if (!zone.entities.has(targetId)) {
+      if (!getEntity(targetId)) {
         reply.code(404);
         return { error: "Target entity not found" };
       }
@@ -63,71 +64,16 @@ export function registerCommands(server: FastifyInstance) {
         return { error: "travel requires targetZone" };
       }
 
-      // Verify connection exists
-      const connections = getZoneConnections(zoneId);
-      if (!connections.includes(targetZone)) {
+      // In unified world, just walk toward target region center
+      const center = getRegionCenter(targetZone);
+      if (!center) {
         reply.code(400);
-        return { error: `${targetZone} is not connected to ${zoneId}`, connectedZones: connections };
+        return { error: `Unknown region: ${targetZone}` };
       }
 
-      // Level check
-      const requiredLevel = ZONE_LEVEL_REQUIREMENTS[targetZone] ?? 1;
-      const entityLevel = entity.level ?? 1;
-      if (entityLevel < requiredLevel) {
-        reply.code(400);
-        return {
-          error: `Level ${requiredLevel} required for ${targetZone}`,
-          currentLevel: entityLevel,
-          requiredLevel,
-        };
-      }
-
-      // Determine shared edge direction
-      const edge = getSharedEdge(zoneId, targetZone);
-
-      if (edge) {
-        // Edge-adjacent: set move order to walk just past the boundary
-        const layout = getWorldLayout();
-        const zoneSize = layout.zones[zoneId]?.size;
-        if (!zoneSize) {
-          reply.code(500);
-          return { error: "Zone layout not found" };
-        }
-
-        let tx: number;
-        let ty: number;
-        switch (edge) {
-          case "east":
-            tx = zoneSize.width + 35;
-            ty = entity.y;
-            break;
-          case "west":
-            tx = -35;
-            ty = entity.y;
-            break;
-          case "north":
-            tx = entity.x;
-            ty = -35;
-            break;
-          case "south":
-            tx = entity.x;
-            ty = zoneSize.height + 35;
-            break;
-        }
-
-        order = { action: "move", x: tx, y: ty };
-      } else {
-        // Corner-only connection (e.g. DF↔AP): walk to portal, auto-transition on arrival
-        const portalPos = findPortalInZone(zoneId, targetZone);
-        if (!portalPos) {
-          reply.code(500);
-          return { error: `No portal found from ${zoneId} to ${targetZone}` };
-        }
-
-        // Set move toward portal and flag for auto-portal transition
-        order = { action: "move", x: portalPos.x, y: portalPos.z };
-        entity.travelTargetZone = targetZone;
-      }
+      // Set move order toward the target region center (world-space)
+      order = { action: "move", x: center.x, y: center.z };
+      entity.travelTargetZone = targetZone;
     } else {
       reply.code(400);
       return { error: `Unknown action: ${action}` };

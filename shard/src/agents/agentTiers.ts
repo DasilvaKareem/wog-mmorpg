@@ -26,7 +26,7 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
   free: {
     supervisorEnabled: false,
     sessionLimitMs: 6 * 3600_000,       // 6 hours
-    allowedZones: ["village-square"],
+    allowedZones: ["village-square", "wild-meadow", "dark-forest"],
     retreatEnabled: false,
     techniquesEnabled: false,
     selfAdaptationEnabled: false,

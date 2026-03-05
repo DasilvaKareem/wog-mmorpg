@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
 import { mintItem } from "../blockchain/blockchain.js";
 import { FLOWER_CATALOG } from "../resources/flowerCatalog.js";
 import { NECTAR_CATALOG } from "../resources/nectarCatalog.js";
@@ -33,17 +33,16 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     }));
   });
 
-  // GET /herbalism/nodes/:zoneId - all flower nodes in zone
-  server.get<{ Params: { zoneId: string } }>(
-    "/herbalism/nodes/:zoneId",
-    async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
+  // GET /herbalism/nodes - all flower nodes (optionally filtered by region)
+  server.get<{ Querystring: { region?: string } }>(
+    "/herbalism/nodes",
+    async (request) => {
+      const { region } = request.query;
+      const entities = region
+        ? getEntitiesInRegion(region)
+        : [...getAllEntities().values()];
 
-      const flowerNodes = Array.from(zone.entities.values())
+      const flowerNodes = entities
         .filter((e) => e.type === "flower-node")
         .map((e) => ({
           id: e.id,
@@ -57,17 +56,24 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
           requiredSickleTier: e.flowerType
             ? FLOWER_CATALOG[e.flowerType].requiredSickleTier
             : 1,
+          region: e.region,
         }));
 
-      return { zoneId: request.params.zoneId, flowerNodes };
+      return { region: region ?? "all", flowerNodes };
     }
   );
+
+  // Backward compat alias
+  server.get("/herbalism/nodes/:zoneId", async (request, reply) => {
+    const { zoneId } = (request as any).params;
+    return reply.redirect(`/herbalism/nodes?region=${zoneId}`);
+  });
 
   // POST /herbalism/gather - gather flowers with sickle
   server.post<{
     Body: {
       walletAddress: string;
-      zoneId: string;
+      zoneId?: string;
       entityId: string;
       flowerNodeId: string;
     };
@@ -89,19 +95,13 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const flowerNode = zone.entities.get(flowerNodeId);
+    const flowerNode = getEntity(flowerNodeId);
     if (!flowerNode || flowerNode.type !== "flower-node") {
       reply.code(404);
       return { error: "Flower node not found" };
@@ -159,7 +159,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     flowerNode.charges = (flowerNode.charges ?? 0) - 1;
     const chargesRemaining = flowerNode.charges;
     if (flowerNode.charges <= 0) {
-      flowerNode.depletedAtTick = zone.tick;
+      flowerNode.depletedAtTick = getWorldTick();
     }
 
     // CRITICAL: Reduce sickle durability
@@ -178,12 +178,13 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
       // Award profession XP
       const xpAmount = xpForRarity(flowerProps.rarity);
-      const profXpResult = awardProfessionXp(entity, zoneId, xpAmount, "herbalism", undefined, flowerProps.label);
+      const region = zoneId ?? entity.region ?? "unknown";
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, flowerProps.label);
 
       // Log gather_herb diary entry
       if (walletAddress) {
-        const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, zoneId, flowerProps.label, sickleItem.name);
-        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "gather_herb", headline, narrative, {
+        const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, region, flowerProps.label, sickleItem.name);
+        logDiary(walletAddress, entity.name, region, entity.x, entity.y, "gather_herb", headline, narrative, {
           herbName: flowerProps.label,
           sickleName: sickleItem.name,
           chargesRemaining,
@@ -238,17 +239,16 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     }));
   });
 
-  // GET /herbalism/nectars/:zoneId — all nectar nodes in zone
-  server.get<{ Params: { zoneId: string } }>(
-    "/herbalism/nectars/:zoneId",
-    async (request, reply) => {
-      const zone = getAllZones().get(request.params.zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
+  // GET /herbalism/nectars — all nectar nodes (optionally filtered by region)
+  server.get<{ Querystring: { region?: string } }>(
+    "/herbalism/nectars",
+    async (request) => {
+      const { region } = request.query;
+      const entities = region
+        ? getEntitiesInRegion(region)
+        : [...getAllEntities().values()];
 
-      const nectarNodes = Array.from(zone.entities.values())
+      const nectarNodes = entities
         .filter((e) => e.type === "nectar-node")
         .map((e) => ({
           id: e.id,
@@ -262,17 +262,24 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
           requiredSickleTier: e.nectarType && NECTAR_CATALOG[e.nectarType as keyof typeof NECTAR_CATALOG]
             ? NECTAR_CATALOG[e.nectarType as keyof typeof NECTAR_CATALOG].requiredSickleTier
             : 1,
+          region: e.region,
         }));
 
-      return { zoneId: request.params.zoneId, nectarNodes };
+      return { region: region ?? "all", nectarNodes };
     }
   );
+
+  // Backward compat alias
+  server.get("/herbalism/nectars/:zoneId", async (request, reply) => {
+    const { zoneId } = (request as any).params;
+    return reply.redirect(`/herbalism/nectars?region=${zoneId}`);
+  });
 
   // POST /herbalism/gather-nectar — gather nectar with sickle
   server.post<{
     Body: {
       walletAddress: string;
-      zoneId: string;
+      zoneId?: string;
       entityId: string;
       nectarNodeId: string;
     };
@@ -292,19 +299,13 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       return { error: "Not authorized to use this wallet" };
     }
 
-    const zone = getAllZones().get(zoneId);
-    if (!zone) {
-      reply.code(404);
-      return { error: "Zone not found" };
-    }
-
-    const entity = zone.entities.get(entityId);
+    const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
     }
 
-    const nectarNode = zone.entities.get(nectarNodeId);
+    const nectarNode = getEntity(nectarNodeId);
     if (!nectarNode || nectarNode.type !== "nectar-node") {
       reply.code(404);
       return { error: "Nectar node not found" };
@@ -364,7 +365,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     nectarNode.charges = (nectarNode.charges ?? 0) - 1;
     const chargesRemaining = nectarNode.charges;
     if (nectarNode.charges <= 0) {
-      nectarNode.depletedAtTick = zone.tick;
+      nectarNode.depletedAtTick = getWorldTick();
     }
 
     // Reduce sickle durability
@@ -383,12 +384,13 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
       // Award profession XP (same as flower rarity)
       const xpAmount = xpForRarity(nectarProps.rarity);
-      const profXpResult = awardProfessionXp(entity, zoneId, xpAmount, "herbalism", undefined, nectarProps.label);
+      const region = zoneId ?? entity.region ?? "unknown";
+      const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, nectarProps.label);
 
       // Log diary
       if (walletAddress) {
-        const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, zoneId, nectarProps.label, sickleItem.name);
-        logDiary(walletAddress, entity.name, zoneId, entity.x, entity.y, "gather_herb", headline, narrative, {
+        const { headline, narrative } = narrativeGatherHerb(entity.name, entity.raceId, entity.classId, region, nectarProps.label, sickleItem.name);
+        logDiary(walletAddress, entity.name, region, entity.x, entity.y, "gather_herb", headline, narrative, {
           herbName: nectarProps.label,
           sickleName: sickleItem.name,
           chargesRemaining,

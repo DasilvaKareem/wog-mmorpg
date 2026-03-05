@@ -22,6 +22,8 @@ import {
   getConnectionPortal,
   findPortalInZone,
   findDestPortalPosition,
+  getRegionAtPosition,
+  getZoneOffset,
 } from "./worldLayout.js";
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSystem.js";
@@ -92,6 +94,8 @@ export interface Entity {
   y: number;
   hp: number;
   maxHp: number;
+  /** Soft region label — updated automatically based on world position. */
+  region?: string;
   essence?: number;
   maxEssence?: number;
   createdAt: number;
@@ -189,24 +193,184 @@ function toSerializableEntity(entity: Entity): Record<string, unknown> {
   };
 }
 
-// In-memory zone state — this is the living world
-const zones = new Map<string, ZoneState>();
+// ── Unified World State ────────────────────────────────────────────────
+// Single entity map + single tick counter. All entities live here.
+// "Regions" are soft labels derived from world position.
 
-export function getOrCreateZone(zoneId: string): ZoneState {
-  let zone = zones.get(zoneId);
-  if (!zone) {
-    zone = { zoneId, entities: new Map(), tick: 0 };
-    zones.set(zoneId, zone);
-  }
-  return zone;
+interface WorldState {
+  entities: Map<string, Entity>;
+  tick: number;
 }
 
+const world: WorldState = { entities: new Map(), tick: 0 };
+
+// Track known region IDs for getAllZones compat
+const knownRegions = new Set<string>();
+
+/**
+ * Region-filtered view of world.entities. Implements the Map interface
+ * so existing code that does zone.entities.get/set/delete/values works unchanged.
+ * Mutations go through to world.entities with region tagging.
+ */
+class RegionEntityMap implements Map<string, Entity> {
+  constructor(private regionId: string) {}
+
+  get(id: string): Entity | undefined {
+    const e = world.entities.get(id);
+    return e?.region === this.regionId ? e : undefined;
+  }
+
+  set(id: string, entity: Entity): this {
+    entity.region = this.regionId;
+    world.entities.set(id, entity);
+    return this;
+  }
+
+  has(id: string): boolean {
+    const e = world.entities.get(id);
+    return e?.region === this.regionId;
+  }
+
+  delete(id: string): boolean {
+    const e = world.entities.get(id);
+    if (e?.region === this.regionId) {
+      return world.entities.delete(id);
+    }
+    return false;
+  }
+
+  get size(): number {
+    let count = 0;
+    for (const e of world.entities.values()) {
+      if (e.region === this.regionId) count++;
+    }
+    return count;
+  }
+
+  clear(): void {
+    for (const [id, e] of world.entities) {
+      if (e.region === this.regionId) world.entities.delete(id);
+    }
+  }
+
+  forEach(callbackfn: (value: Entity, key: string, map: Map<string, Entity>) => void, thisArg?: any): void {
+    for (const [id, e] of world.entities) {
+      if (e.region === this.regionId) callbackfn.call(thisArg, e, id, this);
+    }
+  }
+
+  *entries(): IterableIterator<[string, Entity]> {
+    for (const [id, e] of world.entities) {
+      if (e.region === this.regionId) yield [id, e];
+    }
+  }
+
+  *keys(): IterableIterator<string> {
+    for (const [id, e] of world.entities) {
+      if (e.region === this.regionId) yield id;
+    }
+  }
+
+  *values(): IterableIterator<Entity> {
+    for (const e of world.entities.values()) {
+      if (e.region === this.regionId) yield e;
+    }
+  }
+
+  [Symbol.iterator](): IterableIterator<[string, Entity]> {
+    return this.entries();
+  }
+
+  get [Symbol.toStringTag](): string {
+    return "RegionEntityMap";
+  }
+}
+
+// Cache RegionEntityMap instances to avoid creating new objects each call
+const regionMapCache = new Map<string, RegionEntityMap>();
+
+function getRegionMap(regionId: string): RegionEntityMap {
+  let map = regionMapCache.get(regionId);
+  if (!map) {
+    map = new RegionEntityMap(regionId);
+    regionMapCache.set(regionId, map);
+  }
+  return map;
+}
+
+/**
+ * Compat shim: returns a virtual ZoneState that filters world.entities by region.
+ * All 43+ consumer files continue to work unchanged.
+ */
+export function getOrCreateZone(zoneId: string): ZoneState {
+  knownRegions.add(zoneId);
+  return {
+    zoneId,
+    entities: getRegionMap(zoneId),
+    get tick() { return world.tick; },
+  };
+}
+
+/**
+ * Compat shim: returns a Map of virtual ZoneStates for all known regions.
+ */
 export function getAllZones(): Map<string, ZoneState> {
-  return zones;
+  // Include all regions that have entities + any explicitly created
+  for (const e of world.entities.values()) {
+    if (e.region) knownRegions.add(e.region);
+  }
+  const result = new Map<string, ZoneState>();
+  for (const regionId of knownRegions) {
+    result.set(regionId, getOrCreateZone(regionId));
+  }
+  return result;
 }
 
 export function deleteZone(zoneId: string): boolean {
-  return zones.delete(zoneId);
+  // Remove all entities in region + forget the region
+  for (const [id, e] of world.entities) {
+    if (e.region === zoneId) world.entities.delete(id);
+  }
+  regionMapCache.delete(zoneId);
+  return knownRegions.delete(zoneId);
+}
+
+// ── New Unified World API ─────────────────────────────────────────────
+
+/** Get a single entity by ID from the unified world. */
+export function getEntity(id: string): Entity | undefined {
+  return world.entities.get(id);
+}
+
+/** Get all entities in the world. */
+export function getAllEntities(): Map<string, Entity> {
+  return world.entities;
+}
+
+/** Get all entities in a specific region. */
+export function getEntitiesInRegion(region: string): Entity[] {
+  const result: Entity[] = [];
+  for (const e of world.entities.values()) {
+    if (e.region === region) result.push(e);
+  }
+  return result;
+}
+
+/** Get entities near a world-space position within a radius. */
+export function getEntitiesNear(x: number, z: number, radius: number): Entity[] {
+  const r2 = radius * radius;
+  const result: Entity[] = [];
+  for (const e of world.entities.values()) {
+    const dx = e.x - x;
+    const dy = e.y - z;
+    if (dx * dx + dy * dy <= r2) result.push(e);
+  }
+  return result;
+}
+
+/** Get the unified world tick. */
+export function getWorldTick(): number {
+  return world.tick;
 }
 
 // ── Wallet Spawn Registry ─────────────────────────────────────────────────
@@ -727,8 +891,8 @@ export function clearMobTagsForPlayer(zone: ZoneState, playerId: string): void {
  */
 function handlePlayerDeath(player: Entity, zoneId: string): void {
   // Clear mob tags owned by this player and reset combat state
-  const zone = zones.get(zoneId);
-  if (zone) clearMobTagsForPlayer(zone, player.id);
+  const zone = getOrCreateZone(zoneId);
+  clearMobTagsForPlayer(zone, player.id);
   player.lastCombatTick = undefined;
 
   // Apply death penalty: lose 10% of XP *within* the current level (progress toward next)
@@ -782,10 +946,11 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
     }
   }
 
-  // Teleport to graveyard spawn point
-  const spawn = GRAVEYARD_SPAWNS[zoneId] ?? { x: 100, y: 100 };
-  player.x = spawn.x;
-  player.y = spawn.y;
+  // Teleport to graveyard spawn point (world-space)
+  const localSpawn = GRAVEYARD_SPAWNS[zoneId] ?? { x: 100, y: 100 };
+  const graveyardOffset = getZoneOffset(zoneId) ?? { x: 0, z: 0 };
+  player.x = localSpawn.x + graveyardOffset.x;
+  player.y = localSpawn.y + graveyardOffset.z;
 
   // Restore HP to full
   player.hp = player.maxHp;
@@ -802,15 +967,15 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
   recalculateEntityVitals(player);
   player.hp = player.maxHp;
 
-  console.log(`[death] ${player.name} respawned at graveyard (${spawn.x}, ${spawn.y})`);
+  console.log(`[death] ${player.name} respawned at graveyard (${player.x}, ${player.y})`);
 
   // Log diary entry for player death
   if (player.walletAddress) {
     const { headline, narrative } = narrativeDeath(player.name, player.raceId, player.classId, zoneId, deathXpLoss);
-    logDiary(player.walletAddress, player.name, zoneId, spawn.x, spawn.y, "death", headline, narrative, {
+    logDiary(player.walletAddress, player.name, zoneId, player.x, player.y, "death", headline, narrative, {
       xpLoss: deathXpLoss,
-      respawnX: spawn.x,
-      respawnY: spawn.y,
+      respawnX: player.x,
+      respawnY: player.y,
     });
   }
 
@@ -1148,8 +1313,9 @@ function moveToward(entity: Entity, tx: number, ty: number): boolean {
 }
 
 async function worldTick() {
-  for (const zone of zones.values()) {
-    zone.tick++;
+  world.tick++;
+
+  for (const zone of getAllZones().values()) {
 
     // Regenerate essence for all player entities (INT-scaled)
     for (const entity of zone.entities.values()) {
@@ -1971,186 +2137,52 @@ async function worldTick() {
     }
   }
 
-  // ── Seamless zone transitions (after all zones tick) ──────────────
-  const transfers: Array<{
-    entity: Entity;
-    sourceZoneId: string;
-    dest: { destZoneId: string; destLocalX: number; destLocalZ: number };
-  }> = [];
+  // ── Automatic region recalculation (replaces zone transitions) ──────
+  // Entities move freely in world-space; region is a soft label updated here.
+  for (const entity of world.entities.values()) {
+    if (entity.type !== "player") continue;
 
-  for (const zone of zones.values()) {
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "player") continue;
+    const newRegion = getRegionAtPosition(entity.x, entity.y);
+    if (!newRegion || newRegion === entity.region) continue;
 
-      const dest = getAdjacentZone(zone.zoneId, entity.x, entity.y);
-      if (!dest) continue;
-
-      // Level check — clamp if too low
-      const requiredLevel = ZONE_LEVEL_REQUIREMENTS[dest.destZoneId] ?? 1;
-      if ((entity.level ?? 1) < requiredLevel) {
-        clampToZoneBounds(entity, zone.zoneId);
-        entity.order = undefined;
-        continue;
-      }
-
-      transfers.push({ entity, sourceZoneId: zone.zoneId, dest });
-    }
-  }
-
-  for (const { entity, sourceZoneId, dest } of transfers) {
-    const srcZone = zones.get(sourceZoneId);
-    if (!srcZone) continue;
-
-    // Clear mob tags in source zone and reset combat state
-    clearMobTagsForPlayer(srcZone, entity.id);
-    entity.lastCombatTick = undefined;
-
-    srcZone.entities.delete(entity.id);
-    entity.x = dest.destLocalX;
-    entity.y = dest.destLocalZ;
-    entity.order = undefined;
-
-    const destZone = getOrCreateZone(dest.destZoneId);
-    destZone.entities.set(entity.id, entity);
+    const oldRegion = entity.region ?? "unknown";
+    entity.region = newRegion;
 
     // Keep spawn registry in sync
-    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, dest.destZoneId);
+    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, newRegion);
 
-    logZoneEvent({
-      zoneId: sourceZoneId,
-      type: "system",
-      tick: srcZone.tick,
-      message: `${entity.name} departed to ${dest.destZoneId}`,
-      entityId: entity.id,
-      entityName: entity.name,
-    });
-
-    logZoneEvent({
-      zoneId: dest.destZoneId,
-      type: "system",
-      tick: destZone.tick,
-      message: `${entity.name} arrived from ${sourceZoneId}`,
-      entityId: entity.id,
-      entityName: entity.name,
-    });
-
-    // Log zone transition diary entry
-    if (entity.walletAddress) {
-      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, sourceZoneId, dest.destZoneId);
-      logDiary(entity.walletAddress, entity.name, dest.destZoneId, entity.x, entity.y, "zone_transition", headline, narrative, {
-        fromZone: sourceZoneId,
-        toZone: dest.destZoneId,
-      });
+    // Clear travel target if we arrived at our destination region
+    if (entity.travelTargetZone === newRegion) {
+      entity.travelTargetZone = undefined;
     }
 
-    console.log(
-      `[transition] ${entity.name} moved from ${sourceZoneId} to ${dest.destZoneId} at (${dest.destLocalX}, ${dest.destLocalZ})`
-    );
-  }
-
-  // ── Auto-portal transitions for travel command (corner connections) ──
-  const portalTransfers: Array<{
-    entity: Entity;
-    sourceZoneId: string;
-    destZoneId: string;
-    destPortalPos: { x: number; z: number };
-  }> = [];
-
-  for (const zone of zones.values()) {
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "player" || !entity.travelTargetZone) continue;
-
-      // Find portal in current zone leading to travelTargetZone
-      const portalId = getConnectionPortal(zone.zoneId, entity.travelTargetZone);
-      if (!portalId) {
-        entity.travelTargetZone = undefined;
-        continue;
-      }
-
-      const portalPos = findPortalInZone(zone.zoneId, entity.travelTargetZone);
-      if (!portalPos) {
-        entity.travelTargetZone = undefined;
-        continue;
-      }
-
-      // Check proximity to portal (within 20 units)
-      const dx = portalPos.x - entity.x;
-      const dz = portalPos.z - entity.y;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > 20) continue;
-
-      // Level check
-      const requiredLevel = ZONE_LEVEL_REQUIREMENTS[entity.travelTargetZone] ?? 1;
-      if ((entity.level ?? 1) < requiredLevel) {
-        entity.travelTargetZone = undefined;
-        entity.order = undefined;
-        continue;
-      }
-
-      // Find destination portal position
-      const destPortalPos = findDestPortalPosition(zone.zoneId, entity.travelTargetZone);
-      if (!destPortalPos) {
-        entity.travelTargetZone = undefined;
-        continue;
-      }
-
-      portalTransfers.push({
-        entity,
-        sourceZoneId: zone.zoneId,
-        destZoneId: entity.travelTargetZone,
-        destPortalPos,
-      });
-    }
-  }
-
-  for (const { entity, sourceZoneId, destZoneId, destPortalPos } of portalTransfers) {
-    const srcZone = zones.get(sourceZoneId);
-    if (!srcZone) continue;
-
-    clearMobTagsForPlayer(srcZone, entity.id);
-    entity.lastCombatTick = undefined;
-    entity.travelTargetZone = undefined;
-
-    srcZone.entities.delete(entity.id);
-    entity.x = destPortalPos.x;
-    entity.y = destPortalPos.z;
-    entity.order = undefined;
-
-    const destZone = getOrCreateZone(destZoneId);
-    destZone.entities.set(entity.id, entity);
-
-    // Keep spawn registry in sync
-    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, destZoneId);
-
     logZoneEvent({
-      zoneId: sourceZoneId,
+      zoneId: oldRegion,
       type: "system",
-      tick: srcZone.tick,
-      message: `${entity.name} departed to ${destZoneId}`,
+      tick: world.tick,
+      message: `${entity.name} departed to ${newRegion}`,
       entityId: entity.id,
       entityName: entity.name,
     });
 
     logZoneEvent({
-      zoneId: destZoneId,
+      zoneId: newRegion,
       type: "system",
-      tick: destZone.tick,
-      message: `${entity.name} arrived from ${sourceZoneId}`,
+      tick: world.tick,
+      message: `${entity.name} arrived from ${oldRegion}`,
       entityId: entity.id,
       entityName: entity.name,
     });
 
     if (entity.walletAddress) {
-      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, sourceZoneId, destZoneId);
-      logDiary(entity.walletAddress, entity.name, destZoneId, entity.x, entity.y, "zone_transition", headline, narrative, {
-        fromZone: sourceZoneId,
-        toZone: destZoneId,
+      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, oldRegion, newRegion);
+      logDiary(entity.walletAddress, entity.name, newRegion, entity.x, entity.y, "zone_transition", headline, narrative, {
+        fromZone: oldRegion,
+        toZone: newRegion,
       });
     }
 
-    console.log(
-      `[transition] ${entity.name} portal-traveled from ${sourceZoneId} to ${destZoneId} at (${destPortalPos.x}, ${destPortalPos.z})`
-    );
+    console.log(`[region] ${entity.name} crossed from ${oldRegion} to ${newRegion} at (${Math.round(entity.x)}, ${Math.round(entity.y)})`);
   }
 }
 
@@ -2159,29 +2191,28 @@ async function worldTick() {
  */
 export async function saveAllOnlinePlayers(): Promise<void> {
   let count = 0;
-  for (const zone of zones.values()) {
-    for (const entity of zone.entities.values()) {
-      if (entity.type !== "player" || !entity.walletAddress || !entity.name) continue;
-      try {
-        await saveCharacter(entity.walletAddress, entity.name, {
-          name: entity.name,
-          level: entity.level ?? 1,
-          xp: entity.xp ?? 0,
-          raceId: entity.raceId ?? "human",
-          classId: entity.classId ?? "warrior",
-          gender: entity.gender,
-          zone: zone.zoneId,
-          x: entity.x,
-          y: entity.y,
-          kills: entity.kills ?? 0,
-          completedQuests: entity.completedQuests ?? [],
-          learnedTechniques: entity.learnedTechniques ?? [],
-          professions: getLearnedProfessions(entity.walletAddress),
-        });
-        count++;
-      } catch (err) {
-        console.error(`[auto-save] Failed to save ${entity.name}:`, err);
-      }
+  for (const entity of world.entities.values()) {
+    if (entity.type !== "player" || !entity.walletAddress || !entity.name) continue;
+    try {
+      await saveCharacter(entity.walletAddress, entity.name, {
+        name: entity.name,
+        level: entity.level ?? 1,
+        xp: entity.xp ?? 0,
+        raceId: entity.raceId ?? "human",
+        classId: entity.classId ?? "warrior",
+        gender: entity.gender,
+        zone: entity.region ?? "village-square",
+        x: entity.x,
+        y: entity.y,
+        kills: entity.kills ?? 0,
+        completedQuests: entity.completedQuests ?? [],
+        learnedTechniques: entity.learnedTechniques ?? [],
+        professions: getLearnedProfessions(entity.walletAddress),
+        equipment: entity.equipment ?? undefined,
+      });
+      count++;
+    } catch (err) {
+      console.error(`[auto-save] Failed to save ${entity.name}:`, err);
     }
   }
   if (count > 0) {
@@ -2210,7 +2241,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
 
   server.get("/zones", async () => {
     const result: Record<string, { entityCount: number; tick: number }> = {};
-    for (const [id, zone] of zones) {
+    for (const [id, zone] of getAllZones()) {
       result[id] = { entityCount: zone.entities.size, tick: zone.tick };
     }
     return result;
@@ -2219,11 +2250,12 @@ export function registerZoneRuntime(server: FastifyInstance) {
   server.get<{ Params: { zoneId: string } }>(
     "/zones/:zoneId",
     async (request, reply) => {
-      const zone = zones.get(request.params.zoneId);
-      if (!zone) {
+      const zoneId = request.params.zoneId;
+      if (!knownRegions.has(zoneId)) {
         reply.code(404);
         return { error: "Zone not found" };
       }
+      const zone = getOrCreateZone(zoneId);
       const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 3000, ["ability", "combat", "death", "levelup", "technique"]);
       return {
         zoneId: zone.zoneId,

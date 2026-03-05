@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { NECTAR_CATALOG, type NectarType } from "./nectarCatalog.js";
+import { getZoneOffset } from "../world/worldLayout.js";
 
 interface NectarSpawnDef {
   zoneId: string;
@@ -67,15 +68,17 @@ export function spawnNectarNodes(): void {
   for (const def of NECTAR_SPAWN_DEFS) {
     const zone = getOrCreateZone(def.zoneId);
     const nectarProps = NECTAR_CATALOG[def.nectarType];
+    const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
 
     const entity: Entity = {
       id: randomUUID(),
       type: "nectar-node",
       name: nectarProps.label,
-      x: def.x,
-      y: def.y,
+      x: def.x + offset.x,
+      y: def.y + offset.z,
       hp: 9999,
       maxHp: 9999,
+      region: def.zoneId,
       createdAt: Date.now(),
       nectarType: def.nectarType,
       charges: nectarProps.maxCharges,

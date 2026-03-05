@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getTechniquesByClass, getLearnedTechniques, getTechniqueById } from "./techniques.js";
 import type { TechniqueDefinition } from "./techniques.js";
-import { getOrCreateZone, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { getOrCreateZone, getEntity, recalculateEntityVitals } from "../world/zoneRuntime.js";
 import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
 import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
@@ -23,58 +23,58 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
   );
 
   // Get learned techniques for a character (actually learned, not available)
-  server.get<{ Params: { zoneId: string; entityId: string } }>(
-    "/techniques/learned/:zoneId/:entityId",
-    async (req, reply) => {
-      const { zoneId, entityId } = req.params;
-      const zone = getOrCreateZone(zoneId);
-      const entity = zone.entities.get(entityId);
+  const learnedHandler = async (req: any, reply: any) => {
+    const entityId = req.params.entityId;
+    const entity = getEntity(entityId);
 
-      if (!entity) {
-        return reply.status(404).send({ error: "Entity not found" });
-      }
-
-      if (!entity.classId) {
-        return reply.status(400).send({ error: "Entity is not a player character" });
-      }
-
-      const learnedIds = entity.learnedTechniques ?? [];
-      const learned = learnedIds
-        .map(id => getTechniqueById(id))
-        .filter((t): t is NonNullable<typeof t> => t != null);
-
-      return reply.send({ techniques: learned });
+    if (!entity) {
+      return reply.status(404).send({ error: "Entity not found" });
     }
-  );
+
+    if (!entity.classId) {
+      return reply.status(400).send({ error: "Entity is not a player character" });
+    }
+
+    const learnedIds = entity.learnedTechniques ?? [];
+    const learned = learnedIds
+      .map(id => getTechniqueById(id))
+      .filter((t): t is NonNullable<typeof t> => t != null);
+
+    return reply.send({ techniques: learned });
+  };
+
+  server.get("/techniques/learned/:entityId", learnedHandler);
+  // Compat alias
+  server.get("/techniques/learned/:zoneId/:entityId", learnedHandler);
 
   // Get available techniques for a character (based on class and level)
-  server.get<{ Params: { zoneId: string; entityId: string } }>(
-    "/techniques/available/:zoneId/:entityId",
-    async (req, reply) => {
-      const { zoneId, entityId } = req.params;
-      const zone = getOrCreateZone(zoneId);
-      const entity = zone.entities.get(entityId);
+  const availableHandler = async (req: any, reply: any) => {
+    const entityId = req.params.entityId;
+    const entity = getEntity(entityId);
 
-      if (!entity) {
-        return reply.status(404).send({ error: "Entity not found" });
-      }
-
-      if (!entity.classId || !entity.level) {
-        return reply.status(400).send({ error: "Entity is not a player character" });
-      }
-
-      const available = getLearnedTechniques(entity.classId, entity.level);
-      const learnedIds = entity.learnedTechniques ?? [];
-
-      // Mark which are already learned
-      const result = available.map(tech => ({
-        ...tech,
-        isLearned: learnedIds.includes(tech.id),
-      }));
-
-      return reply.send({ techniques: result });
+    if (!entity) {
+      return reply.status(404).send({ error: "Entity not found" });
     }
-  );
+
+    if (!entity.classId || !entity.level) {
+      return reply.status(400).send({ error: "Entity is not a player character" });
+    }
+
+    const available = getLearnedTechniques(entity.classId, entity.level);
+    const learnedIds = entity.learnedTechniques ?? [];
+
+    // Mark which are already learned
+    const result = available.map(tech => ({
+      ...tech,
+      isLearned: learnedIds.includes(tech.id),
+    }));
+
+    return reply.send({ techniques: result });
+  };
+
+  server.get("/techniques/available/:entityId", availableHandler);
+  // Compat alias
+  server.get("/techniques/available/:zoneId/:entityId", availableHandler);
 
   // Learn a technique from a trainer (PROTECTED)
   server.post<{
@@ -90,9 +90,8 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const { zoneId, playerEntityId, techniqueId, trainerEntityId } = req.body;
     const authenticatedWallet = (req as any).walletAddress;
 
-    const zone = getOrCreateZone(zoneId);
-    const player = zone.entities.get(playerEntityId);
-    const trainer = zone.entities.get(trainerEntityId);
+    const player = getEntity(playerEntityId);
+    const trainer = getEntity(trainerEntityId);
 
     if (!player) {
       return reply.status(404).send({ error: "Player entity not found" });
@@ -186,10 +185,11 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }).catch((err) => console.error(`[persistence] Save failed after technique learn:`, err));
 
     // Emit zone event for client animation
+    const zone = zoneId ? getOrCreateZone(zoneId) : undefined;
     logZoneEvent({
       zoneId,
       type: "technique",
-      tick: zone.tick,
+      tick: zone?.tick ?? 0,
       message: `✦ ${player.name} learned ${technique.name}!`,
       entityId: playerEntityId,
       entityName: player.name,

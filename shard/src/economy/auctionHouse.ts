@@ -17,7 +17,7 @@ import {
   getZoneAuctionsFromChain,
   type AuctionData,
 } from "./auctionHouseChain.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllZones, getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { copperToGold } from "../blockchain/currency.js";
 
@@ -51,58 +51,55 @@ function formatAuctionForResponse(auction: AuctionData) {
 
 export function registerAuctionHouseRoutes(server: FastifyInstance) {
   /**
-   * GET /auctionhouse/npc/:zoneId/:entityId
+   * GET /auctionhouse/npc/:entityId
    * Get auctioneer NPC details and list active auctions in their zone.
    * This is the main discovery endpoint for AI agents.
    */
-  server.get<{ Params: { zoneId: string; entityId: string } }>(
-    "/auctionhouse/npc/:zoneId/:entityId",
-    async (request, reply) => {
-      const { zoneId, entityId } = request.params;
+  const auctionNpcHandler = async (request: any, reply: any) => {
+    const entityId = request.params.entityId;
 
-      const zone = getAllZones().get(zoneId);
-      if (!zone) {
-        reply.code(404);
-        return { error: "Zone not found" };
-      }
-
-      const entity = zone.entities.get(entityId);
-      if (!entity || entity.type !== "auctioneer") {
-        reply.code(404);
-        return { error: "Auctioneer not found" };
-      }
-
-      try {
-        // Get all active auctions for this zone
-        const auctionIds = await getZoneAuctionsFromChain(zoneId, 0); // 0 = Active status
-        const activeAuctions = [];
-
-        for (const auctionId of auctionIds) {
-          const auction = await getAuctionFromChain(auctionId);
-          activeAuctions.push(formatAuctionForResponse(auction));
-        }
-
-        return {
-          npcId: entity.id,
-          npcName: entity.name,
-          npcType: entity.type,
-          zoneId,
-          description: `${entity.name} operates the regional auction house for ${zoneId}. Browse active auctions, place bids, or list your own items for sale.`,
-          activeAuctions,
-          endpoints: {
-            listAuctions: `/auctionhouse/${zoneId}/auctions`,
-            createAuction: `/auctionhouse/${zoneId}/create`,
-            placeBid: `/auctionhouse/${zoneId}/bid`,
-            buyout: `/auctionhouse/${zoneId}/buyout`,
-          },
-        };
-      } catch (err) {
-        server.log.error(err, `Failed to get auctioneer NPC ${entityId}`);
-        reply.code(500);
-        return { error: "Failed to retrieve auction house data" };
-      }
+    const entity = getEntity(entityId);
+    if (!entity || entity.type !== "auctioneer") {
+      reply.code(404);
+      return { error: "Auctioneer not found" };
     }
-  );
+
+    const zoneId = request.params.zoneId ?? entity.region ?? "unknown";
+
+    try {
+      // Get all active auctions for this zone
+      const auctionIds = await getZoneAuctionsFromChain(zoneId, 0); // 0 = Active status
+      const activeAuctions = [];
+
+      for (const auctionId of auctionIds) {
+        const auction = await getAuctionFromChain(auctionId);
+        activeAuctions.push(formatAuctionForResponse(auction));
+      }
+
+      return {
+        npcId: entity.id,
+        npcName: entity.name,
+        npcType: entity.type,
+        zoneId,
+        description: `${entity.name} operates the regional auction house for ${zoneId}. Browse active auctions, place bids, or list your own items for sale.`,
+        activeAuctions,
+        endpoints: {
+          listAuctions: `/auctionhouse/${zoneId}/auctions`,
+          createAuction: `/auctionhouse/${zoneId}/create`,
+          placeBid: `/auctionhouse/${zoneId}/bid`,
+          buyout: `/auctionhouse/${zoneId}/buyout`,
+        },
+      };
+    } catch (err) {
+      server.log.error(err, `Failed to get auctioneer NPC ${entityId}`);
+      reply.code(500);
+      return { error: "Failed to retrieve auction house data" };
+    }
+  };
+
+  server.get("/auctionhouse/npc/:entityId", auctionNpcHandler);
+  // Compat alias
+  server.get("/auctionhouse/npc/:zoneId/:entityId", auctionNpcHandler);
 
   /**
    * POST /auctionhouse/:zoneId/create

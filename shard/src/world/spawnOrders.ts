@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import {
   getOrCreateZone,
+  getEntity,
+  getAllEntities,
   recalculateEntityVitals,
   isWalletSpawned,
   registerSpawnedWallet,
@@ -14,6 +16,7 @@ import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
+import { getZoneOffset } from "./worldLayout.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -90,6 +93,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
 
     const spawnZoneId = saved?.zone ?? zoneId;
     const zone = getOrCreateZone(spawnZoneId);
+    const offset = getZoneOffset(spawnZoneId) ?? { x: 0, z: 0 };
 
     const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
@@ -102,12 +106,18 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
     const resolvedTokenId = parseOnChainTokenId(characterTokenId);
 
+    // Saved coords are world-space if >= offset (post-migration), otherwise local (legacy)
+    const rawX = saved?.x ?? x;
+    const rawY = saved?.y ?? y;
+    const worldX = rawX >= offset.x ? rawX : rawX + offset.x;
+    const worldY = rawY >= offset.z ? rawY : rawY + offset.z;
+
     const entity: Entity = {
       id: randomUUID(),
       type,
       name: saved?.name ?? name,
-      x: saved?.x ?? x,
-      y: saved?.y ?? y,
+      x: worldX,
+      y: worldY,
       hp: resolvedHp,
       maxHp: derivedStats?.hp ?? resolvedHp,
       ...(derivedStats?.essence != null && { essence: derivedStats.essence, maxEssence: derivedStats.essence }),
@@ -124,6 +134,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       kills: saved?.kills ?? 0,
       completedQuests: saved?.completedQuests ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
+      ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
     if (entity.stats) {
@@ -202,24 +213,24 @@ export function registerSpawnOrders(server: FastifyInstance) {
     };
   });
 
-  // DELETE /spawn/:zoneId/:entityId — remove an entity
-  server.delete<{ Params: { zoneId: string; entityId: string } }>(
-    "/spawn/:zoneId/:entityId",
-    async (request, reply) => {
-      const { zoneId, entityId } = request.params;
-      const zone = getOrCreateZone(zoneId);
+  // DELETE /spawn/:entityId — remove an entity
+  const deleteSpawnHandler = async (request: any, reply: any) => {
+    const entityId = request.params.entityId;
+    const entity = getEntity(entityId);
 
-      if (!zone.entities.has(entityId)) {
-        reply.code(404);
-        return { error: "Entity not found" };
-      }
-
-      const entity = zone.entities.get(entityId)!;
-      if (entity.type === "player" && entity.walletAddress) {
-        unregisterSpawnedWallet(entity.walletAddress);
-      }
-      zone.entities.delete(entityId);
-      return { deleted: entityId };
+    if (!entity) {
+      reply.code(404);
+      return { error: "Entity not found" };
     }
-  );
+
+    if (entity.type === "player" && entity.walletAddress) {
+      unregisterSpawnedWallet(entity.walletAddress);
+    }
+    getAllEntities().delete(entityId);
+    return { deleted: entityId };
+  };
+
+  server.delete("/spawn/:entityId", deleteSpawnHandler);
+  // Compat alias
+  server.delete("/spawn/:zoneId/:entityId", deleteSpawnHandler);
 }

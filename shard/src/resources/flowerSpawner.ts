@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { FLOWER_CATALOG, type FlowerType } from "./flowerCatalog.js";
+import { getZoneOffset } from "../world/worldLayout.js";
 
 interface FlowerSpawnDef {
   zoneId: string;
@@ -137,15 +138,17 @@ export function spawnFlowerNodes(): void {
   for (const def of FLOWER_SPAWN_DEFS) {
     const zone = getOrCreateZone(def.zoneId);
     const flowerProps = FLOWER_CATALOG[def.flowerType];
+    const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
 
     const entity: Entity = {
       id: randomUUID(),
       type: "flower-node",
       name: flowerProps.label,
-      x: def.x,
-      y: def.y,
+      x: def.x + offset.x,
+      y: def.y + offset.z,
       hp: 9999,
       maxHp: 9999,
+      region: def.zoneId,
       createdAt: Date.now(),
       flowerType: def.flowerType,
       charges: flowerProps.maxCharges,

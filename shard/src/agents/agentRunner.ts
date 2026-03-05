@@ -17,7 +17,8 @@ import { peekInbox, ackInboxMessages, type InboxMessage } from "./agentInbox.js"
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveZoneId } from "../world/worldLayout.js";
-import { getAllZones } from "../world/zoneRuntime.js";
+import { getAllZones, getEntity as getWorldEntity } from "../world/zoneRuntime.js";
+import { getRegionCenter } from "../world/worldLayout.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
@@ -80,7 +81,7 @@ export class AgentRunner {
   private api: ApiCaller | null = null;
   private custodialWallet: string | null = null;
   private entityId: string | null = null;
-  private currentZone: string = "village-square";
+  private currentRegion: string = "village-square";
   private jwtExpiry = 0;
   private jwt: string | null = null;
   /** Resolves once the first tick succeeds (or rejects if it fails). */
@@ -103,7 +104,8 @@ export class AgentRunner {
   /** Last trigger event that fired the supervisor */
   public lastTrigger: TriggerEvent | null = null;
   /** Expose current zone for dashboard */
-  public get zone(): string { return this.currentZone; }
+  public get zone(): string { return this.currentRegion; }
+  public get region(): string { return this.currentRegion; }
   /** Expose entity ID for dashboard */
   public get entity(): string | null { return this.entityId; }
   /** Expose wallet for dashboard */
@@ -161,7 +163,7 @@ export class AgentRunner {
   } {
     return {
       wallet: this.userWallet,
-      zone: this.currentZone,
+      zone: this.currentRegion,
       entityId: this.entityId,
       custodialWallet: this.custodialWallet,
       currentActivity: this.currentActivity,
@@ -279,42 +281,46 @@ export class AgentRunner {
     if (!ref || !this.api) return false;
 
     this.entityId = ref.entityId;
-    this.currentZone = ref.zoneId;
+    this.currentRegion = ref.zoneId;
 
-    // Check entity still in expected zone
+    // In unified world, look up entity directly from memory
+    const worldEntity = getWorldEntity(this.entityId);
+    if (worldEntity) {
+      const newRegion = worldEntity.region ?? this.currentRegion;
+      if (newRegion !== this.currentRegion) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Region changed: ${this.currentRegion} → ${newRegion}`);
+        void this.logActivity(`Region transition: ${this.currentRegion} → ${newRegion}`);
+      }
+      this.currentRegion = newRegion;
+      await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: newRegion });
+      return true;
+    }
+
+    // Fallback: try API check (entity may have been respawned with new ID)
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
+      const state = await this.api("GET", `/zones/${this.currentRegion}`);
       if (state?.entities?.[this.entityId]) return true;
     } catch (err: any) {
       console.debug(`[agent:${this.userWallet.slice(0, 8)}] zone check: ${err.message?.slice(0, 60)}`);
-    }
-
-    // Entity not in expected zone — scan all zones (handles server-side transitions)
-    try {
-      const zones = await this.api("GET", "/state");
-      for (const [zid, zdata] of Object.entries(zones.zones ?? {})) {
-        const ents = (zdata as any).entities ?? {};
-        if (ents[this.entityId]) {
-          if (zid !== this.currentZone) {
-            console.log(`[agent:${this.userWallet.slice(0, 8)}] Zone changed: ${this.currentZone} → ${zid} (server-side transition)`);
-            void this.logActivity(`Zone transition: ${this.currentZone} → ${zid}`);
-          }
-          this.currentZone = zid;
-          await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: zid });
-          return true;
-        }
-      }
-    } catch (err: any) {
-      console.debug(`[agent:${this.userWallet.slice(0, 8)}] zone scan: ${err.message?.slice(0, 60)}`);
     }
 
     return false;
   }
 
   private async getEntityState(): Promise<any | null> {
-    if (!this.api || !this.entityId) return null;
+    if (!this.entityId) return null;
+    // Direct memory lookup in unified world
+    const entity = getWorldEntity(this.entityId);
+    if (entity) {
+      if (entity.region && entity.region !== this.currentRegion) {
+        this.currentRegion = entity.region;
+      }
+      return entity;
+    }
+    // Fallback to API
+    if (!this.api) return null;
     try {
-      const state = await this.api("GET", `/zones/${this.currentZone}`);
+      const state = await this.api("GET", `/zones/${this.currentRegion}`);
       return state?.entities?.[this.entityId] ?? null;
     } catch (err: any) {
       console.debug(`[agent:${this.userWallet.slice(0, 8)}] getEntityState: ${err.message?.slice(0, 60)}`);
@@ -327,7 +333,7 @@ export class AgentRunner {
   private async getZoneState(): Promise<{ entities: Record<string, any>; me: any } | null> {
     if (this.cachedZoneState) return this.cachedZoneState;
     if (!this.api || !this.entityId) return null;
-    const state = await this.api("GET", `/zones/${this.currentZone}`);
+    const state = await this.api("GET", `/zones/${this.currentRegion}`);
     const entities = state?.entities ?? {};
     const me = entities[this.entityId];
     if (!me) return null;
@@ -344,9 +350,8 @@ export class AgentRunner {
 
   /** Set/clear gotoMode flag on the entity to suppress auto-combat while navigating */
   private setEntityGotoMode(on: boolean): void {
-    const zone = getAllZones().get(this.currentZone);
-    if (!zone || !this.entityId) return;
-    const entity = zone.entities.get(this.entityId);
+    if (!this.entityId) return;
+    const entity = getWorldEntity(this.entityId);
     if (entity) entity.gotoMode = on;
   }
 
@@ -375,7 +380,7 @@ export class AgentRunner {
     if (dist > closeEnoughDist) {
       void this.logActivity(`Walking to ${target.name ?? "target"} (${Math.round(dist)} away)`);
       await this.api("POST", "/command", {
-        zoneId: this.currentZone, entityId: this.entityId, action: "move",
+        zoneId: this.currentRegion, entityId: this.entityId, action: "move",
         x: target.x, y: target.y,
       });
       return true; // still moving
@@ -404,7 +409,7 @@ export class AgentRunner {
         (e) => e.type === "profession-trainer" && e.teachesProfession === professionId
       );
       if (!trainer) {
-        console.log(`[agent:${this.userWallet.slice(0, 8)}] No ${professionId} trainer in ${this.currentZone}`);
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] No ${professionId} trainer in ${this.currentRegion}`);
         return false;
       }
 
@@ -415,7 +420,7 @@ export class AgentRunner {
       // Learn
       await this.api("POST", "/professions/learn", {
         walletAddress: this.custodialWallet,
-        zoneId: this.currentZone,
+        zoneId: this.currentRegion,
         entityId: this.entityId,
         trainerId: trainer[0],
         professionId,
@@ -457,7 +462,7 @@ export class AgentRunner {
         return { ok: false, reason: "my character has no class set — something went wrong during creation" };
       }
 
-      const availableRes = await this.api("GET", `/techniques/available/${this.currentZone}/${this.entityId}`);
+      const availableRes = await this.api("GET", `/techniques/available/${this.entityId}`);
       const available: Array<{ id: string; name?: string; isLearned?: boolean; copperCost?: number }> = availableRes?.techniques ?? [];
 
       // Skip already-learned and permanently-failed techniques
@@ -499,7 +504,7 @@ export class AgentRunner {
         },
       );
       if (!trainer) {
-        return { ok: false, reason: `no ${classId} trainer found in ${this.currentZone} — I may need to travel to a zone with one` };
+        return { ok: false, reason: `no ${classId} trainer found in ${this.currentRegion} — I may need to travel to a zone with one` };
       }
 
       const moving = await this.moveToEntity(me, trainer[1]);
@@ -507,7 +512,7 @@ export class AgentRunner {
 
       try {
         await this.api("POST", "/techniques/learn", {
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           playerEntityId: this.entityId,
           techniqueId: nextToLearn.id,
           trainerEntityId: trainer[0],
@@ -569,7 +574,7 @@ export class AgentRunner {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     try {
       await this.api("POST", "/equipment/equip", {
-        zoneId: this.currentZone,
+        zoneId: this.currentRegion,
         tokenId,
         entityId: this.entityId,
         walletAddress: this.custodialWallet,
@@ -606,7 +611,7 @@ export class AgentRunner {
         (e) => e.type === "merchant" && /blacksmith/i.test(e.name)
       );
       if (!smith) {
-        console.debug(`[agent:${this.userWallet.slice(0, 8)}] No blacksmith in ${this.currentZone}`);
+        console.debug(`[agent:${this.userWallet.slice(0, 8)}] No blacksmith in ${this.currentRegion}`);
         return false;
       }
 
@@ -618,7 +623,7 @@ export class AgentRunner {
 
       // Repair all slots
       const result = await this.api("POST", "/equipment/repair", {
-        zoneId: this.currentZone,
+        zoneId: this.currentRegion,
         npcId: smithId,
         entityId: this.entityId,
         walletAddress: this.custodialWallet,
@@ -677,7 +682,7 @@ export class AgentRunner {
       const { entities, me } = zs;
 
       // 1. Check for completed quests and turn them in (walk to NPC first)
-      const activeRes = await this.api("GET", `/quests/active/${this.currentZone}/${this.entityId}`);
+      const activeRes = await this.api("GET", `/quests/active/${this.entityId}`);
       const activeQuests: any[] = activeRes?.activeQuests ?? [];
 
       for (const aq of activeQuests) {
@@ -698,7 +703,7 @@ export class AgentRunner {
             }
             try {
               const completeRes = await this.api("POST", "/quests/complete", {
-                zoneId: this.currentZone,
+                zoneId: this.currentRegion,
                 playerId: this.entityId,
                 questId: aq.questId,
                 npcId: npcEntityId,
@@ -735,7 +740,7 @@ export class AgentRunner {
             }
             try {
               await this.api("POST", "/quests/talk", {
-                zoneId: this.currentZone,
+                zoneId: this.currentRegion,
                 playerId: this.entityId,
                 npcEntityId,
               });
@@ -751,7 +756,7 @@ export class AgentRunner {
           if ((e as any).type === "quest-giver") {
             try {
               await this.api("POST", "/quests/talk", {
-                zoneId: this.currentZone,
+                zoneId: this.currentRegion,
                 playerId: this.entityId,
                 npcEntityId: entityId,
               });
@@ -766,12 +771,12 @@ export class AgentRunner {
       const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
       if (currentActive < 3) {
         try {
-          const availRes = await this.api("GET", `/quests/zone/${this.currentZone}/${this.entityId}`);
+          const availRes = await this.api("GET", `/quests/zone/${this.currentRegion}/${this.entityId}`);
           const available: any[] = availRes?.quests ?? [];
           if (available.length > 0) {
             const q = available[0];
             const acceptRes = await this.api("POST", "/quests/accept", {
-              zoneId: this.currentZone,
+              zoneId: this.currentRegion,
               playerId: this.entityId,
               questId: q.questId,
             });
@@ -783,8 +788,8 @@ export class AgentRunner {
             // Check if we should travel to the next zone
             const myLevel = me.level ?? 1;
             const nextZone = this.findNextZoneForLevel(myLevel);
-            if (nextZone && nextZone !== this.currentZone) {
-              console.log(`[agent:${this.userWallet.slice(0, 8)}] No quests left in ${this.currentZone}, traveling to ${nextZone}`);
+            if (nextZone && nextZone !== this.currentRegion) {
+              console.log(`[agent:${this.userWallet.slice(0, 8)}] No quests left in ${this.currentRegion}, traveling to ${nextZone}`);
               void this.logActivity(`No quests remaining — traveling to ${nextZone}`);
               await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: nextZone });
               this.currentScript = null;
@@ -842,7 +847,7 @@ export class AgentRunner {
         };
         if (hpPct < retreatThreshold[strategy]) {
           await this.api("POST", "/command", {
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             entityId: this.entityId,
             action: "move",
             x: 150,
@@ -879,7 +884,7 @@ export class AgentRunner {
       if (moving) return;
 
       await this.api("POST", "/command", {
-        zoneId: this.currentZone,
+        zoneId: this.currentRegion,
         entityId: this.entityId,
         action: "attack",
         targetId: mobId,
@@ -909,7 +914,7 @@ export class AgentRunner {
       if (nodeEntity.type === "ore-node") {
         await this.api("POST", "/mining/gather", {
           walletAddress: this.custodialWallet,
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           entityId: this.entityId,
           oreNodeId: nodeId,
         });
@@ -917,7 +922,7 @@ export class AgentRunner {
       } else {
         await this.api("POST", "/herbalism/gather", {
           walletAddress: this.custodialWallet,
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           entityId: this.entityId,
           flowerNodeId: nodeId,
         });
@@ -955,7 +960,7 @@ export class AgentRunner {
         try {
           await this.api("POST", "/alchemy/brew", {
             walletAddress: this.custodialWallet,
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             entityId: this.entityId,
             alchemyLabId: labId,
             recipeId: recipe.recipeId ?? recipe.id,
@@ -1000,7 +1005,7 @@ export class AgentRunner {
         try {
           await this.api("POST", "/cooking/cook", {
             walletAddress: this.custodialWallet,
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             entityId: this.entityId,
             campfireId,
             recipeId: recipe.recipeId ?? recipe.id,
@@ -1047,7 +1052,7 @@ export class AgentRunner {
 
         await this.api("POST", "/enchanting/apply", {
           walletAddress: this.custodialWallet,
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           entityId: this.entityId,
           altarId,
           enchantmentElixirTokenId: Number(elixir.tokenId),
@@ -1086,7 +1091,7 @@ export class AgentRunner {
         try {
           await this.api("POST", "/crafting/forge", {
             walletAddress: this.custodialWallet,
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             entityId: this.entityId,
             forgeId,
             recipeId: recipe.recipeId ?? recipe.id,
@@ -1127,7 +1132,7 @@ export class AgentRunner {
       if (moving) return;
 
       // Fetch merchant catalog
-      const shopData = await this.api("GET", `/shop/npc/${this.currentZone}/${merchantId}`);
+      const shopData = await this.api("GET", `/shop/npc/${merchantId}`);
       const items: any[] = shopData?.items ?? [];
       if (items.length === 0) { await this.fallbackToCombat("Merchant has nothing to sell", strategy); return; }
 
@@ -1209,69 +1214,31 @@ export class AgentRunner {
         return;
       }
 
-      if (!targetZone || targetZone === this.currentZone) {
+      if (!targetZone || targetZone === this.currentRegion) {
         // Already arrived or no target — switch back to questing
-        console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at ${this.currentZone}, switching to questing`);
-        void this.logActivity(`Arrived at ${this.currentZone}, resuming questing`);
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Arrived at ${this.currentRegion}, switching to questing`);
+        void this.logActivity(`Arrived at ${this.currentRegion}, resuming questing`);
         await patchAgentConfig(this.userWallet, { focus: "questing", targetZone: undefined });
         return;
       }
 
-      // Fetch neighbors to find a path
-      const neighborsRes = await this.api("GET", `/neighbors/${this.currentZone}`);
-      const neighbors: Array<{ zone: string; levelReq: number; type: string }> =
-        neighborsRes?.neighbors ?? [];
-
-      // Direct connection?
-      const direct = neighbors.find((n) => n.zone === targetZone);
-      if (direct) {
-        const myLevel = (await this.getEntityState())?.level ?? 1;
-        if (myLevel < direct.levelReq) {
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${direct.levelReq} for ${targetZone}, currently ${myLevel} — grinding`);
-          void this.logActivity(`Need Lv${direct.levelReq} for ${targetZone} (Lv${myLevel}) — training here`);
-          await this.doCombat(strategy);
-          return;
-        }
-
-        // Issue travel command — server handles edge-walk vs portal routing
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone,
-          entityId: this.entityId,
-          action: "travel",
-          targetZone,
-        });
-        console.log(`[agent:${this.userWallet.slice(0, 8)}] Traveling from ${this.currentZone} → ${targetZone}`);
-        void this.logActivity(`Traveling ${this.currentZone} → ${targetZone}`);
+      // In unified world, just move directly toward target region center
+      const center = getRegionCenter(targetZone);
+      if (!center) {
+        console.log(`[agent:${this.userWallet.slice(0, 8)}] Unknown region: ${targetZone}`);
+        await patchAgentConfig(this.userWallet, { focus: "questing", targetZone: undefined });
         return;
       }
 
-      // Not directly connected — find the next zone on the path toward targetZone
-      const nextZone = this.findNextZoneOnPath(neighbors, targetZone);
-      if (nextZone) {
-        const myLevel = (await this.getEntityState())?.level ?? 1;
-        const nextLevelReq = ZONE_LEVEL_REQUIREMENTS[nextZone] ?? 1;
-        if (myLevel < nextLevelReq) {
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] Need level ${nextLevelReq} for ${nextZone}, currently ${myLevel} — grinding`);
-          void this.logActivity(`Need Lv${nextLevelReq} for ${nextZone} (Lv${myLevel}) — training here`);
-          await this.doCombat(strategy);
-          return;
-        }
-
-        await this.api("POST", "/command", {
-          zoneId: this.currentZone,
-          entityId: this.entityId,
-          action: "travel",
-          targetZone: nextZone,
-        });
-        console.log(`[agent:${this.userWallet.slice(0, 8)}] Traveling ${this.currentZone} → ${nextZone} (en route to ${targetZone})`);
-        void this.logActivity(`Traveling ${this.currentZone} → ${nextZone} (en route to ${targetZone})`);
-        return;
-      }
-
-      // Can't find a path — fall back to combat
-      console.log(`[agent:${this.userWallet.slice(0, 8)}] No path from ${this.currentZone} to ${targetZone}`);
-      void this.logActivity(`No path from ${this.currentZone} to ${targetZone} — training here`);
-      await this.doCombat(strategy);
+      // Issue travel command — walks directly in world-space
+      await this.api("POST", "/command", {
+        zoneId: this.currentRegion,
+        entityId: this.entityId,
+        action: "travel",
+        targetZone,
+      });
+      console.log(`[agent:${this.userWallet.slice(0, 8)}] Traveling from ${this.currentRegion} → ${targetZone}`);
+      void this.logActivity(`Traveling ${this.currentRegion} → ${targetZone}`);
     } catch (err: any) {
       console.debug(`[agent] travel tick: ${err.message?.slice(0, 80)}`);
     }
@@ -1300,15 +1267,15 @@ export class AgentRunner {
       const { entityId: targetEntityId, zoneId: targetZoneId, name: targetName } = target;
 
       // Wrong zone — travel there first
-      if (targetZoneId !== this.currentZone) {
-        const neighborsRes = await this.api("GET", `/neighbors/${this.currentZone}`);
+      if (targetZoneId !== this.currentRegion) {
+        const neighborsRes = await this.api("GET", `/neighbors/${this.currentRegion}`);
         const neighbors: Array<{ zone: string; levelReq: number }> = neighborsRes?.neighbors ?? [];
         const nextZone = neighbors.find((n) => n.zone === targetZoneId)
           ? targetZoneId
           : this.findNextZoneOnPath(neighbors, targetZoneId);
         if (nextZone) {
           await this.api("POST", "/command", {
-            zoneId: this.currentZone, entityId: this.entityId, action: "travel", targetZone: nextZone,
+            zoneId: this.currentRegion, entityId: this.entityId, action: "travel", targetZone: nextZone,
           });
           void this.logActivity(`Heading to ${targetZoneId} to find ${targetName ?? targetEntityId}`);
         }
@@ -1329,7 +1296,7 @@ export class AgentRunner {
       }
 
       if (!targetEntity) {
-        void this.logActivity(`Could not find ${targetName ?? targetEntityId} in ${this.currentZone}`);
+        void this.logActivity(`Could not find ${targetName ?? targetEntityId} in ${this.currentRegion}`);
         this.setEntityGotoMode(false);
         await patchAgentConfig(this.userWallet, { focus: "questing", gotoTarget: undefined });
         this.currentScript = null;
@@ -1350,7 +1317,7 @@ export class AgentRunner {
         try {
           await this.api("POST", "/professions/learn", {
             walletAddress: this.custodialWallet,
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             entityId: this.entityId,
             trainerId: targetEntityId,
             professionId: profession,
@@ -1363,7 +1330,7 @@ export class AgentRunner {
       } else if (arrivalAction === "learn-technique" && target.techniqueId) {
         try {
           await this.api("POST", "/techniques/learn", {
-            zoneId: this.currentZone,
+            zoneId: this.currentRegion,
             playerEntityId: this.entityId,
             techniqueId: target.techniqueId,
             trainerEntityId: targetEntityId,
@@ -1397,13 +1364,13 @@ export class AgentRunner {
   ): string | null {
     const directNeighbors = currentNeighbors
       .map((n) => n.zone)
-      .filter((z) => z && z !== this.currentZone);
+      .filter((z) => z && z !== this.currentRegion);
     if (directNeighbors.length === 0) return null;
     if (directNeighbors.includes(targetZone)) return targetZone;
 
     type Node = { zone: string; firstHop: string };
     const queue: Node[] = directNeighbors.map((zone) => ({ zone, firstHop: zone }));
-    const visited = new Set<string>([this.currentZone, ...directNeighbors]);
+    const visited = new Set<string>([this.currentRegion, ...directNeighbors]);
 
     while (queue.length > 0) {
       const { zone, firstHop } = queue.shift()!;
@@ -1422,7 +1389,9 @@ export class AgentRunner {
    * Find the highest-level zone the agent qualifies for.
    */
   private findNextZoneForLevel(level: number): string | null {
+    const allowed = this.currentCaps.allowedZones;
     const zonesByLevel = Object.entries(ZONE_LEVEL_REQUIREMENTS)
+      .filter(([zone]) => allowed === "all" || allowed.includes(zone))
       .sort(([, a], [, b]) => a - b);
 
     let bestZone: string | null = null;
@@ -1461,7 +1430,7 @@ export class AgentRunner {
       try {
         await this.api("POST", "/cooking/consume", {
           walletAddress: this.custodialWallet,
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           entityId: this.entityId,
           foodTokenId: Number(food.tokenId),
         });
@@ -1481,7 +1450,7 @@ export class AgentRunner {
       try {
         await this.api("POST", "/alchemy/consume", {
           walletAddress: this.custodialWallet,
-          zoneId: this.currentZone,
+          zoneId: this.currentRegion,
           entityId: this.entityId,
           tokenId: Number(potion.tokenId),
         });
@@ -1502,7 +1471,7 @@ export class AgentRunner {
 
     if (hpPct < fleeThreshold[strategy]) {
       await this.api("POST", "/command", {
-        zoneId: this.currentZone,
+        zoneId: this.currentRegion,
         entityId: this.entityId,
         action: "move",
         x: 150,
@@ -1622,13 +1591,13 @@ export class AgentRunner {
 
       // Priority 3: Outleveled current zone → travel to next zone
       const myLevel = entity.level ?? 1;
-      const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[this.currentZone] ?? 1;
+      const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[this.currentRegion] ?? 1;
       // If agent is 2+ levels above the zone's requirement, find the next zone
       if (myLevel >= currentZoneLevelReq + 2) {
         const nextZone = this.findNextZoneForLevel(myLevel);
-        if (nextZone && nextZone !== this.currentZone) {
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: level ${myLevel} outleveled ${this.currentZone} (req ${currentZoneLevelReq}), traveling to ${nextZone}`);
-          void this.logActivity(`Outleveled ${this.currentZone} (Lv${myLevel}) — traveling to ${nextZone}`);
+        if (nextZone && nextZone !== this.currentRegion) {
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: level ${myLevel} outleveled ${this.currentRegion} (req ${currentZoneLevelReq}), traveling to ${nextZone}`);
+          void this.logActivity(`Outleveled ${this.currentRegion} (Lv${myLevel}) — traveling to ${nextZone}`);
           await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: nextZone });
           return true;
         }
@@ -1638,14 +1607,14 @@ export class AgentRunner {
       // ~4 minutes in one zone → pick a random accessible neighbor to keep things lively
       if (this.ticksInCurrentZone >= 200
         && (currentFocusEarly === "questing" || currentFocusEarly === "combat")) {
-        const neighbors = getZoneConnections(this.currentZone)
+        const neighbors = getZoneConnections(this.currentRegion)
           .filter((z) => {
             const req = ZONE_LEVEL_REQUIREMENTS[z] ?? 1;
-            return myLevel >= req && z !== this.currentZone;
+            return myLevel >= req && z !== this.currentRegion;
           });
         if (neighbors.length > 0) {
           const pick = neighbors[Math.floor(Math.random() * neighbors.length)];
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: roaming after ${this.ticksInCurrentZone} ticks in ${this.currentZone} → ${pick}`);
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] Self-adapt: roaming after ${this.ticksInCurrentZone} ticks in ${this.currentRegion} → ${pick}`);
           void this.logActivity(`Exploring new territory — heading to ${pick}`);
           await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
           return true;
@@ -1709,8 +1678,8 @@ export class AgentRunner {
     }
 
     // Universal: arrived in a new zone
-    if (this.currentZone !== this.lastKnownZone && this.lastKnownZone !== "") {
-      return { type: "zone_arrived", detail: `Arrived in ${this.currentZone}` };
+    if (this.currentRegion !== this.lastKnownZone && this.lastKnownZone !== "") {
+      return { type: "zone_arrived", detail: `Arrived in ${this.currentRegion}` };
     }
 
     // Script-specific triggers
@@ -1739,8 +1708,8 @@ export class AgentRunner {
       }
 
       case "travel": {
-        if (this.currentScript.targetZone && this.currentScript.targetZone === this.currentZone) {
-          return { type: "script_done", detail: `Arrived at destination: ${this.currentZone}` };
+        if (this.currentScript.targetZone && this.currentScript.targetZone === this.currentRegion) {
+          return { type: "script_done", detail: `Arrived at destination: ${this.currentRegion}` };
         }
         break;
       }
@@ -1789,7 +1758,7 @@ export class AgentRunner {
       const prevLevel = this.lastKnownLevel;
       this.ticksSinceLastDecision = 0;
       this.lastKnownLevel = entity.level ?? 1;
-      this.lastKnownZone = this.currentZone;
+      this.lastKnownZone = this.currentRegion;
 
       this.lastTrigger = trigger;
       console.log(`[agent:${this.userWallet.slice(0, 8)}] Trigger [${trigger.type}]: ${trigger.detail}`);
@@ -1828,7 +1797,7 @@ export class AgentRunner {
         // On level-up, check if a new zone just became accessible
         const lvl = entity.level ?? 1;
         const bestZone = this.findNextZoneForLevel(lvl);
-        if (bestZone && bestZone !== this.currentZone
+        if (bestZone && bestZone !== this.currentRegion
           && lvl >= (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1)
           && lvl < (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1) + 2) {
           // Just unlocked this zone — go explore it
@@ -1846,11 +1815,13 @@ export class AgentRunner {
       } else if (trigger.type === "no_targets") {
         // No mobs/nodes in current zone — travel to an accessible neighbor
         const lvl = entity.level ?? 1;
-        const accessibleNeighbors = getZoneConnections(this.currentZone)
-          .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1));
+        const allowed = this.currentCaps.allowedZones;
+        const accessibleNeighbors = getZoneConnections(this.currentRegion)
+          .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1))
+          .filter((z) => allowed === "all" || allowed.includes(z));
         if (accessibleNeighbors.length > 0) {
           const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] No targets in ${this.currentZone}, moving to ${pick}`);
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] No targets in ${this.currentRegion}, moving to ${pick}`);
           void this.logActivity(`Zone cleared — exploring ${pick}`);
           await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
           this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
@@ -1880,7 +1851,7 @@ export class AgentRunner {
           entity,
           entities,
           entityId: this.entityId!,
-          currentZone: this.currentZone,
+          currentZone: this.currentRegion,
           custodialWallet: this.custodialWallet!,
           currentScript: this.currentScript,
           recentActivities: this.recentActivities,
@@ -1982,7 +1953,7 @@ export class AgentRunner {
         // ── First tick verified — agent is alive and well ──
         if (!firstTickDone) {
           firstTickDone = true;
-          console.log(`[agent:${this.userWallet.slice(0, 8)}] First tick OK — entity ${this.entityId} in ${this.currentZone}`);
+          console.log(`[agent:${this.userWallet.slice(0, 8)}] First tick OK — entity ${this.entityId} in ${this.currentRegion}`);
           onFirstTick();
         }
 
@@ -1991,10 +1962,6 @@ export class AgentRunner {
 
         // Track focus changes — null-out current script so supervisor gets a "user_directive" trigger
         if (focus !== this.lastFocus) {
-          // If switching away from goto, clear the gotoMode flag so auto-combat resumes
-          if (this.lastFocus === "goto" && focus !== "goto") {
-            this.setEntityGotoMode(false);
-          }
           this.lastFocus = focus;
           this.ticksSinceFocusChange = 0;
           this.combatFallbackCount = 0;
@@ -2005,8 +1972,13 @@ export class AgentRunner {
         }
         this.ticksSinceFocusChange++;
 
+        // Suppress server-side auto-combat when agent is doing non-combat work
+        // (shopping, crafting, gathering, goto, etc.) so mobs don't hijack the entity
+        const suppressCombat = focus !== "combat" && focus !== "questing";
+        this.setEntityGotoMode(suppressCombat);
+
         // Track zone-stay duration (reset on zone change)
-        if (this.currentZone !== this.lastKnownZone && this.lastKnownZone !== "") {
+        if (this.currentRegion !== this.lastKnownZone && this.lastKnownZone !== "") {
           this.ticksInCurrentZone = 0;
         }
         this.ticksInCurrentZone++;
@@ -2045,7 +2017,7 @@ export class AgentRunner {
         if (normalizedTargetZone && normalizedTargetZone !== config.targetZone) {
           await patchAgentConfig(this.userWallet, { targetZone: normalizedTargetZone });
         }
-        if (normalizedTargetZone && normalizedTargetZone !== this.currentZone && focus !== "traveling") {
+        if (normalizedTargetZone && normalizedTargetZone !== this.currentRegion && focus !== "traveling") {
           await patchAgentConfig(this.userWallet, { focus: "traveling" });
           this.currentScript = null; // supervisor will assign travel script
         }
@@ -2053,9 +2025,9 @@ export class AgentRunner {
         // Zone restriction enforcement — if agent is in a disallowed zone, force travel back
         if (this.currentCaps.allowedZones !== "all") {
           const allowed = this.currentCaps.allowedZones;
-          if (!allowed.includes(this.currentZone)) {
+          if (!allowed.includes(this.currentRegion)) {
             const fallbackZone = allowed[0] ?? "village-square";
-            console.log(`[agent:${this.userWallet.slice(0, 8)}] Zone ${this.currentZone} not allowed for ${config.tier ?? "free"} tier — forcing travel to ${fallbackZone}`);
+            console.log(`[agent:${this.userWallet.slice(0, 8)}] Zone ${this.currentRegion} not allowed for ${config.tier ?? "free"} tier — forcing travel to ${fallbackZone}`);
             void this.logActivity(`Zone restricted — returning to ${fallbackZone}`);
             await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
             this.currentScript = null;
