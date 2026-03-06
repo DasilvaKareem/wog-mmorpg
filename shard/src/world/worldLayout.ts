@@ -46,7 +46,6 @@ export interface WorldLayout {
 // ── Level requirements ───────────────────────────────────────────────
 
 export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
-  "tutorial-island": 1,
   "village-square": 1,
   "wild-meadow": 5,
   "dark-forest": 10,

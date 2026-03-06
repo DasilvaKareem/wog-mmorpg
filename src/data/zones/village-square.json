@@ -70,19 +70,6 @@
       }
     },
     {
-      "id": "tutorial-arrival",
-      "name": "Tutorial Gate",
-      "type": "portal",
-      "position": { "x": 10, "z": 150 },
-      "radius": 12,
-      "tags": [],
-      "portal": {
-        "destinationZone": "tutorial-island",
-        "destinationPoi": "tutorial-gate",
-        "bidirectional": false
-      }
-    },
-    {
       "id": "meadow-exit",
       "name": "Meadow Road",
       "type": "portal",

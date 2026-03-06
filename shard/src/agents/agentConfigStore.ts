@@ -43,8 +43,6 @@ export interface AgentConfig {
   tier?: AgentTier;
   /** Epoch ms when the current session started (for session limit enforcement) */
   sessionStartedAt?: number;
-  /** @deprecated Chat history now lives in agent:chat:{wallet} Redis list. Kept for type compat. */
-  chatHistory: ChatMessage[];
 }
 
 export interface AgentEntityRef {
@@ -67,7 +65,6 @@ export function defaultConfig(): AgentConfig {
     focus: "questing",
     strategy: "balanced",
     lastUpdated: Date.now(),
-    chatHistory: [],
   };
 }
 
@@ -107,7 +104,7 @@ export async function setAgentConfig(userWallet: string, config: AgentConfig): P
 
 export async function patchAgentConfig(
   userWallet: string,
-  patch: Partial<Omit<AgentConfig, "chatHistory">>
+  patch: Partial<AgentConfig>
 ): Promise<AgentConfig> {
   const existing = (await getAgentConfig(userWallet)) ?? defaultConfig();
   const updated: AgentConfig = { ...existing, ...patch, lastUpdated: Date.now() };

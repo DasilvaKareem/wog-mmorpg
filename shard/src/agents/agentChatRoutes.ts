@@ -31,6 +31,7 @@ import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
 import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
+import { sleep, extractRawCharacterName } from "./agentUtils.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -40,19 +41,6 @@ function internalFetch(url: string, init?: RequestInit): Promise<Response> {
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-
-function extractRawCharacterName(name?: string): string | null {
-  if (!name) return null;
-  const trimmed = name.trim();
-  if (!trimmed) return null;
-  const match = trimmed.match(/^(.+?)\s+the\s+\w+$/i);
-  return match ? match[1] : trimmed;
-}
 
 async function getEntityState(entityId: string, _zoneId?: string): Promise<any | null> {
   try {
@@ -421,6 +409,11 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     if (!config) {
       return reply.code(404).send({ error: "No agent config found. Deploy your agent first." });
+    }
+
+    // Self-heal: restart agent loop if it should be running but isn't
+    if (config.enabled && !agentManager.isRunning(authWallet)) {
+      await agentManager.ensureRunning(authWallet);
     }
 
     if (!process.env.GROQ_API_KEY) {

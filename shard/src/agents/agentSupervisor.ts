@@ -14,6 +14,11 @@
  */
 
 import Groq from "groq-sdk";
+import { fetchWalletBalance } from "./agentUtils.js";
+import { findPortalInZone, getSharedEdge, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
+import { getAvailableQuestsForPlayer } from "../social/questSystem.js";
+import { getEntitiesInRegion } from "../world/zoneRuntime.js";
+import type { ZoneEvent } from "../world/zoneEvents.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -30,6 +35,7 @@ export interface SupervisorContext {
   custodialWallet: string;
   currentScript: BotScript | null;
   recentActivities: string[];
+  recentZoneEvents: ZoneEvent[];
   userDirective: string;
   /** Bound API caller from the runner (already authenticated) */
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
@@ -52,6 +58,10 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext): string 
   const goldDisplay = goldCopper >= 10000
     ? `${(goldCopper / 10000).toFixed(2)}g`
     : `${goldCopper}c`;
+  const recentEvents = ctx.recentZoneEvents
+    .slice(-4)
+    .map((zoneEvent) => `${zoneEvent.type}: ${zoneEvent.message}`)
+    .join(" | ") || "none";
 
   return `You are the strategic supervisor for ${entity.name ?? "Agent"}, a Level ${entity.level ?? 1} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"} in World of Geneva.
 
@@ -61,6 +71,7 @@ AGENT STATE:
   Region: ${ctx.currentRegion}  |  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%)  |  Gold: ${goldDisplay}  |  Level: ${entity.level ?? 1}
   Equipped: ${equipped}
   Recent: ${ctx.recentActivities.slice(-4).join(" → ") || "none"}
+  Zone Events: ${recentEvents}
 
 CURRENT SCRIPT: ${ctx.currentScript ? `${ctx.currentScript.type} — ${ctx.currentScript.reason ?? ""}` : "none"}
 
@@ -195,35 +206,53 @@ async function executeTool(
     }
 
     case "read_inventory": {
-      try {
-        const inv = await ctx.apiCall("GET", `/wallet/${ctx.custodialWallet}/balance`);
-        return {
-          gold: inv?.gold ?? 0,
-          items: (inv?.items ?? [])
-            .filter((i: any) => Number(i.balance) > 0)
-            .map((i: any) => ({ tokenId: i.tokenId, name: i.name, category: i.category, count: Number(i.balance) })),
-        };
-      } catch {
-        return { gold: 0, items: [] };
-      }
+      const inv = await fetchWalletBalance(ctx.custodialWallet);
+      return {
+        gold: inv.copper,
+        items: inv.items
+          .filter((i: any) => Number(i.balance) > 0)
+          .map((i: any) => ({ tokenId: i.tokenId, name: i.name, category: i.category, count: Number(i.balance) })),
+      };
     }
 
     case "read_connections": {
-      try {
-        const res = await ctx.apiCall("GET", `/neighbors/${ctx.currentRegion}`);
-        return { connections: res?.neighbors ?? [] };
-      } catch {
-        return { connections: [] };
-      }
+      const connections = getZoneConnections(ctx.currentRegion).map((connZone) => {
+        const edge = getSharedEdge(ctx.currentRegion, connZone);
+        const levelReq = ZONE_LEVEL_REQUIREMENTS[connZone] ?? 1;
+        if (edge) {
+          return { zone: connZone, direction: edge, levelReq, type: "walk" as const };
+        }
+        const portalPos = findPortalInZone(ctx.currentRegion, connZone);
+        return {
+          zone: connZone,
+          direction: "portal" as const,
+          levelReq,
+          type: "portal" as const,
+          ...(portalPos && { portalPosition: { x: portalPos.x, z: portalPos.z } }),
+        };
+      });
+      return { connections };
     }
 
     case "read_quests": {
-      try {
-        const res = await ctx.apiCall("GET", `/quests/zone/${ctx.entityId}`);
-        return { quests: res?.quests ?? [] };
-      } catch {
-        return { quests: [] };
+      const completedQuestIds = ctx.entity.completedQuests ?? [];
+      const activeQuestIds = (ctx.entity.activeQuests ?? []).map((quest: any) => quest.questId);
+      const available = [];
+      for (const entity of getEntitiesInRegion(ctx.currentRegion)) {
+        if (entity.type !== "quest-giver") continue;
+        const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
+        for (const quest of quests) {
+          available.push({
+            questId: quest.id,
+            title: quest.title,
+            npcEntityId: entity.id,
+            npcName: entity.name,
+            objective: quest.objective,
+            rewards: quest.rewards,
+          });
+        }
       }
+      return { active: ctx.entity.activeQuests ?? [], available };
     }
 
     default:

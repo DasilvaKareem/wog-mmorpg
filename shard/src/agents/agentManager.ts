@@ -13,6 +13,7 @@ import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getRedis } from "../redis.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { loadAnyCharacterForWallet } from "../character/characterStore.js";
+import { extractRawCharacterName } from "./agentUtils.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -99,11 +100,7 @@ class AgentManager {
   }
 
   private extractRawName(characterName?: string): string | null {
-    if (!characterName) return null;
-    const trimmed = characterName.trim();
-    if (!trimmed) return null;
-    const suffixMatch = trimmed.match(/^(.+?)\s+the\s+\w+$/i);
-    return suffixMatch ? suffixMatch[1] : trimmed;
+    return extractRawCharacterName(characterName);
   }
 
   /**

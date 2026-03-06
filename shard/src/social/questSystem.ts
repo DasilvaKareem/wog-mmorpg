@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion, updateSpawnedWalletZone } from "../world/zoneRuntime.js";
+import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { mintGold, mintItem } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -9,7 +9,6 @@ import { logDiary, narrativeQuestComplete } from "./diary.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
-import { getRegionCenter } from "../world/worldLayout.js";
 
 // Quest definition
 export interface Quest {
@@ -42,66 +41,6 @@ export interface ActiveQuest {
 
 // Predefined quests offered by NPCs
 export const QUEST_CATALOG: Quest[] = [
-  // === TUTORIAL ISLAND — Teach new agents how to play (3 quests, 105 XP) ===
-
-  {
-    id: "tutorial_first_blood",
-    title: "First Blood",
-    description:
-      "Welcome to Geneva, recruit! Those straw dummies in the training grounds are waiting. " +
-      "Destroy 2 Straw Dummies to learn the basics of combat.",
-    npcId: "Tutorial Master Aria",
-    objective: {
-      type: "kill",
-      targetMobType: "mob",
-      targetMobName: "Straw Dummy",
-      count: 2,
-    },
-    rewards: {
-      copper: 10,
-      xp: 25,
-      items: [{ tokenId: 0, quantity: 2 }], // 2x Health Potion
-    },
-  },
-  {
-    id: "tutorial_armed_and_ready",
-    title: "Armed and Ready",
-    description:
-      "Good work! Now try the Training Dummies — they're tougher. " +
-      "Visit the Recruit Quartermaster to buy a weapon if you need one, then defeat 1 Training Dummy.",
-    npcId: "Tutorial Master Aria",
-    prerequisiteQuestId: "tutorial_first_blood",
-    objective: {
-      type: "kill",
-      targetMobType: "mob",
-      targetMobName: "Training Dummy",
-      count: 1,
-    },
-    rewards: {
-      copper: 15,
-      xp: 30,
-    },
-  },
-  {
-    id: "tutorial_graduation",
-    title: "Into the World",
-    description:
-      "You're ready, champion! Prove it by defeating 2 more Training Dummies, " +
-      "then head through the gate to Village Square where your real adventure begins.",
-    npcId: "Tutorial Master Aria",
-    prerequisiteQuestId: "tutorial_armed_and_ready",
-    objective: {
-      type: "kill",
-      targetMobType: "mob",
-      targetMobName: "Training Dummy",
-      count: 2,
-    },
-    rewards: {
-      copper: 25,
-      xp: 50,
-    },
-  },
-
   // === NEWCOMER'S WELCOME — Talk Quest Chain (village-square, 8 quests, 900 XP → L3) ===
 
   {
@@ -3040,25 +2979,6 @@ export async function awardQuestRewards(
         : "")
   );
 
-  // Auto-teleport to village-square after completing the tutorial graduation quest
-  if (quest.id === "tutorial_graduation") {
-    const villageCenter = getRegionCenter("village-square");
-    if (villageCenter) {
-      player.x = villageCenter.x;
-      player.y = villageCenter.z;
-      player.region = "village-square";
-      // Update spawn registry + persist the new zone
-      if (player.walletAddress) {
-        updateSpawnedWalletZone(player.walletAddress, "village-square");
-        saveCharacter(player.walletAddress, player.name, {
-          zone: "village-square",
-          x: player.x,
-          y: player.y,
-        }).catch(() => {});
-      }
-      console.log(`[tutorial] ${player.name} graduated! Teleported to village-square.`);
-    }
-  }
 }
 
 export function registerQuestRoutes(server: FastifyInstance) {

@@ -1,6 +1,5 @@
 {
   "zones": [
-    "tutorial-island",
     "village-square",
     "wild-meadow",
     "dark-forest",
@@ -13,7 +12,6 @@
     "azurshard-chasm"
   ],
   "connections": [
-    { "from": "tutorial-island", "to": "village-square", "portal": "tutorial-gate" },
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
     { "from": "wild-meadow", "to": "dark-forest", "portal": "forest-gate" },
     { "from": "wild-meadow", "to": "auroral-plains", "portal": "plains-gate" },
@@ -27,7 +25,6 @@
     { "from": "lake-lumina", "to": "azurshard-chasm", "portal": "chasm-descent" }
   ],
   "worldOffsets": {
-    "tutorial-island": { "x": -320, "z": 0 },
     "village-square": { "x": 0, "z": 0 },
     "wild-meadow": { "x": 640, "z": 0 },
     "dark-forest": { "x": 1280, "z": 0 },
