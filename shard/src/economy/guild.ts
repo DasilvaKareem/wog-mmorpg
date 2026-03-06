@@ -23,6 +23,7 @@ import {
   getNextGuildId,
   getNextProposalId,
   getMemberGuildId,
+  refreshGuildNameCache,
   GuildStatus,
   MemberRank,
   ProposalType,
@@ -210,6 +211,9 @@ export function registerGuildRoutes(server: FastifyInstance) {
 
       // Record gold spend (deposit + fee)
       recordGoldSpend(founderAddress, totalCost);
+      await refreshGuildNameCache().catch((err) => {
+        server.log.warn(`[guild] Failed to refresh guild cache after create: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
+      });
 
       server.log.info(`Guild ${guildId} "${name}" created by ${founderAddress}`);
 
@@ -366,6 +370,9 @@ export function registerGuildRoutes(server: FastifyInstance) {
       }
 
       const txHash = await joinGuildOnChain(guildId, memberAddress);
+      await refreshGuildNameCache().catch((err) => {
+        server.log.warn(`[guild] Failed to refresh guild cache after join: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
+      });
 
       server.log.info(`${memberAddress} joined guild ${guildId}`);
 
@@ -408,6 +415,9 @@ export function registerGuildRoutes(server: FastifyInstance) {
 
     try {
       const txHash = await leaveGuildOnChain(guildId, memberAddress);
+      await refreshGuildNameCache().catch((err) => {
+        server.log.warn(`[guild] Failed to refresh guild cache after leave: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
+      });
 
       server.log.info(`${memberAddress} left guild ${guildId}`);
 
