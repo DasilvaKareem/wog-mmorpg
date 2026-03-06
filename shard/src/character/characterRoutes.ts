@@ -49,11 +49,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       name: string;
       race: string;
       className: string;
+      skinColor?: string;
+      hairStyle?: string;
+      eyeColor?: string;
+      origin?: string;
       tier?: string;
       paymentProof?: { transactionHash: string };
     };
   }>("/character/create", async (request, reply) => {
-    const { walletAddress, name, race, className } = request.body;
+    const { walletAddress, name, race, className, skinColor, hairStyle, eyeColor, origin } = request.body;
 
     const error = validateCharacterInput({ walletAddress, name, race, className });
     if (error) {
@@ -113,6 +117,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           xp: 0,
           raceId: character.race.id,
           classId: character.class.id,
+          skinColor,
+          hairStyle,
+          eyeColor,
+          origin,
           zone: "village-square",
           x: 0,
           y: 0,

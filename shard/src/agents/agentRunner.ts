@@ -32,6 +32,7 @@ import { sleep, fetchWalletBalance, issueAgentCommand, type ApiCaller, type Agen
 import { detectTrigger, type TriggerState } from "./agentTriggers.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
+import { emitAgentChat, getAgentOrigin, maybeReactToChat } from "./agentDialogue.js";
 
 const TICK_MS = 1200;
 /** Safety-net: call supervisor if no trigger has fired in about 30s. */
@@ -108,6 +109,7 @@ export class AgentRunner {
   private api: ApiCaller | null = null;
   private custodialWallet: string | null = null;
   private entityId: string | null = null;
+  private agentOrigin: string | null = null;
   private currentRegion: string = "village-square";
   private jwtExpiry = 0;
   private jwt: string | null = null;
@@ -498,6 +500,30 @@ export class AgentRunner {
     const latest = relevant[relevant.length - 1];
     this.lastSeenZoneEventSeq = this.getZoneEventSeq(latest.id);
 
+    // Emit dialogue for kill events (fires before trigger return)
+    if (this.entityId) {
+      const entity = getWorldEntity(this.entityId);
+      if (entity) {
+        const dCtx = {
+          entityId: this.entityId,
+          entityName: entity.name,
+          zoneId: this.currentRegion,
+          origin: this.agentOrigin ?? undefined,
+          classId: (entity as any).classId ?? undefined,
+        };
+        if (latest.type === "kill" && latest.entityId === this.entityId) {
+          emitAgentChat({ ...dCtx, event: "kill", detail: latest.targetName });
+        } else if (latest.type === "quest") {
+          emitAgentChat({ ...dCtx, event: "quest_complete", detail: latest.message });
+        }
+
+        // Check if we barely survived (low HP after a fight)
+        if (latest.type === "kill" && entity.hp > 0 && entity.hp < entity.maxHp * 0.25) {
+          emitAgentChat({ ...dCtx, event: "low_hp_survive" });
+        }
+      }
+    }
+
     if (latest.type === "levelup") {
       return { type: "level_up", detail: latest.message };
     }
@@ -771,6 +797,24 @@ export class AgentRunner {
       }
     }
 
+    // ── Dialogue: emit chat on significant triggers ──
+    if (trigger && this.entityId && entity.name) {
+      const dCtx = {
+        entityId: this.entityId,
+        entityName: entity.name,
+        zoneId: this.currentRegion,
+        origin: this.agentOrigin ?? undefined,
+        classId: entity.classId ?? undefined,
+      };
+      if (trigger.type === "level_up") {
+        emitAgentChat({ ...dCtx, event: "level_up", detail: `${entity.level}` });
+      } else if (trigger.type === "zone_arrived") {
+        emitAgentChat({ ...dCtx, event: "zone_enter", detail: this.currentRegion });
+      } else if (trigger.type === "stuck" && trigger.detail?.includes("death")) {
+        emitAgentChat({ ...dCtx, event: "death" });
+      }
+    }
+
     await this.executeCurrentScript(entity, entities, strategy);
   }
 
@@ -913,6 +957,11 @@ export class AgentRunner {
           firstTickDone = true;
           console.log(`[agent:${this.walletTag}] First tick OK — entity ${this.entityId} in ${this.currentRegion}`);
           onFirstTick();
+
+          // Load origin for dialogue system
+          if (this.custodialWallet && entity.name) {
+            this.agentOrigin = await getAgentOrigin(this.custodialWallet, entity.name) ?? null;
+          }
         }
 
         const strategy: AgentStrategy = config.strategy ?? "balanced";
@@ -943,6 +992,23 @@ export class AgentRunner {
         // Inbox check every 5 ticks
         if (this.ticksSinceFocusChange % 5 === 0) {
           await this.processInbox();
+        }
+
+        // Chat reactions: check for other agents' chat and maybe respond
+        if (this.entityId && this.ticksSinceFocusChange % 3 === 0) {
+          const chatEvents = getRecentZoneEvents(this.currentRegion, Date.now() - 10_000, ["chat"]);
+          if (chatEvents.length > 0) {
+            maybeReactToChat(
+              {
+                entityId: this.entityId,
+                entityName: entity.name,
+                zoneId: this.currentRegion,
+                origin: this.agentOrigin ?? undefined,
+                classId: entity.classId ?? undefined,
+              },
+              chatEvents,
+            );
+          }
         }
 
         // Survival: low HP handling

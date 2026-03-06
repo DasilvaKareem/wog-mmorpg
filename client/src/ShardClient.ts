@@ -68,13 +68,14 @@ export async function createCharacter(
   walletAddress: string,
   name: string,
   race: string,
-  className: string
+  className: string,
+  appearance?: { skinColor?: string; hairStyle?: string; eyeColor?: string; origin?: string }
 ): Promise<CharacterCreateResponse | { error: string }> {
   try {
     const res = await fetch(`${API_URL}/character/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ walletAddress, name, race, className }),
+      body: JSON.stringify({ walletAddress, name, race, className, ...appearance }),
     });
     return await res.json();
   } catch {

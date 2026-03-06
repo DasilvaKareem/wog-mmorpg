@@ -52,6 +52,66 @@ function combineStats(base: CharacterStats, modifiers: CharacterStats): Characte
   return result;
 }
 
+const SKIN_COLORS = [
+  { id: "fair", label: "Fair", hex: "#f5d0a9" },
+  { id: "light", label: "Light", hex: "#d4a574" },
+  { id: "medium", label: "Medium", hex: "#a67c52" },
+  { id: "tan", label: "Tan", hex: "#8d5524" },
+  { id: "brown", label: "Brown", hex: "#6b3a2a" },
+  { id: "dark", label: "Dark", hex: "#3b1d0e" },
+];
+
+const HAIR_STYLES = [
+  { id: "short", label: "Short" },
+  { id: "long", label: "Long" },
+  { id: "braided", label: "Braided" },
+  { id: "mohawk", label: "Mohawk" },
+  { id: "bald", label: "Bald" },
+  { id: "ponytail", label: "Ponytail" },
+  { id: "locs", label: "Locs" },
+  { id: "afro", label: "Afro" },
+  { id: "cornrows", label: "Cornrows" },
+  { id: "bantu-knots", label: "Bantu Knots" },
+  { id: "bangs", label: "Bangs" },
+  { id: "topknot", label: "Top Knot" },
+];
+
+const EYE_COLORS = [
+  { id: "brown", label: "Brown", hex: "#5c3317" },
+  { id: "blue", label: "Blue", hex: "#4a90d9" },
+  { id: "green", label: "Green", hex: "#3d8b37" },
+  { id: "amber", label: "Amber", hex: "#cf8f2e" },
+  { id: "gray", label: "Gray", hex: "#8e8e8e" },
+  { id: "violet", label: "Violet", hex: "#8b45a6" },
+];
+
+const ORIGINS = [
+  {
+    id: "sunforged",
+    label: "Sunforged",
+    tone: "Brave",
+    desc: "Raised in the holy citadels of Aurandel, sworn to protect the weak. Speaks with conviction and charges headfirst into the unknown.",
+  },
+  {
+    id: "veilborn",
+    label: "Veilborn",
+    tone: "Cunning",
+    desc: "Orphaned in the shadow markets of Nythara, trust is a currency they never spend. Calculates every move, reveals nothing freely.",
+  },
+  {
+    id: "dawnkeeper",
+    label: "Dawnkeeper",
+    tone: "Warm",
+    desc: "Wanderers from the Ember Communes who believe all souls carry light. Disarms with kindness, heals before they fight.",
+  },
+  {
+    id: "ironvow",
+    label: "Ironvow",
+    tone: "Ruthless",
+    desc: "Forged in the gladiator pits beneath Felsrock. Mercy is weakness, victory is the only prayer. Speaks bluntly, strikes without hesitation.",
+  },
+];
+
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between text-[12px]">
@@ -85,6 +145,10 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const [charName, setCharName] = React.useState("");
   const [raceId, setRaceId] = React.useState("");
   const [classId, setClassId] = React.useState("");
+  const [skinColor, setSkinColor] = React.useState("");
+  const [hairStyle, setHairStyle] = React.useState("");
+  const [eyeColor, setEyeColor] = React.useState("");
+  const [origin, setOrigin] = React.useState("");
   const [successData, setSuccessData] = React.useState<SuccessData | null>(null);
 
   // Telegram signup
@@ -203,7 +267,11 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     Boolean(connectedAddress) &&
     !nameValidationError &&
     Boolean(selectedRace) &&
-    Boolean(selectedClass);
+    Boolean(selectedClass) &&
+    Boolean(skinColor) &&
+    Boolean(hairStyle) &&
+    Boolean(eyeColor) &&
+    Boolean(origin);
 
   function handleRequestMint() {
     if (nameValidationError) {
@@ -229,7 +297,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         connectedAddress,
         charName.trim(),
         raceId,
-        classId
+        classId,
+        { skinColor, hairStyle, eyeColor, origin }
       );
       if ("error" in result) {
         setError(result.error);
@@ -593,6 +662,104 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                       }`}
                     >
                       {c.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Skin Color */}
+              <div>
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                  Skin Color
+                </label>
+                <div className="flex gap-1.5">
+                  {SKIN_COLORS.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSkinColor(s.id)}
+                      title={s.label}
+                      className={`h-8 w-8 border-2 transition shadow-[2px_2px_0_0_#000] ${
+                        skinColor === s.id
+                          ? "border-[#ffcc00] scale-110"
+                          : "border-[#2a3450] hover:border-[#54f28b]"
+                      }`}
+                      style={{ backgroundColor: s.hex }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Hair Style */}
+              <div>
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                  Hair Style
+                </label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {HAIR_STYLES.map((h) => (
+                    <button
+                      key={h.id}
+                      onClick={() => setHairStyle(h.id)}
+                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
+                        hairStyle === h.id
+                          ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                          : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                      }`}
+                    >
+                      {h.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Eye Color */}
+              <div>
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                  Eye Color
+                </label>
+                <div className="flex gap-1.5">
+                  {EYE_COLORS.map((e) => (
+                    <button
+                      key={e.id}
+                      onClick={() => setEyeColor(e.id)}
+                      title={e.label}
+                      className={`h-8 w-8 border-2 transition shadow-[2px_2px_0_0_#000] flex items-center justify-center ${
+                        eyeColor === e.id
+                          ? "border-[#ffcc00] scale-110"
+                          : "border-[#2a3450] hover:border-[#54f28b]"
+                      }`}
+                      style={{ backgroundColor: e.hex }}
+                    >
+                      <span className="text-[8px] text-white/70 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+                        {e.label.slice(0, 2).toUpperCase()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Origin */}
+              <div>
+                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                  Origin
+                </label>
+                <div className="flex flex-col gap-1.5">
+                  {ORIGINS.map((o) => (
+                    <button
+                      key={o.id}
+                      onClick={() => setOrigin(o.id)}
+                      className={`border-2 px-3 py-2 text-left transition shadow-[2px_2px_0_0_#000] ${
+                        origin === o.id
+                          ? "border-[#ffcc00] bg-[#2a2210]"
+                          : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[13px] font-bold ${origin === o.id ? "text-[#ffcc00]" : "text-[#d6deff]"}`}>
+                          {o.label}
+                        </span>
+                        <span className="text-[10px] text-[#6d77a3]">/ {o.tone}</span>
+                      </div>
+                      <p className="mt-0.5 text-[10px] leading-snug text-[#8b95c2]">{o.desc}</p>
                     </button>
                   ))}
                 </div>

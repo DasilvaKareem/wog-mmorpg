@@ -618,12 +618,53 @@ function handleLevelUp(entity: Entity, zone: ZoneState): void {
   }
 }
 
+// ── Anti-farm: diminishing XP for repeat kills in same zone ────────────
+// Tracks recent kill counts per player per zone. Decays over time.
+const recentKillCounts = new Map<string, { count: number; lastKillTick: number }>();
+const REPEAT_KILL_WINDOW = 120;   // ticks (2 min) before kill counter resets
+const REPEAT_KILL_THRESHOLD = 8;  // kills before penalty kicks in
+const REPEAT_KILL_FLOOR = 0.15;   // minimum XP multiplier (15%)
+const REPEAT_KILL_DECAY = 0.12;   // XP drops 12% per kill past threshold
+
+function getRepeatKillKey(playerId: string, zoneId: string): string {
+  return `${playerId}:${zoneId}`;
+}
+
+function trackRepeatKill(playerId: string, zoneId: string, tick: number): number {
+  const key = getRepeatKillKey(playerId, zoneId);
+  const entry = recentKillCounts.get(key);
+
+  if (!entry || tick - entry.lastKillTick > REPEAT_KILL_WINDOW) {
+    recentKillCounts.set(key, { count: 1, lastKillTick: tick });
+    return 1.0;
+  }
+
+  entry.count++;
+  entry.lastKillTick = tick;
+
+  if (entry.count <= REPEAT_KILL_THRESHOLD) return 1.0;
+
+  const overCount = entry.count - REPEAT_KILL_THRESHOLD;
+  return Math.max(REPEAT_KILL_FLOOR, 1.0 - overCount * REPEAT_KILL_DECAY);
+}
+
+// ── Level-gap XP scaling ──────────────────────────────────────────────
+// Mobs 6+ levels below you give reduced XP. 10+ below = zero.
+function getLevelGapMultiplier(playerLevel: number, mobLevel: number): number {
+  const gap = playerLevel - mobLevel;
+  if (gap <= 5) return 1.0;       // on-level or higher mobs: full XP
+  if (gap >= 10) return 0.0;      // 10+ levels below: no XP (gray mob)
+  // 6-9 levels below: linear falloff (80% → 20%)
+  return Math.max(0, 1.0 - (gap - 5) * 0.2);
+}
+
 /**
  * Award XP to the tagger's party (or solo). All same-zone, alive party members
  * share XP with a party-size bonus: 1.0 + (memberCount - 1) * 0.1.
  * Each member's own potion multiplier is applied individually.
+ * Level-gap and repeat-kill penalties are applied per member.
  */
-function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number): void {
+function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number, mobLevel?: number): void {
   if (baseXpReward <= 0 || xpRecipient.level == null) {
     console.warn(`[xp-debug] SKIPPED XP: recipient=${xpRecipient.name} baseXp=${baseXpReward} level=${xpRecipient.level} levelIsNull=${xpRecipient.level == null}`);
     return;
@@ -660,13 +701,27 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
     if (typeof member.level !== "number" || Number.isNaN(member.level)) member.level = Number(member.level) || 1;
     if (typeof member.xp !== "number" || Number.isNaN(member.xp)) member.xp = Number(member.xp) || 0;
 
-    // Apply each member's own potion XP multiplier
+    // Level-gap penalty: mobs way below your level give less XP
+    const levelGap = mobLevel != null ? getLevelGapMultiplier(member.level, mobLevel) : 1.0;
+    if (levelGap <= 0) {
+      console.log(`[xp-debug] GRAY MOB: ${member.name} (L${member.level}) vs mob L${mobLevel} — 0 XP`);
+      continue;
+    }
+
+    // Repeat-kill penalty: farming same zone too fast
+    const repeatMult = trackRepeatKill(member.id, zone.zoneId, zone.tick);
+
+    // Apply all multipliers: potion buff × level gap × repeat penalty
     const xpMult = getActiveXpMultiplier(member.activeEffects);
-    const finalXp = Math.round(perMemberXp * xpMult);
+    const finalXp = Math.round(perMemberXp * xpMult * levelGap * repeatMult);
     if (finalXp <= 0) continue;
 
     member.xp = member.xp + finalXp;
-    console.log(`[xp-debug] AWARDED: ${member.name} +${finalXp} XP → total ${member.xp} (L${member.level}, need ${xpForLevel(member.level + 1)} for next)`);
+    const penalties = [];
+    if (levelGap < 1) penalties.push(`level-gap:${(levelGap * 100).toFixed(0)}%`);
+    if (repeatMult < 1) penalties.push(`repeat:${(repeatMult * 100).toFixed(0)}%`);
+    const penaltyStr = penalties.length > 0 ? ` [${penalties.join(", ")}]` : "";
+    console.log(`[xp-debug] AWARDED: ${member.name} +${finalXp} XP → total ${member.xp} (L${member.level}, need ${xpForLevel(member.level + 1)} for next)${penaltyStr}`);
 
     // Check for level-up(s)
     let leveled = false;
@@ -699,12 +754,18 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
 function getAttackPower(entity: Entity): number {
   const stats = entity.effectiveStats ?? getEffectiveStats(entity);
   if (stats) {
+    // Spellcasters (mage, warlock, cleric) scale primarily off INT;
+    // physical classes scale off STR. Both benefit from secondary stats.
+    const classId = entity.classId ?? "";
+    const isCaster = ["mage", "warlock", "cleric"].includes(classId);
+    const primary = isCaster
+      ? stats.int * 0.45 + stats.str * 0.08
+      : stats.str * 0.32 + stats.int * 0.12;
     return Math.max(
       5,
       Math.round(
-        stats.str * 0.32 +
+        primary +
           stats.agi * 0.1 +
-          stats.int * 0.22 +
           stats.faith * 0.08
       )
     );
@@ -886,9 +947,9 @@ export function clearMobTagsForPlayer(zone: ZoneState, playerId: string): void {
  * Handle player death: respawn at graveyard, apply XP penalty, restore HP.
  */
 function handlePlayerDeath(player: Entity, zoneId: string): void {
-  // Clear mob tags owned by this player and reset combat state
+  // Keep mob tags alive so the player can return for revenge kills with XP credit.
+  // Tags will expire naturally via TAG_TIMEOUT_TICKS (60s) if the player doesn't return.
   const zone = getOrCreateZone(zoneId);
-  clearMobTagsForPlayer(zone, player.id);
   player.lastCombatTick = undefined;
 
   // Apply death penalty: lose 10% of XP *within* the current level (progress toward next)
@@ -1417,7 +1478,7 @@ async function worldTick() {
               await handleMobDeath(entity, dotKiller, zone);
               // Grant XP for DoT kill
               if (dotKiller) {
-                awardPartyXp(zone, dotKiller, entity.xpReward ?? 0);
+                awardPartyXp(zone, dotKiller, entity.xpReward ?? 0, entity.level);
               }
             }
             break; // Entity is dead, stop processing effects
@@ -1615,7 +1676,7 @@ async function worldTick() {
                     await handleMobDeath(entity, retaliator ?? target, zone);
 
                     if (retaliator) {
-                      awardPartyXp(zone, retaliator, entity.xpReward ?? 0);
+                      awardPartyXp(zone, retaliator, entity.xpReward ?? 0, entity.level);
                     }
                     continue;
                   }
@@ -1682,7 +1743,7 @@ async function worldTick() {
             entity.order = undefined;
 
             // Grant XP on kill — shared with party members in same zone
-            awardPartyXp(zone, xpRecipient, target.xpReward ?? 0);
+            awardPartyXp(zone, xpRecipient, target.xpReward ?? 0, target.level);
           }
         }
       } else if (entity.order.action === "technique") {
@@ -1931,7 +1992,7 @@ async function worldTick() {
             entity.order = undefined;
 
             // Grant XP on kill — shared with party members in same zone
-            awardPartyXp(zone, techXpRecipient, target.xpReward ?? 0);
+            awardPartyXp(zone, techXpRecipient, target.xpReward ?? 0, target.level);
           } else {
             // Technique fired — clear order so AI picks next action
             entity.order = undefined;

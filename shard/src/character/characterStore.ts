@@ -16,6 +16,10 @@ export interface CharacterSaveData {
   raceId: string;
   classId: string;
   gender?: string;
+  skinColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
+  origin?: string;
   zone: string;
   x: number;
   y: number;
@@ -94,6 +98,10 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
     gender: raw.gender,
+    skinColor: raw.skinColor || undefined,
+    hairStyle: raw.hairStyle || undefined,
+    eyeColor: raw.eyeColor || undefined,
+    origin: raw.origin || undefined,
     zone: raw.zone ?? "village-square",
     x: parseFloat(raw.x ?? "0"),
     y: parseFloat(raw.y ?? "0"),

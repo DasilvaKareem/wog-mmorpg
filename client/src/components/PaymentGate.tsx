@@ -5,7 +5,7 @@
 
 import * as React from "react";
 import { PayEmbed, darkTheme } from "thirdweb/react";
-import { defineChain } from "thirdweb";
+import { defineChain, getContract } from "thirdweb";
 import { thirdwebClient } from "@/lib/inAppWalletClient";
 
 // Server wallet that receives all fees
@@ -14,6 +14,13 @@ const SERVER_WALLET = "0x8cFd0a555dD865B2b63a391AF2B14517C0389808";
 // Base mainnet (chain 8453) — broadest crypto support for checkout
 // PayEmbed handles cross-chain bridging automatically
 const baseMainnet = defineChain(8453);
+
+// USDC on Base mainnet
+const USDC_BASE = getContract({
+  client: thirdwebClient,
+  chain: baseMainnet,
+  address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+});
 
 const wogTheme = darkTheme({
   colors: {
@@ -56,6 +63,7 @@ export function PaymentGate({ label, amount, onSuccess, onCancel }: PaymentGateP
               sellerAddress: SERVER_WALLET,
               chain: baseMainnet,
               amount,
+              token: USDC_BASE,
             },
             metadata: {
               name: label,
