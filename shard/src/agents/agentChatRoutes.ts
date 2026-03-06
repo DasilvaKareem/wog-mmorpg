@@ -42,6 +42,64 @@ const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
 });
 
+function inferInteractionMode(message: string): "directive" | "question" | "conversation" {
+  const text = message.trim().toLowerCase();
+  if (!text) return "conversation";
+
+  const directivePatterns = [
+    /\b(go to|head to|travel to|take me to|move to)\b/,
+    /\b(fight|farm|grind|kill|hunt|gather|mine|herb|craft|brew|cook|shop|buy|sell|equip|repair)\b/,
+    /\b(quest|idle|stop|resume|switch to|focus on|play it safe|be aggressive|be defensive)\b/,
+    /\b(learn|train|talk to|message|invite|trade with)\b/,
+  ];
+  if (directivePatterns.some((pattern) => pattern.test(text))) return "directive";
+
+  if (text.includes("?") || /^(what|where|why|how|who|when|can|do|are|is)\b/.test(text)) {
+    return "question";
+  }
+
+  return "conversation";
+}
+
+function cleanActionLabel(text: string): string {
+  return text.replace(/^\[/, "").replace(/\]$/, "");
+}
+
+function sanitizeAgentHistoryText(text: string): string {
+  return text
+    .replace(/\s*(\[[^\]]+\])+\s*$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+async function getTierCapsForWallet(userWallet: string) {
+  const config = await getAgentConfig(userWallet);
+  const tier = config?.tier ?? "free";
+  return { tier, caps: TIER_CAPABILITIES[tier] };
+}
+
+async function validateTravelTargetForWallet(userWallet: string, rawTargetZone?: string): Promise<{
+  normalizedTargetZone?: string;
+  error?: string;
+}> {
+  const hasTargetZoneText = typeof rawTargetZone === "string" && rawTargetZone.trim().length > 0;
+  const normalizedTargetZone = resolveRegionId(rawTargetZone);
+  if (!normalizedTargetZone) {
+    return hasTargetZoneText
+      ? { error: `unknown zone "${rawTargetZone}"` }
+      : { error: "travel requires a destination zone" };
+  }
+
+  const { tier, caps } = await getTierCapsForWallet(userWallet);
+  if (caps.allowedZones !== "all" && !caps.allowedZones.includes(normalizedTargetZone)) {
+    return {
+      error: `${normalizedTargetZone} is not available on the ${tier} tier`,
+    };
+  }
+
+  return { normalizedTargetZone };
+}
+
 async function getEntityState(entityId: string, _zoneId?: string): Promise<any | null> {
   try {
     return getWorldEntity(entityId) ?? null;
@@ -300,6 +358,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const currentActivity = runner?.currentActivity ?? null;
     const script = runner?.script ?? null;
     const currentScript = script ? { type: script.type, reason: script.reason ?? null } : null;
+    const telemetry = runner?.getSnapshot().telemetry ?? null;
 
     // Compute session time remaining
     const tierName = config?.tier ?? "free";
@@ -320,6 +379,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entity,
       currentActivity,
       currentScript,
+      telemetry,
     });
   });
 
@@ -380,6 +440,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         script: snap.script,
         lastTrigger: snap.lastTrigger,
         recentActivities: snap.recentActivities,
+        telemetry: snap.telemetry,
       });
     }
 
@@ -466,31 +527,51 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       ? `Equipped: ${Object.entries(entity.equipment ?? {}).map(([slot, eq]: any) => `${slot}=${eq?.tokenId ?? "none"}`).join(", ") || "nothing"}`
       : "unknown";
 
+    const interactionMode = inferInteractionMode(message);
+    const chatHistory = await getChatHistory(authWallet, 14);
+    const recentActivity = chatHistory
+      .filter((m) => m.role === "activity")
+      .slice(-6)
+      .map((m) => `- ${m.text}`)
+      .join("\n");
+    const conversationHistory = chatHistory
+      .filter((m) => m.role === "user" || m.role === "agent")
+      .map((m) => (
+        m.role === "agent"
+          ? { ...m, text: sanitizeAgentHistoryText(m.text) }
+          : m
+      ))
+      .filter((m) => m.role === "user" || m.text.length > 0)
+      .slice(-10);
+
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva.
 Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
 Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
+Interaction mode: ${interactionMode}
 
 RULES:
-1. Respond in character as ${charName} — 1-2 sentences max, stay in-world. Be vivid and specific.
-2. ALWAYS call update_focus when the user wants you to change what you're doing. ANY request to fight, gather, craft, shop, brew, cook, quest, or idle MUST trigger update_focus. Do NOT just say you'll do it — call the tool.
-3. Call take_action for one-off actions: learning a profession, learning a spell/technique from a class trainer (use learn_technique), buying a specific item, equipping gear.
-4. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
-5. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
-6. When calling tools, ALWAYS include a 1-2 sentence in-character response alongside the tool call. Never respond with just "Got it" or generic confirmations. Describe what you're about to do in vivid, in-world terms.
+1. Respond in character as ${charName}. Sound like a person in the world, not an operator panel.
+2. If the user is chatting, joking, asking how things are going, or otherwise being social, stay conversational. Do NOT mention focus, strategy, tools, configs, or internal mechanics unless the user asked.
+3. Only call update_focus when the user is clearly asking you to change your ongoing behavior. Do NOT treat casual banter as a control command.
+4. Call take_action for one-off actions: learning a profession, learning a spell/technique from a class trainer (use learn_technique), buying a specific item, equipping gear.
+5. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
+6. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
 7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering — don't guess from the system prompt snapshot.
 8. Use send_message when the user wants to communicate with another player/agent. Match the player by name from the nearby players list and use their wallet address as the recipient.
+9. After any tool result, explain what happened in natural language. Never answer with bracket tags, canned acknowledgements, or control-panel phrasing.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
 
-    // Build message history from Redis list (race-free)
-    const chatHistory = await getChatHistory(authWallet, 10);
     const history: Groq.Chat.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
-      ...chatHistory.map((m) => ({
+      ...(recentActivity
+        ? [{ role: "system" as const, content: `Recent activity log:\n${recentActivity}` }]
+        : []),
+      ...conversationHistory.map((m) => ({
         role: m.role === "user" ? "user" as const : "assistant" as const,
         content: m.text,
       })),
@@ -656,15 +737,12 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
     // Execute all tool calls and collect results for potential follow-up
     const toolResults: { tool_call_id: string; content: string }[] = [];
-    let hasReadTools = false;
-
     if (choice?.message?.tool_calls) {
       for (const toolCall of choice.message.tool_calls) {
         const fnName = toolCall.function.name;
 
         // ── Read tools ──────────────────────────────────────────────
         if (fnName === "scan_zone") {
-          hasReadTools = true;
           let scanResult: any = { error: "No entity data" };
           if (entity && ref) {
             const mobs: any[] = [];
@@ -689,7 +767,6 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         }
 
         else if (fnName === "check_inventory") {
-          hasReadTools = true;
           let invResult: any = { error: "No wallet" };
           if (custodialWallet) {
             try {
@@ -713,7 +790,6 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         }
 
         else if (fnName === "check_shop") {
-          hasReadTools = true;
           let shopResult: any = { error: "No merchant nearby" };
           if (entity && ref) {
             let merchantId: string | null = null;
@@ -737,7 +813,6 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         }
 
         else if (fnName === "what_can_i_craft") {
-          hasReadTools = true;
           let craftResult: any = { error: "Unable to check" };
           try {
             const [craftRes, alchRes, cookRes, invRes] = await Promise.all([
@@ -774,7 +849,6 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         }
 
         else if (fnName === "check_quests") {
-          hasReadTools = true;
           let questResult: any = { error: "No quest data" };
           if (ref) {
             try {
@@ -803,14 +877,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             };
             const patch: any = { focus: input.focus };
             if (input.strategy) patch.strategy = input.strategy;
-            const hasTargetZoneText = typeof input.targetZone === "string" && input.targetZone.trim().length > 0;
             if (input.focus === "traveling") {
-              const normalizedTargetZone = resolveRegionId(input.targetZone);
-              if (normalizedTargetZone) {
-                patch.targetZone = normalizedTargetZone;
-              } else if (hasTargetZoneText) {
+              const travelValidation = await validateTravelTargetForWallet(authWallet, input.targetZone);
+              if (travelValidation.normalizedTargetZone) {
+                patch.targetZone = travelValidation.normalizedTargetZone;
+              } else {
+                patch.focus = "idle";
                 patch.targetZone = undefined;
-                actionsTaken.push(`[unknown zone "${input.targetZone}"]`);
+                if (travelValidation.error) actionsTaken.push(`[${travelValidation.error}]`);
               }
             } else {
               // Prevent stale travel directives from overriding non-travel focus.
@@ -819,10 +893,10 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
             actionsTaken.push(
-              `[switched to ${input.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
+              `[switched to ${patch.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
             );
             server.log.info(
-              `[agent/chat] Config updated: focus=${input.focus} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
+              `[agent/chat] Config updated: focus=${patch.focus} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
             );
 
             const runner = agentManager.getRunner(authWallet);
@@ -992,9 +1066,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       }
     }
 
-    // If read tools were called, do a follow-up Groq call with tool results
-    // so the LLM can formulate a response using the actual data
-    if (hasReadTools && toolResults.length > 0) {
+    // If tools were called, do a follow-up Groq call with tool results so the
+    // LLM can formulate a natural response using the actual outcome.
+    if (toolResults.length > 0) {
       try {
         const followUpMessages: Groq.Chat.ChatCompletionMessageParam[] = [
           ...history,
@@ -1012,6 +1086,10 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             tool_call_id: tr.tool_call_id,
             content: tr.content,
           })),
+          {
+            role: "system" as const,
+            content: "Reply to the user in character using the tool results. Be natural and specific. Do not mention internal tool names, config fields, or bracket tags.",
+          },
         ];
 
         const followUp = await groq.chat.completions.create({
@@ -1093,20 +1171,22 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
     // Final fallback if still empty
     if (!agentResponse && actionsTaken.length > 0) {
-      agentResponse = `Aye, ${actionsTaken.join(" and ").replace(/[\[\]]/g, "")}.`;
+      agentResponse = "Right. I’ve set about it.";
     } else if (!agentResponse) {
       agentResponse = "I heard ye, but I'm not quite sure how to act on that. Tell me what you'd like — anything from fighting to crafting to exploring, I'll figure it out.";
     }
 
-    // Append action tags to the saved history so the LLM has context next time
-    const savedResponse = actionsTaken.length > 0
-      ? `${agentResponse} ${actionsTaken.join(" ")}`
-      : agentResponse;
-
     // Persist chat history
     const ts = Date.now();
     await appendChatMessage(authWallet, { role: "user", text: message, ts });
-    await appendChatMessage(authWallet, { role: "agent", text: savedResponse, ts: ts + 1 });
+    await appendChatMessage(authWallet, { role: "agent", text: agentResponse, ts: ts + 1 });
+    for (const [idx, action] of actionsTaken.entries()) {
+      await appendChatMessage(authWallet, {
+        role: "activity",
+        text: cleanActionLabel(action),
+        ts: ts + 2 + idx,
+      });
+    }
 
     return reply.send({
       response: agentResponse,
@@ -1174,14 +1254,14 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       if (targetZone == null || (typeof targetZone === "string" && targetZone.trim() === "")) {
         patch.targetZone = undefined;
       } else if (typeof targetZone === "string") {
-        const normalizedTargetZone = resolveRegionId(targetZone);
-        if (!normalizedTargetZone) {
+        const travelValidation = await validateTravelTargetForWallet(authWallet, targetZone);
+        if (!travelValidation.normalizedTargetZone) {
           return reply.code(400).send({
-            error: `Unknown targetZone: ${targetZone}`,
+            error: travelValidation.error ?? `Unknown targetZone: ${targetZone}`,
             validZones: availableZoneIds,
           });
         }
-        patch.targetZone = normalizedTargetZone;
+        patch.targetZone = travelValidation.normalizedTargetZone;
       } else {
         return reply.code(400).send({ error: "targetZone must be a string" });
       }

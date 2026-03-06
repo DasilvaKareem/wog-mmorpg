@@ -31,6 +31,14 @@ interface AgentSnapshot {
   currentActivity: string;
   script: { type: string; reason: string | null } | null;
   running: boolean;
+  telemetry: {
+    loop: { count: number; avgMs: number; maxMs: number; lastMs: number };
+    walletBalance: { count: number; avgMs: number; maxMs: number; lastMs: number };
+    supervisor: { count: number; avgMs: number; maxMs: number; lastMs: number; errors: number };
+    commands: { total: number; move: number; attack: number; travel: number; failed: number; lastAt: number | null };
+    triggers: Record<string, number>;
+    lastLoopAt: number | null;
+  };
 }
 
 interface PlayerInfo {
@@ -71,6 +79,11 @@ function timeAgo(ts: number): string {
 function truncHash(hash: string): string {
   if (hash.length <= 14) return hash;
   return hash.slice(0, 8) + "..." + hash.slice(-4);
+}
+
+function formatMs(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(2)}s`;
+  return `${Math.round(ms)}ms`;
 }
 
 // Stat box used across the page
@@ -306,12 +319,21 @@ export function AdminDashboardPage(): React.ReactElement {
                         <span className="flex-[2]">Activity</span>
                       </div>
                       {data.agents.list.map((a, i) => (
-                        <div key={i} className="flex items-center border-b border-[#1e2842] px-3 py-2 text-[9px] last:border-b-0 hover:bg-[#1a2240]/50" style={{ fontFamily: "monospace" }}>
-                          <span className="flex-[2] truncate text-[#aa44ff]">{a.wallet.slice(0, 8)}...</span>
-                          <span className="flex-1 truncate text-[#9aa7cc]">{a.zone}</span>
-                          <span className="flex-[2] truncate text-[#54f28b]">
-                            {a.script ? `[${a.script.type}]` : ""} {a.currentActivity || "idle"}
-                          </span>
+                        <div key={i} className="border-b border-[#1e2842] px-3 py-2 text-[9px] last:border-b-0 hover:bg-[#1a2240]/50" style={{ fontFamily: "monospace" }}>
+                          <div className="flex items-center">
+                            <span className="flex-[2] truncate text-[#aa44ff]">{a.wallet.slice(0, 8)}...</span>
+                            <span className="flex-1 truncate text-[#9aa7cc]">{a.zone}</span>
+                            <span className="flex-[2] truncate text-[#54f28b]">
+                              {a.script ? `[${a.script.type}]` : ""} {a.currentActivity || "idle"}
+                            </span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[8px] text-[#7f8ab5]">
+                            <span>loop {formatMs(a.telemetry.loop.avgMs)} avg</span>
+                            <span>balance {formatMs(a.telemetry.walletBalance.avgMs)} avg</span>
+                            <span>supervisor {formatMs(a.telemetry.supervisor.avgMs)} avg</span>
+                            <span>cmd {a.telemetry.commands.total}</span>
+                            <span>fail {a.telemetry.commands.failed + a.telemetry.supervisor.errors}</span>
+                          </div>
                         </div>
                       ))}
                     </>

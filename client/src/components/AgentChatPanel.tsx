@@ -38,6 +38,14 @@ interface AgentStatusData {
   } | null;
   currentActivity: string | null;
   currentScript: { type: string; reason?: string } | null;
+  telemetry: {
+    loop: { count: number; avgMs: number; maxMs: number; lastMs: number };
+    walletBalance: { count: number; avgMs: number; maxMs: number; lastMs: number };
+    supervisor: { count: number; avgMs: number; maxMs: number; lastMs: number; errors: number };
+    commands: { total: number; move: number; attack: number; travel: number; failed: number; lastAt: number | null };
+    triggers: Record<string, number>;
+    lastLoopAt: number | null;
+  } | null;
 }
 
 const FOCUS_COLORS: Record<string, string> = {
@@ -367,6 +375,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           {activity && (
             <div className="text-[11px] mt-1 truncate" style={{ color: activity.startsWith("⚠") ? "#e0af68" : "#7ab893" }}>
               {activity.startsWith("⚠") ? activity : `▸ ${activity}`}
+            </div>
+          )}
+          {status.telemetry && (
+            <div className="mt-1 flex flex-wrap gap-x-3 text-[10px] text-[#5f6b8f]">
+              <span>loop {Math.round(status.telemetry.loop.avgMs)}ms</span>
+              <span>balance {Math.round(status.telemetry.walletBalance.avgMs)}ms</span>
+              <span>supervisor {Math.round(status.telemetry.supervisor.avgMs)}ms</span>
+              <span>cmd {status.telemetry.commands.total}</span>
             </div>
           )}
         </div>

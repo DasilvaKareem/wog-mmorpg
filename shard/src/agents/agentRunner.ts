@@ -40,6 +40,29 @@ const MOVE_REISSUE_MS = 4_000;
 const MOVE_PROGRESS_EPSILON = 4;
 const SUPERVISOR_EVENT_TYPES: ZoneEvent["type"][] = ["combat", "death", "kill", "levelup", "quest", "loot", "technique"];
 
+interface TimingMetric {
+  count: number;
+  avgMs: number;
+  maxMs: number;
+  lastMs: number;
+}
+
+interface AgentTelemetrySnapshot {
+  loop: TimingMetric;
+  walletBalance: TimingMetric;
+  supervisor: TimingMetric & { errors: number };
+  commands: {
+    total: number;
+    move: number;
+    attack: number;
+    travel: number;
+    failed: number;
+    lastAt: number | null;
+  };
+  triggers: Record<string, number>;
+  lastLoopAt: number | null;
+}
+
 /** Convert config focus -> natural-language directive for supervisor context. */
 function focusToDirective(focus: AgentFocus, targetZone?: string): string {
   switch (focus) {
@@ -119,6 +142,14 @@ export class AgentRunner {
   private moveToLastDistance = Number.POSITIVE_INFINITY;
   private moveToLastCommandAt = 0;
   private moveToLastLogAt = 0;
+  private telemetry = {
+    loop: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
+    walletBalance: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
+    supervisor: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0, errors: 0 },
+    commands: { total: 0, move: 0, attack: 0, travel: 0, failed: 0, lastAt: null as number | null },
+    triggers: {} as Record<string, number>,
+    lastLoopAt: null as number | null,
+  };
 
   constructor(userWallet: string) {
     this.userWallet = userWallet;
@@ -155,6 +186,7 @@ export class AgentRunner {
         ? { type: this.lastTrigger.type, detail: this.lastTrigger.detail }
         : null,
       running: this.running,
+      telemetry: this.getTelemetrySnapshot(),
     };
   }
 
@@ -366,6 +398,41 @@ export class AgentRunner {
     }
   }
 
+  private updateTimingMetric(metric: TimingMetric, durationMs: number): void {
+    metric.count += 1;
+    metric.lastMs = durationMs;
+    metric.maxMs = Math.max(metric.maxMs, durationMs);
+    metric.avgMs += (durationMs - metric.avgMs) / metric.count;
+  }
+
+  private getTelemetrySnapshot(): AgentTelemetrySnapshot {
+    const round = (value: number) => Math.round(value * 10) / 10;
+    return {
+      loop: {
+        count: this.telemetry.loop.count,
+        avgMs: round(this.telemetry.loop.avgMs),
+        maxMs: round(this.telemetry.loop.maxMs),
+        lastMs: round(this.telemetry.loop.lastMs),
+      },
+      walletBalance: {
+        count: this.telemetry.walletBalance.count,
+        avgMs: round(this.telemetry.walletBalance.avgMs),
+        maxMs: round(this.telemetry.walletBalance.maxMs),
+        lastMs: round(this.telemetry.walletBalance.lastMs),
+      },
+      supervisor: {
+        count: this.telemetry.supervisor.count,
+        avgMs: round(this.telemetry.supervisor.avgMs),
+        maxMs: round(this.telemetry.supervisor.maxMs),
+        lastMs: round(this.telemetry.supervisor.lastMs),
+        errors: this.telemetry.supervisor.errors,
+      },
+      commands: { ...this.telemetry.commands },
+      triggers: { ...this.telemetry.triggers },
+      lastLoopAt: this.telemetry.lastLoopAt,
+    };
+  }
+
   private async getZoneState(): Promise<{ entities: Record<string, any>; me: any; recentEvents: ZoneEvent[] } | null> {
     if (this.cachedZoneState) return this.cachedZoneState;
     if (!this.entityId) return null;
@@ -397,6 +464,21 @@ export class AgentRunner {
     if (!this.entityId) return;
     const entity = getWorldEntity(this.entityId);
     if (entity) entity.gotoMode = on;
+  }
+
+  private issueCommand(
+    command:
+      | { action: "move"; x: number; y: number }
+      | { action: "attack"; targetId: string }
+      | { action: "travel"; targetZone: string },
+  ): boolean {
+    if (!this.entityId) return false;
+    const ok = issueAgentCommand(this.entityId, command);
+    this.telemetry.commands.total += 1;
+    this.telemetry.commands[command.action] += 1;
+    this.telemetry.commands.lastAt = Date.now();
+    if (!ok) this.telemetry.commands.failed += 1;
+    return ok;
   }
 
   private getZoneEventSeq(eventId: string): number {
@@ -470,7 +552,7 @@ export class AgentRunner {
         void this.logActivity(`Walking to ${target.name ?? "target"} (${Math.round(dist)} away)`);
         this.moveToLastLogAt = now;
       }
-      issueAgentCommand(this.entityId, { action: "move", x: target.x, y: target.y });
+      this.issueCommand({ action: "move", x: target.x, y: target.y });
       this.moveToLastCommandAt = now;
     }
 
@@ -479,7 +561,10 @@ export class AgentRunner {
 
   async getWalletBalance(): Promise<{ copper: number; items: any[] }> {
     if (!this.custodialWallet) return { copper: 0, items: [] };
-    return fetchWalletBalance(this.custodialWallet);
+    const startedAt = performance.now();
+    const balance = await fetchWalletBalance(this.custodialWallet);
+    this.updateTimingMetric(this.telemetry.walletBalance, performance.now() - startedAt);
+    return balance;
   }
 
   private findNextZoneForLevel(level: number): string | null {
@@ -533,7 +618,7 @@ export class AgentRunner {
       getZoneState: () => self.getZoneState(),
       findNearestEntity: (e, m, p) => self.findNearestEntity(e, m, p),
       moveToEntity: (m, t, d?) => self.moveToEntity(m, t, d),
-      issueCommand: (command) => issueAgentCommand(self.entityId!, command),
+      issueCommand: (command) => self.issueCommand(command),
       logActivity: (text) => { void self.logActivity(text); },
       setEntityGotoMode: (on) => self.setEntityGotoMode(on),
       getWalletBalance: () => self.getWalletBalance(),
@@ -593,6 +678,7 @@ export class AgentRunner {
       ?? detectTrigger(entity, entities, triggerState);
 
     if (trigger) {
+      this.telemetry.triggers[trigger.type] = (this.telemetry.triggers[trigger.type] ?? 0) + 1;
       this.ticksSinceLastDecision = 0;
       this.lastKnownLevel = entity.level ?? 1;
       this.lastKnownZone = this.currentRegion;
@@ -656,6 +742,7 @@ export class AgentRunner {
         this.ticksOnCurrentScript = 0;
         void this.logActivity(`[script] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else {
+        const supervisorStartedAt = performance.now();
         try {
           const { copper: walletGoldCopper } = await this.getWalletBalance();
           const newScript = await runSupervisor(trigger, {
@@ -670,10 +757,13 @@ export class AgentRunner {
             apiCall: this.api!,
             walletGoldCopper,
           });
+          this.updateTimingMetric(this.telemetry.supervisor, performance.now() - supervisorStartedAt);
           this.currentScript = newScript;
           this.ticksOnCurrentScript = 0;
           void this.logActivity(`[AI] ${newScript.type}: ${newScript.reason ?? ""}`);
         } catch (err: any) {
+          this.updateTimingMetric(this.telemetry.supervisor, performance.now() - supervisorStartedAt);
+          this.telemetry.supervisor.errors += 1;
           console.warn(`[agent:${this.walletTag}] Supervisor failed: ${err.message?.slice(0, 60)}`);
           this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
           this.ticksOnCurrentScript = 0;
@@ -772,6 +862,7 @@ export class AgentRunner {
     let firstTickDone = false;
 
     while (this.running) {
+      const loopStartedAt = performance.now();
       try {
         this.cachedZoneState = null;
 
@@ -919,6 +1010,9 @@ export class AgentRunner {
           this.running = false;
           return;
         }
+      } finally {
+        this.telemetry.lastLoopAt = Date.now();
+        this.updateTimingMetric(this.telemetry.loop, performance.now() - loopStartedAt);
       }
 
       await sleep(TICK_MS);
