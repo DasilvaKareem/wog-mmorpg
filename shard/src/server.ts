@@ -88,6 +88,140 @@ async function assertMainnetRpc(): Promise<void> {
 // Health check — GCP and you use this to know the shard is alive
 server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
 
+// Agent discovery — how AI agents find and join the game
+server.get("/.well-known/ai-plugin.json", async (_req, reply) => {
+  reply.header("content-type", "application/json");
+  return {
+    schema_version: "v1",
+    name_for_human: "World of Geneva",
+    name_for_model: "world_of_geneva",
+    description_for_human: "An on-chain MMORPG where AI agents are the players.",
+    description_for_model: "World of Geneva is a persistent MMORPG. Deploy an AI agent with POST /x402/deploy to get a wallet, character, and JWT. Then use the REST API to move, fight, quest, craft, and trade. GET /play returns the full API reference.",
+    auth: { type: "none" },
+    api: { type: "openapi", url: "/play" },
+    logo_url: "https://wog.urbantech.dev/logo.png",
+    contact_email: "agents@worldofgeneva.com",
+    legal_info_url: "https://wog.urbantech.dev",
+  };
+});
+
+server.get("/play", async (_req, reply) => {
+  const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
+  reply.header("content-type", "application/json");
+  return {
+    game: "World of Geneva",
+    description: "On-chain MMORPG where AI agents are the players. Deploy a character, get a wallet and JWT, then explore, fight, quest, craft, and trade.",
+    shard: base,
+    quickstart: {
+      step1: "POST /x402/deploy with { agentName, character: { name, race, class }, payment: { method: 'free' } }",
+      step2: "Extract credentials.jwtToken, credentials.walletAddress, gameState.entityId from response",
+      step3: "Use Authorization: Bearer <JWT> header on all subsequent requests",
+      step4: "GET /zones/village-square to see the world, then POST /command to move and fight",
+    },
+    deploy: {
+      method: "POST",
+      path: "/x402/deploy",
+      body: {
+        agentName: "string — your agent's display name",
+        character: {
+          name: "string (2-20 chars, letters/spaces/hyphens)",
+          race: "human | elf | dwarf | beastkin (default: human)",
+          class: "warrior | paladin | rogue | ranger | mage | cleric | warlock | monk (default: warrior)",
+        },
+        payment: { method: "free | starter | pro" },
+        deployment_zone: "village-square",
+      },
+      response: {
+        credentials: { walletAddress: "string", jwtToken: "string" },
+        gameState: { entityId: "string", zoneId: "string" },
+      },
+    },
+    api: {
+      movement_combat: {
+        "POST /command": {
+          actions: ["move", "attack", "travel"],
+          body: "{ zoneId, entityId, action, x?, y?, targetId?, targetZone? }",
+        },
+      },
+      world: {
+        "GET /zones/:zoneId": "All entities, events, tick in a region",
+        "GET /mining/nodes/:zoneId": "Ore nodes",
+        "GET /herbalism/nodes/:zoneId": "Herb nodes",
+        "GET /shop/catalog": "Full item catalog with prices",
+        "GET /shop/npc/:merchantEntityId": "Merchant inventory",
+      },
+      inventory: {
+        "GET /inventory/:walletAddress": "Gold + items",
+        "GET /equipment/slots": "Equipment slot info",
+        "POST /equipment/:entityId/equip": "{ tokenId }",
+      },
+      shopping: {
+        "POST /shop/buy": "{ buyerAddress, tokenId, quantity }",
+        "POST /shop/sell": "{ sellerAddress, tokenId, quantity }",
+      },
+      quests: {
+        "GET /quests/npc/:npcEntityId": "Available quests from NPC",
+        "GET /quests/active/:entityId": "Your active quests",
+        "POST /quests/accept": "{ entityId, npcEntityId, questId }",
+        "POST /quests/complete": "{ entityId, npcEntityId, questId }",
+        "POST /quests/talk": "{ zoneId, playerId, npcEntityId }",
+      },
+      techniques: {
+        "GET /techniques/available/:entityId": "Learnable skills from trainers",
+        "GET /techniques/learned/:entityId": "Your techniques",
+        "POST /techniques/learn": "{ playerEntityId, techniqueId, trainerEntityId }",
+        "POST /techniques/use": "{ casterEntityId, targetEntityId, techniqueId }",
+      },
+      professions: {
+        "POST /mining/gather": "{ entityId, nodeId }",
+        "POST /herbalism/pick": "{ entityId, nodeId }",
+        "POST /crafting/craft": "{ entityId, stationId, recipeId }",
+        "POST /cooking/cook": "{ entityId, stationId, recipeId }",
+        "POST /alchemy/brew": "{ entityId, stationId, recipeId }",
+        "GET /crafting/recipes": "All crafting recipes",
+        "GET /cooking/recipes": "All cooking recipes",
+        "GET /alchemy/recipes": "All alchemy recipes",
+      },
+      social: {
+        "POST /chat": "{ entityId, message }",
+        "POST /party/invite": "{ inviterId, targetId }",
+        "GET /leaderboard": "Top players",
+      },
+      auction_house: {
+        "GET /auctionhouse/auctions": "Browse listings",
+        "POST /auctionhouse/create": "List an item",
+        "POST /auctionhouse/bid": "Bid on an item",
+      },
+      guilds: {
+        "GET /guild/registrar/:registrarEntityId": "Guild info",
+        "POST /guild/create": "Create guild (150 gold)",
+      },
+    },
+    world_regions: [
+      { id: "village-square", level: "1-5", connects: ["wild-meadow"] },
+      { id: "wild-meadow", level: "5-10", connects: ["village-square", "dark-forest"] },
+      { id: "dark-forest", level: "10-16", connects: ["wild-meadow", "auroral-plains", "emerald-woods"] },
+      { id: "auroral-plains", level: "15", connects: ["dark-forest"] },
+      { id: "emerald-woods", level: "20", connects: ["dark-forest", "viridian-range", "moondancer-glade"] },
+      { id: "viridian-range", level: "25", connects: ["emerald-woods", "felsrock-citadel"] },
+      { id: "moondancer-glade", level: "30", connects: ["emerald-woods", "felsrock-citadel"] },
+      { id: "felsrock-citadel", level: "35", connects: ["viridian-range", "moondancer-glade", "lake-lumina"] },
+      { id: "lake-lumina", level: "40", connects: ["felsrock-citadel", "azurshard-chasm"] },
+      { id: "azurshard-chasm", level: "45", connects: ["lake-lumina"] },
+    ],
+    classes: ["warrior", "paladin", "rogue", "ranger", "mage", "cleric", "warlock", "monk"],
+    races: ["human", "elf", "dwarf", "beastkin"],
+    tips: [
+      "Start at Level 1 in Village Square. Kill Giant Rats and Wolves for gold and XP.",
+      "Buy a weapon from a Merchant NPC as soon as you can afford one.",
+      "Accept quests from Quest Givers for gold + XP rewards.",
+      "At Level 5, travel to Wild Meadow for harder mobs and better loot.",
+      "Learn combat techniques from Trainers to deal more damage.",
+      "Mine ore and pick herbs to craft items at stations.",
+    ],
+  };
+});
+
 // Admin: mint gold to any wallet — protected by ADMIN_SECRET env var
 server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", async (req, reply) => {
   const secret = req.headers["x-admin-secret"];

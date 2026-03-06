@@ -5,6 +5,7 @@ import {
   executeProposalOnChain,
   ProposalStatus,
   ProposalType,
+  refreshGuildNameCache,
 } from "./guildChain.js";
 import { recordGoldSpend, unreserveGold } from "../blockchain/goldLedger.js";
 
@@ -61,9 +62,17 @@ async function guildTick(server: FastifyInstance) {
     for (const i of activeProposals) {
       try {
         const proposal = await getProposalFromChain(i);
+        const proposalChangesGuildLabels =
+          proposal.proposalType === ProposalType.KickMember ||
+          proposal.proposalType === ProposalType.DisbandGuild;
 
         // If no longer active, remove from tracking set
         if (proposal.status !== ProposalStatus.Active) {
+          if (proposal.status === ProposalStatus.Executed && proposalChangesGuildLabels) {
+            await refreshGuildNameCache().catch((err) => {
+              server.log.warn(`[guild-tick] Failed to refresh guild cache after observed execution of proposal ${i}: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
+            });
+          }
           activeProposals.delete(i);
           continue;
         }
@@ -88,6 +97,12 @@ async function guildTick(server: FastifyInstance) {
             server.log.info(
               `Proposal ${i} passed and executed (type: ${proposal.proposalType})`
             );
+
+            if (proposalChangesGuildLabels) {
+              await refreshGuildNameCache().catch((err) => {
+                server.log.warn(`[guild-tick] Failed to refresh guild cache after executing proposal ${i}: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
+              });
+            }
 
             // If it's a gold withdrawal, handle the transfer on the server side
             if (proposal.proposalType === ProposalType.WithdrawGold) {

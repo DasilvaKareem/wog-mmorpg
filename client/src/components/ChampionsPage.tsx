@@ -222,7 +222,7 @@ function ChampionSidebar({
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 
-type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "inbox" | "party" | "friends" | "guild" | "gold-shop";
+type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "inbox" | "party" | "friends" | "guild" | "gold-shop" | "plan" | "reputation";
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
@@ -235,7 +235,9 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
     { id: "inbox",       label: "Inbox"      },
     { id: "party",       label: "Party"      },
     { id: "friends",     label: "Friends"    },
+    { id: "reputation",   label: "Reputation" },
     { id: "gold-shop",   label: "Gold Shop"  },
+    { id: "plan",         label: "Plan"       },
   ];
   return (
     <div className="flex gap-0 border-b-2 border-[#2a3450] overflow-x-auto">
@@ -1851,6 +1853,427 @@ function GuildTab({ custodialWallet, ownerWallet }: { custodialWallet: string | 
   );
 }
 
+// ── Reputation Tab ────────────────────────────────────────────────────────
+
+interface RepScore {
+  combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; rank: string;
+}
+
+interface RepTimelinePoint {
+  ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number;
+  category?: string; delta?: number; reason?: string;
+}
+
+const REP_CATEGORIES = [
+  { key: "combat" as const,   label: "Combat",   color: "#ff6b6b" },
+  { key: "economic" as const, label: "Economic", color: "#ffcc00" },
+  { key: "social" as const,   label: "Social",   color: "#5dadec" },
+  { key: "crafting" as const, label: "Crafting", color: "#54f28b" },
+  { key: "agent" as const,    label: "Agent",    color: "#b48efa" },
+];
+
+function ReputationGraph({ timeline, width, height }: { timeline: RepTimelinePoint[]; width: number; height: number }) {
+  if (timeline.length < 2) {
+    return (
+      <div className="flex items-center justify-center border-2 border-[#2a3450] bg-[#060d12]" style={{ width, height }}>
+        <p className="text-[10px] text-[#596a8a]">Not enough data for graph yet</p>
+      </div>
+    );
+  }
+
+  const pad = { top: 20, right: 12, bottom: 28, left: 36 };
+  const w = width - pad.left - pad.right;
+  const h = height - pad.top - pad.bottom;
+
+  const minTs = timeline[0].ts;
+  const maxTs = timeline[timeline.length - 1].ts;
+  const tRange = maxTs - minTs || 1;
+
+  // Y axis: 0..1000
+  const yMin = 0;
+  const yMax = 1000;
+
+  const scaleX = (ts: number) => pad.left + ((ts - minTs) / tRange) * w;
+  const scaleY = (v: number) => pad.top + h - ((v - yMin) / (yMax - yMin)) * h;
+
+  const buildPath = (key: keyof RepTimelinePoint) => {
+    return timeline
+      .map((p, i) => `${i === 0 ? "M" : "L"}${scaleX(p.ts).toFixed(1)},${scaleY(p[key] as number).toFixed(1)}`)
+      .join(" ");
+  };
+
+  // Y gridlines
+  const yTicks = [0, 250, 500, 750, 1000];
+
+  // X labels — show a few time labels
+  const xLabelCount = Math.min(5, timeline.length);
+  const xLabels: { ts: number; x: number }[] = [];
+  for (let i = 0; i < xLabelCount; i++) {
+    const idx = Math.floor((i / (xLabelCount - 1)) * (timeline.length - 1));
+    xLabels.push({ ts: timeline[idx].ts, x: scaleX(timeline[idx].ts) });
+  }
+
+  return (
+    <svg width={width} height={height} className="border-2 border-[#2a3450] bg-[#060d12]">
+      {/* Y gridlines */}
+      {yTicks.map((v) => (
+        <g key={v}>
+          <line x1={pad.left} y1={scaleY(v)} x2={width - pad.right} y2={scaleY(v)} stroke="#1e2842" strokeWidth={1} />
+          <text x={pad.left - 4} y={scaleY(v) + 3} fill="#596a8a" fontSize={8} textAnchor="end" fontFamily="monospace">{v}</text>
+        </g>
+      ))}
+      {/* X labels */}
+      {xLabels.map((l, i) => (
+        <text key={i} x={l.x} y={height - 4} fill="#596a8a" fontSize={7} textAnchor="middle" fontFamily="monospace">
+          {new Date(l.ts).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+        </text>
+      ))}
+      {/* Category lines */}
+      {REP_CATEGORIES.map((cat) => (
+        <path key={cat.key} d={buildPath(cat.key)} fill="none" stroke={cat.color} strokeWidth={1.5} opacity={0.7} />
+      ))}
+      {/* Overall line (bold) */}
+      <path d={buildPath("overall")} fill="none" stroke="#d6deff" strokeWidth={2} />
+    </svg>
+  );
+}
+
+function ReputationTab({ custodialWallet }: { custodialWallet: string | null }) {
+  const [rep, setRep] = React.useState<RepScore | null>(null);
+  const [timeline, setTimeline] = React.useState<RepTimelinePoint[]>([]);
+  const [history, setHistory] = React.useState<Array<{ category: string; delta: number; reason: string; timestamp: number }>>([]);
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    if (!custodialWallet) return;
+    setLoading(true);
+    Promise.all([
+      fetch(`${API_URL}/api/reputation/${custodialWallet}`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/reputation/${custodialWallet}/timeline?limit=200`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/reputation/${custodialWallet}/history?limit=50`).then(r => r.ok ? r.json() : null),
+    ]).then(([repData, tlData, histData]) => {
+      if (repData?.reputation) setRep(repData.reputation);
+      if (tlData?.timeline) setTimeline(tlData.timeline);
+      if (histData?.history) setHistory(histData.history);
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, [custodialWallet]);
+
+  if (!custodialWallet) {
+    return <p className="text-[12px] text-[#7a84a8] py-8 text-center">Deploy a champion to view reputation.</p>;
+  }
+
+  if (loading) {
+    return <p className="text-[11px] text-[#7a84a8] animate-pulse py-8 text-center">Loading reputation...</p>;
+  }
+
+  if (!rep) {
+    return <p className="text-[12px] text-[#7a84a8] py-8 text-center">No reputation data found.</p>;
+  }
+
+  const rankColor = RANK_COLORS[rep.rank] ?? "#95A5A6";
+
+  return (
+    <div className="space-y-4">
+      {/* Header: Overall + Rank */}
+      <div className="flex items-center justify-between border-b border-[#2a3450] pb-3">
+        <div>
+          <p className="text-[13px] text-[#d6deff] font-bold">ERC-8004 Agent Reputation</p>
+          <p className="text-[10px] text-[#7a84a8]">On-chain reputation across 5 categories</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[22px] font-bold" style={{ color: rankColor, textShadow: "2px 2px 0 #000" }}>{rep.overall}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: rankColor }}>{rep.rank}</p>
+        </div>
+      </div>
+
+      {/* Category bars */}
+      <div className="grid gap-2">
+        {REP_CATEGORIES.map((cat) => {
+          const val = rep[cat.key];
+          const pct = (val / 1000) * 100;
+          return (
+            <div key={cat.key} className="flex items-center gap-3">
+              <span className="text-[10px] text-[#7a84a8] w-16 shrink-0 uppercase tracking-wide">{cat.label}</span>
+              <div className="flex-1 h-4 bg-[#0b1020] border border-[#2a3450] relative overflow-hidden">
+                <div
+                  className="h-full transition-all duration-500"
+                  style={{ width: `${pct}%`, backgroundColor: cat.color + "cc" }}
+                />
+                <span className="absolute inset-0 flex items-center justify-center text-[9px] font-bold text-[#d6deff]" style={{ textShadow: "1px 1px 0 #000" }}>
+                  {val}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Timeline graph */}
+      <div>
+        <p className="text-[11px] text-[#7a84a8] mb-2 uppercase tracking-wide">Reputation Over Time</p>
+        <div className="flex gap-3 mb-2 flex-wrap">
+          {REP_CATEGORIES.map((cat) => (
+            <span key={cat.key} className="flex items-center gap-1 text-[9px]">
+              <span className="inline-block w-2 h-2" style={{ backgroundColor: cat.color }} />
+              <span style={{ color: cat.color }}>{cat.label}</span>
+            </span>
+          ))}
+          <span className="flex items-center gap-1 text-[9px]">
+            <span className="inline-block w-2 h-2 bg-[#d6deff]" />
+            <span className="text-[#d6deff]">Overall</span>
+          </span>
+        </div>
+        <ReputationGraph timeline={timeline} width={580} height={220} />
+      </div>
+
+      {/* Recent feedback */}
+      {history.length > 0 && (
+        <div>
+          <p className="text-[11px] text-[#7a84a8] mb-2 uppercase tracking-wide">Recent Changes</p>
+          <div className="border-2 border-[#2a3450] bg-[#0b1020] max-h-48 overflow-y-auto">
+            {history.map((h, i) => (
+              <div key={i} className="flex items-center gap-2 border-b border-[#1e2842] last:border-b-0 px-3 py-1.5">
+                <span
+                  className="text-[10px] font-bold shrink-0 w-8 text-right"
+                  style={{ color: h.delta > 0 ? "#54f28b" : h.delta < 0 ? "#ff6b6b" : "#7a84a8" }}
+                >
+                  {h.delta > 0 ? "+" : ""}{h.delta}
+                </span>
+                <span className="text-[9px] text-[#7a84a8] uppercase tracking-wide shrink-0 w-14">{h.category}</span>
+                <span className="text-[10px] text-[#9aa7cc] truncate flex-1">{h.reason}</span>
+                <span className="text-[8px] text-[#596a8a] shrink-0">
+                  {new Date(h.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Plan / Membership Tab ─────────────────────────────────────────────────
+
+const PLANS = [
+  {
+    id: "free" as const,
+    name: "Free",
+    price: 0,
+    color: "#9aa7cc",
+    features: ["Scripted bot (no LLM)", "6-hour sessions", "3 starter zones", "50 gold bonus"],
+  },
+  {
+    id: "starter" as const,
+    name: "Starter",
+    price: 4.99,
+    color: "#54f28b",
+    features: ["LLM supervisor AI", "12-hour sessions", "All zones unlocked", "Retreat + techniques", "Self-adaptation", "500 gold bonus"],
+  },
+  {
+    id: "pro" as const,
+    name: "Pro",
+    price: 9.99,
+    color: "#ffcc00",
+    features: ["Everything in Starter", "24/7 sessions", "Auction house trading", "2,500 gold bonus", "Legendary item"],
+  },
+];
+
+function PlanTab({ wallet }: { wallet: string | null }) {
+  const [currentTier, setCurrentTier] = React.useState<string>("free");
+  const [loading, setLoading] = React.useState(true);
+  const [upgrading, setUpgrading] = React.useState<string | null>(null);
+  const [showPayment, setShowPayment] = React.useState<typeof PLANS[number] | null>(null);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const [promoCode, setPromoCode] = React.useState("");
+  const [redeemingPromo, setRedeemingPromo] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!wallet) return;
+    setLoading(true);
+    fetch(`${API_URL}/agent/tier/${wallet}`)
+      .then(r => r.json())
+      .then(d => setCurrentTier(d.tier ?? "free"))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [wallet]);
+
+  const handleUpgrade = async (plan: typeof PLANS[number], paymentTx?: string, promo?: string) => {
+    if (!wallet) return;
+    setUpgrading(plan.id);
+    setMessage(null);
+    try {
+      const token = await getAuthToken(wallet);
+      const body: Record<string, string> = { tier: plan.id };
+      if (paymentTx) body.paymentTx = paymentTx;
+      if (promo) body.promoCode = promo;
+      const res = await fetch(`${API_URL}/agent/upgrade-tier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.status === 402) {
+        // Need payment
+        setShowPayment(plan);
+        setUpgrading(null);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error || "Upgrade failed");
+      setCurrentTier(plan.id);
+      setMessage(data.message);
+      setShowPayment(null);
+    } catch (err: any) {
+      setMessage(err.message);
+    } finally {
+      setUpgrading(null);
+    }
+  };
+
+  if (loading) {
+    return <p className="text-[11px] text-[#7a84a8] animate-pulse py-8 text-center">Loading plan info...</p>;
+  }
+
+  // Payment flow
+  if (showPayment) {
+    return (
+      <div className="space-y-3">
+        <div className="border-2 border-[#ffcc00]/30 bg-[#1a1800] px-4 py-3">
+          <p className="text-[12px] font-bold" style={{ color: showPayment.color }}>Upgrade to {showPayment.name}</p>
+          <p className="text-[10px] text-[#9aa7cc] mt-0.5">One-time payment of ${showPayment.price} USD</p>
+        </div>
+        <PaymentGate
+          label={`${showPayment.name} Plan — $${showPayment.price}`}
+          amount={showPayment.price.toString()}
+          onSuccess={() => handleUpgrade(showPayment, "thirdweb-pay-confirmed")}
+          onCancel={() => setShowPayment(null)}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="border-b border-[#2a3450] pb-2">
+        <p className="text-[13px] text-[#d6deff] font-bold">Membership Plan</p>
+        <p className="text-[10px] text-[#7a84a8]">Manage your champion&apos;s capabilities and AI tier.</p>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-3">
+        {PLANS.map((plan) => {
+          const isCurrent = plan.id === currentTier;
+          return (
+            <div
+              key={plan.id}
+              className="border-2 p-4 flex flex-col gap-2 transition"
+              style={{
+                borderColor: isCurrent ? plan.color + "88" : "#2a3450",
+                backgroundColor: isCurrent ? plan.color + "08" : "#0b1020",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-bold" style={{ color: plan.color }}>{plan.name}</span>
+                {isCurrent && (
+                  <span className="text-[9px] uppercase tracking-wide border px-1.5 py-0.5" style={{ color: plan.color, borderColor: plan.color + "44" }}>
+                    Current
+                  </span>
+                )}
+              </div>
+              <p className="text-[14px] text-[#d6deff] font-bold">
+                {plan.price === 0 ? "Free" : `$${plan.price}`}
+                {plan.price > 0 && <span className="text-[10px] text-[#7a84a8] font-normal ml-1">one-time</span>}
+              </p>
+              <ul className="flex-1 space-y-1">
+                {plan.features.map((f) => (
+                  <li key={f} className="text-[10px] text-[#9aa7cc] flex items-start gap-1.5">
+                    <span className="text-[#54f28b] shrink-0 mt-px">+</span>
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              {!isCurrent && (
+                <button
+                  onClick={() => plan.price === 0 ? handleUpgrade(plan, "downgrade") : handleUpgrade(plan)}
+                  disabled={upgrading === plan.id}
+                  className="mt-2 border-2 px-3 py-2 text-[11px] uppercase tracking-wide font-bold transition hover:brightness-110 disabled:opacity-50"
+                  style={{
+                    borderColor: plan.color + "66",
+                    color: plan.price === 0 ? "#9aa7cc" : plan.color,
+                    backgroundColor: plan.price === 0 ? "#11182b" : plan.color + "11",
+                  }}
+                >
+                  {upgrading === plan.id ? "Processing..." : plan.price === 0 ? "Downgrade" : `Upgrade — $${plan.price}`}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Promo code */}
+      <div className="border-2 border-[#2a3450] bg-[#0b1020] p-4">
+        <p className="text-[11px] text-[#d6deff] font-bold mb-2">Have a promo code?</p>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={promoCode}
+            onChange={(e) => setPromoCode(e.target.value.toUpperCase())}
+            placeholder="Enter code"
+            className="flex-1 border-2 border-[#2a3450] bg-[#060d12] px-3 py-2 text-[12px] text-[#d6deff] uppercase tracking-wide font-mono placeholder:text-[#596a8a] outline-none focus:border-[#ffcc00]/40"
+          />
+          <button
+            onClick={async () => {
+              if (!promoCode.trim() || !wallet) return;
+              setRedeemingPromo(true);
+              setMessage(null);
+              try {
+                const token = await getAuthToken(wallet);
+                // First check what tier the promo grants by attempting upgrade
+                // Try pro first, then starter
+                for (const tryTier of ["pro", "starter"] as const) {
+                  const res = await fetch(`${API_URL}/agent/upgrade-tier`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                    body: JSON.stringify({ tier: tryTier, promoCode: promoCode.trim() }),
+                  });
+                  const data = await res.json();
+                  if (res.ok && data.ok) {
+                    setCurrentTier(tryTier);
+                    setMessage(data.message);
+                    setPromoCode("");
+                    break;
+                  }
+                  // If code is for a lower tier, try next
+                  if (data.error?.includes("not " + tryTier)) continue;
+                  // Other error — show it
+                  if (!res.ok) {
+                    setMessage(data.error || "Failed to redeem code.");
+                    break;
+                  }
+                }
+              } catch (err: any) {
+                setMessage(err.message);
+              } finally {
+                setRedeemingPromo(false);
+              }
+            }}
+            disabled={redeemingPromo || !promoCode.trim()}
+            className="border-2 border-[#ffcc00]/40 bg-[#ffcc00]/10 px-4 py-2 text-[11px] uppercase tracking-wide font-bold text-[#ffcc00] transition hover:bg-[#ffcc00]/20 disabled:opacity-40"
+          >
+            {redeemingPromo ? "..." : "Redeem"}
+          </button>
+        </div>
+      </div>
+
+      {message && (
+        <p className={`text-[11px] text-center ${message.includes("fail") || message.includes("error") || message.includes("Invalid") || message.includes("limit") || message.includes("already") ? "text-[#ff6b6b]" : "text-[#54f28b]"}`}>
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Gold Shop Tab ─────────────────────────────────────────────────────────
 
 interface GoldPack {
@@ -2228,7 +2651,9 @@ export function ChampionsPage(): React.ReactElement {
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
               {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "friends"     && <FriendsTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "reputation"  && <ReputationTab custodialWallet={custodialWallet} />}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}
+              {activeTab === "plan"        && <PlanTab wallet={wallet} />}
             </div>
           </div>
         </div>

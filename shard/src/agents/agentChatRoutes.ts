@@ -28,6 +28,7 @@ import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
+import { getRedis } from "../redis.js";
 import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear } from "../world/zoneRuntime.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
@@ -1332,5 +1333,169 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     }
 
     return reply.send({ ok: true, updated: patch });
+  });
+
+  // ── GET /agent/tier/:wallet — public tier lookup ────────────────────────
+  server.get<{ Params: { wallet: string } }>("/agent/tier/:wallet", async (request, reply) => {
+    const wallet = request.params.wallet;
+    if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      return reply.code(400).send({ error: "Invalid wallet address" });
+    }
+    const config = await getAgentConfig(wallet);
+    const tier = config?.tier ?? "free";
+    const caps = TIER_CAPABILITIES[tier];
+    return reply.send({ tier, capabilities: caps });
+  });
+
+  // ── Promo codes ─────────────────────────────────────────────────────────
+  // Codes stored in Redis: promo:{CODE} → JSON { tier, maxUses, uses, goldBonus? }
+  // Seed codes via POST /agent/promo/create (admin) or manually in Redis.
+
+  interface PromoCode {
+    tier: AgentTier;
+    maxUses: number;
+    uses: number;
+    goldBonus?: number;
+  }
+
+  function promoKey(code: string) { return `promo:${code.toUpperCase().trim()}`; }
+  function promoUsedKey(code: string, wallet: string) { return `promo:used:${code.toUpperCase().trim()}:${wallet.toLowerCase()}`; }
+
+  async function getPromo(code: string): Promise<PromoCode | null> {
+    const redis = getRedis();
+    if (!redis) return null;
+    const raw = await redis.get(promoKey(code));
+    return raw ? (JSON.parse(raw) as PromoCode) : null;
+  }
+
+  // ── POST /agent/promo/create — create a promo code (admin) ─────────────
+  server.post<{
+    Body: { code: string; tier: AgentTier; maxUses: number; goldBonus?: number; adminKey: string };
+  }>("/agent/promo/create", async (request, reply) => {
+    const { code, tier, maxUses, goldBonus, adminKey } = request.body;
+    if (adminKey !== process.env.ADMIN_KEY) {
+      return reply.code(403).send({ error: "Unauthorized" });
+    }
+    if (!code || !tier || !maxUses) {
+      return reply.code(400).send({ error: "code, tier, and maxUses required" });
+    }
+    const redis = getRedis();
+    if (!redis) return reply.code(500).send({ error: "Redis unavailable" });
+    const promo: PromoCode = { tier, maxUses, uses: 0, goldBonus };
+    await redis.set(promoKey(code), JSON.stringify(promo));
+    return reply.send({ ok: true, code: code.toUpperCase().trim(), promo });
+  });
+
+  // ── POST /agent/upgrade-tier — change membership plan ───────────────────
+  const TIER_PRICES: Record<string, number> = { starter: 4.99, pro: 9.99 };
+  const TIER_GOLD_BONUS: Record<string, number> = { starter: 500, pro: 2500 };
+
+  server.post<{
+    Body: { tier: AgentTier; paymentTx?: string; promoCode?: string };
+  }>("/agent/upgrade-tier", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { tier, paymentTx, promoCode } = request.body;
+
+    if (!tier || !["free", "starter", "pro"].includes(tier)) {
+      return reply.code(400).send({ error: "Invalid tier. Must be free, starter, or pro." });
+    }
+
+    const config = await getAgentConfig(authWallet);
+    const currentTier = config?.tier ?? "free";
+
+    if (tier === currentTier) {
+      return reply.send({ ok: true, tier, message: "Already on this tier." });
+    }
+
+    // Downgrade to free — no payment needed
+    if (tier === "free") {
+      if (config) {
+        config.tier = "free";
+        config.lastUpdated = Date.now();
+        await setAgentConfig(authWallet, config);
+      }
+      return reply.send({ ok: true, tier: "free", message: "Downgraded to free tier." });
+    }
+
+    // Check promo code
+    let promoApplied = false;
+    let promoGoldBonus = 0;
+    if (promoCode) {
+      const redis = getRedis();
+      const promo = await getPromo(promoCode);
+      if (!promo) {
+        return reply.code(400).send({ error: "Invalid promo code." });
+      }
+      // Check tier match — promo must grant the requested tier or higher
+      const tierRank: Record<string, number> = { free: 0, starter: 1, pro: 2, "self-hosted": 3 };
+      if ((tierRank[promo.tier] ?? 0) < (tierRank[tier] ?? 0)) {
+        return reply.code(400).send({ error: `This promo code is for ${promo.tier} tier, not ${tier}.` });
+      }
+      if (promo.uses >= promo.maxUses) {
+        return reply.code(400).send({ error: "This promo code has reached its usage limit." });
+      }
+      // Check if wallet already used this code
+      if (redis) {
+        const alreadyUsed = await redis.get(promoUsedKey(promoCode, authWallet));
+        if (alreadyUsed) {
+          return reply.code(400).send({ error: "You have already used this promo code." });
+        }
+      }
+      // Redeem
+      promo.uses += 1;
+      if (redis) {
+        await redis.set(promoKey(promoCode), JSON.stringify(promo));
+        await redis.set(promoUsedKey(promoCode, authWallet), "1");
+      }
+      promoApplied = true;
+      promoGoldBonus = promo.goldBonus ?? 0;
+      server.log.info(`[upgrade-tier] Promo ${promoCode.toUpperCase()} redeemed by ${authWallet} for ${tier} tier`);
+    }
+
+    // Upgrade requires payment (unless promo applied)
+    if (!promoApplied) {
+      const price = TIER_PRICES[tier];
+      if (!paymentTx) {
+        return reply.code(402).send({
+          error: "payment_required",
+          message: `Upgrading to ${tier} costs $${price} USD.`,
+          tier,
+          paymentAmount: price.toString(),
+          paymentCurrency: "USDC",
+        });
+      }
+    }
+
+    // Apply tier upgrade
+    const updatedConfig = config ?? defaultConfig();
+    updatedConfig.tier = tier;
+    updatedConfig.lastUpdated = Date.now();
+    await setAgentConfig(authWallet, updatedConfig);
+
+    // Mint gold bonus (tier default + promo bonus)
+    const goldBonus = (TIER_GOLD_BONUS[tier] ?? 0) + promoGoldBonus;
+    if (goldBonus > 0) {
+      const custodial = await getAgentCustodialWallet(authWallet);
+      if (custodial) {
+        try {
+          await mintGold(custodial, goldBonus.toString());
+          server.log.info(`[upgrade-tier] Minted ${goldBonus} gold to ${custodial} for ${tier} tier upgrade`);
+        } catch (err: any) {
+          server.log.warn(`[upgrade-tier] Gold mint failed (non-fatal): ${err.message}`);
+        }
+      }
+    }
+
+    return reply.send({
+      ok: true,
+      tier,
+      goldBonus,
+      promoApplied,
+      message: promoApplied
+        ? `Promo code applied! Upgraded to ${tier} tier with ${goldBonus} gold bonus.`
+        : `Upgraded to ${tier} tier! ${goldBonus} gold bonus minted.`,
+    });
   });
 }

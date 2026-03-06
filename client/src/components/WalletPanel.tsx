@@ -9,6 +9,7 @@ import { HpBar } from "@/components/ui/hp-bar";
 import { Spinner } from "@/components/ui/spinner";
 import { useToast } from "@/components/ui/toast";
 import { XpBar } from "@/components/ui/xp-bar";
+import { API_URL } from "@/config";
 import { useWallet } from "@/hooks/useWallet";
 import { useWogNames } from "@/hooks/useWogNames";
 
@@ -20,9 +21,16 @@ const RARITY_COLORS: Record<string, string> = {
   legendary: "#ffcc00",
 };
 
+const TIER_COLORS: Record<string, string> = {
+  free: "#9aa7cc",
+  starter: "#54f28b",
+  pro: "#ffcc00",
+};
+
 export function WalletPanel(): React.ReactElement {
   const [equippingTokenId, setEquippingTokenId] = React.useState<string | null>(null);
   const [collapsed, setCollapsed] = React.useState(false);
+  const [tier, setTier] = React.useState<string | null>(null);
   const {
     address,
     balance,
@@ -39,6 +47,11 @@ export function WalletPanel(): React.ReactElement {
   } = useWallet();
   const { notify } = useToast();
   const { dn } = useWogNames(address ? [address] : []);
+
+  React.useEffect(() => {
+    if (!address) { setTier(null); return; }
+    fetch(`${API_URL}/agent/tier/${address}`).then(r => r.json()).then(d => setTier(d.tier ?? "free")).catch(() => setTier(null));
+  }, [address]);
 
   return (
     <Card className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4">
@@ -102,6 +115,17 @@ export function WalletPanel(): React.ReactElement {
                 )}
               </div>
             </div>
+            {tier && (
+              <div className="flex items-center justify-between">
+                <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Plan</span>
+                <span
+                  className="border-2 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wide"
+                  style={{ color: TIER_COLORS[tier] ?? "#9aa7cc", borderColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "44", backgroundColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "11" }}
+                >
+                  {tier}
+                </span>
+              </div>
+            )}
             <div className="space-y-1 border-2 border-[#29334d] bg-[#11182b] p-2">
               <div className="flex items-center justify-between">
                 <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Character</span>

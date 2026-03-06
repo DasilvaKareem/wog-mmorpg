@@ -57,6 +57,20 @@ export async function registerReputationRoutes(app: FastifyInstance) {
   });
 
   /**
+   * GET /api/reputation/:walletAddress/timeline
+   * Get reputation score snapshots over time (for graph)
+   */
+  app.get<{
+    Params: { walletAddress: string };
+    Querystring: { limit?: string };
+  }>("/api/reputation/:walletAddress/timeline", async (req, reply) => {
+    const { walletAddress } = req.params;
+    const limit = req.query.limit ? parseInt(req.query.limit) : 100;
+    const timeline = await reputationManager.getTimeline(walletAddress, limit);
+    return reply.send({ timeline });
+  });
+
+  /**
    * POST /api/reputation/feedback
    * Submit reputation feedback (admin/system only)
    */

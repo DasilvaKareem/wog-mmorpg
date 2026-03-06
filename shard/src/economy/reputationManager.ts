@@ -160,6 +160,16 @@ export class ReputationManager {
         overall: String(rep.overall),
         lastUpdated: String(rep.lastUpdated),
       }).catch(() => {});
+
+      // Append snapshot to timeline (sorted set, score = timestamp)
+      const snap = JSON.stringify({
+        combat: rep.combat, economic: rep.economic, social: rep.social,
+        crafting: rep.crafting, agent: rep.agent, overall: rep.overall,
+        category: ReputationCategory[category], delta, reason,
+      });
+      redis.zadd(`reputation:history:${key}`, Date.now(), snap).catch(() => {});
+      // Trim to last 500 snapshots
+      redis.zremrangebyrank(`reputation:history:${key}`, 0, -501).catch(() => {});
     }
   }
 
@@ -190,6 +200,23 @@ export class ReputationManager {
       .filter((f) => f.walletAddress === key)
       .slice(-limit)
       .reverse();
+  }
+
+  /** Get reputation timeline snapshots from Redis */
+  async getTimeline(walletAddress: string, limit: number = 100): Promise<Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }>> {
+    const key = walletAddress.toLowerCase();
+    const redis = getRedis();
+    if (!redis) return [];
+    try {
+      const raw = await redis.zrangebyscore(`reputation:history:${key}`, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, limit);
+      const result: Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }> = [];
+      for (let i = 0; i < raw.length; i += 2) {
+        const snap = JSON.parse(raw[i]);
+        const ts = parseInt(raw[i + 1], 10);
+        result.push({ ts, ...snap });
+      }
+      return result;
+    } catch { return []; }
   }
 
   /** Update combat reputation based on PvP results */
