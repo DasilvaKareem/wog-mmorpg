@@ -126,7 +126,7 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     }
 
     // 2. Check rate limit (for free tier)
-    const tier = request.payment.method === "free" ? "free" : "basic";
+    const tier = request.payment.method === "free" ? "free" : "starter";
     const source = request.metadata?.source || "unknown";
     const rateLimitCheck = checkRateLimit(source, tier);
 

@@ -7,11 +7,13 @@ export interface TechniqueInfo {
   description: string;
   className: string;
   levelRequired: number;
+  copperCost?: number;
   essenceCost: number;
   cooldown: number;
   type: string;
   targetType: string;
   effects: Record<string, unknown>;
+  animStyle?: string;
 }
 
 let cached: TechniqueInfo[] | null = null;

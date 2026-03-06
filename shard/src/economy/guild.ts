@@ -116,7 +116,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
         npcName: entity.name,
         npcType: entity.type,
         zoneId,
-        description: `${entity.name} manages guild registration. Create a new guild (requires 50 gold creation fee + 100 gold minimum deposit = 150 gold total) or browse existing guilds to join.`,
+        description: `${entity.name} manages guild registration. Incorporate a guild for 500 gold or browse existing guilds to join.`,
         activeGuilds,
         endpoints: {
           createGuild: "/guild/create",
@@ -137,7 +137,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
 
   /**
    * POST /guild/create
-   * Create a new guild (requires minimum 100 gold deposit).
+   * Incorporate a new guild (costs 500 gold: 400 fee + 100 treasury deposit).
    */
   server.post<{
     Body: {
@@ -149,7 +149,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
   }>("/guild/create", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { founderAddress, name, description, initialDeposit } = request.body;
+    const { founderAddress, name, description } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     if (!founderAddress || !/^0x[a-fA-F0-9]{40}$/.test(founderAddress)) {
@@ -167,13 +167,10 @@ export function registerGuildRoutes(server: FastifyInstance) {
       return { error: "Guild name must be 3-32 characters" };
     }
 
-    if (initialDeposit < 100) {
-      reply.code(400);
-      return { error: "Minimum initial deposit is 100 gold" };
-    }
-
-    const creationFee = 50; // Guild creation fee (protocol revenue)
-    const totalCost = initialDeposit + creationFee;
+    // Guild incorporation costs 500 gold: 400 creation fee + 100 treasury deposit
+    const creationFee = 400;
+    const fixedDeposit = 100;
+    const totalCost = creationFee + fixedDeposit;
 
     try {
       // Check if already in a guild
@@ -196,7 +193,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
           breakdown: {
             creationFee,
-            initialDeposit,
+            deposit: fixedDeposit,
             total: totalCost,
           },
         };
@@ -207,7 +204,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
         name,
         description,
         founderAddress,
-        initialDeposit,
+        fixedDeposit,
         creationFee
       );
 
@@ -220,7 +217,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
         ok: true,
         guildId,
         name,
-        initialDeposit,
+        deposit: fixedDeposit,
         creationFee,
         totalCost,
         remainingGold: formatGold(getAvailableGold(founderAddress, safeOnChainGold)),
@@ -662,6 +659,66 @@ export function registerGuildRoutes(server: FastifyInstance) {
       server.log.error(err, `Failed to get proposal ${proposalId}`);
       reply.code(500);
       return { error: "Failed to get proposal details" };
+    }
+  });
+
+  /**
+   * GET /guild/wallet/:walletAddress
+   * Look up which guild a wallet belongs to, with full details + proposals.
+   */
+  server.get<{
+    Params: { walletAddress: string };
+  }>("/guild/wallet/:walletAddress", async (request, reply) => {
+    const { walletAddress } = request.params;
+
+    try {
+      const guildId = await getMemberGuildId(walletAddress);
+      if (guildId === 0) {
+        return { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+      }
+
+      const guild = await getGuildFromChain(guildId);
+      if (guild.status !== GuildStatus.Active) {
+        return { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+      }
+
+      const memberData = await getMemberFromChain(guildId, walletAddress);
+      const memberAddresses = await getGuildMembersFromChain(guildId);
+      const members = [];
+      for (const addr of memberAddresses) {
+        try {
+          const m = await getMemberFromChain(guildId, addr);
+          members.push(formatMemberForResponse(m));
+        } catch { /* skip */ }
+      }
+
+      // Fetch proposals for this guild
+      const nextPropId = await getNextProposalId();
+      const proposals = [];
+      for (let i = 0; i < nextPropId; i++) {
+        try {
+          const p = await getProposalFromChain(i);
+          if (p.guildId === guildId) {
+            proposals.push(formatProposalForResponse(p));
+          }
+        } catch { /* skip invalid */ }
+      }
+
+      return {
+        inGuild: true,
+        guild: formatGuildForResponse(guild),
+        member: formatMemberForResponse(memberData),
+        members,
+        proposals,
+      };
+    } catch (err: any) {
+      // Contract not deployed or wallet never interacted
+      if (err.message?.includes("not initialized") || err.message?.includes("revert")) {
+        return { inGuild: false, guild: null, member: null, members: [], proposals: [] };
+      }
+      server.log.error(err, `Failed to look up guild for ${walletAddress}`);
+      reply.code(500);
+      return { error: "Failed to look up guild membership" };
     }
   });
 }

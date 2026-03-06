@@ -85,6 +85,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [sending, setSending] = React.useState(false);
   const [deploying, setDeploying] = React.useState(false);
   const [showDeployPayment, setShowDeployPayment] = React.useState(false);
+  const [deployCount, setDeployCount] = React.useState<number | null>(null);
   const [status, setStatus] = React.useState<AgentStatusData | null>(null);
   const [token, setToken] = React.useState<string | null>(null);
   const [authLoading, setAuthLoading] = React.useState(true);
@@ -106,6 +107,18 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       setAuthLoading(true);
       const t = await getAuthToken(walletAddress);
       if (!cancelled) { setToken(t); setAuthLoading(false); }
+      // Fetch deploy count once we have a token
+      if (t && !cancelled) {
+        try {
+          const res = await fetch(`${API_URL}/agent/deploy-info`, {
+            headers: { Authorization: `Bearer ${t}` },
+          });
+          if (res.ok) {
+            const info = await res.json();
+            if (!cancelled) setDeployCount(info.deployCount ?? 0);
+          }
+        } catch { /* non-critical */ }
+      }
     }
     fetchToken();
     return () => { cancelled = true; };
@@ -402,12 +415,23 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               <span className="text-[#7a8b9e]">Talk to it in chat to control what it does.</span>
             </p>
             <button
-              onClick={() => setShowDeployPayment(true)}
+              onClick={() => {
+                if (deployCount != null && deployCount > 0) {
+                  setShowDeployPayment(true);
+                } else {
+                  void executeDeploy();
+                }
+              }}
               disabled={deploying || authLoading || !token}
               className="border border-[#54f28b] bg-[#0a1a0e] px-4 py-1.5 text-[12px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {deploying ? "Deploying..." : "[▶] Deploy Agent"}
             </button>
+            <p className="text-[9px] text-[#565f89] text-center mt-1">
+              {deployCount != null && deployCount > 0
+                ? "Additional agents: $2 USDC"
+                : "First agent is free"}
+            </p>
           </div>
         )}
 
@@ -560,7 +584,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           <div className="w-full max-w-sm border-4 border-[#54f28b] bg-[#060d12] font-mono shadow-[8px_8px_0_0_#000]">
             <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
               <span className="text-[11px] uppercase tracking-widest text-[#54f28b]">
-                {">> AI AGENT HOSTING FEE"}
+                {">> ADDITIONAL AGENT FEE"}
               </span>
               <button
                 onClick={() => setShowDeployPayment(false)}
@@ -571,7 +595,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
             </div>
             <div className="p-5">
               <PaymentGate
-                label="AI Agent Hosting Fee — $10/month autonomous agent in World of Geneva"
+                label="Additional Agent — $2 USDC per champion"
+                amount="2"
                 onSuccess={() => {
                   setShowDeployPayment(false);
                   void executeDeploy();

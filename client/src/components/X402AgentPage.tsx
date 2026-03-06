@@ -197,7 +197,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
         `  Race:      ${race?.name}\n` +
         `  Class:     ${cls?.name}\n` +
         `  Zone:      ${zone.name}\n` +
-        `  Payment:   Free tier (50 GOLD bonus)\n\n` +
+        `  Tier:      Free (50 GOLD bonus)\n\n` +
         `I'll create a custodial wallet, mint the character NFT, distribute gold and sFUEL, and spawn them in-world. Ready to deploy?`,
       "agent"
     );

@@ -7,6 +7,7 @@ import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
 import { formatCopperString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
+import { PaymentGate } from "@/components/PaymentGate";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -75,7 +76,7 @@ const ACTION_COLORS: Record<string, string> = {
   buy:              "#ffcc00",
   sell:             "#ffcc00",
   equip:            "#9aa7cc",
-  spawn:            "#565f89",
+  spawn:            "#7a84a8",
   consume:          "#ff8c00",
 };
 
@@ -140,7 +141,7 @@ function ChampionSidebar({
       {/* Identity card */}
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">{">> CHAMPION"}</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">{">> CHAMPION"}</span>
         </div>
         <div className="px-4 py-4 flex flex-col gap-2">
           {entity ? (
@@ -166,8 +167,8 @@ function ChampionSidebar({
             </>
           ) : (
             <div className="flex flex-col gap-1">
-              <p className="text-[17px] text-[#565f89]">Champion offline</p>
-              <p className="text-[17px] text-[#3a4260]">Deploy your agent to bring<br />your champion online.</p>
+              <p className="text-[17px] text-[#7a84a8]">Champion offline</p>
+              <p className="text-[17px] text-[#596a8a]">Deploy your agent to bring<br />your champion online.</p>
             </div>
           )}
         </div>
@@ -176,7 +177,7 @@ function ChampionSidebar({
       {/* Zone */}
       {zoneId && (
         <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[17px]">
-          <span className="text-[#565f89]">ZONE  </span>
+          <span className="text-[#7a84a8]">ZONE  </span>
           <span className="text-[#5dadec]">{zoneLabel(zoneId)}</span>
           <span className="ml-1 text-[12px] animate-pulse text-[#54f28b]">● LIVE</span>
         </div>
@@ -184,7 +185,7 @@ function ChampionSidebar({
 
       {/* Wallet */}
       <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[17px]">
-        <span className="text-[#565f89]">WALLET  </span>
+        <span className="text-[#7a84a8]">WALLET  </span>
         <span className="text-[#9aa7cc]">
           {wallet.slice(0, 8)}...{wallet.slice(-6)}
         </span>
@@ -203,7 +204,7 @@ function ChampionSidebar({
             <span className="text-[19px] font-bold" style={{ color: s.color, textShadow: "2px 2px 0 #000" }}>
               {s.value}
             </span>
-            <span className="mt-0.5 text-[13px] uppercase tracking-wide text-[#565f89]">{s.label}</span>
+            <span className="mt-0.5 text-[13px] uppercase tracking-wide text-[#7a84a8]">{s.label}</span>
           </div>
         ))}
       </div>
@@ -221,18 +222,20 @@ function ChampionSidebar({
 
 // ── Tabs ──────────────────────────────────────────────────────────────────
 
-type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "inbox" | "party" | "friends";
+type Tab = "inventory" | "overview" | "professions" | "quests" | "activity" | "inbox" | "party" | "friends" | "guild" | "gold-shop";
 
 function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string }[] = [
     { id: "inventory",   label: "Inventory"  },
     { id: "overview",    label: "Overview"   },
+    { id: "guild",       label: "Guild"      },
     { id: "professions", label: "Professions"},
     { id: "quests",      label: "Quests"     },
     { id: "activity",    label: "Activity"   },
     { id: "inbox",       label: "Inbox"      },
     { id: "party",       label: "Party"      },
     { id: "friends",     label: "Friends"    },
+    { id: "gold-shop",   label: "Gold Shop"  },
   ];
   return (
     <div className="flex gap-0 border-b-2 border-[#2a3450] overflow-x-auto">
@@ -243,7 +246,7 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
           className={`shrink-0 px-4 py-2.5 text-[12px] uppercase tracking-wide transition whitespace-nowrap ${
             active === t.id
               ? "border-b-2 border-[#ffcc00] text-[#ffcc00] bg-[#1a2240]"
-              : "text-[#565f89] hover:text-[#9aa7cc]"
+              : "text-[#7a84a8] hover:text-[#9aa7cc]"
           }`}
           style={{ marginBottom: active === t.id ? "-2px" : "0" }}
         >
@@ -353,7 +356,7 @@ function InventoryTab({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
-        <span className="text-[17px] text-[#3a4260] font-mono animate-pulse">Loading inventory...</span>
+        <span className="text-[17px] text-[#596a8a] font-mono animate-pulse">Loading inventory...</span>
       </div>
     );
   }
@@ -370,8 +373,8 @@ function InventoryTab({
       {/* ── Equipment Slots Panel ─────────────────────────────── */}
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5 flex items-center justify-between">
-          <span className="text-[10px] uppercase tracking-widest text-[#565f89]">{">> EQUIPPED GEAR"}</span>
-          {!zoneId && <span className="text-[9px] text-[#3a4260]">CHAMPION OFFLINE — EQUIP DISABLED</span>}
+          <span className="text-[10px] uppercase tracking-widest text-[#7a84a8]">{">> EQUIPPED GEAR"}</span>
+          {!zoneId && <span className="text-[9px] text-[#596a8a]">CHAMPION OFFLINE — EQUIP DISABLED</span>}
         </div>
         <div className="grid grid-cols-2 gap-1.5 p-3 sm:grid-cols-5">
           {SLOT_ORDER.map(({ slot, label, icon }) => {
@@ -392,7 +395,7 @@ function InventoryTab({
               >
                 <div className="flex items-center gap-1 mb-1">
                   <span className="text-[13px]">{icon}</span>
-                  <span className="text-[9px] uppercase tracking-wide text-[#565f89]">{label}</span>
+                  <span className="text-[9px] uppercase tracking-wide text-[#7a84a8]">{label}</span>
                 </div>
                 {eq ? (
                   <>
@@ -436,7 +439,7 @@ function InventoryTab({
             className={`px-3 py-1 text-[17px] uppercase tracking-wide border-2 transition ${
               filter === cat
                 ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                : "border-[#2a3450] bg-[#0b1020] text-[#565f89] hover:text-[#9aa7cc] hover:border-[#3a4460]"
+                : "border-[#2a3450] bg-[#0b1020] text-[#7a84a8] hover:text-[#9aa7cc] hover:border-[#3a4460]"
             }`}
           >
             {cat === "all" ? `All (${items.length})` : `${CATEGORY_ICONS[cat] ?? ""} ${cat}`}
@@ -446,7 +449,7 @@ function InventoryTab({
 
       {sorted.length === 0 ? (
         <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] px-4 py-12 text-center">
-          <p className="text-[17px] text-[#3a4260]">
+          <p className="text-[17px] text-[#596a8a]">
             {items.length === 0
               ? "No items in inventory — champion hasn't looted anything yet."
               : "No items in this category."}
@@ -497,32 +500,32 @@ function InventoryTab({
                         {item.rarity}
                       </span>
                     </div>
-                    <p className="text-[10px] text-[#565f89] mt-0.5 leading-relaxed line-clamp-2">
+                    <p className="text-[10px] text-[#7a84a8] mt-0.5 leading-relaxed line-clamp-2">
                       {item.description}
                     </p>
 
                     <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                       {/* Token ID */}
-                      <span className="text-[9px] text-[#3a4260]">
+                      <span className="text-[9px] text-[#596a8a]">
                         NFT #{item.tokenId}
                       </span>
 
                       {/* Quantity */}
                       <span className="text-[10px] text-[#9aa7cc]">
-                        <span className="text-[#3a4260]">QTY</span>{" "}
+                        <span className="text-[#596a8a]">QTY</span>{" "}
                         <span className="font-bold text-[#ffcc00]">{item.quantity}</span>
                       </span>
 
                       {/* Equipped slot */}
                       {item.equippedSlot && (
-                        <span className="text-[9px] uppercase text-[#565f89]">
+                        <span className="text-[9px] uppercase text-[#7a84a8]">
                           [{item.equippedSlot}]
                         </span>
                       )}
 
                       {/* Equip slot hint for unequipped items */}
                       {!item.equipped && item.equipSlot && (
-                        <span className="text-[9px] uppercase text-[#3a4260]">
+                        <span className="text-[9px] uppercase text-[#596a8a]">
                           SLOT: {item.equipSlot}
                         </span>
                       )}
@@ -530,7 +533,7 @@ function InventoryTab({
                       {/* Durability */}
                       {durPct !== null && (
                         <div className="flex items-center gap-1">
-                          <span className="text-[9px] text-[#3a4260]">DUR</span>
+                          <span className="text-[9px] text-[#596a8a]">DUR</span>
                           <div className="h-1 w-12 border border-black bg-[#0f1528]">
                             <div
                               className="h-full transition-all"
@@ -618,26 +621,26 @@ function OverviewTab({
             <span className="text-[17px] font-bold font-mono" style={{ color: s.color, textShadow: "2px 2px 0 #000" }}>
               {s.value}
             </span>
-            <span className="mt-0.5 text-[12px] uppercase tracking-wide text-[#565f89]">{s.label}</span>
+            <span className="mt-0.5 text-[12px] uppercase tracking-wide text-[#7a84a8]">{s.label}</span>
           </div>
         ))}
       </div>
 
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Recent Activity</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Recent Activity</span>
         </div>
         {recent.length === 0 ? (
-          <p className="px-4 py-6 text-center text-[17px] text-[#3a4260]">No activity yet</p>
+          <p className="px-4 py-6 text-center text-[17px] text-[#596a8a]">No activity yet</p>
         ) : (
           <div>
             {recent.map((e) => (
               <div key={e.id} className="flex items-start gap-3 border-b border-[#1e2842] px-4 py-2.5 last:border-b-0 font-mono">
-                <span className="mt-0.5 shrink-0 text-[13px] uppercase tracking-wide" style={{ color: ACTION_COLORS[e.action] ?? "#565f89" }}>
+                <span className="mt-0.5 shrink-0 text-[13px] uppercase tracking-wide" style={{ color: ACTION_COLORS[e.action] ?? "#7a84a8" }}>
                   {e.action.replace(/_/g, " ")}
                 </span>
                 <span className="flex-1 text-[17px] text-[#d6deff]">{e.headline}</span>
-                <span className="shrink-0 text-[13px] text-[#3a4260]">{timeAgo(e.timestamp)}</span>
+                <span className="shrink-0 text-[13px] text-[#596a8a]">{timeAgo(e.timestamp)}</span>
               </div>
             ))}
           </div>
@@ -662,14 +665,14 @@ function ProfessionsTab({ learned }: { learned: string[] }) {
             }`}
           >
             <span className="text-[26px]">{p.icon}</span>
-            <span className={`mt-2 text-[17px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#3a4260]"}`}>
+            <span className={`mt-2 text-[17px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#596a8a]"}`}>
               {p.name}
             </span>
             <span className="mt-1 text-[13px] font-mono">
               {isLearned ? (
                 <span className="text-[#54f28b]">[✓ Learned]</span>
               ) : (
-                <span className="text-[#3a4260]">[Locked]</span>
+                <span className="text-[#596a8a]">[Locked]</span>
               )}
             </span>
           </div>
@@ -686,11 +689,11 @@ function QuestsTab({ diary }: { diary: DiaryEntry[] }) {
   return (
     <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
       <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
-        <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Completed Quests</span>
+        <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Completed Quests</span>
         <span className="text-[17px] font-bold text-[#54f28b] font-mono">{quests.length}</span>
       </div>
       {quests.length === 0 ? (
-        <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">No quests completed yet</p>
+        <p className="px-4 py-10 text-center text-[17px] text-[#596a8a]">No quests completed yet</p>
       ) : (
         <div>
           {quests.map((e) => {
@@ -700,14 +703,14 @@ function QuestsTab({ diary }: { diary: DiaryEntry[] }) {
               <div key={e.id} className="flex items-start justify-between border-b border-[#1e2842] px-4 py-3 last:border-b-0 font-mono hover:bg-[#1a2240]/30 transition">
                 <div className="flex-1 min-w-0">
                   <p className="text-[12px] text-[#54f28b] font-bold">{e.headline}</p>
-                  <p className="text-[13px] text-[#565f89] mt-0.5">{zoneLabel(e.zoneId)}</p>
+                  <p className="text-[13px] text-[#7a84a8] mt-0.5">{zoneLabel(e.zoneId)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0 ml-3">
                   {xp > 0 && <span className="text-[13px] text-[#ffcc00]">+{xp} XP</span>}
                   {copperReward > 0 && (
                     <span className="text-[13px] text-[#ffcc00]">+{formatCopperString(copperReward)}</span>
                   )}
-                  <span className="text-[12px] text-[#3a4260]">{timeAgo(e.timestamp)}</span>
+                  <span className="text-[12px] text-[#596a8a]">{timeAgo(e.timestamp)}</span>
                 </div>
               </div>
             );
@@ -724,23 +727,23 @@ function ActivityTab({ diary }: { diary: DiaryEntry[] }) {
   return (
     <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
       <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
-        <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Activity Log</span>
-        <span className="text-[17px] text-[#3a4260] font-mono">{diary.length} entries</span>
+        <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Activity Log</span>
+        <span className="text-[17px] text-[#596a8a] font-mono">{diary.length} entries</span>
       </div>
       {diary.length === 0 ? (
-        <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">No activity recorded</p>
+        <p className="px-4 py-10 text-center text-[17px] text-[#596a8a]">No activity recorded</p>
       ) : (
         <div className="max-h-[520px] overflow-y-auto">
           {diary.map((e) => (
             <div key={e.id} className="border-b border-[#1a2030] px-4 py-2.5 last:border-b-0 font-mono hover:bg-[#1a2240]/20 transition">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[13px] uppercase tracking-wide shrink-0" style={{ color: ACTION_COLORS[e.action] ?? "#565f89" }}>
+                <span className="text-[13px] uppercase tracking-wide shrink-0" style={{ color: ACTION_COLORS[e.action] ?? "#7a84a8" }}>
                   [{e.action.replace(/_/g, " ")}]
                 </span>
                 <span className="text-[17px] text-[#d6deff] flex-1">{e.headline}</span>
-                <span className="text-[12px] text-[#3a4260] shrink-0">{timeAgo(e.timestamp)}</span>
+                <span className="text-[12px] text-[#596a8a] shrink-0">{timeAgo(e.timestamp)}</span>
               </div>
-              <p className="text-[13px] text-[#3a4260] leading-relaxed">{e.narrative}</p>
+              <p className="text-[13px] text-[#596a8a] leading-relaxed">{e.narrative}</p>
             </div>
           ))}
         </div>
@@ -804,7 +807,7 @@ function InboxTab({ wallet }: { wallet: string }) {
   }, [wallet]);
 
   if (loading) {
-    return <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">Loading inbox...</p>;
+    return <p className="px-4 py-10 text-center text-[17px] text-[#596a8a]">Loading inbox...</p>;
   }
 
   // Show newest first
@@ -813,11 +816,11 @@ function InboxTab({ wallet }: { wallet: string }) {
   return (
     <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
       <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
-        <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Message History</span>
-        <span className="text-[17px] text-[#3a4260] font-mono">{total} messages</span>
+        <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Message History</span>
+        <span className="text-[17px] text-[#596a8a] font-mono">{total} messages</span>
       </div>
       {sorted.length === 0 ? (
-        <p className="px-4 py-10 text-center text-[17px] text-[#3a4260]">No messages received yet</p>
+        <p className="px-4 py-10 text-center text-[17px] text-[#596a8a]">No messages received yet</p>
       ) : (
         <div className="max-h-[520px] overflow-y-auto">
           {sorted.map((m, i) => (
@@ -826,18 +829,18 @@ function InboxTab({ wallet }: { wallet: string }) {
                 <span
                   className="text-[11px] uppercase tracking-wide shrink-0 px-1.5 py-0.5 border"
                   style={{
-                    color: MSG_TYPE_COLORS[m.type] ?? "#565f89",
-                    borderColor: MSG_TYPE_COLORS[m.type] ?? "#565f89",
+                    color: MSG_TYPE_COLORS[m.type] ?? "#7a84a8",
+                    borderColor: MSG_TYPE_COLORS[m.type] ?? "#7a84a8",
                   }}
                 >
                   {MSG_TYPE_LABELS[m.type] ?? m.type}
                 </span>
                 <span className="text-[13px] text-[#ffcc00] shrink-0">{m.fromName}</span>
                 <span className="text-[17px] text-[#d6deff] flex-1 truncate">{m.body}</span>
-                <span className="text-[12px] text-[#3a4260] shrink-0">{timeAgo(m.ts)}</span>
+                <span className="text-[12px] text-[#596a8a] shrink-0">{timeAgo(m.ts)}</span>
               </div>
               {m.data && Object.keys(m.data).length > 0 && (
-                <p className="text-[11px] text-[#3a4260] mt-0.5">
+                <p className="text-[11px] text-[#596a8a] mt-0.5">
                   {Object.entries(m.data).map(([k, v]) => `${k}: ${v}`).join(" | ")}
                 </p>
               )}
@@ -988,11 +991,11 @@ function PartyTab({
             <div key={inv.id} className="flex items-center justify-between gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
               <div>
                 <p className="text-[12px] text-[#d6deff]"><span className="text-[#ffcc00]">{inv.fromName}</span> invited your champion</p>
-                <p className="text-[13px] text-[#3a4260] mt-0.5">{timeAgo(inv.createdAt)}</p>
+                <p className="text-[13px] text-[#596a8a] mt-0.5">{timeAgo(inv.createdAt)}</p>
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => void acceptInvite(inv)} className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1 text-[17px] text-[#54f28b] hover:bg-[#112a1b] shadow-[2px_2px_0_0_#000]">[✓]</button>
-                <button onClick={() => void declineInvite(inv)} className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#565f89] hover:text-[#9aa7cc]">[✗]</button>
+                <button onClick={() => void declineInvite(inv)} className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#7a84a8] hover:text-[#9aa7cc]">[✗]</button>
               </div>
             </div>
           ))}
@@ -1000,13 +1003,13 @@ function PartyTab({
       )}
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Current Party</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Current Party</span>
           {partyStatus.inParty && (
             <button onClick={() => void leaveParty()} className="text-[13px] text-[#ff6b6b] hover:text-[#ff9999]">[Leave]</button>
           )}
         </div>
         {!partyStatus.inParty ? (
-          <p className="px-4 py-6 text-center text-[17px] text-[#3a4260]">Not in a party</p>
+          <p className="px-4 py-6 text-center text-[17px] text-[#596a8a]">Not in a party</p>
         ) : (
           <div>
             {partyStatus.members.map((m) => {
@@ -1022,8 +1025,8 @@ function PartyTab({
                       <span className="text-[17px] capitalize" style={{ color: lc }}>Lv {m.level}</span>
                     </div>
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[13px] capitalize text-[#565f89]">{m.raceId} {m.classId}</span>
-                      {m.zoneId && <span className="text-[13px] text-[#3a4260]">• {zoneLabel(m.zoneId)}</span>}
+                      <span className="text-[13px] capitalize text-[#7a84a8]">{m.raceId} {m.classId}</span>
+                      {m.zoneId && <span className="text-[13px] text-[#596a8a]">• {zoneLabel(m.zoneId)}</span>}
                     </div>
                     <div className="mt-1 h-1.5 w-32 border border-black bg-[#0f1528]">
                       <div className="h-full transition-all" style={{ width: `${hpPct}%`, backgroundColor: hc }} />
@@ -1037,7 +1040,7 @@ function PartyTab({
       </div>
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Find Champions</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Find Champions</span>
         </div>
         <div className="p-4 flex flex-col gap-3">
           <div className="flex gap-2">
@@ -1047,7 +1050,7 @@ function PartyTab({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
-              className="flex-1 border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b]"
+              className="flex-1 border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#596a8a] outline-none focus:border-[#54f28b]"
             />
             <button
               onClick={() => void doSearch()}
@@ -1067,9 +1070,9 @@ function PartyTab({
                       <div className="flex items-center gap-2">
                         <span className="text-[12px] font-bold text-[#d6deff]">{r.name}</span>
                         <span className="text-[17px]" style={{ color: lc }}>Lv {r.level}</span>
-                        <span className="text-[13px] capitalize text-[#565f89]">{r.raceId} {r.classId}</span>
+                        <span className="text-[13px] capitalize text-[#7a84a8]">{r.raceId} {r.classId}</span>
                       </div>
-                      <span className="text-[13px] text-[#3a4260]">{zoneLabel(r.zoneId)}</span>
+                      <span className="text-[13px] text-[#596a8a]">{zoneLabel(r.zoneId)}</span>
                     </div>
                     <button
                       onClick={() => void sendInvite(r)}
@@ -1084,7 +1087,7 @@ function PartyTab({
             </div>
           )}
           {searchResults.length === 0 && searchQuery && !searching && (
-            <p className="text-center text-[17px] text-[#3a4260]">No champions found online</p>
+            <p className="text-center text-[17px] text-[#596a8a]">No champions found online</p>
           )}
         </div>
       </div>
@@ -1306,11 +1309,11 @@ function FriendsTab({
             <div key={req.id} className="flex items-center justify-between gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
               <div>
                 <p className="text-[12px] text-[#d6deff]"><span className="text-[#ffcc00]">{req.fromName}</span> wants to be friends</p>
-                <p className="text-[13px] text-[#3a4260] mt-0.5">{timeAgo(req.createdAt)}</p>
+                <p className="text-[13px] text-[#596a8a] mt-0.5">{timeAgo(req.createdAt)}</p>
               </div>
               <div className="flex gap-2 shrink-0">
                 <button onClick={() => void acceptRequest(req)} className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1 text-[17px] text-[#54f28b] hover:bg-[#112a1b] shadow-[2px_2px_0_0_#000]">[&#10003;]</button>
-                <button onClick={() => void declineRequest(req)} className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#565f89] hover:text-[#9aa7cc]">[&#10007;]</button>
+                <button onClick={() => void declineRequest(req)} className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#7a84a8] hover:text-[#9aa7cc]">[&#10007;]</button>
               </div>
             </div>
           ))}
@@ -1320,11 +1323,11 @@ function FriendsTab({
       {/* Friends List */}
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Friends List</span>
-          <span className="text-[17px] text-[#3a4260] font-mono">{friends.length} / {50}</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Friends List</span>
+          <span className="text-[17px] text-[#596a8a] font-mono">{friends.length} / {50}</span>
         </div>
         {friends.length === 0 ? (
-          <p className="px-4 py-6 text-center text-[17px] text-[#3a4260]">No friends yet — search below to add some!</p>
+          <p className="px-4 py-6 text-center text-[17px] text-[#596a8a]">No friends yet — search below to add some!</p>
         ) : (
           <div>
             {friends.map((f) => {
@@ -1336,12 +1339,12 @@ function FriendsTab({
                       {f.online ? (
                         <span className="text-[12px] text-[#54f28b]">●</span>
                       ) : (
-                        <span className="text-[12px] text-[#3a4260]">●</span>
+                        <span className="text-[12px] text-[#596a8a]">●</span>
                       )}
                       <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? dn(f.wallet)}</span>
                       {f.wogName && <span className="text-[12px] text-[#5dadec]">{f.wogName}</span>}
                       {f.level != null && <span className="text-[17px]" style={{ color: lc }}>Lv {f.level}</span>}
-                      {f.raceId && <span className="text-[13px] capitalize text-[#565f89]">{f.raceId} {f.classId}</span>}
+                      {f.raceId && <span className="text-[13px] capitalize text-[#7a84a8]">{f.raceId} {f.classId}</span>}
                       {f.reputationRank && (
                         <span
                           className="text-[12px] border px-1 py-0.5 uppercase tracking-wide"
@@ -1351,7 +1354,7 @@ function FriendsTab({
                         </span>
                       )}
                     </div>
-                    <span className="text-[13px] text-[#3a4260]">
+                    <span className="text-[13px] text-[#596a8a]">
                       {f.online && f.zoneId ? zoneLabel(f.zoneId) : "Offline"}
                     </span>
                   </div>
@@ -1366,7 +1369,7 @@ function FriendsTab({
                     )}
                     <button
                       onClick={() => void removeFriend(f)}
-                      className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#565f89] hover:text-[#ff6b6b] hover:border-[#ff6b6b]/40"
+                      className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#7a84a8] hover:text-[#ff6b6b] hover:border-[#ff6b6b]/40"
                     >
                       [Remove]
                     </button>
@@ -1392,7 +1395,7 @@ function FriendsTab({
                 value={wogNameInput}
                 onChange={(e) => setWogNameInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") void sendByWogName(); }}
-                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 pr-12 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#5dadec]"
+                className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 pr-12 text-[12px] text-[#d6deff] placeholder-[#596a8a] outline-none focus:border-[#5dadec]"
               />
               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-[#5dadec] pointer-events-none">.wog</span>
             </div>
@@ -1404,14 +1407,14 @@ function FriendsTab({
               {wogSending ? "..." : "[Add]"}
             </button>
           </div>
-          <p className="mt-2 text-[13px] text-[#3a4260]">Send a friend request by .wog name — works even if they're offline.</p>
+          <p className="mt-2 text-[13px] text-[#596a8a]">Send a friend request by .wog name — works even if they're offline.</p>
         </div>
       </div>
 
       {/* Search Online Champions */}
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2">
-          <span className="text-[13px] uppercase tracking-widest text-[#565f89]">Search Online Champions</span>
+          <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Search Online Champions</span>
         </div>
         <div className="p-4 flex flex-col gap-3">
           <div className="flex gap-2">
@@ -1421,7 +1424,7 @@ function FriendsTab({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") void doSearch(); }}
-              className="flex-1 border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#3a4260] outline-none focus:border-[#54f28b]"
+              className="flex-1 border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#596a8a] outline-none focus:border-[#54f28b]"
             />
             <button
               onClick={() => void doSearch()}
@@ -1442,9 +1445,9 @@ function FriendsTab({
                       <div className="flex items-center gap-2">
                         <span className="text-[12px] font-bold text-[#d6deff]">{r.name}</span>
                         <span className="text-[17px]" style={{ color: lc }}>Lv {r.level}</span>
-                        <span className="text-[13px] capitalize text-[#565f89]">{r.raceId} {r.classId}</span>
+                        <span className="text-[13px] capitalize text-[#7a84a8]">{r.raceId} {r.classId}</span>
                       </div>
-                      <span className="text-[13px] text-[#3a4260]">{zoneLabel(r.zoneId)}</span>
+                      <span className="text-[13px] text-[#596a8a]">{zoneLabel(r.zoneId)}</span>
                     </div>
                     <button
                       onClick={() => void sendFriendRequest(r)}
@@ -1459,10 +1462,541 @@ function FriendsTab({
             </div>
           )}
           {searchResults.length === 0 && searchQuery && !searching && (
-            <p className="text-center text-[17px] text-[#3a4260]">No champions found online</p>
+            <p className="text-center text-[17px] text-[#596a8a]">No champions found online</p>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Guild tab ────────────────────────────────────────────────────────────
+
+interface GuildInfo {
+  guildId: number;
+  name: string;
+  description: string;
+  founder: string;
+  treasury: number;
+  level: number;
+  reputation: number;
+  status: string;
+  createdAt: number;
+  memberCount: number;
+}
+
+interface GuildMemberInfo {
+  address: string;
+  rank: string;
+  joinedAt: number;
+  contributedGold: number;
+}
+
+interface GuildProposalInfo {
+  proposalId: number;
+  proposalType: string;
+  description: string;
+  proposer: string;
+  yesVotes: number;
+  noVotes: number;
+  status: string;
+  timeRemaining: number;
+  targetAddress: string;
+  targetAmount: number;
+}
+
+const RANK_BADGE_COLORS: Record<string, string> = {
+  Founder: "#ff6b6b",
+  Officer: "#ffcc00",
+  Member:  "#9aa7cc",
+};
+
+const PROPOSAL_ICONS: Record<string, string> = {
+  "withdraw-gold":   "G",
+  "kick-member":     "K",
+  "promote-officer": "+",
+  "demote-officer":  "-",
+  "disband-guild":   "X",
+};
+
+const PROPOSAL_STATUS_COLORS: Record<string, string> = {
+  active:   "#5dadec",
+  passed:   "#54f28b",
+  failed:   "#ff6b6b",
+  executed: "#b48efa",
+  cancelled: "#7a84a8",
+};
+
+function GuildTab({ custodialWallet, ownerWallet }: { custodialWallet: string | null; ownerWallet: string | null }) {
+  const [loading, setLoading] = React.useState(true);
+  const [inGuild, setInGuild] = React.useState(false);
+  const [guild, setGuild] = React.useState<GuildInfo | null>(null);
+  const [myRole, setMyRole] = React.useState<string | null>(null);
+  const [members, setMembers] = React.useState<GuildMemberInfo[]>([]);
+  const [proposals, setProposals] = React.useState<GuildProposalInfo[]>([]);
+  const [subTab, setSubTab] = React.useState<"members" | "proposals">("members");
+  const [showCreate, setShowCreate] = React.useState(false);
+  const [guildName, setGuildName] = React.useState("");
+  const [guildDesc, setGuildDesc] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [createError, setCreateError] = React.useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!custodialWallet) { setLoading(false); return; }
+    let cancelled = false;
+
+    async function fetchGuild() {
+      try {
+        const res = await fetch(`${API_URL}/guild/wallet/${custodialWallet}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        setInGuild(data.inGuild ?? false);
+        setGuild(data.guild ?? null);
+        setMyRole(data.member?.rank ?? null);
+        setMembers(data.members ?? []);
+        setProposals(data.proposals ?? []);
+      } catch { /* non-fatal */ }
+      if (!cancelled) setLoading(false);
+    }
+
+    fetchGuild();
+    const interval = setInterval(fetchGuild, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [custodialWallet, refreshKey]);
+
+  async function handleCreateGuild() {
+    if (!custodialWallet || !ownerWallet || !guildName.trim() || !guildDesc.trim()) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const token = await getAuthToken(ownerWallet);
+      if (!token) { setCreateError("Auth failed — reconnect wallet"); return; }
+      const res = await fetch(`${API_URL}/guild/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          founderAddress: custodialWallet,
+          name: guildName.trim(),
+          description: guildDesc.trim(),
+          initialDeposit: 100,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setShowCreate(false);
+        setGuildName("");
+        setGuildDesc("");
+        setRefreshKey((k) => k + 1);
+      } else {
+        setCreateError(data.error ?? "Failed to create guild");
+      }
+    } catch (err: any) {
+      setCreateError(err.message ?? "Network error");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  if (loading) {
+    return <p className="px-4 py-10 text-center text-[13px] text-[#7a84a8] animate-pulse">Loading guild data...</p>;
+  }
+
+  if (!inGuild || !guild) {
+    return (
+      <div className="flex flex-col gap-4 font-mono">
+        <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] px-4 py-8 text-center">
+          <p className="text-[14px] text-[#7a84a8]">Not in a guild</p>
+          <p className="text-[12px] text-[#596a8a] mt-2 mb-4">
+            Incorporate your own guild or visit a Guild Registrar NPC to join one.
+          </p>
+          {!showCreate && custodialWallet && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="border-2 border-[#54f28b] bg-[#0a1a0e] px-5 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[3px_3px_0_0_#000] hover:bg-[#112a1b] transition"
+            >
+              [+] Incorporate Guild — 500 Gold
+            </button>
+          )}
+        </div>
+
+        {showCreate && (
+          <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+            <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5">
+              <span className="text-[10px] uppercase tracking-widest text-[#54f28b]">{">> INCORPORATE GUILD"}</span>
+            </div>
+            <div className="p-4 flex flex-col gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wide text-[#7a84a8] mb-1 block">Guild Name (3-32 chars)</label>
+                <input
+                  type="text"
+                  value={guildName}
+                  onChange={(e) => setGuildName(e.target.value)}
+                  maxLength={32}
+                  placeholder="e.g. Knights of Geneva"
+                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#596a8a] outline-none focus:border-[#54f28b]"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wide text-[#7a84a8] mb-1 block">Description</label>
+                <input
+                  type="text"
+                  value={guildDesc}
+                  onChange={(e) => setGuildDesc(e.target.value)}
+                  maxLength={200}
+                  placeholder="What is your guild about?"
+                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[12px] text-[#d6deff] placeholder-[#596a8a] outline-none focus:border-[#54f28b]"
+                />
+              </div>
+
+              <div className="border border-[#2a3450] bg-[#0a0f1a] px-3 py-2 text-[11px]">
+                <div className="flex justify-between text-[#9aa7cc]">
+                  <span>Creation Fee</span><span className="text-[#ffcc00]">400 Gold</span>
+                </div>
+                <div className="flex justify-between text-[#9aa7cc] mt-1">
+                  <span>Treasury Deposit</span><span className="text-[#ffcc00]">100 Gold</span>
+                </div>
+                <div className="flex justify-between text-[#d6deff] mt-1 pt-1 border-t border-[#2a3450] font-bold">
+                  <span>Total</span><span className="text-[#ffcc00]">500 Gold</span>
+                </div>
+              </div>
+
+              {createError && (
+                <div className="border border-[#ff6b6b44] bg-[#1a0a0a] px-3 py-2 text-[11px] text-[#ff6b6b]">
+                  {createError}
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => void handleCreateGuild()}
+                  disabled={creating || guildName.trim().length < 3 || !guildDesc.trim()}
+                  className="flex-1 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-[12px] uppercase tracking-wide text-[#54f28b] shadow-[3px_3px_0_0_#000] hover:bg-[#112a1b] transition disabled:opacity-40"
+                >
+                  {creating ? "Incorporating..." : "Incorporate Guild"}
+                </button>
+                <button
+                  onClick={() => { setShowCreate(false); setCreateError(null); }}
+                  className="border-2 border-[#2a3450] px-4 py-2 text-[12px] text-[#7a84a8] hover:text-[#9aa7cc] transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const activeProposals = proposals.filter((p) => p.status === "active");
+  const pastProposals = proposals.filter((p) => p.status !== "active");
+
+  return (
+    <div className="flex flex-col gap-4 font-mono">
+      {/* Guild header card */}
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-widest text-[#7a84a8]">{">> GUILD"}</span>
+          {myRole && (
+            <span
+              className="text-[10px] uppercase tracking-wide border px-2 py-0.5"
+              style={{ color: RANK_BADGE_COLORS[myRole] ?? "#9aa7cc", borderColor: (RANK_BADGE_COLORS[myRole] ?? "#9aa7cc") + "44" }}
+            >
+              {myRole}
+            </span>
+          )}
+        </div>
+        <div className="px-4 py-4">
+          <p className="text-[18px] font-bold text-[#54f28b]" style={{ textShadow: "2px 2px 0 #000" }}>
+            {guild.name}
+          </p>
+          <p className="text-[11px] text-[#9aa7cc] mt-1">{guild.description}</p>
+
+          <div className="grid grid-cols-2 gap-2 mt-3 sm:grid-cols-4">
+            {[
+              { label: "Members", value: String(guild.memberCount), color: "#5dadec" },
+              { label: "Treasury", value: `${guild.treasury.toFixed(2)}g`, color: "#ffcc00" },
+              { label: "Level", value: String(guild.level), color: "#54f28b" },
+              { label: "Reputation", value: String(guild.reputation), color: "#b48efa" },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="flex flex-col items-center border-2 border-[#2a3450] bg-[#0a0f1a] py-2"
+              >
+                <span className="text-[15px] font-bold" style={{ color: s.color }}>{s.value}</span>
+                <span className="text-[9px] uppercase tracking-wide text-[#7a84a8]">{s.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Sub-tabs: Members | Proposals */}
+      <div className="flex gap-0 border-b-2 border-[#2a3450]">
+        {(["members", "proposals"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setSubTab(t)}
+            className={`px-4 py-2 text-[11px] uppercase tracking-wide transition ${
+              subTab === t
+                ? "border-b-2 border-[#54f28b] text-[#54f28b] bg-[#0a1a0e]"
+                : "text-[#7a84a8] hover:text-[#9aa7cc]"
+            }`}
+            style={{ marginBottom: subTab === t ? "-2px" : "0" }}
+          >
+            {t === "members" ? `Members (${members.length})` : `Proposals (${proposals.length})`}
+          </button>
+        ))}
+      </div>
+
+      {/* Members list */}
+      {subTab === "members" && (
+        <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+          {members.length === 0 ? (
+            <p className="px-4 py-6 text-center text-[13px] text-[#7a84a8]">No members</p>
+          ) : (
+            <div>
+              {members.map((m) => (
+                <div key={m.address} className="flex items-center justify-between border-b border-[#1e2842] px-4 py-3 last:border-b-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="text-[10px] uppercase tracking-wide border px-1.5 py-0.5 shrink-0"
+                      style={{ color: RANK_BADGE_COLORS[m.rank] ?? "#9aa7cc", borderColor: (RANK_BADGE_COLORS[m.rank] ?? "#9aa7cc") + "44" }}
+                    >
+                      {m.rank}
+                    </span>
+                    <span className="text-[12px] text-[#d6deff] truncate">
+                      {m.address.slice(0, 8)}...{m.address.slice(-6)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-[11px] text-[#ffcc00]">{m.contributedGold.toFixed(2)}g</span>
+                    <span className="text-[10px] text-[#596a8a]">{timeAgo(m.joinedAt * 1000)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Proposals list */}
+      {subTab === "proposals" && (
+        <div className="flex flex-col gap-3">
+          {proposals.length === 0 ? (
+            <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] px-4 py-6 text-center">
+              <p className="text-[13px] text-[#7a84a8]">No proposals yet</p>
+            </div>
+          ) : (
+            <>
+              {activeProposals.length > 0 && (
+                <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+                  <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5">
+                    <span className="text-[10px] uppercase tracking-widest text-[#5dadec]">Active Votes</span>
+                  </div>
+                  {activeProposals.map((p) => (
+                    <div key={p.proposalId} className="border-b border-[#1e2842] px-4 py-3 last:border-b-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[12px] font-bold text-[#5dadec] shrink-0">
+                          [{PROPOSAL_ICONS[p.proposalType] ?? "?"}]
+                        </span>
+                        <span className="text-[11px] text-[#d6deff] flex-1">{p.description}</span>
+                        <span className="text-[10px] text-[#5dadec] shrink-0">
+                          {p.timeRemaining > 0 ? `${Math.floor(p.timeRemaining / 3600)}h ${Math.floor((p.timeRemaining % 3600) / 60)}m left` : "Expired"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-[10px]">
+                        <span className="text-[#7a84a8] capitalize">{p.proposalType.replace(/-/g, " ")}</span>
+                        <span className="text-[#54f28b]">YES {p.yesVotes}</span>
+                        <span className="text-[#ff6b6b]">NO {p.noVotes}</span>
+                        {p.targetAmount > 0 && <span className="text-[#ffcc00]">{p.targetAmount}g</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {pastProposals.length > 0 && (
+                <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
+                  <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5">
+                    <span className="text-[10px] uppercase tracking-widest text-[#7a84a8]">Past Proposals</span>
+                  </div>
+                  {pastProposals.map((p) => (
+                    <div key={p.proposalId} className="border-b border-[#1e2842] px-4 py-2.5 last:border-b-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-[#9aa7cc] flex-1">{p.description}</span>
+                        <span
+                          className="text-[10px] uppercase tracking-wide border px-1.5 py-0.5 shrink-0"
+                          style={{ color: PROPOSAL_STATUS_COLORS[p.status] ?? "#7a84a8", borderColor: (PROPOSAL_STATUS_COLORS[p.status] ?? "#7a84a8") + "44" }}
+                        >
+                          {p.status}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-4 text-[10px] mt-0.5">
+                        <span className="text-[#7a84a8] capitalize">{p.proposalType.replace(/-/g, " ")}</span>
+                        <span className="text-[#54f28b]">YES {p.yesVotes}</span>
+                        <span className="text-[#ff6b6b]">NO {p.noVotes}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Gold Shop Tab ─────────────────────────────────────────────────────────
+
+interface GoldPack {
+  id: string;
+  name: string;
+  goldAmount: number;
+  priceUsd: number;
+}
+
+const GOLD_PACKS: GoldPack[] = [
+  { id: "pack-500",  name: "500 Gold",   goldAmount: 500,  priceUsd: 5  },
+  { id: "pack-1500", name: "1,500 Gold", goldAmount: 1500, priceUsd: 12 },
+  { id: "pack-5000", name: "5,000 Gold", goldAmount: 5000, priceUsd: 35 },
+];
+
+function GoldShopTab({ wallet, custodialWallet }: { wallet: string | null; custodialWallet: string | null }) {
+  const [buying, setBuying] = React.useState<GoldPack | null>(null);
+  const [pending, setPending] = React.useState<{ paymentId: string } | null>(null);
+  const [confirming, setConfirming] = React.useState(false);
+  const [result, setResult] = React.useState<{ goldMinted: number } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const initiatePurchase = async (pack: GoldPack) => {
+    if (!wallet) return;
+    setError(null);
+    setBuying(pack);
+    try {
+      const token = await getAuthToken(wallet);
+      const res = await fetch(`${API_URL}/gold/purchase`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ packId: pack.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Purchase failed");
+      setPending({ paymentId: data.paymentId });
+    } catch (err: any) {
+      setError(err.message);
+      setBuying(null);
+    }
+  };
+
+  const confirmPurchase = async (txHash: string) => {
+    if (!wallet || !pending) return;
+    setConfirming(true);
+    setError(null);
+    try {
+      const token = await getAuthToken(wallet);
+      const res = await fetch(`${API_URL}/gold/purchase/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ paymentId: pending.paymentId, transactionHash: txHash }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Confirm failed");
+      setResult({ goldMinted: data.goldMinted });
+      setBuying(null);
+      setPending(null);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  // If user is in payment flow, show PaymentGate
+  if (buying && pending) {
+    return (
+      <div className="space-y-3">
+        <div className="border-2 border-[#ffcc00]/30 bg-[#1a1800] px-4 py-3">
+          <p className="text-[12px] text-[#ffcc00] font-bold mb-1">Purchasing: {buying.name}</p>
+          <p className="text-[10px] text-[#9aa7cc]">{buying.goldAmount.toLocaleString()} gold will be minted to your character</p>
+        </div>
+        <PaymentGate
+          label={`${buying.name} — ${buying.goldAmount.toLocaleString()} gold`}
+          amount={buying.priceUsd.toString()}
+          onSuccess={() => {
+            // PayEmbed confirmed — now confirm server-side
+            confirmPurchase("thirdweb-pay-confirmed");
+          }}
+          onCancel={() => { setBuying(null); setPending(null); }}
+        />
+        {confirming && <p className="text-[11px] text-[#ffcc00] animate-pulse text-center">Minting gold...</p>}
+        {error && <p className="text-[11px] text-[#ff6b6b] text-center">{error}</p>}
+      </div>
+    );
+  }
+
+  // Success state
+  if (result) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8">
+        <span className="text-[32px]">⟡</span>
+        <p className="text-[14px] text-[#54f28b] font-bold">{result.goldMinted.toLocaleString()} Gold Minted!</p>
+        <p className="text-[11px] text-[#9aa7cc]">Gold has been added to your character&apos;s wallet.</p>
+        <button
+          onClick={() => setResult(null)}
+          className="mt-2 border-2 border-[#2a3450] bg-[#0b1020] px-4 py-2 text-[11px] text-[#d6deff] hover:bg-[#1a2240] transition"
+        >
+          Buy More
+        </button>
+      </div>
+    );
+  }
+
+  if (!custodialWallet) {
+    return (
+      <div className="text-center py-8">
+        <p className="text-[12px] text-[#7a84a8]">Deploy a champion first to purchase gold.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="border-b border-[#2a3450] pb-2 mb-1">
+        <p className="text-[13px] text-[#d6deff] font-bold">Gold Exchange</p>
+        <p className="text-[10px] text-[#7a84a8]">Purchase gold with crypto. Pay with any token on any chain.</p>
+      </div>
+
+      <div className="grid gap-3">
+        {GOLD_PACKS.map((pack) => (
+          <button
+            key={pack.id}
+            onClick={() => initiatePurchase(pack)}
+            className="border-2 border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240] hover:border-[#ffcc00]/40 transition p-4 text-left group"
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-[13px] text-[#ffcc00] font-bold group-hover:text-[#ffd633]">{pack.name}</p>
+                <p className="text-[10px] text-[#7a84a8] mt-0.5">{pack.goldAmount.toLocaleString()} gold coins</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[14px] text-[#d6deff] font-bold">${pack.priceUsd}</p>
+                <p className="text-[9px] text-[#596a8a] uppercase tracking-wide">USD</p>
+              </div>
+            </div>
+            <div className="mt-2 h-[2px] bg-[#1e2842] group-hover:bg-[#ffcc00]/20 transition" />
+            <p className="text-[9px] text-[#596a8a] mt-1">
+              {(pack.goldAmount / pack.priceUsd).toFixed(0)} gold per dollar
+            </p>
+          </button>
+        ))}
+      </div>
+
+      {error && <p className="text-[11px] text-[#ff6b6b] text-center">{error}</p>}
     </div>
   );
 }
@@ -1494,7 +2028,7 @@ function CharacterSwitcher({
   return (
     <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] font-mono">
       <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5">
-        <span className="text-[10px] uppercase tracking-widest text-[#565f89]">My Champions ({characters.length})</span>
+        <span className="text-[10px] uppercase tracking-widest text-[#7a84a8]">My Champions ({characters.length})</span>
       </div>
       <div className="p-2 flex flex-col gap-1.5">
         {characters.map((c) => {
@@ -1517,7 +2051,7 @@ function CharacterSwitcher({
                 <span className="text-[10px] shrink-0" style={{ color: lc }}>Lv {lv}</span>
               </div>
               {c.properties?.race && (
-                <span className="text-[9px] capitalize text-[#565f89]">
+                <span className="text-[9px] capitalize text-[#7a84a8]">
                   {c.properties.race} {c.properties.class}
                 </span>
               )}
@@ -1644,9 +2178,9 @@ export function ChampionsPage(): React.ReactElement {
       <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto pt-16">
         <div className="pointer-events-none fixed inset-0 z-50" style={{ background: "repeating-linear-gradient(0deg,rgba(0,0,0,0.15) 0px,rgba(0,0,0,0.15) 1px,transparent 1px,transparent 3px)" }} />
         <div className="z-10 flex flex-col items-center gap-6 px-4 py-24 text-center font-mono">
-          <p className="text-[12px] uppercase tracking-widest text-[#565f89]">{">>"} Champions</p>
+          <p className="text-[12px] uppercase tracking-widest text-[#7a84a8]">{">>"} Champions</p>
           <h1 className="text-[26px] uppercase tracking-widest text-[#ffcc00]" style={{ textShadow: "3px 3px 0 #000" }}>My Champion</h1>
-          <p className="text-[12px] text-[#3a4260]">Connect your wallet to view your champion's stats.</p>
+          <p className="text-[12px] text-[#596a8a]">Connect your wallet to view your champion's stats.</p>
           <Link to="/" className="border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] hover:bg-[#7bf5a8] font-bold">
             {">>> Connect Wallet <<<"}
           </Link>
@@ -1662,11 +2196,11 @@ export function ChampionsPage(): React.ReactElement {
       <div className="z-10 w-full max-w-5xl px-4 py-10">
         {/* Page header */}
         <div className="mb-6">
-          <p className="mb-1 text-[17px] uppercase tracking-widest text-[#565f89] font-mono">{"<< Champions >>"}</p>
+          <p className="mb-1 text-[17px] uppercase tracking-widest text-[#7a84a8] font-mono">{"<< Champions >>"}</p>
           <h1 className="text-[26px] uppercase tracking-widest text-[#ffcc00] font-mono" style={{ textShadow: "3px 3px 0 #000" }}>
             {entity ? entity.name : "My Champion"}
           </h1>
-          {loading && <p className="mt-1 text-[17px] text-[#3a4260] font-mono animate-pulse">Loading champion data...</p>}
+          {loading && <p className="mt-1 text-[17px] text-[#596a8a] font-mono animate-pulse">Loading champion data...</p>}
         </div>
 
         {/* Two-column layout */}
@@ -1687,12 +2221,14 @@ export function ChampionsPage(): React.ReactElement {
                 fetch(`${API_URL}/inventory/${profWallet}`).then(r => r.json()).then(d => setItems(d.items ?? [])).catch(() => {}).finally(() => setInventoryLoading(false));
               }} />}
               {activeTab === "overview"    && <OverviewTab entity={entity} diary={diary} kills={kills} deaths={deaths} quests={quests} itemCount={items.length} />}
+              {activeTab === "guild"       && <GuildTab custodialWallet={custodialWallet} ownerWallet={wallet} />}
               {activeTab === "professions" && <ProfessionsTab learned={professions} />}
               {activeTab === "quests"      && <QuestsTab diary={diary} />}
               {activeTab === "activity"    && <ActivityTab diary={diary} />}
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
               {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "friends"     && <FriendsTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}
             </div>
           </div>
         </div>

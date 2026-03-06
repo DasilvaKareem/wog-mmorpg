@@ -161,6 +161,45 @@ export async function getChatHistory(
   return (memChat.get(key) ?? []).slice(-limit);
 }
 
+// ── Deploy count (per-owner wallet) ──────────────────────────────────────────
+
+function deployCountKey(k: string) { return `agent:deploys:${k.toLowerCase()}`; }
+const memDeployCount = new Map<string, number>();
+
+export async function getDeployCount(userWallet: string): Promise<number> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const val = await redis.get(deployCountKey(key));
+      return val ? parseInt(val, 10) : 0;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getDeployCount");
+  }
+  return memDeployCount.get(key) ?? 0;
+}
+
+export async function incrementDeployCount(userWallet: string): Promise<number> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const newVal = await redis.incr(deployCountKey(key));
+      return newVal;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("incrementDeployCount");
+  }
+  const current = memDeployCount.get(key) ?? 0;
+  memDeployCount.set(key, current + 1);
+  return current + 1;
+}
+
 // ── Custodial wallet mapping ─────────────────────────────────────────────────
 
 export async function getAgentCustodialWallet(userWallet: string): Promise<string | null> {

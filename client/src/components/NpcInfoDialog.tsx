@@ -5,6 +5,8 @@ import type { Entity } from "@/types";
 import { formatCopperString } from "@/lib/currency";
 import { useWalletContext } from "@/context/WalletContext";
 import { getAuthToken } from "@/lib/agentAuth";
+import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
+import type { TechniqueInfo } from "@/hooks/useTechniques";
 
 /* ── 8-bit retro palette (matches InspectDialog) ──────────── */
 const BG = "#11182b";
@@ -182,27 +184,7 @@ const FALLBACK_ROLE: NpcRoleInfo = {
   details: () => [],
 };
 
-/* ── Technique type colors ────────────────────────────────── */
-const TYPE_COLORS: Record<string, string> = {
-  attack: "#f25454",
-  buff: "#54f28b",
-  debuff: "#b48efa",
-  healing: "#5dadec",
-};
-
 /* ── Technique list for trainers ──────────────────────────── */
-interface TechniqueInfo {
-  id: string;
-  name: string;
-  description: string;
-  levelRequired: number;
-  copperCost: number;
-  essenceCost: number;
-  cooldown: number;
-  type: string;
-  targetType: string;
-}
-
 function TrainerTechniqueList({ className }: { className: string }): React.ReactElement {
   const [techniques, setTechniques] = React.useState<TechniqueInfo[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -227,18 +209,29 @@ function TrainerTechniqueList({ className }: { className: string }): React.React
   return (
     <div className="space-y-1.5">
       {techniques.map((tech) => {
-        const typeColor = TYPE_COLORS[tech.type] ?? DIM;
+        const visual = getTechniqueVisual(tech.id, tech.type);
+        const primary = colorToCss(visual.primary);
+        const secondary = colorToCss(visual.secondary);
+        const accent = colorToCss(visual.accent);
         return (
-          <div key={tech.id} className="border p-1.5" style={{ borderColor: "#1e2842" }}>
+          <div key={tech.id} className="border p-1.5" style={{ borderColor: primary, background: "#0d1628" }}>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold" style={{ color: TEXT }}>
-                {tech.name}
-              </span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex h-5 w-5 items-center justify-center border text-[9px] font-bold"
+                  style={{ borderColor: primary, color: accent, background: "#10192d" }}
+                >
+                  {visual.uiGlyph}
+                </span>
+                <span className="text-[11px] font-bold" style={{ color: primary }}>
+                  {tech.name}
+                </span>
+              </div>
               <div className="flex items-center gap-1">
                 <span className="text-[8px] uppercase font-bold px-1 border" style={{ borderColor: "#1e2842", color: DIM }}>
                   Lv{tech.levelRequired}
                 </span>
-                <span className="text-[9px] uppercase font-bold" style={{ color: typeColor }}>
+                <span className="text-[9px] uppercase font-bold" style={{ color: secondary }}>
                   {tech.type}
                 </span>
               </div>
@@ -246,10 +239,10 @@ function TrainerTechniqueList({ className }: { className: string }): React.React
             <div className="text-[10px] mt-0.5" style={{ color: DIM }}>
               {tech.description}
             </div>
-            <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: "#5dadec" }}>
+            <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: accent }}>
               <span>CD: {tech.cooldown}s</span>
               <span>ES: {tech.essenceCost}</span>
-              <span>Cost: {formatCopperString(tech.copperCost)}</span>
+              <span>Cost: {formatCopperString(tech.copperCost ?? 0)}</span>
             </div>
           </div>
         );

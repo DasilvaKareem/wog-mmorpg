@@ -19,6 +19,8 @@ import {
   appendChatMessage,
   getChatHistory,
   defaultConfig,
+  getDeployCount,
+  incrementDeployCount,
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
@@ -134,6 +136,22 @@ async function getFullGameState(userWallet: string) {
 export function registerAgentChatRoutes(server: FastifyInstance): void {
   const availableZoneIds = Object.keys(getWorldLayout().zones);
 
+  // ── GET /agent/deploy-info ───────────────────────────────────────────────
+  // Returns whether the next deploy is free or requires payment.
+  server.get("/agent/deploy-info", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const count = await getDeployCount(authWallet);
+    return reply.send({
+      deployCount: count,
+      nextDeployFree: count === 0,
+      paymentRequired: count > 0,
+      paymentAmount: count > 0 ? "2" : "0",
+      paymentCurrency: "USDC",
+    });
+  });
+
   // ── POST /agent/deploy ────────────────────────────────────────────────────
   server.post<{
     Body: {
@@ -142,6 +160,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       raceId?: string;
       classId?: string;
       tier?: AgentTier;
+      paymentTx?: string;
     };
   }>("/agent/deploy", {
     preHandler: authenticateRequest,
@@ -151,6 +170,18 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     if (requestedWallet && requestedWallet.toLowerCase() !== authWallet.toLowerCase()) {
       return reply.code(403).send({ error: "Request wallet does not match authenticated wallet" });
+    }
+
+    // ── 1 free agent per account, then $2 USDC ────────────────────────────
+    const deployCount = await getDeployCount(authWallet);
+    if (deployCount > 0 && !request.body.paymentTx) {
+      return reply.code(402).send({
+        error: "payment_required",
+        message: "First agent is free. Additional agents cost $2 USDC.",
+        deployCount,
+        paymentAmount: "2",
+        paymentCurrency: "USDC",
+      });
     }
 
     // Use the character data the client selected (from their NFT)
@@ -272,6 +303,9 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         throw (startErr ?? new Error("Agent start failed"));
       }
 
+      // Track successful deploy count for payment gating
+      const newCount = await incrementDeployCount(authWallet);
+
       return reply.send({
         ok: true,
         entityId: result.entityId,
@@ -279,6 +313,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         custodialWallet: result.custodialWallet,
         characterName: result.characterName,
         alreadyExisted: result.alreadyExisted,
+        deployCount: newCount,
       });
     } catch (err: any) {
       server.log.error(`[agent/deploy] ${err.message}`);

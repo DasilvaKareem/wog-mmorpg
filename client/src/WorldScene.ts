@@ -6,6 +6,7 @@ import { TilemapRenderer } from "@/TilemapRenderer";
 import { ChunkStreamManager } from "@/ChunkStreamManager";
 import { WorldLayoutManager } from "@/WorldLayoutManager";
 import { AbilityEffectsLayer } from "@/AbilityEffectsLayer";
+import { FloatingTextLayer } from "@/FloatingTextLayer";
 import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
 import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
@@ -46,6 +47,7 @@ export class WorldScene extends Phaser.Scene {
   private chunkManager!: ChunkStreamManager;
   private worldLayout!: WorldLayoutManager;
   private abilityLayer!: AbilityEffectsLayer;
+  private floatingText!: FloatingTextLayer;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private hud!: Phaser.GameObjects.Text;
   private tooltip!: Phaser.GameObjects.Text;
@@ -55,6 +57,10 @@ export class WorldScene extends Phaser.Scene {
   private terrainLoaded = false;
   private currentZoneLabel = "";
   private unsubscribeSwitchZone: (() => void) | null = null;
+
+  /** Centralized event dedup — every event ID processed at most once.
+   *  Stores event ID → timestamp so we can evict only stale entries. */
+  private processedEvents = new Map<string, number>();
 
   /** Dynamic min zoom */
   private minZoom = 0.3;
@@ -120,6 +126,7 @@ export class WorldScene extends Phaser.Scene {
     this.tilemapRenderer = new TilemapRenderer(this);
     this.entityRenderer = new EntityRenderer(this);
     this.abilityLayer = new AbilityEffectsLayer(this);
+    this.floatingText = new FloatingTextLayer(this);
 
     this.entityRenderer.onClick((entity) => {
       if (entity.type === "merchant" && entity.shopItems) {
@@ -903,6 +910,81 @@ export class WorldScene extends Phaser.Scene {
     return Array.from(selected);
   }
 
+  /**
+   * Centralized event processor — deduplicates by event ID so each event
+   * is dispatched to VFX/animations/floating text exactly once, regardless
+   * of how many poll cycles it appears in.
+   */
+  private processEvents(
+    events: import("./types").ZoneEvent[],
+    pixelPositions: Map<string, { x: number; y: number }>,
+  ): void {
+    const now = Date.now();
+
+    // Evict entries older than 6s (server window is 3s, 2x margin)
+    if (this.processedEvents.size > 200) {
+      const cutoff = now - 6_000;
+      for (const [id, ts] of this.processedEvents) {
+        if (ts < cutoff) this.processedEvents.delete(id);
+      }
+    }
+
+    for (const evt of events) {
+      if (this.processedEvents.has(evt.id)) continue;
+      this.processedEvents.set(evt.id, now);
+
+      const evtData = evt.data as Record<string, unknown> | undefined;
+
+      // Ability VFX (particles)
+      if (evt.type === "ability") {
+        this.abilityLayer.playEffect(evt, pixelPositions);
+      }
+
+      // Death animation
+      if (evt.type === "death" && evt.entityId) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) this.abilityLayer.playDeath(pos);
+        this.entityRenderer.triggerDeath(evt.entityId);
+      }
+
+      // Level up animation
+      if (evt.type === "levelup" && evt.entityId) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) this.abilityLayer.playLevelUp(pos);
+        this.entityRenderer.triggerLevelUp(evt.entityId);
+      }
+
+      // Technique learned animation
+      if (evt.type === "technique" && evt.entityId) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) this.abilityLayer.playTechniqueLearned(pos);
+        const techName = (evtData)?.techniqueName as string | undefined;
+        this.entityRenderer.triggerTechniqueLearned(evt.entityId, techName);
+      }
+
+      // Melee lunge animation
+      const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
+      if (isMelee && evt.entityId && evt.targetId) {
+        this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
+      }
+
+      // Floating damage/heal numbers
+      if ((evt.type === "combat" || evt.type === "ability") && evtData) {
+        // Damage on target
+        if (evtData.damage || evtData.dodged || evtData.blocked) {
+          const pos = pixelPositions.get(evt.targetId ?? evt.entityId ?? "");
+          if (pos) this.floatingText.showCombatText(evt.id + ":dmg", pos, evtData, evt.type);
+        }
+        // Heal on healed entity
+        if (evtData.healing) {
+          const healId = evt.targetId ?? evt.entityId;
+          const pos = pixelPositions.get(healId ?? "");
+          if (pos) this.floatingText.showCombatText(evt.id + ":heal", pos, { healing: evtData.healing }, "ability");
+        }
+      }
+    }
+  }
+
   /** Poll all zones for entities, offset to world coordinates */
   private async pollAllZones(): Promise<void> {
     if (this.pollInFlight) return;
@@ -917,30 +999,7 @@ export class WorldScene extends Phaser.Scene {
           this.tick = data.tick;
           this.entityRenderer.update(data.entities);
           const pixelPositions = this.entityRenderer.getPixelPositions();
-          for (const evt of data.recentEvents ?? []) {
-            if (evt.type === "ability") this.abilityLayer.playEffect(evt, pixelPositions);
-            if (evt.type === "death" && evt.entityId) {
-              const pos = pixelPositions.get(evt.entityId);
-              if (pos) this.abilityLayer.playDeath(pos);
-              this.entityRenderer.triggerDeath(evt.entityId);
-            }
-            if (evt.type === "levelup" && evt.entityId) {
-              const pos = pixelPositions.get(evt.entityId);
-              if (pos) this.abilityLayer.playLevelUp(pos);
-              this.entityRenderer.triggerLevelUp(evt.entityId);
-            }
-            if (evt.type === "technique" && evt.entityId) {
-              const pos = pixelPositions.get(evt.entityId);
-              if (pos) this.abilityLayer.playTechniqueLearned(pos);
-              const techName = (evt.data as Record<string, unknown> | undefined)?.techniqueName as string | undefined;
-              this.entityRenderer.triggerTechniqueLearned(evt.entityId, techName);
-            }
-            const evtData = evt.data as Record<string, unknown> | undefined;
-            const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
-            if (isMelee && evt.entityId && evt.targetId) {
-              this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
-            }
-          }
+          this.processEvents(data.recentEvents ?? [], pixelPositions);
         } else {
           this.connected = false;
         }
@@ -983,27 +1042,10 @@ export class WorldScene extends Phaser.Scene {
       this.tick = maxTick;
       this.entityRenderer.update(allEntities);
 
-      // Play ability VFX + melee animations for any new events in the last 3s
+      // Play VFX, animations, floating text — centralized dedup
       const pixelPositions = this.entityRenderer.getPixelPositions();
       for (const { data } of results) {
-        for (const evt of data?.recentEvents ?? []) {
-          if (evt.type === "ability") this.abilityLayer.playEffect(evt, pixelPositions);
-          if (evt.type === "death" && evt.entityId) {
-            const pos = pixelPositions.get(evt.entityId);
-            if (pos) this.abilityLayer.playDeath(pos);
-            this.entityRenderer.triggerDeath(evt.entityId);
-          }
-          if (evt.type === "levelup" && evt.entityId) {
-            const pos = pixelPositions.get(evt.entityId);
-            if (pos) this.abilityLayer.playLevelUp(pos);
-            this.entityRenderer.triggerLevelUp(evt.entityId);
-          }
-          const evtData = evt.data as Record<string, unknown> | undefined;
-          const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
-          if (isMelee && evt.entityId && evt.targetId) {
-            this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
-          }
-        }
+        this.processEvents(data?.recentEvents ?? [], pixelPositions);
       }
 
       // Re-apply wallet lock after each poll (entity may have just spawned)

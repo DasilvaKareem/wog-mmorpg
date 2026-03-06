@@ -21,16 +21,16 @@ export function registerX402Routes(server: FastifyInstance): void {
           gold_bonus: PRICING_TIERS.free.goldBonus,
           rate_limit: PRICING_TIERS.free.rateLimit,
         },
-        basic_tier: {
-          cost_usd: PRICING_TIERS.basic.cost,
-          gold_bonus: PRICING_TIERS.basic.goldBonus,
-          rate_limit: PRICING_TIERS.basic.rateLimit,
+        starter_tier: {
+          cost_usd: PRICING_TIERS.starter.cost,
+          gold_bonus: PRICING_TIERS.starter.goldBonus,
+          rate_limit: PRICING_TIERS.starter.rateLimit,
         },
-        premium_tier: {
-          cost_usd: PRICING_TIERS.premium.cost,
-          gold_bonus: PRICING_TIERS.premium.goldBonus,
-          rate_limit: PRICING_TIERS.premium.rateLimit,
-          bonus: PRICING_TIERS.premium.bonus,
+        pro_tier: {
+          cost_usd: PRICING_TIERS.pro.cost,
+          gold_bonus: PRICING_TIERS.pro.goldBonus,
+          rate_limit: PRICING_TIERS.pro.rateLimit,
+          bonus: PRICING_TIERS.pro.bonus,
         },
       },
       payment_methods: ["free", "stripe", "crypto"],

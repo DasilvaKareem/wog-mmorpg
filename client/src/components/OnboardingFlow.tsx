@@ -626,7 +626,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 disabled={!canCreate}
                 className="mt-1 w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
-                [→] Mint Character — $10
+                [→] Mint Character — $2 USDC
               </button>
             </div>
           )}
@@ -634,7 +634,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {/* ── STEP: PAYMENT (CHARACTER MINT) ── */}
           {step === "payment-char" && (
             <PaymentGate
-              label="Character Mint Fee — one-time $10 to enter World of Geneva"
+              label="Character Mint Fee — one-time $2 USDC to enter World of Geneva"
+              amount="2"
               onSuccess={() => void handleCreate()}
               onCancel={() => setStep("create-char")}
             />

@@ -1,5 +1,5 @@
 /**
- * PaymentGate — wraps thirdweb PayEmbed for a direct $10 USD payment
+ * PaymentGate — wraps thirdweb PayEmbed for crypto payments
  * to the WoG server wallet. Accepts any crypto on any supported chain.
  */
 
@@ -10,9 +10,6 @@ import { thirdwebClient } from "@/lib/inAppWalletClient";
 
 // Server wallet that receives all fees
 const SERVER_WALLET = "0x8cFd0a555dD865B2b63a391AF2B14517C0389808";
-
-// Bypass payment for testing — set to false before going live
-const TEST_MODE = true;
 
 // Base mainnet (chain 8453) — broadest crypto support for checkout
 // PayEmbed handles cross-chain bridging automatically
@@ -32,43 +29,21 @@ const wogTheme = darkTheme({
 interface PaymentGateProps {
   /** What the fee is for, shown in the UI */
   label: string;
+  /** Amount in USD */
+  amount: string;
   /** Called when payment is confirmed */
   onSuccess: () => void;
   /** Called when user cancels */
   onCancel: () => void;
 }
 
-export function PaymentGate({ label, onSuccess, onCancel }: PaymentGateProps): React.ReactElement {
-  if (TEST_MODE) {
-    return (
-      <div className="flex flex-col gap-3 p-4">
-        <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[10px] text-[#8b95c2]">
-          <p className="text-[#ffcc00] mb-1 text-[12px] font-bold">[TEST] FREE MODE</p>
-          <p className="text-[#9aa7cc]">{label}</p>
-          <p className="mt-1 text-[#54f28b]">Payment bypassed for testing.</p>
-        </div>
-        <button
-          onClick={onSuccess}
-          className="border-4 border-black bg-[#54f28b] px-5 py-3 text-[13px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8]"
-        >
-          Continue (Free)
-        </button>
-        <button
-          onClick={onCancel}
-          className="text-[11px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
-        >
-          ← Cancel
-        </button>
-      </div>
-    );
-  }
-
+export function PaymentGate({ label, amount, onSuccess, onCancel }: PaymentGateProps): React.ReactElement {
   return (
     <div className="flex flex-col gap-3">
       <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[10px] text-[#8b95c2]">
         <p className="text-[#ffcc00] mb-1 text-[12px] font-bold">[⟡] PAYMENT REQUIRED</p>
         <p className="text-[#9aa7cc]">{label}</p>
-        <p className="mt-1">$10.00 USD — pay with any crypto, any chain.</p>
+        <p className="mt-1">${amount} USD — pay with any crypto, any chain.</p>
       </div>
 
       <div className="flex justify-center">
@@ -80,8 +55,7 @@ export function PaymentGate({ label, onSuccess, onCancel }: PaymentGateProps): R
             paymentInfo: {
               sellerAddress: SERVER_WALLET,
               chain: baseMainnet,
-              amount: "10",
-              // No tokenAddress = native ETH; thirdweb converts any crypto the user holds
+              amount,
             },
             metadata: {
               name: label,

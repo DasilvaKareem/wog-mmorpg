@@ -24,8 +24,8 @@ export interface PricingTier {
 
 export const PRICING_TIERS: Record<string, PricingTier> = {
   free: { cost: 0, goldBonus: 50, rateLimit: "1/hour" },
-  basic: { cost: 5, goldBonus: 500, rateLimit: "unlimited" },
-  premium: { cost: 20, goldBonus: 2500, rateLimit: "unlimited", bonus: "legendary_item" },
+  starter: { cost: 4.99, goldBonus: 500, rateLimit: "unlimited" },
+  pro: { cost: 9.99, goldBonus: 2500, rateLimit: "unlimited", bonus: "legendary_item" },
 };
 
 /**

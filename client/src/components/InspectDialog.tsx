@@ -2,8 +2,9 @@ import * as React from "react";
 import { API_URL } from "@/config";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useItemCatalog, type CatalogItem } from "@/hooks/useItemCatalog";
-import { useTechniques } from "@/hooks/useTechniques";
+import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
+import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
 
 /* ── 8-bit retro palette ─────────────────────────────────────── */
@@ -379,7 +380,7 @@ function useEssenceTechniques(walletAddress?: string): EssenceTechniqueData[] {
 }
 
 /* ── Skills Tab ───────────────────────────────────────────────── */
-function SkillsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id: string) => { id: string; name: string; description: string; cooldown: number; essenceCost: number; type: string; targetType: string } | undefined }): React.ReactElement {
+function SkillsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id: string) => TechniqueInfo | undefined }): React.ReactElement {
   const ids = entity.learnedTechniques ?? [];
   const essenceTechniques = useEssenceTechniques(entity.walletAddress);
 
@@ -403,15 +404,26 @@ function SkillsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id
             </div>
           );
         }
-        const typeColor = { attack: "#f25454", buff: "#54f28b", debuff: "#b48efa", healing: "#5dadec" }[tech.type] ?? DIM;
+        const visual = getTechniqueVisual(tech.id, tech.type);
+        const primary = colorToCss(visual.primary);
+        const secondary = colorToCss(visual.secondary);
+        const accent = colorToCss(visual.accent);
         return (
-          <div key={techId} className="border p-1.5" style={{ borderColor: "#1e2842" }}>
+          <div key={techId} className="border p-1.5" style={{ borderColor: primary, background: "#0d1628" }}>
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold" style={{ color: TEXT }}>{tech.name}</span>
-              <span className="text-[9px] uppercase font-bold" style={{ color: typeColor }}>{tech.type}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex h-5 w-5 items-center justify-center border text-[9px] font-bold"
+                  style={{ borderColor: primary, color: accent, background: "#10192d" }}
+                >
+                  {visual.uiGlyph}
+                </span>
+                <span className="text-[11px] font-bold" style={{ color: primary }}>{tech.name}</span>
+              </div>
+              <span className="text-[9px] uppercase font-bold" style={{ color: secondary }}>{tech.type}</span>
             </div>
             <div className="text-[10px]" style={{ color: DIM }}>{tech.description}</div>
-            <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: "#5dadec" }}>
+            <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: accent }}>
               <span>CD: {tech.cooldown}s</span>
               <span>Cost: {tech.essenceCost} ES</span>
               <span>{tech.targetType}</span>
@@ -427,20 +439,30 @@ function SkillsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id
             Unique Essence Techniques
           </div>
           {essenceTechniques.map((tech) => {
-            const borderColor = tech.tier === "ultimate" ? "#b48efa" : "#5dadec";
+            const visual = getTechniqueVisual(tech.id, tech.type);
+            const borderColor = tech.tier === "ultimate" ? "#b48efa" : colorToCss(visual.primary);
             const tierLabel = tech.tier === "ultimate" ? "ULTIMATE" : "SIGNATURE";
-            const typeColor = { attack: "#f25454", buff: "#54f28b", debuff: "#b48efa", healing: "#5dadec" }[tech.type] ?? DIM;
+            const typeColor = colorToCss(visual.secondary);
+            const accent = colorToCss(visual.accent);
             return (
               <div key={tech.id} className="border-2 p-1.5" style={{ borderColor, background: "#0d1628" }}>
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold" style={{ color: tech.displayColor }}>{tech.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="flex h-5 w-5 items-center justify-center border text-[9px] font-bold"
+                      style={{ borderColor, color: accent, background: "#10192d" }}
+                    >
+                      {visual.uiGlyph}
+                    </span>
+                    <span className="text-[11px] font-bold" style={{ color: tech.displayColor }}>{tech.name}</span>
+                  </div>
                   <div className="flex gap-1">
                     <span className="text-[8px] uppercase font-bold px-1 border" style={{ color: borderColor, borderColor }}>{tierLabel}</span>
                     <span className="text-[9px] uppercase font-bold" style={{ color: typeColor }}>{tech.type}</span>
                   </div>
                 </div>
                 <div className="text-[10px]" style={{ color: DIM }}>{tech.description}</div>
-                <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: "#5dadec" }}>
+                <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: accent }}>
                   <span>CD: {tech.cooldown}s</span>
                   <span>Cost: {tech.essenceCost} ES</span>
                   <span>{tech.targetType}</span>
@@ -455,7 +477,7 @@ function SkillsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id
 }
 
 /* ── Effects Tab ──────────────────────────────────────────────── */
-function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id: string) => { name: string } | undefined }): React.ReactElement {
+function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (id: string) => TechniqueInfo | undefined }): React.ReactElement {
   const effects: ActiveEffect[] = entity.activeEffects ?? [];
 
   if (effects.length === 0) {
@@ -470,16 +492,14 @@ function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (i
         const tech = getTechnique(fx.techniqueId);
         const name = fx.name ?? tech?.name ?? fx.techniqueId;
         const remaining = Math.max(0, Math.round((fx.remainingTicks * 0.5)));
-        const typeColors: Record<string, string> = {
-          buff: "#54f28b", hot: "#54f28b", shield: "#5dadec",
-          debuff: "#b48efa", dot: "#f25454",
-        };
-        const borderColor = typeColors[fx.type] ?? "#b48efa";
+        const visual = getTechniqueVisual(fx.techniqueId, tech?.type ?? (fx.type === "buff" || fx.type === "hot" || fx.type === "shield" ? "buff" : "debuff"));
+        const borderColor = colorToCss(visual.primary);
+        const accent = colorToCss(visual.accent);
 
         return (
           <div key={i} className="flex justify-between text-[11px] border-l-2 pl-2" style={{ borderColor }}>
             <div>
-              <span style={{ color: borderColor }}>{name}</span>
+              <span style={{ color: borderColor }}>{visual.uiGlyph} {name}</span>
               {fx.statModifiers && (
                 <span className="ml-1 text-[9px]" style={{ color: DIM }}>
                   {Object.entries(fx.statModifiers).map(([s, v]) => `${(v ?? 0) > 0 ? "+" : ""}${v ?? 0}% ${s}`).join(", ")}
@@ -501,7 +521,7 @@ function EffectsTab({ entity, getTechnique }: { entity: Entity; getTechnique: (i
                 </span>
               )}
             </div>
-            <span style={{ color: remaining > 5 ? DIM : "#f2c854" }}>{remaining}s</span>
+            <span style={{ color: remaining > 5 ? accent : "#f2c854" }}>{remaining}s</span>
           </div>
         );
       })}

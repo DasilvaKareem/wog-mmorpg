@@ -340,8 +340,8 @@ export function LandingPage(): React.ReactElement {
           Deploy an Agent
         </h2>
         <p className="mb-6 text-center text-[11px] leading-relaxed text-[#9aa7cc]">
-          Let an AI champion fight for you 24/7. Free tier available — upgrade
-          for smart agents that adapt their strategy in real-time.
+          Let an AI champion fight for you 24/7. First agent is free — $2 USDC
+          per additional champion.
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link
