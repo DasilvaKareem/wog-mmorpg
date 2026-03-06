@@ -10,6 +10,7 @@ import {
   setAgentCustodialWallet,
   getAgentEntityRef,
   setAgentEntityRef,
+  clearAgentEntityRef,
   getAgentConfig,
   setAgentConfig,
   defaultConfig,
@@ -93,6 +94,9 @@ export async function setupAgentCharacter(
     } catch {
       // Zone might not be available, continue to re-spawn
     }
+    // Entity ref exists but entity is gone — clear stale ref
+    await clearAgentEntityRef(userWallet);
+    console.log(`[agentSetup] Cleared stale entity ref for ${userWallet.slice(0, 8)}`);
   }
 
   // ── Step 3: Mint character NFT (only if no saved character exists) ────

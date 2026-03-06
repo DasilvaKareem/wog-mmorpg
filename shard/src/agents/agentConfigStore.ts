@@ -268,3 +268,20 @@ export async function setAgentEntityRef(userWallet: string, ref: AgentEntityRef)
   }
   memEntity.set(key, ref);
 }
+
+export async function clearAgentEntityRef(userWallet: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.del(entityKey(key));
+      memEntity.delete(key);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("clearAgentEntityRef");
+  }
+  memEntity.delete(key);
+}
