@@ -307,54 +307,14 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         return;
       }
 
-      const successBase: SuccessData = {
+      setSuccessData({
         name: charName.trim(),
         race: selectedRace?.name ?? raceId,
         className: selectedClass?.name ?? classId,
         txHash: result.txHash,
-        agentDeploying: true,
-      };
-      setSuccessData(successBase);
+        agentDeploying: false,
+      });
       setStep("success");
-
-      // Deploy agent in the background
-      try {
-        const token = await getAuthToken(connectedAddress);
-        if (token) {
-          const deployRes = await fetch(`${API_URL}/agent/deploy`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              walletAddress: connectedAddress,
-              characterName: charName.trim(),
-              raceId,
-              classId,
-            }),
-          });
-          const deployData = await deployRes.json();
-          if (deployRes.ok) {
-            if (deployData.custodialWallet) {
-              WalletManager.getInstance().setCustodialAddress(deployData.custodialWallet);
-            }
-            setSuccessData({
-              ...successBase,
-              agentDeploying: false,
-              agentEntityId: deployData.entityId,
-              agentZoneId: deployData.zoneId,
-            });
-          } else {
-            setSuccessData({ ...successBase, agentDeploying: false, agentError: deployData.error });
-          }
-        } else {
-          setSuccessData({
-            ...successBase,
-            agentDeploying: false,
-            agentError: "Could not authenticate wallet for agent deploy.",
-          });
-        }
-      } catch (deployErr: any) {
-        setSuccessData({ ...successBase, agentDeploying: false, agentError: deployErr.message });
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Minting failed. Please try again.");
       setStep("create-char");
