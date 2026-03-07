@@ -280,7 +280,8 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     }
     if (!canCreate) return;
     setError(null);
-    setStep("payment-char");
+    // First character is free — skip payment gate and mint directly
+    void handleCreate();
   }
 
   async function handleCreate() {
@@ -382,7 +383,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               : step === "create-char"
               ? ">> CREATE CHARACTER"
               : step === "payment-char"
-              ? ">> CHARACTER MINT FEE"
+              ? ">> CHARACTER MINT"
               : step === "minting"
               ? ">> MINTING NFT..."
               : step === "telegram-signup"
@@ -793,7 +794,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 disabled={!canCreate}
                 className="mt-1 w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
-                [→] Mint Character — $2 USDC
+                [→] Mint Character — FREE
               </button>
             </div>
           )}
