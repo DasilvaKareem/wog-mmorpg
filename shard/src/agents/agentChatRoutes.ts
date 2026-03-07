@@ -173,20 +173,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       return reply.code(403).send({ error: "Request wallet does not match authenticated wallet" });
     }
 
-    // ── 1 free agent per account, then $2 USDC ────────────────────────────
-    // Redeploying an existing agent (same wallet) is always free — only charge
-    // for truly NEW agent deployments (no custodial wallet yet).
+    // Agent deployment is free for now
     const deployCount = await getDeployCount(authWallet);
-    const existingCustodial = await getAgentCustodialWallet(authWallet);
-    if (deployCount > 0 && !existingCustodial && !request.body.paymentTx) {
-      return reply.code(402).send({
-        error: "payment_required",
-        message: "First agent is free. Additional agents cost $2 USDC.",
-        deployCount,
-        paymentAmount: "2",
-        paymentCurrency: "USDC",
-      });
-    }
 
     // Use the character data the client selected (from their NFT)
     let characterName = request.body.characterName;

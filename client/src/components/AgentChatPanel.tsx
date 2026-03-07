@@ -416,11 +416,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
             </p>
             <button
               onClick={() => {
-                if (deployCount != null && deployCount > 0) {
-                  setShowDeployPayment(true);
-                } else {
-                  void executeDeploy();
-                }
+                void executeDeploy();
               }}
               disabled={deploying || authLoading || !token}
               className="border border-[#54f28b] bg-[#0a1a0e] px-4 py-1.5 text-[12px] uppercase tracking-widest text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
@@ -428,9 +424,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               {deploying ? "Deploying..." : "[▶] Deploy Agent"}
             </button>
             <p className="text-[9px] text-[#565f89] text-center mt-1">
-              {deployCount != null && deployCount > 0
-                ? "Additional agents: $2 USDC"
-                : "First agent is free"}
+              Free to deploy
             </p>
           </div>
         )}
