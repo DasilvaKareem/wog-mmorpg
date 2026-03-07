@@ -372,9 +372,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={panelCls}>
+      <div className={`${panelCls} max-h-[90vh] flex flex-col`}>
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2">
+        <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 shrink-0">
           <span className="text-[13px] uppercase tracking-widest text-[#54f28b]">
             {step === "login" || step === "email-input" || step === "email-otp"
               ? ">> ENTER THE WORLD <<"
@@ -398,7 +398,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           </button>
         </div>
 
-        <div className="p-5">
+        <div className="p-5 overflow-y-auto flex-1">
           {/* ── STEP: LOGIN ── */}
           {(step === "login") && (
             <div className="flex flex-col gap-3">
@@ -595,7 +595,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
           {/* ── STEP: CREATE CHARACTER ── */}
           {step === "create-char" && (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
               {connectedAddress && (
                 <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
                   [AUTH] {connectedAddress.slice(0, 8)}...{connectedAddress.slice(-6)}
@@ -604,7 +604,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               {/* Name */}
               <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
                   Character Name
                 </label>
                 <input
@@ -616,7 +616,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                     setCharName(e.target.value);
                     if (error) setError(null);
                   }}
-                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[14px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
+                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[13px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
                   autoFocus
                 />
                 {nameValidationError && charName.trim().length > 0 && (
@@ -624,83 +624,109 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 )}
               </div>
 
-              {/* Race */}
-              <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
-                  Race
-                </label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {races.map((r) => (
-                    <button
-                      key={r.id}
-                      onClick={() => setRaceId(r.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
-                        raceId === r.id
-                          ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                          : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                      }`}
-                    >
-                      {r.name}
-                    </button>
-                  ))}
+              {/* Race + Class side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Race
+                  </label>
+                  <div className="flex flex-col gap-1">
+                    {races.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => setRaceId(r.id)}
+                        className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                          raceId === r.id
+                            ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                        }`}
+                      >
+                        {r.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Class
+                  </label>
+                  <div className="flex flex-col gap-1">
+                    {classes.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => setClassId(c.id)}
+                        className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                          classId === c.id
+                            ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
+                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              {/* Class */}
-              <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
-                  Class
-                </label>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {classes.map((c) => (
-                    <button
-                      key={c.id}
-                      onClick={() => setClassId(c.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
-                        classId === c.id
-                          ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
-                          : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                      }`}
-                    >
-                      {c.name}
-                    </button>
-                  ))}
+              {/* Skin Color + Eye Color side by side */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Skin Color
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {SKIN_COLORS.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => setSkinColor(s.id)}
+                        title={s.label}
+                        className={`h-7 w-7 border-2 transition ${
+                          skinColor === s.id
+                            ? "border-[#ffcc00] scale-110"
+                            : "border-[#2a3450] hover:border-[#54f28b]"
+                        }`}
+                        style={{ backgroundColor: s.hex }}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-
-              {/* Skin Color */}
-              <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
-                  Skin Color
-                </label>
-                <div className="flex gap-1.5">
-                  {SKIN_COLORS.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setSkinColor(s.id)}
-                      title={s.label}
-                      className={`h-8 w-8 border-2 transition shadow-[2px_2px_0_0_#000] ${
-                        skinColor === s.id
-                          ? "border-[#ffcc00] scale-110"
-                          : "border-[#2a3450] hover:border-[#54f28b]"
-                      }`}
-                      style={{ backgroundColor: s.hex }}
-                    />
-                  ))}
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Eye Color
+                  </label>
+                  <div className="flex flex-wrap gap-1">
+                    {EYE_COLORS.map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={() => setEyeColor(e.id)}
+                        title={e.label}
+                        className={`h-7 w-7 border-2 transition flex items-center justify-center ${
+                          eyeColor === e.id
+                            ? "border-[#ffcc00] scale-110"
+                            : "border-[#2a3450] hover:border-[#54f28b]"
+                        }`}
+                        style={{ backgroundColor: e.hex }}
+                      >
+                        <span className="text-[7px] text-white/70 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
+                          {e.label.slice(0, 2).toUpperCase()}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {/* Hair Style */}
               <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
                   Hair Style
                 </label>
-                <div className="grid grid-cols-4 gap-1.5">
+                <div className="grid grid-cols-6 gap-1">
                   {HAIR_STYLES.map((h) => (
                     <button
                       key={h.id}
                       onClick={() => setHairStyle(h.id)}
-                      className={`border-2 px-2 py-1.5 text-left text-[12px] transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-1 py-1 text-center text-[10px] transition ${
                         hairStyle === h.id
                           ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
                           : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
@@ -712,55 +738,26 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 </div>
               </div>
 
-              {/* Eye Color */}
-              <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
-                  Eye Color
-                </label>
-                <div className="flex gap-1.5">
-                  {EYE_COLORS.map((e) => (
-                    <button
-                      key={e.id}
-                      onClick={() => setEyeColor(e.id)}
-                      title={e.label}
-                      className={`h-8 w-8 border-2 transition shadow-[2px_2px_0_0_#000] flex items-center justify-center ${
-                        eyeColor === e.id
-                          ? "border-[#ffcc00] scale-110"
-                          : "border-[#2a3450] hover:border-[#54f28b]"
-                      }`}
-                      style={{ backgroundColor: e.hex }}
-                    >
-                      <span className="text-[8px] text-white/70 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
-                        {e.label.slice(0, 2).toUpperCase()}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {/* Origin */}
               <div>
-                <label className="mb-1 block text-[12px] text-[#9aa7cc] uppercase tracking-wider">
+                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
                   Origin
                 </label>
-                <div className="flex flex-col gap-1.5">
+                <div className="grid grid-cols-2 gap-1">
                   {ORIGINS.map((o) => (
                     <button
                       key={o.id}
                       onClick={() => setOrigin(o.id)}
-                      className={`border-2 px-3 py-2 text-left transition shadow-[2px_2px_0_0_#000] ${
+                      className={`border-2 px-2 py-1.5 text-left transition ${
                         origin === o.id
                           ? "border-[#ffcc00] bg-[#2a2210]"
                           : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <span className={`text-[13px] font-bold ${origin === o.id ? "text-[#ffcc00]" : "text-[#d6deff]"}`}>
-                          {o.label}
-                        </span>
-                        <span className="text-[10px] text-[#6d77a3]">/ {o.tone}</span>
-                      </div>
-                      <p className="mt-0.5 text-[10px] leading-snug text-[#8b95c2]">{o.desc}</p>
+                      <span className={`text-[11px] font-bold ${origin === o.id ? "text-[#ffcc00]" : "text-[#d6deff]"}`}>
+                        {o.label}
+                      </span>
+                      <span className="text-[9px] text-[#6d77a3] ml-1">/ {o.tone}</span>
                     </button>
                   ))}
                 </div>
@@ -768,11 +765,11 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               {/* Stat preview */}
               {previewStats && (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2">
-                  <p className="mb-1.5 text-[11px] uppercase tracking-wider text-[#6d77a3]">
-                    Base Stats — {selectedRace?.name} {selectedClass?.name}
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-1.5">
+                  <p className="mb-1 text-[10px] uppercase tracking-wider text-[#6d77a3]">
+                    Stats — {selectedRace?.name} {selectedClass?.name}
                   </p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  <div className="grid grid-cols-3 gap-x-3 gap-y-0">
                     <StatRow label="STR" value={previewStats.str ?? 0} />
                     <StatRow label="DEF" value={previewStats.def ?? 0} />
                     <StatRow label="HP" value={previewStats.hp ?? 0} />
@@ -792,7 +789,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               <button
                 onClick={handleRequestMint}
                 disabled={!canCreate}
-                className="mt-1 w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+                className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-2.5 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
                 [→] Mint Character — FREE
               </button>
