@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getTechniquesByClass, getLearnedTechniques, getTechniqueById } from "./techniques.js";
 import type { TechniqueDefinition } from "./techniques.js";
-import { getOrCreateZone, getEntity, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { getOrCreateZone, getEntity, recalculateEntityVitals, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
 import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
@@ -80,15 +80,21 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
   server.post<{
     Body: {
       zoneId: string;
-      playerEntityId: string;
+      playerEntityId?: string;
+      entityId?: string;
       techniqueId: string;
       trainerEntityId: string;
     };
   }>("/techniques/learn", {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
-    const { zoneId, playerEntityId, techniqueId, trainerEntityId } = req.body;
+    const playerEntityId = req.body.entityId || req.body.playerEntityId;
+    const { zoneId, techniqueId, trainerEntityId } = req.body;
     const authenticatedWallet = (req as any).walletAddress;
+
+    if (!playerEntityId) {
+      return reply.status(400).send({ error: "entityId (or playerEntityId) is required" });
+    }
 
     const player = getEntity(playerEntityId);
     const trainer = getEntity(trainerEntityId);
@@ -154,7 +160,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const dy = player.y - trainer.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
     if (distance > 50) {
-      return reply.status(400).send({ error: "Too far from trainer" });
+      return reply.status(400).send({ error: "Too far from trainer", distance: Math.round(distance), maxRange: 50 });
     }
 
     // Check gold balance
@@ -211,15 +217,23 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
   server.post<{
     Body: {
       zoneId: string;
-      casterEntityId: string;
+      casterEntityId?: string;
+      entityId?: string;
       techniqueId: string;
       targetEntityId?: string;
+      targetId?: string;
     };
   }>("/techniques/use", {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
-    const { zoneId, casterEntityId, techniqueId, targetEntityId } = req.body;
+    const casterEntityId = req.body.entityId || req.body.casterEntityId;
+    const targetEntityId = req.body.targetId || req.body.targetEntityId;
+    const { zoneId, techniqueId } = req.body;
     const authenticatedWallet = (req as any).walletAddress;
+
+    if (!casterEntityId) {
+      return reply.status(400).send({ error: "entityId (or casterEntityId) is required" });
+    }
 
     const zone = getOrCreateZone(zoneId);
     const caster = getEntity(casterEntityId);
@@ -373,9 +387,13 @@ function applyTechniqueEffects(
         const actualDamage = Math.min(damage, t.hp);
         t.hp = Math.max(0, t.hp - damage);
         if (t.hp === 0) {
-          zone.entities.delete(t.id);
+          if (t.type === "mob" || t.type === "boss") {
+            zone.entities.delete(t.id);
+          }
+          // Players are NOT deleted — zoneRuntime tick handles player death properly
+          // (respawn at graveyard, XP penalty, etc.)
         }
-        return { id: t.id, name: t.name, damage: actualDamage };
+        return { id: t.id, name: t.name, damage: actualDamage, killed: t.hp === 0 };
       });
     } else {
       // Single target attack

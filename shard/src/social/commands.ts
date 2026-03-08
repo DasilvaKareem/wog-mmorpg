@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity, type Order } from "../world/zoneRuntime.js";
+import { getEntity, getOrCreateZone, type Order, type Entity } from "../world/zoneRuntime.js";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import {
   getZoneConnections,
@@ -13,18 +13,19 @@ import {
 interface CommandBody {
   zoneId: string;
   entityId: string;
-  action: "move" | "attack" | "travel";
+  action: "move" | "attack" | "attack-nearest" | "travel";
   x?: number;
   y?: number;
   targetId?: string;
   targetZone?: string;
+  mobName?: string;
 }
 
 export function registerCommands(server: FastifyInstance) {
   server.post<{ Body: CommandBody }>("/command", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, entityId, action, x, y, targetId, targetZone } = request.body;
+    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     const entity = getEntity(entityId);
@@ -57,6 +58,36 @@ export function registerCommands(server: FastifyInstance) {
         return { error: "Target entity not found" };
       }
       order = { action: "attack", targetId };
+    } else if (action === "attack-nearest") {
+      // Find nearest mob (optionally filtered by name)
+      const regionId = entity.region;
+      if (!regionId) {
+        reply.code(400);
+        return { error: "Entity not in a region" };
+      }
+      const zone = getOrCreateZone(regionId);
+      let nearestMob: Entity | null = null;
+      let nearestDist = Infinity;
+
+      for (const other of zone.entities.values()) {
+        if (other.type !== "mob" && other.type !== "boss") continue;
+        if (other.hp <= 0) continue;
+        if (mobName && !other.name.toLowerCase().includes(mobName.toLowerCase())) continue;
+        const dx = other.x - entity.x;
+        const dy = other.y - entity.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearestMob = other;
+        }
+      }
+
+      if (!nearestMob) {
+        reply.code(404);
+        return { error: mobName ? `No "${mobName}" found nearby` : "No mobs found nearby" };
+      }
+
+      order = { action: "attack", targetId: nearestMob.id };
     } else if (action === "travel") {
       if (!targetZone) {
         reply.code(400);
@@ -79,7 +110,27 @@ export function registerCommands(server: FastifyInstance) {
     }
 
     entity.order = order;
-    return { ok: true, order };
+
+    // Return enriched response with player state + quest progress
+    const questProgress = (entity.activeQuests ?? []).map((aq: any) => ({
+      questId: aq.questId,
+      progress: aq.progress,
+    }));
+
+    return {
+      ok: true,
+      order,
+      entity: {
+        id: entity.id,
+        position: { x: entity.x, y: entity.y },
+        hp: entity.hp,
+        maxHp: entity.maxHp,
+        level: entity.level,
+        xp: entity.xp,
+        region: entity.region,
+      },
+      questProgress: questProgress.length > 0 ? questProgress : undefined,
+    };
   });
 
   // ── GET /neighbors/:zoneId — discovery endpoint for AI agents ──────

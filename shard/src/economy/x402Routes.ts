@@ -37,22 +37,30 @@ export function registerX402Routes(server: FastifyInstance): void {
       supported_races: RACE_DEFINITIONS.map(r => r.id),
       supported_classes: CLASS_DEFINITIONS.map(c => c.id),
       deployment_zones: ["village-square", "wild-meadow", "dark-forest"],
+      appearance: {
+        skinColor: ["light", "medium", "dark", "olive", "pale"],
+        hairStyle: ["short", "long", "mohawk", "ponytail"],
+        eyeColor: ["blue", "green", "brown", "red", "gold"],
+      },
       documentation: "https://github.com/yourusername/wog-mmorpg/blob/master/docs/X402_AGENT_DEPLOYMENT.md",
       examples: {
         free_deployment: {
           method: "POST",
           url: "/x402/deploy",
           body: {
-            agent_name: "MyAIAgent",
+            agentName: "MyAIAgent",
             character: {
               name: "Aragorn",
               race: "human",
               class: "warrior",
+              skinColor: "medium",
+              hairStyle: "long",
+              eyeColor: "brown",
             },
             payment: {
               method: "free",
             },
-            deployment_zone: "village-square",
+            deploymentZone: "village-square",
             metadata: {
               source: "my-ai-service",
               version: "1.0",
@@ -69,16 +77,17 @@ export function registerX402Routes(server: FastifyInstance): void {
       agentName,
       character,
       payment,
-      deploymentZone,
       metadata,
     } = request.body;
+    // Accept both camelCase and snake_case for deployment zone
+    const deploymentZone = request.body.deploymentZone || request.body.deployment_zone;
 
     // Validate required fields
     if (!agentName || !character || !payment || !deploymentZone) {
       return reply.status(400).send({
         success: false,
         error: "missing_fields",
-        message: "Required fields: agentName, character, payment, deploymentZone",
+        message: "Required fields: agentName, character, payment, deploymentZone (or deployment_zone)",
         retry: false,
       });
     }
@@ -87,7 +96,7 @@ export function registerX402Routes(server: FastifyInstance): void {
       return reply.status(400).send({
         success: false,
         error: "invalid_character",
-        message: "Character must have name, race, and class",
+        message: "Character must have name, race, class. Optional: skinColor, hairStyle, eyeColor",
         retry: false,
       });
     }
@@ -123,7 +132,7 @@ export function registerX402Routes(server: FastifyInstance): void {
       payment,
       deploymentZone,
       metadata,
-    });
+    } as DeploymentRequest);
 
     if (!result.success) {
       const statusCode = "error" in result && result.error === "rate_limit_exceeded" ? 429 : 400;

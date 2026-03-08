@@ -48,6 +48,7 @@ export interface AgentConfig {
 export interface AgentEntityRef {
   entityId: string;
   zoneId: string;
+  characterName?: string;
 }
 
 // In-memory fallback

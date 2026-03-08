@@ -3027,11 +3027,16 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
   // POST /quests/accept - Accept a quest
   server.post<{
-    Body: { zoneId?: string; playerId: string; questId: string };
+    Body: { zoneId?: string; playerId?: string; entityId?: string; questId: string };
   }>("/quests/accept", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { playerId, questId } = request.body;
+    const playerId = request.body.entityId || request.body.playerId;
+    const { questId } = request.body;
+    if (!playerId) {
+      reply.code(400);
+      return { error: "entityId (or playerId) is required" };
+    }
     const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
@@ -3093,8 +3098,9 @@ export function registerQuestRoutes(server: FastifyInstance) {
   });
 
   // GET /quests/active/:playerId - Get player's active quests
+  // Also accepts entityId as alias for playerId
   const questsActiveHandler = async (request: any, reply: any) => {
-    const { playerId } = request.params;
+    const playerId = request.params.entityId || request.params.playerId;
     const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
@@ -3121,6 +3127,12 @@ export function registerQuestRoutes(server: FastifyInstance) {
     questsActiveHandler
   );
 
+  // entityId alias (preferred)
+  server.get<{ Params: { entityId: string } }>(
+    "/quests/active/entity/:entityId",
+    questsActiveHandler
+  );
+
   // Backward compat alias
   server.get<{ Params: { zoneId: string; playerId: string } }>(
     "/quests/active/:zoneId/:playerId",
@@ -3129,11 +3141,16 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
   // POST /quests/complete - Turn in a completed quest
   server.post<{
-    Body: { zoneId?: string; playerId: string; questId: string; npcId: string };
+    Body: { zoneId?: string; playerId?: string; entityId?: string; questId: string; npcId: string };
   }>("/quests/complete", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { playerId, questId, npcId } = request.body;
+    const playerId = request.body.entityId || request.body.playerId;
+    const { questId, npcId } = request.body;
+    if (!playerId) {
+      reply.code(400);
+      return { error: "entityId (or playerId) is required" };
+    }
     const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {
@@ -3200,11 +3217,16 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
   // POST /quests/talk - Auto-accept + auto-complete a talk quest by visiting an NPC
   server.post<{
-    Body: { zoneId?: string; playerId: string; npcEntityId: string };
+    Body: { zoneId?: string; playerId?: string; entityId?: string; npcEntityId: string };
   }>("/quests/talk", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { playerId, npcEntityId } = request.body;
+    const playerId = request.body.entityId || request.body.playerId;
+    const { npcEntityId } = request.body;
+    if (!playerId) {
+      reply.code(400);
+      return { error: "entityId (or playerId) is required" };
+    }
     const player = getEntity(playerId);
 
     if (!player || player.type !== "player") {

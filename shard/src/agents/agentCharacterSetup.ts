@@ -166,7 +166,7 @@ export async function setupAgentCharacter(
   const resolvedZoneId: string = spawnResult.zone ?? startZone;
 
   // ── Step 7: Persist entity ref ────────────────────────────────────────
-  await setAgentEntityRef(userWallet, { entityId, zoneId: resolvedZoneId });
+  await setAgentEntityRef(userWallet, { entityId, zoneId: resolvedZoneId, characterName: spawnName });
 
   // ── Step 8: Init config if not already set ────────────────────────────
   const existingConfig = await getAgentConfig(userWallet);

@@ -15,9 +15,13 @@ export interface DeploymentRequest {
     name: string;
     race: string;
     class: string;
+    skinColor?: string;
+    hairStyle?: string;
+    eyeColor?: string;
   };
   payment: PaymentMethod;
-  deploymentZone: string;
+  deploymentZone?: string;
+  deployment_zone?: string;
   metadata?: {
     source?: string;
     version?: string;
@@ -106,6 +110,8 @@ function recordDeployment(source: string): void {
 export async function deployAgent(request: DeploymentRequest): Promise<DeploymentResponse | DeploymentError> {
   const deploymentId = randomUUID();
   const startTime = Date.now();
+  // Accept both camelCase and snake_case for deployment zone
+  const deploymentZone = request.deploymentZone || request.deployment_zone || "";
 
   try {
     // 1. Validate character input
@@ -121,6 +127,16 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
         success: false,
         error: "validation_failed",
         message: validation,
+        retry: false,
+      };
+    }
+
+    // Validate deployment zone
+    if (!deploymentZone) {
+      return {
+        success: false,
+        error: "missing_fields",
+        message: "deploymentZone (or deployment_zone) is required",
         retry: false,
       };
     }
@@ -165,8 +181,8 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     const jwtToken = generateAuthToken(wallet.address);
 
     // 7. Spawn entity in game world FIRST (no blockchain needed)
-    console.log(`[x402] ${deploymentId}: Spawning in ${request.deploymentZone}...`);
-    const zone = getOrCreateZone(request.deploymentZone);
+    console.log(`[x402] ${deploymentId}: Spawning in ${deploymentZone}...`);
+    const zone = getOrCreateZone(deploymentZone);
 
     const spawnX = 150;
     const spawnY = 150;
@@ -195,6 +211,9 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       kills: existingSave?.kills ?? 0,
       completedQuests: existingSave?.completedQuests ?? [],
       learnedTechniques: existingSave?.learnedTechniques ?? [],
+      ...(request.character.skinColor != null && { skinColor: request.character.skinColor }),
+      ...(request.character.hairStyle != null && { hairStyle: request.character.hairStyle }),
+      ...(request.character.eyeColor != null && { eyeColor: request.character.eyeColor }),
     };
 
     recalculateEntityVitals(entity);
@@ -211,7 +230,7 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     }
 
     zone.entities.set(entity.id, entity);
-    registerSpawnedWallet(wallet.address, entity.id, request.deploymentZone);
+    registerSpawnedWallet(wallet.address, entity.id, deploymentZone);
 
     // 8. Save character to persistent store (preserve existing progress if found)
     await saveCharacter(wallet.address, request.character.name, {
@@ -220,7 +239,10 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       xp: existingSave?.xp ?? 0,
       raceId: request.character.race,
       classId: request.character.class,
-      zone: request.deploymentZone,
+      skinColor: request.character.skinColor,
+      hairStyle: request.character.hairStyle,
+      eyeColor: request.character.eyeColor,
+      zone: deploymentZone,
       x: spawnX,
       y: spawnY,
       kills: existingSave?.kills ?? 0,
@@ -235,9 +257,9 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     // 10. Log diary entry
     const isRestored = !!existingSave;
     const { headline, narrative } = narrativeSpawn(
-      entity.name, entity.raceId, entity.classId, request.deploymentZone, isRestored
+      entity.name, entity.raceId, entity.classId, deploymentZone, isRestored
     );
-    logDiary(wallet.address, entity.name, request.deploymentZone, spawnX, spawnY,
+    logDiary(wallet.address, entity.name, deploymentZone, spawnX, spawnY,
       "spawn", headline, narrative, {
         restored: isRestored,
         level: entity.level,
@@ -316,7 +338,7 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       },
       gameState: {
         entityId: entity.id,
-        zoneId: request.deploymentZone,
+        zoneId: deploymentZone,
         position: { x: spawnX, y: spawnY },
         goldBalance: goldBonus.toString(),
       },

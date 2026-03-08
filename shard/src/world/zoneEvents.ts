@@ -15,6 +15,7 @@ export type ZoneEventType =
   | "trade"
   | "shop"
   | "quest"
+  | "quest-progress"
   | "system"
   | "ability"
   | "technique";

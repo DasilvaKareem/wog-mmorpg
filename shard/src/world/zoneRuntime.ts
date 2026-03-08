@@ -645,7 +645,9 @@ function trackRepeatKill(playerId: string, zoneId: string, tick: number): number
   }
 
   entry.count++;
-  entry.lastKillTick = tick;
+  // NOTE: do NOT update lastKillTick here — the window starts on the first
+  // kill and expires after REPEAT_KILL_WINDOW ticks regardless of subsequent
+  // kills. Otherwise rapid continuous killing never lets the window reset.
 
   if (entry.count <= REPEAT_KILL_THRESHOLD) return 1.0;
 
@@ -1740,6 +1742,22 @@ async function worldTick() {
                     console.log(
                       `[quest] ${xpRecipient.name} progress: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`
                     );
+                    // Emit quest progress event so agents can track without polling
+                    logZoneEvent({
+                      zoneId: zone.zoneId,
+                      type: "quest-progress",
+                      tick: zone.tick,
+                      message: `${xpRecipient.name}: ${questDef.title} (${activeQuest.progress}/${questDef.objective.count})`,
+                      entityId: xpRecipient.id,
+                      entityName: xpRecipient.name,
+                      data: {
+                        questId: activeQuest.questId,
+                        questTitle: questDef.title,
+                        progress: activeQuest.progress,
+                        required: questDef.objective.count,
+                        complete: activeQuest.progress >= questDef.objective.count,
+                      },
+                    });
                   }
                 }
               }

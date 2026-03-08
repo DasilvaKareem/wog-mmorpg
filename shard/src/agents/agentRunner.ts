@@ -21,7 +21,7 @@ import { peekInbox, ackInboxMessages } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
@@ -884,7 +884,7 @@ export class AgentRunner {
         void this.logActivity(`Region transition: ${this.currentRegion} -> ${newRegion}`);
       }
       this.currentRegion = newRegion;
-      await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: newRegion });
+      await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: newRegion, characterName: ref.characterName });
       return true;
     }
 
@@ -894,6 +894,38 @@ export class AgentRunner {
     } catch (err: any) {
       console.debug(`[agent:${this.walletTag}] zone check: ${err.message?.slice(0, 60)}`);
     }
+
+    // Entity is gone — clean up stale wallet registry so respawn can work
+    if (this.custodialWallet) {
+      const staleEntry = isWalletSpawned(this.custodialWallet);
+      if (staleEntry) {
+        console.log(`[agent:${this.walletTag}] Entity missing but wallet still registered — cleaning up stale entry`);
+        unregisterSpawnedWallet(this.custodialWallet);
+      }
+
+      // Try to respawn via the spawn API
+      try {
+        const charName = ref.characterName || "Agent";
+        const spawnResult = await this.api("POST", `/spawn`, {
+          walletAddress: this.custodialWallet,
+          zoneId: this.currentRegion || "village-square",
+          type: "player",
+          name: charName,
+        });
+        if (spawnResult?.spawned?.id) {
+          const newEntityId: string = spawnResult.spawned.id;
+          this.entityId = newEntityId;
+          const spawnZone: string = spawnResult.zone || this.currentRegion || "village-square";
+          this.currentRegion = spawnZone;
+          await setAgentEntityRef(this.userWallet, { entityId: newEntityId, zoneId: spawnZone, characterName: ref.characterName });
+          console.log(`[agent:${this.walletTag}] Respawned entity ${this.entityId} in ${spawnZone}`);
+          return true;
+        }
+      } catch (err: any) {
+        console.warn(`[agent:${this.walletTag}] Respawn failed: ${err.message?.slice(0, 80)}`);
+      }
+    }
+
     return false;
   }
 

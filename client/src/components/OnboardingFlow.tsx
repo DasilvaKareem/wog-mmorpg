@@ -11,6 +11,7 @@ import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import { PaymentGate } from "@/components/PaymentGate";
 import type { RaceInfo, ClassInfo, CharacterStats } from "@/types";
+import { CharacterPreview } from "@/components/CharacterPreview";
 
 type SocialStrategy = "google" | "discord" | "x" | "telegram" | "farcaster";
 type Step =
@@ -559,6 +560,18 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               {connectedAddress && (
                 <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
                   [AUTH] {connectedAddress.slice(0, 8)}...{connectedAddress.slice(-6)}
+                </div>
+              )}
+
+              {/* Sprite Preview */}
+              {(skinColor || eyeColor || hairStyle || classId) && (
+                <div className="flex justify-center">
+                  <CharacterPreview
+                    skinColor={skinColor || "medium"}
+                    eyeColor={eyeColor || "brown"}
+                    hairStyle={hairStyle || "short"}
+                    classId={classId || "warrior"}
+                  />
                 </div>
               )}
 
