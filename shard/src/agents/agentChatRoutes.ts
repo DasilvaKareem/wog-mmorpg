@@ -7,7 +7,8 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import Groq from "groq-sdk";
+import { type Content, type FunctionDeclaration, type Part, type Type, FunctionCallingConfigMode } from "@google/genai";
+import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { agentManager } from "./agentManager.js";
 import {
@@ -41,9 +42,7 @@ function internalFetch(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, { ...init, signal: AbortSignal.timeout(5_000) });
 }
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY,
-});
+// Gemini client is initialized in geminiClient.ts
 
 function inferInteractionMode(message: string): "directive" | "question" | "conversation" {
   const text = message.trim().toLowerCase();
@@ -504,8 +503,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       await agentManager.ensureRunning(authWallet);
     }
 
-    if (!process.env.GROQ_API_KEY) {
-      return reply.code(503).send({ error: "GROQ_API_KEY not configured" });
+    if (!process.env.GOOGLE_CLOUD_PROJECT && !process.env.GEMINI_API_KEY) {
+      return reply.code(503).send({ error: "GOOGLE_CLOUD_PROJECT or GEMINI_API_KEY not configured" });
     }
 
     // Build system prompt
@@ -593,152 +592,131 @@ RULES:
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
 
-    const history: Groq.Chat.ChatCompletionMessageParam[] = [
-      { role: "system", content: systemPrompt },
-      ...(recentActivity
-        ? [{ role: "system" as const, content: `Recent activity log:\n${recentActivity}` }]
-        : []),
-      ...conversationHistory.map((m) => ({
-        role: m.role === "user" ? "user" as const : "assistant" as const,
-        content: m.text,
-      })),
-      { role: "user", content: message },
+    const chatToolDecls: FunctionDeclaration[] = [
+      {
+        name: "update_focus",
+        description: "Update the agent's activity focus and combat strategy",
+        parameters: {
+          type: "OBJECT" as Type,
+          properties: {
+            focus: {
+              type: "STRING" as Type,
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
+              description: "The new activity focus",
+            },
+            strategy: {
+              type: "STRING" as Type,
+              enum: ["aggressive", "balanced", "defensive"],
+              description: "The combat/play strategy",
+            },
+            targetZone: {
+              type: "STRING" as Type,
+              description: "Optional target zone to move to",
+            },
+          },
+          required: ["focus"],
+        },
+      },
+      {
+        name: "take_action",
+        description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith.",
+        parameters: {
+          type: "OBJECT" as Type,
+          properties: {
+            action: {
+              type: "STRING" as Type,
+              enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear"],
+              description: "The action type. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or go to a trainer.",
+            },
+            professionId: {
+              type: "STRING" as Type,
+              enum: ["mining", "herbalism", "skinning", "blacksmithing", "alchemy", "cooking", "leatherworking", "jewelcrafting"],
+              description: "Which profession to learn (for learn_profession action)",
+            },
+            tokenId: {
+              type: "NUMBER" as Type,
+              description: "The item token ID to buy or equip (for buy_item / equip_item actions)",
+            },
+          },
+          required: ["action"],
+        },
+      },
+      {
+        name: "scan_zone",
+        description: "Look around: see nearby mobs (sorted by level fit), NPCs, resource nodes, and portals in your current zone.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
+      {
+        name: "check_inventory",
+        description: "Check your gold balance, all items in your inventory with quantities, and currently equipped gear.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
+      {
+        name: "check_shop",
+        description: "See what the nearest merchant sells and what you can afford.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
+      {
+        name: "what_can_i_craft",
+        description: "Check which crafting, alchemy, and cooking recipes you can make right now based on your inventory.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
+      {
+        name: "check_quests",
+        description: "See your active quests and available quests in your current zone.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
+      {
+        name: "send_message",
+        description: "Send a message to a nearby player/agent. Use this when the user wants to talk to, trade with, or invite another player. The message is delivered to their inbox and they'll see it on their next tick.",
+        parameters: {
+          type: "OBJECT" as Type,
+          properties: {
+            toWallet: {
+              type: "STRING" as Type,
+              description: "The recipient's wallet address (from the nearby players list)",
+            },
+            body: {
+              type: "STRING" as Type,
+              description: "The message to send, written in-character",
+            },
+            type: {
+              type: "STRING" as Type,
+              enum: ["direct", "trade-request", "party-invite"],
+              description: "Message type: direct for general chat, trade-request for trade offers, party-invite for group invites",
+            },
+          },
+          required: ["toWallet", "body"],
+        },
+      },
     ];
 
-    // Groq API call with tools (OpenAI-compatible format)
-    let groqResponse: Groq.Chat.ChatCompletion;
+    const fullSystemInstruction = recentActivity
+      ? `${systemPrompt}\n\nRecent activity log:\n${recentActivity}`
+      : systemPrompt;
+
+    const contents: Content[] = [
+      ...conversationHistory.map((m) => ({
+        role: (m.role === "user" ? "user" : "model") as "user" | "model",
+        parts: [{ text: m.role === "agent" ? sanitizeAgentHistoryText(m.text) : m.text }],
+      })),
+      { role: "user" as const, parts: [{ text: message }] },
+    ];
+
+    let geminiResponse;
     try {
-      groqResponse = await groq.chat.completions.create({
-        model: "openai/gpt-oss-120b",
-        max_tokens: 300,
-        temperature: 0.5,
-        messages: history,
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "update_focus",
-              description: "Update the agent's activity focus and combat strategy",
-              parameters: {
-                type: "object",
-                properties: {
-                  focus: {
-                    type: "string",
-                    enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
-                    description: "The new activity focus",
-                  },
-                  strategy: {
-                    type: "string",
-                    enum: ["aggressive", "balanced", "defensive"],
-                    description: "The combat/play strategy",
-                  },
-                  targetZone: {
-                    type: "string",
-                    description: "Optional target zone to move to",
-                  },
-                },
-                required: ["focus"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "take_action",
-              description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith.",
-              parameters: {
-                type: "object",
-                properties: {
-                  action: {
-                    type: "string",
-                    enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear"],
-                    description: "The action type. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or go to a trainer.",
-                  },
-                  professionId: {
-                    type: "string",
-                    enum: ["mining", "herbalism", "skinning", "blacksmithing", "alchemy", "cooking", "leatherworking", "jewelcrafting"],
-                    description: "Which profession to learn (for learn_profession action)",
-                  },
-                  tokenId: {
-                    type: "number",
-                    description: "The item token ID to buy or equip (for buy_item / equip_item actions)",
-                  },
-                },
-                required: ["action"],
-              },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "scan_zone",
-              description: "Look around: see nearby mobs (sorted by level fit), NPCs, resource nodes, and portals in your current zone.",
-              parameters: { type: "object", properties: {} },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "check_inventory",
-              description: "Check your gold balance, all items in your inventory with quantities, and currently equipped gear.",
-              parameters: { type: "object", properties: {} },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "check_shop",
-              description: "See what the nearest merchant sells and what you can afford.",
-              parameters: { type: "object", properties: {} },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "what_can_i_craft",
-              description: "Check which crafting, alchemy, and cooking recipes you can make right now based on your inventory.",
-              parameters: { type: "object", properties: {} },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "check_quests",
-              description: "See your active quests and available quests in your current zone.",
-              parameters: { type: "object", properties: {} },
-            },
-          },
-          {
-            type: "function",
-            function: {
-              name: "send_message",
-              description: "Send a message to a nearby player/agent. Use this when the user wants to talk to, trade with, or invite another player. The message is delivered to their inbox and they'll see it on their next tick.",
-              parameters: {
-                type: "object",
-                properties: {
-                  toWallet: {
-                    type: "string",
-                    description: "The recipient's wallet address (from the nearby players list)",
-                  },
-                  body: {
-                    type: "string",
-                    description: "The message to send, written in-character",
-                  },
-                  type: {
-                    type: "string",
-                    enum: ["direct", "trade-request", "party-invite"],
-                    description: "Message type: direct for general chat, trade-request for trade offers, party-invite for group invites",
-                  },
-                },
-                required: ["toWallet", "body"],
-              },
-            },
-          },
-        ],
-        tool_choice: "auto",
+      geminiResponse = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction: fullSystemInstruction,
+          tools: [{ functionDeclarations: chatToolDecls }],
+          temperature: 0.5,
+          maxOutputTokens: 300,
+        },
       });
     } catch (err: any) {
-      server.log.error(`[agent/chat] Groq API error: ${err.message}`);
+      server.log.error(`[agent/chat] Gemini API error: ${err.message}`);
       return reply.code(502).send({ error: "AI service unavailable" });
     }
 
@@ -747,26 +725,27 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
     let agentResponse = "";
     const actionsTaken: string[] = [];
 
-    const choice = groqResponse.choices[0];
+    const responseParts = geminiResponse.candidates?.[0]?.content?.parts ?? [];
 
-    // Debug: log what Groq actually returned
-    server.log.info(`[agent/chat] Groq response: finish_reason=${choice?.finish_reason} content=${JSON.stringify(choice?.message?.content)?.slice(0, 120)} tool_calls=${choice?.message?.tool_calls?.length ?? 0} model=${groqResponse.model}`);
-    if (choice?.message?.tool_calls?.length) {
-      for (const tc of choice.message.tool_calls) {
-        server.log.info(`[agent/chat] tool_call: ${tc.function.name}(${tc.function.arguments?.slice(0, 100)})`);
-      }
+    // Debug: log what Gemini actually returned
+    const textParts = responseParts.filter((p: Part) => p.text);
+    const fnCallParts = responseParts.filter((p: Part) => p.functionCall);
+    server.log.info(`[agent/chat] Gemini response: text=${JSON.stringify(textParts[0]?.text)?.slice(0, 120)} tool_calls=${fnCallParts.length} model=${GEMINI_MODEL}`);
+    for (const fc of fnCallParts) {
+      server.log.info(`[agent/chat] tool_call: ${fc.functionCall!.name}(${JSON.stringify(fc.functionCall!.args)?.slice(0, 100)})`);
     }
 
     // Capture first response content
-    if (choice?.message?.content) {
-      agentResponse = choice.message.content;
+    if (textParts.length > 0 && textParts[0].text) {
+      agentResponse = textParts[0].text;
     }
 
     // Execute all tool calls and collect results for potential follow-up
-    const toolResults: { tool_call_id: string; content: string }[] = [];
-    if (choice?.message?.tool_calls) {
-      for (const toolCall of choice.message.tool_calls) {
-        const fnName = toolCall.function.name;
+    const toolResults: { name: string; content: string }[] = [];
+    if (fnCallParts.length > 0) {
+      for (const toolCallPart of fnCallParts) {
+        const fnName = toolCallPart.functionCall!.name!;
+        const fnArgs = toolCallPart.functionCall!.args ?? {};
 
         // ── Read tools ──────────────────────────────────────────────
         if (fnName === "scan_zone") {
@@ -790,7 +769,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             mobs.sort((a, b) => Math.abs(a.level - playerLevel) - Math.abs(b.level - playerLevel));
             scanResult = { region: entity.region ?? ref.zoneId, playerLevel, mobs: mobs.slice(0, 15), npcs: npcs.slice(0, 10), resources: resources.slice(0, 10) };
           }
-          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(scanResult) });
+          toolResults.push({ name: fnName, content: JSON.stringify(scanResult) });
         }
 
         else if (fnName === "check_inventory") {
@@ -813,7 +792,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               server.log.warn(`[agent/chat] check_inventory fetch failed: ${(err as Error).message}`);
             }
           }
-          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(invResult) });
+          toolResults.push({ name: fnName, content: JSON.stringify(invResult) });
         }
 
         else if (fnName === "check_shop") {
@@ -836,7 +815,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               }
             }
           }
-          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(shopResult) });
+          toolResults.push({ name: fnName, content: JSON.stringify(shopResult) });
         }
 
         else if (fnName === "what_can_i_craft") {
@@ -872,7 +851,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           } catch (err) {
             server.log.warn(`[agent/chat] what_can_i_craft fetch failed: ${(err as Error).message}`);
           }
-          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(craftResult) });
+          toolResults.push({ name: fnName, content: JSON.stringify(craftResult) });
         }
 
         else if (fnName === "check_quests") {
@@ -891,13 +870,13 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               server.log.warn(`[agent/chat] check_quests fetch failed: ${(err as Error).message}`);
             }
           }
-          toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify(questResult) });
+          toolResults.push({ name: fnName, content: JSON.stringify(questResult) });
         }
 
         // ── Action tools ─────────────────────────────────────────
         else if (fnName === "update_focus") {
           try {
-            const input = JSON.parse(toolCall.function.arguments) as {
+            const input = fnArgs as {
               focus: AgentFocus;
               strategy?: AgentStrategy;
               targetZone?: string;
@@ -928,21 +907,21 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
 
             const runner = agentManager.getRunner(authWallet);
             if (runner) runner.clearScript();
-            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, ...patch }) });
+            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, ...patch }) });
           } catch {
-            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Failed to update focus" }) });
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to update focus" }) });
           }
         }
 
         else if (fnName === "send_message") {
           try {
-            const input = JSON.parse(toolCall.function.arguments) as {
+            const input = fnArgs as {
               toWallet: string;
               body: string;
               type?: "direct" | "trade-request" | "party-invite";
             };
             if (!input.toWallet || !input.body) {
-              toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "toWallet and body are required" }) });
+              toolResults.push({ name: fnName, content: JSON.stringify({ error: "toWallet and body are required" }) });
             } else {
               const msgId = await sendInboxMessage({
                 from: authWallet,
@@ -958,16 +937,16 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               const recipientName = recipientPlayer?.name ?? input.toWallet.slice(0, 10);
               actionsTaken.push(`[sent ${input.type ?? "direct"} message to ${recipientName}]`);
               server.log.info(`[agent/chat] send_message to ${recipientName} (${input.toWallet.slice(0, 10)}): "${input.body.slice(0, 60)}"`);
-              toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, messageId: msgId, to: recipientName }) });
+              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, messageId: msgId, to: recipientName }) });
             }
           } catch {
-            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Failed to send message" }) });
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to send message" }) });
           }
         }
 
         else if (fnName === "take_action") {
           try {
-            const input = JSON.parse(toolCall.function.arguments) as {
+            const input = fnArgs as {
               action: string;
               professionId?: string;
               tokenId?: number;
@@ -1085,110 +1064,102 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
               }
             }
-            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
+            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
           } catch {
-            toolResults.push({ tool_call_id: toolCall.id, content: JSON.stringify({ error: "Action failed" }) });
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Action failed" }) });
           }
         }
       }
     }
 
-    // If tools were called, do a follow-up Groq call with tool results so the
+    // If tools were called, do a follow-up Gemini call with tool results so the
     // LLM can formulate a natural response using the actual outcome.
     if (toolResults.length > 0) {
       try {
-        const followUpMessages: Groq.Chat.ChatCompletionMessageParam[] = [
-          ...history,
+        const followUpContents: Content[] = [
+          ...contents,
+          { role: "model", parts: responseParts },
           {
-            role: "assistant" as const,
-            content: choice?.message?.content ?? "",
-            tool_calls: choice?.message?.tool_calls?.map(tc => ({
-              id: tc.id,
-              type: "function" as const,
-              function: { name: tc.function.name, arguments: tc.function.arguments },
+            role: "user",
+            parts: toolResults.map(tr => ({
+              functionResponse: { name: tr.name, response: JSON.parse(tr.content) },
             })),
-          },
-          ...toolResults.map(tr => ({
-            role: "tool" as const,
-            tool_call_id: tr.tool_call_id,
-            content: tr.content,
-          })),
-          {
-            role: "system" as const,
-            content: "Reply to the user in character using the tool results. Be natural and specific. Do not mention internal tool names, config fields, or bracket tags.",
           },
         ];
 
-        const followUp = await groq.chat.completions.create({
-          model: "openai/gpt-oss-120b",
-          max_tokens: 300,
-          temperature: 0.5,
-          messages: followUpMessages,
+        const followUp = await gemini.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: followUpContents,
+          config: {
+            systemInstruction: fullSystemInstruction + "\n\nReply to the user in character using the tool results. Be natural and specific. Do not mention internal tool names, config fields, or bracket tags.",
+            temperature: 0.5,
+            maxOutputTokens: 300,
+          },
         });
 
-        if (followUp.choices[0]?.message?.content) {
-          agentResponse = followUp.choices[0].message.content;
+        const followUpText = followUp.candidates?.[0]?.content?.parts?.find((p: Part) => p.text)?.text;
+        if (followUpText) {
+          agentResponse = followUpText;
         }
       } catch (err: any) {
-        server.log.warn(`[agent/chat] Follow-up Groq call failed: ${err.message}`);
+        server.log.warn(`[agent/chat] Follow-up Gemini call failed: ${err.message}`);
       }
     }
 
-    // If LLM returned nothing useful, retry once with tool_choice: "required"
+    // If LLM returned nothing useful, retry once with forced tool call
     if (!agentResponse && actionsTaken.length === 0) {
-      server.log.warn(`[agent/chat] Empty response from Groq — retrying with tool_choice=required`);
+      server.log.warn(`[agent/chat] Empty response from Gemini — retrying with forced tool`);
       try {
-        const retryResponse = await groq.chat.completions.create({
-          model: "openai/gpt-oss-120b",
-          max_tokens: 300,
-          temperature: 0.3,
-          messages: history,
-          tools: [
-            {
-              type: "function",
-              function: {
+        const retryResponse = await gemini.models.generateContent({
+          model: GEMINI_MODEL,
+          contents,
+          config: {
+            systemInstruction: fullSystemInstruction,
+            tools: [{
+              functionDeclarations: [{
                 name: "update_focus",
                 description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel.",
                 parameters: {
-                  type: "object",
+                  type: "OBJECT" as Type,
                   properties: {
                     focus: {
-                      type: "string",
+                      type: "STRING" as Type,
                       enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {
-                      type: "string",
+                      type: "STRING" as Type,
                       enum: ["aggressive", "balanced", "defensive"],
                     },
                   },
                   required: ["focus"],
                 },
-              },
-            },
-          ],
-          tool_choice: { type: "function", function: { name: "update_focus" } },
+              }],
+            }],
+            toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY, allowedFunctionNames: ["update_focus"] } },
+            temperature: 0.3,
+            maxOutputTokens: 300,
+          },
         });
-        const retryChoice = retryResponse.choices[0];
-        if (retryChoice?.message?.content) {
-          agentResponse = retryChoice.message.content;
+        const retryParts = retryResponse.candidates?.[0]?.content?.parts ?? [];
+        const retryText = retryParts.find((p: Part) => p.text)?.text;
+        if (retryText) {
+          agentResponse = retryText;
         }
-        if (retryChoice?.message?.tool_calls) {
-          for (const tc of retryChoice.message.tool_calls) {
-            if (tc.function.name === "update_focus") {
-              try {
-                const input = JSON.parse(tc.function.arguments) as { focus: AgentFocus; strategy?: AgentStrategy };
-                const patch: any = { focus: input.focus };
-                if (input.strategy) patch.strategy = input.strategy;
-                patch.targetZone = undefined;
-                await patchAgentConfig(authWallet, patch);
-                configUpdated = true;
-                actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
-                const runner = agentManager.getRunner(authWallet);
-                if (runner) runner.clearScript();
-                server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
-              } catch { /* ignore parse errors */ }
-            }
+        for (const rp of retryParts) {
+          if (rp.functionCall?.name === "update_focus") {
+            try {
+              const input = rp.functionCall.args as unknown as { focus: AgentFocus; strategy?: AgentStrategy };
+              const patch: any = { focus: input.focus };
+              if (input.strategy) patch.strategy = input.strategy;
+              patch.targetZone = undefined;
+              await patchAgentConfig(authWallet, patch);
+              configUpdated = true;
+              actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) runner.clearScript();
+              server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
+            } catch { /* ignore parse errors */ }
           }
         }
       } catch (retryErr: any) {

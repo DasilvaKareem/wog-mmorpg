@@ -12,6 +12,7 @@ import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites } from "@/EntitySpriteGenerator";
 import { preloadOverworld } from "@/OverworldAtlas";
+import { preloadLayerSprites } from "@/LayeredSpriteCompositor";
 
 /** Zoom threshold below which the strategic overview renders instead of tiles */
 const OVERVIEW_ENTER = 0.38;
@@ -106,6 +107,9 @@ export class WorldScene extends Phaser.Scene {
     this.load.image("char-sheet-a", "/sprites/character.png");
     this.load.image("char-sheet-b", "/sprites/characterB.png");
     this.load.image("char-sheet-c", "/sprites/characterC.png");
+
+    // Layered character sprite sheets
+    preloadLayerSprites(this);
   }
 
   create(): void {

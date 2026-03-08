@@ -99,6 +99,9 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
     const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
+    const resolvedSkinColor = saved?.skinColor;
+    const resolvedHairStyle = saved?.hairStyle;
+    const resolvedEyeColor = saved?.eyeColor;
     const derivedStats =
       type === "player" && resolvedRaceId && resolvedClassId
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
@@ -130,6 +133,9 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedRaceId != null && { raceId: resolvedRaceId }),
       ...(resolvedClassId != null && { classId: resolvedClassId }),
       ...(resolvedGender != null && { gender: resolvedGender }),
+      ...(resolvedSkinColor != null && { skinColor: resolvedSkinColor }),
+      ...(resolvedHairStyle != null && { hairStyle: resolvedHairStyle }),
+      ...(resolvedEyeColor != null && { eyeColor: resolvedEyeColor }),
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
       completedQuests: saved?.completedQuests ?? [],

@@ -1,5 +1,7 @@
 import Phaser from "phaser";
 import { ENTITY_SPRITE_PALETTES, CLASS_SPRITE_PALETTES, MOB_CATEGORY_PALETTES } from "./config.js";
+import { getOrCreateLayeredTexture, needsRecomposite } from "./LayeredSpriteCompositor.js";
+import type { Entity } from "./types.js";
 
 /**
  * Generates 16x16 sprite sheets for entity types and registers
@@ -266,6 +268,33 @@ export function inferMobCategory(name: string): string | null {
     if (lower.includes(category)) return category;
   }
   return null;
+}
+
+/**
+ * Try to get a layered composite texture for a player entity.
+ * Returns the texture key if layers are available, null otherwise.
+ */
+export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity): string | null {
+  if (entity.type !== "player") return null;
+  const key = getOrCreateLayeredTexture(scene, entity);
+  if (key && !scene.anims.exists(`${key}-idle-down`)) {
+    createAnimations(scene, key);
+  }
+  return key;
+}
+
+/**
+ * Check if a player entity's layered texture needs re-compositing
+ * (e.g., equipment changed).
+ */
+export function checkLayeredRecomposite(scene: Phaser.Scene, entity: Entity, currentKey: string): string | null {
+  if (entity.type !== "player") return null;
+  if (!needsRecomposite(entity, currentKey)) return null;
+  const newKey = getOrCreateLayeredTexture(scene, entity);
+  if (newKey && !scene.anims.exists(`${newKey}-idle-down`)) {
+    createAnimations(scene, newKey);
+  }
+  return newKey;
 }
 
 /** Get the texture key for an entity type, with optional class/name-specific variant */

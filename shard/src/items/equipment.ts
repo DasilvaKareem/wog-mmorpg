@@ -266,6 +266,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const durability = itemInstance?.rolledMaxDurability ?? item.maxDurability;
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
+      name: item.name,
       durability,
       maxDurability: durability,
       broken: false,

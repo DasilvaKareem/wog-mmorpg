@@ -1,6 +1,9 @@
 /** API URL - use environment variable, or empty string for local dev (Vite proxy) */
 export const API_URL = import.meta.env.VITE_API_URL || "";
 
+/** Asset CDN base URL — Cloudflare R2 in prod, local fallback in dev */
+export const ASSET_BASE_URL = import.meta.env.VITE_ASSET_BASE_URL || "";
+
 /** Client-side tile size in pixels — 16px for Pokemon aesthetic */
 export const CLIENT_TILE_PX = 16;
 

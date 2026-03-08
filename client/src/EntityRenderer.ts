@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import type { Entity } from "./types.js";
 import {
   getEntityTextureKey,
+  getLayeredTextureKey,
+  checkLayeredRecomposite,
   inferDirection,
 } from "./EntitySpriteGenerator.js";
 
@@ -380,7 +382,9 @@ export class EntityRenderer {
       };
     }
 
-    const textureKey = getEntityTextureKey(entity.type, entity.classId, entity.name);
+    // Try layered composite first for players, fall back to class-based
+    const layeredKey = getLayeredTextureKey(this.scene, entity);
+    const textureKey = layeredKey ?? getEntityTextureKey(entity.type, entity.classId, entity.name);
 
     // Elevation-aware depth: base 10 + elevation * 2
     const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
@@ -506,9 +510,13 @@ export class EntityRenderer {
     const dy = py - visual.lastY;
     const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
 
-    const textureKey = getEntityTextureKey(entity.type, entity.classId, entity.name);
+    // Try layered composite, check for recomposite (equipment changes), fall back to class-based
+    const currentKey = visual.sprite.texture.key;
+    const recompKey = checkLayeredRecomposite(this.scene, entity, currentKey);
+    const layeredKey = recompKey ?? (currentKey.includes("|") ? currentKey : getLayeredTextureKey(this.scene, entity));
+    const textureKey = layeredKey ?? getEntityTextureKey(entity.type, entity.classId, entity.name);
 
-    // Swap texture if class info arrived after initial creation
+    // Swap texture if it changed
     if (visual.sprite.texture.key !== textureKey && this.scene.textures.exists(textureKey)) {
       visual.sprite.setTexture(textureKey);
       const idleAnim = `${textureKey}-idle-${visual.facing}`;

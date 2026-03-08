@@ -14,13 +14,16 @@ export interface Entity {
   raceId?: string;
   classId?: string;
   gender?: "male" | "female";
+  skinColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
   essence?: number;
   maxEssence?: number;
   xpReward?: number;
   equipment?: Partial<
     Record<
       "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "ring" | "amulet",
-      { tokenId: number; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string }
+      { tokenId: number; name?: string; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string }
     >
   >;
   effectiveStats?: CharacterStats;

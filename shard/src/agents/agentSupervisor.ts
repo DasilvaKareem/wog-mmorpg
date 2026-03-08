@@ -13,7 +13,8 @@
  *   set_script      → new BotScript for the bot to execute
  */
 
-import Groq from "groq-sdk";
+import { type Content, type FunctionDeclaration, type Part, type Type } from "@google/genai";
+import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { fetchWalletBalance } from "./agentUtils.js";
 import { findPortalInZone, getSharedEdge, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer } from "../social/questSystem.js";
@@ -21,8 +22,6 @@ import { getEntitiesInRegion } from "../world/zoneRuntime.js";
 import type { ZoneEvent } from "../world/zoneEvents.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const SUPERVISOR_MODEL = process.env.AGENT_SUPERVISOR_MODEL ?? "openai/gpt-oss-120b";
 const MAX_TURNS = 5;
 
 // ── Context ───────────────────────────────────────────────────────────────
@@ -94,77 +93,62 @@ Your job: Decide the next bot script to execute.
 
 // ── Tools ─────────────────────────────────────────────────────────────────
 
-function buildTools(): Groq.Chat.ChatCompletionTool[] {
+function buildTools(): FunctionDeclaration[] {
   return [
     {
-      type: "function",
-      function: {
-        name: "read_zone",
-        description: "Read the current region — lists mobs, resource nodes, and NPCs with IDs, levels, and distances",
-        parameters: { type: "object", properties: {}, required: [] },
-      },
+      name: "read_zone",
+      description: "Read the current region — lists mobs, resource nodes, and NPCs with IDs, levels, and distances",
+      parameters: { type: "OBJECT" as Type, properties: {} },
     },
     {
-      type: "function",
-      function: {
-        name: "read_inventory",
-        description: "Read the agent's inventory — items owned with counts and categories, plus gold balance",
-        parameters: { type: "object", properties: {}, required: [] },
-      },
+      name: "read_inventory",
+      description: "Read the agent's inventory — items owned with counts and categories, plus gold balance",
+      parameters: { type: "OBJECT" as Type, properties: {} },
     },
     {
-      type: "function",
-      function: {
-        name: "read_connections",
-        description: "Read regions reachable from the current region and their level requirements",
-        parameters: { type: "object", properties: {}, required: [] },
-      },
+      name: "read_connections",
+      description: "Read regions reachable from the current region and their level requirements",
+      parameters: { type: "OBJECT" as Type, properties: {} },
     },
     {
-      type: "function",
-      function: {
-        name: "read_quests",
-        description: "Read available and active quests in the current region",
-        parameters: { type: "object", properties: {}, required: [] },
-      },
+      name: "read_quests",
+      description: "Read available and active quests in the current region",
+      parameters: { type: "OBJECT" as Type, properties: {} },
     },
     {
-      type: "function",
-      function: {
-        name: "set_script",
-        description: "Set the bot's behavior script. Call this once to finalize the decision.",
-        parameters: {
-          type: "object",
-          properties: {
-            type: {
-              type: "string",
-              enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "idle"],
-              description: "Which behavior mode the bot should run",
-            },
-            maxLevelOffset: {
-              type: "number",
-              description: "combat only: max mob level above agent level to engage (1=safe, 5=aggressive)",
-            },
-            nodeType: {
-              type: "string",
-              enum: ["ore", "herb", "both"],
-              description: "gather only: which resource nodes to target",
-            },
-            targetZone: {
-              type: "string",
-              description: "travel only: destination region ID",
-            },
-            maxGold: {
-              type: "number",
-              description: "shop only: maximum gold to spend this session",
-            },
-            reason: {
-              type: "string",
-              description: "Brief explanation for why this script was chosen (shown in activity log)",
-            },
+      name: "set_script",
+      description: "Set the bot's behavior script. Call this once to finalize the decision.",
+      parameters: {
+        type: "OBJECT" as Type,
+        properties: {
+          type: {
+            type: "STRING" as Type,
+            enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "idle"],
+            description: "Which behavior mode the bot should run",
           },
-          required: ["type", "reason"],
+          maxLevelOffset: {
+            type: "NUMBER" as Type,
+            description: "combat only: max mob level above agent level to engage (1=safe, 5=aggressive)",
+          },
+          nodeType: {
+            type: "STRING" as Type,
+            enum: ["ore", "herb", "both"],
+            description: "gather only: which resource nodes to target",
+          },
+          targetZone: {
+            type: "STRING" as Type,
+            description: "travel only: destination region ID",
+          },
+          maxGold: {
+            type: "NUMBER" as Type,
+            description: "shop only: maximum gold to spend this session",
+          },
+          reason: {
+            type: "STRING" as Type,
+            description: "Brief explanation for why this script was chosen (shown in activity log)",
+          },
         },
+        required: ["type", "reason"],
       },
     },
   ];
@@ -266,59 +250,59 @@ export async function runSupervisor(
   event: TriggerEvent,
   ctx: SupervisorContext,
 ): Promise<BotScript> {
-  const messages: Groq.Chat.ChatCompletionMessageParam[] = [
-    { role: "system", content: buildSystemPrompt(event, ctx) },
-    { role: "user", content: "What should the bot do next?" },
+  const systemInstruction = buildSystemPrompt(event, ctx);
+  const contents: Content[] = [
+    { role: "user", parts: [{ text: "What should the bot do next?" }] },
   ];
 
   for (let turn = 0; turn < MAX_TURNS; turn++) {
-    let res: Groq.Chat.ChatCompletion;
+    let res;
     try {
-      res = await groq.chat.completions.create({
-        model: SUPERVISOR_MODEL,
-        messages,
-        tools: buildTools(),
-        tool_choice: "auto",
-        max_tokens: 512,
-        temperature: 0.3,
+      res = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents,
+        config: {
+          systemInstruction,
+          tools: [{ functionDeclarations: buildTools() }],
+          temperature: 0.3,
+          maxOutputTokens: 512,
+        },
       });
     } catch (err: any) {
       console.warn(`[supervisor] LLM call failed (turn ${turn}): ${err.message?.slice(0, 80)}`);
       break;
     }
 
-    const msg = res.choices[0]?.message;
-    if (!msg) break;
-    messages.push(msg as Groq.Chat.ChatCompletionMessageParam);
+    const parts = res.candidates?.[0]?.content?.parts;
+    if (!parts || parts.length === 0) break;
 
-    const toolCalls = msg.tool_calls ?? [];
-    if (toolCalls.length === 0) break; // LLM gave up without setting a script
+    // Add model response to conversation history
+    contents.push({ role: "model", parts });
 
-    const toolResults: Groq.Chat.ChatCompletionMessageParam[] = [];
+    const fnCalls = parts.filter((p: Part) => p.functionCall);
+    if (fnCalls.length === 0) break; // LLM gave up without setting a script
 
-    for (const tc of toolCalls) {
+    const responseParts: Part[] = [];
+
+    for (const part of fnCalls) {
+      const fc = part.functionCall!;
+
       // set_script is the terminal tool — extract and return immediately
-      if (tc.function.name === "set_script") {
-        try {
-          const script = JSON.parse(tc.function.arguments) as BotScript;
-          console.log(`[supervisor] set_script(${event.type}): ${script.type} — ${script.reason}`);
-          return script;
-        } catch {
-          break;
-        }
+      if (fc.name === "set_script") {
+        const script = fc.args as unknown as BotScript;
+        console.log(`[supervisor] set_script(${event.type}): ${script.type} — ${script.reason}`);
+        return script;
       }
 
       // Read tools — execute locally and feed results back
-      const result = await executeTool(tc.function.name, ctx);
-      toolResults.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        content: JSON.stringify(result),
-      } as Groq.Chat.ChatCompletionMessageParam);
+      const result = await executeTool(fc.name!, ctx);
+      responseParts.push({
+        functionResponse: { name: fc.name!, response: result as Record<string, unknown> },
+      });
     }
 
-    if (toolResults.length > 0) {
-      messages.push(...toolResults);
+    if (responseParts.length > 0) {
+      contents.push({ role: "user", parts: responseParts });
     }
   }
 

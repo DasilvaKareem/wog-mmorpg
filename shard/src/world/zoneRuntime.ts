@@ -40,6 +40,7 @@ export type Order =
 
 export interface EquippedItemState {
   tokenId: number;
+  name?: string;
   durability: number;
   maxDurability: number;
   broken?: boolean;
@@ -113,6 +114,10 @@ export interface Entity {
   classId?: string;
   /** Character gender (players only). */
   gender?: "male" | "female";
+  /** Character appearance (players only). */
+  skinColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
   /** Live computed stats (players + mobs/bosses). */
   stats?: CharacterStats;
   /** Equipped item state by slot (players only). */
