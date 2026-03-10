@@ -998,6 +998,20 @@ export class WorldScene extends Phaser.Scene {
           if (pos) this.floatingText.showCombatText(evt.id + ":heal", pos, { healing: evtData.healing }, "ability");
         }
       }
+
+      // Speech bubbles for NPC interactions
+      if (evt.entityId) {
+        if (evt.type === "quest") {
+          const label = (evtData?.questTitle as string) ?? evt.message;
+          this.entityRenderer.showSpeechBubble(evt.entityId, label, 3500);
+        } else if (evt.type === "shop") {
+          this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2500);
+        } else if (evt.type === "trade") {
+          this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2500);
+        } else if (evt.type === "loot") {
+          this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2000);
+        }
+      }
     }
   }
 

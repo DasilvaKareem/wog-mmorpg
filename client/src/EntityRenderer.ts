@@ -15,12 +15,21 @@ interface AppliedFx {
   shine: Phaser.FX.Shine | null;
 }
 
+interface SpeechBubble {
+  bg: Phaser.GameObjects.Rectangle;
+  text: Phaser.GameObjects.Text;
+  tail: Phaser.GameObjects.Triangle;
+  timer: Phaser.Time.TimerEvent;
+}
+
 interface EntityVisual {
   sprite: Phaser.GameObjects.Sprite;
   label: Phaser.GameObjects.Text;
   hpBar: Phaser.GameObjects.Rectangle;
   hpBg: Phaser.GameObjects.Rectangle;
   partyRing: Phaser.GameObjects.Arc | null;
+  questMarker: Phaser.GameObjects.Text | null;
+  speechBubble: SpeechBubble | null;
   lastX: number;
   lastY: number;
   facing: "down" | "left" | "right" | "up";
@@ -39,6 +48,11 @@ const HIDE_LABEL_TYPES = new Set([
   "merchant", "trainer", "profession-trainer", "guild-registrar",
   "auctioneer", "arena-master", "quest-giver", "lore-npc", "npc",
   "ore-node", "herb-node",
+]);
+
+/** NPC types that can give quests — show ! or ? marker above them */
+const QUEST_NPC_TYPES = new Set([
+  "quest-giver", "lore-npc", "merchant", "trainer", "profession-trainer",
 ]);
 
 const PARTY_COLORS = [
@@ -173,7 +187,8 @@ export class EntityRenderer {
 
     this.dying.add(entityId);
 
-    const { sprite, label, hpBar, hpBg, partyRing } = visual;
+    const { sprite, label, hpBar, hpBg, partyRing, questMarker } = visual;
+    this.destroySpeechBubble(visual);
 
     // Spin + shrink + fade the sprite
     this.scene.tweens.add({
@@ -190,6 +205,7 @@ export class EntityRenderer {
         hpBar.destroy();
         hpBg.destroy();
         partyRing?.destroy();
+        questMarker?.destroy();
         this.visuals.delete(entityId);
         this.entities.delete(entityId);
         this.dying.delete(entityId);
@@ -332,11 +348,13 @@ export class EntityRenderer {
     for (const [id, visual] of this.visuals) {
       if (!incoming.has(id) && !this.dying.has(id)) {
         this.clearEffectFx(visual);
+        this.destroySpeechBubble(visual);
         visual.sprite.destroy();
         visual.label.destroy();
         visual.hpBar.destroy();
         visual.hpBg.destroy();
         visual.partyRing?.destroy();
+        visual.questMarker?.destroy();
         this.visuals.delete(id);
         this.entities.delete(id);
       }
@@ -372,6 +390,8 @@ export class EntityRenderer {
         hpBar: null as any,
         hpBg: null as any,
         partyRing: null,
+        questMarker: null,
+        speechBubble: null,
         lastX: px,
         lastY: py,
         facing: "down",
@@ -472,6 +492,22 @@ export class EntityRenderer {
         .setDepth(entityDepth - 1);
     }
 
+    // Quest marker (! above quest NPCs) — always visible, bobs via sine
+    let questMarker: Phaser.GameObjects.Text | null = null;
+    if (QUEST_NPC_TYPES.has(entity.type)) {
+      questMarker = this.scene.add
+        .text(px, py - 20, "!", {
+          fontSize: "12px",
+          fontFamily: "monospace",
+          fontStyle: "bold",
+          color: "#ffcc00",
+          stroke: "#000000",
+          strokeThickness: 3,
+        })
+        .setOrigin(0.5, 1)
+        .setDepth(entityDepth + 2);
+    }
+
     // Hide NPC labels and HP bars by default — shown on hover
     if (isNpc) {
       label.setVisible(false);
@@ -485,6 +521,8 @@ export class EntityRenderer {
       hpBar,
       hpBg,
       partyRing,
+      questMarker,
+      speechBubble: null,
       lastX: px,
       lastY: py,
       facing: "down",
@@ -533,6 +571,7 @@ export class EntityRenderer {
     visual.hpBg.setDepth(entityDepth);
     visual.hpBar.setDepth(entityDepth + 1);
     visual.partyRing?.setDepth(entityDepth - 1);
+    visual.questMarker?.setDepth(entityDepth + 2);
 
     // Update party ring: create/destroy/recolor if partyId changed
     this.syncPartyRing(visual, entity);
@@ -566,7 +605,7 @@ export class EntityRenderer {
         duration: TWEEN_DURATION,
         ease: "Linear",
         onUpdate: () => {
-          // Labels, HP bars, and party ring follow sprite
+          // Labels, HP bars, party ring, quest marker, and speech bubble follow sprite
           visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12);
           visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10);
           const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
@@ -575,6 +614,7 @@ export class EntityRenderer {
             visual.sprite.y + 10,
           );
           visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
+          this.repositionOverlays(visual);
         },
         onComplete: () => {
           visual.moving = false;
@@ -600,6 +640,7 @@ export class EntityRenderer {
       visual.label.setPosition(px, py - 12);
       visual.hpBg.setPosition(px, py + 10);
       visual.partyRing?.setPosition(px, py);
+      this.repositionOverlays(visual);
     }
 
     // Update HP bar
@@ -728,6 +769,112 @@ export class EntityRenderer {
     visual.fx.types.clear();
   }
 
+  // ─── Speech Bubbles ──────────────────────────────────────────────────
+
+  /** Show a speech bubble above an entity for a few seconds. */
+  showSpeechBubble(entityId: string, message: string, durationMs = 3000): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    // Remove existing bubble first
+    this.destroySpeechBubble(visual);
+
+    // Truncate long messages
+    const displayText = message.length > 40 ? message.slice(0, 37) + "..." : message;
+
+    const sx = visual.sprite.x;
+    const sy = visual.sprite.y;
+    const bubbleY = sy - 26;
+
+    const text = this.scene.add
+      .text(sx, bubbleY - 4, displayText, {
+        fontSize: "8px",
+        fontFamily: "monospace",
+        color: "#f1f5ff",
+        wordWrap: { width: 100 },
+        align: "center",
+      })
+      .setOrigin(0.5, 1)
+      .setDepth(100);
+
+    const bounds = text.getBounds();
+    const padX = 5;
+    const padY = 3;
+    const bgW = bounds.width + padX * 2;
+    const bgH = bounds.height + padY * 2;
+
+    const bg = this.scene.add
+      .rectangle(sx, bubbleY - bounds.height / 2 - padY + 1, bgW, bgH, 0x11182b)
+      .setStrokeStyle(1, 0x29334d)
+      .setOrigin(0.5, 0.5)
+      .setDepth(99);
+
+    // Small triangle tail pointing down
+    const tail = this.scene.add
+      .triangle(sx, bubbleY + 1, -3, 0, 3, 0, 0, 5, 0x11182b)
+      .setStrokeStyle(1, 0x29334d)
+      .setDepth(99);
+
+    // Fade in
+    bg.setAlpha(0);
+    text.setAlpha(0);
+    tail.setAlpha(0);
+    this.scene.tweens.add({
+      targets: [bg, text, tail],
+      alpha: 1,
+      duration: 150,
+    });
+
+    const timer = this.scene.time.delayedCall(durationMs, () => {
+      // Fade out
+      this.scene.tweens.add({
+        targets: [bg, text, tail],
+        alpha: 0,
+        duration: 300,
+        onComplete: () => {
+          bg.destroy();
+          text.destroy();
+          tail.destroy();
+          if (visual.speechBubble?.timer === timer) {
+            visual.speechBubble = null;
+          }
+        },
+      });
+    });
+
+    visual.speechBubble = { bg, text, tail, timer };
+  }
+
+  private destroySpeechBubble(visual: EntityVisual): void {
+    if (!visual.speechBubble) return;
+    const { bg, text, tail, timer } = visual.speechBubble;
+    timer.destroy();
+    bg.destroy();
+    text.destroy();
+    tail.destroy();
+    visual.speechBubble = null;
+  }
+
+  /** Reposition quest marker and speech bubble relative to sprite. */
+  private repositionOverlays(visual: EntityVisual): void {
+    const sx = visual.sprite.x;
+    const sy = visual.sprite.y;
+
+    if (visual.questMarker) {
+      visual.questMarker.setPosition(sx, sy - 20);
+    }
+
+    // Speech bubble follows sprite
+    if (visual.speechBubble) {
+      const { bg, text, tail } = visual.speechBubble;
+      const bubbleY = sy - 26;
+      const bounds = text.getBounds();
+      text.setPosition(sx, bubbleY - 4);
+      bg.setPosition(sx, bubbleY - bounds.height / 2 - 3 + 1);
+      tail.setPosition(sx, bubbleY + 1);
+    }
+  }
+
   get entityCount(): number {
     return this.visuals.size;
   }
@@ -742,6 +889,12 @@ export class EntityRenderer {
       visual.hpBar.setVisible(showDetails);
       visual.hpBg.setVisible(showDetails);
       visual.partyRing?.setVisible(visible);
+      visual.questMarker?.setVisible(visible);
+      if (visual.speechBubble) {
+        visual.speechBubble.bg.setVisible(visible);
+        visual.speechBubble.text.setVisible(visible);
+        visual.speechBubble.tail.setVisible(visible);
+      }
     }
   }
 }
