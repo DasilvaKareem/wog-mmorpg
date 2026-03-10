@@ -36,6 +36,7 @@ import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
 import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sleep, extractRawCharacterName } from "./agentUtils.js";
+import type { AgentMcpClient } from "./mcpClient.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -593,6 +594,10 @@ RULES:
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
 
+    // Get MCP client from the runner if available
+    const runner = agentManager.getRunner(authWallet);
+    const mcpClient: AgentMcpClient | null = runner?.mcp?.isConnected() ? runner.mcp : null;
+
     const chatToolDecls: FunctionDeclaration[] = [
       {
         name: "update_focus",
@@ -691,6 +696,17 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         },
       },
     ];
+
+    // When MCP is connected, replace hardcoded read tools with the full MCP tool surface
+    if (mcpClient) {
+      // Remove hardcoded read tools — MCP equivalents are richer
+      const localOnlyTools = new Set(["update_focus", "take_action", "send_message"]);
+      const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
+      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true);
+      chatToolDecls.length = 0;
+      chatToolDecls.push(...localTools, ...mcpTools);
+      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools`);
+    }
 
     const fullSystemInstruction = recentActivity
       ? `${systemPrompt}\n\nRecent activity log:\n${recentActivity}`
@@ -1074,6 +1090,26 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
           } catch {
             toolResults.push({ name: fnName, content: JSON.stringify({ error: "Action failed" }) });
+          }
+        }
+
+        // ── MCP tools (fallback for any tool not handled locally) ──
+        else if (mcpClient && mcpClient.hasTool(fnName)) {
+          try {
+            const mcpResult = await mcpClient.callTool(
+              fnName,
+              fnArgs as Record<string, unknown>,
+              {
+                entityId: ref?.entityId,
+                zoneId: ref?.zoneId ?? entity?.region,
+                walletAddress: custodialWallet ?? undefined,
+              },
+            );
+            toolResults.push({ name: fnName, content: mcpResult });
+            server.log.info(`[agent/chat] MCP tool ${fnName} OK`);
+          } catch (err: any) {
+            server.log.warn(`[agent/chat] MCP tool ${fnName} failed: ${err.message?.slice(0, 80)}`);
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: err.message?.slice(0, 100) }) });
           }
         }
       }

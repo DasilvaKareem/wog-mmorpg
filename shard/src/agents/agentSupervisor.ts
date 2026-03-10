@@ -3,14 +3,12 @@
  * AI strategic supervisor — called only when a significant game event fires.
  * Runs a multi-turn tool-use conversation to read game state, then sets a new BotScript.
  *
- * Read tools (MCP-style):
- *   read_zone       → mobs, nodes, NPCs in current zone
- *   read_inventory  → items owned + gold
- *   read_connections → reachable zones + level requirements
- *   read_quests     → available quests in current zone
+ * When the MCP client is connected, the supervisor gets access to the full WoG MCP
+ * tool surface (scan_zone, get_my_status, find_mobs_for_level, what_can_i_craft, etc.)
+ * instead of the limited hardcoded read tools.
  *
- * Write tool (the output):
- *   set_script      → new BotScript for the bot to execute
+ * The terminal tool is always `set_script` — which is NOT an MCP tool but a local
+ * action that tells the runner what behavior to execute next.
  */
 
 import { type Content, type FunctionDeclaration, type Part, type Type } from "@google/genai";
@@ -21,8 +19,10 @@ import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.j
 import { getEntitiesInRegion } from "../world/zoneRuntime.js";
 import type { ZoneEvent } from "../world/zoneEvents.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
+import type { AgentMcpClient } from "./mcpClient.js";
 
-const MAX_TURNS = 5;
+const MAX_TURNS_LEGACY = 5;
+const MAX_TURNS_MCP = 5;
 
 // ── Context ───────────────────────────────────────────────────────────────
 
@@ -40,11 +40,13 @@ export interface SupervisorContext {
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
   /** Real on-chain wallet balance in copper (pre-fetched by runner). entity.gold is always 0. */
   walletGoldCopper?: number;
+  /** MCP client — if connected, supervisor uses MCP tools instead of hardcoded ones. */
+  mcpClient?: AgentMcpClient;
 }
 
 // ── Prompt ────────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext): string {
+function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext, hasMcp: boolean): string {
   const entity = ctx.entity;
   const hpPct = Math.round((entity.hp / Math.max(entity.maxHp, 1)) * 100);
   const eq = entity.equipment ?? {};
@@ -62,6 +64,10 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext): string 
     .map((zoneEvent) => `${zoneEvent.type}: ${zoneEvent.message}`)
     .join(" | ") || "none";
 
+  const mcpHint = hasMcp
+    ? `\n- You have MCP tools: scan_zone (zone overview), get_my_status (character snapshot), find_mobs_for_level, shop_get_catalog, items_get_inventory. Call at most 1-2 reads then IMMEDIATELY call set_script. Do NOT explore — decide fast.`
+    : `\n- Call read tools only if you need more information (zone, inventory, connections, quests)`;
+
   return `You are the strategic supervisor for ${entity.name ?? "Agent"}, a Level ${entity.level ?? 1} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"} in World of Geneva.
 
 EVENT: ${event.detail}
@@ -78,8 +84,7 @@ USER DIRECTIVE: ${ctx.userDirective}
 
 Your job: Decide the next bot script to execute.
 - IMPORTANT: If the current script is still valid and making progress, RE-ISSUE the same script type with the same parameters. Do NOT change scripts just because you were called. Walking to a distant target is normal progress — let it finish.
-- Only change scripts when: the current goal is impossible, completed, or a clearly better opportunity exists.
-- Call read tools only if you need more information (zone, inventory, connections, quests)
+- Only change scripts when: the current goal is impossible, completed, or a clearly better opportunity exists.${mcpHint}
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold
 - HP REGEN: You passively regenerate HP when out of combat (after ~10s). Do NOT gather herbs, cook, or shop for food just because HP is low — simply wait or keep moving and HP will recover on its own. Only use food/potions during active combat emergencies (below 20% HP). Never switch to gathering or cooking solely because of low HP.
@@ -91,9 +96,48 @@ Your job: Decide the next bot script to execute.
   * If outleveled: travel to an easier zone.`.trim();
 }
 
-// ── Tools ─────────────────────────────────────────────────────────────────
+// ── set_script declaration (always present) ──────────────────────────────
 
-function buildTools(): FunctionDeclaration[] {
+const SET_SCRIPT_DECL: FunctionDeclaration = {
+  name: "set_script",
+  description: "Set the bot's behavior script. Call this once to finalize the decision.",
+  parameters: {
+    type: "OBJECT" as Type,
+    properties: {
+      type: {
+        type: "STRING" as Type,
+        enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
+        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC.",
+      },
+      maxLevelOffset: {
+        type: "NUMBER" as Type,
+        description: "combat only: max mob level above agent level to engage (1=safe, 5=aggressive)",
+      },
+      nodeType: {
+        type: "STRING" as Type,
+        enum: ["ore", "herb", "both"],
+        description: "gather only: which resource nodes to target",
+      },
+      targetZone: {
+        type: "STRING" as Type,
+        description: "travel only: destination region ID",
+      },
+      maxGold: {
+        type: "NUMBER" as Type,
+        description: "shop only: maximum gold to spend this session",
+      },
+      reason: {
+        type: "STRING" as Type,
+        description: "Brief explanation for why this script was chosen (shown in activity log)",
+      },
+    },
+    required: ["type", "reason"],
+  },
+};
+
+// ── Legacy hardcoded tools (fallback when MCP is unavailable) ────────────
+
+function buildLegacyTools(): FunctionDeclaration[] {
   return [
     {
       name: "read_zone",
@@ -115,48 +159,13 @@ function buildTools(): FunctionDeclaration[] {
       description: "Read available and active quests in the current region",
       parameters: { type: "OBJECT" as Type, properties: {} },
     },
-    {
-      name: "set_script",
-      description: "Set the bot's behavior script. Call this once to finalize the decision.",
-      parameters: {
-        type: "OBJECT" as Type,
-        properties: {
-          type: {
-            type: "STRING" as Type,
-            enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
-            description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC.",
-          },
-          maxLevelOffset: {
-            type: "NUMBER" as Type,
-            description: "combat only: max mob level above agent level to engage (1=safe, 5=aggressive)",
-          },
-          nodeType: {
-            type: "STRING" as Type,
-            enum: ["ore", "herb", "both"],
-            description: "gather only: which resource nodes to target",
-          },
-          targetZone: {
-            type: "STRING" as Type,
-            description: "travel only: destination region ID",
-          },
-          maxGold: {
-            type: "NUMBER" as Type,
-            description: "shop only: maximum gold to spend this session",
-          },
-          reason: {
-            type: "STRING" as Type,
-            description: "Brief explanation for why this script was chosen (shown in activity log)",
-          },
-        },
-        required: ["type", "reason"],
-      },
-    },
+    SET_SCRIPT_DECL,
   ];
 }
 
-// ── Tool execution (reads game state locally, no extra round-trips) ────────
+// ── Legacy tool execution (reads game state locally) ─────────────────────
 
-async function executeTool(
+async function executeLegacyTool(
   toolName: string,
   ctx: SupervisorContext,
 ): Promise<unknown> {
@@ -250,12 +259,24 @@ export async function runSupervisor(
   event: TriggerEvent,
   ctx: SupervisorContext,
 ): Promise<BotScript> {
-  const systemInstruction = buildSystemPrompt(event, ctx);
+  const hasMcp = Boolean(ctx.mcpClient?.isConnected());
+  const maxTurns = hasMcp ? MAX_TURNS_MCP : MAX_TURNS_LEGACY;
+  const systemInstruction = buildSystemPrompt(event, ctx, hasMcp);
+
+  // Build tools: MCP tools (non-blocking only) + set_script, or legacy fallback
+  let toolDecls: FunctionDeclaration[];
+  if (hasMcp) {
+    const mcpTools = ctx.mcpClient!.getGeminiTools(/* includeBlocking */ false, /* supervisorOnly */ true);
+    toolDecls = [...mcpTools, SET_SCRIPT_DECL];
+  } else {
+    toolDecls = buildLegacyTools();
+  }
+
   const contents: Content[] = [
     { role: "user", parts: [{ text: "What should the bot do next?" }] },
   ];
 
-  for (let turn = 0; turn < MAX_TURNS; turn++) {
+  for (let turn = 0; turn < maxTurns; turn++) {
     let res;
     try {
       res = await gemini.models.generateContent({
@@ -263,7 +284,7 @@ export async function runSupervisor(
         contents,
         config: {
           systemInstruction,
-          tools: [{ functionDeclarations: buildTools() }],
+          tools: [{ functionDeclarations: toolDecls }],
           temperature: 0.3,
           maxOutputTokens: 512,
         },
@@ -294,8 +315,30 @@ export async function runSupervisor(
         return script;
       }
 
-      // Read tools — execute locally and feed results back
-      const result = await executeTool(fc.name!, ctx);
+      let result: unknown;
+
+      // Route to MCP or legacy handler
+      if (hasMcp && ctx.mcpClient!.hasTool(fc.name!)) {
+        try {
+          const mcpResult = await ctx.mcpClient!.callTool(
+            fc.name!,
+            (fc.args ?? {}) as Record<string, unknown>,
+            {
+              entityId: ctx.entityId,
+              zoneId: ctx.currentRegion,
+              walletAddress: ctx.custodialWallet,
+            },
+          );
+          // Parse JSON response for Gemini
+          try { result = JSON.parse(mcpResult); } catch { result = { text: mcpResult }; }
+        } catch (err: any) {
+          console.warn(`[supervisor] MCP tool ${fc.name} failed: ${err.message?.slice(0, 60)}`);
+          result = { error: err.message?.slice(0, 100) };
+        }
+      } else {
+        result = await executeLegacyTool(fc.name!, ctx);
+      }
+
       responseParts.push({
         functionResponse: { name: fc.name!, response: result as Record<string, unknown> },
       });

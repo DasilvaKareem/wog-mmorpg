@@ -26,6 +26,7 @@ import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unre
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
+import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
 
 // Extracted modules
@@ -131,6 +132,7 @@ export class AgentRunner {
   public get entity(): string | null { return this.entityId; }
   public get wallet(): string { return this.userWallet; }
   public get custodial(): string | null { return this.custodialWallet; }
+  public get mcp(): AgentMcpClient | null { return this.mcpClient; }
 
   private ticksSinceLastDecision = 0;
   private cachedZoneState: { entities: Record<string, any>; me: any; recentEvents: ZoneEvent[] } | null = null;
@@ -143,6 +145,8 @@ export class AgentRunner {
   private currentCaps: TierCapabilities = TIER_CAPABILITIES["free"];
   private nextTechniqueCheckAt = 0;
   private failedTechniqueIds = new Set<string>();
+  private mcpClient: AgentMcpClient | null = null;
+  private lastPrivateKey: string | null = null;
   private moveToStaleCount = 0;
   private moveToLastTarget = "";
   private moveToLastDistance = Number.POSITIVE_INFINITY;
@@ -784,6 +788,7 @@ export class AgentRunner {
             userDirective,
             apiCall: this.api!,
             walletGoldCopper,
+            mcpClient: this.mcpClient?.isConnected() ? this.mcpClient : undefined,
           });
           this.updateTimingMetric(this.telemetry.supervisor, performance.now() - supervisorStartedAt);
           this.currentScript = newScript;
@@ -848,6 +853,10 @@ export class AgentRunner {
 
   stop(): void {
     this.running = false;
+    if (this.mcpClient) {
+      this.mcpClient.disconnect().catch(() => {});
+      this.mcpClient = null;
+    }
     console.log(`[agent:${this.walletTag}] Loop stopped`);
   }
 
@@ -860,10 +869,18 @@ export class AgentRunner {
 
     try {
       const privateKey = await exportCustodialWallet(custodial);
+      this.lastPrivateKey = privateKey;
       this.jwt = await authenticateWithWallet(privateKey);
       this.api = createAuthenticatedAPI(this.jwt);
       this.jwtExpiry = Date.now() + 23 * 3_600_000;
       console.log(`[agent:${this.walletTag}] Authenticated`);
+
+      // Connect to MCP server (non-blocking — agent runs fine without it)
+      if (!this.mcpClient) this.mcpClient = new AgentMcpClient(this.walletTag);
+      this.mcpClient.ensureConnected(privateKey).catch((err) => {
+        console.warn(`[agent:${this.walletTag}] MCP connect failed (non-fatal): ${err.message?.slice(0, 60)}`);
+      });
+
       return true;
     } catch (err: any) {
       console.warn(`[agent:${this.walletTag}] Auth failed: ${err.message?.slice(0, 60)}`);

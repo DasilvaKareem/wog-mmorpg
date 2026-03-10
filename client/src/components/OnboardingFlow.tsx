@@ -400,7 +400,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 shrink-0">
           <span className="text-[13px] uppercase tracking-widest text-[#54f28b]">
             {step === "login" || step === "email-input" || step === "email-otp"
-              ? ">> ENTER THE WORLD <<"
+              ? ">> SUMMON CHAMPION <<"
               : step === "connecting"
               ? ">> AUTHENTICATING..."
               : step === "create-char"
@@ -441,7 +441,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
               <div className="flex items-center gap-2 my-1">
                 <div className="flex-1 border-t border-[#2a3450]" />
-                <span className="text-[11px] text-[#6d77a3]">OR SIGN IN TO PLAY</span>
+                <span className="text-[11px] text-[#6d77a3]">OR SIGN IN TO SUMMON</span>
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 

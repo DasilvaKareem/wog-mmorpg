@@ -1,0 +1,12 @@
+{
+  "rules": [
+    {
+      "allowed": {
+        "origins": ["https://worldofgeneva.com", "https://www.worldofgeneva.com", "http://localhost:5173"],
+        "methods": ["GET", "HEAD"],
+        "headers": ["*"]
+      },
+      "maxAgeSeconds": 86400
+    }
+  ]
+}

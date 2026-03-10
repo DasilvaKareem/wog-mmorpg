@@ -280,6 +280,7 @@ function InventoryTab({
   items,
   loading,
   wallet,
+  ownerWallet,
   entityId,
   zoneId,
   onRefresh,
@@ -287,6 +288,7 @@ function InventoryTab({
   items: InventoryItem[];
   loading: boolean;
   wallet: string | null;
+  ownerWallet: string | null;
   entityId: string | null;
   zoneId: string | null;
   onRefresh: () => void;
@@ -322,7 +324,8 @@ function InventoryTab({
     setBusy(item.tokenId);
     setError(null);
     try {
-      const token = await getAuthToken(wallet);
+      const authWallet = ownerWallet ?? wallet;
+      const token = await getAuthToken(authWallet);
       if (!token) { setError("Auth failed — reconnect wallet"); return; }
       const res = await fetch(`${API_URL}/equipment/equip`, {
         method: "POST",
@@ -341,7 +344,8 @@ function InventoryTab({
     setBusy(-1);
     setError(null);
     try {
-      const token = await getAuthToken(wallet);
+      const authWallet = ownerWallet ?? wallet;
+      const token = await getAuthToken(authWallet);
       if (!token) { setError("Auth failed — reconnect wallet"); return; }
       const res = await fetch(`${API_URL}/equipment/unequip`, {
         method: "POST",
@@ -2603,9 +2607,9 @@ export function ChampionsPage(): React.ReactElement {
         <div className="z-10 flex flex-col items-center gap-6 px-4 py-24 text-center font-mono">
           <p className="text-[12px] uppercase tracking-widest text-[#7a84a8]">{">>"} Champions</p>
           <h1 className="text-[26px] uppercase tracking-widest text-[#ffcc00]" style={{ textShadow: "3px 3px 0 #000" }}>My Champion</h1>
-          <p className="text-[12px] text-[#596a8a]">Connect your wallet to view your champion's stats.</p>
+          <p className="text-[12px] text-[#596a8a]">Connect your wallet to summon your champion.</p>
           <Link to="/" className="border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] hover:bg-[#7bf5a8] font-bold">
-            {">>> Connect Wallet <<<"}
+            {">>> Summon Champion <<<"}
           </Link>
         </div>
       </div>
@@ -2638,7 +2642,7 @@ export function ChampionsPage(): React.ReactElement {
           <div className="flex-1 min-w-0 border-4 border-black bg-[#0a0f1a] shadow-[4px_4px_0_0_#000]">
             <TabBar active={activeTab} onChange={setActiveTab} />
             <div className="p-4">
-              {activeTab === "inventory"   && <InventoryTab items={items} loading={inventoryLoading} wallet={custodialWallet ?? wallet} entityId={agentEntityId} zoneId={agentZoneId} onRefresh={() => {
+              {activeTab === "inventory"   && <InventoryTab items={items} loading={inventoryLoading} wallet={custodialWallet ?? wallet} ownerWallet={wallet} entityId={agentEntityId} zoneId={agentZoneId} onRefresh={() => {
                 setInventoryLoading(true);
                 const profWallet = custodialWallet ?? wallet;
                 fetch(`${API_URL}/inventory/${profWallet}`).then(r => r.json()).then(d => setItems(d.items ?? [])).catch(() => {}).finally(() => setInventoryLoading(false));

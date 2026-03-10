@@ -5,6 +5,7 @@ import { ITEM_CATALOG, getItemByTokenId, getItemsByTokenIds } from "../items/ite
 import { getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import {
   getMerchantState,
   getMerchantPrice,
@@ -110,8 +111,15 @@ export function registerShopRoutes(server: FastifyInstance) {
       return { error: "Invalid buyer address" };
     }
 
-    // Verify authenticated wallet matches buyer
-    if (buyerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    // Verify authenticated wallet matches buyer (direct or via custodial ownership)
+    const buyerLower = buyerAddress.toLowerCase();
+    const authLower = authenticatedWallet.toLowerCase();
+    let shopAuthorized = buyerLower === authLower;
+    if (!shopAuthorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      shopAuthorized = !!custodial && buyerLower === custodial.toLowerCase();
+    }
+    if (!shopAuthorized) {
       reply.code(403);
       return { error: "Not authorized to purchase for this wallet" };
     }
@@ -238,7 +246,14 @@ export function registerShopRoutes(server: FastifyInstance) {
       return { error: "Invalid seller address" };
     }
 
-    if (sellerAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    const sellerLower = sellerAddress.toLowerCase();
+    const authLowerSell = authenticatedWallet.toLowerCase();
+    let sellAuthorized = sellerLower === authLowerSell;
+    if (!sellAuthorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      sellAuthorized = !!custodial && sellerLower === custodial.toLowerCase();
+    }
+    if (!sellAuthorized) {
       reply.code(403);
       return { error: "Not authorized to sell for this wallet" };
     }

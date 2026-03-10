@@ -38,6 +38,11 @@ class BalanceCache<T> {
     return entry.value;
   }
 
+  /** Return the cached value even if expired (for fallback on RPC errors). */
+  getStale(key: string): T | undefined {
+    return this.store.get(key)?.value;
+  }
+
   set(key: string, value: T): void {
     this.store.set(key, { value, expiresAt: Date.now() + this.ttlMs });
   }
@@ -386,15 +391,21 @@ export async function getGoldBalance(address: string): Promise<string> {
           continue;
         }
         if (isTransient) {
+          const stale = goldCache.getStale(cacheKey);
           if (shouldLogOwnershipWarning(address)) {
-            console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning 0: ${msg.slice(0, 120)}`);
+            console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning ${stale ? "stale" : "0"}: ${msg.slice(0, 120)}`);
+          }
+          if (stale !== undefined) {
+            // Re-cache the stale value to prevent repeated RPC hammering
+            goldCache.set(cacheKey, stale);
+            return stale;
           }
           return "0";
         }
         throw err;
       }
     }
-    return "0";
+    return goldCache.getStale(cacheKey) ?? "0";
   })();
 
   inflightGold.set(cacheKey, promise);

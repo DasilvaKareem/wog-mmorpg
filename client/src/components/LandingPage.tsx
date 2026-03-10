@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { OnboardingFlow } from "@/components/OnboardingFlow";
+import { DriftingClouds, LogoSparkles, RadarPing, PixelDivider, EssenceParticles, CtaBorderDraw } from "@/components/LandingAnimations";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
 import { API_URL } from "../config.js";
@@ -151,14 +152,17 @@ export function LandingPage(): React.ReactElement {
           className="w-full object-cover"
           style={{ display: "block", maxHeight: "90vh" }}
         />
+        {/* Drifting pixel clouds */}
+        <DriftingClouds />
         {/* Logo overlay — top-center */}
-        <div className="absolute top-8 left-1/2 -translate-x-1/2">
+        <div className="absolute top-8 left-1/2 -translate-x-1/2 relative">
           <img
             src="/assets/logo.png"
             alt="World of Geneva"
             className="w-[640px] max-w-[90vw] object-contain"
             style={{ filter: "drop-shadow(2px 6px 16px rgba(0,0,0,0.7))" }}
           />
+          <LogoSparkles />
         </div>
         {/* CTA — just below logo */}
         <div className="absolute top-[clamp(140px,28vw,280px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
@@ -189,6 +193,8 @@ export function LandingPage(): React.ReactElement {
         </p>
       </section>
 
+      <PixelDivider color="#54f28b" />
+
       {/* ── FEATURES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
@@ -217,6 +223,8 @@ export function LandingPage(): React.ReactElement {
           ))}
         </div>
       </section>
+
+      <PixelDivider color="#ffcc00" />
 
       {/* ── ZONES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
@@ -278,8 +286,11 @@ export function LandingPage(): React.ReactElement {
         </div>
       </section>
 
+      <PixelDivider color="#aa44ff" />
+
       {/* ── ABOUT GENEVA TEASER ── */}
-      <section className="z-10 w-full max-w-3xl px-4 py-10">
+      <section className="relative z-10 w-full max-w-3xl px-4 py-10">
+        <EssenceParticles />
         <h2
           className="mb-4 text-center text-[16px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}
@@ -299,6 +310,8 @@ export function LandingPage(): React.ReactElement {
           </Link>
         </div>
       </section>
+
+      <PixelDivider color="#54f28b" />
 
       {/* ── HOW IT WORKS ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
@@ -354,6 +367,8 @@ export function LandingPage(): React.ReactElement {
         </div>
       </section>
 
+      <PixelDivider />
+
       {/* ── STATS ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
@@ -407,15 +422,16 @@ export function LandingPage(): React.ReactElement {
           ].map((s) => (
             <div
               key={s.label}
-              className="flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3"
+              className="relative flex flex-col items-center border-2 border-[#2a3450] bg-[#11192d] px-3 py-3 overflow-hidden"
             >
+              <RadarPing color={s.color} />
               <span
-                className="text-[18px]"
+                className="relative text-[18px]"
                 style={{ color: s.color, textShadow: "2px 2px 0 #000" }}
               >
                 {s.value}
               </span>
-              <span className="mt-1 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
+              <span className="relative mt-1 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
                 {s.label}
               </span>
             </div>
@@ -495,7 +511,7 @@ export function LandingPage(): React.ReactElement {
 
       {/* ── BOTTOM CTA ── */}
       <section className="z-10 flex w-full max-w-3xl flex-col items-center px-4 pt-6 pb-16">
-        <div className="mb-6 w-full border-t-4 border-[#ffcc00]" />
+        <CtaBorderDraw />
         <p className="mb-4 text-[12px] text-[#9aa7cc]">
           Ready to enter the world?
         </p>

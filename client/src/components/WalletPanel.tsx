@@ -173,10 +173,9 @@ export function WalletPanel(): React.ReactElement {
             >
               {collapsed ? "+" : "−"}
             </button>
-            Wallet
+            Wallet & Inventory
           </div>
         </CardTitle>
-        {!collapsed && <CardDescription className="text-xs">Spectator inventory</CardDescription>}
       </CardHeader>
       {!collapsed && <CardContent className="space-y-3 text-[9px]">
         {!isConnected ? (

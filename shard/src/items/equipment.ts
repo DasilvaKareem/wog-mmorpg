@@ -13,6 +13,7 @@ import {
   type ZoneState,
 } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getItemInstance } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -202,8 +203,15 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership
-    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    // Verify wallet ownership: accept direct match OR owner→custodial relationship
+    const entityWallet = entity.walletAddress?.toLowerCase();
+    const authWallet = authenticatedWallet.toLowerCase();
+    let authorized = entityWallet === authWallet;
+    if (!authorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      authorized = !!custodial && entityWallet === custodial.toLowerCase();
+    }
+    if (!authorized) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }
@@ -339,8 +347,15 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership
-    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    // Verify wallet ownership: accept direct match OR owner→custodial relationship
+    const entityWallet2 = entity.walletAddress?.toLowerCase();
+    const authWallet2 = authenticatedWallet.toLowerCase();
+    let authorized2 = entityWallet2 === authWallet2;
+    if (!authorized2) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      authorized2 = !!custodial && entityWallet2 === custodial.toLowerCase();
+    }
+    if (!authorized2) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }
@@ -410,8 +425,15 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership
-    if (entity.walletAddress?.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    // Verify wallet ownership: accept direct match OR owner→custodial relationship
+    const entityWallet3 = entity.walletAddress?.toLowerCase();
+    const authWallet3 = authenticatedWallet.toLowerCase();
+    let authorized3 = entityWallet3 === authWallet3;
+    if (!authorized3) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      authorized3 = !!custodial && entityWallet3 === custodial.toLowerCase();
+    }
+    if (!authorized3) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }
