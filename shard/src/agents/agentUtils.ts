@@ -71,6 +71,7 @@ export interface AgentContext {
   // Public actions (also called from chat routes)
   buyItem(tokenId: number): Promise<boolean>;
   equipItem(tokenId: number): Promise<boolean>;
+  learnProfession(professionId: string): Promise<boolean>;
 }
 
 /**

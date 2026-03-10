@@ -656,6 +656,7 @@ export class AgentRunner {
       get currentScript() { return self.currentScript; },
       buyItem: (id) => self.buyItem(id),
       equipItem: (id) => self.equipItem(id),
+      learnProfession: (id) => self.learnProfession(id),
     };
   }
 

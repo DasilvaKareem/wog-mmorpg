@@ -8,6 +8,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeGatherHerb } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity } from "./professionXp.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 const GATHER_RANGE = 50;
 
@@ -180,6 +181,16 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       const xpAmount = xpForRarity(flowerProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
       const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, flowerProps.label);
+
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId: region,
+        type: "loot",
+        tick: getWorldTick(),
+        message: `${entity.name}: Gathered ${flowerProps.label}`,
+        entityId: entity.id,
+        entityName: entity.name,
+      });
 
       // Log gather_herb diary entry
       if (walletAddress) {

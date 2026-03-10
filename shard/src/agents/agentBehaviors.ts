@@ -93,6 +93,24 @@ export async function doGathering(ctx: AgentContext, strategy: AgentStrategy): P
     }
 
     const [nodeId, nodeEntity] = node;
+
+    // Auto-learn required profession before attempting to gather
+    if (nodeEntity.type === "ore-node") {
+      const learned = await ctx.learnProfession("mining");
+      if (!learned) {
+        void ctx.logActivity("Can't mine — no mining trainer nearby");
+        await fallbackToCombat(ctx, "No mining trainer", strategy);
+        return;
+      }
+    } else {
+      const learned = await ctx.learnProfession("herbalism");
+      if (!learned) {
+        void ctx.logActivity("Can't gather herbs — no herbalism trainer nearby");
+        await fallbackToCombat(ctx, "No herbalism trainer", strategy);
+        return;
+      }
+    }
+
     const moving = await ctx.moveToEntity(me, nodeEntity);
     if (moving) return;
 
@@ -121,6 +139,14 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     const zs = await ctx.getZoneState();
     if (!zs) return;
     const { entities, me } = zs;
+
+    // Auto-learn alchemy profession before attempting to brew
+    const learned = await ctx.learnProfession("alchemy");
+    if (!learned) {
+      void ctx.logActivity("Can't brew — no alchemy trainer nearby");
+      await doGathering(ctx, strategy);
+      return;
+    }
 
     const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
     if (!lab) {
@@ -167,6 +193,14 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
 
 export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
   try {
+    // Auto-learn cooking profession
+    const learned = await ctx.learnProfession("cooking");
+    if (!learned) {
+      void ctx.logActivity("Can't cook — no cooking trainer nearby");
+      await doGathering(ctx, strategy);
+      return;
+    }
+
     const zs = await ctx.getZoneState();
     if (!zs) return;
     const { entities, me } = zs;

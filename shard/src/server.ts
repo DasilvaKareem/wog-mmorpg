@@ -174,7 +174,7 @@ server.get("/play", async (_req, reply) => {
       },
       professions: {
         "POST /mining/gather": "{ entityId, nodeId }",
-        "POST /herbalism/pick": "{ entityId, nodeId }",
+        "POST /herbalism/gather": "{ walletAddress, zoneId, entityId, flowerNodeId }",
         "POST /crafting/craft": "{ entityId, stationId, recipeId }",
         "POST /cooking/cook": "{ entityId, stationId, recipeId }",
         "POST /alchemy/brew": "{ entityId, stationId, recipeId }",

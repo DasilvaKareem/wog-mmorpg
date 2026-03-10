@@ -457,12 +457,12 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
         return { error: "Invalid tier. Must be 1-4." };
       }
 
-      // Tier 1: recipes 0-1, Tier 2: 2-4, Tier 3: 5-6, Tier 4: 7-9
-      const tierRanges = {
-        1: [0, 1],
-        2: [2, 4],
-        3: [5, 6],
-        4: [7, 9],
+      // Tier 1: basic potions, Tier 2: intermediate elixirs, Tier 3: advanced, Tier 4: master
+      const tierRanges: Record<number, [number, number]> = {
+        1: [0, 1],    // minor-health, minor-mana
+        2: [2, 4],    // stamina, wisdom, swift-step
+        3: [5, 16],   // greater potions, stat elixirs, enchantments
+        4: [17, ALCHEMY_RECIPES.length - 1], // gate essences, tonics, resistance elixirs
       };
 
       const [start, end] = tierRanges[tier as 1 | 2 | 3 | 4];
@@ -625,6 +625,16 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       server.log.info(
         `[alchemy] ${entity.name} brewed ${outputItem?.name} at ${alchemyLab.name} → ${potionTx}`
       );
+
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: `${entity.name}: Brewed ${outputItem?.name ?? "a potion"}`,
+        entityId: entity.id,
+        entityName: entity.name,
+      });
 
       // Log brew diary entry
       if (walletAddress) {
