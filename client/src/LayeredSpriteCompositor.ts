@@ -42,6 +42,28 @@ const DEFAULT_SKIN = "medium";
 const DEFAULT_EYES = "brown";
 const DEFAULT_HAIR = "short";
 
+// Map onboarding appearance IDs → layer filenames
+// (onboarding stores ids like "fair", "tan", "amber"; layers use "pale", "olive", "gold")
+const SKIN_MAP: Record<string, string> = {
+  fair: "pale", light: "light", medium: "medium", tan: "olive",
+  brown: "dark", dark: "dark",
+  // direct layer names also accepted
+  pale: "pale", olive: "olive",
+};
+
+const EYE_MAP: Record<string, string> = {
+  brown: "brown", blue: "blue", green: "green", amber: "gold",
+  gray: "brown", violet: "red",
+  // direct layer names also accepted
+  gold: "gold", red: "red",
+};
+
+const HAIR_MAP: Record<string, string> = {
+  short: "short", long: "long", braided: "long", mohawk: "mohawk",
+  bald: "", ponytail: "ponytail", locs: "long", afro: "short",
+  cornrows: "short", "bantu-knots": "short", bangs: "long", topknot: "ponytail",
+};
+
 // ── Item → visual mapping ───────────────────────────────────────────
 
 /** Map weapon item names to visual weapon type */
@@ -158,7 +180,7 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
 export interface LayerKeys {
   body: string;
   eyes: string;
-  hair: string;
+  hair: string | null;
   weapon: string | null;
   chest: string | null;
   legs: string | null;
@@ -169,30 +191,29 @@ export interface LayerKeys {
 
 /** Derive the layer texture keys from an entity's appearance + equipment */
 export function getLayerKeys(entity: Entity): LayerKeys {
-  const skinTone = entity.skinColor ?? DEFAULT_SKIN;
-  const eyeColor = entity.eyeColor ?? DEFAULT_EYES;
-  const hairStyle = entity.hairStyle ?? DEFAULT_HAIR;
+  const rawSkin = entity.skinColor ?? DEFAULT_SKIN;
+  const rawEyes = entity.eyeColor ?? DEFAULT_EYES;
+  const rawHair = entity.hairStyle ?? DEFAULT_HAIR;
 
-  // Equipment visual lookups — we only have item name from the tokenId reference
-  // For now, use a name-based heuristic via the entity's equipment data
+  // Map onboarding IDs to layer filenames
+  const skinTone = SKIN_MAP[rawSkin] ?? rawSkin;
+  const eyeColor = EYE_MAP[rawEyes] ?? rawEyes;
+  const hairStyle = HAIR_MAP[rawHair] ?? rawHair;
+
   const eq = entity.equipment ?? {};
-
-  // We need item names. The equipment object stores tokenId + durability.
-  // The client doesn't have the full item catalog, so we'll add a lightweight
-  // name field. For now, derive from what data is available or use defaults.
-  const weaponName = (eq.weapon as any)?.name as string | undefined;
-  const chestName = (eq.chest as any)?.name as string | undefined;
-  const legsName = (eq.legs as any)?.name as string | undefined;
-  const bootsName = (eq.boots as any)?.name as string | undefined;
-  const helmName = (eq.helm as any)?.name as string | undefined;
-  const shouldersName = (eq.shoulders as any)?.name as string | undefined;
+  const weaponName = eq.weapon?.name;
+  const chestName = eq.chest?.name;
+  const legsName = eq.legs?.name;
+  const bootsName = eq.boots?.name;
+  const helmName = eq.helm?.name;
+  const shouldersName = eq.shoulders?.name;
 
   const weaponType = weaponVisual(weaponName);
 
   return {
     body: `layer-body-${skinTone}`,
     eyes: `layer-eyes-${eyeColor}`,
-    hair: `layer-hair-${hairStyle}`,
+    hair: hairStyle ? `layer-hair-${hairStyle}` : null,
     weapon: weaponType ? `layer-weapon-${weaponType}` : null,
     chest: chestName ? `layer-chest-${armorVisual(chestName, "chest")}` : null,
     legs: legsName ? `layer-legs-${armorVisual(legsName, "legs")}` : null,
@@ -207,7 +228,7 @@ export function layerCacheKey(keys: LayerKeys): string {
   return [
     keys.body,
     keys.eyes,
-    keys.hair,
+    keys.hair ?? "no-hair",
     keys.weapon ?? "no-weapon",
     keys.chest ?? "no-chest",
     keys.legs ?? "no-legs",
@@ -286,7 +307,7 @@ export function getOrCreateLayeredTexture(
   // Layer 1-3: base appearance
   drawLayer(keys.body);
   drawLayer(keys.eyes);
-  drawLayer(keys.hair);
+  if (keys.hair) drawLayer(keys.hair);
 
   // Layer 4: weapon behind body
   if (keys.weapon) drawWeaponBehind(keys.weapon);
