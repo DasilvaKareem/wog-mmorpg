@@ -602,7 +602,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           properties: {
             focus: {
               type: "STRING" as Type,
-              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "learning", "idle"],
               description: "The new activity focus",
             },
             strategy: {
@@ -712,8 +712,12 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         config: {
           systemInstruction: fullSystemInstruction,
           tools: [{ functionDeclarations: chatToolDecls }],
+          // Force tool calling for directives — otherwise Gemini just chats about doing it
+          ...(interactionMode === "directive"
+            ? { toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY } } }
+            : {}),
           temperature: 0.5,
-          maxOutputTokens: 300,
+          maxOutputTokens: 150,
         },
       });
     } catch (err: any) {
@@ -1127,7 +1131,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                   properties: {
                     focus: {
                       type: "STRING" as Type,
-                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "idle"],
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "learning", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {
