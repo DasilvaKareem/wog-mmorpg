@@ -2046,6 +2046,38 @@ async function worldTick() {
       }
     }
 
+    // ── Entity separation pass: push overlapping entities apart ─────
+    // Runs every tick so even stationary entities don't stack.
+    const livingEntities: Entity[] = [];
+    for (const e of zone.entities.values()) {
+      if ((e.hp ?? 0) <= 0) continue;
+      if (e.type === "flower-node" || e.type === "ore-node" ||
+          e.type === "nectar-node" || e.type === "corpse") continue;
+      livingEntities.push(e);
+    }
+    for (let i = 0; i < livingEntities.length; i++) {
+      const a = livingEntities[i];
+      for (let j = i + 1; j < livingEntities.length; j++) {
+        const b = livingEntities[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
+          const overlap = (ENTITY_COLLISION_RADIUS - dist) / 2;
+          const nx = (dx / dist) * overlap;
+          const ny = (dy / dist) * overlap;
+          a.x += nx;
+          a.y += ny;
+          b.x -= nx;
+          b.y -= ny;
+        } else if (dist <= 0.01) {
+          // Exactly overlapping — nudge apart randomly
+          a.x += (Math.random() - 0.5) * ENTITY_COLLISION_RADIUS;
+          a.y += (Math.random() - 0.5) * ENTITY_COLLISION_RADIUS;
+        }
+      }
+    }
+
     // ── Mob leash / de-aggro: mobs too far from spawn walk home ────
     // If a mob is pulled beyond its leash range, it de-aggros, drops
     // combat, and walks back to spawn. While leashing it regens HP
