@@ -999,9 +999,14 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
-      // Speech bubbles for NPC interactions
+      // Speech bubbles for agent dialogue and NPC interactions
       if (evt.entityId) {
-        if (evt.type === "quest") {
+        if (evt.type === "chat") {
+          // Agent dialogue — strip "Name: " prefix since bubble is above the entity
+          const colonIdx = evt.message.indexOf(": ");
+          const line = colonIdx > 0 ? evt.message.slice(colonIdx + 2) : evt.message;
+          this.entityRenderer.showSpeechBubble(evt.entityId, line, 4000);
+        } else if (evt.type === "quest") {
           const label = (evtData?.questTitle as string) ?? evt.message;
           this.entityRenderer.showSpeechBubble(evt.entityId, label, 3500);
         } else if (evt.type === "shop") {
