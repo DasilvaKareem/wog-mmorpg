@@ -199,8 +199,6 @@ export function LandingPage(): React.ReactElement {
         </p>
       </section>
 
-      <PixelDivider color="#54f28b" />
-
       {/* ── FEATURES ── */}
       <section className="z-10 w-full max-w-3xl px-4 py-10">
         <h2
