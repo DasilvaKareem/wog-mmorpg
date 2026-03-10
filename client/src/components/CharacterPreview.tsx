@@ -10,9 +10,9 @@ import { ASSET_BASE_URL } from "@/config";
 
 const FRAME_W = 16;
 const FRAME_H = 22;
-const SCALE = 6;
-const CANVAS_W = FRAME_W * SCALE; // 96
-const CANVAS_H = FRAME_H * SCALE; // 132
+const SCALE = 8;
+const CANVAS_W = FRAME_W * SCALE; // 128
+const CANVAS_H = FRAME_H * SCALE; // 176
 
 // Map onboarding skin color ids → available body layer filenames
 const SKIN_MAP: Record<string, string> = {
@@ -50,30 +50,12 @@ const HAIR_MAP: Record<string, string> = {
   topknot: "ponytail",
 };
 
-// Class → default starter equipment visual layers
-const CLASS_EQUIPMENT: Record<string, {
-  weapon?: string;
-  chest?: string;
-  legs?: string;
-  boots?: string;
-  helm?: string;
-  shoulders?: string;
-}> = {
-  warrior:  { weapon: "sword", chest: "chain", legs: "chain", boots: "iron", helm: "iron" },
-  paladin:  { weapon: "mace", chest: "chain", legs: "chain", boots: "iron", helm: "plate", shoulders: "iron" },
-  rogue:    { weapon: "dagger", chest: "leather", legs: "leather", boots: "leather", helm: "leather" },
-  ranger:   { weapon: "bow", chest: "leather", legs: "leather", boots: "leather" },
-  mage:     { weapon: "staff", chest: "cloth", legs: "cloth", boots: "cloth" },
-  cleric:   { weapon: "mace", chest: "cloth", legs: "cloth", boots: "cloth", helm: "leather" },
-  warlock:  { weapon: "staff", chest: "cloth", legs: "cloth", boots: "cloth" },
-  monk:     { chest: "cloth", legs: "cloth", boots: "cloth" },
-};
-
 interface Props {
   skinColor: string;
   eyeColor: string;
   hairStyle: string;
-  classId: string;
+  /** Kept for API compat but not used in preview rendering */
+  classId?: string;
 }
 
 // Image cache to avoid reloading PNGs on every render
@@ -97,7 +79,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Props): React.ReactElement {
+export function CharacterPreview({ skinColor, eyeColor, hairStyle }: Props): React.ReactElement {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [loadFailed, setLoadFailed] = React.useState(false);
 
@@ -130,15 +112,10 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
       layers.push(`${base}/hair/hair-${hair}.png`);
     }
 
-    // Class equipment layers (draw order matches LayeredSpriteCompositor)
-    const equip = CLASS_EQUIPMENT[classId] ?? {};
-    if (equip.chest) layers.push(`${base}/chest/chest-${equip.chest}.png`);
-    if (equip.legs) layers.push(`${base}/legs/legs-${equip.legs}.png`);
-    if (equip.boots) layers.push(`${base}/boots/boots-${equip.boots}.png`);
-    if (equip.shoulders) layers.push(`${base}/shoulders/shoulders-${equip.shoulders}.png`);
-    if (equip.helm) layers.push(`${base}/helm/helm-${equip.helm}.png`);
-    // Weapon last (on top for down-facing frame — matches weapon-front in compositor)
-    if (equip.weapon) layers.push(`${base}/weapons/weapon-${equip.weapon}.png`);
+    // Equipment layers intentionally omitted — the body sprites already
+    // include default clothing, so stacking armor/helm/weapon overlays
+    // on a 16×22 pixel frame makes the preview unreadable.  Equipment
+    // is shown in-game via the full LayeredSpriteCompositor.
 
     let cancelled = false;
 
@@ -168,7 +145,7 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
     );
 
     return () => { cancelled = true; };
-  }, [skinColor, eyeColor, hairStyle, classId]);
+  }, [skinColor, eyeColor, hairStyle]);
 
   if (loadFailed) {
     return (
