@@ -145,17 +145,15 @@ export function LandingPage(): React.ReactElement {
       />
 
       {/* ── HERO ── */}
-      <header className="relative z-10 w-full overflow-hidden">
+      <header className="relative z-10 w-full">
         <img
           src="/assets/Banner.png"
           alt="World of Geneva"
           className="w-full object-cover"
           style={{ display: "block", maxHeight: "90vh" }}
         />
-        {/* Drifting pixel clouds — overlays the banner */}
-        <div className="absolute inset-0 pointer-events-none">
-          <DriftingClouds />
-        </div>
+        {/* Drifting pixel clouds */}
+        <DriftingClouds />
         {/* Logo overlay — top-center */}
         <div className="absolute top-8 left-1/2 -translate-x-1/2">
           <div className="relative">
