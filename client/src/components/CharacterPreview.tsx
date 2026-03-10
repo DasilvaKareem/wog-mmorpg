@@ -106,11 +106,8 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle }: Props): Rea
     // and the AI-generated eyes PNGs contain full face outlines that
     // overpower the body. Kept in props for future regeneration.
 
-    // Hair (skip if bald)
-    const hair = HAIR_MAP[hairStyle] ?? "";
-    if (hair) {
-      layers.push(`${base}/hair/hair-${hair}.png`);
-    }
+    // Hair layer skipped — AI-generated hair PNGs are oversized and
+    // cover the entire character sprite at this scale.
 
     // Equipment layers intentionally omitted — the body sprites already
     // include default clothing, so stacking armor/helm/weapon overlays

@@ -150,9 +150,7 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
     scene.load.image(`layer-body-${skin}`, `${base}/body/body-${skin}.png`);
   }
   // Eyes layer preload skipped — body sprites already include facial features
-  for (const hair of HAIR_STYLES) {
-    scene.load.image(`layer-hair-${hair}`, `${base}/hair/hair-${hair}.png`);
-  }
+  // Hair layer preload skipped — AI-generated hair PNGs are oversized
   for (const tier of CHEST_TIERS) {
     scene.load.image(`layer-chest-${tier}`, `${base}/chest/chest-${tier}.png`);
   }
@@ -302,12 +300,13 @@ export function getOrCreateLayeredTexture(
     ctx.restore();
   };
 
-  // Layer 1-3: base appearance
+  // Layer 1: base body only
   drawLayer(keys.body);
   // NOTE: eyes layer skipped — body sprites already include facial features,
   // and the AI-generated eyes PNGs contain full face outlines that overpower
   // the body layer. Eyes remain in the key for cache differentiation.
-  if (keys.hair) drawLayer(keys.hair);
+  // NOTE: hair layer skipped — AI-generated hair PNGs are oversized and
+  // cover the entire character sprite. Hair remains in the key for cache.
 
   // Layer 4: weapon behind body
   if (keys.weapon) drawWeaponBehind(keys.weapon);
