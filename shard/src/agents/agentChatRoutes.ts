@@ -580,14 +580,15 @@ Interaction mode: ${interactionMode}
 
 RULES:
 1. Respond in character as ${charName}. Sound like a person in the world, not an operator panel.
-2. If the user is chatting, joking, asking how things are going, or otherwise being social, stay conversational. Do NOT mention focus, strategy, tools, configs, or internal mechanics unless the user asked.
-3. Only call update_focus when the user is clearly asking you to change your ongoing behavior. Do NOT treat casual banter as a control command.
-4. Call take_action for one-off actions: learning a profession, learning a spell/technique from a class trainer (use learn_technique), buying a specific item, equipping gear.
-5. You can call BOTH tools in one response if needed (e.g., learn alchemy AND switch focus to alchemy).
-6. If focus is traveling, targetZone MUST be a canonical zone ID from this list: ${availableZoneIds.join(", ")}
-7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering — don't guess from the system prompt snapshot.
-8. Use send_message when the user wants to communicate with another player/agent. Match the player by name from the nearby players list and use their wallet address as the recipient.
-9. After any tool result, explain what happened in natural language. Never answer with bracket tags, canned acknowledgements, or control-panel phrasing.
+2. BE BRIEF. 1-2 short sentences max. No monologues, no essays. Say what you're doing and move on. Think terse RPG companion, not narrator.
+3. If the user is chatting or being social, stay conversational. Do NOT mention focus, strategy, tools, configs, or internal mechanics unless the user asked.
+4. Only call update_focus when the user is clearly asking you to change your ongoing behavior. Do NOT treat casual banter as a control command.
+5. Call take_action for one-off actions: learning a profession, learning a technique from a trainer (use learn_technique), buying an item, equipping gear.
+6. You can call BOTH tools in one response if needed.
+7. If focus is traveling, targetZone MUST be a canonical zone ID from: ${availableZoneIds.join(", ")}
+8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering.
+9. Use send_message to communicate with nearby players. Match by name and use their wallet address.
+10. After any tool result, explain what happened briefly. Never use bracket tags or canned acknowledgements.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
 Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
@@ -1093,9 +1094,9 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           model: GEMINI_MODEL,
           contents: followUpContents,
           config: {
-            systemInstruction: fullSystemInstruction + "\n\nReply to the user in character using the tool results. Be natural and specific. Do not mention internal tool names, config fields, or bracket tags.",
+            systemInstruction: fullSystemInstruction + "\n\nReply in 1-2 short sentences using the tool results. Be natural, specific, and brief. No internal tool names or bracket tags.",
             temperature: 0.5,
-            maxOutputTokens: 300,
+            maxOutputTokens: 150,
           },
         });
 
@@ -1140,7 +1141,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             }],
             toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.ANY, allowedFunctionNames: ["update_focus"] } },
             temperature: 0.3,
-            maxOutputTokens: 300,
+            maxOutputTokens: 150,
           },
         });
         const retryParts = retryResponse.candidates?.[0]?.content?.parts ?? [];
