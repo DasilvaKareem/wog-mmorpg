@@ -11,6 +11,7 @@ import { PaymentGate } from "@/components/PaymentGate";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
+import { ChatLog } from "@/components/ChatLog";
 
 interface ChatMessage {
   role: "user" | "agent" | "activity" | "system";
@@ -91,6 +92,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [authLoading, setAuthLoading] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
+  const [viewMode, setViewMode] = React.useState<"chat" | "zonelog">("chat");
   const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string } | null>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const lastSyncTs = React.useRef(0);
@@ -341,6 +343,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         <div className="flex items-center gap-2">
           {isDeployed && (
             <button
+              onClick={() => setViewMode(viewMode === "chat" ? "zonelog" : "chat")}
+              className="text-[11px] text-[#7a8b9e] hover:text-[#7dcfff] transition-colors uppercase tracking-widest"
+              title={viewMode === "chat" ? "Show zone log" : "Show chat"}
+            >
+              {viewMode === "chat" ? "[log]" : "[chat]"}
+            </button>
+          )}
+          {isDeployed && (
+            <button
               onClick={() => setShowStopConfirm(true)}
               className="text-[11px] text-[#7a8b9e] hover:text-[#ff4d6d] transition-colors uppercase tracking-widest"
               title="Stop agent"
@@ -403,7 +414,13 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         </div>
       )}
 
+      {/* ── Zone log view ────────────────────────────────────────── */}
+      {viewMode === "zonelog" && isDeployed && (
+        <ChatLog zoneId={status?.zoneId ?? null} embedded />
+      )}
+
       {/* ── Message stream ─────────────────────────────────────────── */}
+      {viewMode === "chat" && (
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-3 py-2 space-y-0.5"
@@ -474,9 +491,10 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           <div className="text-[12px] text-[#6b7394] animate-pulse">Agent thinking...</div>
         )}
       </div>
+      )}
 
       {/* ── Quick suggestions ──────────────────────────────────────── */}
-      {isDeployed && !sending && messages.length < 3 && (
+      {viewMode === "chat" && isDeployed && !sending && messages.length < 3 && (
         <div className="flex gap-1 px-3 py-1.5 overflow-x-auto border-t border-[#1a2a18]" style={{ scrollbarWidth: "none" }}>
           {QUICK_SUGGESTIONS.map((s) => (
             <button
@@ -492,7 +510,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       )}
 
       {/* ── Chat input ─────────────────────────────────────────────── */}
-      {isDeployed && (
+      {isDeployed && viewMode === "chat" && (
         <div className="border-t-2 border-[#1a2a18] bg-[#080f0a] p-2">
           <div className="flex gap-1">
             <input

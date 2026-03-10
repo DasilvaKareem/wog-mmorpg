@@ -55,23 +55,109 @@ export const ENTITY_SPRITE_PALETTES: Record<string, { body: number[]; outline: n
   "quest-giver":       { body: [100, 180, 255], outline: [40, 90, 150],   detail: [200, 230, 255] },
 };
 
-/** Mob category palettes — matched by keyword in mob name */
+/** Mob category palettes — matched by keyword in mob name.
+ *  Used as fallback when no PNG sprite sheet exists for this mob. */
 export const MOB_CATEGORY_PALETTES: Record<string, { body: number[]; outline: number[]; detail: number[]; shape: "quadruped" | "humanoid" }> = {
-  wolf:    { body: [140, 140, 155], outline: [70, 70, 80],    detail: [200, 200, 210], shape: "quadruped" },  // gray
-  bear:    { body: [140, 90, 50],   outline: [80, 50, 25],    detail: [190, 150, 100], shape: "quadruped" },  // brown
-  rat:     { body: [160, 130, 90],  outline: [90, 70, 40],    detail: [210, 190, 150], shape: "quadruped" },  // tan
-  boar:    { body: [130, 80, 70],   outline: [70, 40, 35],    detail: [180, 140, 130], shape: "quadruped" },  // dark brown
-  spider:  { body: [80, 50, 100],   outline: [40, 20, 55],    detail: [150, 120, 180], shape: "quadruped" },  // dark purple
-  slime:   { body: [80, 200, 80],   outline: [40, 120, 40],   detail: [160, 240, 160], shape: "quadruped" },  // lime green
-  goblin:  { body: [80, 160, 60],   outline: [40, 90, 30],    detail: [150, 220, 130], shape: "humanoid" },   // goblin green
-  bandit:  { body: [90, 80, 75],    outline: [50, 45, 40],    detail: [160, 150, 140], shape: "humanoid" },   // dark gray
-  cultist: { body: [100, 40, 120],  outline: [55, 20, 65],    detail: [170, 120, 190], shape: "humanoid" },   // dark purple
-  undead:  { body: [170, 170, 160], outline: [100, 100, 90],  detail: [220, 220, 210], shape: "humanoid" },   // bone/pale
-  ent:     { body: [90, 120, 50],   outline: [50, 70, 25],    detail: [150, 180, 100], shape: "quadruped" },  // mossy brown-green
-  troll:   { body: [60, 120, 80],   outline: [30, 65, 40],    detail: [130, 190, 150], shape: "humanoid" },   // dark teal-green
-  golem:   { body: [130, 130, 140], outline: [70, 70, 80],    detail: [190, 190, 200], shape: "quadruped" },  // stone gray
-  snake:   { body: [80, 140, 60],   outline: [40, 80, 30],    detail: [140, 200, 120], shape: "quadruped" },  // olive green
+  wolf:    { body: [140, 140, 155], outline: [70, 70, 80],    detail: [200, 200, 210], shape: "quadruped" },
+  bear:    { body: [140, 90, 50],   outline: [80, 50, 25],    detail: [190, 150, 100], shape: "quadruped" },
+  rat:     { body: [160, 130, 90],  outline: [90, 70, 40],    detail: [210, 190, 150], shape: "quadruped" },
+  boar:    { body: [130, 80, 70],   outline: [70, 40, 35],    detail: [180, 140, 130], shape: "quadruped" },
+  spider:  { body: [80, 50, 100],   outline: [40, 20, 55],    detail: [150, 120, 180], shape: "quadruped" },
+  slime:   { body: [80, 200, 80],   outline: [40, 120, 40],   detail: [160, 240, 160], shape: "quadruped" },
+  goblin:  { body: [80, 160, 60],   outline: [40, 90, 30],    detail: [150, 220, 130], shape: "humanoid" },
+  bandit:  { body: [90, 80, 75],    outline: [50, 45, 40],    detail: [160, 150, 140], shape: "humanoid" },
+  cultist: { body: [100, 40, 120],  outline: [55, 20, 65],    detail: [170, 120, 190], shape: "humanoid" },
+  undead:  { body: [170, 170, 160], outline: [100, 100, 90],  detail: [220, 220, 210], shape: "humanoid" },
+  ent:     { body: [90, 120, 50],   outline: [50, 70, 25],    detail: [150, 180, 100], shape: "quadruped" },
+  troll:   { body: [60, 120, 80],   outline: [30, 65, 40],    detail: [130, 190, 150], shape: "humanoid" },
+  golem:   { body: [130, 130, 140], outline: [70, 70, 80],    detail: [190, 190, 200], shape: "quadruped" },
+  snake:   { body: [80, 140, 60],   outline: [40, 80, 30],    detail: [140, 200, 120], shape: "quadruped" },
 };
+
+/**
+ * Map from keyword found in mob name → sprite PNG filename (without extension).
+ * These are loaded from /sprites/mobs/mob-{id}.png when available.
+ * Order matters — first match wins, so more specific keywords come first.
+ */
+export const MOB_SPRITE_IDS: Array<[keyword: string, spriteId: string]> = [
+  // Specific names first (avoid false matches)
+  ["necromancer", "necromancer"],
+  ["archdruid", "archdruid"],
+  ["infernal", "infernal"],
+  ["forgemaster", "infernal"],
+  ["titan", "titan"],
+  ["avalanche", "titan"],
+  ["warden", "warden"],
+  ["solaris", "warden"],
+  ["sentinel", "sentinel"],
+  ["grom", "sentinel"],
+  ["dragonkin", "dragonkin"],
+  ["dragon", "dragon"],
+  ["azurshard", "dragon"],
+  ["drake", "drake"],
+  ["skyward", "drake"],
+  ["wyrm", "wyrm"],
+  ["chasm", "wyrm"],
+  // Citadel
+  ["automaton", "automaton"],
+  ["forgebound", "forgebound"],
+  ["molten", "forgebound"],
+  ["dweller", "dweller"],
+  ["dwarf", "dwarf"],
+  // Lake
+  ["luminous", "luminous"],
+  ["crystal", "crystal"],
+  ["drowned", "drowned"],
+  ["lumen", "lumen"],
+  ["horror", "horror"],
+  ["sunken", "horror"],
+  // Chasm
+  ["weaver", "weaver"],
+  ["void", "weaver"],
+  ["shard", "shard"],
+  ["devourer", "devourer"],
+  // Mountains
+  ["yeti", "yeti"],
+  ["basilisk", "basilisk"],
+  ["condor", "condor"],
+  ["giant", "giant"],
+  ["frost", "giant"],
+  // Glade
+  ["fae", "fae"],
+  ["dryad", "dryad"],
+  ["druid", "druid"],
+  ["shadow druid", "druid"],
+  // Plains
+  ["stalker", "stalker"],
+  ["wisp", "wisp"],
+  ["aurora", "wisp"],
+  ["harpy", "harpy"],
+  ["elemental", "elemental"],
+  ["storm", "elemental"],
+  // Woods
+  ["treant", "treant"],
+  ["serpent", "serpent"],
+  ["worg", "worg"],
+  ["specter", "specter"],
+  ["guardian", "guardian"],
+  // Wraith (generic — after more specific wraith types)
+  ["wraith", "wraith"],
+  // Base categories
+  ["wolf", "wolf"],
+  ["bear", "bear"],
+  ["rat", "rat"],
+  ["boar", "boar"],
+  ["spider", "spider"],
+  ["slime", "slime"],
+  ["goblin", "goblin"],
+  ["bandit", "bandit"],
+  ["cultist", "cultist"],
+  ["undead", "undead"],
+  ["ent", "ent"],
+  ["troll", "troll"],
+  ["golem", "golem"],
+  ["snake", "snake"],
+];
 
 /** SNES-style terrain color palettes — { base, dark, light } as 0xRRGGBB */
 export interface TilePalette {

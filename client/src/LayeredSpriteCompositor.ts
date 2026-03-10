@@ -149,9 +149,7 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
   for (const skin of SKIN_TONES) {
     scene.load.image(`layer-body-${skin}`, `${base}/body/body-${skin}.png`);
   }
-  for (const eye of EYE_COLORS) {
-    scene.load.image(`layer-eyes-${eye}`, `${base}/eyes/eyes-${eye}.png`);
-  }
+  // Eyes layer preload skipped — body sprites already include facial features
   for (const hair of HAIR_STYLES) {
     scene.load.image(`layer-hair-${hair}`, `${base}/hair/hair-${hair}.png`);
   }
@@ -306,7 +304,9 @@ export function getOrCreateLayeredTexture(
 
   // Layer 1-3: base appearance
   drawLayer(keys.body);
-  drawLayer(keys.eyes);
+  // NOTE: eyes layer skipped — body sprites already include facial features,
+  // and the AI-generated eyes PNGs contain full face outlines that overpower
+  // the body layer. Eyes remain in the key for cache differentiation.
   if (keys.hair) drawLayer(keys.hair);
 
   // Layer 4: weapon behind body

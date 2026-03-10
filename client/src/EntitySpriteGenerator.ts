@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { ENTITY_SPRITE_PALETTES, CLASS_SPRITE_PALETTES, MOB_CATEGORY_PALETTES } from "./config.js";
+import { ENTITY_SPRITE_PALETTES, CLASS_SPRITE_PALETTES, MOB_CATEGORY_PALETTES, MOB_SPRITE_IDS } from "./config.js";
+import { ASSET_BASE_URL } from "./config.js";
 import { getOrCreateLayeredTexture, needsRecomposite } from "./LayeredSpriteCompositor.js";
 import type { Entity } from "./types.js";
 
@@ -260,6 +261,66 @@ function addCanvasSpriteSheet(
   }
 }
 
+// ── Mob PNG sprite sheets ──────────────────────────────────────────
+// Tracks which mob sprite PNGs have been loaded from /sprites/mobs/
+const loadedMobSprites = new Set<string>();
+const failedMobSprites = new Set<string>();
+
+/** Get unique sprite IDs from the mob mapping table */
+function getUniqueMobSpriteIds(): string[] {
+  const seen = new Set<string>();
+  for (const [, spriteId] of MOB_SPRITE_IDS) {
+    seen.add(spriteId);
+  }
+  return Array.from(seen);
+}
+
+/**
+ * Preload all mob sprite PNGs. Call from WorldScene.preload().
+ * Files expected at /sprites/mobs/mob-{id}.png (64x64, 4x4 grid of 16x16).
+ */
+export function preloadMobSprites(scene: Phaser.Scene): void {
+  const base = ASSET_BASE_URL || "";
+  for (const spriteId of getUniqueMobSpriteIds()) {
+    const key = `mob-sprite-${spriteId}`;
+    if (scene.textures.exists(key)) continue;
+    scene.load.spritesheet(key, `${base}/sprites/mobs/mob-${spriteId}.png`, {
+      frameWidth: SPRITE_PX,
+      frameHeight: SPRITE_PX,
+    });
+  }
+}
+
+/**
+ * After preload completes, register animations for successfully loaded mob sprites.
+ * Call from WorldScene.create() after registerEntitySprites().
+ */
+export function registerMobSpriteAnimations(scene: Phaser.Scene): void {
+  for (const spriteId of getUniqueMobSpriteIds()) {
+    const key = `mob-sprite-${spriteId}`;
+    if (scene.textures.exists(key) && scene.textures.get(key).key !== "__MISSING") {
+      loadedMobSprites.add(spriteId);
+      createAnimations(scene, key);
+    } else {
+      failedMobSprites.add(spriteId);
+    }
+  }
+}
+
+/**
+ * Look up a mob's PNG sprite key by name. Returns the texture key if a
+ * real PNG was loaded, null otherwise (falls back to procedural).
+ */
+export function getMobSpriteKey(name: string): string | null {
+  const lower = name.toLowerCase();
+  for (const [keyword, spriteId] of MOB_SPRITE_IDS) {
+    if (lower.includes(keyword) && loadedMobSprites.has(spriteId)) {
+      return `mob-sprite-${spriteId}`;
+    }
+  }
+  return null;
+}
+
 /** Infer mob category from entity name by keyword matching */
 export function inferMobCategory(name: string): string | null {
   const lower = name.toLowerCase();
@@ -302,7 +363,11 @@ export function getEntityTextureKey(entityType: string, classId?: string, entity
   if (entityType === "player" && classId && CLASS_SPRITE_PALETTES[classId]) {
     return `entity-player-${classId}`;
   }
-  if (entityType === "mob" && entityName) {
+  if ((entityType === "mob" || entityType === "boss") && entityName) {
+    // Prefer real PNG sprite sheet if available
+    const pngKey = getMobSpriteKey(entityName);
+    if (pngKey) return pngKey;
+    // Fall back to procedural category sprite
     const category = inferMobCategory(entityName);
     if (category) return `entity-mob-${category}`;
     return "entity-mob";

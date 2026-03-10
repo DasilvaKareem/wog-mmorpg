@@ -20,6 +20,11 @@ const TILE = {
   STONE_FLOOR: 14,
   STONE_DARK: 15,
   WATER_STILL: 16,
+  WATER_EDGE_N: 19,
+  WATER_EDGE_S: 20,
+  WATER_EDGE_E: 21,
+  WATER_EDGE_W: 22,
+  WATER_CORNER: 23,
   TREE_TRUNK: 40,
   TREE_CANOPY_TL: 41,
   TREE_CANOPY_TR: 42,
@@ -191,12 +196,14 @@ function populateWorldBlendInfos(allZoneData: Map<string, ZoneData>): void {
 /** Get the base ground tile for a biome given a noise value */
 function biomeBaseTile(biome: string, noise: number): number {
   if (biome === "forest") {
-    return TILE.GRASS_DARK;
+    // Mix dark grass with occasional plain grass for depth
+    return noise < 0.08 ? TILE.GRASS_PLAIN : noise < 0.15 ? TILE.GRASS_LIGHT : TILE.GRASS_DARK;
   } else if (biome === "village") {
-    return noise < 0.08 ? TILE.GRASS_LIGHT : TILE.GRASS_PLAIN;
+    // Mix plain and light grass for a tended look
+    return noise < 0.15 ? TILE.GRASS_LIGHT : noise < 0.25 ? TILE.GRASS_FLOWERS_YELLOW : TILE.GRASS_PLAIN;
   } else {
-    // grassland
-    return noise < 0.12 ? TILE.GRASS_LIGHT : TILE.GRASS_PLAIN;
+    // grassland — varied mix for natural look
+    return noise < 0.12 ? TILE.GRASS_LIGHT : noise < 0.22 ? TILE.GRASS_DARK : TILE.GRASS_PLAIN;
   }
 }
 
@@ -346,38 +353,44 @@ function generateMap(zone: ZoneData): GeneratedMap {
   // 3. Scatter decorations (world-space noise + blending)
   scatterDecoration(ground, w, h, biome, exclusion, zone.id, worldOffTx, worldOffTz);
 
-  // 4. Place trees (world-space noise + blending)
+  // 4. Place water ponds (clusters of water tiles)
+  placeWaterPonds(ground, w, h, biome, exclusion, worldOffTx, worldOffTz);
+
+  // 5. Place trees (world-space noise + blending)
   placeTrees(ground, overlay, w, h, biome, exclusion, zone.id, worldOffTx, worldOffTz);
 
-  // 5. Draw roads (if zone has roads defined)
+  // 6. Draw roads (if zone has roads defined)
   if (zone.roads && Array.isArray(zone.roads)) {
     for (const road of zone.roads) {
       drawRoad(ground, w, h, road, poiMap, zone);
     }
   }
 
-  // 6. Stamp structures
+  // 7. Stamp structures
   for (const poi of validPois) {
     if (poi.type === "structure" && poi.structure) {
       stampStructure(ground, overlay, w, h, poi, zone);
     }
   }
 
-  // 7. Place landmarks
+  // 8. Place landmarks
   for (const poi of validPois) {
     if (poi.type === "landmark") {
       placeLandmark(ground, w, h, poi, zone);
     }
   }
 
-  // 8. Place portals
+  // 9. Place portals
   for (const poi of validPois) {
     if (poi.type === "portal") {
       placePortal(ground, overlay, w, h, poi, zone);
     }
   }
 
-  // 9. Generate elevation (world-space noise + blending)
+  // 10. Auto-tile water edges (shore transitions)
+  autoTileWaterEdges(ground, w, h);
+
+  // 11. Generate elevation (world-space noise + blending)
   const elevation = generateElevation(ground, w, h, biome, exclusion, validPois, zone, worldOffTx, worldOffTz);
 
   return { zoneId: zone.id, width: w, height: h, tileSize: TILE_SIZE, ground, overlay, elevation, biome };
@@ -477,18 +490,19 @@ function scatterDecoration(
       }
 
       if (effectiveBiome === "grassland") {
+        if (n < 0.02) ground[idx] = TILE.GRASS_FLOWERS_RED;
+        else if (n < 0.04) ground[idx] = TILE.GRASS_FLOWERS_YELLOW;
+        else if (n < 0.055) ground[idx] = TILE.GRASS_FLOWERS_BLUE;
+        else if (n < 0.10) ground[idx] = TILE.GRASS_LIGHT;
+      } else if (effectiveBiome === "forest") {
+        if (n < 0.03) ground[idx] = TILE.GRASS_PLAIN;
+        else if (n < 0.06) ground[idx] = TILE.GRASS_LIGHT;
+      } else {
+        // village
         if (n < 0.015) ground[idx] = TILE.GRASS_FLOWERS_RED;
         else if (n < 0.03) ground[idx] = TILE.GRASS_FLOWERS_YELLOW;
         else if (n < 0.04) ground[idx] = TILE.GRASS_FLOWERS_BLUE;
-        else if (n < 0.06) ground[idx] = TILE.GRASS_LIGHT;
-        else if (n < 0.008) ground[idx] = TILE.WATER_STILL;
-      } else if (effectiveBiome === "forest") {
-        if (n < 0.02) ground[idx] = TILE.GRASS_DARK;
-        else if (n < 0.025) ground[idx] = TILE.GRASS_PLAIN;
-      } else {
-        // village
-        if (n < 0.01) ground[idx] = TILE.GRASS_FLOWERS_RED;
-        else if (n < 0.02) ground[idx] = TILE.GRASS_FLOWERS_YELLOW;
+        else if (n < 0.07) ground[idx] = TILE.GRASS_LIGHT;
       }
     }
   }
@@ -591,6 +605,98 @@ function placeTrees(
         else if (n < 0.012) overlay[idx] = TILE.ROCK_SMALL;
       }
     }
+  }
+}
+
+// ── Place water ponds ───────────────────────────────────────────
+
+/**
+ * Place water as small natural ponds (clusters of 3-8 tiles) instead of
+ * isolated single tiles. Creates 2-4 ponds per grassland zone, 1 per forest.
+ */
+function placeWaterPonds(
+  ground: number[], w: number, h: number, biome: string,
+  exclusion: boolean[], worldOffTx: number, worldOffTz: number,
+): void {
+  const s = hashStr("world-pond");
+  const pondCount = biome === "forest" ? 2 : biome === "village" ? 1 : 3;
+
+  for (let p = 0; p < pondCount; p++) {
+    // Pick pond center using deterministic noise
+    const cx = Math.floor(seededNoise2D(p, 0, s + worldOffTx) * (w - 8)) + 4;
+    const cz = Math.floor(seededNoise2D(p, 1, s + worldOffTz) * (h - 8)) + 4;
+
+    // Skip if in exclusion zone
+    if (cx < 2 || cx >= w - 2 || cz < 2 || cz >= h - 2) continue;
+    if (exclusion[cz * w + cx]) continue;
+
+    // Pond radius varies 2-4 tiles
+    const radius = 2 + Math.floor(seededNoise2D(p, 2, s) * 2.5);
+
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        const tx = cx + dx;
+        const tz = cz + dz;
+        if (tx < 1 || tx >= w - 1 || tz < 1 || tz >= h - 1) continue;
+        if (exclusion[tz * w + tx]) continue;
+
+        // Elliptical shape with noise for organic edges
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const noiseOffset = seededNoise2D(tx + worldOffTx, tz + worldOffTz, s + 5555) * 0.8;
+        if (dist + noiseOffset <= radius) {
+          ground[tz * w + tx] = TILE.WATER_STILL;
+        }
+      }
+    }
+  }
+}
+
+// ── Water edge auto-tiling ──────────────────────────────────────
+
+/**
+ * Post-process water tiles: detect boundaries between water and land,
+ * and replace boundary water tiles with appropriate edge/shore tiles.
+ * Interior water stays as WATER_STILL for animation.
+ */
+function autoTileWaterEdges(ground: number[], w: number, h: number): void {
+  const isWater = (tx: number, tz: number): boolean => {
+    if (tx < 0 || tx >= w || tz < 0 || tz >= h) return false;
+    const t = ground[tz * w + tx];
+    return t === TILE.WATER_STILL;
+  };
+
+  // Collect edge replacements (don't modify in-place during iteration)
+  const edits: { idx: number; tile: number }[] = [];
+
+  for (let tz = 0; tz < h; tz++) {
+    for (let tx = 0; tx < w; tx++) {
+      if (!isWater(tx, tz)) continue;
+
+      const landN = !isWater(tx, tz - 1);
+      const landS = !isWater(tx, tz + 1);
+      const landE = !isWater(tx + 1, tz);
+      const landW = !isWater(tx - 1, tz);
+
+      const idx = tz * w + tx;
+
+      // Corners (two adjacent land sides)
+      if (landN && landW) { edits.push({ idx, tile: TILE.WATER_CORNER }); continue; }
+      // For other corners, use the closest single-edge tile (looks fine at 16px)
+      if (landN && landE) { edits.push({ idx, tile: TILE.WATER_EDGE_N }); continue; }
+      if (landS && landW) { edits.push({ idx, tile: TILE.WATER_EDGE_W }); continue; }
+      if (landS && landE) { edits.push({ idx, tile: TILE.WATER_EDGE_S }); continue; }
+
+      // Single edge
+      if (landN) { edits.push({ idx, tile: TILE.WATER_EDGE_N }); continue; }
+      if (landS) { edits.push({ idx, tile: TILE.WATER_EDGE_S }); continue; }
+      if (landE) { edits.push({ idx, tile: TILE.WATER_EDGE_E }); continue; }
+      if (landW) { edits.push({ idx, tile: TILE.WATER_EDGE_W }); continue; }
+      // Interior water: leave as WATER_STILL (will animate)
+    }
+  }
+
+  for (const edit of edits) {
+    ground[edit.idx] = edit.tile;
   }
 }
 
@@ -927,9 +1033,11 @@ function generateElevation(
     }
   }
 
-  // Force water tiles to elevation 0
+  // Force water tiles (including edges) to elevation 0
   for (let i = 0; i < w * h; i++) {
-    if (ground[i] === TILE.WATER_STILL) {
+    const t = ground[i];
+    if (t === TILE.WATER_STILL || t === TILE.WATER_EDGE_N || t === TILE.WATER_EDGE_S ||
+        t === TILE.WATER_EDGE_E || t === TILE.WATER_EDGE_W || t === TILE.WATER_CORNER) {
       elevation[i] = 0;
     }
   }

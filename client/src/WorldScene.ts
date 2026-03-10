@@ -10,7 +10,7 @@ import { FloatingTextLayer } from "@/FloatingTextLayer";
 import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
 import type { Entity } from "@/types";
 import { gameBus } from "@/lib/eventBus";
-import { registerEntitySprites } from "@/EntitySpriteGenerator";
+import { registerEntitySprites, preloadMobSprites, registerMobSpriteAnimations } from "@/EntitySpriteGenerator";
 import { preloadOverworld } from "@/OverworldAtlas";
 import { preloadLayerSprites } from "@/LayeredSpriteCompositor";
 
@@ -116,6 +116,9 @@ export class WorldScene extends Phaser.Scene {
 
     // Layered character sprite sheets
     preloadLayerSprites(this);
+
+    // Mob PNG sprite sheets (generated via falsprite)
+    preloadMobSprites(this);
   }
 
   create(): void {
@@ -131,6 +134,7 @@ export class WorldScene extends Phaser.Scene {
     this.input.addPointer(1);
 
     registerEntitySprites(this);
+    registerMobSpriteAnimations(this);
 
     this.worldLayout = new WorldLayoutManager();
     this.tilemapRenderer = new TilemapRenderer(this);
@@ -957,8 +961,9 @@ export class WorldScene extends Phaser.Scene {
 
       const evtData = evt.data as Record<string, unknown> | undefined;
 
-      // Ability VFX (particles)
-      if (evt.type === "ability") {
+      // Ability VFX (particles) — techniques and ranged basic attacks
+      const combatAnimStyle = evtData?.animStyle as string | undefined;
+      if (evt.type === "ability" || (evt.type === "combat" && combatAnimStyle && combatAnimStyle !== "melee")) {
         this.abilityLayer.playEffect(evt, pixelPositions);
       }
 
@@ -984,8 +989,8 @@ export class WorldScene extends Phaser.Scene {
         this.entityRenderer.triggerTechniqueLearned(evt.entityId, techName);
       }
 
-      // Melee lunge animation
-      const isMelee = evtData?.animStyle === "melee" || evt.type === "combat";
+      // Melee lunge animation — only for melee-style attacks (not ranged projectiles)
+      const isMelee = combatAnimStyle === "melee" || (!combatAnimStyle && evt.type === "combat");
       if (isMelee && evt.entityId && evt.targetId) {
         this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
       }

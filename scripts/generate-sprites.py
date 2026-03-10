@@ -207,6 +207,86 @@ def build_sprite_prompt(rewritten):
 
 # ── Sprite definitions ─────────────────────────────────────────────
 
+# ── Mob sprite definitions ─────────────────────────────────────────
+# Mobs use 16x16 frames → 64x64 sheets (unlike player 16x22 → 64x88)
+MOB_FRAME_W, MOB_FRAME_H = 16, 16
+MOB_SHEET_W = MOB_FRAME_W * COLS  # 64
+MOB_SHEET_H = MOB_FRAME_H * ROWS  # 64
+MOB_OUT_DIR = Path("client/public/sprites/mobs")
+
+MOB_BASE_PROMPT = (
+    "Single creature sprite sheet, pixel art, 16x16 pixel frames, "
+    "top-down 2D RPG style like Pokemon or Zelda. "
+    "Tiny cute chibi monster. No text, no labels, no UI."
+)
+
+# category → prompt describing the creature's appearance
+MOB_SPRITE_DEFS: dict[str, str] = {
+    # ── Village / early ──
+    "wolf":      "Gray wolf, canine quadruped, pointy ears, bushy tail, fierce red eyes, gray fur",
+    "rat":       "Giant brown rat, long pink tail, beady eyes, small rounded body, tan fur",
+    "boar":      "Wild boar, tusks, brown bristly fur, stocky body, small hooves, aggressive",
+    "slime":     "Green slime blob, translucent lime jelly body, no legs, amorphous, googly eyes",
+    "goblin":    "Small green goblin, pointy ears, crude leather armor, holding a dagger, sneering",
+    "bandit":    "Human bandit, dark hooded cloak, mask over face, leather armor, dagger in hand",
+    # ── Meadow / forest ──
+    "bear":      "Large brown bear, thick fur, powerful paws, standing on all fours, dark eyes",
+    "spider":    "Giant purple spider, eight legs, fangs dripping venom, multiple red eyes, hairy body",
+    "ent":       "Living tree creature, bark skin, mossy green-brown, branch arms, glowing green eyes, trunk body",
+    "snake":     "Large olive-green serpent, coiled body, forked tongue, scales, slithering, no legs",
+    # ── Dark forest ──
+    "cultist":   "Dark robed cultist, purple hooded robe, glowing eyes, holding dark orb, skeletal hands",
+    "undead":    "Undead knight, pale bone armor, glowing blue eyes, tattered cape, skeletal, rusted sword",
+    "troll":     "Forest troll, large muscular, dark teal-green skin, club weapon, tusks, hunched posture",
+    "golem":     "Stone golem, gray rocky body, glowing rune eyes, massive fists, cracked stone texture",
+    "necromancer": "Dark necromancer, black and purple robes, skull staff, glowing green magic aura, hood",
+    # ── Plains ──
+    "stalker":   "Plains stalker cat, tawny golden fur, sleek feline predator, sharp claws, amber eyes",
+    "wisp":      "Floating aurora wisp, ethereal blue-green glow, orb of light, trailing particles, no body",
+    "harpy":     "Windborne harpy, feathered wings, bird-like talons, woman-like face, wind-swept feathers",
+    "wraith":    "Ethereal wraith, translucent ghostly form, tattered floating robes, glowing purple eyes",
+    "elemental": "Storm elemental, crackling lightning body, cloud-like form, electric blue-white energy",
+    "drake":     "Skyward drake, small dragon with wings, blue-gray scales, fire breath, horned head",
+    # ── Woods ──
+    "treant":    "Thorned treant, massive tree creature, sharp thorny branches, dark bark, amber sap eyes",
+    "serpent":   "Emerald serpent, bright green scaled snake, large, coiled, jewel-like green scales, fangs",
+    "worg":      "Feral worg, huge dark wolf, matted black fur, massive fangs, bloodshot eyes, muscular",
+    "specter":   "Ghostly specter, floating translucent spirit, wispy ethereal body, hollow glowing eyes",
+    "guardian":  "Ancient stone guardian, armored construct, glowing blue core, shield and sword, bulky",
+    "sentinel":  "Grom sentinel boss, massive stone warrior, green glowing runes, towering, ancient armor",
+    # ── Mountains ──
+    "yeti":      "Mountain yeti, large white-furred ape, massive arms, icy blue eyes, frost on fur",
+    "basilisk":  "Rock basilisk, reptilian, stone-gray scales, petrifying yellow eyes, heavy armored hide",
+    "condor":    "Storm condor, giant bird, dark feathers, electric blue wingtips, sharp beak and talons",
+    "giant":     "Frost giant, massive humanoid, blue-white skin, icy beard, fur loincloth, ice club",
+    "titan":     "Avalanche titan boss, enormous rocky giant, snow-covered, glowing ice-blue core, crushing fists",
+    # ── Glade ──
+    "fae":       "Fae guardian, small winged fairy warrior, glowing golden wings, tiny sword, magical aura",
+    "dryad":     "Twilight dryad, tree-woman hybrid, flower crown, bark-skin lower body, purple leaf hair",
+    "druid":     "Shadow druid, dark robed nature caster, antler headdress, staff with dark vines, menacing",
+    "archdruid": "Moondancer archdruid boss, large, crescent moon staff, silver robes, lunar magic aura, horned crown",
+    # ── Citadel ──
+    "automaton": "Iron automaton, mechanical construct, gears visible, copper-bronze body, glowing red eye visor",
+    "forgebound":"Molten forgebound, lava-infused golem, cracked obsidian skin, orange magma veins, fiery",
+    "dweller":   "Deep dweller, cave creature, pale eyeless, long claws, hunched, translucent skin",
+    "dwarf":     "Corrupted dwarf king, stocky, dark iron crown, glowing red veins, massive war hammer",
+    "infernal":  "Forgemaster infernal boss, huge fire demon, molten armor, flaming sword, lava dripping",
+    # ── Lake ──
+    "luminous":  "Luminous wraith, bright glowing ghost, golden-white ethereal form, trailing light particles",
+    "crystal":   "Crystal golem, transparent gemstone body, prismatic light refractions, sharp crystalline limbs",
+    "drowned":   "Drowned knight, waterlogged armor, seaweed draped, barnacle-encrusted, ghostly blue glow",
+    "lumen":     "Lumen serpent, bioluminescent water snake, glowing blue-white scales, long sinuous body",
+    "horror":    "Sunken horror, deep sea aberration, tentacles, bioluminescent lure, massive maw, dark purple",
+    "warden":    "Solaris warden boss, radiant armored angel, golden wings, blazing sun-sword, holy aura",
+    # ── Chasm ──
+    "dragonkin": "Azure dragonkin, bipedal dragon warrior, blue scales, dragon wings, clawed hands, armored",
+    "weaver":    "Void weaver, dark matter spider-like creature, reality-warping tendrils, starfield body",
+    "shard":     "Shard sentinel, living crystal construct, sharp geometric body, pulsing blue energy core",
+    "wyrm":      "Chasm wyrm, massive serpentine dragon, dark scales, glowing blue underbelly, wingless",
+    "devourer":  "Essence devourer, amorphous dark entity, consuming void, many eyes, tendrils of darkness",
+    "dragon":    "Azurshard dragon boss, enormous blue dragon, crystalline scales, devastating breath, majestic wings",
+}
+
 SPRITE_DEFS = {
     "body": {
         "dir": "body",
@@ -347,7 +427,7 @@ def generate_category(category):
     defn = SPRITE_DEFS.get(category)
     if not defn:
         print(f"Unknown category: {category}")
-        print(f"Available: {', '.join(SPRITE_DEFS.keys())}")
+        print(f"Available: {', '.join(SPRITE_DEFS.keys())}, mobs")
         return
 
     out_dir = OUT_DIR / defn["dir"]
@@ -374,12 +454,174 @@ def generate_category(category):
         time.sleep(1)
 
 
+# ── Mob sprite generation ──────────────────────────────────────────
+
+def build_mob_sprite_prompt(rewritten):
+    """Wrap rewritten mob prompt with strict grid requirements."""
+    return "\n".join([
+        "STRICT TECHNICAL REQUIREMENTS FOR THIS IMAGE:",
+        "",
+        "FORMAT: A single image containing a four-by-four grid of equally sized cells.",
+        "Every cell must be the exact same dimensions, perfectly aligned, no gaps.",
+        "",
+        "FORBIDDEN: No text, numbers, labels, watermarks, UI elements.",
+        "ONLY the creature illustration in each cell.",
+        "",
+        "BACKGROUND: Plain solid flat color background (will be removed).",
+        "",
+        "CONSISTENCY: The exact same single creature in every cell.",
+        "Same proportions, same art style. Tiny pixel art, 2D top-down RPG, 16x16 pixel frames.",
+        "",
+        "GRID LAYOUT: 4 columns x 4 rows.",
+        "Row 1: facing down (toward camera). Row 2: facing left.",
+        "Row 3: facing right. Row 4: facing up (away from camera).",
+        "Columns: idle1, idle2 (slight shift), walk1 (step forward), walk2 (other step).",
+        "",
+        "CREATURE AND ANIMATION DIRECTION:",
+        rewritten,
+    ])
+
+
+def rewrite_mob_prompt(base_prompt):
+    """Use LLM to rewrite a mob prompt into detailed creature + choreography."""
+    system = "\n".join([
+        "You are an animation director and creature designer for a pixel art sprite sheet pipeline.",
+        "Given a creature concept, return exactly two sections:",
+        "",
+        "CHARACTER: Vivid description of the creature — body shape, colors, silhouette, distinguishing features.",
+        "",
+        "CHOREOGRAPHY: A four-beat continuous animation loop.",
+        "Beat 1: idle standing/hovering, facing camera (down).",
+        "Beat 2: same idle, slight shift (breathing/bobbing/weight).",
+        "Beat 3: moving, first step/slither/flap.",
+        "Beat 4: moving, second step/slither/flap.",
+        "Describe exact body positions for each beat.",
+        "",
+        "RULES:",
+        "- Tiny pixel art creature, 16x16 pixels, top-down 2D RPG style like Pokemon.",
+        "- The ENTIRE creature fits inside 16x16 pixels. Very small and cute/chibi.",
+        "- No text, numbers, labels, grids, or technical terms.",
+        "- Solid colored background (will be removed).",
+    ])
+
+    result = run_queued(REWRITE_ENDPOINT, {
+        "model": REWRITE_MODEL,
+        "prompt": f"Design and choreograph for: {base_prompt}",
+        "system_prompt": system,
+        "max_tokens": 350,
+        "temperature": 0.6,
+    }, 120000)
+
+    if isinstance(result, str) and len(result) > 20:
+        return result.strip()
+
+    if not isinstance(result, dict):
+        return base_prompt
+
+    for path in [
+        lambda d: d.get("choices", [{}])[0].get("message", {}).get("content"),
+        lambda d: d.get("output", {}).get("choices", [{}])[0].get("message", {}).get("content") if isinstance(d.get("output"), dict) else None,
+        lambda d: d.get("output") if isinstance(d.get("output"), str) else None,
+        lambda d: d.get("text"),
+        lambda d: d.get("result") if isinstance(d.get("result"), str) else None,
+    ]:
+        try:
+            v = path(result)
+            if isinstance(v, str) and len(v) > 20:
+                return v.strip()
+        except (IndexError, KeyError, TypeError, AttributeError):
+            continue
+
+    for key in ["output", "text", "content", "result"]:
+        v = result.get(key)
+        if isinstance(v, str) and len(v) > 20:
+            return v.strip()
+
+    return base_prompt
+
+
+def generate_mob_sprite(mob_id, description, out_path):
+    """Generate one mob sprite sheet using the falsprite pipeline."""
+    print(f"  [mob/{mob_id}] Rewriting prompt...")
+    base = f"{MOB_BASE_PROMPT} {description}"
+    rewritten = rewrite_mob_prompt(base)
+    print(f"    Rewritten ({len(rewritten)} chars): {rewritten[:120]}...")
+
+    full_prompt = build_mob_sprite_prompt(rewritten)
+
+    print(f"  [mob/{mob_id}] Generating sprite sheet...")
+    result = run_queued(NANO_BANANA, {
+        "prompt": full_prompt,
+        "aspect_ratio": "1:1",
+        "resolution": "2K",
+        "num_images": 1,
+        "output_format": "png",
+        "safety_tolerance": 2,
+        "expand_prompt": True,
+    })
+
+    sprite_url = extract_image_url(result)
+    if not sprite_url:
+        raise RuntimeError(f"No image URL in result: {json.dumps(result)[:200]}")
+
+    print(f"  [mob/{mob_id}] Removing background...")
+    try:
+        bg_result = run_direct(REMOVE_BG, {"image_url": sprite_url})
+        transparent_url = extract_image_url(bg_result)
+        if transparent_url:
+            sprite_url = transparent_url
+            print(f"    Background removed.")
+        else:
+            print(f"    BG removal returned no URL, using original.")
+    except Exception as e:
+        print(f"    BG removal failed ({e}), using original.")
+
+    print(f"  [mob/{mob_id}] Downloading and resizing to {MOB_SHEET_W}x{MOB_SHEET_H}...")
+    img = download_image(sprite_url)
+
+    # Resize to exact 64x64 with NEAREST for pixel crispness
+    sheet = img.resize((MOB_SHEET_W, MOB_SHEET_H), Image.Resampling.NEAREST)
+    if sheet.mode != "RGBA":
+        sheet = sheet.convert("RGBA")
+
+    sheet.save(out_path)
+    print(f"    Saved: {out_path} ({sheet.size[0]}x{sheet.size[1]})")
+
+
+def generate_mobs(filter_id=None):
+    """Generate mob sprite sheets."""
+    MOB_OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    targets = MOB_SPRITE_DEFS
+    if filter_id:
+        if filter_id not in MOB_SPRITE_DEFS:
+            print(f"Unknown mob: {filter_id}")
+            print(f"Available: {', '.join(MOB_SPRITE_DEFS.keys())}")
+            return
+        targets = {filter_id: MOB_SPRITE_DEFS[filter_id]}
+
+    for mob_id, description in targets.items():
+        out_path = MOB_OUT_DIR / f"mob-{mob_id}.png"
+
+        if out_path.exists():
+            print(f"  SKIP {out_path} (already exists, delete to regenerate)")
+            continue
+
+        try:
+            generate_mob_sprite(mob_id, description, out_path)
+        except Exception as e:
+            print(f"  ERROR [mob/{mob_id}]: {e}")
+
+        time.sleep(1)
+
+
 def main():
     category = sys.argv[1] if len(sys.argv) > 1 else "all"
 
-    print(f"FalSprite Layer Generator")
-    print(f"Pipeline: LLM rewrite → nano-banana-2 → BRIA bg removal → resize to 64x88")
-    print(f"Output: {OUT_DIR}")
+    print(f"FalSprite Generator")
+    print(f"Pipeline: LLM rewrite → nano-banana-2 → BRIA bg removal → resize")
+    print(f"Player layers output: {OUT_DIR}")
+    print(f"Mob sprites output:   {MOB_OUT_DIR}")
     print()
 
     if category == "all":
@@ -388,6 +630,15 @@ def main():
             print(f"  {cat.upper()} ({len(SPRITE_DEFS[cat]['variants'])} variants)")
             print(f"{'='*50}")
             generate_category(cat)
+        print(f"\n{'='*50}")
+        print(f"  MOBS ({len(MOB_SPRITE_DEFS)} types)")
+        print(f"{'='*50}")
+        generate_mobs()
+    elif category == "mobs":
+        # python3 generate-sprites.py mobs          → all mobs
+        # python3 generate-sprites.py mobs wolf     → just wolf
+        mob_filter = sys.argv[2] if len(sys.argv) > 2 else None
+        generate_mobs(mob_filter)
     else:
         generate_category(category)
 

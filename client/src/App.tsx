@@ -44,6 +44,15 @@ function GameWorld(): React.ReactElement {
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const { address } = useWalletContext();
 
+  // Toggleable panel visibility: null = use default (shown on desktop, hidden on mobile)
+  const [chatVisible, setChatVisible] = React.useState<boolean | null>(null);
+  const [ranksVisible, setRanksVisible] = React.useState<boolean | null>(null);
+  const [walletVisible, setWalletVisible] = React.useState<boolean | null>(null);
+
+  const showChat = chatVisible ?? !isCompactWorldUI;
+  const showRanks = ranksVisible ?? !isCompactWorldUI;
+  const showWallet = walletVisible ?? !isCompactWorldUI;
+
   // Listen for global "open onboarding" event (from Navbar sign-in button)
   React.useEffect(() => {
     const handler = () => setOnboardingOpen(true);
@@ -66,12 +75,18 @@ function GameWorld(): React.ReactElement {
         setQuestLogOpen((current) => !current);
       } else if (key === "i" && address && currentZone) {
         gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
+      } else if (key === "l") {
+        setChatVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (key === "r") {
+        setRanksVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (key === "w") {
+        setWalletVisible((v) => !(v ?? !isCompactWorldUI));
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [address, currentZone]);
+  }, [address, currentZone, isCompactWorldUI]);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
@@ -113,21 +128,21 @@ function GameWorld(): React.ReactElement {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <GameCanvas />
-      {!isCompactWorldUI && <WalletPanel />}
-      {!isCompactWorldUI && (
+      {showWallet && <WalletPanel />}
+      {showRanks && (
         <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
       )}
-      {!isCompactWorldUI && (
+      {showChat && (
         address ? (
           <AgentChatPanel
             walletAddress={address}
             currentZone={currentZone}
-            className="absolute bottom-4 right-4 z-30 hidden md:flex"
+            className="absolute bottom-16 right-2 md:right-4 z-30"
           />
         ) : (
           <ChatLog
             zoneId={currentZone}
-            className="absolute bottom-4 right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto hidden md:block"
+            className="absolute bottom-16 right-2 md:right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto"
           />
         )
       )}
@@ -163,6 +178,12 @@ function GameWorld(): React.ReactElement {
               gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
             }
           }}
+          onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
+          onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
+          onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
+          chatActive={showChat}
+          ranksActive={showRanks}
+          walletActive={showWallet}
         />
       </div>
     </div>

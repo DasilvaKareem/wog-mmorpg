@@ -98,13 +98,13 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle }: Props): Rea
     // Build layer list in draw order
     const layers: string[] = [];
 
-    // Body (always present)
+    // Body (always present — includes face/eyes in the sprite)
     const skin = SKIN_MAP[skinColor] ?? "medium";
     layers.push(`${base}/body/body-${skin}.png`);
 
-    // Eyes
-    const eyes = EYE_MAP[eyeColor] ?? "brown";
-    layers.push(`${base}/eyes/eyes-${eyes}.png`);
+    // Eyes layer skipped — body sprites already include facial features,
+    // and the AI-generated eyes PNGs contain full face outlines that
+    // overpower the body. Kept in props for future regeneration.
 
     // Hair (skip if bald)
     const hair = HAIR_MAP[hairStyle] ?? "";
