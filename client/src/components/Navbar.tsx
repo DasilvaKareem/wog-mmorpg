@@ -97,7 +97,7 @@ function DropdownLink({
 
 export function Navbar(): React.ReactElement {
   const location = useLocation();
-  const { isConnected, connect, disconnect, loading, address, balance } = useWalletContext();
+  const { isConnected, disconnect, address, balance } = useWalletContext();
   const { dn } = useWogNames(address ? [address] : []);
   const [openMenu, setOpenMenu] = React.useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -132,11 +132,11 @@ export function Navbar(): React.ReactElement {
   const isMenuActive = (menu: DropdownMenu) =>
     menu.items.some((item) => item.to && item.to === location.pathname);
 
-  // On /world and /spectate, show only the logo as a home button
+  // On /world and /spectate, show logo + sign-in button when not connected
   if (isGameRoute) {
     return (
       <nav className="pointer-events-none fixed top-0 left-0 right-0 z-[60]">
-        <div className="mx-auto flex max-w-6xl px-4 py-0">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-0">
           <Link to="/" className="pointer-events-auto flex items-center py-1 opacity-70 hover:opacity-100 transition-opacity">
             <img
               src="/assets/logo.png"
@@ -144,6 +144,16 @@ export function Navbar(): React.ReactElement {
               className="h-8 w-auto object-contain"
             />
           </Link>
+          {!isConnected && (
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("wog:open-onboarding"));
+              }}
+              className="pointer-events-auto border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218]"
+            >
+              Sign In / Connect
+            </button>
+          )}
         </div>
       </nav>
     );
@@ -264,11 +274,12 @@ export function Navbar(): React.ReactElement {
           {/* Wallet */}
           {!isConnected ? (
             <button
-              onClick={() => void connect()}
-              disabled={loading}
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("wog:open-onboarding"));
+              }}
               className="border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218] disabled:opacity-50"
             >
-              {loading ? "..." : "Connect Wallet"}
+              Sign In / Connect
             </button>
           ) : (
             <div className="flex items-center gap-0">

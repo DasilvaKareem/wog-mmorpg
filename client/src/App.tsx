@@ -44,6 +44,13 @@ function GameWorld(): React.ReactElement {
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const { address } = useWalletContext();
 
+  // Listen for global "open onboarding" event (from Navbar sign-in button)
+  React.useEffect(() => {
+    const handler = () => setOnboardingOpen(true);
+    window.addEventListener("wog:open-onboarding", handler);
+    return () => window.removeEventListener("wog:open-onboarding", handler);
+  }, []);
+
   React.useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -165,6 +172,15 @@ function GameWorld(): React.ReactElement {
 function AppShell(): React.ReactElement {
   const location = useLocation();
   const isWorldRoute = location.pathname === "/world";
+  const [onboardingOpen, setOnboardingOpen] = React.useState(false);
+
+  // Listen for global "open onboarding" event on non-world routes
+  React.useEffect(() => {
+    if (isWorldRoute) return; // GameWorld handles its own listener
+    const handler = () => setOnboardingOpen(true);
+    window.addEventListener("wog:open-onboarding", handler);
+    return () => window.removeEventListener("wog:open-onboarding", handler);
+  }, [isWorldRoute]);
 
   return (
     <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
@@ -174,20 +190,25 @@ function AppShell(): React.ReactElement {
           <GameWorld />
         </div>
       ) : (
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/marketplace" element={<MarketplacePage />} />
-          <Route path="/x402" element={<X402AgentPage />} />
-          <Route path="/races" element={<RacesClassesPage />} />
-          <Route path="/story" element={<StoryPage />} />
-          <Route path="/media" element={<MediaPage />} />
-          <Route path="/leaderboards" element={<LeaderboardPage />} />
-          <Route path="/news" element={<NewsPage />} />
-          <Route path="/champions" element={<ChampionsPage />} />
-          <Route path="/pricing" element={<PricingPage />} />
-          <Route path="/admin" element={<AdminDashboardPage />} />
-          <Route path="*" element={<LandingPage />} />
-        </Routes>
+        <>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/x402" element={<X402AgentPage />} />
+            <Route path="/races" element={<RacesClassesPage />} />
+            <Route path="/story" element={<StoryPage />} />
+            <Route path="/media" element={<MediaPage />} />
+            <Route path="/leaderboards" element={<LeaderboardPage />} />
+            <Route path="/news" element={<NewsPage />} />
+            <Route path="/champions" element={<ChampionsPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
+            <Route path="/admin" element={<AdminDashboardPage />} />
+            <Route path="*" element={<LandingPage />} />
+          </Routes>
+          {onboardingOpen && (
+            <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+          )}
+        </>
       )}
     </div>
   );
