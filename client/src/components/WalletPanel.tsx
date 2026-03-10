@@ -2,12 +2,10 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencyDisplay } from "@/components/ui/currency-display";
 import { HpBar } from "@/components/ui/hp-bar";
-import { Spinner } from "@/components/ui/spinner";
 
 import { XpBar } from "@/components/ui/xp-bar";
 import { API_URL } from "@/config";
@@ -144,14 +142,12 @@ export function WalletPanel(): React.ReactElement {
     address,
     balance,
     isConnected,
-    loading,
     characterProgress,
     characterLoading,
     characters,
     selectedCharacterTokenId,
     deployedCharacterName,
     selectCharacter,
-    connect,
     disconnect,
   } = useWallet();
   const { dn } = useWogNames(address ? [address] : []);
@@ -160,6 +156,9 @@ export function WalletPanel(): React.ReactElement {
     if (!address) { setTier(null); return; }
     fetch(`${API_URL}/agent/tier/${address}`).then(r => r.json()).then(d => setTier(d.tier ?? "free")).catch(() => setTier(null));
   }, [address]);
+
+  // Don't render the panel at all when not connected — the Navbar handles sign-in
+  if (!isConnected) return <></>;
 
   return (
     <Card className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4">
@@ -178,79 +177,57 @@ export function WalletPanel(): React.ReactElement {
         </CardTitle>
       </CardHeader>
       {!collapsed && <CardContent className="space-y-3 text-[9px]">
-        {!isConnected ? (
-          <Button
-            className="w-full"
-            disabled={loading}
-            onClick={() => {
-              void connect().catch(() => undefined);
-            }}
-            type="button"
-          >
-            {loading ? (
-              <span className="inline-flex items-center gap-2">
-                <Spinner />
-                Connecting
-              </span>
+        <div className="flex items-center justify-between">
+          <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
+          <div className="flex items-center gap-1">
+            <Badge>{dn(address!)}</Badge>
+            <button
+              onClick={disconnect}
+              className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"
+              type="button"
+              title="Disconnect wallet"
+            >
+              X
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Gold</span>
+          <div className="bg-[#1a2a10] border-2 border-[#54f28b] px-1.5 py-0.5 shadow-[2px_2px_0_0_#000]">
+            {balance?.gold ? (
+              <CurrencyDisplay amount={balance.gold} size="sm" />
             ) : (
-              "Connect Wallet"
+              <span className="text-[8px] text-black">...</span>
             )}
-          </Button>
-        ) : (
-          <>
-            <div className="flex items-center justify-between">
-              <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
-              <div className="flex items-center gap-1">
-                <Badge>{dn(address!)}</Badge>
-                <button
-                  onClick={disconnect}
-                  className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"
-                  type="button"
-                  title="Disconnect wallet"
-                >
-                  X
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Gold</span>
-              <div className="bg-[#1a2a10] border-2 border-[#54f28b] px-1.5 py-0.5 shadow-[2px_2px_0_0_#000]">
-                {balance?.gold ? (
-                  <CurrencyDisplay amount={balance.gold} size="sm" />
-                ) : (
-                  <span className="text-[8px] text-black">...</span>
-                )}
-              </div>
-            </div>
-            {tier && (
-              <div className="flex items-center justify-between">
-                <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Plan</span>
-                <Link
-                  to="/champions"
-                  className="border-2 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wide cursor-pointer transition hover:brightness-125"
-                  style={{ color: TIER_COLORS[tier] ?? "#9aa7cc", borderColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "44", backgroundColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "11" }}
-                >
-                  {tier} ↗
-                </Link>
-              </div>
-            )}
-            <CharacterSection
-              characters={characters}
-              characterProgress={characterProgress}
-              characterLoading={characterLoading}
-              selectedCharacterTokenId={selectedCharacterTokenId}
-              deployedCharacterName={deployedCharacterName}
-              selectCharacter={selectCharacter}
-              walletAddress={address!}
-            />
+          </div>
+        </div>
+        {tier && (
+          <div className="flex items-center justify-between">
+            <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Plan</span>
             <Link
               to="/champions"
-              className="flex w-full items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+              className="border-2 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wide cursor-pointer transition hover:brightness-125"
+              style={{ color: TIER_COLORS[tier] ?? "#9aa7cc", borderColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "44", backgroundColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "11" }}
             >
-              View Champion
+              {tier} ↗
             </Link>
-          </>
+          </div>
         )}
+        <CharacterSection
+          characters={characters}
+          characterProgress={characterProgress}
+          characterLoading={characterLoading}
+          selectedCharacterTokenId={selectedCharacterTokenId}
+          deployedCharacterName={deployedCharacterName}
+          selectCharacter={selectCharacter}
+          walletAddress={address!}
+        />
+        <Link
+          to="/champions"
+          className="flex w-full items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+        >
+          View Champion
+        </Link>
       </CardContent>}
     </Card>
   );
