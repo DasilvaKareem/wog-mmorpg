@@ -20,6 +20,7 @@ export type AgentFocus =
   | "trading"
   | "shopping"
   | "traveling"
+  | "learning"
   | "idle"
   | "goto";
 

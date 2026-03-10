@@ -34,7 +34,10 @@ export function detectTrigger(
   }
 
   // Script stuck too long — let supervisor re-evaluate on the same cadence as periodic review.
-  if (state.ticksOnCurrentScript >= state.maxStaleTicks) {
+  // Give goto/travel scripts 3x longer since they need time to walk across zones.
+  const isMovementScript = state.currentScript.type === "goto" || state.currentScript.type === "travel";
+  const staleLimit = isMovementScript ? state.maxStaleTicks * 3 : state.maxStaleTicks;
+  if (state.ticksOnCurrentScript >= staleLimit) {
     return {
       type: "stuck",
       detail: `Script "${state.currentScript.type}" running for ${state.ticksOnCurrentScript} ticks with no progress`,

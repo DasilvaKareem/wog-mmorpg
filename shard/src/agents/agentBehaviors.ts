@@ -413,7 +413,7 @@ export async function doGotoNpc(
     const target = config?.gotoTarget;
     if (!target) {
       ctx.setEntityGotoMode(false);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing" });
+      await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
       ctx.setScript(null);
       return;
     }
@@ -452,7 +452,7 @@ export async function doGotoNpc(
     if (!targetEntity) {
       void ctx.logActivity(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`);
       ctx.setEntityGotoMode(false);
-      await patchAgentConfig(ctx.userWallet, { focus: "questing", gotoTarget: undefined });
+      await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
       ctx.setScript(null);
       return;
     }
@@ -495,7 +495,9 @@ export async function doGotoNpc(
 
     console.log(`[agent:${ctx.walletTag}] Arrived at goto target: ${targetName ?? targetEntityId}`);
     ctx.setEntityGotoMode(false);
-    await patchAgentConfig(ctx.userWallet, { focus: "questing", gotoTarget: undefined });
+    // Clear the goto target but preserve the previous focus instead of blindly resetting to questing.
+    // The runner will pick the next script based on whatever focus the user had set.
+    await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
     ctx.setScript(null);
   } catch (err: any) {
     ctx.setEntityGotoMode(false);

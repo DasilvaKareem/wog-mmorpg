@@ -14,6 +14,7 @@ import {
   setAgentEntityRef,
   patchAgentConfig,
   appendChatMessage,
+  getChatHistory,
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
@@ -77,6 +78,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "shopping":   return "Buy and equip the best gear you can afford.";
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
     case "goto":       return "Walk to the target NPC the user pointed at.";
+    case "learning":   return "Find a trainer NPC and learn new techniques/skills.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     default:           return "Be autonomous — quest and improve your character.";
   }
@@ -97,6 +99,7 @@ function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: 
     case "trading":    return { type: "shop",    reason: "User focus: shopping" };
     case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
     case "goto":       return { type: "goto",    reason: "User clicked an NPC" };
+    case "learning":   return { type: "learn",   reason: "User focus: learn techniques" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
   }
@@ -674,6 +677,7 @@ export class AgentRunner {
       case "brew":    await behaviors.doAlchemy(ctx, strategy); break;
       case "cook":    await behaviors.doCooking(ctx, strategy); break;
       case "quest":   await behaviors.doQuesting(ctx, strategy, (l) => this.findNextZoneForLevel(l)); break;
+      case "learn":   await this.learnNextTechnique(); break;
       case "idle":    break;
     }
   }
@@ -711,25 +715,21 @@ export class AgentRunner {
       this.lastTrigger = trigger;
       console.log(`[agent:${this.walletTag}] Trigger [${trigger.type}]: ${trigger.detail}`);
 
-      const userDirective = focusToDirective(config.focus, config.targetZone);
+      // Include the user's actual latest chat message so the supervisor/script honors directives
+      let userDirective = focusToDirective(config.focus, config.targetZone);
+      try {
+        const recentChat = await getChatHistory(this.userWallet, 5);
+        const lastUserMsg = [...recentChat].reverse().find((m) => m.role === "user");
+        if (lastUserMsg && Date.now() - lastUserMsg.ts < 120_000) {
+          userDirective = `User said: "${lastUserMsg.text}" — ${userDirective}`;
+        }
+      } catch { /* non-fatal */ }
 
       if (trigger.type === "no_script") {
-        if (config.focus === "goto" || config.focus === "traveling") {
-          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
-          this.ticksOnCurrentScript = 0;
-          void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
-        } else {
-          const { copper: earlyGameCopper } = await this.getWalletBalance();
-          if (earlyGameCopper < 100) {
-            this.currentScript = { type: "combat", maxLevelOffset: 2, reason: "Early game — killing rats to earn starter gold" };
-            this.ticksOnCurrentScript = 0;
-            void this.logActivity("[AI] combat: Killing rats to earn starter gold (need 100c)");
-          } else {
-            this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
-            this.ticksOnCurrentScript = 0;
-            void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
-          }
-        }
+        // Always respect the user's configured focus — never override with hardcoded behavior
+        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.ticksOnCurrentScript = 0;
+        void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else if (trigger.type === "level_up") {
         const lvl = entity.level ?? 1;
         const bestZone = this.findNextZoneForLevel(lvl);

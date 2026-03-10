@@ -123,8 +123,8 @@ function buildTools(): FunctionDeclaration[] {
         properties: {
           type: {
             type: "STRING" as Type,
-            enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "idle"],
-            description: "Which behavior mode the bot should run",
+            enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
+            description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC.",
           },
           maxLevelOffset: {
             type: "NUMBER" as Type,
