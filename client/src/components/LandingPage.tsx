@@ -184,6 +184,10 @@ export function LandingPage(): React.ReactElement {
             </div>
           ) : null}
         </div>
+        {/* Glowing divider at bottom edge of banner */}
+        <div className="absolute bottom-0 left-0 right-0 flex justify-center">
+          <PixelDivider color="#ffcc00" />
+        </div>
       </header>
 
       {/* ── INTRO ── */}
