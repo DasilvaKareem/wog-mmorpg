@@ -3419,11 +3419,11 @@ export function registerQuestRoutes(server: FastifyInstance) {
           zoneId: e.zoneId,
         }));
 
-      // Resolve NPC entity IDs for turn-in (find entity in region whose name matches quest.npcId)
+      // Resolve NPC entity IDs for turn-in — search ALL zones (not just current)
+      // so markers show even when the quest giver is in a visible but different zone
       const npcByName = new Map<string, string>();
-      const regionEntities = getEntitiesInRegion(playerZoneId);
-      for (const e of regionEntities) {
-        if (e.name) npcByName.set(e.name, e.id);
+      for (const e of getAllEntities().values()) {
+        if (e.name && e.type !== "player" && e.type !== "mob") npcByName.set(e.name, e.id);
       }
 
       const activeQuestsWithNpc = activeQuests.map((aq) => {

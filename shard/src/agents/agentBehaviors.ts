@@ -633,16 +633,19 @@ export async function doQuesting(
     }
 
     // 4. Progress kill/gather quests
-    const hasKillQuest = activeQuests.some(
+    const killQuests = activeQuests.filter(
       (aq: any) => !aq.complete && aq.quest?.objective?.type === "kill",
     );
     const hasGatherQuest = activeQuests.some(
       (aq: any) => !aq.complete && (aq.quest?.objective?.type === "gather" || aq.quest?.objective?.type === "craft"),
     );
 
-    if (hasKillQuest) {
-      void ctx.logActivity("Hunting mobs for kill quest");
-      await doCombat(ctx, strategy);
+    if (killQuests.length > 0) {
+      // Prefer quest-specific mobs over random combat
+      const questMobNames = new Set(
+        killQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
+      );
+      await doQuestCombat(ctx, strategy, questMobNames);
     } else if (hasGatherQuest) {
       void ctx.logActivity("Gathering resources for quest");
       await doGathering(ctx, strategy);
@@ -652,6 +655,48 @@ export async function doQuesting(
   } catch (err: any) {
     console.debug(`[agent] questing tick: ${err.message?.slice(0, 60)}`);
     await fallbackToCombat(ctx, "Quest system error", strategy);
+  }
+}
+
+// ── Quest-aware combat ──────────────────────────────────────────────────────
+
+/** Like doCombat but prioritizes mobs whose names match active kill quests. */
+async function doQuestCombat(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  questMobNames: Set<string>,
+): Promise<void> {
+  try {
+    const zs = await ctx.getZoneState();
+    if (!zs) return;
+    const { entities, me } = zs;
+
+    const myLevel = me.level ?? 1;
+    const maxMobLevel = myLevel + (strategy === "aggressive" ? 5 : strategy === "defensive" ? 0 : 2);
+
+    const eligible = Object.entries(entities).filter(
+      ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel,
+    );
+    if (eligible.length === 0) return;
+
+    // Sort: quest mobs first, then by distance
+    const sorted = eligible.sort(([, a]: any, [, b]: any) => {
+      const aIsQuest = questMobNames.has((a.name ?? "").toLowerCase()) ? 0 : 1;
+      const bIsQuest = questMobNames.has((b.name ?? "").toLowerCase()) ? 0 : 1;
+      if (aIsQuest !== bIsQuest) return aIsQuest - bIsQuest;
+      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
+    });
+
+    const [, mob] = sorted[0] as [string, any];
+    const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
+    const moving = await ctx.moveToEntity(me, mob);
+    if (!moving) {
+      void ctx.logActivity(isQuestTarget
+        ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
+        : `Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    }
+  } catch (err: any) {
+    console.debug(`[agent] quest combat tick: ${err.message?.slice(0, 60)}`);
   }
 }
 
