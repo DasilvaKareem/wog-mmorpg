@@ -11,7 +11,6 @@ import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
 import { getLootTable, rollDrops, rollCopper } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
-import { ensureEssenceTechniqueInitialized } from "../combat/essenceTechniqueGenerator.js";
 import { randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
@@ -679,16 +678,16 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
 
   const partyMemberIds = getPartyMembers(xpRecipient.id);
 
-  // Filter to same-zone, alive, player-type members
+  // Filter to alive, player-type members (use global entity map so cross-zone party members get XP)
   const eligibleMembers: Entity[] = [];
   for (const memberId of partyMemberIds) {
-    const member = zone.entities.get(memberId);
+    const member = world.entities.get(memberId);
     if (member && member.type === "player" && member.hp > 0 && member.level != null) {
       eligibleMembers.push(member);
     } else if (member) {
       console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
     } else {
-      console.warn(`[xp-debug] MEMBER NOT FOUND in zone: memberId=${memberId}`);
+      console.warn(`[xp-debug] MEMBER NOT FOUND: memberId=${memberId}`);
     }
   }
 
@@ -1121,43 +1120,6 @@ async function handleMobDeath(
 }
 
 // ── Smart Combat AI Helpers ────────────────────────────────────────────
-
-/**
- * Ensure an entity's learnedTechniques list includes everything they qualify
- * for by class + level. Called by the server-side auto-combat AI so that
- * server-controlled entities can actually use their spells.
- * (Real AI agents still learn techniques via POST /techniques/learn at trainers.)
- */
-function ensureTechniquesForAutoCombat(entity: Entity): void {
-  if (!entity.classId || !entity.level) return;
-  const classTechniques = getTechniquesByClass(entity.classId);
-  if (!entity.learnedTechniques) entity.learnedTechniques = [];
-  const learned = new Set(entity.learnedTechniques);
-  for (const tech of classTechniques) {
-    if (tech.levelRequired <= entity.level && !learned.has(tech.id)) {
-      entity.learnedTechniques.push(tech.id);
-      learned.add(tech.id);
-    }
-  }
-
-  // Auto-learn essence techniques for AI agents with wallets
-  if (entity.walletAddress) {
-    if (entity.level >= 15) {
-      const sig = ensureEssenceTechniqueInitialized(entity.walletAddress, entity.classId, "signature");
-      if (!learned.has(sig.id)) {
-        entity.learnedTechniques.push(sig.id);
-        learned.add(sig.id);
-      }
-    }
-    if (entity.level >= 30) {
-      const ult = ensureEssenceTechniqueInitialized(entity.walletAddress, entity.classId, "ultimate");
-      if (!learned.has(ult.id)) {
-        entity.learnedTechniques.push(ult.id);
-        learned.add(ult.id);
-      }
-    }
-  }
-}
 
 /**
  * Pick the best technique for a player to use in combat.
@@ -2154,13 +2116,7 @@ async function worldTick() {
 
       if (!nearestMob) continue;
 
-      // Auto-grant techniques only for synthetic server-side test players.
-      // Real player/agent wallets must learn from class trainers via API.
-      if (!entity.walletAddress) {
-        ensureTechniquesForAutoCombat(entity);
-      }
-
-      // Try to pick a technique
+      // Pick the best technique from what the player has learned at trainers
       const chosenTech = pickTechnique(entity, nearestMob, zone);
       if (chosenTech) {
         const techTarget = chosenTech.targetType === "self" ? entity.id : nearestMob.id;

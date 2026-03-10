@@ -62,12 +62,14 @@ export async function doCombat(
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
 
-    const [mobId, mob] = sorted[0] as [string, any];
+    // Navigate toward the best target. Once in range, the zone runtime's
+    // auto-combat AI handles technique selection and attacking — it picks
+    // buffs, heals, debuffs, or the strongest attack automatically.
+    const [, mob] = sorted[0] as [string, any];
     const moving = await ctx.moveToEntity(me, mob);
-    if (moving) return;
-
-    ctx.issueCommand({ action: "attack", targetId: mobId });
-    void ctx.logActivity(`Attacking ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    if (!moving) {
+      void ctx.logActivity(`Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    }
   } catch (err: any) {
     console.debug(`[agent] combat tick: ${err.message?.slice(0, 60)}`);
   }
