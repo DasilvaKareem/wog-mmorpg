@@ -22,7 +22,11 @@ type DialogueEvent =
   | "quest_complete"
   | "idle"
   | "low_hp_survive"
-  | "react_chat";
+  | "react_chat"
+  | "react_levelup"
+  | "react_death"
+  | "react_quest"
+  | "react_kill";
 
 interface DialogueContext {
   entityId: string;
@@ -44,14 +48,15 @@ const CHAT_COOLDOWN_MS = 180_000; // max 1 message per 3 min per agent
 const REACT_COOLDOWN_MS = 180_000; // max 1 reaction per 3 min per agent
 
 function isOnCooldown(entityId: string, event: DialogueEvent): boolean {
-  const key = `${entityId}:${event === "react_chat" ? "react" : "chat"}`;
+  // Per-event cooldown so a kill doesn't block a level_up or death message
+  const key = `${entityId}:${event}`;
   const last = lastChatTime.get(key) ?? 0;
-  const cooldown = event === "react_chat" ? REACT_COOLDOWN_MS : CHAT_COOLDOWN_MS;
+  const cooldown = event.startsWith("react_") ? REACT_COOLDOWN_MS : CHAT_COOLDOWN_MS;
   return Date.now() - last < cooldown;
 }
 
 function markCooldown(entityId: string, event: DialogueEvent): void {
-  const key = `${entityId}:${event === "react_chat" ? "react" : "chat"}`;
+  const key = `${entityId}:${event}`;
   lastChatTime.set(key, Date.now());
 }
 
@@ -320,6 +325,110 @@ const DIALOGUE: Record<string, string[]> = {
     "Right.",
     "Interesting, {speaker}.",
   ],
+
+  // ── Contextual Reactions (to zone events from other players) ────
+  // react_levelup: when another player levels up
+  "sunforged::react_levelup": [
+    "Well fought, {speaker}! The light grows in you.",
+    "Grats, {speaker}. May you climb ever higher.",
+    "A new level! Aurandel smiles upon you, {speaker}.",
+  ],
+  "veilborn::react_levelup": [
+    "Grats.",
+    "Not bad, {speaker}.",
+    "Hm. {speaker} is getting stronger... noted.",
+  ],
+  "dawnkeeper::react_levelup": [
+    "Congratulations, {speaker}! So proud of you!",
+    "Grats {speaker}!! You're amazing!",
+    "Wonderful! Keep shining, {speaker}!",
+  ],
+  "ironvow::react_levelup": [
+    "Grats. Now don't slow down.",
+    "Good. Stronger is better, {speaker}.",
+    "About time, {speaker}.",
+  ],
+  "::react_levelup": [
+    "Grats!",
+    "Gz {speaker}!",
+    "Nice, {speaker}!",
+    "Congrats!",
+    "Grats {speaker}!!",
+    "Let's go {speaker}!",
+  ],
+
+  // react_death: when another player dies
+  "sunforged::react_death": [
+    "Fall back, {speaker}! I'll cover you!",
+    "Stay strong, {speaker}. Rise again!",
+    "No hero stays down forever, {speaker}.",
+  ],
+  "veilborn::react_death": [
+    "Tough break, {speaker}.",
+    "Should've dodged.",
+    "Rest up, {speaker}.",
+  ],
+  "dawnkeeper::react_death": [
+    "Oh no, {speaker}! Are you okay?",
+    "Be careful out there, {speaker}!",
+    "Come back stronger, {speaker}. I believe in you!",
+  ],
+  "ironvow::react_death": [
+    "Get up, {speaker}.",
+    "Weakness leaves the body, {speaker}.",
+    "Die less.",
+  ],
+  "::react_death": [
+    "RIP {speaker}",
+    "F",
+    "Oof. {speaker} down.",
+    "Unlucky, {speaker}.",
+  ],
+
+  // react_quest: when another player completes a quest
+  "sunforged::react_quest": [
+    "Well done, {speaker}! Another oath fulfilled!",
+    "The realm thanks you, {speaker}.",
+  ],
+  "veilborn::react_quest": [
+    "Nice payday, {speaker}.",
+    "Quest done? Moving on.",
+  ],
+  "dawnkeeper::react_quest": [
+    "Amazing work, {speaker}!",
+    "That's wonderful! Well done!",
+  ],
+  "ironvow::react_quest": [
+    "Good. What's next, {speaker}?",
+    "One quest closer to power.",
+  ],
+  "::react_quest": [
+    "Nice quest, {speaker}!",
+    "GG {speaker}!",
+    "Well done!",
+  ],
+
+  // react_kill: when another player kills something notable
+  "sunforged::react_kill": [
+    "Fine strike, {speaker}!",
+    "Together we are stronger!",
+  ],
+  "veilborn::react_kill": [
+    "Clean kill.",
+    "Efficient, {speaker}.",
+  ],
+  "dawnkeeper::react_kill": [
+    "Great teamwork!",
+    "Well fought, {speaker}!",
+  ],
+  "ironvow::react_kill": [
+    "Next.",
+    "Good. Keep going.",
+  ],
+  "::react_kill": [
+    "Nice!",
+    "Got 'em!",
+  ],
 };
 
 // ── Line Selection ──────────────────────────────────────────────────────
@@ -407,7 +516,8 @@ export function clearOriginCache(walletAddress: string, characterName: string): 
 }
 
 /**
- * Check zone events for other agents' chat messages and potentially react.
+ * Check zone events for other agents' chat/actions and potentially react.
+ * Reacts contextually: "grats" for level-ups, "RIP" for deaths, etc.
  * Call this periodically from the agent loop.
  */
 export function maybeReactToChat(
@@ -416,23 +526,49 @@ export function maybeReactToChat(
 ): boolean {
   if (isOnCooldown(ctx.entityId, "react_chat")) return false;
 
-  // Find chat messages from OTHER entities in the last batch
-  const otherChats = recentEvents.filter(
-    (e) => e.type === "chat" && e.entityId && e.entityId !== ctx.entityId && e.entityName,
+  // Find events from OTHER entities
+  const otherEvents = recentEvents.filter(
+    (e) => e.entityId && e.entityId !== ctx.entityId && e.entityName,
   );
+  if (otherEvents.length === 0) return false;
 
-  if (otherChats.length === 0) return false;
+  // Map zone event types to contextual reaction events
+  const reactionMap: Record<string, DialogueEvent> = {
+    levelup: "react_levelup",
+    death: "react_death",
+    quest: "react_quest",
+    kill: "react_kill",
+    chat: "react_chat",
+  };
 
-  // Small chance to react (20%) — agents shouldn't reply to everything
-  if (Math.random() > 0.20) return false;
+  // Prioritize significant events: levelup > death > quest > kill > chat
+  const priority = ["levelup", "death", "quest", "kill", "chat"];
+  let bestEvent: (typeof otherEvents)[0] | null = null;
+  let bestReaction: DialogueEvent = "react_chat";
 
-  // React to the most recent chat
-  const chat = otherChats[otherChats.length - 1];
+  for (const eventType of priority) {
+    const found = otherEvents.filter((e) => e.type === eventType);
+    if (found.length > 0) {
+      bestEvent = found[found.length - 1];
+      bestReaction = reactionMap[eventType] ?? "react_chat";
+      break;
+    }
+  }
+
+  if (!bestEvent) return false;
+
+  // Higher chance to react to significant events (levelup/death: 40%, quest: 30%, others: 20%)
+  const reactChance = bestReaction === "react_levelup" || bestReaction === "react_death"
+    ? 0.40
+    : bestReaction === "react_quest"
+      ? 0.30
+      : 0.20;
+  if (Math.random() > reactChance) return false;
 
   return emitAgentChat({
     ...ctx,
-    event: "react_chat",
-    speakerName: chat.entityName,
-    detail: chat.message,
+    event: bestReaction,
+    speakerName: bestEvent.entityName,
+    detail: bestEvent.message,
   });
 }

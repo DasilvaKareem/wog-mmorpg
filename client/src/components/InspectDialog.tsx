@@ -5,6 +5,7 @@ import { useItemCatalog, type CatalogItem } from "@/hooks/useItemCatalog";
 import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
+import { WalletManager } from "@/lib/walletManager";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
 
 /* ── 8-bit retro palette ─────────────────────────────────────── */
@@ -154,13 +155,19 @@ export function InspectDialog(): React.ReactElement | null {
   async function fetchSelfEntity(zoneId: string, walletAddress: string): Promise<void> {
     try {
       const normalized = walletAddress.toLowerCase();
+      // Also check custodial wallet — entities spawn with the custodial address
+      const custodial = WalletManager.getInstance().custodialAddress?.toLowerCase() ?? null;
       const res = await fetch(`${API_URL}/zones/${zoneId}`);
       if (!res.ok) return;
       const data = await res.json();
       const entities = data.entities as Record<string, Entity> | undefined;
       if (!entities) return;
       const self = Object.values(entities).find(
-        (e) => e.type === "player" && e.walletAddress?.toLowerCase() === normalized,
+        (e) => {
+          if (e.type !== "player") return false;
+          const ew = e.walletAddress?.toLowerCase();
+          return ew === normalized || (custodial && ew === custodial);
+        },
       );
       if (self) {
         setEntity(self);

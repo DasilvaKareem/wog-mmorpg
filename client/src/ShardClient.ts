@@ -86,6 +86,7 @@ export async function createCharacter(
 export interface FetchCharactersResult {
   characters: OwnedCharacter[];
   liveEntity: WalletCharacterProgress | null;
+  deployedCharacterName: string | null;
 }
 
 export async function fetchCharactersWithLive(
@@ -101,11 +102,12 @@ export async function fetchCharactersWithLive(
         detail = "";
       }
       console.error("Failed to fetch characters:", res.status, detail);
-      return { characters: [], liveEntity: null };
+      return { characters: [], liveEntity: null, deployedCharacterName: null };
     }
     const data: {
       characters: Array<Partial<OwnedCharacter> & { tokenId?: string; name?: string; description?: string }>;
       liveEntity?: { name: string; level: number; xp: number; hp: number; maxHp: number; zoneId: string };
+      deployedCharacterName?: string | null;
     } = await res.json();
 
     const characters = data.characters.map((character) => ({
@@ -144,10 +146,10 @@ export async function fetchCharactersWithLive(
       };
     }
 
-    return { characters, liveEntity };
+    return { characters, liveEntity, deployedCharacterName: data.deployedCharacterName ?? null };
   } catch {
     console.error("Failed to fetch characters: network error");
-    return { characters: [], liveEntity: null };
+    return { characters: [], liveEntity: null, deployedCharacterName: null };
   }
 }
 

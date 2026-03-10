@@ -8,6 +8,7 @@ import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./char
 import { computeStatsAtLevel } from "./leveling.js";
 import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
+import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
@@ -189,11 +190,16 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
       try {
         // Find live entity for this wallet across all entities
+        // Check both the owner wallet and its custodial wallet (agent system)
         const normalizedWallet = walletAddress.toLowerCase();
+        const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
+        const agentRef = await getAgentEntityRef(walletAddress);
+        const deployedCharacterName = agentRef?.characterName ?? null;
         let liveEntity: { level: number; xp: number; hp: number; maxHp: number; zoneId: string; name: string } | null = null;
         for (const entity of getAllEntities().values()) {
           if (entity.type !== "player") continue;
-          if (entity.walletAddress?.toLowerCase() !== normalizedWallet) continue;
+          const ew = entity.walletAddress?.toLowerCase();
+          if (ew !== normalizedWallet && ew !== custodialWallet) continue;
           liveEntity = {
             level: entity.level ?? 1,
             xp: entity.xp ?? 0,
@@ -246,7 +252,9 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
               if (baseName) {
                 try {
-                  const saved = await loadCharacter(walletAddress, baseName);
+                  // Try owner wallet first, then custodial wallet
+                  const saved = await loadCharacter(walletAddress, baseName)
+                    ?? (custodialWallet ? await loadCharacter(custodialWallet, baseName) : null);
                   if (saved) {
                     return {
                       tokenId: nft.id.toString(),
@@ -273,11 +281,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             })
           );
 
-          return { walletAddress, liveEntity, characters };
+          return { walletAddress, liveEntity, deployedCharacterName, characters };
         }
 
         // Fallback: on-chain returned empty — build characters from Redis
-        const savedChars = await loadAllCharactersForWallet(walletAddress);
+        // Check both the owner wallet and the custodial wallet
+        let savedChars = await loadAllCharactersForWallet(walletAddress);
+        if (savedChars.length === 0 && custodialWallet) {
+          savedChars = await loadAllCharactersForWallet(custodialWallet);
+        }
         if (savedChars.length > 0) {
           server.log.info(`[characters] On-chain empty for ${walletAddress}, serving ${savedChars.length} character(s) from Redis`);
         }
@@ -318,7 +330,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           };
         });
 
-        return { walletAddress, liveEntity, characters };
+        return { walletAddress, liveEntity, deployedCharacterName, characters };
       } catch (err) {
         server.log.error(err, `Failed to fetch characters for ${walletAddress}`);
         reply.code(500);

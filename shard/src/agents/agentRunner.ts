@@ -137,6 +137,7 @@ export class AgentRunner {
   private ticksOnCurrentScript = 0;
   private lastKnownLevel = 0;
   private lastKnownZone = "";
+  private nextIdleChatTick = 100 + Math.floor(Math.random() * 150);
   private lastInboxId = "0-0";
   private lastSeenZoneEventSeq = 0;
   private currentCaps: TierCapabilities = TIER_CAPABILITIES["free"];
@@ -512,7 +513,7 @@ export class AgentRunner {
           entityName: entity.name,
           zoneId: this.currentRegion,
           origin: this.agentOrigin ?? undefined,
-          classId: (entity as any).classId ?? undefined,
+          classId: entity.classId ?? undefined,
         };
         if (latest.type === "kill" && latest.entityId === this.entityId) {
           emitAgentChat({ ...dCtx, event: "kill", detail: latest.targetName });
@@ -1028,7 +1029,7 @@ export class AgentRunner {
 
         // Chat reactions: check for other agents' chat and maybe respond
         if (this.entityId && this.ticksSinceFocusChange % 3 === 0) {
-          const chatEvents = getRecentZoneEvents(this.currentRegion, Date.now() - 10_000, ["chat"]);
+          const chatEvents = getRecentZoneEvents(this.currentRegion, Date.now() - 10_000, ["chat", "levelup", "death", "quest", "kill"]);
           if (chatEvents.length > 0) {
             maybeReactToChat(
               {
@@ -1041,6 +1042,24 @@ export class AgentRunner {
               chatEvents,
             );
           }
+        }
+
+        // Idle dialogue: random 2-5 minute intervals when not actively fighting
+        if (this.entityId && this.ticksSinceFocusChange >= this.nextIdleChatTick) {
+          const notFighting = !entity.order || entity.order.type !== "attack";
+          if (notFighting) {
+            emitAgentChat({
+              entityId: this.entityId,
+              entityName: entity.name,
+              zoneId: this.currentRegion,
+              origin: this.agentOrigin ?? undefined,
+              classId: entity.classId ?? undefined,
+              event: "idle",
+              detail: this.currentRegion,
+            });
+          }
+          // Schedule next idle chat in 2-5 minutes (100-250 ticks at 1.2s each)
+          this.nextIdleChatTick = this.ticksSinceFocusChange + 100 + Math.floor(Math.random() * 150);
         }
 
         // Survival: low HP handling

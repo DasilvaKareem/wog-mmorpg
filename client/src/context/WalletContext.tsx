@@ -24,6 +24,8 @@ interface WalletContextValue {
   characters: OwnedCharacter[];
   /** Token ID of the user-selected character (null = auto-pick highest level) */
   selectedCharacterTokenId: string | null;
+  /** Name of the currently deployed agent character (null if no agent running) */
+  deployedCharacterName: string | null;
   /** Select a character by token ID to display in the wallet panel */
   selectCharacter: (tokenId: string | null) => void;
   professions: ProfessionsResponse | null;
@@ -86,6 +88,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const [characterLoading, setCharacterLoading] = React.useState(false);
   const [characters, setCharacters] = React.useState<OwnedCharacter[]>([]);
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = React.useState<string | null>(null);
+  const [deployedCharacterName, setDeployedCharacterName] = React.useState<string | null>(null);
   const [professions, setProfessions] = React.useState<ProfessionsResponse | null>(null);
   const [professionsLoading, setProfessionsLoading] = React.useState(false);
   const lastCharacterFetchRef = React.useRef<number>(0);
@@ -110,16 +113,19 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       return;
     }
 
-    setCharacterLoading(true);
+    // Only show loading spinner on first fetch — background refreshes update silently
+    const isFirstFetch = !characterProgress && characters.length === 0;
+    if (isFirstFetch) setCharacterLoading(true);
     try {
       // Single API call returns both NFT characters and live entity data
-      const [liveCharacter, { characters: ownedCharacters, liveEntity: liveCharacterGlobal }] = await Promise.all([
+      const [liveCharacter, { characters: ownedCharacters, liveEntity: liveCharacterGlobal, deployedCharacterName: deployed }] = await Promise.all([
         fetchWalletCharacterInZone(walletManager.address, zoneId),
         fetchCharactersWithLive(walletManager.address),
       ]);
 
       // Always store all characters for the selector
       setCharacters(ownedCharacters);
+      setDeployedCharacterName(deployed);
 
       // If a live agent is in the current zone, show that
       if (liveCharacter) {
@@ -340,6 +346,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       characterLoading,
       characters,
       selectedCharacterTokenId,
+      deployedCharacterName,
       selectCharacter,
       professions,
       professionsLoading,
@@ -361,6 +368,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       characterLoading,
       characters,
       selectedCharacterTokenId,
+      deployedCharacterName,
       selectCharacter,
       professions,
       professionsLoading,

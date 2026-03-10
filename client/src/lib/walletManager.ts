@@ -112,6 +112,10 @@ export class WalletManager {
     return this._address !== null;
   }
 
+  get custodialAddress(): string | null {
+    return this._custodialAddress;
+  }
+
   async connect(walletType: ExternalWalletType = "walletconnect"): Promise<string> {
     const wallet = createWallet(WALLET_IDS[walletType]);
     const account = await Promise.race([

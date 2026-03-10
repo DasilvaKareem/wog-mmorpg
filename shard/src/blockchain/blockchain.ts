@@ -14,7 +14,7 @@ import { ITEM_CATALOG } from "../items/itemCatalog.js";
 import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
-import { biteProvider } from "./biteChain.js";
+import { biteProvider, biteWallet } from "./biteChain.js";
 import { ethers } from "ethers";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
@@ -500,6 +500,58 @@ export async function burnItem(
   });
 }
 
+// --- ERC-8004 Identity Registry ---
+
+const IDENTITY_REGISTRY_ABI = [
+  "function createIdentity(uint256 characterTokenId, address characterOwner, string metadataURI) external returns (uint256)",
+  "function characterToIdentity(uint256) view returns (uint256)",
+  "function identities(uint256) view returns (uint256 characterTokenId, address characterOwner, string metadataURI, uint256 createdAt, bool active)",
+];
+
+const identityRegistryAddress = process.env.IDENTITY_REGISTRY_ADDRESS;
+const identityRegistryContract = identityRegistryAddress && biteWallet
+  ? new ethers.Contract(identityRegistryAddress, IDENTITY_REGISTRY_ABI, biteWallet)
+  : null;
+
+if (identityRegistryAddress) {
+  console.log(`[blockchain] Identity registry at ${identityRegistryAddress}`);
+} else {
+  console.warn("[blockchain] IDENTITY_REGISTRY_ADDRESS not set — identity registration disabled");
+}
+
+/**
+ * Register a character identity on the ERC-8004 identity registry.
+ * Fire-and-forget safe — logs errors but never throws.
+ */
+export async function registerIdentity(
+  characterTokenId: bigint,
+  ownerAddress: string,
+  metadataURI: string
+): Promise<string | null> {
+  if (!identityRegistryContract) return null;
+
+  try {
+    // Check if identity already exists for this character
+    const existingId = await identityRegistryContract.characterToIdentity(characterTokenId);
+    if (existingId > 0n) {
+      console.log(`[identity] Character ${characterTokenId} already registered as identity ${existingId}`);
+      return null;
+    }
+
+    const tx = await identityRegistryContract.createIdentity(
+      characterTokenId,
+      ownerAddress,
+      metadataURI
+    );
+    const receipt = await tx.wait();
+    console.log(`[identity] Registered identity for character ${characterTokenId} → tx ${receipt.hash}`);
+    return receipt.hash;
+  } catch (err: any) {
+    console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);
+    return null;
+  }
+}
+
 // --- ERC-721 Character NFTs ---
 
 const characterContract = getContract({
@@ -560,7 +612,8 @@ async function getOwnedCharacterTokenIdsFromTransfers(owner: string): Promise<bi
   return Array.from(owned).map((id) => BigInt(id));
 }
 
-/** Mint a character NFT (ERC-721) to a player address. Returns tx hash. */
+/** Mint a character NFT (ERC-721) to a player address. Returns tx hash.
+ *  Also registers an ERC-8004 identity in the background if the registry is configured. */
 export async function mintCharacter(
   toAddress: string,
   nft: { name: string; description: string; properties: Record<string, unknown> }
@@ -575,6 +628,25 @@ export async function mintCharacter(
     txStats.characterMints++;
     recordTx("character-mint", receipt.transactionHash);
     characterCache.invalidate(toAddress.toLowerCase());
+
+    // Extract tokenId from the ERC-721 Transfer event and register identity
+    if (identityRegistryContract) {
+      void (async () => {
+        try {
+          const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
+          const transferLog = fullReceipt?.logs.find(
+            (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
+          );
+          if (transferLog?.topics[3]) {
+            const tokenId = BigInt(transferLog.topics[3]);
+            await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
+          }
+        } catch (err: any) {
+          console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
+        }
+      })();
+    }
+
     return receipt.transactionHash;
   });
 }

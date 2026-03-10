@@ -79,7 +79,7 @@ interface AgentChatPanelProps {
 }
 
 export function AgentChatPanel({ walletAddress, currentZone, className = "" }: AgentChatPanelProps): React.ReactElement {
-  const { characters } = useWalletContext();
+  const { characters, selectedCharacterTokenId } = useWalletContext();
   const [messages, setMessages] = React.useState<ChatMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
@@ -182,8 +182,10 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setDeploying(true);
     addSystemMsg("Deploying agent...");
     try {
-      // Send character info so the server doesn't need to re-fetch it
-      const primary = characters[0];
+      // Send character info — use selected character if set, otherwise first
+      const primary = (selectedCharacterTokenId
+        ? characters.find((c) => c.tokenId === selectedCharacterTokenId)
+        : null) ?? characters[0];
       const deployBody: Record<string, string | undefined> = { walletAddress };
       if (primary) {
         deployBody.characterName = primary.name;

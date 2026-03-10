@@ -17,6 +17,7 @@ import { restoreProfessions } from "../professions/professions.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
 import { getZoneOffset } from "./worldLayout.js";
+import { rehydratePartyMembership } from "../social/partySystem.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -185,6 +186,10 @@ export function registerSpawnOrders(server: FastifyInstance) {
     // Register wallet in spawn registry (one player per shard)
     if (type === "player" && walletAddress) {
       registerSpawnedWallet(walletAddress, entity.id, spawnZoneId);
+      // Re-link to persisted party (survives server restarts)
+      rehydratePartyMembership(entity.id, walletAddress).catch((err) =>
+        server.log.error(`[party] Rehydration error for ${entity.name}: ${err}`)
+      );
     }
 
     // Log diary entry for player spawns
