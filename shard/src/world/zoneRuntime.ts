@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "../character/classes.js";
+import { getClassById } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
 import { mintItem, updateCharacterMetadata, burnItem, mintGold } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
@@ -411,9 +412,25 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
 const MOVE_SPEED = 30; // units per tick
-const ATTACK_RANGE = 40; // units
+const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
+
+/** Return the attack range for an entity based on its class definition. */
+function getEntityAttackRange(entity: Entity): number {
+  if (entity.classId) {
+    const classDef = getClassById(entity.classId);
+    if (classDef) return classDef.attackRange;
+  }
+  return MELEE_RANGE;
+}
+
+const RANGED_CLASSES = new Set(["mage", "warlock", "ranger", "cleric"]);
+
+/** Return the animStyle for a basic auto-attack: "projectile" for ranged, "melee" for melee. */
+function getBasicAttackAnimStyle(entity: Entity): "melee" | "projectile" {
+  return RANGED_CLASSES.has(entity.classId ?? "") ? "projectile" : "melee";
+}
 
 // ── Stat-based combat mechanics (players only) ────────────────────────
 const DODGE_CAP = 0.40;
@@ -1327,14 +1344,41 @@ function addActiveEffectInternal(entity: Entity, effect: ActiveEffect): void {
   entity.activeEffects.push(effect);
 }
 
-function moveToward(entity: Entity, tx: number, ty: number): boolean {
+const ENTITY_COLLISION_RADIUS = 14; // units — entities can't overlap within this radius
+
+function moveToward(
+  entity: Entity, tx: number, ty: number,
+  zoneEntities?: Map<string, Entity>,
+): boolean {
   const dx = tx - entity.x;
   const dy = ty - entity.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist <= 5) return true; // arrived
   const step = Math.min(MOVE_SPEED, dist);
-  entity.x += (dx / dist) * step;
-  entity.y += (dy / dist) * step;
+  let nx = entity.x + (dx / dist) * step;
+  let ny = entity.y + (dy / dist) * step;
+
+  // Entity-to-entity collision: push out of overlapping living entities
+  if (zoneEntities) {
+    for (const other of zoneEntities.values()) {
+      if (other.id === entity.id) continue;
+      if ((other.hp ?? 0) <= 0) continue; // ignore corpses/dead
+      if (other.type === "flower-node" || other.type === "ore-node" ||
+          other.type === "nectar-node" || other.type === "corpse") continue;
+      const ox = nx - other.x;
+      const oy = ny - other.y;
+      const oDist = Math.sqrt(ox * ox + oy * oy);
+      if (oDist < ENTITY_COLLISION_RADIUS && oDist > 0.01) {
+        // Push entity out along the overlap direction
+        const push = ENTITY_COLLISION_RADIUS - oDist;
+        nx += (ox / oDist) * push;
+        ny += (oy / oDist) * push;
+      }
+    }
+  }
+
+  entity.x = nx;
+  entity.y = ny;
   return false;
 }
 
@@ -1489,7 +1533,7 @@ async function worldTick() {
       if (!entity.order) continue;
 
       if (entity.order.action === "move") {
-        const arrived = moveToward(entity, entity.order.x, entity.order.y);
+        const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
         if (arrived) entity.order = undefined;
       } else if (entity.order.action === "attack") {
         const target = zone.entities.get(entity.order.targetId);
@@ -1511,8 +1555,8 @@ async function worldTick() {
         const dx = target.x - entity.x;
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > ATTACK_RANGE) {
-          moveToward(entity, target.x, target.y);
+        if (dist > getEntityAttackRange(entity)) {
+          moveToward(entity, target.x, target.y, zone.entities);
         } else {
           const rawDmg = computeDamage(entity, target, zone.zoneId);
           const hit = resolveHit(entity, target, rawDmg);
@@ -1521,6 +1565,8 @@ async function worldTick() {
           trySetMobTag(target, entity.id, entity.type, zone.tick);
           entity.lastCombatTick = zone.tick;
           target.lastCombatTick = zone.tick;
+
+          const atkAnim = getBasicAttackAnimStyle(entity);
 
           if (hit.dodged) {
             // Dodge: no damage, no durability loss, no retaliation, no death
@@ -1533,7 +1579,7 @@ async function worldTick() {
               entityName: entity.name,
               targetId: target.id,
               targetName: target.name,
-              data: { damage: 0, dodged: true, targetHp: target.hp },
+              data: { damage: 0, dodged: true, targetHp: target.hp, animStyle: atkAnim, casterX: entity.x, casterZ: entity.y, targetX: target.x, targetZ: target.y },
             });
           } else {
             // Hit landed — apply durability
@@ -1551,7 +1597,7 @@ async function worldTick() {
               entityName: entity.name,
               targetId: target.id,
               targetName: target.name,
-              data: { damage: hit.finalDamage, critical: hit.critical, blocked: hit.blocked, targetHp: target.hp },
+              data: { damage: hit.finalDamage, critical: hit.critical, blocked: hit.blocked, targetHp: target.hp, animStyle: atkAnim, casterX: entity.x, casterZ: entity.y, targetX: target.x, targetZ: target.y },
             });
 
             // Basic retaliation: combatants trade hits while in range.
@@ -1561,6 +1607,8 @@ async function worldTick() {
 
               entity.lastCombatTick = zone.tick;
               target.lastCombatTick = zone.tick;
+
+              const retAnim = getBasicAttackAnimStyle(target);
 
               if (retHit.dodged) {
                 logZoneEvent({
@@ -1572,7 +1620,7 @@ async function worldTick() {
                   entityName: target.name,
                   targetId: entity.id,
                   targetName: entity.name,
-                  data: { damage: 0, dodged: true, targetHp: entity.hp },
+                  data: { damage: 0, dodged: true, targetHp: entity.hp, animStyle: retAnim, casterX: target.x, casterZ: target.y, targetX: entity.x, targetZ: entity.y },
                 });
               } else {
                 applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
@@ -1589,7 +1637,7 @@ async function worldTick() {
                   entityName: target.name,
                   targetId: entity.id,
                   targetName: entity.name,
-                  data: { damage: retHit.finalDamage, critical: retHit.critical, blocked: retHit.blocked, targetHp: entity.hp },
+                  data: { damage: retHit.finalDamage, critical: retHit.critical, blocked: retHit.blocked, targetHp: entity.hp, animStyle: retAnim, casterX: target.x, casterZ: target.y, targetX: entity.x, targetZ: entity.y },
                 });
 
                 if (entity.hp <= 0) {
@@ -1753,8 +1801,13 @@ async function worldTick() {
         const dx = target.x - entity.x;
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > ATTACK_RANGE) {
-          moveToward(entity, target.x, target.y);
+        // Projectile/area techniques can be cast at range even by melee classes
+        const baseRange = getEntityAttackRange(entity);
+        const techRange = (technique.animStyle === "projectile" || technique.animStyle === "area")
+          ? Math.max(baseRange, 100)
+          : baseRange;
+        if (dist > techRange) {
+          moveToward(entity, target.x, target.y, zone.entities);
         } else {
           // Deduct essence
           const currentEssence = entity.essence ?? 0;
@@ -2089,7 +2142,7 @@ async function worldTick() {
     // ── Player auto-combat AI: players pick techniques or basic attack ──
     // Only engages mobs within AUTO_COMBAT_RANGE so agents can walk to
     // portals, merchants, etc. without being hijacked.
-    const AUTO_COMBAT_RANGE = 80;
+    const BASE_AUTO_COMBAT_RANGE = 80;
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
       if (entity.order) continue;
@@ -2099,9 +2152,13 @@ async function worldTick() {
       // Skip players in goto mode (navigating to NPC — don't interrupt with combat)
       if (entity.gotoMode) continue;
 
+      // Ranged classes scan further — auto-engage at their attack range + buffer
+      const classRange = getEntityAttackRange(entity);
+      const autoCombatRange = Math.max(BASE_AUTO_COMBAT_RANGE, classRange + 20);
+
       // Find nearest mob within range
       let nearestMob: Entity | null = null;
-      let nearestDist = AUTO_COMBAT_RANGE;
+      let nearestDist = autoCombatRange;
       for (const other of zone.entities.values()) {
         if (other.type !== "mob" && other.type !== "boss") continue;
         if (other.hp <= 0) continue;
