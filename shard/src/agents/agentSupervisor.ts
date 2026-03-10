@@ -17,7 +17,7 @@ import { type Content, type FunctionDeclaration, type Part, type Type } from "@g
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
 import { fetchWalletBalance } from "./agentUtils.js";
 import { findPortalInZone, getSharedEdge, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getAvailableQuestsForPlayer } from "../social/questSystem.js";
+import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { getEntitiesInRegion } from "../world/zoneRuntime.js";
 import type { ZoneEvent } from "../world/zoneEvents.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
@@ -223,7 +223,7 @@ async function executeTool(
       const activeQuestIds = (ctx.entity.activeQuests ?? []).map((quest: any) => quest.questId);
       const available = [];
       for (const entity of getEntitiesInRegion(ctx.currentRegion)) {
-        if (entity.type !== "quest-giver") continue;
+        if (!isQuestNpc(entity)) continue;
         const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
         for (const quest of quests) {
           available.push({

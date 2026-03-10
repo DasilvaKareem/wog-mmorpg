@@ -2836,6 +2836,14 @@ export function getQuestsForNpc(npcName: string): Quest[] {
   return QUEST_CATALOG.filter((q) => q.npcId === npcName);
 }
 
+/** Set of all NPC names that have at least one quest in the catalog. */
+const QUEST_NPC_NAMES: ReadonlySet<string> = new Set(QUEST_CATALOG.map((q) => q.npcId));
+
+/** Returns true if an entity has quests in the catalog (any NPC type). */
+export function isQuestNpc(entity: { name: string }): boolean {
+  return QUEST_NPC_NAMES.has(entity.name);
+}
+
 /**
  * Check if a quest is available to a player (prerequisites met)
  */
@@ -3457,7 +3465,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
       const zoneEntities = getEntitiesInRegion(zoneId);
       for (const entity of zoneEntities) {
-        if (entity.type !== "quest-giver") continue;
+        if (!isQuestNpc(entity)) continue;
         const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
         for (const q of quests) {
           available.push({

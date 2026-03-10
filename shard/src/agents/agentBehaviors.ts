@@ -7,6 +7,7 @@ import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentCon
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { isQuestNpc } from "../social/questSystem.js";
 import type { AgentContext } from "./agentUtils.js";
 
 // ── Combat ───────────────────────────────────────────────────────────────────
@@ -527,7 +528,7 @@ export async function doQuesting(
       if (aq.complete && aq.quest?.npcId) {
         const npcName = String(aq.quest?.npcId ?? "").toLowerCase();
         const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
-          if (!e || e.type !== "quest-giver") return false;
+          if (!e) return false;
           return String(e.name ?? "").toLowerCase() === npcName;
         });
         if (npcEntry) {
@@ -566,7 +567,7 @@ export async function doQuesting(
       for (const tq of talkQuests) {
         const targetNpcName = String(tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId ?? "").toLowerCase();
         const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
-          if (!e || e.type !== "quest-giver") return false;
+          if (!e) return false;
           return String(e.name ?? "").toLowerCase() === targetNpcName;
         });
         if (npcEntry) {
@@ -587,9 +588,9 @@ export async function doQuesting(
           }
         }
       }
-      // Fallback: try all quest-givers
+      // Fallback: try all NPCs that have quests in the catalog
       for (const [entityId, e] of Object.entries(entities)) {
-        if ((e as any).type === "quest-giver") {
+        if (isQuestNpc(e as any)) {
           try {
             await ctx.api("POST", "/quests/talk", {
               zoneId: ctx.currentRegion, playerId: ctx.entityId, npcEntityId: entityId,
