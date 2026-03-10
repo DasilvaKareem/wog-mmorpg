@@ -78,6 +78,12 @@ export class WorldScene extends Phaser.Scene {
   private lastTooltipUpdateAt = 0;
   private lastHudUpdateAt = 0;
 
+  /** Quest marker state — polled periodically to update NPC markers */
+  private lastQuestMarkerPoll = 0;
+  private availableQuestNpcIds = new Set<string>();
+  private activeQuestNpcIds = new Set<string>();   // NPC entity IDs with in-progress quests
+  private readyQuestNpcIds = new Set<string>();    // NPC entity IDs with turn-in ready quests
+
   /** Multi-zone streaming active */
   private chunkStreamingEnabled = false;
 
@@ -1006,9 +1012,10 @@ export class WorldScene extends Phaser.Scene {
           const colonIdx = evt.message.indexOf(": ");
           const line = colonIdx > 0 ? evt.message.slice(colonIdx + 2) : evt.message;
           this.entityRenderer.showSpeechBubble(evt.entityId, line, 4000);
-        } else if (evt.type === "quest") {
-          const label = (evtData?.questTitle as string) ?? evt.message;
-          this.entityRenderer.showSpeechBubble(evt.entityId, label, 3500);
+        } else if (evt.type === "quest" || evt.type === "quest-progress") {
+          const colonIdx = evt.message.indexOf(": ");
+          const line = colonIdx > 0 ? evt.message.slice(colonIdx + 2) : evt.message;
+          this.entityRenderer.showSpeechBubble(evt.entityId, line, 3000);
         } else if (evt.type === "shop") {
           this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2500);
         } else if (evt.type === "trade") {
@@ -1087,8 +1094,70 @@ export class WorldScene extends Phaser.Scene {
       if (this.lockedWalletAddress) {
         this.lockToPlayerWallet(this.lockedWalletAddress);
       }
+
+      // Update quest markers based on followed player's quest state
+      this.updateQuestMarkers(allEntities);
     } finally {
       this.pollInFlight = false;
     }
+  }
+
+  /** Compute and apply quest marker states for NPC entities. */
+  private updateQuestMarkers(allEntities: Record<string, import("./types").Entity>): void {
+    const playerEntity = this.followTarget ? allEntities[this.followTarget] : null;
+    if (!playerEntity) return;
+
+    // Poll quest APIs every 5s
+    const now = Date.now();
+    if (now - this.lastQuestMarkerPoll > 5000 && playerEntity.zoneId) {
+      this.lastQuestMarkerPoll = now;
+      this.pollQuestState(playerEntity.zoneId, playerEntity.id);
+    }
+
+    // Priority: ready (yellow ?) > active (gray ?) > available (yellow !)
+    const states = new Map<string, "available" | "active" | "ready">();
+    for (const npcId of this.availableQuestNpcIds) states.set(npcId, "available");
+    for (const npcId of this.activeQuestNpcIds) states.set(npcId, "active");
+    for (const npcId of this.readyQuestNpcIds) states.set(npcId, "ready");
+
+    this.entityRenderer.updateQuestMarkers(states);
+  }
+
+  /** Fetch available + active quest state for NPC markers. */
+  private async pollQuestState(zoneId: string, playerId: string): Promise<void> {
+    const apiUrl = (await import("./config")).API_URL;
+    try {
+      const [availRes, logRes] = await Promise.all([
+        fetch(`${apiUrl}/quests/zone/${zoneId}/${playerId}`),
+        this.lockedWalletAddress
+          ? fetch(`${apiUrl}/questlog/${this.lockedWalletAddress}`)
+          : null,
+      ]);
+
+      // Available quests → yellow !
+      if (availRes.ok) {
+        const json = await availRes.json() as { quests: Array<{ npcEntityId: string }> };
+        this.availableQuestNpcIds = new Set((json.quests ?? []).map((q) => q.npcEntityId));
+      }
+
+      // Active quests → gray ? (in progress) or yellow ? (complete/ready)
+      if (logRes?.ok) {
+        const log = await logRes.json() as {
+          activeQuests: Array<{ npcEntityId: string | null; complete: boolean }>;
+        };
+        const active = new Set<string>();
+        const ready = new Set<string>();
+        for (const aq of log.activeQuests ?? []) {
+          if (!aq.npcEntityId) continue;
+          if (aq.complete) {
+            ready.add(aq.npcEntityId);
+          } else {
+            active.add(aq.npcEntityId);
+          }
+        }
+        this.activeQuestNpcIds = active;
+        this.readyQuestNpcIds = ready;
+      }
+    } catch { /* ignore network errors */ }
   }
 }

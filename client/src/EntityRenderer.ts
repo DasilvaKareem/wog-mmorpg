@@ -50,10 +50,19 @@ const HIDE_LABEL_TYPES = new Set([
   "ore-node", "herb-node",
 ]);
 
-/** NPC types that can give quests — show ! or ? marker above them */
+/** NPC types that can potentially give quests */
 const QUEST_NPC_TYPES = new Set([
   "quest-giver", "lore-npc", "merchant", "trainer", "profession-trainer",
 ]);
+
+/** Quest marker states: available (!), active (?), or ready to turn in (?) */
+type QuestMarkerState = "available" | "active" | "ready";
+
+const MARKER_CONFIG: Record<QuestMarkerState, { symbol: string; color: string }> = {
+  available: { symbol: "!", color: "#ffcc00" },   // yellow !
+  active:    { symbol: "?", color: "#6b7a9e" },   // gray ?
+  ready:     { symbol: "?", color: "#ffcc00" },   // yellow ?
+};
 
 const PARTY_COLORS = [
   0x54f28b, 0xffcc00, 0x9ab9ff, 0xff8800,
@@ -87,6 +96,7 @@ export class EntityRenderer {
   private entities = new Map<string, Entity>();
   private onClickCallback: ((entity: Entity) => void) | null = null;
   private dying = new Set<string>(); // entities mid-death animation
+  private questMarkerStates = new Map<string, QuestMarkerState>(); // entityId → marker state
 
   /**
    * Scale factor: multiply entity world coords by this to get pixel position.
@@ -492,15 +502,17 @@ export class EntityRenderer {
         .setDepth(entityDepth - 1);
     }
 
-    // Quest marker (! above quest NPCs) — always visible, bobs via sine
+    // Quest marker — state-dependent: ! (available), ? (active/ready)
     let questMarker: Phaser.GameObjects.Text | null = null;
-    if (QUEST_NPC_TYPES.has(entity.type)) {
+    const markerState = this.questMarkerStates.get(id);
+    if (QUEST_NPC_TYPES.has(entity.type) && markerState) {
+      const cfg = MARKER_CONFIG[markerState];
       questMarker = this.scene.add
-        .text(px, py - 20, "!", {
+        .text(px, py - 20, cfg.symbol, {
           fontSize: "12px",
           fontFamily: "monospace",
           fontStyle: "bold",
-          color: "#ffcc00",
+          color: cfg.color,
           stroke: "#000000",
           strokeThickness: 3,
         })
@@ -767,6 +779,49 @@ export class EntityRenderer {
     visual.fx.colorMatrix = null;
     visual.fx.shine = null;
     visual.fx.types.clear();
+  }
+
+  // ─── Quest Markers ───────────────────────────────────────────────────
+
+  /** Update quest marker states for NPC entities. Call from scene with computed states. */
+  updateQuestMarkers(states: Map<string, QuestMarkerState>): void {
+    this.questMarkerStates = states;
+
+    // Update existing markers to reflect new states
+    for (const [id, visual] of this.visuals) {
+      const entity = this.entities.get(id);
+      if (!entity || !QUEST_NPC_TYPES.has(entity.type)) continue;
+
+      const state = states.get(id);
+      if (!state) {
+        // No quest relevance — remove marker if present
+        if (visual.questMarker) {
+          visual.questMarker.destroy();
+          visual.questMarker = null;
+        }
+        continue;
+      }
+
+      const cfg = MARKER_CONFIG[state];
+      if (visual.questMarker) {
+        // Update existing marker
+        if (visual.questMarker.text !== cfg.symbol) visual.questMarker.setText(cfg.symbol);
+        visual.questMarker.setColor(cfg.color);
+      } else {
+        // Create new marker
+        visual.questMarker = this.scene.add
+          .text(visual.sprite.x, visual.sprite.y - 20, cfg.symbol, {
+            fontSize: "12px",
+            fontFamily: "monospace",
+            fontStyle: "bold",
+            color: cfg.color,
+            stroke: "#000000",
+            strokeThickness: 3,
+          })
+          .setOrigin(0.5, 1)
+          .setDepth(visual.sprite.depth + 2);
+      }
+    }
   }
 
   // ─── Speech Bubbles ──────────────────────────────────────────────────

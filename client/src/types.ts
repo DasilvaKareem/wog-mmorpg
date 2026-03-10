@@ -35,6 +35,8 @@ export interface Entity {
   zoneId?: string;
   teachesProfession?: string;
   teachesClass?: string;
+  activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
+  completedQuests?: string[];
 }
 
 export interface ActiveEffect {
