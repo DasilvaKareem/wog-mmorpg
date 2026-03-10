@@ -85,7 +85,9 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    // Do NOT set crossOrigin — we only use drawImage() (never getImageData),
+    // so a tainted canvas is fine. Setting crossOrigin causes load failures
+    // when the CDN (R2) doesn't return CORS headers.
     img.onload = () => {
       imageCache.set(src, img);
       resolve(img);
@@ -97,12 +99,15 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
 export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Props): React.ReactElement {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const [loadFailed, setLoadFailed] = React.useState(false);
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+
+    setLoadFailed(false);
 
     const base = ASSET_BASE_URL
       ? `${ASSET_BASE_URL}/sprites/layers`
@@ -125,14 +130,14 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
       layers.push(`${base}/hair/hair-${hair}.png`);
     }
 
-    // Class equipment layers
+    // Class equipment layers (draw order matches LayeredSpriteCompositor)
     const equip = CLASS_EQUIPMENT[classId] ?? {};
     if (equip.chest) layers.push(`${base}/chest/chest-${equip.chest}.png`);
     if (equip.legs) layers.push(`${base}/legs/legs-${equip.legs}.png`);
     if (equip.boots) layers.push(`${base}/boots/boots-${equip.boots}.png`);
     if (equip.shoulders) layers.push(`${base}/shoulders/shoulders-${equip.shoulders}.png`);
     if (equip.helm) layers.push(`${base}/helm/helm-${equip.helm}.png`);
-    // Weapon last (on top for down-facing frame)
+    // Weapon last (on top for down-facing frame — matches weapon-front in compositor)
     if (equip.weapon) layers.push(`${base}/weapons/weapon-${equip.weapon}.png`);
 
     let cancelled = false;
@@ -140,6 +145,12 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
     Promise.all(layers.map((src) => loadImage(src).catch(() => null))).then(
       (images) => {
         if (cancelled) return;
+
+        // Check if body (first layer) loaded — if not, nothing will render
+        if (!images[0]) {
+          setLoadFailed(true);
+          return;
+        }
 
         ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
         ctx.imageSmoothingEnabled = false;
@@ -158,6 +169,17 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
 
     return () => { cancelled = true; };
   }, [skinColor, eyeColor, hairStyle, classId]);
+
+  if (loadFailed) {
+    return (
+      <div
+        className="flex items-center justify-center border-2 border-[#2a3450] bg-[#0b1020] text-[#6d77a3] text-[10px] text-center"
+        style={{ width: CANVAS_W, height: CANVAS_H }}
+      >
+        <span>Sprite layers<br/>not loaded</span>
+      </div>
+    );
+  }
 
   return (
     <canvas

@@ -7,6 +7,7 @@ import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { InspectDialog } from "@/components/InspectDialog";
 import { NpcInfoDialog } from "@/components/NpcInfoDialog";
 import { QuestLogDialog } from "@/components/QuestLogDialog";
+import { OnboardingFlow } from "@/components/OnboardingFlow";
 import { GameCanvas } from "@/components/GameCanvas";
 import { LandingPage } from "@/components/LandingPage";
 import { LeaderboardPage } from "@/components/LeaderboardPage";
@@ -36,6 +37,7 @@ import { gameBus } from "@/lib/eventBus";
 
 function GameWorld(): React.ReactElement {
   const [characterOpen, setCharacterOpen] = React.useState(false);
+  const [onboardingOpen, setOnboardingOpen] = React.useState(false);
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
@@ -129,7 +131,14 @@ function GameWorld(): React.ReactElement {
       <InspectDialog />
       <NpcInfoDialog />
       <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
-      <CharacterDialog onOpenChange={setCharacterOpen} open={characterOpen} />
+      <CharacterDialog
+        onOpenChange={setCharacterOpen}
+        open={characterOpen}
+        onRequestCreate={() => { setCharacterOpen(false); setOnboardingOpen(true); }}
+      />
+      {onboardingOpen && (
+        <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+      )}
       <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
       <div
         className="absolute left-1/2 -translate-x-1/2 z-30"

@@ -2,24 +2,16 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CurrencyDisplay } from "@/components/ui/currency-display";
 import { HpBar } from "@/components/ui/hp-bar";
 import { Spinner } from "@/components/ui/spinner";
-import { useToast } from "@/components/ui/toast";
+
 import { XpBar } from "@/components/ui/xp-bar";
 import { API_URL } from "@/config";
 import { useWallet } from "@/hooks/useWallet";
 import { useWogNames } from "@/hooks/useWogNames";
-
-const RARITY_COLORS: Record<string, string> = {
-  common: "#9aa7cc",
-  uncommon: "#54f28b",
-  rare: "#5dadec",
-  epic: "#b48efa",
-  legendary: "#ffcc00",
-};
 
 const TIER_COLORS: Record<string, string> = {
   free: "#9aa7cc",
@@ -28,7 +20,6 @@ const TIER_COLORS: Record<string, string> = {
 };
 
 export function WalletPanel(): React.ReactElement {
-  const [equippingTokenId, setEquippingTokenId] = React.useState<string | null>(null);
   const [collapsed, setCollapsed] = React.useState(false);
   const [tier, setTier] = React.useState<string | null>(null);
   const {
@@ -43,9 +34,7 @@ export function WalletPanel(): React.ReactElement {
     selectCharacter,
     connect,
     disconnect,
-    equipItem,
   } = useWallet();
-  const { notify } = useToast();
   const { dn } = useWogNames(address ? [address] : []);
 
   React.useEffect(() => {
@@ -118,12 +107,13 @@ export function WalletPanel(): React.ReactElement {
             {tier && (
               <div className="flex items-center justify-between">
                 <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Plan</span>
-                <span
-                  className="border-2 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wide"
+                <Link
+                  to="/champions"
+                  className="border-2 px-1.5 py-0.5 text-[7px] font-bold uppercase tracking-wide cursor-pointer transition hover:brightness-125"
                   style={{ color: TIER_COLORS[tier] ?? "#9aa7cc", borderColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "44", backgroundColor: (TIER_COLORS[tier] ?? "#9aa7cc") + "11" }}
                 >
-                  {tier}
-                </span>
+                  {tier} ↗
+                </Link>
               </div>
             )}
             <div className="space-y-1 border-2 border-[#29334d] bg-[#11182b] p-2">
@@ -163,66 +153,8 @@ export function WalletPanel(): React.ReactElement {
               to="/champions"
               className="flex w-full items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
             >
-              <span className="text-[7px]">@@</span>
               View Champion
             </Link>
-
-            <div>
-              <p className="mb-1 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Items</p>
-              <div className="max-h-24 space-y-1 overflow-auto pr-1">
-                {balance?.items?.length ? (
-                  balance.items.map((item) => {
-                    const rarityColor = RARITY_COLORS[item.rarity ?? "common"] ?? RARITY_COLORS.common;
-                    return (
-                    <div
-                      className="flex items-center justify-between gap-2 border-2 bg-[#11182b] px-2 py-1 text-[8px]"
-                      key={`${item.tokenId}-${item.name}`}
-                      style={{ borderColor: rarityColor + "44" }}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-bold" style={{ color: rarityColor }}>{item.name}</p>
-                        <p className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">
-                          x{item.balance}
-                          {item.rarity && item.rarity !== "common" ? `  |  ${item.rarity}` : ""}
-                          {item.equipSlot ? `  |  ${item.equipSlot}` : ""}
-                          {item.maxDurability ? `  |  dura ${item.maxDurability}` : ""}
-                        </p>
-                      </div>
-                      {item.equipSlot ? (
-                        <Button
-                          className="h-6 px-2 text-[7px]"
-                          disabled={equippingTokenId === item.tokenId}
-                          onClick={() => {
-                            const tokenId = Number(item.tokenId);
-                            if (!Number.isFinite(tokenId)) return;
-                            setEquippingTokenId(item.tokenId);
-                            void equipItem(tokenId)
-                              .then((ok) => {
-                                notify(
-                                  ok
-                                    ? `Equipped ${item.name} (${item.equipSlot}).`
-                                    : `Could not equip ${item.name}.`,
-                                  ok ? "success" : "error"
-                                );
-                              })
-                              .finally(() => {
-                                setEquippingTokenId(null);
-                              });
-                          }}
-                          type="button"
-                          variant="secondary"
-                        >
-                          Equip
-                        </Button>
-                      ) : null}
-                    </div>
-                    );
-                  })
-                ) : (
-                  <p className="text-[8px] text-[#9aa7cc]">No items</p>
-                )}
-              </div>
-            </div>
           </>
         )}
       </CardContent>}

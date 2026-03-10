@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWallet } from "@/hooks/useWallet";
+import { getAuthToken } from "@/lib/agentAuth";
 import { API_URL } from "../config.js";
 
 interface QueueStatus {
@@ -45,9 +46,13 @@ export function MatchmakingQueue(): React.ReactElement {
 
     setLoading(true);
     try {
+      const token = await getAuthToken(address);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const response = await fetch(`${API_URL}/api/pvp/queue/join`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           agentId: `agent_${address.slice(2, 10)}`,
           walletAddress: address,
@@ -76,9 +81,13 @@ export function MatchmakingQueue(): React.ReactElement {
 
     setLoading(true);
     try {
+      const token = await getAuthToken(address);
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const response = await fetch(`${API_URL}/api/pvp/queue/leave`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           agentId: `agent_${address.slice(2, 10)}`,
           format: selectedFormat,

@@ -3,32 +3,20 @@ import * as React from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import { getAuthToken } from "@/lib/agentAuth";
-import { validateCharacterName } from "@/lib/characterNameValidation";
 import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { fetchDiary, type DiaryEntry } from "@/ShardClient";
-import type { CharacterCreateResponse, CharacterStats } from "@/types";
 
-type View = "list" | "create" | "result" | "detail";
+type View = "list" | "detail";
 
 interface CharacterDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-function combineStats(base: CharacterStats, modifiers: CharacterStats): CharacterStats {
-  const keys = Object.keys(base) as (keyof CharacterStats)[];
-  const result = {} as CharacterStats;
-  for (const key of keys) {
-    result[key] = Math.floor(base[key] * modifiers[key]);
-  }
-  return result;
+  onRequestCreate?: () => void;
 }
 
 /* ── Rarity colors ───────────────────────────────────────────────── */
@@ -93,17 +81,11 @@ function diaryTimeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
-export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): React.ReactElement {
+export function CharacterDialog({ open, onOpenChange, onRequestCreate }: CharacterDialogProps): React.ReactElement {
   const { address, isConnected, balance } = useWallet();
-  const { classes, races, characters, loading, load, create } = useCharacters();
+  const { characters, loading, load } = useCharacters();
 
   const [view, setView] = React.useState<View>("list");
-  const [name, setName] = React.useState("");
-  const [raceId, setRaceId] = React.useState("");
-  const [classId, setClassId] = React.useState("");
-  const [submitting, setSubmitting] = React.useState(false);
-  const [createError, setCreateError] = React.useState<string | null>(null);
-  const [result, setResult] = React.useState<CharacterCreateResponse | null>(null);
   const [selectedCharacter, setSelectedCharacter] = React.useState<typeof characters[number] | null>(null);
   const [deploying, setDeploying] = React.useState(false);
   const [deployResult, setDeployResult] = React.useState<string | null>(null);
@@ -119,12 +101,6 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
   React.useEffect(() => {
     if (!open) {
       setView("list");
-      setName("");
-      setRaceId("");
-      setClassId("");
-      setResult(null);
-      setSubmitting(false);
-      setCreateError(null);
       setDeployResult(null);
       setDiaryEntries([]);
       setExpandedEntry(null);
@@ -181,23 +157,6 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
       setDeploying(false);
     }
   }
-
-  const selectedRace = races.find((race) => race.id === raceId);
-  const selectedClass = classes.find((classInfo) => classInfo.id === classId);
-
-  const previewStats =
-    selectedRace && selectedClass
-      ? combineStats(selectedClass.baseStats, selectedRace.statModifiers)
-      : null;
-  const nameValidationError = validateCharacterName(name);
-
-  const canCreate = Boolean(
-    address &&
-      !nameValidationError &&
-      selectedRace &&
-      selectedClass &&
-      !submitting
-  );
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
@@ -270,159 +229,8 @@ export function CharacterDialog({ open, onOpenChange }: CharacterDialogProps): R
               <Button onClick={() => onOpenChange(false)} type="button" variant="secondary">
                 Close
               </Button>
-              <Button onClick={() => setView("create")} type="button">
+              <Button onClick={() => onRequestCreate?.()} type="button">
                 Create Character
-              </Button>
-            </DialogFooter>
-          </div>
-        ) : null}
-
-        {isConnected && view === "create" ? (
-          <div className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-[8px] uppercase tracking-wide text-[#9aa7cc]">Name</label>
-                <Input
-                  maxLength={24}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                    if (createError) setCreateError(null);
-                  }}
-                  placeholder="2-24 characters"
-                  value={name}
-                />
-                {nameValidationError && name.trim().length > 0 ? (
-                  <p className="mt-1 text-[7px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
-                ) : null}
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[8px] uppercase tracking-wide text-[#9aa7cc]">Race</label>
-                <Select
-                  onChange={(event) => setRaceId(event.target.value)}
-                  value={raceId}
-                >
-                  <option value="">Select race...</option>
-                  {races.map((race) => (
-                    <option key={race.id} value={race.id}>
-                      {race.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div>
-                <label className="mb-1 block text-[8px] uppercase tracking-wide text-[#9aa7cc]">Class</label>
-                <Select
-                  onChange={(event) => setClassId(event.target.value)}
-                  value={classId}
-                >
-                  <option value="">Select class...</option>
-                  {classes.map((classInfo) => (
-                    <option key={classInfo.id} value={classInfo.id}>
-                      {classInfo.name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="border-2 border-[#2a3450] bg-[#11192d] p-2 text-[8px] text-[#d6deff]">
-                <p className="mb-1 uppercase tracking-wide text-[#9aa7cc]">Selection</p>
-                <p>{selectedRace?.name ?? "No race"}</p>
-                <p>{selectedClass?.name ?? "No class"}</p>
-              </div>
-            </div>
-
-            {previewStats ? (
-              <div className="border-2 border-[#2a3450] bg-[#11192d] p-2">
-                <p className="mb-2 text-[8px] uppercase tracking-wide text-[#9aa7cc]">Stat Preview</p>
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(previewStats).map(([key, value]) => (
-                    <Badge key={key} variant="secondary">
-                      {key}: {value}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <DialogFooter>
-              <Button onClick={() => setView("list")} type="button" variant="secondary">
-                Back
-              </Button>
-              <Button
-                disabled={!canCreate}
-                onClick={() => {
-                  if (!address || !selectedRace || !selectedClass) return;
-                  setCreateError(null);
-                  const localNameError = validateCharacterName(name.trim());
-                  if (localNameError) {
-                    setCreateError(localNameError);
-                    return;
-                  }
-                  setSubmitting(true);
-                  void create({
-                    walletAddress: address,
-                    name: name.trim(),
-                    race: selectedRace.id,
-                    className: selectedClass.id,
-                  })
-                    .then((createResult) => {
-                      if ("ok" in createResult && createResult.ok) {
-                        setResult(createResult);
-                        setView("result");
-                      } else if ("error" in createResult) {
-                        setCreateError(createResult.error);
-                      }
-                    })
-                    .finally(() => {
-                      setSubmitting(false);
-                    });
-                }}
-                type="button"
-              >
-                {submitting ? "Creating..." : "Mint Character"}
-              </Button>
-            </DialogFooter>
-            {createError ? (
-              <p className="text-[8px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
-                [ERR] {createError}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
-
-        {isConnected && view === "result" && result ? (
-          <div className="space-y-3">
-            <div className="border-2 border-black bg-[#54f28b] p-3 text-[8px] text-black shadow-[3px_3px_0_0_#000]">
-              Character created successfully.
-            </div>
-
-            <div className="border-2 border-[#2a3450] bg-[#11192d] p-3">
-              <p className="text-[9px] text-[#f1f5ff]">{result.character.name}</p>
-              <p className="text-[8px] text-[#9aa7cc]">{result.character.description}</p>
-              <p className="mt-2 break-all text-[8px] text-[#9aa7cc]">tx: {result.txHash}</p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(result.character.stats).map(([key, value]) => (
-                <Badge key={key} variant="secondary">
-                  {key}: {value}
-                </Badge>
-              ))}
-            </div>
-
-            <DialogFooter>
-              <Button
-                onClick={() => {
-                  if (!address) return;
-                  void load(address).then(() => {
-                    setView("list");
-                  });
-                }}
-                type="button"
-              >
-                Done
               </Button>
             </DialogFooter>
           </div>

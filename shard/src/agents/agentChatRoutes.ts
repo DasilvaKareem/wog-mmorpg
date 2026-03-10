@@ -762,6 +762,8 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 mobs.push({ name: e.name, level: e.level, hp: e.hp, maxHp: e.maxHp, distance: dist });
               } else if (e.type === "npc") {
                 npcs.push({ name: e.name, role: (e as any).npcType ?? (e as any).role ?? (e as any).subType, entityId: e.id, distance: dist });
+              } else if (e.type === "trainer" || e.type === "profession-trainer") {
+                npcs.push({ name: e.name, role: `${(e as any).teachesClass ?? "class"} trainer`, entityId: e.id, distance: dist });
               } else if (e.type === "resource" || e.type === "ore" || e.type === "herb") {
                 resources.push({ name: e.name, type: (e as any).resourceType ?? e.type, distance: dist });
               }

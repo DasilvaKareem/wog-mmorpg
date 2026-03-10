@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "project:wog-play": {
+      "name": "wog-play",
+      "scope": "project",
+      "source": "wog-play",
+      "sourceType": "hub",
+      "hubSkillId": "f5afd73d-6c85-4627-87a9-955aa695ee7f",
+      "hubSkillVersionId": "727745d5-dbe2-46d1-b64f-c13f96d0e27f",
+      "hubVersion": "2.1.0",
+      "installMode": "symlink",
+      "installedAt": "2026-03-08T03:57:14.075Z",
+      "updatedAt": "2026-03-08T03:57:14.075Z"
+    },
+    "project:find": {
+      "name": "find",
+      "scope": "project",
+      "source": "find",
+      "sourceType": "hub",
+      "hubSkillId": "f5e25ef6-197f-4995-8cf3-c91dbfc26b8b",
+      "hubSkillVersionId": "6bcbe95f-41df-47b9-a32e-5cb052d0cb5c",
+      "hubVersion": "1.0.0",
+      "installMode": "symlink",
+      "installedAt": "2026-03-08T03:57:18.678Z",
+      "updatedAt": "2026-03-08T03:57:18.678Z"
+    }
+  }
+}

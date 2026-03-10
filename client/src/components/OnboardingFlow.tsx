@@ -113,6 +113,50 @@ const ORIGINS = [
   },
 ];
 
+const PLANS = [
+  {
+    id: "free" as const,
+    name: "Free",
+    price: "$0",
+    period: "",
+    border: "#54f28b",
+    perks: [
+      "4-hour activity summaries",
+      "Level-up & death alerts",
+      "Basic agent commands",
+    ],
+  },
+  {
+    id: "adventurer" as const,
+    name: "Adventurer",
+    price: "$4.99",
+    period: "/mo",
+    border: "#5dadec",
+    perks: [
+      "Everything in Free",
+      "Real-time combat alerts",
+      "Loot drop notifications",
+      "Daily strategy tips from AI",
+      "Priority agent response",
+    ],
+  },
+  {
+    id: "champion" as const,
+    name: "Champion",
+    price: "$9.99",
+    period: "/mo",
+    border: "#ffcc00",
+    perks: [
+      "Everything in Adventurer",
+      "Live minute-by-minute feed",
+      "AI strategy coaching",
+      "Legendary item drop alerts",
+      "Custom alert filters",
+      "Early access to new zones",
+    ],
+  },
+];
+
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between text-[12px]">
@@ -152,9 +196,10 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const [origin, setOrigin] = React.useState("");
   const [successData, setSuccessData] = React.useState<SuccessData | null>(null);
 
-  // Telegram signup
+  // Telegram signup + plan selection
   const [telegramLinked, setTelegramLinked] = React.useState(false);
   const [botLinkUrl, setBotLinkUrl] = React.useState<string | null>(null);
+  const [selectedPlan, setSelectedPlan] = React.useState<"free" | "adventurer" | "champion">("free");
 
   // Sync wallet address into local state when it arrives (e.g. after Connect Wallet)
   React.useEffect(() => {
@@ -204,7 +249,14 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     onClose();
     navigate("/world");
     if (connectedAddress) {
-      setTimeout(() => gameBus.emit("lockToPlayer", { walletAddress: connectedAddress }), 500);
+      // Retry lockToPlayer a few times while the scene initializes and first poll completes
+      let attempts = 0;
+      const maxAttempts = 5;
+      const retry = setInterval(() => {
+        gameBus.emit("lockToPlayer", { walletAddress: connectedAddress });
+        if (++attempts >= maxAttempts) clearInterval(retry);
+      }, 500);
+      return () => clearInterval(retry);
     }
   }, [step]);
 
@@ -273,6 +325,16 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     Boolean(hairStyle) &&
     Boolean(eyeColor) &&
     Boolean(origin);
+
+  const missingFields: string[] = [];
+  if (!charName.trim()) missingFields.push("Name");
+  else if (nameValidationError) missingFields.push("Valid Name");
+  if (!selectedRace) missingFields.push("Race");
+  if (!selectedClass) missingFields.push("Class");
+  if (!skinColor) missingFields.push("Skin");
+  if (!hairStyle) missingFields.push("Hair");
+  if (!eyeColor) missingFields.push("Eyes");
+  if (!origin) missingFields.push("Origin");
 
   function handleRequestMint() {
     if (nameValidationError) {
@@ -363,10 +425,26 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
           {/* ── STEP: LOGIN ── */}
           {(step === "login") && (
             <div className="flex flex-col gap-3">
-              <p className="text-[12px] leading-relaxed text-[#9aa7cc] mb-1">
-                Sign in instantly — no wallet extension needed. Your account is
-                secured by thirdweb in-app wallets.
-              </p>
+              <button
+                onClick={() => { onClose(); navigate("/world"); }}
+                className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left text-[14px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] hover:text-[#7bf5a8] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-[13px] font-bold text-[#54f28b]">
+                  👁
+                </span>
+                <div className="flex flex-col">
+                  <span>Spectate World</span>
+                  <span className="text-[11px] text-[#6d77a3]">Watch without signing in</span>
+                </div>
+                <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
+              </button>
+
+              <div className="flex items-center gap-2 my-1">
+                <div className="flex-1 border-t border-[#2a3450]" />
+                <span className="text-[11px] text-[#6d77a3]">OR SIGN IN TO PLAY</span>
+                <div className="flex-1 border-t border-[#2a3450]" />
+              </div>
+
               {SOCIAL_PROVIDERS.map((p) => (
                 <button
                   key={p.strategy}
@@ -441,26 +519,6 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                 </button>
               ))}
-
-              <div className="flex items-center gap-2 my-1">
-                <div className="flex-1 border-t border-[#2a3450]" />
-                <span className="text-[11px] text-[#6d77a3]">OR</span>
-                <div className="flex-1 border-t border-[#2a3450]" />
-              </div>
-
-              <button
-                onClick={() => { onClose(); navigate("/world"); }}
-                className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left text-[14px] text-[#9aa7cc] shadow-[3px_3px_0_0_#000] transition hover:border-[#9aa7cc] hover:text-[#d6deff] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#9aa7cc] text-[13px] font-bold text-[#9aa7cc]">
-                  👁
-                </span>
-                <div className="flex flex-col">
-                  <span>Spectate World</span>
-                  <span className="text-[11px] text-[#6d77a3]">Watch without signing in</span>
-                </div>
-                <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
-              </button>
 
               {error && (
                 <p className="mt-1 text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
@@ -556,158 +614,184 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
           {/* ── STEP: CREATE CHARACTER ── */}
           {step === "create-char" && (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               {connectedAddress && (
                 <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
                   [AUTH] {connectedAddress.slice(0, 8)}...{connectedAddress.slice(-6)}
                 </div>
               )}
 
-              {/* Sprite Preview */}
-              {(skinColor || eyeColor || hairStyle || classId) && (
-                <div className="flex justify-center">
-                  <CharacterPreview
-                    skinColor={skinColor || "medium"}
-                    eyeColor={eyeColor || "brown"}
-                    hairStyle={hairStyle || "short"}
-                    classId={classId || "warrior"}
-                  />
+              {/* Top row: Preview + Name/Race/Class */}
+              <div className="flex gap-3">
+                {/* Character preview with zone frame */}
+                <div className="shrink-0 flex flex-col items-center">
+                  <div className="border-2 border-[#2a3450] bg-gradient-to-b from-[#0f1a2e] via-[#0b1424] to-[#162210] p-3 relative">
+                    <CharacterPreview
+                      skinColor={skinColor || "medium"}
+                      eyeColor={eyeColor || "brown"}
+                      hairStyle={hairStyle || "short"}
+                      classId={classId || "warrior"}
+                    />
+                    {/* Ground decoration */}
+                    <div className="absolute bottom-0 left-0 right-0 h-3 bg-gradient-to-t from-[#1a2a10] to-transparent" />
+                  </div>
+                  <div className="border-2 border-t-0 border-[#2a3450] bg-[#0a1a0e] px-3 py-1 w-full text-center">
+                    <span className="text-[9px] text-[#6d77a3] uppercase tracking-wider">Spawns in</span>
+                    <p className="text-[11px] text-[#54f28b] font-bold">Village Square</p>
+                    <span className="text-[9px] text-[#6d77a3]">Level 1 Zone</span>
+                  </div>
+                </div>
+
+                {/* Right side: Name + Race/Class */}
+                <div className="flex-1 flex flex-col gap-2 min-w-0">
+                  {/* Name */}
+                  <div>
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Character Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="2–24 characters"
+                      value={charName}
+                      maxLength={24}
+                      onChange={(e) => {
+                        setCharName(e.target.value);
+                        if (error) setError(null);
+                      }}
+                      className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[13px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
+                      autoFocus
+                    />
+                    {nameValidationError && charName.trim().length > 0 && (
+                      <p className="mt-1 text-[11px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                    )}
+                  </div>
+
+                  {/* Race */}
+                  <div>
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Race
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      {races.map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => setRaceId(r.id)}
+                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                            raceId === r.id
+                              ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                          }`}
+                        >
+                          {r.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Class */}
+                  <div>
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Class
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      {classes.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => setClassId(c.id)}
+                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                            classId === c.id
+                              ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
+                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                          }`}
+                        >
+                          {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Selected class/race description */}
+              {(selectedClass || selectedRace) && (
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[10px] text-[#8b95c2]">
+                  {selectedRace && <p><span className="text-[#ffcc00]">{selectedRace.name}:</span> {selectedRace.description}</p>}
+                  {selectedClass && <p className={selectedRace ? "mt-1" : ""}><span className="text-[#54f28b]">{selectedClass.name}:</span> {selectedClass.description}</p>}
                 </div>
               )}
 
-              {/* Name */}
-              <div>
-                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                  Character Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="2–24 characters"
-                  value={charName}
-                  maxLength={24}
-                  onChange={(e) => {
-                    setCharName(e.target.value);
-                    if (error) setError(null);
-                  }}
-                  className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[13px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
-                  autoFocus
-                />
-                {nameValidationError && charName.trim().length > 0 && (
-                  <p className="mt-1 text-[11px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
-                )}
-              </div>
-
-              {/* Race + Class side by side */}
-              <div className="grid grid-cols-2 gap-3">
+              {/* Appearance row: Skin + Eyes + Hair */}
+              <div className="grid grid-cols-3 gap-3">
+                {/* Skin Color */}
                 <div>
                   <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Race
+                    Skin
                   </label>
-                  <div className="flex flex-col gap-1">
-                    {races.map((r) => (
-                      <button
-                        key={r.id}
-                        onClick={() => setRaceId(r.id)}
-                        className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
-                          raceId === r.id
-                            ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                        }`}
-                      >
-                        {r.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Class
-                  </label>
-                  <div className="flex flex-col gap-1">
-                    {classes.map((c) => (
-                      <button
-                        key={c.id}
-                        onClick={() => setClassId(c.id)}
-                        className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
-                          classId === c.id
-                            ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
-                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                        }`}
-                      >
-                        {c.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Skin Color + Eye Color side by side */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Skin Color
-                  </label>
-                  <div className="flex flex-wrap gap-1">
+                  <div className="grid grid-cols-3 gap-1">
                     {SKIN_COLORS.map((s) => (
                       <button
                         key={s.id}
                         onClick={() => setSkinColor(s.id)}
-                        title={s.label}
-                        className={`h-7 w-7 border-2 transition ${
+                        className={`h-8 border-2 transition flex items-end justify-center pb-0.5 ${
                           skinColor === s.id
-                            ? "border-[#ffcc00] scale-110"
+                            ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
                             : "border-[#2a3450] hover:border-[#54f28b]"
                         }`}
                         style={{ backgroundColor: s.hex }}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Eye Color
-                  </label>
-                  <div className="flex flex-wrap gap-1">
-                    {EYE_COLORS.map((e) => (
-                      <button
-                        key={e.id}
-                        onClick={() => setEyeColor(e.id)}
-                        title={e.label}
-                        className={`h-7 w-7 border-2 transition flex items-center justify-center ${
-                          eyeColor === e.id
-                            ? "border-[#ffcc00] scale-110"
-                            : "border-[#2a3450] hover:border-[#54f28b]"
-                        }`}
-                        style={{ backgroundColor: e.hex }}
                       >
-                        <span className="text-[7px] text-white/70 font-bold drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)]">
-                          {e.label.slice(0, 2).toUpperCase()}
+                        <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                          {s.label}
                         </span>
                       </button>
                     ))}
                   </div>
                 </div>
-              </div>
 
-              {/* Hair Style */}
-              <div>
-                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                  Hair Style
-                </label>
-                <div className="grid grid-cols-6 gap-1">
-                  {HAIR_STYLES.map((h) => (
-                    <button
-                      key={h.id}
-                      onClick={() => setHairStyle(h.id)}
-                      className={`border-2 px-1 py-1 text-center text-[10px] transition ${
-                        hairStyle === h.id
-                          ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                          : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                      }`}
-                    >
-                      {h.label}
-                    </button>
-                  ))}
+                {/* Eye Color */}
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Eyes
+                  </label>
+                  <div className="grid grid-cols-3 gap-1">
+                    {EYE_COLORS.map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={() => setEyeColor(e.id)}
+                        className={`h-8 border-2 transition flex items-end justify-center pb-0.5 ${
+                          eyeColor === e.id
+                            ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
+                            : "border-[#2a3450] hover:border-[#54f28b]"
+                        }`}
+                        style={{ backgroundColor: e.hex }}
+                      >
+                        <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                          {e.label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hair Style */}
+                <div>
+                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                    Hair
+                  </label>
+                  <div className="grid grid-cols-2 gap-1 max-h-[136px] overflow-y-auto pr-0.5">
+                    {HAIR_STYLES.map((h) => (
+                      <button
+                        key={h.id}
+                        onClick={() => setHairStyle(h.id)}
+                        className={`border-2 px-1 py-0.5 text-center text-[9px] transition ${
+                          hairStyle === h.id
+                            ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                        }`}
+                      >
+                        {h.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -731,6 +815,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                         {o.label}
                       </span>
                       <span className="text-[9px] text-[#6d77a3] ml-1">/ {o.tone}</span>
+                      {origin === o.id && (
+                        <p className="text-[9px] text-[#8b95c2] mt-0.5 leading-tight">{o.desc}</p>
+                      )}
                     </button>
                   ))}
                 </div>
@@ -764,7 +851,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 disabled={!canCreate}
                 className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-2.5 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
-                [→] Mint Character — FREE
+                {canCreate
+                  ? "[→] Mint Character — $0.00"
+                  : `Select: ${missingFields.join(", ")}`}
               </button>
             </div>
           )}
@@ -856,21 +945,73 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
               </button>
             </div>
           )}
-          {/* ── STEP: TELEGRAM SIGNUP ── */}
+          {/* ── STEP: TELEGRAM SIGNUP + PLAN ── */}
           {step === "telegram-signup" && (
             <div className="flex flex-col gap-3">
+              {/* Plan selection */}
+              <p className="text-[12px] leading-relaxed text-[#9aa7cc]">
+                Choose your Telegram alerts plan. Upgrade anytime.
+              </p>
+
+              <div className="grid grid-cols-3 gap-2">
+                {PLANS.map((plan) => {
+                  const isSelected = selectedPlan === plan.id;
+                  return (
+                    <button
+                      key={plan.id}
+                      onClick={() => setSelectedPlan(plan.id)}
+                      className={`border-2 px-2 py-2 text-left transition flex flex-col ${
+                        isSelected
+                          ? "bg-[#0a1a0e] shadow-[3px_3px_0_0_#000]"
+                          : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
+                      }`}
+                      style={isSelected ? { borderColor: plan.border } : undefined}
+                    >
+                      <div className="flex items-baseline gap-1 mb-1">
+                        <span
+                          className="text-[13px] font-bold"
+                          style={{ color: isSelected ? plan.border : "#d6deff" }}
+                        >
+                          {plan.price}
+                        </span>
+                        {plan.period && (
+                          <span className="text-[9px] text-[#6d77a3]">{plan.period}</span>
+                        )}
+                      </div>
+                      <span
+                        className="text-[10px] font-bold mb-1.5"
+                        style={{ color: isSelected ? plan.border : "#9aa7cc" }}
+                      >
+                        {plan.name}
+                      </span>
+                      <div className="flex flex-col gap-0.5">
+                        {plan.perks.map((perk, i) => (
+                          <span
+                            key={i}
+                            className={`text-[8px] leading-tight ${
+                              isSelected ? "text-[#9aa7cc]" : "text-[#6d77a3]"
+                            }`}
+                          >
+                            {perk}
+                          </span>
+                        ))}
+                      </div>
+                      {isSelected && (
+                        <div
+                          className="mt-2 text-[8px] font-bold uppercase tracking-wider text-center py-0.5 border-t"
+                          style={{ color: plan.border, borderColor: plan.border + "40" }}
+                        >
+                          Selected
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Telegram connection */}
               {!telegramLinked ? (
                 <>
-                  <p className="text-[12px] leading-relaxed text-[#9aa7cc]">
-                    Get agent summaries and alerts delivered to your Telegram.
-                  </p>
-
-                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[11px] text-[#8b95c2]">
-                    <p className="text-[#9aa7cc] mb-1">You'll receive:</p>
-                    <p>• 4-hour activity summaries (kills, quests, zones)</p>
-                    <p>• Instant level-up &amp; death alerts</p>
-                  </div>
-
                   {botLinkUrl ? (
                     <a
                       href={botLinkUrl}
@@ -879,7 +1020,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                       className="flex w-full items-center justify-center gap-2 border-2 border-[#26a5e4] bg-[#0a1020] px-4 py-3 text-[14px] text-[#26a5e4] shadow-[3px_3px_0_0_#000] transition hover:bg-[#0e1830] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
                     >
                       <span className="flex h-5 w-5 items-center justify-center border border-[#26a5e4] text-[13px] font-bold">T</span>
-                      Open Telegram Bot
+                      Connect Telegram
                       <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                     </a>
                   ) : (
@@ -889,9 +1030,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   )}
 
                   <div className="flex items-center gap-2 text-[11px] text-[#8b95c2]">
-                    <span className="animate-pulse">●</span>
-                    <span className="animate-pulse" style={{ animationDelay: "0.3s" }}>●</span>
-                    <span className="opacity-30">●</span>
+                    <span className="animate-pulse">&bull;</span>
+                    <span className="animate-pulse" style={{ animationDelay: "0.3s" }}>&bull;</span>
+                    <span className="opacity-30">&bull;</span>
                     <span className="ml-1">Waiting for connection...</span>
                   </div>
 
@@ -904,20 +1045,17 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 </>
               ) : (
                 <>
-                  <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3">
-                    <p className="text-[14px] text-[#54f28b] mb-2">[✓] Connected!</p>
-                    <div className="text-[11px] text-[#9aa7cc] flex flex-col gap-0.5">
-                      <p>You'll receive:</p>
-                      <p>• 4-hour activity summaries</p>
-                      <p>• Instant level-up / death alerts</p>
-                    </div>
+                  <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2">
+                    <p className="text-[12px] text-[#54f28b]">[✓] Telegram Connected</p>
                   </div>
 
                   <button
                     onClick={() => setStep("done")}
                     className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
                   >
-                    Continue →
+                    {selectedPlan === "free"
+                      ? "Enter World →"
+                      : `Subscribe & Enter — ${PLANS.find((p) => p.id === selectedPlan)?.price}/mo`}
                   </button>
                 </>
               )}

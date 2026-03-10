@@ -2,6 +2,7 @@ import { createThirdwebClient } from "thirdweb";
 import { API_URL } from "../config.js";
 import { defineChain } from "thirdweb";
 import { createWallet, type WalletId } from "thirdweb/wallets";
+import { getAuthToken } from "./agentAuth";
 
 const SKALE_CHAIN_ID = 1187947933;
 
@@ -184,12 +185,21 @@ export class WalletManager {
     return this._balance;
   }
 
+  private async authHeaders(): Promise<Record<string, string>> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (this._address) {
+      const token = await getAuthToken(this._address);
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
+    return headers;
+  }
+
   async buyItem(tokenId: number, quantity: number): Promise<boolean> {
     if (!this._address) return false;
 
     const res = await fetch(`${API_URL}/shop/buy`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await this.authHeaders(),
       body: JSON.stringify({
         buyerAddress: this._address,
         tokenId,
@@ -209,7 +219,7 @@ export class WalletManager {
     console.log("[equipItem] Request:", { zoneId, tokenId, walletAddress: this._address });
     const res = await fetch(`${API_URL}/equipment/equip`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await this.authHeaders(),
       body: JSON.stringify({
         zoneId,
         tokenId,
@@ -231,7 +241,7 @@ export class WalletManager {
 
     const res = await fetch(`${API_URL}/equipment/unequip`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await this.authHeaders(),
       body: JSON.stringify({
         zoneId,
         slot,

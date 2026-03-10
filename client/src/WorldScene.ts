@@ -196,7 +196,7 @@ export class WorldScene extends Phaser.Scene {
       const dragThreshold = this.touchMode ? 8 : 4;
       if (!this.isDragging && movedX < dragThreshold && movedY < dragThreshold) return;
       this.isDragging = true;
-      this.followTarget = null;
+      this.releaseFollow();
       const cam = this.cameras.main;
       cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
       cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
@@ -307,10 +307,16 @@ export class WorldScene extends Phaser.Scene {
     });
   }
 
+  /** Release camera tracking entirely (ESC, arrow keys, drag) */
+  private releaseFollow(): void {
+    this.followTarget = null;
+    this.lockedWalletAddress = null;
+  }
+
   update(): void {
     // ESC releases spectate
     if (Phaser.Input.Keyboard.JustDown(this.escKey)) {
-      this.followTarget = null;
+      this.releaseFollow();
     }
 
     const cam = this.cameras.main;
@@ -321,7 +327,7 @@ export class WorldScene extends Phaser.Scene {
     // Arrow key pan (releases spectate)
     if (this.cursors.left.isDown || this.cursors.right.isDown ||
         this.cursors.up.isDown || this.cursors.down.isDown) {
-      this.followTarget = null;
+      this.releaseFollow();
     }
 
     if (this.followTarget === null) {
@@ -336,7 +342,8 @@ export class WorldScene extends Phaser.Scene {
       const spritePos = this.entityRenderer.getSpritePosition(this.followTarget);
       if (spritePos) {
         cam.centerOn(spritePos.x, spritePos.y);
-      } else {
+      } else if (!this.lockedWalletAddress) {
+        // Only clear follow target if we're not waiting for a wallet-locked entity to spawn
         this.followTarget = null;
       }
     }
@@ -641,7 +648,7 @@ export class WorldScene extends Phaser.Scene {
     if (!this.worldLayout.loaded) return;
     const center = this.worldLayout.getZonePixelCenter(zoneId);
     this.cameras.main.centerOn(center.x, center.z);
-    this.followTarget = null;
+    this.releaseFollow();
     this.currentZoneLabel = zoneId;
     gameBus.emit("zoneChanged", { zoneId });
   }
@@ -905,6 +912,11 @@ export class WorldScene extends Phaser.Scene {
     if (this.followTarget) {
       const followed = this.entityRenderer.getEntity(this.followTarget);
       if (followed?.zoneId) selected.add(followed.zoneId);
+    }
+
+    // Ensure spawn zone is polled when waiting for a wallet-locked entity
+    if (this.lockedWalletAddress && !this.followTarget) {
+      selected.add("village-square");
     }
 
     for (const zone of nearest.slice(0, 2)) {
