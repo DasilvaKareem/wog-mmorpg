@@ -145,24 +145,28 @@ export function LandingPage(): React.ReactElement {
       />
 
       {/* ── HERO ── */}
-      <header className="relative z-10 w-full">
+      <header className="relative z-10 w-full overflow-hidden">
         <img
           src="/assets/Banner.png"
           alt="World of Geneva"
           className="w-full object-cover"
           style={{ display: "block", maxHeight: "90vh" }}
         />
-        {/* Drifting pixel clouds */}
-        <DriftingClouds />
+        {/* Drifting pixel clouds — overlays the banner */}
+        <div className="absolute inset-0 pointer-events-none">
+          <DriftingClouds />
+        </div>
         {/* Logo overlay — top-center */}
-        <div className="absolute top-8 left-1/2 -translate-x-1/2 relative">
-          <img
-            src="/assets/logo.png"
-            alt="World of Geneva"
-            className="w-[640px] max-w-[90vw] object-contain"
-            style={{ filter: "drop-shadow(2px 6px 16px rgba(0,0,0,0.7))" }}
-          />
-          <LogoSparkles />
+        <div className="absolute top-8 left-1/2 -translate-x-1/2">
+          <div className="relative">
+            <img
+              src="/assets/logo.png"
+              alt="World of Geneva"
+              className="w-[640px] max-w-[90vw] object-contain"
+              style={{ filter: "drop-shadow(2px 6px 16px rgba(0,0,0,0.7))" }}
+            />
+            <LogoSparkles />
+          </div>
         </div>
         {/* CTA — just below logo */}
         <div className="absolute top-[clamp(140px,28vw,280px)] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
