@@ -80,6 +80,8 @@ export class WalletManager {
   /** Sync an address obtained via social/in-app wallet into WalletManager state */
   async syncExternalAddress(address: string): Promise<void> {
     this._address = address;
+    this._custodialAddress = null;
+    this._custodialResolved = false;
     // Fire-and-forget registration + balance — don't block the wallet becoming "connected"
     void fetch(`${API_URL}/wallet/register`, {
       method: "POST",
@@ -127,6 +129,8 @@ export class WalletManager {
 
     this._address = account.address;
     this._account = account as any;
+    this._custodialAddress = null;
+    this._custodialResolved = false;
 
     // Fire-and-forget registration + balance — don't block on these
     void fetch(`${API_URL}/wallet/register`, {
@@ -166,6 +170,13 @@ export class WalletManager {
   setCustodialAddress(address: string | null): void {
     this._custodialAddress = address;
     this._custodialResolved = true;
+  }
+
+  /** Returns the in-world wallet to follow: custodial if deployed, otherwise owner. */
+  async getTrackedWalletAddress(): Promise<string | null> {
+    if (!this._address) return null;
+    const custodial = await this.resolveCustodialAddress();
+    return custodial || this._address;
   }
 
   async fetchBalance(force = false): Promise<WalletBalance | null> {

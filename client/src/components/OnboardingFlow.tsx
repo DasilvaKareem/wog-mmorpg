@@ -262,17 +262,39 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     if (step !== "done") return;
     onClose();
     navigate("/world");
+    let retry: number | null = null;
+
     if (connectedAddress) {
-      // Retry lockToPlayer a few times while the scene initializes and first poll completes
-      let attempts = 0;
-      const maxAttempts = 5;
-      const retry = setInterval(() => {
-        gameBus.emit("lockToPlayer", { walletAddress: connectedAddress });
-        if (++attempts >= maxAttempts) clearInterval(retry);
-      }, 500);
-      return () => clearInterval(retry);
+      void (async () => {
+        const trackedWallet = await WalletManager.getInstance().getTrackedWalletAddress();
+        const walletToFocus = trackedWallet ?? connectedAddress;
+        const zoneId = successData?.agentZoneId;
+        let attempts = 0;
+        const maxAttempts = 8;
+
+        retry = window.setInterval(() => {
+          if (zoneId) {
+            gameBus.emit("switchZone", { zoneId });
+          }
+          gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
+          if (++attempts >= maxAttempts && retry !== null) {
+            window.clearInterval(retry);
+            retry = null;
+          }
+        }, 350);
+      })();
     }
-  }, [step]);
+
+    return () => {
+      if (retry !== null) window.clearInterval(retry);
+    };
+  }, [connectedAddress, navigate, onClose, step, successData?.agentZoneId]);
+
+  React.useEffect(() => {
+    if (step !== "success" || !successData?.agentEntityId) return;
+    const timeout = window.setTimeout(() => setStep("done"), 600);
+    return () => window.clearTimeout(timeout);
+  }, [step, successData?.agentEntityId]);
 
   async function connectSocial(strategy: SocialStrategy) {
     setError(null);
@@ -403,14 +425,67 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         return;
       }
 
-      setSuccessData({
+      const successBase: SuccessData = {
         name: charName.trim(),
         race: selectedRace?.name ?? raceId,
         className: selectedClass?.name ?? classId,
         txHash: result.txHash,
-        agentDeploying: false,
-      });
+        agentDeploying: true,
+      };
+      setSuccessData(successBase);
       setStep("success");
+
+      const token = await getAuthToken(targetAddress);
+      if (!token) {
+        setSuccessData({
+          ...successBase,
+          agentDeploying: false,
+          agentError: "Auth not available",
+        });
+        return;
+      }
+
+      try {
+        const deployRes = await fetch(`${API_URL}/agent/deploy`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            walletAddress: targetAddress,
+            characterName: charName.trim(),
+            raceId,
+            classId,
+          }),
+        });
+        const deployData = await deployRes.json();
+
+        if (deployRes.ok) {
+          if (deployData.custodialWallet) {
+            WalletManager.getInstance().setCustodialAddress(deployData.custodialWallet);
+          }
+          setSuccessData({
+            ...successBase,
+            agentDeploying: false,
+            agentEntityId: deployData.entityId,
+            agentZoneId: deployData.zoneId,
+          });
+          return;
+        }
+
+        setSuccessData({
+          ...successBase,
+          agentDeploying: false,
+          agentError: deployData.error ?? "Agent deploy failed",
+        });
+      } catch (deployErr) {
+        setSuccessData({
+          ...successBase,
+          agentDeploying: false,
+          agentError: deployErr instanceof Error ? deployErr.message : "Agent deploy failed",
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Minting failed. Please try again.");
       setStep("create-char");

@@ -10,6 +10,61 @@ import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameSer
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 
+type CharacterListEntry = {
+  tokenId: string;
+  name: string;
+  description: string;
+  properties: {
+    race?: string;
+    class?: string;
+    level?: number;
+    xp?: number;
+    stats?: unknown;
+  };
+};
+
+function collapseCharacterName(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function stripCharacterClassSuffix(value: string): string {
+  return collapseCharacterName(value).replace(/\s+the\s+\w+$/i, "").trim();
+}
+
+function normalizeCharacterKey(name: string, classId?: string | null): string {
+  return `${stripCharacterClassSuffix(name).toLowerCase()}::${(classId ?? "").trim().toLowerCase()}`;
+}
+
+function compareCharacterEntries(left: CharacterListEntry, right: CharacterListEntry): number {
+  const leftLevel = Number(left.properties.level ?? 1);
+  const rightLevel = Number(right.properties.level ?? 1);
+  if (leftLevel !== rightLevel) return leftLevel - rightLevel;
+
+  const leftXp = Number(left.properties.xp ?? 0);
+  const rightXp = Number(right.properties.xp ?? 0);
+  if (leftXp !== rightXp) return leftXp - rightXp;
+
+  const leftToken = /^\d+$/.test(left.tokenId) ? Number(left.tokenId) : Number.POSITIVE_INFINITY;
+  const rightToken = /^\d+$/.test(right.tokenId) ? Number(right.tokenId) : Number.POSITIVE_INFINITY;
+  if (leftToken !== rightToken) return rightToken - leftToken;
+
+  return 0;
+}
+
+function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
+  const deduped = new Map<string, CharacterListEntry>();
+
+  for (const character of characters) {
+    const key = normalizeCharacterKey(character.name, character.properties.class);
+    const existing = deduped.get(key);
+    if (!existing || compareCharacterEntries(existing, character) < 0) {
+      deduped.set(key, character);
+    }
+  }
+
+  return Array.from(deduped.values());
+}
+
 export function registerCharacterRoutes(server: FastifyInstance) {
   /**
    * GET /character/classes
@@ -113,6 +168,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     }
 
     const character = computeCharacter(name, race, className);
+    const existingSave = await loadCharacter(walletAddress, character.name);
 
     const callingLabel = calling ? calling.charAt(0).toUpperCase() + calling.slice(1) : null;
     const metadata = {
@@ -134,7 +190,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
       // Seed character store so level/xp are always in Redis from the start.
       // IMPORTANT: Only seed if no existing save exists — never overwrite progress.
-      const existingSave = await loadCharacter(walletAddress, character.name);
       if (!existingSave) {
         await saveCharacter(walletAddress, character.name, {
           name: character.name,
@@ -168,37 +223,52 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         server.log.info(`[character] Existing save found for "${character.name}" (L${existingSave.level}) — skipping seed`);
       }
 
-      // Mint NFT + register name in background — don't block the response
-      void (async () => {
-        try {
-          const txHash = await mintCharacter(walletAddress, metadata);
-          server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
-        } catch (err) {
-          server.log.warn(`[character] NFT mint failed for ${walletAddress} (non-fatal, Redis has data): ${(err as Error).message}`);
-        }
-
-        try {
-          const existing = await reverseLookupOnChain(walletAddress);
-          if (!existing) {
-            await registerNameOnChain(walletAddress, character.name);
-            server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
+      if (!existingSave) {
+        // Mint NFT + register name in background — don't block the response.
+        // Repeated create calls used to remint the same character because Redis was
+        // already seeded but we still executed this block unconditionally.
+        void (async () => {
+          try {
+            const txHash = await mintCharacter(walletAddress, metadata);
+            server.log.info(`Minted character "${character.name}" to ${walletAddress}: ${txHash}`);
+          } catch (err) {
+            server.log.warn(`[character] NFT mint failed for ${walletAddress} (non-fatal, Redis has data): ${(err as Error).message}`);
           }
-        } catch (err) {
-          server.log.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
-        }
-      })();
+
+          try {
+            const existing = await reverseLookupOnChain(walletAddress);
+            if (!existing) {
+              await registerNameOnChain(walletAddress, character.name);
+              server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
+            }
+          } catch (err) {
+            server.log.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
+          }
+        })();
+      } else {
+        server.log.info(`[character] Skipping remint for existing character "${character.name}" on ${walletAddress}`);
+      }
+
+      const responseLevel = existingSave?.level ?? character.level;
+      const responseXp = existingSave?.xp ?? 0;
+      const responseStats = computeStatsAtLevel(
+        existingSave?.raceId ?? character.race.id,
+        existingSave?.classId ?? character.class.id,
+        responseLevel
+      );
 
       return {
         ok: true,
+        existing: Boolean(existingSave),
         walletRegistration: registration,
         character: {
           name: metadata.name,
           description: metadata.description,
-          race: character.race.id,
-          class: character.class.id,
-          level: character.level,
-          xp: 0,
-          stats: character.stats,
+          race: existingSave?.raceId ?? character.race.id,
+          class: existingSave?.classId ?? character.class.id,
+          level: responseLevel,
+          xp: responseXp,
+          stats: responseStats,
         },
       };
     } catch (err) {
@@ -333,7 +403,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             })
           );
 
-          return { walletAddress, liveEntity, deployedCharacterName, characters };
+          return {
+            walletAddress,
+            liveEntity,
+            deployedCharacterName,
+            characters: dedupeCharacterEntries(characters as CharacterListEntry[]),
+          };
         }
 
         // Fallback: on-chain returned empty — build characters from Redis
@@ -382,7 +457,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           };
         });
 
-        return { walletAddress, liveEntity, deployedCharacterName, characters };
+        return {
+          walletAddress,
+          liveEntity,
+          deployedCharacterName,
+          characters: dedupeCharacterEntries(characters as CharacterListEntry[]),
+        };
       } catch (err) {
         server.log.error(err, `Failed to fetch characters for ${walletAddress}`);
         reply.code(500);

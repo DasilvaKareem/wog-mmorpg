@@ -1,39 +1,101 @@
 import * as React from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 
-import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
-import { CharacterDialog } from "@/components/CharacterDialog";
-import { ColiseumDialog } from "@/components/ColiseumDialog";
-import { InspectDialog } from "@/components/InspectDialog";
-import { NpcInfoDialog } from "@/components/NpcInfoDialog";
-import { QuestLogDialog } from "@/components/QuestLogDialog";
-import { OnboardingFlow } from "@/components/OnboardingFlow";
-import { GameCanvas } from "@/components/GameCanvas";
-import { LandingPage } from "@/components/LandingPage";
-import { LeaderboardPage } from "@/components/LeaderboardPage";
-import { MarketplacePage } from "@/components/MarketplacePage";
-import { MediaPage } from "@/components/MediaPage";
 import { Navbar } from "@/components/Navbar";
-import { NewsPage } from "@/components/NewsPage";
-import { RacesClassesPage } from "@/components/RacesClassesPage";
-import { StoryPage } from "@/components/StoryPage";
-import { X402AgentPage } from "@/components/X402AgentPage";
-import { ChampionsPage } from "@/components/ChampionsPage";
-import { PricingPage } from "@/components/PricingPage";
-import { AdminDashboardPage } from "@/components/AdminDashboardPage";
-import { ShopDialog } from "@/components/ShopDialog";
-import { GuildDialog } from "@/components/GuildDialog";
-import { WalletPanel } from "@/components/WalletPanel";
-import { ChatLog } from "@/components/ChatLog";
-import { AgentChatPanel } from "@/components/AgentChatPanel";
-import { HotkeyBar } from "@/components/HotkeyBar";
-import { PlayerPanel } from "@/components/PlayerPanel";
-import { WorldMap } from "@/components/WorldMap";
-import { FarcasterMiniApp } from "@/pages/FarcasterMiniApp";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
+import { WalletManager } from "@/lib/walletManager";
+
+const AuctionHouseDialog = React.lazy(() =>
+  import("@/components/AuctionHouseDialog").then((mod) => ({ default: mod.AuctionHouseDialog }))
+);
+const CharacterDialog = React.lazy(() =>
+  import("@/components/CharacterDialog").then((mod) => ({ default: mod.CharacterDialog }))
+);
+const ColiseumDialog = React.lazy(() =>
+  import("@/components/ColiseumDialog").then((mod) => ({ default: mod.ColiseumDialog }))
+);
+const InspectDialog = React.lazy(() =>
+  import("@/components/InspectDialog").then((mod) => ({ default: mod.InspectDialog }))
+);
+const NpcInfoDialog = React.lazy(() =>
+  import("@/components/NpcInfoDialog").then((mod) => ({ default: mod.NpcInfoDialog }))
+);
+const QuestLogDialog = React.lazy(() =>
+  import("@/components/QuestLogDialog").then((mod) => ({ default: mod.QuestLogDialog }))
+);
+const GameCanvas = React.lazy(() =>
+  import("@/components/GameCanvas").then((mod) => ({ default: mod.GameCanvas }))
+);
+const ShopDialog = React.lazy(() =>
+  import("@/components/ShopDialog").then((mod) => ({ default: mod.ShopDialog }))
+);
+const GuildDialog = React.lazy(() =>
+  import("@/components/GuildDialog").then((mod) => ({ default: mod.GuildDialog }))
+);
+const WalletPanel = React.lazy(() =>
+  import("@/components/WalletPanel").then((mod) => ({ default: mod.WalletPanel }))
+);
+const ChatLog = React.lazy(() =>
+  import("@/components/ChatLog").then((mod) => ({ default: mod.ChatLog }))
+);
+const AgentChatPanel = React.lazy(() =>
+  import("@/components/AgentChatPanel").then((mod) => ({ default: mod.AgentChatPanel }))
+);
+const HotkeyBar = React.lazy(() =>
+  import("@/components/HotkeyBar").then((mod) => ({ default: mod.HotkeyBar }))
+);
+const OnboardingFlow = React.lazy(() =>
+  import("@/components/OnboardingFlow").then((mod) => ({ default: mod.OnboardingFlow }))
+);
+const PlayerPanel = React.lazy(() =>
+  import("@/components/PlayerPanel").then((mod) => ({ default: mod.PlayerPanel }))
+);
+const WorldMap = React.lazy(() =>
+  import("@/components/WorldMap").then((mod) => ({ default: mod.WorldMap }))
+);
+const LandingPage = React.lazy(() =>
+  import("@/components/LandingPage").then((mod) => ({ default: mod.LandingPage }))
+);
+const LeaderboardPage = React.lazy(() =>
+  import("@/components/LeaderboardPage").then((mod) => ({ default: mod.LeaderboardPage }))
+);
+const MarketplacePage = React.lazy(() =>
+  import("@/components/MarketplacePage").then((mod) => ({ default: mod.MarketplacePage }))
+);
+const MediaPage = React.lazy(() =>
+  import("@/components/MediaPage").then((mod) => ({ default: mod.MediaPage }))
+);
+const NewsPage = React.lazy(() =>
+  import("@/components/NewsPage").then((mod) => ({ default: mod.NewsPage }))
+);
+const RacesClassesPage = React.lazy(() =>
+  import("@/components/RacesClassesPage").then((mod) => ({ default: mod.RacesClassesPage }))
+);
+const StoryPage = React.lazy(() =>
+  import("@/components/StoryPage").then((mod) => ({ default: mod.StoryPage }))
+);
+const X402AgentPage = React.lazy(() =>
+  import("@/components/X402AgentPage").then((mod) => ({ default: mod.X402AgentPage }))
+);
+const ChampionsPage = React.lazy(() =>
+  import("@/components/ChampionsPage").then((mod) => ({ default: mod.ChampionsPage }))
+);
+const PricingPage = React.lazy(() =>
+  import("@/components/PricingPage").then((mod) => ({ default: mod.PricingPage }))
+);
+const AdminDashboardPage = React.lazy(() =>
+  import("@/components/AdminDashboardPage").then((mod) => ({ default: mod.AdminDashboardPage }))
+);
+const FarcasterMiniApp = React.lazy(() =>
+  import("@/pages/FarcasterMiniApp").then((mod) => ({ default: mod.FarcasterMiniApp }))
+);
+
+function RouteFallback(): React.ReactElement {
+  return <div className="min-h-screen bg-[#060d12]" />;
+}
 
 function GameWorld(): React.ReactElement {
   const [characterOpen, setCharacterOpen] = React.useState(false);
@@ -52,6 +114,27 @@ function GameWorld(): React.ReactElement {
   const showChat = chatVisible ?? !isCompactWorldUI;
   const showRanks = ranksVisible ?? !isCompactWorldUI;
   const showWallet = walletVisible ?? !isCompactWorldUI;
+
+  const focusOwnedCharacter = React.useCallback((zoneId?: string) => {
+    if (!address) return;
+
+    void (async () => {
+      const trackedWallet = await WalletManager.getInstance().getTrackedWalletAddress();
+      const walletToFocus = trackedWallet ?? address;
+      let attempts = 0;
+      const maxAttempts = 8;
+
+      const retry = window.setInterval(() => {
+        if (zoneId) {
+          gameBus.emit("switchZone", { zoneId });
+        }
+        gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
+        if (++attempts >= maxAttempts) {
+          window.clearInterval(retry);
+        }
+      }, 350);
+    })();
+  }, [address]);
 
   // Listen for global "open onboarding" event (from Navbar sign-in button)
   React.useEffect(() => {
@@ -81,12 +164,15 @@ function GameWorld(): React.ReactElement {
         setRanksVisible((v) => !(v ?? !isCompactWorldUI));
       } else if (key === "w") {
         setWalletVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (event.code === "Space" && address) {
+        event.preventDefault();
+        focusOwnedCharacter();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [address, currentZone, isCompactWorldUI]);
+  }, [address, currentZone, focusOwnedCharacter, isCompactWorldUI]);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
@@ -121,71 +207,73 @@ function GameWorld(): React.ReactElement {
   // Lock camera to connected player's agent entity
   React.useEffect(() => {
     if (address) {
-      gameBus.emit("lockToPlayer", { walletAddress: address });
+      focusOwnedCharacter();
     }
-  }, [address]);
+  }, [address, focusOwnedCharacter]);
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <GameCanvas />
-      {showWallet && <WalletPanel />}
-      {showRanks && (
-        <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
-      )}
-      {showChat && (
-        address ? (
-          <AgentChatPanel
-            walletAddress={address}
-            currentZone={currentZone}
-            className="absolute bottom-16 right-2 md:right-4 z-30"
-          />
-        ) : (
-          <ChatLog
-            zoneId={currentZone}
-            className="absolute bottom-16 right-2 md:right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto"
-          />
-        )
-      )}
-      <ShopDialog />
-      <GuildDialog />
-      <AuctionHouseDialog />
-      <ColiseumDialog />
-      <InspectDialog />
-      <NpcInfoDialog />
-      <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
-      <CharacterDialog
-        onOpenChange={setCharacterOpen}
-        open={characterOpen}
-        onRequestCreate={() => { setCharacterOpen(false); setOnboardingOpen(true); }}
-      />
-      {onboardingOpen && (
-        <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
-      )}
-      <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
-      <div
-        className="absolute left-1/2 -translate-x-1/2 z-30"
-        style={{
-          bottom: isCompactWorldUI ? "calc(env(safe-area-inset-bottom, 0px) + 8px)" : "8px",
-        }}
-      >
-        <HotkeyBar
-          mobile={isCompactWorldUI}
-          onCharacter={() => setCharacterOpen((c) => !c)}
-          onMap={() => setMapOpen((c) => !c)}
-          onQuestLog={() => setQuestLogOpen((c) => !c)}
-          onInspect={() => {
-            if (address && currentZone) {
-              gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
-            }
-          }}
-          onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
-          onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
-          onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
-          chatActive={showChat}
-          ranksActive={showRanks}
-          walletActive={showWallet}
+      <React.Suspense fallback={<RouteFallback />}>
+        <GameCanvas />
+      </React.Suspense>
+      <React.Suspense fallback={null}>
+        {showWallet && <WalletPanel />}
+        {showRanks && (
+          <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
+        )}
+        {showChat && (
+          address ? (
+            <AgentChatPanel
+              walletAddress={address}
+              currentZone={currentZone}
+              className="absolute bottom-16 right-2 md:right-4 z-30"
+            />
+          ) : (
+            <ChatLog
+              zoneId={currentZone}
+              className="absolute bottom-16 right-2 md:right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto"
+            />
+          )
+        )}
+        <ShopDialog />
+        <GuildDialog />
+        <AuctionHouseDialog />
+        <ColiseumDialog />
+        <InspectDialog />
+        <NpcInfoDialog />
+        <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
+        <CharacterDialog
+          onOpenChange={setCharacterOpen}
+          open={characterOpen}
+          onRequestCreate={() => { setCharacterOpen(false); setOnboardingOpen(true); }}
         />
-      </div>
+        {onboardingOpen && <OnboardingFlow onClose={() => setOnboardingOpen(false)} />}
+        <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-30"
+          style={{
+            bottom: isCompactWorldUI ? "calc(env(safe-area-inset-bottom, 0px) + 8px)" : "8px",
+          }}
+        >
+          <HotkeyBar
+            mobile={isCompactWorldUI}
+            onCharacter={() => setCharacterOpen((c) => !c)}
+            onMap={() => setMapOpen((c) => !c)}
+            onQuestLog={() => setQuestLogOpen((c) => !c)}
+            onInspect={() => {
+              if (address && currentZone) {
+                gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
+              }
+            }}
+            onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
+            onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
+            onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
+            chatActive={showChat}
+            ranksActive={showRanks}
+            walletActive={showWallet}
+          />
+        </div>
+      </React.Suspense>
     </div>
   );
 }
@@ -212,22 +300,26 @@ function AppShell(): React.ReactElement {
         </div>
       ) : (
         <>
-          <Routes>
-            <Route path="/" element={<LandingPage />} />
-            <Route path="/marketplace" element={<MarketplacePage />} />
-            <Route path="/x402" element={<X402AgentPage />} />
-            <Route path="/races" element={<RacesClassesPage />} />
-            <Route path="/story" element={<StoryPage />} />
-            <Route path="/media" element={<MediaPage />} />
-            <Route path="/leaderboards" element={<LeaderboardPage />} />
-            <Route path="/news" element={<NewsPage />} />
-            <Route path="/champions" element={<ChampionsPage />} />
-            <Route path="/pricing" element={<PricingPage />} />
-            <Route path="/admin" element={<AdminDashboardPage />} />
-            <Route path="*" element={<LandingPage />} />
-          </Routes>
+          <React.Suspense fallback={<RouteFallback />}>
+            <Routes>
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/marketplace" element={<MarketplacePage />} />
+              <Route path="/x402" element={<X402AgentPage />} />
+              <Route path="/races" element={<RacesClassesPage />} />
+              <Route path="/story" element={<StoryPage />} />
+              <Route path="/media" element={<MediaPage />} />
+              <Route path="/leaderboards" element={<LeaderboardPage />} />
+              <Route path="/news" element={<NewsPage />} />
+              <Route path="/champions" element={<ChampionsPage />} />
+              <Route path="/pricing" element={<PricingPage />} />
+              <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route path="*" element={<LandingPage />} />
+            </Routes>
+          </React.Suspense>
           {onboardingOpen && (
-            <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+            <React.Suspense fallback={null}>
+              <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+            </React.Suspense>
           )}
         </>
       )}
@@ -262,7 +354,11 @@ function RootDetector(): React.ReactElement {
   }
 
   if (mode === "miniapp") {
-    return <FarcasterMiniApp />;
+    return (
+      <React.Suspense fallback={<RouteFallback />}>
+        <FarcasterMiniApp />
+      </React.Suspense>
+    );
   }
 
   return (
@@ -281,7 +377,14 @@ export default function App(): React.ReactElement {
     <BrowserRouter>
       <Routes>
         {/* Farcaster Mini App — explicit route always works */}
-        <Route path="/farcaster" element={<FarcasterMiniApp />} />
+        <Route
+          path="/farcaster"
+          element={(
+            <React.Suspense fallback={<RouteFallback />}>
+              <FarcasterMiniApp />
+            </React.Suspense>
+          )}
+        />
 
         {/* Root — auto-detect Warpcast vs normal browser */}
         <Route path="/" element={<RootDetector />} />
