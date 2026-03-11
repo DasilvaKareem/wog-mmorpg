@@ -165,7 +165,7 @@ export function LandingPage(): React.ReactElement {
             />
             <LogoSparkles />
           </div>
-          <div className="mt-3 sm:mt-4 flex flex-col items-center gap-2 pointer-events-auto">
+          <div className="mt-1 sm:mt-1.5 flex flex-col items-center gap-2 pointer-events-auto">
             <button
               onClick={() => isConnected ? navigate("/world") : setOnboardingOpen(true)}
               className="whitespace-nowrap border-4 border-black bg-[#54f28b] px-6 py-3 text-[15px] font-bold uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
