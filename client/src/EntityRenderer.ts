@@ -43,6 +43,7 @@ const SPRITE_SIZE = 16;
 const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
+const VISUAL_SEPARATION_RADIUS = 20; // pixels — minimum visual distance between sprites
 
 const HIDE_LABEL_TYPES = new Set([
   "merchant", "trainer", "profession-trainer", "guild-registrar",
@@ -370,11 +371,49 @@ export class EntityRenderer {
       }
     }
 
-    // Add or update entities
+    // Build pixel positions for all incoming entities
+    const positions = new Map<string, { px: number; py: number }>();
+    for (const [id, entity] of Object.entries(entities)) {
+      positions.set(id, { px: entity.x * this.coordScale, py: entity.y * this.coordScale });
+    }
+
+    // Client-side visual separation — push overlapping sprites apart so they don't stack
+    const ids = Array.from(positions.keys());
+    const SKIP_TYPES = new Set(["ore-node", "herb-node", "nectar-node", "corpse"]);
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 0; i < ids.length; i++) {
+        const a = positions.get(ids[i])!;
+        const ea = entities[ids[i]];
+        if (SKIP_TYPES.has(ea.type)) continue;
+        for (let j = i + 1; j < ids.length; j++) {
+          const b = positions.get(ids[j])!;
+          const eb = entities[ids[j]];
+          if (SKIP_TYPES.has(eb.type)) continue;
+          const dx = a.px - b.px;
+          const dy = a.py - b.py;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < VISUAL_SEPARATION_RADIUS) {
+            if (dist > 0.01) {
+              const overlap = (VISUAL_SEPARATION_RADIUS - dist) / 2;
+              const nx = (dx / dist) * overlap;
+              const ny = (dy / dist) * overlap;
+              a.px += nx; a.py += ny;
+              b.px -= nx; b.py -= ny;
+            } else {
+              // Exact overlap — offset deterministically by id hash
+              const hash = ids[i].charCodeAt(0) - ids[j].charCodeAt(0);
+              a.px += hash >= 0 ? VISUAL_SEPARATION_RADIUS / 2 : -VISUAL_SEPARATION_RADIUS / 2;
+              b.px += hash >= 0 ? -VISUAL_SEPARATION_RADIUS / 2 : VISUAL_SEPARATION_RADIUS / 2;
+            }
+          }
+        }
+      }
+    }
+
+    // Add or update entities with separated positions
     for (const [id, entity] of Object.entries(entities)) {
       this.entities.set(id, entity);
-      const px = entity.x * this.coordScale;
-      const py = entity.y * this.coordScale;
+      const { px, py } = positions.get(id)!;
 
       let visual = this.visuals.get(id);
       if (!visual) {

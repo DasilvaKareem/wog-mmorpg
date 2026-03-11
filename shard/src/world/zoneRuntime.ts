@@ -2055,25 +2055,29 @@ async function worldTick() {
           e.type === "nectar-node" || e.type === "corpse") continue;
       livingEntities.push(e);
     }
-    for (let i = 0; i < livingEntities.length; i++) {
-      const a = livingEntities[i];
-      for (let j = i + 1; j < livingEntities.length; j++) {
-        const b = livingEntities[j];
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
-          const overlap = (ENTITY_COLLISION_RADIUS - dist) / 2;
-          const nx = (dx / dist) * overlap;
-          const ny = (dy / dist) * overlap;
-          a.x += nx;
-          a.y += ny;
-          b.x -= nx;
-          b.y -= ny;
-        } else if (dist <= 0.01) {
-          // Exactly overlapping — nudge apart randomly
-          a.x += (Math.random() - 0.5) * ENTITY_COLLISION_RADIUS;
-          a.y += (Math.random() - 0.5) * ENTITY_COLLISION_RADIUS;
+    // Run 3 passes for better convergence when many entities cluster
+    for (let pass = 0; pass < 3; pass++) {
+      for (let i = 0; i < livingEntities.length; i++) {
+        const a = livingEntities[i];
+        for (let j = i + 1; j < livingEntities.length; j++) {
+          const b = livingEntities[j];
+          const dx = a.x - b.x;
+          const dy = a.y - b.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
+            const overlap = (ENTITY_COLLISION_RADIUS - dist) / 2;
+            const nx = (dx / dist) * overlap;
+            const ny = (dy / dist) * overlap;
+            a.x += nx;
+            a.y += ny;
+            b.x -= nx;
+            b.y -= ny;
+          } else if (dist <= 0.01) {
+            // Exactly overlapping — nudge apart deterministically
+            a.x += ENTITY_COLLISION_RADIUS * 0.5;
+            b.x -= ENTITY_COLLISION_RADIUS * 0.5;
+            a.y += (i % 2 === 0 ? 1 : -1) * ENTITY_COLLISION_RADIUS * 0.3;
+          }
         }
       }
     }
