@@ -132,7 +132,7 @@ export function PricingPage(): React.ReactElement {
       />
 
       {/* ── HERO ── */}
-      <section className="z-10 w-full max-w-4xl px-4 pt-16 pb-4 text-center">
+      <section className="z-10 w-full max-w-4xl px-4 pt-24 pb-4 text-center">
         <h1
           className="mb-4 text-[18px] uppercase tracking-widest text-[#ffcc00]"
           style={{ textShadow: "3px 3px 0 #000" }}

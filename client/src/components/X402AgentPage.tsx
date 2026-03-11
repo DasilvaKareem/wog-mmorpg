@@ -297,7 +297,7 @@ export function X402AgentPage({ onBack }: X402AgentPageProps): React.ReactElemen
   };
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-10">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-24">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"

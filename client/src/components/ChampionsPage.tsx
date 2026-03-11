@@ -2602,7 +2602,7 @@ export function ChampionsPage(): React.ReactElement {
 
   if (!wallet) {
     return (
-      <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto pt-16">
+      <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto pt-24">
         <div className="pointer-events-none fixed inset-0 z-50" style={{ background: "repeating-linear-gradient(0deg,rgba(0,0,0,0.15) 0px,rgba(0,0,0,0.15) 1px,transparent 1px,transparent 3px)" }} />
         <div className="z-10 flex flex-col items-center gap-6 px-4 py-24 text-center font-mono">
           <p className="text-[12px] uppercase tracking-widest text-[#7a84a8]">{">>"} Champions</p>
@@ -2617,7 +2617,7 @@ export function ChampionsPage(): React.ReactElement {
   }
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-16">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-24">
       <div className="pointer-events-none fixed inset-0 z-50" style={{ background: "repeating-linear-gradient(0deg,rgba(0,0,0,0.15) 0px,rgba(0,0,0,0.15) 1px,transparent 1px,transparent 3px)" }} />
 
       <div className="z-10 w-full max-w-5xl px-4 py-10">

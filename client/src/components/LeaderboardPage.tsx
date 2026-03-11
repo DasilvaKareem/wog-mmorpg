@@ -81,7 +81,7 @@ export function LeaderboardPage(): React.ReactElement {
   const highestLevel = players.length > 0 ? players[0]?.level ?? 0 : 0;
 
   return (
-    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-16">
+    <div className="relative flex min-h-full w-full flex-col items-center overflow-y-auto overflow-x-hidden pt-24">
       {/* Scanline overlay */}
       <div
         className="pointer-events-none fixed inset-0 z-50"
