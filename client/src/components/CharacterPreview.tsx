@@ -6,8 +6,7 @@ import { ASSET_BASE_URL } from "@/config";
  * Composites layered sprite PNGs without Phaser — pure canvas.
  *
  * Shows the down-facing idle frame (row 0, col 0) scaled up.
- * Equipment layers are scaled per-frame to match body proportions
- * (same EQUIP_SCALE as the in-game LayeredSpriteCompositor).
+ * Layers are composited at their authored frame alignment, matching the world renderer.
  */
 
 const FRAME_W = 16;
@@ -15,9 +14,6 @@ const FRAME_H = 22;
 const SCALE = 8;
 const CANVAS_W = FRAME_W * SCALE; // 128
 const CANVAS_H = FRAME_H * SCALE; // 176
-
-/** Equipment layers are AI-generated at ~100% cell fill but body only uses ~70% */
-const EQUIP_SCALE = 0.7;
 
 // Map onboarding skin color ids → available body layer filenames
 const SKIN_MAP: Record<string, string> = {
@@ -79,7 +75,6 @@ interface Props {
 
 interface LayerDef {
   src: string;
-  scale: number; // 1 = native, <1 = shrink per-frame
 }
 
 // Image cache to avoid reloading PNGs on every render
@@ -121,27 +116,33 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
 
     // 1. Body (always present)
     const skin = SKIN_MAP[skinColor] ?? "medium";
-    layers.push({ src: `${base}/body/body-${skin}.png`, scale: 1 });
+    layers.push({ src: `${base}/body/body-${skin}.png` });
 
     // 2. Eyes (only clean dot-style PNGs)
     const eye = EYE_MAP[eyeColor] ?? "brown";
     if (CLEAN_EYES.has(eye)) {
-      layers.push({ src: `${base}/eyes/eyes-${eye}.png`, scale: 1 });
+      layers.push({ src: `${base}/eyes/eyes-${eye}.png` });
     }
 
-    // 3. Equipment based on class
+    // 3. Hair
+    const hair = HAIR_MAP[hairStyle] ?? "short";
+    if (hair) {
+      layers.push({ src: `${base}/hair/hair-${hair}.png` });
+    }
+
+    // 4. Equipment based on class
     const equip = CLASS_EQUIPMENT[classId ?? "warrior"] ?? CLASS_EQUIPMENT.warrior;
     if (equip.chest) {
-      layers.push({ src: `${base}/chest/chest-${equip.chest}.png`, scale: EQUIP_SCALE });
+      layers.push({ src: `${base}/chest/chest-${equip.chest}.png` });
     }
     if (equip.legs) {
-      layers.push({ src: `${base}/legs/legs-${equip.legs}.png`, scale: EQUIP_SCALE });
+      layers.push({ src: `${base}/legs/legs-${equip.legs}.png` });
     }
     if (equip.boots) {
-      layers.push({ src: `${base}/boots/boots-${equip.boots}.png`, scale: EQUIP_SCALE });
+      layers.push({ src: `${base}/boots/boots-${equip.boots}.png` });
     }
     if (equip.weapon) {
-      layers.push({ src: `${base}/weapons/weapon-${equip.weapon}.png`, scale: EQUIP_SCALE });
+      layers.push({ src: `${base}/weapons/weapon-${equip.weapon}.png` });
     }
 
     let cancelled = false;
@@ -167,18 +168,9 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
         for (let i = 0; i < images.length; i++) {
           const img = images[i];
           if (!img) continue;
-          const s = layers[i].scale;
-
-          // Extract first frame (row 0, col 0) = down-facing idle
-          if (s !== 1) {
-            const fw = FRAME_W * s;
-            const fh = FRAME_H * s;
-            const dx = (FRAME_W - fw) / 2;
-            const dy = FRAME_H - fh; // anchor to bottom
-            bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, dx, dy, fw, fh);
-          } else {
-            bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
-          }
+          // Extract first frame (row 0, col 0) = down-facing idle.
+          // Preview art is already aligned inside each 16x22 cell.
+          bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
         }
 
         // Scale up to display canvas

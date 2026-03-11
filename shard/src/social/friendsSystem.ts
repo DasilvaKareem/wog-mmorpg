@@ -49,6 +49,13 @@ function getFriends(wallet: string): Friend[] {
   return friendsStore.get(norm(wallet)) ?? [];
 }
 
+export async function areFriends(walletA: string, walletB: string): Promise<boolean> {
+  const a = norm(walletA);
+  const b = norm(walletB);
+  await ensureLoaded(a);
+  return getFriends(a).some((f) => f.wallet === b);
+}
+
 function freshRequests(wallet: string): FriendRequest[] {
   const key = norm(wallet);
   const now = Date.now();

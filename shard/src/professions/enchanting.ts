@@ -4,6 +4,8 @@ import { burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { getItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
+import { saveCharacter } from "../character/characterStore.js";
 
 export type EnchantmentType =
   | "fire"
@@ -196,6 +198,10 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       return { error: "Item not found in catalog" };
     }
 
+    const existingInstance = equippedItem.instanceId
+      ? getItemInstance(equippedItem.instanceId)
+      : undefined;
+
     // CRITICAL: Burn enchantment elixir NFT
     try {
       const burnTx = await burnItem(
@@ -221,14 +227,33 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       if (enchantment.type === "durability") {
         const oldMaxDur = equippedItem.maxDurability;
         equippedItem.maxDurability = Math.floor(equippedItem.maxDurability * 1.5);
-        // Restore some durability as a bonus
+        // Restore some durability as a bonus without fully repairing the item.
         equippedItem.durability = Math.min(
           equippedItem.maxDurability,
-          equippedItem.durability + Math.floor(equippedItem.maxDurability * 0.3)
+          equippedItem.durability + Math.floor(oldMaxDur * 0.3)
         );
         server.log.info(
           `[enchanting] Durability boost: ${oldMaxDur} → ${equippedItem.maxDurability}`
         );
+      }
+
+      const persistedInstance = upsertItemInstanceFromEquipment({
+        instanceId: existingInstance?.instanceId ?? equippedItem.instanceId,
+        walletAddress,
+        tokenId: equippedItem.tokenId,
+        name: existingInstance?.displayName ?? itemInfo.name,
+        quality: equippedItem.quality,
+        rolledStats: equippedItem.rolledStats,
+        bonusAffix: equippedItem.bonusAffix,
+        durability: equippedItem.durability,
+        maxDurability: equippedItem.maxDurability,
+        enchantments: equippedItem.enchantments,
+      });
+      equippedItem.instanceId = persistedInstance.instanceId;
+
+      recalculateEntityVitals(entity);
+      if (entity.walletAddress) {
+        saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
       }
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);
@@ -249,6 +274,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
           name: itemInfo.name,
           slot: equipmentSlot,
           tokenId: equippedItem.tokenId,
+          instanceId: equippedItem.instanceId,
           durability: equippedItem.durability,
           maxDurability: equippedItem.maxDurability,
           enchantments: equippedItem.enchantments,
@@ -386,9 +412,29 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       const removedEnchantments = [...equippedItem.enchantments];
       equippedItem.enchantments = [];
 
-      recalculateEntityVitals(entity);
-
+      const existingInstance = equippedItem.instanceId
+        ? getItemInstance(equippedItem.instanceId)
+        : undefined;
       const itemInfo = getItemByTokenId(BigInt(equippedItem.tokenId));
+
+      const persistedInstance = upsertItemInstanceFromEquipment({
+        instanceId: existingInstance?.instanceId ?? equippedItem.instanceId,
+        walletAddress,
+        tokenId: equippedItem.tokenId,
+        name: existingInstance?.displayName ?? itemInfo?.name,
+        quality: equippedItem.quality,
+        rolledStats: equippedItem.rolledStats,
+        bonusAffix: equippedItem.bonusAffix,
+        durability: equippedItem.durability,
+        maxDurability: equippedItem.maxDurability,
+        enchantments: [],
+      });
+      equippedItem.instanceId = persistedInstance.instanceId;
+
+      recalculateEntityVitals(entity);
+      if (entity.walletAddress) {
+        saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
+      }
 
       server.log.info(
         `[enchanting] ${entity.name} removed enchantments from ${itemInfo?.name} → ${burnTx}`
@@ -401,6 +447,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
           name: itemInfo?.name ?? "Unknown",
           slot: equipmentSlot,
           tokenId: equippedItem.tokenId,
+          instanceId: equippedItem.instanceId,
           durability: equippedItem.durability,
           maxDurability: equippedItem.maxDurability,
         },

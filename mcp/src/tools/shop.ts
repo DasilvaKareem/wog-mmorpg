@@ -54,7 +54,13 @@ export function registerShopTools(server: McpServer): void {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/shop/buy",
-        { walletAddress, npcEntityId, zoneId, itemTokenId, quantity },
+        {
+          buyerAddress: walletAddress,
+          merchantEntityId: npcEntityId,
+          zoneId,
+          tokenId: itemTokenId,
+          quantity,
+        },
         token
       );
       return {
@@ -80,7 +86,41 @@ export function registerShopTools(server: McpServer): void {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/shop/sell",
-        { walletAddress, merchantEntityId, zoneId, itemTokenId, quantity },
+        {
+          sellerAddress: walletAddress,
+          merchantEntityId,
+          zoneId,
+          tokenId: itemTokenId,
+          quantity,
+        },
+        token
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+      };
+    }
+  );
+
+  server.registerTool(
+    "shop_recycle_item",
+    {
+      description:
+        "Recycle an item from your inventory into GOLD by burning the NFT. Safer than merchant sellback for common loot because the shard enforces equipped-copy protection automatically.",
+      inputSchema: {
+        sessionId: z.string().describe("Session ID from auth_verify_signature"),
+        itemTokenId: z.number().describe("ERC-1155 token ID of the item to recycle"),
+        quantity: z.number().min(1).describe("Number of items to recycle"),
+      },
+    },
+    async ({ sessionId, itemTokenId, quantity }) => {
+      const { walletAddress, token } = requireSession(sessionId);
+      const data = await shard.post<unknown>(
+        "/shop/recycle",
+        {
+          sellerAddress: walletAddress,
+          tokenId: itemTokenId,
+          quantity,
+        },
         token
       );
       return {
@@ -108,13 +148,13 @@ export function registerShopTools(server: McpServer): void {
   server.registerTool(
     "items_get_inventory",
     {
-      description: "Get all items (NFTs) in a wallet's inventory with metadata.",
+      description: "Get all items (NFTs) in a wallet's inventory with metadata, equipped-copy counts, and recycle values.",
       inputSchema: {
         walletAddress: z.string().describe("Ethereum wallet address"),
       },
     },
     async ({ walletAddress }) => {
-      const data = await shard.get<unknown>(`/items/${walletAddress}`);
+      const data = await shard.get<unknown>(`/inventory/${walletAddress}`);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
       };

@@ -37,7 +37,7 @@ import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
 import { sendInboxMessage } from "./agentInbox.js";
-import { sleep, extractRawCharacterName } from "./agentUtils.js";
+import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
@@ -678,13 +678,13 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       },
       {
         name: "take_action",
-        description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith.",
+        description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith, and recycle_item to turn loot into gold.",
         parameters: {
           type: "OBJECT" as Type,
           properties: {
             action: {
               type: "STRING" as Type,
-              enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear"],
+              enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear", "recycle_item"],
               description: "The action type. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or go to a trainer.",
             },
             professionId: {
@@ -694,7 +694,11 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             },
             tokenId: {
               type: "NUMBER" as Type,
-              description: "The item token ID to buy or equip (for buy_item / equip_item actions)",
+              description: "The item token ID to buy, equip, or recycle",
+            },
+            quantity: {
+              type: "NUMBER" as Type,
+              description: "Optional item quantity for recycle_item. Defaults to 1.",
             },
           },
           required: ["action"],
@@ -707,12 +711,12 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       },
       {
         name: "check_inventory",
-        description: "Check your gold balance, all items in your inventory with quantities, and currently equipped gear.",
+        description: "Check your gold balance, all items in your inventory with quantities, and which items can be safely recycled for gold.",
         parameters: { type: "OBJECT" as Type, properties: {} },
       },
       {
         name: "check_shop",
-        description: "See what the nearest merchant sells and what you can afford.",
+        description: "See what the nearest merchant sells and what that merchant buys back.",
         parameters: { type: "OBJECT" as Type, properties: {} },
       },
       {
@@ -852,18 +856,22 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
           let invResult: any = { error: "No wallet" };
           if (custodialWallet) {
             try {
-              const res = await internalFetch(`${apiBase}/wallet/${custodialWallet}/balance`);
-              if (res.ok) {
-                const data = await res.json() as any;
-                invResult = {
-                  gold: data.gold ?? data.copper ?? 0,
-                  items: (data.items ?? []).map((i: any) => ({
-                    tokenId: i.tokenId, name: i.name, balance: i.balance,
-                    category: i.category, equipSlot: i.equipSlot, rarity: i.rarity,
-                  })),
-                  equipped: entity?.equipment ?? {},
-                };
-              }
+              const data = await fetchLiquidationInventory(custodialWallet);
+              invResult = {
+                gold: data.copper,
+                items: data.items.map((i: any) => ({
+                  tokenId: i.tokenId,
+                  name: i.name,
+                  balance: i.balance,
+                  category: i.category,
+                  equipSlot: i.equipSlot,
+                  rarity: i.rarity,
+                  equippedCount: i.equippedCount,
+                  recyclableQuantity: i.recyclableQuantity,
+                  recycleCopperValue: i.recycleCopperValue,
+                })),
+                equipped: entity?.equipment ?? {},
+              };
             } catch (err) {
               server.log.warn(`[agent/chat] check_inventory fetch failed: ${(err as Error).message}`);
             }
@@ -877,15 +885,34 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
             let merchantId: string | null = null;
             let merchantDist = Infinity;
             for (const e of getEntitiesNear(entity.x, entity.y, 300)) {
-              if (e.type === "npc" && ((e as any).npcType === "merchant" || (e as any).subType === "merchant" || (e as any).role === "merchant")) {
+              if (
+                e.type === "merchant" ||
+                (e.type === "npc" && ((e as any).npcType === "merchant" || (e as any).subType === "merchant" || (e as any).role === "merchant"))
+              ) {
                 const d = Math.hypot((e.x ?? 0) - (entity.x ?? 0), (e.y ?? 0) - (entity.y ?? 0));
                 if (d < merchantDist) { merchantDist = d; merchantId = e.id; }
               }
             }
             if (merchantId) {
               try {
-                const res = await internalFetch(`${apiBase}/shop/npc/${merchantId}`);
-                if (res.ok) shopResult = await res.json();
+                const [catalogRes, sellRes] = await Promise.all([
+                  internalFetch(`${apiBase}/shop/npc/${merchantId}`),
+                  internalFetch(`${apiBase}/shop/sell-prices/${merchantId}`),
+                ]);
+                const catalog = catalogRes.ok ? await catalogRes.json() : null;
+                const sellPrices = sellRes.ok ? await sellRes.json() : null;
+                const buyPriceByToken = new Map<number, number>(
+                  (sellPrices?.items ?? []).map((item: any) => [Number(item.tokenId), Number(item.buyPrice ?? 0)]),
+                );
+                if (catalog) {
+                  shopResult = {
+                    ...catalog,
+                    items: (catalog.items ?? []).map((item: any) => ({
+                      ...item,
+                      buyPrice: buyPriceByToken.get(Number(item.tokenId)) ?? item.buyPrice ?? null,
+                    })),
+                  };
+                }
               } catch (err) {
                 server.log.warn(`[agent/chat] check_shop fetch failed: ${(err as Error).message}`);
               }
@@ -1026,6 +1053,7 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
               action: string;
               professionId?: string;
               tokenId?: number;
+              quantity?: number;
             };
             if (input.action === "learn_profession" && input.professionId) {
               const runner = agentManager.getRunner(authWallet);
@@ -1138,6 +1166,15 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
                 const repaired = await runner.repairGear();
                 actionsTaken.push(`[${repaired ? "repaired gear" : "failed to repair gear"}]`);
                 server.log.info(`[agent/chat] repair_gear → ${repaired}`);
+              }
+            } else if (input.action === "recycle_item" && input.tokenId != null) {
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                const result = await runner.recycleItem(input.tokenId, Math.max(1, Math.floor(input.quantity ?? 1)));
+                actionsTaken.push(result.ok
+                  ? `[recycled ${result.itemName ?? `item #${input.tokenId}`} for ${result.totalPayoutCopper ?? 0}c]`
+                  : `[failed to recycle item #${input.tokenId}: ${result.error ?? "unknown error"}]`);
+                server.log.info(`[agent/chat] recycle_item(${input.tokenId}, qty=${Math.max(1, Math.floor(input.quantity ?? 1))}) → ${result.ok}`);
               }
             }
             toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });

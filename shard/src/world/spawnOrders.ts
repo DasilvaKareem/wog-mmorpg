@@ -16,7 +16,7 @@ import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
-import { getZoneOffset } from "./worldLayout.js";
+import { getWorldLayout, getZoneOffset } from "./worldLayout.js";
 import { rehydratePartyMembership } from "../social/partySystem.js";
 
 interface SpawnOrderBody {
@@ -35,6 +35,10 @@ interface SpawnOrderBody {
   classId?: string;
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
   gender?: "male" | "female";
+  skinColor?: string;
+  hairStyle?: string;
+  eyeColor?: string;
+  origin?: string;
 }
 
 function parseOnChainTokenId(value: string | undefined): bigint | undefined {
@@ -56,6 +60,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
       walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, calling, gender,
+      skinColor, hairStyle, eyeColor, origin,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
@@ -96,15 +101,17 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const spawnZoneId = saved?.zone ?? zoneId;
     const zone = getOrCreateZone(spawnZoneId);
     const offset = getZoneOffset(spawnZoneId) ?? { x: 0, z: 0 };
+    const zoneLayout = getWorldLayout().zones[spawnZoneId];
 
     const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
     const resolvedCalling = (saved?.calling as "adventurer" | "farmer" | "merchant" | "craftsman" | undefined) ?? calling;
     const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
-    const resolvedSkinColor = saved?.skinColor;
-    const resolvedHairStyle = saved?.hairStyle;
-    const resolvedEyeColor = saved?.eyeColor;
+    const resolvedSkinColor = saved?.skinColor ?? skinColor;
+    const resolvedHairStyle = saved?.hairStyle ?? hairStyle;
+    const resolvedEyeColor = saved?.eyeColor ?? eyeColor;
+    const resolvedOrigin = saved?.origin ?? origin;
     const derivedStats =
       type === "player" && resolvedRaceId && resolvedClassId
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
@@ -112,11 +119,20 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
     const resolvedTokenId = parseOnChainTokenId(characterTokenId);
 
-    // Saved coords are world-space if >= offset (post-migration), otherwise local (legacy)
+    // Saved coords may be raw world-space, normalized-world from the bad layout shift,
+    // or legacy zone-local values. Prefer an explicit in-zone world-space match first.
     const rawX = saved?.x ?? x;
     const rawY = saved?.y ?? y;
-    const worldX = rawX >= offset.x ? rawX : rawX + offset.x;
-    const worldY = rawY >= offset.z ? rawY : rawY + offset.z;
+    const rawLooksWorld = zoneLayout
+      ? rawX >= offset.x && rawX <= offset.x + zoneLayout.size.width &&
+        rawY >= offset.z && rawY <= offset.z + zoneLayout.size.height
+      : rawX >= offset.x && rawY >= offset.z;
+    const rawLooksLocal = zoneLayout
+      ? rawX >= 0 && rawX <= zoneLayout.size.width &&
+        rawY >= 0 && rawY <= zoneLayout.size.height
+      : true;
+    const worldX = rawLooksWorld ? rawX : rawLooksLocal ? rawX + offset.x : rawX;
+    const worldY = rawLooksWorld ? rawY : rawLooksLocal ? rawY + offset.z : rawY;
 
     const entity: Entity = {
       id: randomUUID(),
@@ -175,6 +191,10 @@ export function registerSpawnOrders(server: FastifyInstance) {
         classId: resolvedClassId ?? "warrior",
         calling: resolvedCalling,
         gender: resolvedGender,
+        skinColor: resolvedSkinColor,
+        hairStyle: resolvedHairStyle,
+        eyeColor: resolvedEyeColor,
+        origin: resolvedOrigin,
         zone: spawnZoneId,
         x: entity.x,
         y: entity.y,

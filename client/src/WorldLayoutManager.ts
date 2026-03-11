@@ -90,9 +90,19 @@ export class WorldLayoutManager {
   /** Get the world center in pixels */
   getWorldPixelCenter(): { x: number; z: number } {
     if (!this.layout) return { x: 0, z: 0 };
+    let minX = Infinity;
+    let minZ = Infinity;
+    let maxX = -Infinity;
+    let maxZ = -Infinity;
+    for (const zone of Object.values(this.layout.zones)) {
+      minX = Math.min(minX, zone.offset.x);
+      minZ = Math.min(minZ, zone.offset.z);
+      maxX = Math.max(maxX, zone.offset.x + zone.size.width);
+      maxZ = Math.max(maxZ, zone.offset.z + zone.size.height);
+    }
     return {
-      x: (this.layout.totalSize.width / 2) * this.coordScale,
-      z: (this.layout.totalSize.height / 2) * this.coordScale,
+      x: ((minX + maxX) / 2) * this.coordScale,
+      z: ((minZ + maxZ) / 2) * this.coordScale,
     };
   }
 

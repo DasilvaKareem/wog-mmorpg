@@ -1,5 +1,13 @@
 import Phaser from "phaser";
 import { ASSET_BASE_URL } from "./config.js";
+import {
+  BOOTS_LAYER_SCALE,
+  CHEST_LAYER_SCALE,
+  HELM_LAYER_SCALE,
+  LEGS_LAYER_SCALE,
+  SHOULDER_LAYER_SCALE,
+  WEAPON_LAYER_SCALE,
+} from "./layerScales.js";
 import type { Entity } from "./types.js";
 
 /**
@@ -130,7 +138,7 @@ function armorVisual(itemName: string | undefined, slot: string): string | null 
 // ── Preloader ───────────────────────────────────────────────────────
 
 const SKIN_TONES = ["light", "medium", "dark", "olive", "pale"];
-const EYE_COLORS = ["blue", "green", "brown", "red", "gold"];
+const CLEAN_EYE_COLORS = ["blue", "gold", "red"];
 const HAIR_STYLES = ["short", "long", "mohawk", "ponytail"];
 const CHEST_TIERS = ["cloth", "leather", "chain", "plate"];
 const LEGS_TIERS = ["cloth", "leather", "chain", "plate"];
@@ -149,12 +157,12 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
   for (const skin of SKIN_TONES) {
     scene.load.image(`layer-body-${skin}`, `${base}/body/body-${skin}.png`);
   }
-  // Eyes: only load clean dot-style PNGs (blue, gold, red are clean; brown/green have face outlines)
-  const CLEAN_EYES = ["blue", "gold", "red"];
-  for (const eye of CLEAN_EYES) {
+  for (const eye of CLEAN_EYE_COLORS) {
     scene.load.image(`layer-eyes-${eye}`, `${base}/eyes/eyes-${eye}.png`);
   }
-  // Hair layer preload skipped — AI-generated hair PNGs contain full character outlines
+  for (const hair of HAIR_STYLES) {
+    scene.load.image(`layer-hair-${hair}`, `${base}/hair/hair-${hair}.png`);
+  }
   for (const tier of CHEST_TIERS) {
     scene.load.image(`layer-chest-${tier}`, `${base}/chest/chest-${tier}.png`);
   }
@@ -170,10 +178,9 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
   for (const tier of SHOULDER_TIERS) {
     scene.load.image(`layer-shoulders-${tier}`, `${base}/shoulders/shoulders-${tier}.png`);
   }
-  // Weapon PNGs skipped — procedural weapon sprites generated at runtime
-  // for (const weapon of WEAPON_TYPES) {
-  //   scene.load.image(`layer-weapon-${weapon}`, `${base}/weapons/weapon-${weapon}.png`);
-  // }
+  for (const weapon of WEAPON_TYPES) {
+    scene.load.image(`layer-weapon-${weapon}`, `${base}/weapons/weapon-${weapon}.png`);
+  }
 }
 
 // ── Layer key builder ───────────────────────────────────────────────
@@ -697,10 +704,6 @@ export function getOrCreateLayeredTexture(
   // Generate procedural weapon textures if PNG layers didn't load
   ensureProceduralWeapons(scene);
 
-  // Equipment layers are AI-generated at ~100% cell fill, but the body sprite
-  // only occupies ~65% of each 16×22 cell. Scale equipment frames down to match.
-  const EQUIP_SCALE = 0.7;
-
   // Composite all layers
   const canvas = document.createElement("canvas");
   canvas.width = CANVAS_W;
@@ -710,9 +713,9 @@ export function getOrCreateLayeredTexture(
 
   /**
    * Draw a layer onto the composite canvas.
-   * When scale < 1, each individual frame is shrunk and centered within its
-   * cell so equipment overlays align with the body sprite's proportions.
-   * offsetY > 0 pushes content down (anchor toward feet).
+   * Layer sheets are authored on the same 16x22 frame grid as the body.
+   * Native draw (`scale = 1`) preserves that alignment; scaling remains as an
+   * escape hatch for future art tweaks.
    */
   const drawLayer = (textureKey: string, opts?: { scale?: number; offsetX?: number; offsetY?: number }) => {
     if (!scene.textures.exists(textureKey)) return;
@@ -740,7 +743,7 @@ export function getOrCreateLayeredTexture(
     }
   };
 
-  const drawWeaponBehind = (textureKey: string, scale = EQUIP_SCALE) => {
+  const drawWeaponBehind = (textureKey: string, scale = WEAPON_LAYER_SCALE) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
     const fw = PLAYER_FW * scale;
@@ -757,7 +760,7 @@ export function getOrCreateLayeredTexture(
     }
   };
 
-  const drawWeaponFront = (textureKey: string, scale = EQUIP_SCALE) => {
+  const drawWeaponFront = (textureKey: string, scale = WEAPON_LAYER_SCALE) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
     const fw = PLAYER_FW * scale;
@@ -780,18 +783,17 @@ export function getOrCreateLayeredTexture(
   // Layer 2: eyes (only clean dot-style PNGs; broken ones won't be loaded so drawLayer no-ops)
   if (keys.eyes) drawLayer(keys.eyes);
 
-  // Hair layer skipped — AI-generated PNGs contain full character outlines, not just hair.
-  // Hair remains in the cache key for future use when proper PNGs are made.
+  if (keys.hair) drawLayer(keys.hair);
 
   // Layer 4: weapon behind body
   if (keys.weapon) drawWeaponBehind(keys.weapon);
 
-  // Layer 5-9: equipment (scaled to match body proportions)
-  if (keys.chest) drawLayer(keys.chest, { scale: EQUIP_SCALE });
-  if (keys.legs) drawLayer(keys.legs, { scale: EQUIP_SCALE });
-  if (keys.boots) drawLayer(keys.boots, { scale: EQUIP_SCALE });
-  if (keys.shoulders) drawLayer(keys.shoulders, { scale: EQUIP_SCALE });
-  if (keys.helm) drawLayer(keys.helm, { scale: EQUIP_SCALE });
+  // Layer 5-9: equipment
+  if (keys.chest) drawLayer(keys.chest, { scale: CHEST_LAYER_SCALE });
+  if (keys.legs) drawLayer(keys.legs, { scale: LEGS_LAYER_SCALE });
+  if (keys.boots) drawLayer(keys.boots, { scale: BOOTS_LAYER_SCALE });
+  if (keys.shoulders) drawLayer(keys.shoulders, { scale: SHOULDER_LAYER_SCALE });
+  if (keys.helm) drawLayer(keys.helm, { scale: HELM_LAYER_SCALE });
 
   // Layer 10: weapon in front
   if (keys.weapon) drawWeaponFront(keys.weapon);

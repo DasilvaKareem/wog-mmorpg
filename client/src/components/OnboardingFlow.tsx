@@ -86,6 +86,11 @@ const EYE_COLORS = [
   { id: "violet", label: "Violet", hex: "#8b45a6" },
 ];
 
+const GENDERS = [
+  { id: "male" as const, label: "Male" },
+  { id: "female" as const, label: "Female" },
+];
+
 const ORIGINS = [
   {
     id: "sunforged",
@@ -174,10 +179,11 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const navigate = useNavigate();
   const { syncAddress, address: walletAddress, connect } = useWalletContext();
 
-  // If already connected, skip login and go straight to character creation
-  const [step, setStep] = React.useState<Step>(walletAddress ? "create-char" : "login");
+  // Show the character builder first; authentication is only needed to mint.
+  const [step, setStep] = React.useState<Step>("create-char");
   const [error, setError] = React.useState<string | null>(null);
   const [connectedAddress, setConnectedAddress] = React.useState<string | null>(walletAddress);
+  const [pendingMintAfterAuth, setPendingMintAfterAuth] = React.useState(false);
 
   // Email flow
   const [email, setEmail] = React.useState("");
@@ -190,6 +196,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const [charName, setCharName] = React.useState("");
   const [raceId, setRaceId] = React.useState("");
   const [classId, setClassId] = React.useState("");
+  const [gender, setGender] = React.useState<"male" | "female" | undefined>(undefined);
   const [skinColor, setSkinColor] = React.useState("");
   const [hairStyle, setHairStyle] = React.useState("");
   const [eyeColor, setEyeColor] = React.useState("");
@@ -207,6 +214,13 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
       setConnectedAddress(walletAddress);
     }
   }, [walletAddress, connectedAddress]);
+
+  React.useEffect(() => {
+    if (walletAddress && step === "login") {
+      setStep("create-char");
+    }
+  }, [walletAddress, step]);
+
 
   // Load races/classes when entering create-char step
   React.useEffect(() => {
@@ -265,9 +279,7 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     setStep("connecting");
     try {
       const account = await sharedInAppWallet.connect({ client: thirdwebClient, chain: skaleChain, strategy });
-      setConnectedAddress(account.address);
-      await syncAddress(account.address);
-      setStep("create-char");
+      await handleAuthSuccess(account.address);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Login failed. Please try again.");
       setStep("login");
@@ -299,13 +311,21 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
         email: email.trim(),
         verificationCode: otp.trim(),
       });
-      setConnectedAddress(account.address);
-      await syncAddress(account.address);
-      setStep("create-char");
+      await handleAuthSuccess(account.address);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Invalid code. Please try again.");
       setStep("email-otp");
     }
+  }
+
+  async function handleAuthSuccess(nextAddress: string) {
+    setConnectedAddress(nextAddress);
+    await syncAddress(nextAddress);
+    if (pendingMintAfterAuth) {
+      void handleCreate(nextAddress);
+      return;
+    }
+    setStep("create-char");
   }
 
   const selectedRace = races.find((r) => r.id === raceId);
@@ -317,10 +337,10 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   const nameValidationError = validateCharacterName(charName);
 
   const canCreate =
-    Boolean(connectedAddress) &&
     !nameValidationError &&
     Boolean(selectedRace) &&
     Boolean(selectedClass) &&
+    Boolean(gender) &&
     Boolean(skinColor) &&
     Boolean(hairStyle) &&
     Boolean(eyeColor) &&
@@ -331,10 +351,16 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
   else if (nameValidationError) missingFields.push("Valid Name");
   if (!selectedRace) missingFields.push("Race");
   if (!selectedClass) missingFields.push("Class");
+  if (!gender) missingFields.push("Gender");
   if (!skinColor) missingFields.push("Skin");
   if (!hairStyle) missingFields.push("Hair");
   if (!eyeColor) missingFields.push("Eyes");
   if (!origin) missingFields.push("Origin");
+
+  React.useEffect(() => {
+    if (!pendingMintAfterAuth || !connectedAddress || !canCreate || step !== "create-char") return;
+    void handleCreate(connectedAddress);
+  }, [pendingMintAfterAuth, connectedAddress, canCreate, step]);
 
   function handleRequestMint() {
     if (nameValidationError) {
@@ -342,27 +368,34 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
       return;
     }
     if (!canCreate) return;
+    if (!connectedAddress) {
+      setPendingMintAfterAuth(true);
+      setError(null);
+      setStep("login");
+      return;
+    }
     setError(null);
-    // First character is free — skip payment gate and mint directly
-    void handleCreate();
+    void handleCreate(connectedAddress);
   }
 
-  async function handleCreate() {
+  async function handleCreate(overrideAddress?: string) {
+    const targetAddress = overrideAddress ?? connectedAddress;
     if (nameValidationError) {
       setError(nameValidationError);
       setStep("create-char");
       return;
     }
-    if (!connectedAddress || !canCreate) return;
+    if (!targetAddress || !canCreate) return;
     setError(null);
+    setPendingMintAfterAuth(false);
     setStep("minting");
     try {
       const result = await createCharacter(
-        connectedAddress,
+        targetAddress,
         charName.trim(),
         raceId,
         classId,
-        { skinColor, hairStyle, eyeColor, origin }
+        { gender, skinColor, hairStyle, eyeColor, origin }
       );
       if ("error" in result) {
         setError(result.error);
@@ -519,6 +552,19 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                   <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
                 </button>
               ))}
+
+              {pendingMintAfterAuth && (
+                <button
+                  onClick={() => {
+                    setPendingMintAfterAuth(false);
+                    setError(null);
+                    setStep("create-char");
+                  }}
+                  className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors"
+                >
+                  ← Back to Character Builder
+                </button>
+              )}
 
               {error && (
                 <p className="mt-1 text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
@@ -709,6 +755,28 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                       ))}
                     </div>
                   </div>
+
+                  {/* Gender */}
+                  <div>
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Gender
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      {GENDERS.map((option) => (
+                        <button
+                          key={option.id}
+                          onClick={() => setGender(option.id)}
+                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                            gender === option.id
+                              ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -852,7 +920,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                 className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-2.5 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
               >
                 {canCreate
-                  ? "[→] Mint Character — $0.00"
+                  ? connectedAddress
+                    ? "[→] Mint Character — $0.00"
+                    : "[→] Sign In to Mint Character"
                   : `Select: ${missingFields.join(", ")}`}
               </button>
             </div>

@@ -30,7 +30,7 @@ import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
 
 // Extracted modules
-import { sleep, fetchWalletBalance, issueAgentCommand, type ApiCaller, type AgentContext } from "./agentUtils.js";
+import { sleep, fetchLiquidationInventory, fetchWalletBalance, issueAgentCommand, type ApiCaller, type AgentContext } from "./agentUtils.js";
 import { detectTrigger, type TriggerState } from "./agentTriggers.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
@@ -41,7 +41,27 @@ const TICK_MS = 1200;
 const MAX_STALE_TICKS = Math.ceil(30_000 / TICK_MS);
 const MOVE_REISSUE_MS = 4_000;
 const MOVE_PROGRESS_EPSILON = 4;
-const SUPERVISOR_EVENT_TYPES: ZoneEvent["type"][] = ["combat", "death", "kill", "levelup", "quest", "loot", "technique"];
+const SUPERVISOR_EVENT_TYPES: ZoneEvent["type"][] = ["combat", "death", "kill", "levelup", "quest", "quest-progress", "loot", "technique"];
+
+function getQuestProgressMilestone(event: ZoneEvent): string | null {
+  if (event.type !== "quest-progress") return null;
+  const progress = Number(event.data?.progress);
+  const required = Number(event.data?.required);
+  const title = String(event.data?.questTitle ?? event.message ?? "this quest");
+
+  if (!Number.isFinite(progress) || !Number.isFinite(required) || required <= 0) {
+    return null;
+  }
+  if (required === 1) return title;
+  if (progress >= required) return title;
+  if (progress === required - 1) return title;
+  if (required >= 4 && progress === Math.ceil(required / 2)) return title;
+  return null;
+}
+
+function getTechniqueDetail(event: ZoneEvent): string {
+  return String(event.data?.techniqueName ?? event.message ?? "a new technique");
+}
 
 interface TimingMetric {
   count: number;
@@ -96,8 +116,8 @@ function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: 
     case "alchemy":    return { type: "brew",    reason: "User focus: alchemy" };
     case "cooking":    return { type: "cook",    reason: "User focus: cooking" };
     case "enchanting": return { type: "combat",  maxLevelOffset: levelOffset, reason: "Enchanting — need to farm XP first" };
-    case "shopping":
-    case "trading":    return { type: "shop",    reason: "User focus: shopping" };
+    case "shopping":   return { type: "shop",    reason: "User focus: shopping" };
+    case "trading":    return { type: "trade",   reason: "User focus: trading" };
     case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
     case "goto":       return { type: "goto",    reason: "User clicked an NPC" };
     case "learning":   return { type: "learn",   reason: "User focus: learn techniques" };
@@ -216,6 +236,14 @@ export class AgentRunner {
         (e) => e.type === "profession-trainer" && e.teachesProfession === professionId,
       );
       if (!trainer) {
+        if (this.currentRegion !== "village-square") {
+          const reason = `Need ${professionId} trainer in village-square`;
+          console.log(`[agent:${this.walletTag}] ${reason}`);
+          this.currentScript = { type: "travel", targetZone: "village-square", reason };
+          void this.logActivity(`Traveling to village-square to learn ${professionId}`);
+          this.issueCommand({ action: "travel", targetZone: "village-square" });
+          return false;
+        }
         console.log(`[agent:${this.walletTag}] No ${professionId} trainer in ${this.currentRegion}`);
         return false;
       }
@@ -324,12 +352,13 @@ export class AgentRunner {
     }
   }
 
-  async equipItem(tokenId: number): Promise<boolean> {
+  async equipItem(tokenId: number, instanceId?: string): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     try {
       await this.api("POST", "/equipment/equip", {
         zoneId: this.currentRegion, tokenId,
         entityId: this.entityId, walletAddress: this.custodialWallet,
+        ...(instanceId ? { instanceId } : {}),
       });
       console.log(`[agent:${this.walletTag}] Equipped tokenId=${tokenId}`);
       void this.logActivity(`Equipped item (token #${tokenId})`);
@@ -374,6 +403,34 @@ export class AgentRunner {
     } catch (err: any) {
       console.debug(`[agent] repairGear: ${err.message?.slice(0, 60)}`);
       return false;
+    }
+  }
+
+  async recycleItem(
+    tokenId: number,
+    quantity = 1,
+  ): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }> {
+    if (!this.api || !this.custodialWallet || quantity < 1) {
+      return { ok: false, error: "agent not fully initialized" };
+    }
+    try {
+      const result = await this.api("POST", "/shop/recycle", {
+        sellerAddress: this.custodialWallet,
+        tokenId,
+        quantity,
+      });
+      if (!result?.ok) {
+        return { ok: false, error: result?.error ?? "recycle failed" };
+      }
+      console.log(`[agent:${this.walletTag}] Recycled tokenId=${tokenId} x${quantity}`);
+      void this.logActivity(`Recycled ${quantity}x ${result.item ?? `token #${tokenId}`} for ${result.totalPayoutCopper ?? 0}c`);
+      return {
+        ok: true,
+        itemName: result.item,
+        totalPayoutCopper: result.totalPayoutCopper,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message?.slice(0, 120) ?? "recycle failed" };
     }
   }
 
@@ -500,7 +557,7 @@ export class AgentRunner {
     const relevant = recentEvents
       .filter((event) => this.getZoneEventSeq(event.id) > this.lastSeenZoneEventSeq)
       .filter((event) => event.entityId === this.entityId || event.targetId === this.entityId)
-      .filter((event) => ["death", "kill", "levelup", "quest", "loot"].includes(event.type))
+      .filter((event) => ["death", "kill", "levelup", "quest", "quest-progress", "loot", "technique"].includes(event.type))
       .sort((a, b) => this.getZoneEventSeq(a.id) - this.getZoneEventSeq(b.id));
 
     if (relevant.length === 0) return null;
@@ -521,8 +578,17 @@ export class AgentRunner {
         };
         if (latest.type === "kill" && latest.entityId === this.entityId) {
           emitAgentChat({ ...dCtx, event: "kill", detail: latest.targetName });
+        } else if (latest.type === "loot" && latest.entityId === this.entityId) {
+          emitAgentChat({ ...dCtx, event: "loot_found", detail: latest.message });
+        } else if (latest.type === "technique" && latest.entityId === this.entityId) {
+          emitAgentChat({ ...dCtx, event: "technique_learn", detail: getTechniqueDetail(latest) });
         } else if (latest.type === "quest") {
           emitAgentChat({ ...dCtx, event: "quest_complete", detail: latest.message });
+        } else if (latest.type === "quest-progress" && latest.entityId === this.entityId) {
+          const milestone = getQuestProgressMilestone(latest);
+          if (milestone) {
+            emitAgentChat({ ...dCtx, event: "quest_progress", detail: milestone });
+          }
         }
 
         // Check if we barely survived (low HP after a fight)
@@ -537,6 +603,9 @@ export class AgentRunner {
     }
     if (latest.type === "death") {
       return { type: "stuck", detail: `Recent death: ${latest.message}` };
+    }
+    if (latest.type === "quest-progress") {
+      return null;
     }
     return { type: "script_done", detail: latest.message };
   }
@@ -601,6 +670,14 @@ export class AgentRunner {
     return balance;
   }
 
+  async getLiquidationInventory(): Promise<{ copper: number; items: any[] }> {
+    if (!this.custodialWallet) return { copper: 0, items: [] };
+    const startedAt = performance.now();
+    const balance = await fetchLiquidationInventory(this.custodialWallet);
+    this.updateTimingMetric(this.telemetry.walletBalance, performance.now() - startedAt);
+    return balance;
+  }
+
   private findNextZoneForLevel(level: number): string | null {
     const allowed = this.currentCaps.allowedZones;
     const zonesByLevel = Object.entries(ZONE_LEVEL_REQUIREMENTS)
@@ -656,11 +733,13 @@ export class AgentRunner {
       logActivity: (text) => { void self.logActivity(text); },
       setEntityGotoMode: (on) => self.setEntityGotoMode(on),
       getWalletBalance: () => self.getWalletBalance(),
+      getLiquidationInventory: () => self.getLiquidationInventory(),
       setScript: (s) => { self.currentScript = s; self.ticksOnCurrentScript = 0; },
       get currentScript() { return self.currentScript; },
       buyItem: (id) => self.buyItem(id),
-      equipItem: (id) => self.equipItem(id),
+      equipItem: (id, instanceId) => self.equipItem(id, instanceId),
       learnProfession: (id) => self.learnProfession(id),
+      recycleItem: (id, quantity) => self.recycleItem(id, quantity),
     };
   }
 
@@ -679,6 +758,7 @@ export class AgentRunner {
       case "travel":  await behaviors.doTravel(ctx, strategy); break;
       case "goto":    await behaviors.doGotoNpc(ctx, (n, t) => this.findNextZoneOnPath(n, t)); break;
       case "shop":    await behaviors.doShopping(ctx, strategy); break;
+      case "trade":   await behaviors.doTrading(ctx, strategy); break;
       case "craft":   await behaviors.doCrafting(ctx, strategy); break;
       case "brew":    await behaviors.doAlchemy(ctx, strategy); break;
       case "cook":    await behaviors.doCooking(ctx, strategy); break;
@@ -1047,7 +1127,7 @@ export class AgentRunner {
 
         // Chat reactions: check for other agents' chat and maybe respond
         if (this.entityId && this.ticksSinceFocusChange % 3 === 0) {
-          const chatEvents = getRecentZoneEvents(this.currentRegion, Date.now() - 10_000, ["chat", "levelup", "death", "quest", "kill"]);
+          const chatEvents = getRecentZoneEvents(this.currentRegion, Date.now() - 10_000, ["chat", "levelup", "death", "quest", "kill", "loot", "technique"]);
           if (chatEvents.length > 0) {
             maybeReactToChat(
               {

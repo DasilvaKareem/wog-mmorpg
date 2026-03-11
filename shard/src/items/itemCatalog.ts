@@ -17,6 +17,14 @@ export interface ItemStatBonuses extends Partial<CharacterStats> {}
 
 export type ItemRarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
 
+const RECYCLE_VALUE_RATIO_BY_CATEGORY: Record<ItemDefinition["category"], number> = {
+  material: 0.75,
+  consumable: 0.6,
+  tool: 0.5,
+  weapon: 0.35,
+  armor: 0.35,
+};
+
 export interface ItemDefinition {
   tokenId: bigint;
   name: string;
@@ -36,6 +44,11 @@ export function getItemRarity(copperPrice: number): ItemRarity {
   if (copperPrice >= 150) return "rare";
   if (copperPrice >= 50) return "uncommon";
   return "common";
+}
+
+export function getItemRecycleCopperValue(item: Pick<ItemDefinition, "category" | "copperPrice">): number {
+  const ratio = RECYCLE_VALUE_RATIO_BY_CATEGORY[item.category] ?? 0.25;
+  return Math.max(1, Math.floor(item.copperPrice * ratio));
 }
 
 export const ITEM_CATALOG: ItemDefinition[] = [

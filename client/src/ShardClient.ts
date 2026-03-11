@@ -69,7 +69,13 @@ export async function createCharacter(
   name: string,
   race: string,
   className: string,
-  appearance?: { skinColor?: string; hairStyle?: string; eyeColor?: string; origin?: string }
+  appearance?: {
+    gender?: "male" | "female";
+    skinColor?: string;
+    hairStyle?: string;
+    eyeColor?: string;
+    origin?: string;
+  }
 ): Promise<CharacterCreateResponse | { error: string }> {
   try {
     const res = await fetch(`${API_URL}/character/create`, {

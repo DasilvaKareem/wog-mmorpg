@@ -157,6 +157,14 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           professions: [],
         });
       } else {
+        await saveCharacter(walletAddress, character.name, {
+          ...(calling !== undefined && { calling }),
+          ...(gender !== undefined && { gender }),
+          ...(skinColor !== undefined && { skinColor }),
+          ...(hairStyle !== undefined && { hairStyle }),
+          ...(eyeColor !== undefined && { eyeColor }),
+          ...(origin !== undefined && { origin }),
+        });
         server.log.info(`[character] Existing save found for "${character.name}" (L${existingSave.level}) — skipping seed`);
       }
 

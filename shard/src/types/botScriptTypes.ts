@@ -10,6 +10,7 @@ export type BotScriptType =
   | "gather"
   | "travel"
   | "shop"
+  | "trade"
   | "craft"
   | "brew"
   | "cook"

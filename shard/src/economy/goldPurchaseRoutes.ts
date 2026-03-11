@@ -8,10 +8,14 @@
 
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { mintGold } from "../blockchain/blockchain.js";
+import { distributeSFuel, getGoldBalance, mintGold, transferGoldFrom } from "../blockchain/blockchain.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getRedis } from "../redis.js";
 import { randomUUID } from "crypto";
+import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
+import { copperToGold, formatCopperString, goldToCopper } from "../blockchain/currency.js";
+import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { areFriends } from "../social/friendsSystem.js";
 
 // ── Gold pack definitions ────────────────────────────────────────────────────
 
@@ -29,6 +33,9 @@ const GOLD_PACKS: GoldPack[] = [
   { id: "pack-1500",  name: "1,500 Gold", goldAmount: 1500,  priceUsd: 12, priceUsdc: "12000000" },
   { id: "pack-5000",  name: "5,000 Gold", goldAmount: 5000,  priceUsd: 35, priceUsdc: "35000000" },
 ];
+
+const FRIEND_TRANSFER_FEE_COPPER = 25;
+const FRIEND_TRANSFER_FEE_GOLD = copperToGold(FRIEND_TRANSFER_FEE_COPPER);
 
 /** Base chain ID for USDC payments */
 const BASE_CHAIN_ID = 8453;
@@ -67,9 +74,45 @@ async function deletePending(paymentId: string): Promise<void> {
   if (redis) await redis.del(pendingKey(paymentId));
 }
 
+async function transferGoldWithGasRetry(
+  server: FastifyInstance,
+  fromAddress: string,
+  toAddress: string,
+  amount: number,
+): Promise<string> {
+  const senderAccount = await getCustodialWallet(fromAddress);
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await transferGoldFrom(senderAccount, toAddress, formatGold(amount));
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "");
+      const lowGasBalance =
+        msg.includes("Account balance is too low") ||
+        msg.includes("insufficient funds for gas");
+      if (!lowGasBalance || attempt === 2) throw err;
+
+      try {
+        await distributeSFuel(fromAddress);
+        server.log.info(`[gold-transfer] Topped up sFUEL for ${fromAddress} after transfer attempt ${attempt + 1}`);
+      } catch (sfuelErr: any) {
+        server.log.warn(`[gold-transfer] Failed topping up sFUEL for ${fromAddress}: ${String(sfuelErr?.message ?? sfuelErr).slice(0, 150)}`);
+      }
+    }
+  }
+
+  throw new Error("Failed to transfer gold");
+}
+
 // ── Route registration ───────────────────────────────────────────────────────
 
 export function registerGoldPurchaseRoutes(server: FastifyInstance): void {
+  server.get("/gold/transfer/config", async () => ({
+    feeCopper: FRIEND_TRANSFER_FEE_COPPER,
+    feeGold: formatGold(FRIEND_TRANSFER_FEE_GOLD),
+    feeLabel: formatCopperString(FRIEND_TRANSFER_FEE_COPPER),
+  }));
+
   /**
    * GET /gold/packs — list available gold packs
    */
@@ -185,6 +228,88 @@ export function registerGoldPurchaseRoutes(server: FastifyInstance): void {
     } catch (err: any) {
       server.log.error(`[gold-purchase] Mint failed for ${paymentId}: ${err.message}`);
       return reply.code(500).send({ error: "Gold mint failed" });
+    }
+  });
+
+  /**
+   * POST /gold/transfer — send ERC-20 gold from your custodial wallet to a friend.
+   * Charges a fixed protocol fee tracked in the spend ledger.
+   */
+  server.post<{
+    Body: { toWallet: string; amount: number };
+  }>("/gold/transfer", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const ownerWallet = (request as any).walletAddress as string;
+    const { toWallet, amount } = request.body;
+
+    if (!toWallet || !/^0x[a-fA-F0-9]{40}$/.test(toWallet)) {
+      return reply.code(400).send({ error: "Invalid recipient wallet" });
+    }
+
+    const senderCustodial = await getAgentCustodialWallet(ownerWallet);
+    if (!senderCustodial) {
+      return reply.code(400).send({ error: "No custodial wallet found. Deploy an agent first." });
+    }
+
+    if (senderCustodial.toLowerCase() === toWallet.toLowerCase()) {
+      return reply.code(400).send({ error: "Cannot transfer gold to yourself" });
+    }
+
+    if (!(await areFriends(senderCustodial, toWallet))) {
+      return reply.code(403).send({ error: "Can only send gold to friends" });
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return reply.code(400).send({ error: "Transfer amount must be greater than zero" });
+    }
+
+    const transferCopper = goldToCopper(amount);
+    if (transferCopper <= 0) {
+      return reply.code(400).send({ error: "Transfer amount must be at least 1 copper" });
+    }
+    const normalizedAmount = copperToGold(transferCopper);
+    const totalCharge = normalizedAmount + FRIEND_TRANSFER_FEE_GOLD;
+
+    try {
+      const onChainGold = parseFloat(await getGoldBalance(senderCustodial));
+      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+      const availableGold = getAvailableGold(senderCustodial, safeOnChainGold);
+
+      if (availableGold < totalCharge) {
+        return reply.code(400).send({
+          error: "Insufficient gold",
+          available: formatGold(availableGold),
+          required: formatGold(totalCharge),
+          breakdown: {
+            transfer: formatGold(normalizedAmount),
+            fee: formatGold(FRIEND_TRANSFER_FEE_GOLD),
+            total: formatGold(totalCharge),
+          },
+        });
+      }
+
+      const txHash = await transferGoldWithGasRetry(server, senderCustodial, toWallet, normalizedAmount);
+      recordGoldSpend(senderCustodial, FRIEND_TRANSFER_FEE_GOLD);
+
+      server.log.info(
+        `[gold-transfer] ${senderCustodial} sent ${formatGold(normalizedAmount)} GOLD to ${toWallet} (fee ${formatGold(FRIEND_TRANSFER_FEE_GOLD)}) tx=${txHash}`,
+      );
+
+      return reply.send({
+        ok: true,
+        txHash,
+        fromWallet: senderCustodial,
+        toWallet: toWallet.toLowerCase(),
+        amount: formatGold(normalizedAmount),
+        fee: formatGold(FRIEND_TRANSFER_FEE_GOLD),
+        feeLabel: formatCopperString(FRIEND_TRANSFER_FEE_COPPER),
+        total: formatGold(totalCharge),
+        remainingGold: formatGold(Math.max(0, availableGold - totalCharge)),
+      });
+    } catch (err: any) {
+      server.log.error(`[gold-transfer] Failed ${senderCustodial} -> ${toWallet}: ${String(err?.message ?? err).slice(0, 150)}`);
+      return reply.code(500).send({ error: "Gold transfer failed" });
     }
   });
 }

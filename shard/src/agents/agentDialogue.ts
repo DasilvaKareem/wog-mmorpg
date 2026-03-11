@@ -20,13 +20,18 @@ type DialogueEvent =
   | "death"
   | "zone_enter"
   | "quest_complete"
+  | "quest_progress"
+  | "loot_found"
+  | "technique_learn"
   | "idle"
   | "low_hp_survive"
   | "react_chat"
   | "react_levelup"
   | "react_death"
   | "react_quest"
-  | "react_kill";
+  | "react_kill"
+  | "react_loot"
+  | "react_technique";
 
 interface DialogueContext {
   entityId: string;
@@ -91,6 +96,21 @@ const DIALOGUE: Record<string, string[]> = {
     "Another oath honored.",
     "The people can rest easier tonight.",
   ],
+  "sunforged::quest_progress": [
+    "Progress on {detail}. The oath holds.",
+    "{detail} draws nearer to completion.",
+    "Steady now. {detail} won't finish itself.",
+  ],
+  "sunforged::loot_found": [
+    "A worthy find. It will serve the cause.",
+    "Fortune favors the steadfast.",
+    "Useful spoils. We press on.",
+  ],
+  "sunforged::technique_learn": [
+    "{detail} is mine to wield now.",
+    "Another discipline mastered.",
+    "A new art for the light's arsenal.",
+  ],
   "sunforged::idle": [
     "The calm before purpose.",
     "Even heroes must breathe.",
@@ -137,6 +157,21 @@ const DIALOGUE: Record<string, string[]> = {
     "Job done. Payment received.",
     "Another contract closed.",
     "Clean work.",
+  ],
+  "veilborn::quest_progress": [
+    "{detail}. Piece by piece.",
+    "Closer now. That's how clean work happens.",
+    "Progress is progress. Keep the rhythm.",
+  ],
+  "veilborn::loot_found": [
+    "Not bad. Might actually be worth carrying.",
+    "Useful. I like useful.",
+    "Good haul. No complaints.",
+  ],
+  "veilborn::technique_learn": [
+    "{detail}. That should make things easier.",
+    "New trick acquired.",
+    "Another edge sharpened.",
   ],
   "veilborn::idle": [
     "...",
@@ -185,6 +220,21 @@ const DIALOGUE: Record<string, string[]> = {
     "Quest complete! Who's next?",
     "Happy to be of service.",
   ],
+  "dawnkeeper::quest_progress": [
+    "We're getting there with {detail}!",
+    "{detail} is coming together nicely!",
+    "Little by little, {detail} is almost done!",
+  ],
+  "dawnkeeper::loot_found": [
+    "Ooh, nice find!",
+    "Treasure always brightens the mood!",
+    "Look at that! Today likes us.",
+  ],
+  "dawnkeeper::technique_learn": [
+    "I learned {detail}! That's exciting!",
+    "New technique, new possibilities!",
+    "I can feel the difference already.",
+  ],
   "dawnkeeper::idle": [
     "Just taking it all in.",
     "Anyone need a hand?",
@@ -231,6 +281,21 @@ const DIALOGUE: Record<string, string[]> = {
     "Done. Where's the real challenge?",
     "Errands. Give me a war.",
     "Completed. Moving on.",
+  ],
+  "ironvow::quest_progress": [
+    "{detail}. Almost finished.",
+    "One more step toward the end of {detail}.",
+    "Good. The work is nearly done.",
+  ],
+  "ironvow::loot_found": [
+    "Finally. Something worth taking.",
+    "Spoils. As it should be.",
+    "Good. Payment in steel's shadow.",
+  ],
+  "ironvow::technique_learn": [
+    "{detail}. I'll break bones with that.",
+    "A new weapon, even without steel.",
+    "Good. More ways to win.",
   ],
   "ironvow::idle": [
     "Wasting time.",
@@ -323,6 +388,21 @@ const DIALOGUE: Record<string, string[]> = {
   "::quest_complete": [
     "Quest complete.",
     "Mission accomplished.",
+  ],
+  "::quest_progress": [
+    "Making progress on {detail}.",
+    "{detail} is almost done.",
+    "Closer to finishing {detail}.",
+  ],
+  "::loot_found": [
+    "Nice haul.",
+    "Found something useful.",
+    "Loot secured.",
+  ],
+  "::technique_learn": [
+    "Learned {detail}.",
+    "New technique unlocked.",
+    "That should help.",
   ],
   "::idle": [
     "...",
@@ -428,21 +508,71 @@ const DIALOGUE: Record<string, string[]> = {
     "Fine strike, {speaker}!",
     "Together we are stronger!",
   ],
+  "sunforged::react_loot": [
+    "A worthy haul, {speaker}. Use it well.",
+    "Fortune smiles on you, {speaker}.",
+    "Good spoils, {speaker}. The march continues.",
+  ],
+  "sunforged::react_technique": [
+    "Well learned, {speaker}. Wield it with honor.",
+    "A fine discipline, {speaker}.",
+    "Strong work, {speaker}. That art will serve you.",
+  ],
   "veilborn::react_kill": [
     "Clean kill.",
     "Efficient, {speaker}.",
+  ],
+  "veilborn::react_loot": [
+    "Not bad, {speaker}. Worth the risk?",
+    "Decent haul, {speaker}.",
+    "Keep that somewhere safe, {speaker}.",
+  ],
+  "veilborn::react_technique": [
+    "Interesting. Show me what {detail} can do, {speaker}.",
+    "New trick, {speaker}? Could be useful.",
+    "Noted, {speaker}. That technique might matter.",
   ],
   "dawnkeeper::react_kill": [
     "Great teamwork!",
     "Well fought, {speaker}!",
   ],
+  "dawnkeeper::react_loot": [
+    "Nice find, {speaker}!",
+    "Oooh, lucky you, {speaker}!",
+    "That's a great pickup, {speaker}!",
+  ],
+  "dawnkeeper::react_technique": [
+    "You learned {detail}? That's awesome, {speaker}!",
+    "Very cool, {speaker}! I want to see that in action!",
+    "Love that for you, {speaker}!",
+  ],
   "ironvow::react_kill": [
     "Next.",
     "Good. Keep going.",
   ],
+  "ironvow::react_loot": [
+    "Good. Take it and move, {speaker}.",
+    "Earned it, {speaker}.",
+    "Spoils belong to the strong, {speaker}.",
+  ],
+  "ironvow::react_technique": [
+    "Use {detail} well, {speaker}.",
+    "Good. More power for the pile, {speaker}.",
+    "Let's see if {detail} makes you dangerous, {speaker}.",
+  ],
   "::react_kill": [
     "Nice!",
     "Got 'em!",
+  ],
+  "::react_loot": [
+    "Nice haul, {speaker}!",
+    "Lucky drop, {speaker}!",
+    "Good find!",
+  ],
+  "::react_technique": [
+    "Nice, {speaker} learned {detail}!",
+    "New move unlocked, {speaker}?",
+    "That should help, {speaker}!",
   ],
 };
 
@@ -534,12 +664,12 @@ export function clearOriginCache(walletAddress: string, characterName: string): 
 
 /**
  * Check zone events for other agents' chat/actions and potentially react.
- * Reacts contextually: "grats" for level-ups, "RIP" for deaths, etc.
+ * Reacts contextually: "grats" for level-ups, "RIP" for deaths, loot hype, etc.
  * Call this periodically from the agent loop.
  */
 export function maybeReactToChat(
   ctx: Omit<DialogueContext, "event" | "speakerName">,
-  recentEvents: Array<{ type: string; entityId?: string; entityName?: string; message?: string }>,
+  recentEvents: Array<{ type: string; entityId?: string; entityName?: string; message?: string; data?: Record<string, unknown> }>,
 ): boolean {
   // Find events from OTHER entities
   const otherEvents = recentEvents.filter(
@@ -553,11 +683,13 @@ export function maybeReactToChat(
     death: "react_death",
     quest: "react_quest",
     kill: "react_kill",
+    loot: "react_loot",
+    technique: "react_technique",
     chat: "react_chat",
   };
 
-  // Prioritize significant events: levelup > death > quest > kill > chat
-  const priority = ["levelup", "death", "quest", "kill", "chat"];
+  // Prioritize significant events: levelup > death > technique > loot > quest > kill > chat
+  const priority = ["levelup", "death", "technique", "loot", "quest", "kill", "chat"];
   let bestEvent: (typeof otherEvents)[0] | null = null;
   let bestReaction: DialogueEvent = "react_chat";
 
@@ -579,17 +711,25 @@ export function maybeReactToChat(
   // Chat reactions bumped to 60% to enable conversation chains between agents
   const reactChance = bestReaction === "react_levelup" || bestReaction === "react_death"
     ? 0.40
+    : bestReaction === "react_technique"
+      ? 0.35
+      : bestReaction === "react_loot"
+        ? 0.25
     : bestReaction === "react_quest"
       ? 0.30
       : bestReaction === "react_chat"
         ? 0.60
         : 0.20;
+
+  const detail = bestReaction === "react_technique"
+    ? String(bestEvent.data?.techniqueName ?? bestEvent.message ?? "")
+    : bestEvent.message;
   if (Math.random() > reactChance) return false;
 
   return emitAgentChat({
     ...ctx,
     event: bestReaction,
     speakerName: bestEvent.entityName,
-    detail: bestEvent.message,
+    detail,
   });
 }

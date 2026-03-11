@@ -148,6 +148,20 @@ export interface CraftedItemInstance {
   craftedAt: number; // timestamp
   recipeId: string;
   displayName: string;
+  currentDurability: number;
+  currentMaxDurability: number;
+  enchantments?: Array<{
+    type: string;
+    name: string;
+    statBonus?: {
+      str?: number;
+      def?: number;
+      agi?: number;
+      int?: number;
+    };
+    specialEffect?: string;
+    appliedAt: number;
+  }>;
   /** Expanded procedural name components (null for non-weapon items) */
   generatedName?: GeneratedWeaponName;
 }
@@ -156,6 +170,19 @@ export interface CraftedItemInstance {
 
 const instanceRegistry = new Map<string, CraftedItemInstance>();
 const walletIndex = new Map<string, string[]>(); // wallet → instanceId[]
+
+function qualityRollFromTier(tier?: string): QualityRoll {
+  switch (tier) {
+    case "epic":
+      return { tier: "epic", statMultiplier: 1.35, displayPrefix: "Legendary", color: "#a855f7" };
+    case "rare":
+      return { tier: "rare", statMultiplier: 1.18, displayPrefix: "Superior", color: "#3b82f6" };
+    case "uncommon":
+      return { tier: "uncommon", statMultiplier: 1.05, displayPrefix: "Fine", color: "#22c55e" };
+    default:
+      return { tier: "common", statMultiplier: 1, displayPrefix: "", color: "#9ca3af" };
+  }
+}
 
 export function rollCraftedItem(params: {
   baseTokenId: bigint;
@@ -214,6 +241,8 @@ export function rollCraftedItem(params: {
     craftedAt: Date.now(),
     recipeId: params.recipeId,
     displayName,
+    currentDurability: rolledMaxDurability,
+    currentMaxDurability: rolledMaxDurability,
     generatedName: generated ?? undefined,
   };
 
@@ -243,6 +272,72 @@ export function getWalletInstances(wallet: string): CraftedItemInstance[] {
     if (inst) instances.push(inst);
   }
   return instances;
+}
+
+export function upsertItemInstanceFromEquipment(params: {
+  instanceId?: string;
+  walletAddress: string;
+  tokenId: number;
+  durability: number;
+  maxDurability: number;
+  name?: string;
+  quality?: string;
+  rolledStats?: Partial<CharacterStats>;
+  bonusAffix?: {
+    name: string;
+    statBonuses: Partial<CharacterStats>;
+    specialEffect?: string;
+  };
+  enchantments?: CraftedItemInstance["enchantments"];
+}): CraftedItemInstance {
+  const existing = params.instanceId ? instanceRegistry.get(params.instanceId) : undefined;
+  if (existing) {
+    existing.currentDurability = params.durability;
+    existing.currentMaxDurability = params.maxDurability;
+    existing.rolledMaxDurability = params.maxDurability;
+    existing.enchantments = params.enchantments ? [...params.enchantments] : undefined;
+    if (params.rolledStats) existing.rolledStats = { ...params.rolledStats };
+    if (params.bonusAffix) {
+      existing.bonusAffix = {
+        id: existing.bonusAffix?.id ?? params.bonusAffix.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        name: params.bonusAffix.name,
+        statBonuses: params.bonusAffix.statBonuses,
+        specialEffect: params.bonusAffix.specialEffect,
+      };
+    }
+    if (params.name && !existing.displayName) existing.displayName = params.name;
+    return existing;
+  }
+
+  const instance: CraftedItemInstance = {
+    instanceId: randomUUID(),
+    baseTokenId: params.tokenId,
+    quality: qualityRollFromTier(params.quality),
+    rolledStats: params.rolledStats ?? {},
+    bonusAffix: params.bonusAffix
+      ? {
+          id: params.bonusAffix.name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+          name: params.bonusAffix.name,
+          statBonuses: params.bonusAffix.statBonuses,
+          specialEffect: params.bonusAffix.specialEffect,
+        }
+      : undefined,
+    rolledMaxDurability: params.maxDurability,
+    craftedBy: params.walletAddress.toLowerCase(),
+    craftedAt: Date.now(),
+    recipeId: "runtime-instance",
+    displayName: params.name ?? getItemByTokenId(BigInt(params.tokenId))?.name ?? "Unknown Item",
+    currentDurability: params.durability,
+    currentMaxDurability: params.maxDurability,
+    enchantments: params.enchantments ? [...params.enchantments] : undefined,
+  };
+
+  instanceRegistry.set(instance.instanceId, instance);
+  const wallet = params.walletAddress.toLowerCase();
+  const existingIds = walletIndex.get(wallet) ?? [];
+  existingIds.push(instance.instanceId);
+  walletIndex.set(wallet, existingIds);
+  return instance;
 }
 
 // ── API Routes ─────────────────────────────────────────────────────────

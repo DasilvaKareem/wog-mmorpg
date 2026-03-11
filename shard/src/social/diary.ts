@@ -28,6 +28,7 @@ export type DiaryAction =
   | "repair"
   | "buy"
   | "sell"
+  | "recycle"
   | "craft"
   | "brew"
   | "cook"
@@ -252,6 +253,22 @@ export function narrativeSell(
   return {
     headline: `Sold ${quantity}x ${itemName}`,
     narrative: `${title} parted with ${quantity}x ${itemName} at a merchant stall in ${zoneName(zoneId)}, pocketing ${totalPayout} gold with a satisfied nod.`,
+  };
+}
+
+export function narrativeRecycle(
+  name: string,
+  raceId: string | undefined,
+  classId: string | undefined,
+  zoneId: string,
+  itemName: string,
+  quantity: number,
+  totalPayout: number,
+): { headline: string; narrative: string } {
+  const title = charTitle(name, raceId, classId);
+  return {
+    headline: `Recycled ${quantity}x ${itemName}`,
+    narrative: `${title} fed ${quantity}x ${itemName} into a recycler in ${zoneName(zoneId)}, breaking the NFT salvage down into ${totalPayout} gold worth of reclaimed value.`,
   };
 }
 

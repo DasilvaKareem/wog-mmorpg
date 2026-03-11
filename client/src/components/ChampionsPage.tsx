@@ -5,7 +5,8 @@ import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
 import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
-import { formatCopperString } from "@/lib/currency";
+import { CurrencyInput } from "@/components/ui/currency-input";
+import { formatCopperString, formatGoldString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
 
@@ -45,9 +46,12 @@ interface InventoryItem {
   rarity: "common" | "uncommon" | "rare" | "epic" | "legendary";
   quantity: number;
   equipped: boolean;
+  equippedCount: number;
   equippedSlot: string | null;
   durability: number | null;
   maxDurability: number | null;
+  recyclableQuantity: number;
+  recycleCopperValue: number;
 }
 
 const ALL_PROFESSIONS = [
@@ -75,6 +79,7 @@ const ACTION_COLORS: Record<string, string> = {
   skin:             "#c8a062",
   buy:              "#ffcc00",
   sell:             "#ffcc00",
+  recycle:          "#54f28b",
   equip:            "#9aa7cc",
   spawn:            "#7a84a8",
   consume:          "#ff8c00",
@@ -296,6 +301,7 @@ function InventoryTab({
   const [filter, setFilter] = React.useState<string>("all");
   const [busy, setBusy] = React.useState<number | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [notice, setNotice] = React.useState<string | null>(null);
 
   const categories = ["all", "weapon", "armor", "consumable", "material"] as const;
 
@@ -323,6 +329,7 @@ function InventoryTab({
     if (!wallet || !zoneId) return;
     setBusy(item.tokenId);
     setError(null);
+    setNotice(null);
     try {
       const authWallet = ownerWallet ?? wallet;
       const token = await getAuthToken(authWallet);
@@ -334,6 +341,7 @@ function InventoryTab({
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Equip failed"); return; }
+      setNotice(`Equipped ${item.name}.`);
       onRefresh();
     } catch { setError("Network error"); }
     finally { setBusy(null); }
@@ -343,6 +351,7 @@ function InventoryTab({
     if (!wallet || !zoneId) return;
     setBusy(-1);
     setError(null);
+    setNotice(null);
     try {
       const authWallet = ownerWallet ?? wallet;
       const token = await getAuthToken(authWallet);
@@ -354,9 +363,35 @@ function InventoryTab({
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Unequip failed"); return; }
+      setNotice(`Unequipped ${slot}.`);
       onRefresh();
     } catch { setError("Network error"); }
     finally { setBusy(null); }
+  }
+
+  async function handleRecycle(item: InventoryItem, quantity: number) {
+    if (!wallet || quantity < 1) return;
+    setBusy(item.tokenId);
+    setError(null);
+    setNotice(null);
+    try {
+      const authWallet = ownerWallet ?? wallet;
+      const token = await getAuthToken(authWallet);
+      if (!token) { setError("Auth failed — reconnect wallet"); return; }
+      const res = await fetch(`${API_URL}/shop/recycle`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ sellerAddress: wallet, tokenId: item.tokenId, quantity }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Recycle failed"); return; }
+      setNotice(`Recycled ${quantity}x ${item.name} for ${formatCopperString(data.totalPayoutCopper ?? 0)}.`);
+      onRefresh();
+    } catch {
+      setError("Network error");
+    } finally {
+      setBusy(null);
+    }
   }
 
   if (loading) {
@@ -373,6 +408,11 @@ function InventoryTab({
       {error && (
         <div className="border-2 border-[#ff6b6b44] bg-[#1a0a0a] px-3 py-2 text-[11px] text-[#ff6b6b]">
           {error}
+        </div>
+      )}
+      {notice && (
+        <div className="border-2 border-[#54f28b44] bg-[#09160d] px-3 py-2 text-[11px] text-[#54f28b]">
+          {notice}
         </div>
       )}
 
@@ -472,6 +512,8 @@ function InventoryTab({
             const durColor = durPct === null ? null : durPct > 66 ? "#54f28b" : durPct > 33 ? "#ffcc00" : "#ff6b6b";
             const canEquip = !!item.equipSlot && !item.equipped && !!zoneId;
             const canUnequip = item.equipped && !!item.equippedSlot && !!zoneId;
+            const canRecycle = item.recyclableQuantity > 0;
+            const recycleValueTotal = item.recycleCopperValue * item.recyclableQuantity;
 
             return (
               <div
@@ -522,6 +564,11 @@ function InventoryTab({
                         <span className="font-bold text-[#ffcc00]">{item.quantity}</span>
                       </span>
 
+                      <span className="text-[10px] text-[#54f28b]">
+                        <span className="text-[#596a8a]">RECYCLE</span>{" "}
+                        <span className="font-bold">{formatCopperString(item.recycleCopperValue)}</span>
+                      </span>
+
                       {/* Equipped slot */}
                       {item.equippedSlot && (
                         <span className="text-[9px] uppercase text-[#7a84a8]">
@@ -553,9 +600,25 @@ function InventoryTab({
                       )}
                     </div>
 
+                    {(item.equippedCount > 0 || canRecycle) && (
+                      <div className="mt-1.5 flex items-center gap-3 flex-wrap text-[9px] uppercase">
+                        {item.equippedCount > 0 && (
+                          <span className="text-[#9aa7cc]">
+                            Locked Equipped: <span className="font-bold text-[#d6deff]">{item.equippedCount}</span>
+                          </span>
+                        )}
+                        {canRecycle && (
+                          <span className="text-[#54f28b]">
+                            Recyclable: <span className="font-bold">{item.recyclableQuantity}</span>
+                            {" "}for {formatCopperString(recycleValueTotal)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
                     {/* Equip / Unequip button */}
-                    {(canEquip || canUnequip) && (
-                      <div className="mt-2">
+                    {(canEquip || canUnequip || canRecycle) && (
+                      <div className="mt-2 flex items-center gap-2 flex-wrap">
                         {canEquip && (
                           <button
                             onClick={() => handleEquip(item)}
@@ -573,6 +636,26 @@ function InventoryTab({
                           >
                             {busy === -1 ? "REMOVING..." : "UNEQUIP"}
                           </button>
+                        )}
+                        {canRecycle && (
+                          <>
+                            <button
+                              onClick={() => handleRecycle(item, 1)}
+                              disabled={busy !== null}
+                              className="border-2 border-[#54f28b44] bg-[#09160d] px-3 py-1 text-[10px] uppercase tracking-wide text-[#54f28b] hover:bg-[#54f28b22] transition disabled:opacity-40"
+                            >
+                              {busy === item.tokenId ? "RECYCLING..." : `RECYCLE 1 · ${formatCopperString(item.recycleCopperValue)}`}
+                            </button>
+                            {item.recyclableQuantity > 1 && (
+                              <button
+                                onClick={() => handleRecycle(item, item.recyclableQuantity)}
+                                disabled={busy !== null}
+                                className="border-2 border-[#54f28b22] bg-[#08110b] px-3 py-1 text-[10px] uppercase tracking-wide text-[#8af7b0] hover:bg-[#54f28b18] transition disabled:opacity-40"
+                              >
+                                {busy === item.tokenId ? "RECYCLING..." : `RECYCLE ALL · ${formatCopperString(recycleValueTotal)}`}
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     )}
@@ -1136,10 +1219,12 @@ interface FriendRequestInfo {
 }
 
 function FriendsTab({
+  ownerWallet,
   custodialWallet,
   entityId,
   entityZoneId,
 }: {
+  ownerWallet: string | null;
   custodialWallet: string | null;
   entityId: string | null;
   entityZoneId: string | null;
@@ -1153,12 +1238,48 @@ function FriendsTab({
   const { dn } = useWogNames(friendAddresses);
   const [wogNameInput, setWogNameInput] = React.useState("");
   const [wogSending, setWogSending] = React.useState(false);
-  const [actionMsg, setActionMsg] = React.useState<string | null>(null);
+  const [actionMsg, setActionMsg] = React.useState<{ text: string; tone: "ok" | "error" } | null>(null);
+  const [availableGold, setAvailableGold] = React.useState<number | null>(null);
+  const [transferFeeGold, setTransferFeeGold] = React.useState(0.0025);
+  const [transferFeeLabel, setTransferFeeLabel] = React.useState("25c");
+  const [transferTargetWallet, setTransferTargetWallet] = React.useState<string | null>(null);
+  const [transferAmount, setTransferAmount] = React.useState(0);
+  const [sendingGold, setSendingGold] = React.useState(false);
 
   const friendWallets = React.useMemo(
     () => new Set(friends.map((f) => f.wallet.toLowerCase())),
     [friends],
   );
+
+  function showAction(text: string, tone: "ok" | "error" = "ok", timeoutMs = 4000) {
+    setActionMsg({ text, tone });
+    window.setTimeout(() => setActionMsg(null), timeoutMs);
+  }
+
+  async function refreshTransferState() {
+    if (!custodialWallet) return;
+    try {
+      const [balanceRes, feeRes] = await Promise.all([
+        fetch(`${API_URL}/wallet/${custodialWallet}/balance`),
+        fetch(`${API_URL}/gold/transfer/config`),
+      ]);
+
+      if (balanceRes.ok) {
+        const data = await balanceRes.json();
+        const parsed = parseFloat(data.gold ?? "0");
+        setAvailableGold(Number.isFinite(parsed) ? parsed : 0);
+      }
+
+      if (feeRes.ok) {
+        const data = await feeRes.json();
+        const parsed = parseFloat(data.feeGold ?? "0.0025");
+        if (Number.isFinite(parsed) && parsed >= 0) setTransferFeeGold(parsed);
+        if (typeof data.feeLabel === "string" && data.feeLabel.trim()) setTransferFeeLabel(data.feeLabel);
+      }
+    } catch {
+      // non-fatal
+    }
+  }
 
   // Poll friends list
   React.useEffect(() => {
@@ -1174,6 +1295,13 @@ function FriendsTab({
     }
     poll();
     const interval = setInterval(poll, 10_000);
+    return () => clearInterval(interval);
+  }, [custodialWallet]);
+
+  React.useEffect(() => {
+    if (!custodialWallet) return;
+    refreshTransferState();
+    const interval = setInterval(() => { void refreshTransferState(); }, 15_000);
     return () => clearInterval(interval);
   }, [custodialWallet]);
 
@@ -1220,10 +1348,9 @@ function FriendsTab({
         body: JSON.stringify({ fromWallet: custodialWallet, toWallet: target.walletAddress }),
       });
       const d = await res.json();
-      if (res.ok) setActionMsg(`Friend request sent to ${target.name}!`);
-      else setActionMsg(`Error: ${d.error}`);
-    } catch { setActionMsg("Failed to send request"); }
-    setTimeout(() => setActionMsg(null), 4000);
+      if (res.ok) showAction(`Friend request sent to ${target.name}!`);
+      else showAction(`Error: ${d.error}`, "error");
+    } catch { showAction("Failed to send request", "error"); }
   }
 
   async function sendByWogName() {
@@ -1236,11 +1363,10 @@ function FriendsTab({
         body: JSON.stringify({ fromWallet: custodialWallet, toName: wogNameInput.trim() }),
       });
       const d = await res.json();
-      if (res.ok) { setActionMsg(`Friend request sent to ${wogNameInput.trim().replace(/\.wog$/i, "")}.wog!`); setWogNameInput(""); }
-      else setActionMsg(`Error: ${d.error}`);
-    } catch { setActionMsg("Failed to send request"); }
+      if (res.ok) { showAction(`Friend request sent to ${wogNameInput.trim().replace(/\.wog$/i, "")}.wog!`); setWogNameInput(""); }
+      else showAction(`Error: ${d.error}`, "error");
+    } catch { showAction("Failed to send request", "error"); }
     finally { setWogSending(false); }
-    setTimeout(() => setActionMsg(null), 4000);
   }
 
   async function acceptRequest(req: FriendRequestInfo) {
@@ -1254,10 +1380,9 @@ function FriendsTab({
       const d = await res.json();
       if (res.ok) {
         setRequests((prev) => prev.filter((r) => r.id !== req.id));
-        setActionMsg(`You are now friends with ${req.fromName}!`);
-      } else setActionMsg(`Error: ${d.error}`);
-    } catch { setActionMsg("Failed to accept"); }
-    setTimeout(() => setActionMsg(null), 4000);
+        showAction(`You are now friends with ${req.fromName}!`);
+      } else showAction(`Error: ${d.error}`, "error");
+    } catch { showAction("Failed to accept", "error"); }
   }
 
   async function declineRequest(req: FriendRequestInfo) {
@@ -1278,8 +1403,11 @@ function FriendsTab({
       body: JSON.stringify({ wallet: custodialWallet, targetWallet: f.wallet }),
     });
     setFriends((prev) => prev.filter((x) => x.wallet !== f.wallet));
-    setActionMsg("Friend removed.");
-    setTimeout(() => setActionMsg(null), 3000);
+    if (transferTargetWallet === f.wallet) {
+      setTransferTargetWallet(null);
+      setTransferAmount(0);
+    }
+    showAction("Friend removed.", "ok", 3000);
   }
 
   async function inviteFriend(f: FriendInfo) {
@@ -1291,18 +1419,75 @@ function FriendsTab({
         body: JSON.stringify({ fromEntityId: entityId, fromZoneId: entityZoneId, toCustodialWallet: f.wallet }),
       });
       const d = await res.json();
-      if (res.ok) setActionMsg(`Party invite sent to ${f.name}!`);
-      else setActionMsg(`Error: ${d.error}`);
-    } catch { setActionMsg("Failed to invite"); }
-    setTimeout(() => setActionMsg(null), 4000);
+      if (res.ok) showAction(`Party invite sent to ${f.name}!`);
+      else showAction(`Error: ${d.error}`, "error");
+    } catch { showAction("Failed to invite", "error"); }
+  }
+
+  async function sendGold(friend: FriendInfo) {
+    if (!ownerWallet || !custodialWallet) return;
+    if (!transferTargetWallet || transferTargetWallet !== friend.wallet) return;
+
+    const normalizedAmount = Math.floor(transferAmount * 10000) / 10000;
+    if (normalizedAmount <= 0) {
+      showAction("Enter a gold amount greater than 0.", "error");
+      return;
+    }
+
+    const totalGold = normalizedAmount + transferFeeGold;
+    if (availableGold !== null && totalGold > availableGold) {
+      showAction("Not enough spendable gold for amount plus fee.", "error");
+      return;
+    }
+
+    setSendingGold(true);
+    try {
+      const token = await getAuthToken(ownerWallet);
+      if (!token) {
+        showAction("Auth failed. Reconnect wallet and try again.", "error");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/gold/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ toWallet: friend.wallet, amount: normalizedAmount }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showAction(data.error ?? "Gold transfer failed", "error");
+        return;
+      }
+
+      const remaining = parseFloat(data.remainingGold ?? "0");
+      if (Number.isFinite(remaining)) setAvailableGold(remaining);
+      setTransferTargetWallet(null);
+      setTransferAmount(0);
+      showAction(`Sent ${formatGoldString(normalizedAmount)} to ${friend.name ?? friend.wogName ?? dn(friend.wallet)}. Fee: ${data.feeLabel ?? transferFeeLabel}.`);
+      void refreshTransferState();
+    } catch {
+      showAction("Gold transfer failed", "error");
+    } finally {
+      setSendingGold(false);
+    }
   }
 
   const isOnline = Boolean(entityId);
+  const transferTotal = transferAmount + transferFeeGold;
 
   return (
     <div className="flex flex-col gap-4 font-mono">
       {actionMsg && (
-        <div className="border-2 border-[#54f28b]/40 bg-[#0a1a0e] px-3 py-2 text-[17px] text-[#54f28b]">{actionMsg}</div>
+        <div
+          className="border-2 px-3 py-2 text-[17px]"
+          style={{
+            borderColor: actionMsg.tone === "error" ? "#ff6b6b66" : "#54f28b66",
+            backgroundColor: actionMsg.tone === "error" ? "#1a0a0a" : "#0a1a0e",
+            color: actionMsg.tone === "error" ? "#ff6b6b" : "#54f28b",
+          }}
+        >
+          {actionMsg.text}
+        </div>
       )}
 
       {/* Friend Requests */}
@@ -1330,7 +1515,12 @@ function FriendsTab({
       <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000]">
         <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-4 py-2 flex items-center justify-between">
           <span className="text-[13px] uppercase tracking-widest text-[#7a84a8]">Friends List</span>
-          <span className="text-[17px] text-[#596a8a] font-mono">{friends.length} / {50}</span>
+          <div className="text-right">
+            <span className="block text-[17px] text-[#596a8a] font-mono">{friends.length} / {50}</span>
+            {availableGold !== null && (
+              <span className="block text-[12px] text-[#ffcc00]">Spendable: {formatGoldString(availableGold)}</span>
+            )}
+          </div>
         </div>
         {friends.length === 0 ? (
           <p className="px-4 py-6 text-center text-[17px] text-[#596a8a]">No friends yet — search below to add some!</p>
@@ -1339,48 +1529,128 @@ function FriendsTab({
             {friends.map((f) => {
               const lc = levelColor(f.level ?? 0);
               return (
-                <div key={f.wallet} className="flex items-center gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {f.online ? (
-                        <span className="text-[12px] text-[#54f28b]">●</span>
-                      ) : (
-                        <span className="text-[12px] text-[#596a8a]">●</span>
-                      )}
-                      <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? dn(f.wallet)}</span>
-                      {f.wogName && <span className="text-[12px] text-[#5dadec]">{f.wogName}</span>}
-                      {f.level != null && <span className="text-[17px]" style={{ color: lc }}>Lv {f.level}</span>}
-                      {f.raceId && <span className="text-[13px] capitalize text-[#7a84a8]">{f.raceId} {f.classId}</span>}
-                      {f.reputationRank && (
-                        <span
-                          className="text-[12px] border px-1 py-0.5 uppercase tracking-wide"
-                          style={{ color: RANK_COLORS[f.reputationRank] ?? "#95A5A6", borderColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "44", backgroundColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "11" }}
-                        >
-                          {f.reputationRank}
-                        </span>
-                      )}
+                <React.Fragment key={f.wallet}>
+                  <div className="flex items-center gap-3 border-b border-[#1e2842] px-4 py-3 last:border-b-0">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        {f.online ? (
+                          <span className="text-[12px] text-[#54f28b]">●</span>
+                        ) : (
+                          <span className="text-[12px] text-[#596a8a]">●</span>
+                        )}
+                        <span className="text-[13px] font-bold text-[#d6deff]">{f.name ?? f.wogName ?? dn(f.wallet)}</span>
+                        {f.wogName && <span className="text-[12px] text-[#5dadec]">{f.wogName}</span>}
+                        {f.level != null && <span className="text-[17px]" style={{ color: lc }}>Lv {f.level}</span>}
+                        {f.raceId && <span className="text-[13px] capitalize text-[#7a84a8]">{f.raceId} {f.classId}</span>}
+                        {f.reputationRank && (
+                          <span
+                            className="text-[12px] border px-1 py-0.5 uppercase tracking-wide"
+                            style={{ color: RANK_COLORS[f.reputationRank] ?? "#95A5A6", borderColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "44", backgroundColor: (RANK_COLORS[f.reputationRank] ?? "#95A5A6") + "11" }}
+                          >
+                            {f.reputationRank}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[13px] text-[#596a8a]">
+                        {f.online && f.zoneId ? zoneLabel(f.zoneId) : "Offline"}
+                      </span>
                     </div>
-                    <span className="text-[13px] text-[#596a8a]">
-                      {f.online && f.zoneId ? zoneLabel(f.zoneId) : "Offline"}
-                    </span>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    {f.online && isOnline && (
+                    <div className="flex gap-2 shrink-0">
                       <button
-                        onClick={() => void inviteFriend(f)}
-                        className="border-2 border-[#26a5e4] bg-[#0a1020] px-3 py-1 text-[17px] text-[#26a5e4] shadow-[2px_2px_0_0_#000] hover:bg-[#0e1830]"
+                        onClick={() => {
+                          if (transferTargetWallet === f.wallet) {
+                            setTransferTargetWallet(null);
+                            setTransferAmount(0);
+                            return;
+                          }
+                          setTransferTargetWallet(f.wallet);
+                          setTransferAmount(0);
+                        }}
+                        className="border-2 border-[#ffcc00] bg-[#1f1807] px-3 py-1 text-[17px] text-[#ffcc00] shadow-[2px_2px_0_0_#000] hover:bg-[#2b220c]"
                       >
-                        [Invite]
+                        {transferTargetWallet === f.wallet ? "[Close]" : "[Send Gold]"}
                       </button>
-                    )}
-                    <button
-                      onClick={() => void removeFriend(f)}
-                      className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#7a84a8] hover:text-[#ff6b6b] hover:border-[#ff6b6b]/40"
-                    >
-                      [Remove]
-                    </button>
+                      {f.online && isOnline && (
+                        <button
+                          onClick={() => void inviteFriend(f)}
+                          className="border-2 border-[#26a5e4] bg-[#0a1020] px-3 py-1 text-[17px] text-[#26a5e4] shadow-[2px_2px_0_0_#000] hover:bg-[#0e1830]"
+                        >
+                          [Invite]
+                        </button>
+                      )}
+                      <button
+                        onClick={() => void removeFriend(f)}
+                        className="border-2 border-[#2a3450] px-3 py-1 text-[17px] text-[#7a84a8] hover:text-[#ff6b6b] hover:border-[#ff6b6b]/40"
+                      >
+                        [Remove]
+                      </button>
+                    </div>
                   </div>
-                </div>
+                  {transferTargetWallet === f.wallet && (
+                    <div className="border-b border-[#1e2842] bg-[#0a0f1a] px-4 py-4 last:border-b-0">
+                      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                        <div className="flex flex-col gap-2">
+                          <p className="text-[13px] text-[#d6deff]">
+                            Send ERC20 gold to <span className="text-[#ffcc00]">{f.name ?? f.wogName ?? dn(f.wallet)}</span>
+                          </p>
+                          <CurrencyInput
+                            value={transferAmount}
+                            onChange={setTransferAmount}
+                            min={0}
+                            max={availableGold !== null ? Math.max(0, availableGold - transferFeeGold) : undefined}
+                            disabled={sendingGold}
+                            size="md"
+                          />
+                          <p className="text-[12px] text-[#596a8a]">
+                            Recipient wallet: {f.wallet.slice(0, 8)}...{f.wallet.slice(-6)}
+                          </p>
+                        </div>
+                        <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                          <p className="text-[12px] uppercase tracking-wide text-[#7a84a8]">Transfer Summary</p>
+                          <div className="mt-2 space-y-1 text-[13px]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[#7a84a8]">Amount</span>
+                              <span className="text-[#d6deff]">{formatGoldString(transferAmount)}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-[#7a84a8]">Fee</span>
+                              <span className="text-[#ff8c42]">{transferFeeLabel}</span>
+                            </div>
+                            <div className="flex items-center justify-between border-t border-[#1e2842] pt-2">
+                              <span className="text-[#7a84a8]">Total</span>
+                              <span className="text-[#ffcc00]">{formatGoldString(transferTotal)}</span>
+                            </div>
+                            {availableGold !== null && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-[#7a84a8]">Available</span>
+                                <span className="text-[#54f28b]">{formatGoldString(availableGold)}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-3 flex gap-2">
+                            <button
+                              onClick={() => void sendGold(f)}
+                              disabled={sendingGold || transferAmount <= 0 || !ownerWallet}
+                              className="flex-1 border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2 text-[12px] text-[#54f28b] shadow-[2px_2px_0_0_#000] hover:bg-[#112a1b] disabled:opacity-40"
+                            >
+                              {sendingGold ? "Sending..." : "[Confirm Send]"}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setTransferTargetWallet(null);
+                                setTransferAmount(0);
+                              }}
+                              disabled={sendingGold}
+                              className="border-2 border-[#2a3450] px-3 py-2 text-[12px] text-[#7a84a8] hover:text-[#9aa7cc] disabled:opacity-40"
+                            >
+                              [Cancel]
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
               );
             })}
           </div>
@@ -2654,7 +2924,7 @@ export function ChampionsPage(): React.ReactElement {
               {activeTab === "activity"    && <ActivityTab diary={diary} />}
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
               {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
-              {activeTab === "friends"     && <FriendsTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "friends"     && <FriendsTab ownerWallet={wallet} custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "reputation"  && <ReputationTab custodialWallet={custodialWallet} />}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}
               {activeTab === "plan"        && <PlanTab wallet={wallet} />}

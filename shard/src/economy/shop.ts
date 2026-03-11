@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import { getGoldBalance, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
+import { getGoldBalance, mintGold, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
-import { ITEM_CATALOG, getItemByTokenId, getItemsByTokenIds } from "../items/itemCatalog.js";
-import { getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { ITEM_CATALOG, getItemByTokenId, getItemRecycleCopperValue, getItemsByTokenIds } from "../items/itemCatalog.js";
+import { getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
+import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
@@ -14,7 +15,7 @@ import {
   recordMerchantSale,
   recordMerchantPurchase,
 } from "../world/merchantAgent.js";
-import { logDiary, narrativeBuy, narrativeSell } from "../social/diary.js";
+import { logDiary, narrativeBuy, narrativeRecycle, narrativeSell } from "../social/diary.js";
 import { copperToGold } from "../blockchain/currency.js";
 
 export function registerShopRoutes(server: FastifyInstance) {
@@ -359,6 +360,131 @@ export function registerShopRoutes(server: FastifyInstance) {
       server.log.error(err, `Shop sell failed for ${sellerAddress}`);
       reply.code(500);
       return { error: "Sell transaction failed" };
+    }
+  });
+
+  /**
+   * POST /shop/recycle { sellerAddress, tokenId, quantity }
+   * Burn NFT items and mint GOLD based on recycle value.
+   * PROTECTED - Requires authentication
+   */
+  server.post<{
+    Body: {
+      sellerAddress: string;
+      tokenId: number;
+      quantity: number;
+    };
+  }>("/shop/recycle", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const { sellerAddress, tokenId, quantity } = request.body;
+    const authenticatedWallet = (request as any).walletAddress;
+
+    if (!sellerAddress || !/^0x[a-fA-F0-9]{40}$/.test(sellerAddress)) {
+      reply.code(400);
+      return { error: "Invalid seller address" };
+    }
+
+    const sellerLower = sellerAddress.toLowerCase();
+    const authLowerSell = authenticatedWallet.toLowerCase();
+    let recycleAuthorized = sellerLower === authLowerSell;
+    if (!recycleAuthorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      recycleAuthorized = !!custodial && sellerLower === custodial.toLowerCase();
+    }
+    if (!recycleAuthorized) {
+      reply.code(403);
+      return { error: "Not authorized to recycle for this wallet" };
+    }
+
+    if (quantity < 1 || quantity > 100) {
+      reply.code(400);
+      return { error: "Quantity must be between 1 and 100" };
+    }
+
+    const item = getItemByTokenId(BigInt(tokenId));
+    if (!item) {
+      reply.code(400);
+      return { error: `Unknown tokenId: ${tokenId}` };
+    }
+
+    const recycleCopperValue = getItemRecycleCopperValue(item);
+    const totalPayoutCopper = recycleCopperValue * quantity;
+    const goldPayout = copperToGold(totalPayoutCopper);
+
+    try {
+      const sellerBalance = await getItemBalance(sellerAddress, BigInt(tokenId));
+      if (sellerBalance < BigInt(quantity)) {
+        reply.code(400);
+        return { error: "You don't have enough of this item", balance: sellerBalance.toString() };
+      }
+
+      const ownedQuantity = Number(sellerBalance);
+      const equippedCounts = await getEquippedItemCounts(sellerAddress);
+      const equippedCount = equippedCounts.get(tokenId) ?? 0;
+      const recyclableQuantity = getRecyclableQuantity(ownedQuantity, equippedCount);
+      if (quantity > recyclableQuantity) {
+        reply.code(400);
+        return {
+          error: equippedCount > 0
+            ? "That item is equipped on one of your characters. Unequip it or recycle only extra copies."
+            : "You can't recycle more than you own.",
+          ownedQuantity,
+          equippedCount,
+          recyclableQuantity,
+        };
+      }
+
+      const burnTx = await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+      const goldTx = await mintGold(sellerAddress, goldPayout.toString());
+
+      server.log.info(
+        `[shop/recycle] ${sellerAddress} recycled ${quantity}x ${item.name} for ${totalPayoutCopper}c`
+      );
+
+      {
+        let sellerEntity: { name: string; raceId?: string; classId?: string; region?: string; x: number; y: number } | undefined;
+        for (const e of getAllEntities().values()) {
+          if (e.walletAddress?.toLowerCase() === sellerAddress.toLowerCase()) {
+            sellerEntity = e;
+            break;
+          }
+        }
+        if (sellerEntity) {
+          const zoneId = (sellerEntity as any).region ?? "unknown";
+          const { headline, narrative } = narrativeRecycle(
+            sellerEntity.name,
+            sellerEntity.raceId,
+            sellerEntity.classId,
+            zoneId,
+            item.name,
+            quantity,
+            totalPayoutCopper,
+          );
+          logDiary(sellerAddress, sellerEntity.name, zoneId, sellerEntity.x, sellerEntity.y, "recycle", headline, narrative, {
+            itemName: item.name,
+            tokenId,
+            quantity,
+            unitRecycleValue: recycleCopperValue,
+            totalPayoutCopper,
+          });
+        }
+      }
+
+      return {
+        ok: true,
+        item: item.name,
+        quantity,
+        unitRecycleValue: recycleCopperValue,
+        totalPayoutCopper,
+        goldPayout,
+        burnTx,
+        goldTx,
+      };
+    } catch (err) {
+      server.log.error(err, `Shop recycle failed for ${sellerAddress}`);
+      reply.code(500);
+      return { error: "Recycle transaction failed" };
     }
   });
 

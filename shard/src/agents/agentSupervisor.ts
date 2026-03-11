@@ -13,7 +13,7 @@
 
 import { type Content, type FunctionDeclaration, type Part, type Type } from "@google/genai";
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
-import { fetchWalletBalance } from "./agentUtils.js";
+import { fetchLiquidationInventory } from "./agentUtils.js";
 import { findPortalInZone, getSharedEdge, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { getEntitiesInRegion } from "../world/zoneRuntime.js";
@@ -88,11 +88,12 @@ Your job: Decide the next bot script to execute.
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold
 - HP REGEN: You passively regenerate HP when out of combat (after ~10s). Do NOT gather herbs, cook, or shop for food just because HP is low — simply wait or keep moving and HP will recover on its own. Only use food/potions during active combat emergencies (below 20% HP). Never switch to gathering or cooking solely because of low HP.
-- ECONOMY RULES: Gold earned from mob kills takes time to confirm on-chain. Agents start with 0 gold.
+- ECONOMY RULES: Gold earned from mob kills takes time to confirm on-chain. Agents start with 0 gold, and recyclable loot is a valid gold source.
   * EARLY GAME (< 100c): FIGHT mobs (Giant Rats, etc.) until you have at least 100 copper. Do NOT quest, gather, cook, or craft until you have 100c. Buy a weapon as soon as you can afford one (≥ 10c).
   * No weapon AND no gold (< 10c): FIGHT — agents can attack unarmed. Earn gold first.
   * No weapon AND has gold (≥ 10c): SHOP — buy the cheapest weapon available.
-  * Has weapon + ≥ 100c: quest or combat based on zone and level.
+      * If inventory contains recyclable loot and funds are low, choose trade to recycle it into gold.
+      * Has weapon + ≥ 100c: quest or combat based on zone and level.
   * If outleveled: travel to an easier zone.`.trim();
 }
 
@@ -106,7 +107,7 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
     properties: {
       type: {
         type: "STRING" as Type,
-        enum: ["combat", "gather", "travel", "shop", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
+        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
         description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC.",
       },
       maxLevelOffset: {
@@ -199,12 +200,20 @@ async function executeLegacyTool(
     }
 
     case "read_inventory": {
-      const inv = await fetchWalletBalance(ctx.custodialWallet);
+      const inv = await fetchLiquidationInventory(ctx.custodialWallet);
       return {
         gold: inv.copper,
         items: inv.items
           .filter((i: any) => Number(i.balance) > 0)
-          .map((i: any) => ({ tokenId: i.tokenId, name: i.name, category: i.category, count: Number(i.balance) })),
+          .map((i: any) => ({
+            tokenId: i.tokenId,
+            name: i.name,
+            category: i.category,
+            count: Number(i.balance),
+            equippedCount: i.equippedCount,
+            recyclableQuantity: i.recyclableQuantity,
+            recycleCopperValue: i.recycleCopperValue,
+          })),
       };
     }
 

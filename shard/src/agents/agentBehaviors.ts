@@ -9,9 +9,16 @@ import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getClassById } from "../character/classes.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { isQuestNpc } from "../social/questSystem.js";
+import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
+import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
+import { getItemByTokenId } from "../items/itemCatalog.js";
 import type { AgentContext } from "./agentUtils.js";
 
 const MELEE_RANGE = 40;
+const PROFESSION_HUB_ZONE = "village-square";
+const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
+const SICKLE_TOKENS: Record<number, number> = { 41: 1, 42: 2, 43: 3, 44: 4 };
+const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
 
 /** Return the attack range for an entity based on its class, with a small buffer so
  *  the entity stops just inside range rather than right at the edge. */
@@ -21,6 +28,138 @@ function getCombatStopDist(me: any): number {
     if (classDef) return Math.max(MELEE_RANGE - 5, classDef.attackRange - 10);
   }
   return MELEE_RANGE - 5;
+}
+
+type GatherPreference = "ore" | "herb" | "both";
+type GatheringToolKind = "pickaxe" | "sickle";
+
+function matchesTool(name: string | undefined, toolKind: GatheringToolKind): boolean {
+  const lower = name?.toLowerCase() ?? "";
+  return toolKind === "pickaxe" ? lower.includes("pickaxe") : lower.includes("sickle");
+}
+
+function toolTierFromTokenId(tokenId: number | undefined, toolKind: GatheringToolKind): number {
+  if (!tokenId) return 0;
+  return toolKind === "pickaxe"
+    ? (PICKAXE_TOKENS[tokenId] ?? 0)
+    : (SICKLE_TOKENS[tokenId] ?? 0);
+}
+
+function requiredNodeTier(entity: any): number {
+  if (entity.type === "ore-node" && entity.oreType) {
+    return ORE_CATALOG[entity.oreType as OreType]?.requiredPickaxeTier ?? 1;
+  }
+  if (entity.type === "flower-node" && entity.flowerType) {
+    return FLOWER_CATALOG[entity.flowerType as FlowerType]?.requiredSickleTier ?? 1;
+  }
+  return 1;
+}
+
+function findGatherNode(
+  entities: Record<string, any>,
+  me: any,
+  preference: GatherPreference,
+): [string, any] | null {
+  const matches = Object.entries(entities)
+    .filter(([, e]) => {
+      if (preference === "ore") return e.type === "ore-node";
+      if (preference === "herb") return e.type === "flower-node";
+      return e.type === "ore-node" || e.type === "flower-node";
+    })
+    .sort(([, a], [, b]) => {
+      const tierDiff = requiredNodeTier(a) - requiredNodeTier(b);
+      if (tierDiff !== 0) return tierDiff;
+      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
+    });
+  return matches[0] as [string, any] ?? null;
+}
+
+async function routeToProfessionHub(ctx: AgentContext, reason: string): Promise<boolean> {
+  if (ctx.currentRegion === PROFESSION_HUB_ZONE) return false;
+  void ctx.logActivity(reason);
+  ctx.setScript({ type: "travel", targetZone: PROFESSION_HUB_ZONE, reason });
+  return ctx.issueCommand({ action: "travel", targetZone: PROFESSION_HUB_ZONE });
+}
+
+async function ensureGatheringTool(
+  ctx: AgentContext,
+  entities: Record<string, any>,
+  me: any,
+  toolKind: GatheringToolKind,
+  requiredTier: number,
+): Promise<boolean> {
+  const equippedWeapon = me.equipment?.weapon;
+  const equippedTokenId = Number(equippedWeapon?.tokenId ?? 0);
+  const equippedTier = toolTierFromTokenId(equippedTokenId, toolKind);
+  const equippedReady = !!equippedWeapon
+    && !equippedWeapon.broken
+    && (equippedWeapon.durability ?? 0) > 0
+    && matchesTool(equippedWeapon.name, toolKind)
+    && equippedTier >= requiredTier;
+  if (equippedReady) return true;
+
+  const { copper, items } = await ctx.getWalletBalance();
+  const inventoryTool = items
+    .filter((item: any) => {
+      const tokenId = Number(item.tokenId);
+      const tier = toolTierFromTokenId(tokenId, toolKind);
+      return tier >= requiredTier && matchesTool(item.name, toolKind) && Number(item.balance ?? 0) > 0;
+    })
+    .sort((a: any, b: any) => Number(b.tokenId) - Number(a.tokenId))[0];
+
+  if (inventoryTool) {
+    const equipped = await ctx.equipItem(Number(inventoryTool.tokenId));
+    if (equipped) {
+      void ctx.logActivity(`Equipped ${inventoryTool.name}`);
+    }
+    return false;
+  }
+
+  const merchants = Object.entries(entities)
+    .filter(([, e]) => e.type === "merchant")
+    .sort(([, a], [, b]) => Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y));
+
+  for (const [merchantId, merchantEntity] of merchants) {
+    const moving = await ctx.moveToEntity(me, merchantEntity);
+    if (moving) return false;
+
+    const shopData = await ctx.api("GET", `/shop/npc/${merchantId}`);
+    const merchantTool = (shopData?.items ?? [])
+      .filter((item: any) => {
+        const tokenId = Number(item.tokenId);
+        const tier = toolTierFromTokenId(tokenId, toolKind);
+        return tier >= requiredTier && matchesTool(item.name, toolKind);
+      })
+      .sort((a: any, b: any) => {
+        const priceDiff = Number(a.currentPrice ?? a.copperPrice ?? 0) - Number(b.currentPrice ?? b.copperPrice ?? 0);
+        if (priceDiff !== 0) return priceDiff;
+        return Number(a.tokenId) - Number(b.tokenId);
+      })[0];
+
+    if (!merchantTool) continue;
+
+    const price = Number(merchantTool.currentPrice ?? merchantTool.copperPrice ?? 0);
+    if (copper < price) {
+      void ctx.logActivity(`Need ${price} copper for ${merchantTool.name}`);
+      return false;
+    }
+
+    const bought = await ctx.buyItem(Number(merchantTool.tokenId));
+    if (!bought) return false;
+    await ctx.equipItem(Number(merchantTool.tokenId));
+    void ctx.logActivity(`Bought ${merchantTool.name} for gathering`);
+    return false;
+  }
+
+  const toolLabel = toolKind === "pickaxe" ? "pickaxe" : "sickle";
+  const rerouted = await routeToProfessionHub(
+    ctx,
+    `Traveling to ${PROFESSION_HUB_ZONE} to buy a tier ${requiredTier} ${toolLabel}`,
+  );
+  if (!rerouted) {
+    void ctx.logActivity(`No merchant here sells a tier ${requiredTier} ${toolLabel}`);
+  }
+  return false;
 }
 
 // ── Combat ───────────────────────────────────────────────────────────────────
@@ -93,15 +232,17 @@ export async function doCombat(
 
 // ── Gathering ────────────────────────────────────────────────────────────────
 
-export async function doGathering(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doGathering(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  preference: GatherPreference = "both",
+): Promise<void> {
   try {
     const zs = await ctx.getZoneState();
     if (!zs) return;
     const { entities, me } = zs;
 
-    const node = ctx.findNearestEntity(entities, me,
-      (e) => e.type === "ore-node" || e.type === "flower-node",
-    );
+    const node = findGatherNode(entities, me, preference);
     if (!node) {
       await fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
       return;
@@ -112,35 +253,45 @@ export async function doGathering(ctx: AgentContext, strategy: AgentStrategy): P
     // Auto-learn required profession before attempting to gather
     if (nodeEntity.type === "ore-node") {
       const learned = await ctx.learnProfession("mining");
-      if (!learned) {
-        void ctx.logActivity("Can't mine — no mining trainer nearby");
-        await fallbackToCombat(ctx, "No mining trainer", strategy);
-        return;
-      }
+      if (!learned) return;
     } else {
       const learned = await ctx.learnProfession("herbalism");
-      if (!learned) {
-        void ctx.logActivity("Can't gather herbs — no herbalism trainer nearby");
-        await fallbackToCombat(ctx, "No herbalism trainer", strategy);
-        return;
-      }
+      if (!learned) return;
     }
+
+    const toolKind: GatheringToolKind = nodeEntity.type === "ore-node" ? "pickaxe" : "sickle";
+    const toolReady = await ensureGatheringTool(
+      ctx,
+      entities,
+      me,
+      toolKind,
+      requiredNodeTier(nodeEntity),
+    );
+    if (!toolReady) return;
 
     const moving = await ctx.moveToEntity(me, nodeEntity);
     if (moving) return;
 
     if (nodeEntity.type === "ore-node") {
-      await ctx.api("POST", "/mining/gather", {
-        walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
-        entityId: ctx.entityId, oreNodeId: nodeId,
-      });
-      void ctx.logActivity(`Gathered ore from ${nodeEntity.name ?? "ore node"}`);
+      try {
+        await ctx.api("POST", "/mining/gather", {
+          walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+          entityId: ctx.entityId, oreNodeId: nodeId,
+        });
+        void ctx.logActivity(`Mined ${nodeEntity.name ?? "ore node"}`);
+      } catch (err: any) {
+        void ctx.logActivity(`Mining failed: ${err.message?.slice(0, 80) ?? "unknown error"}`);
+      }
     } else {
-      await ctx.api("POST", "/herbalism/gather", {
-        walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
-        entityId: ctx.entityId, flowerNodeId: nodeId,
-      });
-      void ctx.logActivity(`Gathered herb from ${nodeEntity.name ?? "flower node"}`);
+      try {
+        await ctx.api("POST", "/herbalism/gather", {
+          walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+          entityId: ctx.entityId, flowerNodeId: nodeId,
+        });
+        void ctx.logActivity(`Gathered ${nodeEntity.name ?? "flower node"}`);
+      } catch (err: any) {
+        void ctx.logActivity(`Herbalism failed: ${err.message?.slice(0, 80) ?? "unknown error"}`);
+      }
     }
   } catch (err: any) {
     console.debug(`[agent] gathering tick: ${err.message?.slice(0, 60)}`);
@@ -158,15 +309,13 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     // Auto-learn alchemy profession before attempting to brew
     const learned = await ctx.learnProfession("alchemy");
     if (!learned) {
-      void ctx.logActivity("Can't brew — no alchemy trainer nearby");
-      await doGathering(ctx, strategy);
       return;
     }
 
     const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
     if (!lab) {
       void ctx.logActivity("No alchemy lab here — gathering herbs instead");
-      await doGathering(ctx, strategy);
+      await doGathering(ctx, strategy, "herb");
       return;
     }
 
@@ -178,7 +327,7 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
     if (recipes.length === 0) {
       void ctx.logActivity("No alchemy recipes available — gathering materials");
-      await doGathering(ctx, strategy);
+      await doGathering(ctx, strategy, "herb");
       return;
     }
 
@@ -198,7 +347,7 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     }
 
     void ctx.logActivity("Missing ingredients for all potions — gathering herbs");
-    await doGathering(ctx, strategy);
+    await doGathering(ctx, strategy, "herb");
   } catch (err: any) {
     console.debug(`[agent] alchemy tick: ${err.message?.slice(0, 60)}`);
   }
@@ -274,8 +423,17 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
     if (moving) return;
 
     if (me.equipment?.weapon) {
+      if (me.equipment.weapon.enchantments && me.equipment.weapon.enchantments.length > 0) {
+        void ctx.logActivity("Weapon already enchanted — crafting more gear");
+        await doCrafting(ctx, strategy);
+        return;
+      }
+
       const { items } = await ctx.getWalletBalance();
-      const elixir = items.find((i: any) => i.category === "enchantment-elixir" && Number(i.balance) > 0);
+      const elixir = items.find((i: any) =>
+        ENCHANTMENT_ELIXIR_TOKENS.has(Number(i.tokenId))
+        && Number(i.balance) > 0,
+      );
       if (!elixir) {
         void ctx.logActivity("No enchantment elixirs — brewing some first");
         await doAlchemy(ctx, strategy);
@@ -288,9 +446,10 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
         enchantmentElixirTokenId: Number(elixir.tokenId),
         equipmentSlot: "weapon",
       });
+      void ctx.logActivity(`Enchanted weapon with ${elixir.name}`);
     } else {
-      void ctx.logActivity("No weapon to enchant — gathering materials instead");
-      await doGathering(ctx, strategy);
+      void ctx.logActivity("No weapon to enchant — forging one first");
+      await doCrafting(ctx, strategy);
     }
   } catch (err: any) {
     console.debug(`[agent] enchanting tick: ${err.message?.slice(0, 60)}`);
@@ -301,6 +460,9 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
 
 export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
   try {
+    const learned = await ctx.learnProfession("blacksmithing");
+    if (!learned) return;
+
     const zs = await ctx.getZoneState();
     if (!zs) return;
     const { entities, me } = zs;
@@ -320,13 +482,26 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
 
     for (const recipe of recipes) {
       try {
-        await ctx.api("POST", "/crafting/forge", {
+        const result = await ctx.api("POST", "/crafting/forge", {
           walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
           entityId: ctx.entityId, forgeId,
           recipeId: recipe.recipeId ?? recipe.id,
         });
-        console.log(`[agent:${ctx.walletTag}] Crafted ${recipe.name ?? recipe.recipeId}`);
-        void ctx.logActivity(`Crafted ${recipe.name ?? recipe.recipeId}`);
+        const craftedTokenId = Number(result?.crafted?.tokenId ?? 0);
+        const craftedInstanceId = typeof result?.crafted?.instanceId === "string"
+          ? result.crafted.instanceId
+          : undefined;
+        const craftedItem = craftedTokenId ? getItemByTokenId(BigInt(craftedTokenId)) : undefined;
+        const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
+        console.log(`[agent:${ctx.walletTag}] Crafted ${craftedName}`);
+        void ctx.logActivity(`Crafted ${craftedName}`);
+
+        if (craftedItem?.equipSlot && (!me.equipment?.[craftedItem.equipSlot] || craftedItem.equipSlot === "weapon")) {
+          const equipped = await ctx.equipItem(craftedTokenId, craftedInstanceId);
+          if (equipped) {
+            void ctx.logActivity(`Equipped ${craftedName}`);
+          }
+        }
         return;
       } catch (err: any) {
         console.debug(`[agent:${ctx.walletTag}] craft ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
@@ -334,7 +509,7 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
     }
 
     void ctx.logActivity("Missing materials for all recipes — gathering ore");
-    await doGathering(ctx, strategy);
+    await doGathering(ctx, strategy, "ore");
   } catch (err: any) {
     console.debug(`[agent] crafting tick: ${err.message?.slice(0, 60)}`);
   }
@@ -403,6 +578,52 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
     await fallbackToCombat(ctx, "Can't afford any upgrades right now", strategy);
   } catch (err: any) {
     console.debug(`[agent] shopping tick: ${err.message?.slice(0, 60)}`);
+  }
+}
+
+// ── Trading / Recycling ─────────────────────────────────────────────────────
+
+export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+  try {
+    const inventory = await ctx.getLiquidationInventory();
+    const candidates = inventory.items
+      .filter((item: any) => item.recyclableQuantity > 0)
+      .filter((item: any) => (
+        item.category === "material" ||
+        item.category === "consumable" ||
+        (item.category === "tool" && item.recyclableQuantity > 1)
+      ))
+      .sort((a: any, b: any) => {
+        const totalA = Number(a.recycleCopperValue ?? 0) * Number(a.recyclableQuantity ?? 0);
+        const totalB = Number(b.recycleCopperValue ?? 0) * Number(b.recyclableQuantity ?? 0);
+        return totalB - totalA;
+      });
+
+    const best = candidates[0];
+    if (best) {
+      const quantity = Number(best.recyclableQuantity);
+      const result = await ctx.recycleItem(Number(best.tokenId), quantity);
+      if (result.ok) {
+        void ctx.logActivity(`Traded ${quantity}x ${best.name} for ${result.totalPayoutCopper ?? 0}c`);
+        return;
+      }
+      void ctx.logActivity(`Recycle failed for ${best.name}: ${result.error ?? "unknown error"}`);
+    }
+
+    const zs = await ctx.getZoneState();
+    if (zs) {
+      const { me } = zs;
+      const emptySlots = ["weapon", "chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"]
+        .filter((slot) => !me.equipment?.[slot]);
+      if (emptySlots.length > 0 && inventory.copper >= 10) {
+        await doShopping(ctx, strategy);
+        return;
+      }
+    }
+
+    await fallbackToCombat(ctx, "No goods worth trading right now", strategy);
+  } catch (err: any) {
+    console.debug(`[agent] trading tick: ${err.message?.slice(0, 60)}`);
   }
 }
 

@@ -2,19 +2,21 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getItemByTokenId, getItemRarity, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
+import { getItemByTokenId, getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
+import { getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
 import {
   getEntity,
   getAllEntities,
   getEntitiesInRegion,
   getEffectiveStats,
   recalculateEntityVitals,
+  type EquippedItemState,
   type Entity,
   type ZoneState,
 } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
-import { getItemInstance } from "./itemRng.js";
+import { getItemInstance, upsertItemInstanceFromEquipment } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
 
@@ -38,6 +40,33 @@ function isEquipmentSlot(value: string): value is EquipmentSlot {
 function isBlacksmith(entity: Entity | undefined): entity is Entity {
   if (!entity) return false;
   return entity.type === "merchant" && /blacksmith/i.test(entity.name);
+}
+
+function syncEquippedInstance(owner: string | undefined, equipped: EquippedItemState | undefined): void {
+  if (!owner || !equipped) return;
+  if (
+    !equipped.instanceId &&
+    !equipped.enchantments?.length &&
+    !equipped.quality &&
+    !equipped.rolledStats &&
+    !equipped.bonusAffix
+  ) {
+    return;
+  }
+
+  const persisted = upsertItemInstanceFromEquipment({
+    instanceId: equipped.instanceId,
+    walletAddress: owner,
+    tokenId: equipped.tokenId,
+    name: equipped.name,
+    quality: equipped.quality,
+    rolledStats: equipped.rolledStats,
+    bonusAffix: equipped.bonusAffix,
+    durability: equipped.durability,
+    maxDurability: equipped.maxDurability,
+    enchantments: equipped.enchantments,
+  });
+  equipped.instanceId = persisted.instanceId;
 }
 
 function computeRepairCost(
@@ -249,21 +278,6 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: "Wallet does not own this item" };
     }
 
-    entity.equipment ??= {};
-    const current = entity.equipment[item.equipSlot];
-    if (current && current.tokenId === Number(item.tokenId) && current.durability > 0) {
-      return {
-        ok: true,
-        equipped: {
-          slot: item.equipSlot,
-          tokenId: item.tokenId.toString(),
-          name: item.name,
-        },
-        ...serializeEntityEquipment(entity),
-      };
-    }
-
-    // Build the equipped item state — include rolled stats if instanceId provided
     const itemInstance = instanceId ? getItemInstance(instanceId) : undefined;
     if (instanceId && !itemInstance) {
       reply.code(400);
@@ -278,17 +292,38 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: "Instance does not belong to this wallet" };
     }
 
-    const durability = itemInstance?.rolledMaxDurability ?? item.maxDurability;
+    entity.equipment ??= {};
+    const current = entity.equipment[item.equipSlot];
+    if (
+      current &&
+      current.tokenId === Number(item.tokenId) &&
+      current.durability > 0 &&
+      (current.instanceId ?? null) === (itemInstance?.instanceId ?? null)
+    ) {
+      return {
+        ok: true,
+        equipped: {
+          slot: item.equipSlot,
+          tokenId: item.tokenId.toString(),
+          name: item.name,
+        },
+        ...serializeEntityEquipment(entity),
+      };
+    }
+
+    const durability = itemInstance?.currentDurability ?? itemInstance?.rolledMaxDurability ?? item.maxDurability;
+    const maxDurability = itemInstance?.currentMaxDurability ?? itemInstance?.rolledMaxDurability ?? item.maxDurability;
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
       name: item.name,
       durability,
-      maxDurability: durability,
+      maxDurability,
       broken: false,
       ...(itemInstance && {
         instanceId: itemInstance.instanceId,
         quality: itemInstance.quality.tier,
         rolledStats: itemInstance.rolledStats,
+        enchantments: itemInstance.enchantments ? [...itemInstance.enchantments] : undefined,
         bonusAffix: itemInstance.bonusAffix
           ? {
               name: itemInstance.bonusAffix.name,
@@ -359,7 +394,9 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       return { error: "Not authorized to control this entity" };
     }
 
+    const owner = walletAddress ?? entity.walletAddress;
     if (entity.equipment) {
+      syncEquippedInstance(owner, entity.equipment[slot]);
       delete entity.equipment[slot];
       if (Object.keys(entity.equipment).length === 0) {
         entity.equipment = undefined;
@@ -510,6 +547,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       if (!equipped) continue;
       equipped.durability = equipped.maxDurability;
       equipped.broken = false;
+      syncEquippedInstance(owner, equipped);
     }
     recalculateEntityVitals(entity);
     recordGoldSpend(owner, goldCost);
@@ -522,6 +560,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         totalCost,
         itemsRepaired: repairs.length,
       });
+      saveCharacter(owner, entity.name, { equipment: entity.equipment ?? {} }).catch(() => {});
     }
 
     return {
@@ -564,6 +603,8 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         }
       }
 
+      const equippedCounts = await getEquippedItemCounts(walletAddress);
+
       // Fetch all on-chain balances in parallel
       const balances = await Promise.all(
         ITEM_CATALOG.map(async (item) => {
@@ -577,6 +618,8 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         .map(({ tokenId, qty }) => {
           const def = ITEM_CATALOG.find((i) => Number(i.tokenId) === tokenId)!;
           const equipped = equippedByTokenId[tokenId];
+          const equippedCount = equippedCounts.get(tokenId) ?? 0;
+          const recyclableQuantity = getRecyclableQuantity(qty, equippedCount);
           return {
             tokenId,
             name: def.name,
@@ -585,10 +628,13 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
             equipSlot: def.equipSlot ?? null,
             rarity: getItemRarity(def.copperPrice),
             quantity: qty,
-            equipped: !!equipped,
+            equipped: equippedCount > 0,
+            equippedCount,
             equippedSlot: equipped?.slot ?? null,
             durability: equipped?.durability ?? null,
             maxDurability: equipped?.maxDurability ?? null,
+            recyclableQuantity,
+            recycleCopperValue: getItemRecycleCopperValue(def),
           };
         });
 

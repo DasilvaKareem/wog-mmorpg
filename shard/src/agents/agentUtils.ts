@@ -5,7 +5,8 @@
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold } from "../blockchain/goldLedger.js";
 import { goldToCopper } from "../blockchain/currency.js";
-import { ITEM_CATALOG } from "../items/itemCatalog.js";
+import { getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
+import { getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG } from "../items/itemCatalog.js";
 import { getRegionCenter } from "../world/worldLayout.js";
 import { getEntity, type Order } from "../world/zoneRuntime.js";
 import { type TierCapabilities } from "./agentTiers.js";
@@ -31,6 +32,21 @@ export function extractRawCharacterName(name?: string): string | null {
 // ── API types ────────────────────────────────────────────────────────────────
 
 export type ApiCaller = (method: string, path: string, body?: unknown) => Promise<any>;
+
+export interface LiquidationInventoryItem {
+  tokenId: string;
+  name: string;
+  balance: string;
+  category: string;
+  rarity: string;
+  equipSlot: string | null;
+  armorSlot: string | null;
+  statBonuses: Record<string, number>;
+  maxDurability: number | null;
+  equippedCount: number;
+  recyclableQuantity: number;
+  recycleCopperValue: number;
+}
 
 /**
  * Context object passed from AgentRunner to behavior/survival/trigger functions.
@@ -63,6 +79,7 @@ export interface AgentContext {
   logActivity(text: string): void;
   setEntityGotoMode(on: boolean): void;
   getWalletBalance(): Promise<{ copper: number; items: any[] }>;
+  getLiquidationInventory(): Promise<{ copper: number; items: LiquidationInventoryItem[] }>;
 
   // Allow behaviors to modify script state
   setScript(script: BotScript | null): void;
@@ -70,8 +87,9 @@ export interface AgentContext {
 
   // Public actions (also called from chat routes)
   buyItem(tokenId: number): Promise<boolean>;
-  equipItem(tokenId: number): Promise<boolean>;
+  equipItem(tokenId: number, instanceId?: string): Promise<boolean>;
   learnProfession(professionId: string): Promise<boolean>;
+  recycleItem(tokenId: number, quantity?: number): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }>;
 }
 
 /**
@@ -103,6 +121,50 @@ export async function fetchWalletBalance(
         armorSlot: item.armorSlot ?? null,
         statBonuses: item.statBonuses ?? {},
         maxDurability: item.maxDurability ?? null,
+      });
+    }
+
+    return {
+      copper: goldToCopper(availableGold),
+      items,
+    };
+  } catch {
+    return { copper: 0, items: [] };
+  }
+}
+
+export async function fetchLiquidationInventory(
+  custodialWallet: string,
+): Promise<{ copper: number; items: LiquidationInventoryItem[] }> {
+  try {
+    const onChainGold = parseFloat(await getGoldBalance(custodialWallet));
+    const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
+    const availableGold = getAvailableGold(custodialWallet, safeOnChainGold);
+    const equippedCounts = await getEquippedItemCounts(custodialWallet);
+    const balanceResults = await Promise.all(
+      ITEM_CATALOG.map((item) => getItemBalance(custodialWallet, item.tokenId)),
+    );
+
+    const items: LiquidationInventoryItem[] = [];
+    for (let i = 0; i < ITEM_CATALOG.length; i++) {
+      const balance = balanceResults[i];
+      if (balance <= 0n) continue;
+      const item = ITEM_CATALOG[i];
+      const owned = Number(balance);
+      const equippedCount = equippedCounts.get(Number(item.tokenId)) ?? 0;
+      items.push({
+        tokenId: item.tokenId.toString(),
+        name: item.name,
+        balance: balance.toString(),
+        category: item.category,
+        rarity: getItemRarity(item.copperPrice),
+        equipSlot: item.equipSlot ?? null,
+        armorSlot: item.armorSlot ?? null,
+        statBonuses: item.statBonuses ?? {},
+        maxDurability: item.maxDurability ?? null,
+        equippedCount,
+        recyclableQuantity: getRecyclableQuantity(owned, equippedCount),
+        recycleCopperValue: getItemRecycleCopperValue(item),
       });
     }
 

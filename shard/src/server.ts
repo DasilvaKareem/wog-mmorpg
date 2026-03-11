@@ -158,6 +158,7 @@ server.get("/play", async (_req, reply) => {
       shopping: {
         "POST /shop/buy": "{ buyerAddress, tokenId, quantity }",
         "POST /shop/sell": "{ sellerAddress, tokenId, quantity }",
+        "POST /shop/recycle": "{ sellerAddress, tokenId, quantity }",
       },
       quests: {
         "GET /quests/npc/:npcEntityId": "Available quests from NPC",

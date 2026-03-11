@@ -2,14 +2,14 @@ import type { FastifyInstance } from "fastify";
 import type { CharacterStats } from "../character/classes.js";
 import { getClassById } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { mintItem, updateCharacterMetadata, burnItem, mintGold } from "../blockchain/blockchain.js";
+import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
 import { type ProfessionType, getLearnedProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
 import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
-import { getLootTable, rollDrops, rollCopper } from "../items/lootTables.js";
+import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { randomUUID } from "crypto";
@@ -26,6 +26,7 @@ import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSyst
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "../social/diary.js";
 import { recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold } from "../blockchain/currency.js";
+import { upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -549,6 +550,17 @@ function getEquipmentBonuses(entity: Entity): CharacterStats {
       total.faith += affix.faith ?? 0;
       total.luck += affix.luck ?? 0;
     }
+
+    if (equipped.enchantments) {
+      for (const enchantment of equipped.enchantments) {
+        const bonus = enchantment.statBonus;
+        if (!bonus) continue;
+        total.str += bonus.str ?? 0;
+        total.def += bonus.def ?? 0;
+        total.agi += bonus.agi ?? 0;
+        total.int += bonus.int ?? 0;
+      }
+    }
   }
 
   return total;
@@ -904,6 +916,7 @@ function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
   if (!entity.equipment) return;
 
   let changed = false;
+  const owner = entity.walletAddress;
   for (const slot of slots) {
     const equipped = entity.equipment[slot];
     if (!equipped || equipped.durability <= 0) continue;
@@ -912,11 +925,32 @@ function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
     if (equipped.durability === 0) {
       equipped.broken = true;
     }
+    if (
+      owner &&
+      (equipped.instanceId || equipped.enchantments?.length || equipped.quality || equipped.rolledStats || equipped.bonusAffix)
+    ) {
+      const persisted = upsertItemInstanceFromEquipment({
+        instanceId: equipped.instanceId,
+        walletAddress: owner,
+        tokenId: equipped.tokenId,
+        name: equipped.name,
+        quality: equipped.quality,
+        rolledStats: equipped.rolledStats,
+        bonusAffix: equipped.bonusAffix,
+        durability: equipped.durability,
+        maxDurability: equipped.maxDurability,
+        enchantments: equipped.enchantments,
+      });
+      equipped.instanceId = persisted.instanceId;
+    }
     changed = true;
   }
 
   if (changed) {
     recalculateEntityVitals(entity);
+    if (owner) {
+      saveCharacter(owner, entity.name, { equipment: entity.equipment }).catch(() => {});
+    }
   }
 }
 
@@ -1078,24 +1112,15 @@ async function handleMobDeath(
 ): Promise<void> {
   const lootTable = getLootTable(mob.name);
 
-  // Auto-loot: mint gold + common drops to killer's wallet
+  // Auto-loot: mint recyclable item drops to killer's wallet
   if (!killer) {
-    console.warn(`[loot] ${mob.name} died with no killer — gold skipped`);
+    console.warn(`[loot] ${mob.name} died with no killer — loot skipped`);
   } else if (!killer.walletAddress) {
-    console.warn(`[loot] ${mob.name} killed by ${killer.name} (${killer.type}) — no walletAddress, gold skipped`);
+    console.warn(`[loot] ${mob.name} killed by ${killer.name} (${killer.type}) — no walletAddress, loot skipped`);
   } else if (!lootTable) {
-    console.warn(`[loot] ${mob.name} killed by ${killer.name} — no loot table entry, gold skipped`);
+    console.warn(`[loot] ${mob.name} killed by ${killer.name} — no loot table entry, loot skipped`);
   }
   if (killer?.walletAddress && lootTable) {
-    // Roll copper loot and convert to on-chain gold (10,000 copper = 1 gold)
-    const copperAmount = rollCopper(lootTable.copperMin, lootTable.copperMax);
-    if (copperAmount > 0) {
-      const goldAmount = copperToGold(copperAmount);
-      mintGold(killer.walletAddress, goldAmount.toString()).catch((err) => {
-        console.error(`[loot] Failed to mint ${copperAmount}c (${goldAmount}g) to ${killer.walletAddress}:`, err);
-      });
-    }
-
     // Roll auto-drops
     const autoDrops = rollDrops(lootTable.autoDrops);
     for (const drop of autoDrops) {
@@ -1107,9 +1132,9 @@ async function handleMobDeath(
       });
     }
 
-    if (autoDrops.length > 0 || copperAmount > 0) {
+    if (autoDrops.length > 0) {
       console.log(
-        `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${copperAmount}c + ${autoDrops.length} items from ${mob.name}`
+        `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${autoDrops.length} recyclable item drops from ${mob.name}`
       );
     }
   }

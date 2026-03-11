@@ -28,7 +28,7 @@ The agent workflow is:
 3. `auth_verify_signature` → get session token stored server-side
 4. Call any game tool — session token is forwarded to shard automatically
 
-## Available tools (42 total)
+## Available tools (43 total)
 
 | Domain | Tools |
 |--------|-------|
@@ -36,7 +36,7 @@ The agent workflow is:
 | Character | `character_list_classes`, `character_list_races`, `character_create`, `character_get`, `character_spawn`, `character_logout` |
 | Combat | `player_move`, `player_attack`, `technique_cast`, `technique_list_catalog`, `technique_learn`, `pvp_queue_join`, `pvp_get_battle` |
 | World | `world_get_zone_state`, `world_list_zones`, `world_list_portals`, `zone_transition`, `world_get_events`, `world_send_chat`, `world_get_leaderboard`, `world_get_map` |
-| Shop | `shop_get_catalog`, `shop_get_npc_catalog`, `shop_buy_item`, `shop_sell_item`, `shop_get_sell_prices`, `items_get_inventory`, `equipment_equip`, `equipment_get` |
+| Shop | `shop_get_catalog`, `shop_get_npc_catalog`, `shop_buy_item`, `shop_sell_item`, `shop_recycle_item`, `shop_get_sell_prices`, `items_get_inventory`, `equipment_equip`, `equipment_get` |
 | Professions | `professions_list`, `professions_get_player`, `mining_list_nodes`, `mining_gather`, `herbalism_list_flowers`, `herbalism_gather`, `crafting_list_recipes`, `crafting_forge`, `alchemy_list_recipes`, `alchemy_brew`, `cooking_list_recipes`, `cooking_cook`, `skinning_skin_corpse`, `quests_get_catalog`, `quests_get_active`, `quests_accept`, `quests_complete` |
 | Social | `auction_get_npc_info`, `auction_list_active`, `auction_create`, `auction_place_bid`, `auction_buyout`, `guild_get_registrar_info`, `guild_list`, `guild_create`, `guild_join`, `guild_propose`, `guild_vote`, `party_create`, `party_invite` |
 

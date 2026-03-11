@@ -721,8 +721,8 @@ export class WorldScene extends Phaser.Scene {
     cam.centerOn(worldCenter.x, worldCenter.z);
 
     // Initial chunk load at world center
-    const worldCenterGameX = layoutData.totalSize.width / 2;
-    const worldCenterGameZ = layoutData.totalSize.height / 2;
+    const worldCenterGameX = worldCenter.x / this.tilemapRenderer.coordScale;
+    const worldCenterGameZ = worldCenter.z / this.tilemapRenderer.coordScale;
     this.chunkManager.update(worldCenterGameX, worldCenterGameZ);
 
     this.terrainLoaded = true;
@@ -1071,15 +1071,10 @@ export class WorldScene extends Phaser.Scene {
         anyConnected = true;
         if (data.tick > maxTick) maxTick = data.tick;
 
-        const zone = this.worldLayout.getZone(zoneId);
-        if (!zone) continue;
-
-        // Offset entity positions from zone-local to world coordinates
+        // Entities are already returned in world-space by the shard.
         for (const [id, entity] of Object.entries(data.entities)) {
           allEntities[id] = {
             ...entity,
-            x: entity.x + zone.offset.x,
-            y: entity.y + zone.offset.z,
             zoneId,
           };
         }
