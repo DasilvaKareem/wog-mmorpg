@@ -9,6 +9,7 @@ import { validateCharacterName } from "@/lib/characterNameValidation";
 import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
+import type { OnboardingStartMode } from "@/lib/onboarding";
 import { PaymentGate } from "@/components/PaymentGate";
 import type { RaceInfo, ClassInfo, CharacterStats } from "@/types";
 import { CharacterPreview } from "@/components/CharacterPreview";
@@ -173,14 +174,22 @@ function StatRow({ label, value }: { label: string; value: number }) {
 
 interface OnboardingFlowProps {
   onClose: () => void;
+  initialMode?: OnboardingStartMode;
 }
 
-export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactElement {
+function modeToStep(mode: OnboardingStartMode): Step {
+  return mode === "sign-in" ? "login" : "create-char";
+}
+
+export function OnboardingFlow({
+  onClose,
+  initialMode = "create-character",
+}: OnboardingFlowProps): React.ReactElement {
   const navigate = useNavigate();
   const { syncAddress, address: walletAddress, connect } = useWalletContext();
+  const signInOnly = initialMode === "sign-in";
 
-  // Show the character builder first; authentication is only needed to mint.
-  const [step, setStep] = React.useState<Step>("create-char");
+  const [step, setStep] = React.useState<Step>(() => modeToStep(initialMode));
   const [error, setError] = React.useState<string | null>(null);
   const [connectedAddress, setConnectedAddress] = React.useState<string | null>(walletAddress);
   const [pendingMintAfterAuth, setPendingMintAfterAuth] = React.useState(false);
@@ -217,9 +226,9 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
 
   React.useEffect(() => {
     if (walletAddress && step === "login") {
-      setStep("create-char");
+      setStep(signInOnly ? "done" : "create-char");
     }
-  }, [walletAddress, step]);
+  }, [signInOnly, walletAddress, step]);
 
 
   // Load races/classes when entering create-char step
@@ -340,14 +349,16 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
     }
   }
 
-  async function handleAuthSuccess(nextAddress: string) {
+  async function handleAuthSuccess(nextAddress: string, options?: { skipSync?: boolean }) {
     setConnectedAddress(nextAddress);
-    await syncAddress(nextAddress);
+    if (!options?.skipSync) {
+      await syncAddress(nextAddress);
+    }
     if (pendingMintAfterAuth) {
       void handleCreate(nextAddress);
       return;
     }
-    setStep("create-char");
+    setStep(signInOnly ? "done" : "create-char");
   }
 
   const selectedRace = races.find((r) => r.id === raceId);
@@ -605,7 +616,11 @@ export function OnboardingFlow({ onClose }: OnboardingFlowProps): React.ReactEle
                     setStep("connecting");
                     try {
                       await connect(w.type);
-                      setStep("create-char");
+                      const nextAddress = WalletManager.getInstance().address;
+                      if (!nextAddress) {
+                        throw new Error("Wallet connected but no address was returned.");
+                      }
+                      await handleAuthSuccess(nextAddress, { skipSync: true });
                     } catch (e) {
                       setError(e instanceof Error ? e.message : "Wallet connection failed.");
                       setStep("login");

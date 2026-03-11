@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { gameBus } from "@/lib/eventBus";
+import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
 import { WalletManager } from "@/lib/walletManager";
 
 const AuctionHouseDialog = React.lazy(() =>
@@ -97,9 +98,15 @@ function RouteFallback(): React.ReactElement {
   return <div className="min-h-screen bg-[#060d12]" />;
 }
 
+function resolveOnboardingMode(event: Event): OnboardingStartMode {
+  const customEvent = event as CustomEvent<{ mode?: OnboardingStartMode }>;
+  return customEvent.detail?.mode ?? "create-character";
+}
+
 function GameWorld(): React.ReactElement {
   const [characterOpen, setCharacterOpen] = React.useState(false);
   const [onboardingOpen, setOnboardingOpen] = React.useState(false);
+  const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
@@ -138,9 +145,12 @@ function GameWorld(): React.ReactElement {
 
   // Listen for global "open onboarding" event (from Navbar sign-in button)
   React.useEffect(() => {
-    const handler = () => setOnboardingOpen(true);
-    window.addEventListener("wog:open-onboarding", handler);
-    return () => window.removeEventListener("wog:open-onboarding", handler);
+    const handler = (event: Event) => {
+      setOnboardingMode(resolveOnboardingMode(event));
+      setOnboardingOpen(true);
+    };
+    window.addEventListener(OPEN_ONBOARDING_EVENT, handler);
+    return () => window.removeEventListener(OPEN_ONBOARDING_EVENT, handler);
   }, []);
 
   React.useEffect(() => {
@@ -245,9 +255,18 @@ function GameWorld(): React.ReactElement {
         <CharacterDialog
           onOpenChange={setCharacterOpen}
           open={characterOpen}
-          onRequestCreate={() => { setCharacterOpen(false); setOnboardingOpen(true); }}
+          onRequestCreate={() => {
+            setCharacterOpen(false);
+            setOnboardingMode("create-character");
+            setOnboardingOpen(true);
+          }}
         />
-        {onboardingOpen && <OnboardingFlow onClose={() => setOnboardingOpen(false)} />}
+        {onboardingOpen && (
+          <OnboardingFlow
+            initialMode={onboardingMode}
+            onClose={() => setOnboardingOpen(false)}
+          />
+        )}
         <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
         <div
           className="absolute left-1/2 -translate-x-1/2 z-30"
@@ -282,13 +301,17 @@ function AppShell(): React.ReactElement {
   const location = useLocation();
   const isWorldRoute = location.pathname === "/world";
   const [onboardingOpen, setOnboardingOpen] = React.useState(false);
+  const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
 
   // Listen for global "open onboarding" event on non-world routes
   React.useEffect(() => {
     if (isWorldRoute) return; // GameWorld handles its own listener
-    const handler = () => setOnboardingOpen(true);
-    window.addEventListener("wog:open-onboarding", handler);
-    return () => window.removeEventListener("wog:open-onboarding", handler);
+    const handler = (event: Event) => {
+      setOnboardingMode(resolveOnboardingMode(event));
+      setOnboardingOpen(true);
+    };
+    window.addEventListener(OPEN_ONBOARDING_EVENT, handler);
+    return () => window.removeEventListener(OPEN_ONBOARDING_EVENT, handler);
   }, [isWorldRoute]);
 
   return (
@@ -318,7 +341,10 @@ function AppShell(): React.ReactElement {
           </React.Suspense>
           {onboardingOpen && (
             <React.Suspense fallback={null}>
-              <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+              <OnboardingFlow
+                initialMode={onboardingMode}
+                onClose={() => setOnboardingOpen(false)}
+              />
             </React.Suspense>
           )}
         </>

@@ -550,7 +550,10 @@ export function LandingPage(): React.ReactElement {
 
       {/* Onboarding flow modal */}
       {onboardingOpen && (
-        <OnboardingFlow onClose={() => setOnboardingOpen(false)} />
+        <OnboardingFlow
+          initialMode="create-character"
+          onClose={() => setOnboardingOpen(false)}
+        />
       )}
     </div>
   );

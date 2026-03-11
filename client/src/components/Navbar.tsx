@@ -2,6 +2,7 @@ import * as React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
+import { openOnboarding } from "@/lib/onboarding";
 
 interface DropdownItem {
   label: string;
@@ -147,7 +148,7 @@ export function Navbar(): React.ReactElement {
           {!isConnected && (
             <button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent("wog:open-onboarding"));
+                openOnboarding("sign-in");
               }}
               className="pointer-events-auto border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218]"
             >
@@ -275,7 +276,7 @@ export function Navbar(): React.ReactElement {
           {!isConnected ? (
             <button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent("wog:open-onboarding"));
+                openOnboarding("sign-in");
               }}
               className="border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218] disabled:opacity-50"
             >
