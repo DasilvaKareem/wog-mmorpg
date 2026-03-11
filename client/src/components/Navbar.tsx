@@ -187,11 +187,11 @@ export function Navbar(): React.ReactElement {
                 <div key={menu.label} className="relative">
                   <Link
                     to={menu.to}
-                    className={`flex items-center gap-1 px-3 py-3 text-[9px] uppercase tracking-wide transition ${
+                    className={`flex items-center gap-1 px-3 py-3 text-[10px] uppercase tracking-wide transition ${
                       active ? "text-[#ffcc00]" : "text-[#9aa7cc] hover:text-[#d6deff]"
                     }`}
                   >
-                    <span className="text-[7px]">{menu.icon}</span>
+                    <span className="text-[8px]">{menu.icon}</span>
                     {menu.label}
                   </Link>
                   {active && (
@@ -203,7 +203,7 @@ export function Navbar(): React.ReactElement {
             return (
               <div key={menu.label} className="relative">
                 <button
-                  className={`flex items-center gap-1 px-3 py-3 text-[9px] uppercase tracking-wide transition ${
+                  className={`flex items-center gap-1 px-3 py-3 text-[10px] uppercase tracking-wide transition ${
                     openMenu === menu.label
                       ? "text-[#ffcc00]"
                       : active
@@ -212,9 +212,9 @@ export function Navbar(): React.ReactElement {
                   }`}
                   onClick={() => setOpenMenu(openMenu === menu.label ? null : menu.label)}
                 >
-                  <span className="text-[7px]">{menu.icon}</span>
+                  <span className="text-[8px]">{menu.icon}</span>
                   {menu.label}
-                  <span className="text-[7px]">
+                  <span className="text-[8px]">
                     {openMenu === menu.label ? "^" : "v"}
                   </span>
                 </button>
@@ -250,9 +250,9 @@ export function Navbar(): React.ReactElement {
             href="/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 px-3 py-3 text-[9px] uppercase tracking-wide text-[#9aa7cc] transition hover:text-[#d6deff]"
+            className="flex items-center gap-1 px-3 py-3 text-[10px] uppercase tracking-wide text-[#9aa7cc] transition hover:text-[#d6deff]"
           >
-            <span className="text-[7px]">{">>>"}</span>
+            <span className="text-[8px]">{">>>"}</span>
             Docs
           </a>
 
@@ -262,7 +262,7 @@ export function Navbar(): React.ReactElement {
           {/* Spectate link */}
           <Link
             to="/world"
-            className="flex items-center gap-1.5 border-l border-[#2a3450] px-3 py-2 text-[9px] uppercase tracking-wide transition text-[#54f28b]/70 hover:text-[#54f28b]"
+            className="flex items-center gap-1.5 border-l border-[#2a3450] px-3 py-2 text-[10px] uppercase tracking-wide transition text-[#54f28b]/70 hover:text-[#54f28b]"
           >
             <span className="inline-block animate-pulse text-[8px]">{">>>"}</span>
             Spectate
@@ -277,7 +277,7 @@ export function Navbar(): React.ReactElement {
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("wog:open-onboarding"));
               }}
-              className="border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218] disabled:opacity-50"
+              className="border-2 border-[#ffcc00] bg-[#2a2210] px-3 py-1.5 text-[10px] uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218] disabled:opacity-50"
             >
               Summon Champion
             </button>
