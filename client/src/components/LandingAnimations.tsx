@@ -24,18 +24,24 @@ function useReducedMotion(): boolean {
 function PixelCloud({ y, scale, dur, delay }: { y: number; scale: number; dur: number; delay: number }) {
   // NES-style cloud: stacked rects
   return (
-    <g opacity="0.12" transform={`scale(${scale})`}>
-      <rect x="0" y={y} width="4" height="4" fill="#9aa7cc" />
-      <rect x="4" y={y} width="4" height="4" fill="#9aa7cc" />
-      <rect x="8" y={y} width="4" height="4" fill="#9aa7cc" />
-      <rect x="-4" y={y + 4} width="4" height="4" fill="#9aa7cc" />
-      <rect x="0" y={y + 4} width="4" height="4" fill="#d6deff" />
-      <rect x="4" y={y + 4} width="4" height="4" fill="#d6deff" />
-      <rect x="8" y={y + 4} width="4" height="4" fill="#d6deff" />
-      <rect x="12" y={y + 4} width="4" height="4" fill="#9aa7cc" />
-      <rect x="0" y={y + 8} width="4" height="4" fill="#9aa7cc" />
-      <rect x="4" y={y + 8} width="4" height="4" fill="#9aa7cc" />
-      <rect x="8" y={y + 8} width="4" height="4" fill="#9aa7cc" />
+    <g opacity="0.35" transform={`scale(${scale})`}>
+      <rect x="-4" y={y} width="4" height="4" fill="#9aa7cc" />
+      <rect x="0" y={y} width="4" height="4" fill="#c8d0e8" />
+      <rect x="4" y={y} width="4" height="4" fill="#c8d0e8" />
+      <rect x="8" y={y} width="4" height="4" fill="#c8d0e8" />
+      <rect x="12" y={y} width="4" height="4" fill="#9aa7cc" />
+      <rect x="-8" y={y + 4} width="4" height="4" fill="#9aa7cc" />
+      <rect x="-4" y={y + 4} width="4" height="4" fill="#d6deff" />
+      <rect x="0" y={y + 4} width="4" height="4" fill="#e8ecff" />
+      <rect x="4" y={y + 4} width="4" height="4" fill="#e8ecff" />
+      <rect x="8" y={y + 4} width="4" height="4" fill="#e8ecff" />
+      <rect x="12" y={y + 4} width="4" height="4" fill="#d6deff" />
+      <rect x="16" y={y + 4} width="4" height="4" fill="#9aa7cc" />
+      <rect x="-4" y={y + 8} width="4" height="4" fill="#9aa7cc" />
+      <rect x="0" y={y + 8} width="4" height="4" fill="#c8d0e8" />
+      <rect x="4" y={y + 8} width="4" height="4" fill="#c8d0e8" />
+      <rect x="8" y={y + 8} width="4" height="4" fill="#c8d0e8" />
+      <rect x="12" y={y + 8} width="4" height="4" fill="#9aa7cc" />
       <animateTransform
         attributeName="transform"
         type="translate"
@@ -59,10 +65,11 @@ export function DriftingClouds(): React.ReactElement | null {
       shapeRendering="crispEdges"
       aria-hidden="true"
     >
-      <PixelCloud y={20} scale={1.5} dur={45} delay={0} />
-      <PixelCloud y={50} scale={1} dur={60} delay={8} />
-      <PixelCloud y={35} scale={1.2} dur={52} delay={20} />
-      <PixelCloud y={70} scale={0.8} dur={70} delay={12} />
+      <PixelCloud y={80} scale={2} dur={38} delay={0} />
+      <PixelCloud y={110} scale={1.5} dur={50} delay={6} />
+      <PixelCloud y={95} scale={1.8} dur={44} delay={15} />
+      <PixelCloud y={130} scale={1.2} dur={55} delay={10} />
+      <PixelCloud y={60} scale={1.6} dur={48} delay={22} />
     </svg>
   );
 }
