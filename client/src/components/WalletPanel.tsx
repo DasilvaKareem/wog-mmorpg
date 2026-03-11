@@ -40,6 +40,14 @@ function CharacterSection({
 }): React.ReactElement {
   const [switching, setSwitching] = React.useState(false);
 
+  function focusCharacter() {
+    if (!characterProgress) return;
+    if (characterProgress.zoneId) {
+      gameBus.emit("switchZone", { zoneId: characterProgress.zoneId });
+    }
+    gameBus.emit("lockToPlayer", { walletAddress });
+  }
+
   async function handleSwitch(tokenId: string) {
     if (switching) return;
     const char = characters.find((c) => c.tokenId === tokenId);
@@ -50,17 +58,17 @@ function CharacterSection({
       const token = await getAuthToken(walletAddress);
       if (!token) return;
 
-      // Stop current agent
-      await fetch(`${API_URL}/agent/stop`, {
+      // Stop current agent — server now saves + despawns the old entity
+      const stopRes = await fetch(`${API_URL}/agent/stop`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ walletAddress }),
       });
+      if (!stopRes.ok) {
+        console.warn("[switch] Stop failed:", await stopRes.text());
+      }
 
-      // Small delay for despawn to process
-      await new Promise((r) => setTimeout(r, 500));
-
-      // Deploy with selected character
+      // Deploy the new character
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -76,7 +84,10 @@ function CharacterSection({
         WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
       }
 
-      // Lock camera to the new entity
+      // Focus camera on the new character's zone + lock to them
+      if (res.ok && data.zoneId) {
+        gameBus.emit("switchZone", { zoneId: data.zoneId });
+      }
       gameBus.emit("lockToPlayer", { walletAddress });
     } catch {
       // silent
@@ -121,11 +132,15 @@ function CharacterSection({
       {switching ? (
         <p className="text-[8px] text-[#9aa7cc]">Switching character...</p>
       ) : characterProgress ? (
-        <>
-          <p className="truncate text-[8px] text-[#f1f5ff]">{characterProgress.name}</p>
+        <button
+          type="button"
+          onClick={focusCharacter}
+          className="w-full text-left cursor-pointer hover:bg-[#1a2440] transition-colors rounded px-1 py-0.5 -mx-1"
+          title="Click to focus camera on character"
+        >
           <HpBar hp={characterProgress.hp} maxHp={characterProgress.maxHp} />
           <XpBar level={characterProgress.level} xp={characterProgress.xp} />
-        </>
+        </button>
       ) : characterLoading ? (
         <p className="text-[8px] text-[#9aa7cc]">Syncing character...</p>
       ) : (
@@ -172,7 +187,7 @@ export function WalletPanel(): React.ReactElement {
             >
               {collapsed ? "+" : "−"}
             </button>
-            Wallet & Inventory
+            Inventory
           </div>
         </CardTitle>
       </CardHeader>
@@ -180,7 +195,7 @@ export function WalletPanel(): React.ReactElement {
         <div className="flex items-center justify-between">
           <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
           <div className="flex items-center gap-1">
-            <Badge>{dn(address!)}</Badge>
+            <Badge>{address ? dn(address) : "..."}</Badge>
             <button
               onClick={disconnect}
               className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"

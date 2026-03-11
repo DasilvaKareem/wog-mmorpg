@@ -45,7 +45,7 @@ interface DialogueContext {
 
 const lastChatTime = new Map<string, number>();
 const CHAT_COOLDOWN_MS = 180_000; // max 1 message per 3 min per agent
-const REACT_COOLDOWN_MS = 180_000; // max 1 reaction per 3 min per agent
+const REACT_COOLDOWN_MS = 15_000;  // max 1 reaction per 15s — enables chat chains
 
 function isOnCooldown(entityId: string, event: DialogueEvent): boolean {
   // Per-event cooldown so a kill doesn't block a level_up or death message
@@ -102,10 +102,13 @@ const DIALOGUE: Record<string, string[]> = {
     "I've survived worse in Aurandel.",
   ],
   "sunforged::react_chat": [
-    "Well spoken, {speaker}.",
-    "I hear you, {speaker}. Let's move forward.",
-    "Agreed. Onward.",
-    "The light guides us both, {speaker}.",
+    "Well spoken, {speaker}. What zone are you heading to next?",
+    "I hear you, {speaker}. Let's push deeper together.",
+    "Agreed. Onward — the citadel awaits!",
+    "The light guides us both, {speaker}. Have you tried the dark forest?",
+    "You're right, {speaker}. We should keep moving.",
+    "That reminds me of Aurandel, {speaker}. Ever been?",
+    "Couldn't have said it better, {speaker}. For the dawn!",
   ],
 
   // ── VEILBORN (Cunning) ────────────────────────────────────
@@ -146,10 +149,13 @@ const DIALOGUE: Record<string, string[]> = {
     "Sloppy. I need to be sharper.",
   ],
   "veilborn::react_chat": [
-    "Hm.",
-    "Noted, {speaker}.",
-    "If you say so.",
-    "...interesting take, {speaker}.",
+    "Hm. You might be onto something, {speaker}.",
+    "Noted, {speaker}. I've seen worse plans.",
+    "If you say so. But the shadows know the truth.",
+    "...interesting take, {speaker}. What's your angle?",
+    "Not bad advice, {speaker}. I'll keep that in mind.",
+    "Quiet down, {speaker}. Something's watching us.",
+    "You talk a lot, {speaker}. But I respect it.",
   ],
 
   // ── DAWNKEEPER (Warm) ─────────────────────────────────────
@@ -190,10 +196,13 @@ const DIALOGUE: Record<string, string[]> = {
     "My heart's racing. In a good way? No. Not good.",
   ],
   "dawnkeeper::react_chat": [
-    "Well said, {speaker}!",
-    "I love that energy, {speaker}.",
-    "Couldn't agree more!",
-    "You always know what to say, {speaker}.",
+    "Well said, {speaker}! Have you been to the meadow? It's beautiful!",
+    "I love that energy, {speaker}. This zone feels so alive!",
+    "Couldn't agree more! Want to team up sometime?",
+    "You always know what to say, {speaker}. That's a gift!",
+    "Oh totally, {speaker}! What level are you now?",
+    "Right?! That's exactly what I was thinking, {speaker}!",
+    "Aww, thanks for saying that, {speaker}. Made my day!",
   ],
 
   // ── IRONVOW (Ruthless) ────────────────────────────────────
@@ -234,10 +243,13 @@ const DIALOGUE: Record<string, string[]> = {
     "You'll need to hit harder than that.",
   ],
   "ironvow::react_chat": [
-    "Talk less, fight more.",
-    "Whatever, {speaker}.",
-    "Prove it.",
-    "Words are cheap, {speaker}.",
+    "Talk less, fight more, {speaker}.",
+    "Whatever, {speaker}. You ready for the next fight?",
+    "Prove it. Meet me at the arena.",
+    "Words are cheap, {speaker}. Show me your kills.",
+    "I've heard tougher talk from slimes, {speaker}.",
+    "Keep up or get out of the way, {speaker}.",
+    "Hmph. At least you're not boring, {speaker}.",
   ],
 
   // ── CLASS-SPECIFIC OVERRIDES ──────────────────────────────
@@ -321,9 +333,12 @@ const DIALOGUE: Record<string, string[]> = {
     "That was rough.",
   ],
   "::react_chat": [
-    "Hm.",
-    "Right.",
-    "Interesting, {speaker}.",
+    "True, {speaker}. What's your next move?",
+    "Right? This zone is something else.",
+    "Interesting point, {speaker}.",
+    "For real, {speaker}. Let's keep going.",
+    "Ha, fair enough {speaker}.",
+    "You think so? I was wondering the same thing.",
   ],
 
   // ── Contextual Reactions (to zone events from other players) ────
@@ -470,7 +485,9 @@ export function emitAgentChat(ctx: DialogueContext): boolean {
   if (isOnCooldown(ctx.entityId, ctx.event)) return false;
 
   // Skip chat with a random chance to feel more natural (30% chance to stay silent)
-  if (ctx.event !== "level_up" && ctx.event !== "death" && Math.random() < 0.30) return false;
+  // Reactions bypass this — probability is already handled in maybeReactToChat()
+  const isReaction = ctx.event.startsWith("react_");
+  if (!isReaction && ctx.event !== "level_up" && ctx.event !== "death" && Math.random() < 0.30) return false;
 
   let line = pickLine(ctx.origin, ctx.classId, ctx.event);
   if (!line) return false;
@@ -524,8 +541,6 @@ export function maybeReactToChat(
   ctx: Omit<DialogueContext, "event" | "speakerName">,
   recentEvents: Array<{ type: string; entityId?: string; entityName?: string; message?: string }>,
 ): boolean {
-  if (isOnCooldown(ctx.entityId, "react_chat")) return false;
-
   // Find events from OTHER entities
   const otherEvents = recentEvents.filter(
     (e) => e.entityId && e.entityId !== ctx.entityId && e.entityName,
@@ -557,12 +572,18 @@ export function maybeReactToChat(
 
   if (!bestEvent) return false;
 
-  // Higher chance to react to significant events (levelup/death: 40%, quest: 30%, others: 20%)
+  // Check cooldown for the specific reaction type (not a blanket gate)
+  if (isOnCooldown(ctx.entityId, bestReaction)) return false;
+
+  // Higher chance to react to significant events
+  // Chat reactions bumped to 60% to enable conversation chains between agents
   const reactChance = bestReaction === "react_levelup" || bestReaction === "react_death"
     ? 0.40
     : bestReaction === "react_quest"
       ? 0.30
-      : 0.20;
+      : bestReaction === "react_chat"
+        ? 0.60
+        : 0.20;
   if (Math.random() > reactChance) return false;
 
   return emitAgentChat({

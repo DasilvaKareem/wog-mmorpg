@@ -9,12 +9,15 @@
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 
+export type CharacterCalling = "adventurer" | "farmer" | "merchant" | "craftsman";
+
 export interface CharacterSaveData {
   name: string;
   level: number;
   xp: number;
   raceId: string;
   classId: string;
+  calling?: CharacterCalling;
   gender?: string;
   skinColor?: string;
   hairStyle?: string;

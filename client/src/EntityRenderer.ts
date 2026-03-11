@@ -37,6 +37,7 @@ interface EntityVisual {
   isNpc: boolean;
   hovered: boolean;
   fx: AppliedFx;
+  spriteScale: number; // mob/boss scale multiplier
 }
 
 const SPRITE_SIZE = 16;
@@ -44,6 +45,10 @@ const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
 const VISUAL_SEPARATION_RADIUS = 20; // pixels — minimum visual distance between sprites
+
+/** Scale multipliers for mob/boss sprites so they're visually larger */
+const MOB_SCALE = 1.4;
+const BOSS_SCALE = 1.8;
 
 const HIDE_LABEL_TYPES = new Set([
   "merchant", "trainer", "profession-trainer", "guild-registrar",
@@ -448,6 +453,7 @@ export class EntityRenderer {
         isNpc: false,
         hovered: false,
         fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
+        spriteScale: 1,
       };
     }
 
@@ -459,9 +465,15 @@ export class EntityRenderer {
     const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
     const entityDepth = 10 + elev * 2;
 
+    // Scale up mob/boss sprites so they're more visible
+    const mobScale = entity.type === "boss" ? BOSS_SCALE
+      : entity.type === "mob" ? MOB_SCALE
+      : 1;
+
     const sprite = this.scene.add
       .sprite(px, py, textureKey, 0)
       .setDepth(entityDepth)
+      .setScale(mobScale)
       .setInteractive({ useHandCursor: true });
 
     const isNpc = HIDE_LABEL_TYPES.has(entity.type);
@@ -499,6 +511,10 @@ export class EntityRenderer {
       sprite.play(idleAnim);
     }
 
+    // Offset label/HP bar based on sprite scale (larger mobs need more spacing)
+    const labelYOff = -12 * mobScale;
+    const hpYOff = 10 * mobScale;
+
     // Name label — colored if in a party, guild tag underneath
     const labelColor = entity.partyId ? colorToHex(partyColor(entity.partyId)) : "#ffffff";
     const levelTag = entity.level != null ? ` Lv.${entity.level}` : "";
@@ -506,7 +522,7 @@ export class EntityRenderer {
       ? `${entity.name}${levelTag}\n<${entity.guildName}>`
       : `${entity.name}${levelTag}`;
     const label = this.scene.add
-      .text(px, py - 12, labelText, {
+      .text(px, py + labelYOff, labelText, {
         fontSize: "10px",
         fontFamily: "monospace",
         color: labelColor,
@@ -518,14 +534,14 @@ export class EntityRenderer {
       .setDepth(entityDepth + 1);
 
     const hpBg = this.scene.add
-      .rectangle(px, py + 10, HP_BAR_W, HP_BAR_H, 0x333333)
+      .rectangle(px, py + hpYOff, HP_BAR_W, HP_BAR_H, 0x333333)
       .setDepth(entityDepth);
 
     const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
     const hpBar = this.scene.add
       .rectangle(
         px - HP_BAR_W / 2 + (HP_BAR_W * hpRatio) / 2,
-        py + 10,
+        py + hpYOff,
         HP_BAR_W * hpRatio,
         HP_BAR_H,
         hpColor(hpRatio),
@@ -581,6 +597,7 @@ export class EntityRenderer {
       isNpc,
       hovered: false,
       fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
+      spriteScale: mobScale,
     };
 
     // Apply initial FX for any active effects
@@ -657,12 +674,13 @@ export class EntityRenderer {
         ease: "Linear",
         onUpdate: () => {
           // Labels, HP bars, party ring, quest marker, and speech bubble follow sprite
-          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12);
-          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10);
+          const s = visual.spriteScale;
+          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
           const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
           visual.hpBar.setPosition(
             visual.sprite.x - HP_BAR_W / 2 + (HP_BAR_W * hpRatio) / 2,
-            visual.sprite.y + 10,
+            visual.sprite.y + 10 * s,
           );
           visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
           this.repositionOverlays(visual);
@@ -687,19 +705,21 @@ export class EntityRenderer {
       }
 
       // Snap position (in case of drift)
+      const s = visual.spriteScale;
       visual.sprite.setPosition(px, py);
-      visual.label.setPosition(px, py - 12);
-      visual.hpBg.setPosition(px, py + 10);
+      visual.label.setPosition(px, py - 12 * s);
+      visual.hpBg.setPosition(px, py + 10 * s);
       visual.partyRing?.setPosition(px, py);
       this.repositionOverlays(visual);
     }
 
     // Update HP bar
     const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
+    const sc = visual.spriteScale;
     visual.hpBar
       .setPosition(
         visual.sprite.x - HP_BAR_W / 2 + (HP_BAR_W * hpRatio) / 2,
-        visual.sprite.y + 10,
+        visual.sprite.y + 10 * sc,
       )
       .setSize(HP_BAR_W * hpRatio, HP_BAR_H)
       .setFillStyle(hpColor(hpRatio));
@@ -776,16 +796,16 @@ export class EntityRenderer {
       return;
     }
 
-    // Glow: shield (cyan) > buff (gold) > debuff (purple) — priority order
+    // Glow: shield (cyan) > buff (green-gold) > debuff (purple) — priority order
     const needsGlow = newTypes.has("shield") || newTypes.has("buff") || newTypes.has("debuff");
     if (needsGlow) {
       preFX.setPadding(4);
       if (newTypes.has("shield")) {
-        applied.glow = preFX.addGlow(0x44ccff, 3, 0, false);
+        applied.glow = preFX.addGlow(0x44ccff, 3.5, 0, false);
       } else if (newTypes.has("buff")) {
-        applied.glow = preFX.addGlow(0xfacc22, 2.5, 0, false);
+        applied.glow = preFX.addGlow(0x55dd88, 3, 0, false);
       } else {
-        applied.glow = preFX.addGlow(0xaa44ff, 2.5, 0, false);
+        applied.glow = preFX.addGlow(0xcc44ff, 3, 0, false);
       }
     }
 

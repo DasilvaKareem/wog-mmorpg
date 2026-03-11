@@ -18,6 +18,7 @@ import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
 import { getItemBalance, burnItem, mintItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { logZoneEvent } from "./zoneEvents.js";
 
 // --- Types ---
@@ -746,8 +747,19 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       return { error: "Player entity not found in dungeon" };
     }
 
-    // Verify wallet
-    if (player.walletAddress?.toLowerCase() !== walletAddress.toLowerCase()) {
+    // Verify wallet: direct match → custodial mapping → entity-ref
+    const pWallet = player.walletAddress?.toLowerCase();
+    const aWallet = walletAddress.toLowerCase();
+    let dungeonAuth = pWallet === aWallet;
+    if (!dungeonAuth) {
+      const custodial = await getAgentCustodialWallet(walletAddress);
+      dungeonAuth = !!custodial && pWallet === custodial.toLowerCase();
+    }
+    if (!dungeonAuth) {
+      const ref = await getAgentEntityRef(walletAddress);
+      dungeonAuth = !!ref && ref.entityId === entityId;
+    }
+    if (!dungeonAuth) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }

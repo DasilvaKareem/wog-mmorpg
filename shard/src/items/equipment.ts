@@ -13,7 +13,7 @@ import {
   type ZoneState,
 } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
-import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
+import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { getItemInstance } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -67,6 +67,21 @@ function serializeEntityEquipment(entity: Entity) {
     equipment: entity.equipment ?? {},
     effectiveStats: entity.effectiveStats ?? getEffectiveStats(entity) ?? null,
   };
+}
+
+/**
+ * Verify that authenticatedWallet (from JWT) owns the given entity.
+ * Checks: direct match → custodial wallet mapping → entity-ref match.
+ */
+async function isAuthorizedForEntity(authenticatedWallet: string, entity: Entity): Promise<boolean> {
+  const entityWallet = entity.walletAddress?.toLowerCase();
+  const authWallet = authenticatedWallet.toLowerCase();
+  if (entityWallet === authWallet) return true;
+  const custodial = await getAgentCustodialWallet(authenticatedWallet);
+  if (custodial && entityWallet === custodial.toLowerCase()) return true;
+  const ref = await getAgentEntityRef(authenticatedWallet);
+  if (ref && ref.entityId === entity.id) return true;
+  return false;
 }
 
 function resolvePlayer(
@@ -203,15 +218,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership: accept direct match OR owner→custodial relationship
-    const entityWallet = entity.walletAddress?.toLowerCase();
-    const authWallet = authenticatedWallet.toLowerCase();
-    let authorized = entityWallet === authWallet;
-    if (!authorized) {
-      const custodial = await getAgentCustodialWallet(authenticatedWallet);
-      authorized = !!custodial && entityWallet === custodial.toLowerCase();
-    }
-    if (!authorized) {
+    if (!(await isAuthorizedForEntity(authenticatedWallet, entity))) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }
@@ -347,15 +354,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership: accept direct match OR owner→custodial relationship
-    const entityWallet2 = entity.walletAddress?.toLowerCase();
-    const authWallet2 = authenticatedWallet.toLowerCase();
-    let authorized2 = entityWallet2 === authWallet2;
-    if (!authorized2) {
-      const custodial = await getAgentCustodialWallet(authenticatedWallet);
-      authorized2 = !!custodial && entityWallet2 === custodial.toLowerCase();
-    }
-    if (!authorized2) {
+    if (!(await isAuthorizedForEntity(authenticatedWallet, entity))) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }
@@ -425,15 +424,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
     const entity = resolved.entity;
 
-    // Verify wallet ownership: accept direct match OR owner→custodial relationship
-    const entityWallet3 = entity.walletAddress?.toLowerCase();
-    const authWallet3 = authenticatedWallet.toLowerCase();
-    let authorized3 = entityWallet3 === authWallet3;
-    if (!authorized3) {
-      const custodial = await getAgentCustodialWallet(authenticatedWallet);
-      authorized3 = !!custodial && entityWallet3 === custodial.toLowerCase();
-    }
-    if (!authorized3) {
+    if (!(await isAuthorizedForEntity(authenticatedWallet, entity))) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }

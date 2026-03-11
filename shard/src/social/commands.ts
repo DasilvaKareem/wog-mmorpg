@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getOrCreateZone, type Order, type Entity } from "../world/zoneRuntime.js";
-import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
+import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import {
   getZoneConnections,
   getSharedEdge,
@@ -35,7 +36,18 @@ export function registerCommands(server: FastifyInstance) {
     }
 
     // Verify the authenticated user owns this entity
-    if (!verifyEntityOwnership(entity.walletAddress, authenticatedWallet)) {
+    const entityWallet = entity.walletAddress?.toLowerCase();
+    const authWallet = authenticatedWallet.toLowerCase();
+    let cmdAuthorized = entityWallet === authWallet;
+    if (!cmdAuthorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      cmdAuthorized = !!custodial && entityWallet === custodial.toLowerCase();
+    }
+    if (!cmdAuthorized) {
+      const ref = await getAgentEntityRef(authenticatedWallet);
+      cmdAuthorized = !!ref && ref.entityId === entity.id;
+    }
+    if (!cmdAuthorized) {
       reply.code(403);
       return { error: "Not authorized to control this entity" };
     }

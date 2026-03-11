@@ -205,6 +205,12 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
+        if (data.zoneId) {
+          gameBus.emit("switchZone", { zoneId: data.zoneId });
+        }
+        if (walletAddress) {
+          gameBus.emit("lockToPlayer", { walletAddress });
+        }
       } else {
         addSystemMsg(`[ERR] ${data.error ?? "Deploy failed"}`);
       }

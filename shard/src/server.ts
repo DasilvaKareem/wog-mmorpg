@@ -337,6 +337,7 @@ server.post<{
     xp: entity.xp ?? 0,
     raceId: entity.raceId ?? "human",
     classId: entity.classId ?? "warrior",
+    calling: entity.calling,
     gender: entity.gender,
     zone: foundZoneId!,
     x: entity.x,

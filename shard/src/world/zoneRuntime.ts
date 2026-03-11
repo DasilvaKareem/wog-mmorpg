@@ -112,6 +112,8 @@ export interface Entity {
   raceId?: string;
   /** Class identifier for stat recalc on level-up. */
   classId?: string;
+  /** Character calling — adventurer, farmer, merchant, craftsman (players only). */
+  calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
   /** Character gender (players only). */
   gender?: "male" | "female";
   /** Character appearance (players only). */
@@ -1346,6 +1348,9 @@ function addActiveEffectInternal(entity: Entity, effect: ActiveEffect): void {
 
 const ENTITY_COLLISION_RADIUS = 14; // units — entities can't overlap within this radius
 
+/** Entity types that can be displaced by collisions. NPCs/stations are immovable. */
+const MOVABLE_TYPES = new Set(["player", "mob", "boss"]);
+
 function moveToward(
   entity: Entity, tx: number, ty: number,
   zoneEntities?: Map<string, Entity>,
@@ -2064,19 +2069,39 @@ async function worldTick() {
           const dx = a.x - b.x;
           const dy = a.y - b.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
+          const aMovable = MOVABLE_TYPES.has(a.type);
+          const bMovable = MOVABLE_TYPES.has(b.type);
+          if (!aMovable && !bMovable) continue; // both immovable, skip
+
           if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
-            const overlap = (ENTITY_COLLISION_RADIUS - dist) / 2;
+            const overlap = ENTITY_COLLISION_RADIUS - dist;
             const nx = (dx / dist) * overlap;
             const ny = (dy / dist) * overlap;
-            a.x += nx;
-            a.y += ny;
-            b.x -= nx;
-            b.y -= ny;
+            if (aMovable && bMovable) {
+              // Both movable — split push equally
+              a.x += nx * 0.5;
+              a.y += ny * 0.5;
+              b.x -= nx * 0.5;
+              b.y -= ny * 0.5;
+            } else if (aMovable) {
+              // Only a moves — full push to a
+              a.x += nx;
+              a.y += ny;
+            } else {
+              // Only b moves — full push to b
+              b.x -= nx;
+              b.y -= ny;
+            }
           } else if (dist <= 0.01) {
-            // Exactly overlapping — nudge apart deterministically
-            a.x += ENTITY_COLLISION_RADIUS * 0.5;
-            b.x -= ENTITY_COLLISION_RADIUS * 0.5;
-            a.y += (i % 2 === 0 ? 1 : -1) * ENTITY_COLLISION_RADIUS * 0.3;
+            // Exactly overlapping — nudge movable entity away
+            if (aMovable) {
+              a.x += ENTITY_COLLISION_RADIUS * 0.5;
+              a.y += (i % 2 === 0 ? 1 : -1) * ENTITY_COLLISION_RADIUS * 0.3;
+            }
+            if (bMovable) {
+              b.x -= ENTITY_COLLISION_RADIUS * 0.5;
+              b.y += (i % 2 === 0 ? -1 : 1) * ENTITY_COLLISION_RADIUS * 0.3;
+            }
           }
         }
       }
@@ -2329,6 +2354,7 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         xp: entity.xp ?? 0,
         raceId: entity.raceId ?? "human",
         classId: entity.classId ?? "warrior",
+        calling: entity.calling,
         gender: entity.gender,
         zone: entity.region ?? "village-square",
         x: entity.x,

@@ -4,7 +4,7 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
 import { mintCharacter, getOwnedCharacters } from "../blockchain/blockchain.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
-import { loadCharacter, saveCharacter, loadAllCharactersForWallet } from "./characterStore.js";
+import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
@@ -38,8 +38,21 @@ export function registerCharacterRoutes(server: FastifyInstance) {
   });
 
   /**
+   * GET /character/callings
+   * Returns the 4 callings with descriptions.
+   */
+  server.get("/character/callings", async () => {
+    return [
+      { id: "adventurer", name: "Adventurer", description: "Called to fight and slay monsters, explore dungeons, and compete in coliseums" },
+      { id: "farmer", name: "Farmer", description: "Cultivates land, prepares food and drinks, designs homes and builds communities" },
+      { id: "merchant", name: "Merchant", description: "A trader who handles guild DAOs, runs auctions, and amasses wealth" },
+      { id: "craftsman", name: "Craftsman", description: "Enchants weapons, smelts ore, crafts jewelry, and designs gear" },
+    ];
+  });
+
+  /**
    * POST /character/create
-   * { walletAddress, name, race, className, tier?, paymentProof? } → mint ERC-721 NFT with computed stats
+   * { walletAddress, name, race, className, calling?, tier?, paymentProof? } → mint ERC-721 NFT with computed stats
    *
    * Paid tiers (starter/pro) require a paymentProof.transactionHash.
    * Internal callers (agentCharacterSetup) pass x-internal header to bypass the gate.
@@ -50,6 +63,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       name: string;
       race: string;
       className: string;
+      calling?: CharacterCalling;
+      gender?: "male" | "female";
       skinColor?: string;
       hairStyle?: string;
       eyeColor?: string;
@@ -58,7 +73,14 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       paymentProof?: { transactionHash: string };
     };
   }>("/character/create", async (request, reply) => {
-    const { walletAddress, name, race, className, skinColor, hairStyle, eyeColor, origin } = request.body;
+    const { walletAddress, name, race, className, calling, gender, skinColor, hairStyle, eyeColor, origin } = request.body;
+
+    // Validate calling if provided
+    const validCallings: CharacterCalling[] = ["adventurer", "farmer", "merchant", "craftsman"];
+    if (calling && !validCallings.includes(calling)) {
+      reply.code(400);
+      return { error: `Invalid calling: ${calling}. Must be one of: ${validCallings.join(", ")}` };
+    }
 
     const error = validateCharacterInput({ walletAddress, name, race, className });
     if (error) {
@@ -92,12 +114,14 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
     const character = computeCharacter(name, race, className);
 
+    const callingLabel = calling ? calling.charAt(0).toUpperCase() + calling.slice(1) : null;
     const metadata = {
       name: `${character.name} the ${character.class.name}`,
-      description: `Level ${character.level} ${character.race.name} ${character.class.name}`,
+      description: `Level ${character.level} ${character.race.name} ${character.class.name}${callingLabel ? ` (${callingLabel})` : ""}`,
       properties: {
         race: character.race.id,
         class: character.class.id,
+        ...(calling && { calling }),
         level: character.level,
         xp: 0,
         stats: character.stats,
@@ -118,6 +142,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           xp: 0,
           raceId: character.race.id,
           classId: character.class.id,
+          calling,
+          gender,
           skinColor,
           hairStyle,
           eyeColor,
@@ -212,14 +238,32 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         }
 
         // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)
+        // Query both the owner wallet and the custodial wallet (characters are minted to custodial)
         let nfts: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
         try {
-          nfts = await Promise.race([
+          const lookups: Promise<Awaited<ReturnType<typeof getOwnedCharacters>>>[] = [
             getOwnedCharacters(walletAddress),
+          ];
+          if (custodialWallet && custodialWallet !== normalizedWallet) {
+            lookups.push(getOwnedCharacters(custodialWallet));
+          }
+          const results = await Promise.race([
+            Promise.all(lookups),
             new Promise<never>((_, reject) =>
               setTimeout(() => reject(new Error("NFT lookup timed out (10s)")), 10_000)
             ),
           ]);
+          // Merge and deduplicate by tokenId
+          const seen = new Set<string>();
+          for (const list of results) {
+            for (const nft of list) {
+              const id = nft.id.toString();
+              if (!seen.has(id)) {
+                seen.add(id);
+                nfts.push(nft);
+              }
+            }
+          }
         } catch (nftErr) {
           server.log.warn(`[characters] getOwnedNFTs failed for ${walletAddress}, falling back to Redis: ${(nftErr as Error).message}`);
         }

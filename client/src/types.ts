@@ -13,6 +13,7 @@ export interface Entity {
   xp?: number;
   raceId?: string;
   classId?: string;
+  calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
   gender?: "male" | "female";
   skinColor?: string;
   hairStyle?: string;

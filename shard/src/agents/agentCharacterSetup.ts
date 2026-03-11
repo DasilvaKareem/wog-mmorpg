@@ -60,7 +60,8 @@ export async function setupAgentCharacter(
   userWallet: string,
   characterName: string,
   raceId: string,
-  classId: string
+  classId: string,
+  calling?: "adventurer" | "farmer" | "merchant" | "craftsman"
 ): Promise<CharacterSetupResult> {
   const existing = await getAgentCustodialWallet(userWallet);
 
@@ -112,6 +113,7 @@ export async function setupAgentCharacter(
         name: characterName,
         race: raceId,
         className: classId,
+        ...(calling && { calling }),
       });
       console.log(`[agentSetup] Minted character "${characterName}" for ${custodialAddress}`);
     } catch (err: any) {
@@ -171,7 +173,13 @@ export async function setupAgentCharacter(
   // ── Step 8: Init config if not already set ────────────────────────────
   const existingConfig = await getAgentConfig(userWallet);
   if (!existingConfig) {
-    await setAgentConfig(userWallet, defaultConfig());
+    const config = defaultConfig();
+    // Set initial focus based on calling
+    if (calling === "adventurer") config.focus = "combat";
+    else if (calling === "farmer") config.focus = "cooking";
+    else if (calling === "merchant") config.focus = "trading";
+    else if (calling === "craftsman") config.focus = "crafting";
+    await setAgentConfig(userWallet, config);
   }
 
   console.log(`[agentSetup] Agent ready: entity=${entityId} zone=${resolvedZoneId}`);

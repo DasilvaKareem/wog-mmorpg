@@ -6,6 +6,8 @@ import { ASSET_BASE_URL } from "@/config";
  * Composites layered sprite PNGs without Phaser — pure canvas.
  *
  * Shows the down-facing idle frame (row 0, col 0) scaled up.
+ * Equipment layers are scaled per-frame to match body proportions
+ * (same EQUIP_SCALE as the in-game LayeredSpriteCompositor).
  */
 
 const FRAME_W = 16;
@@ -13,6 +15,9 @@ const FRAME_H = 22;
 const SCALE = 8;
 const CANVAS_W = FRAME_W * SCALE; // 128
 const CANVAS_H = FRAME_H * SCALE; // 176
+
+/** Equipment layers are AI-generated at ~100% cell fill but body only uses ~70% */
+const EQUIP_SCALE = 0.7;
 
 // Map onboarding skin color ids → available body layer filenames
 const SKIN_MAP: Record<string, string> = {
@@ -34,6 +39,9 @@ const EYE_MAP: Record<string, string> = {
   violet: "red",
 };
 
+// Only these eye PNGs are clean dot-style overlays (no face outlines)
+const CLEAN_EYES = new Set(["blue", "gold", "red"]);
+
 // Map onboarding hair style ids → available hair layer filenames
 const HAIR_MAP: Record<string, string> = {
   short: "short",
@@ -50,12 +58,28 @@ const HAIR_MAP: Record<string, string> = {
   topknot: "ponytail",
 };
 
+// Default starter equipment visuals per class
+const CLASS_EQUIPMENT: Record<string, { chest?: string; legs?: string; boots?: string; weapon?: string }> = {
+  warrior:  { chest: "leather", legs: "cloth",   boots: "leather", weapon: "sword" },
+  mage:     { chest: "cloth",   legs: "cloth",   boots: "cloth",   weapon: "staff" },
+  ranger:   { chest: "leather", legs: "leather", boots: "leather", weapon: "bow" },
+  cleric:   { chest: "cloth",   legs: "cloth",   boots: "cloth",   weapon: "mace" },
+  rogue:    { chest: "leather", legs: "leather", boots: "leather", weapon: "dagger" },
+  paladin:  { chest: "chain",   legs: "chain",   boots: "iron",    weapon: "sword" },
+  warlock:  { chest: "cloth",   legs: "cloth",   boots: "cloth",   weapon: "staff" },
+  monk:     { chest: "cloth",   legs: "cloth",   boots: "cloth" },
+};
+
 interface Props {
   skinColor: string;
   eyeColor: string;
   hairStyle: string;
-  /** Kept for API compat but not used in preview rendering */
   classId?: string;
+}
+
+interface LayerDef {
+  src: string;
+  scale: number; // 1 = native, <1 = shrink per-frame
 }
 
 // Image cache to avoid reloading PNGs on every render
@@ -67,9 +91,6 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 
   return new Promise((resolve, reject) => {
     const img = new Image();
-    // Do NOT set crossOrigin — we only use drawImage() (never getImageData),
-    // so a tainted canvas is fine. Setting crossOrigin causes load failures
-    // when the CDN (R2) doesn't return CORS headers.
     img.onload = () => {
       imageCache.set(src, img);
       resolve(img);
@@ -79,7 +100,7 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-export function CharacterPreview({ skinColor, eyeColor, hairStyle }: Props): React.ReactElement {
+export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Props): React.ReactElement {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [loadFailed, setLoadFailed] = React.useState(false);
 
@@ -95,54 +116,80 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle }: Props): Rea
       ? `${ASSET_BASE_URL}/sprites/layers`
       : "/sprites/layers";
 
-    // Build layer list in draw order
-    const layers: string[] = [];
+    // Build layer list in draw order (bottom → top)
+    const layers: LayerDef[] = [];
 
-    // Body (always present — includes face/eyes in the sprite)
+    // 1. Body (always present)
     const skin = SKIN_MAP[skinColor] ?? "medium";
-    layers.push(`${base}/body/body-${skin}.png`);
+    layers.push({ src: `${base}/body/body-${skin}.png`, scale: 1 });
 
-    // Eyes layer skipped — body sprites already include facial features,
-    // and the AI-generated eyes PNGs contain full face outlines that
-    // overpower the body. Kept in props for future regeneration.
+    // 2. Eyes (only clean dot-style PNGs)
+    const eye = EYE_MAP[eyeColor] ?? "brown";
+    if (CLEAN_EYES.has(eye)) {
+      layers.push({ src: `${base}/eyes/eyes-${eye}.png`, scale: 1 });
+    }
 
-    // Hair layer skipped — AI-generated hair PNGs are oversized and
-    // cover the entire character sprite at this scale.
-
-    // Equipment layers intentionally omitted — the body sprites already
-    // include default clothing, so stacking armor/helm/weapon overlays
-    // on a 16×22 pixel frame makes the preview unreadable.  Equipment
-    // is shown in-game via the full LayeredSpriteCompositor.
+    // 3. Equipment based on class
+    const equip = CLASS_EQUIPMENT[classId ?? "warrior"] ?? CLASS_EQUIPMENT.warrior;
+    if (equip.chest) {
+      layers.push({ src: `${base}/chest/chest-${equip.chest}.png`, scale: EQUIP_SCALE });
+    }
+    if (equip.legs) {
+      layers.push({ src: `${base}/legs/legs-${equip.legs}.png`, scale: EQUIP_SCALE });
+    }
+    if (equip.boots) {
+      layers.push({ src: `${base}/boots/boots-${equip.boots}.png`, scale: EQUIP_SCALE });
+    }
+    if (equip.weapon) {
+      layers.push({ src: `${base}/weapons/weapon-${equip.weapon}.png`, scale: EQUIP_SCALE });
+    }
 
     let cancelled = false;
 
-    Promise.all(layers.map((src) => loadImage(src).catch(() => null))).then(
+    Promise.all(layers.map((l) => loadImage(l.src).catch(() => null))).then(
       (images) => {
         if (cancelled) return;
 
-        // Check if body (first layer) loaded — if not, nothing will render
+        // Body (first layer) must load
         if (!images[0]) {
           setLoadFailed(true);
           return;
         }
 
+        // Composite at native resolution into an offscreen 16×22 buffer,
+        // then scale the result up to the display canvas.
+        const buf = document.createElement("canvas");
+        buf.width = FRAME_W;
+        buf.height = FRAME_H;
+        const bctx = buf.getContext("2d")!;
+        bctx.imageSmoothingEnabled = false;
+
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          if (!img) continue;
+          const s = layers[i].scale;
+
+          // Extract first frame (row 0, col 0) = down-facing idle
+          if (s !== 1) {
+            const fw = FRAME_W * s;
+            const fh = FRAME_H * s;
+            const dx = (FRAME_W - fw) / 2;
+            const dy = FRAME_H - fh; // anchor to bottom
+            bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, dx, dy, fw, fh);
+          } else {
+            bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
+          }
+        }
+
+        // Scale up to display canvas
         ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
         ctx.imageSmoothingEnabled = false;
-
-        for (const img of images) {
-          if (!img) continue;
-          // Draw only the first frame (row 0, col 0) = down-facing idle
-          ctx.drawImage(
-            img,
-            0, 0, FRAME_W, FRAME_H,       // source: first frame
-            0, 0, CANVAS_W, CANVAS_H,      // dest: scaled up
-          );
-        }
+        ctx.drawImage(buf, 0, 0, FRAME_W, FRAME_H, 0, 0, CANVAS_W, CANVAS_H);
       }
     );
 
     return () => { cancelled = true; };
-  }, [skinColor, eyeColor, hairStyle]);
+  }, [skinColor, eyeColor, hairStyle, classId]);
 
   if (loadFailed) {
     return (

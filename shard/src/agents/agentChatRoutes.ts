@@ -17,6 +17,7 @@ import {
   patchAgentConfig,
   getAgentCustodialWallet,
   getAgentEntityRef,
+  clearAgentEntityRef,
   appendChatMessage,
   getChatHistory,
   defaultConfig,
@@ -30,10 +31,11 @@ import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getRedis } from "../redis.js";
-import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
+import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
-import { loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sleep, extractRawCharacterName } from "./agentUtils.js";
 import type { AgentMcpClient } from "./mcpClient.js";
@@ -160,6 +162,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       characterName?: string;
       raceId?: string;
       classId?: string;
+      calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
       tier?: AgentTier;
       paymentTx?: string;
     };
@@ -245,7 +248,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         authWallet,
         characterName,
         raceId,
-        classId
+        classId,
+        request.body.calling
       );
 
       // Mint starter gold for brand-new custodial wallets (0 balance) so the agent
@@ -321,9 +325,58 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
 
+    // 1. Stop the agent loop
     await agentManager.stop(authWallet);
 
-    return reply.send({ ok: true });
+    // 2. Despawn the entity from the world (save progress first)
+    const ref = await getAgentEntityRef(authWallet);
+    if (ref) {
+      const entity: any = getWorldEntity(ref.entityId);
+      if (entity) {
+        // Save character state before removing
+        const wallet = entity.walletAddress ?? (await getAgentCustodialWallet(authWallet));
+        if (wallet) {
+          try {
+            await saveCharacter(wallet, entity.name, {
+              name: entity.name,
+              level: entity.level ?? 1,
+              xp: entity.xp ?? 0,
+              raceId: entity.raceId ?? "human",
+              classId: entity.classId ?? "warrior",
+              calling: entity.calling,
+              gender: entity.gender,
+              zone: entity.region ?? ref.zoneId,
+              x: entity.x,
+              y: entity.y,
+              kills: entity.kills ?? 0,
+              completedQuests: entity.completedQuests ?? [],
+              learnedTechniques: entity.learnedTechniques ?? [],
+              professions: getLearnedProfessions(wallet),
+            });
+          } catch (err: any) {
+            server.log.warn(`[agent/stop] Save failed (non-fatal): ${err.message}`);
+          }
+
+          // Clear mob tags owned by this player
+          for (const e of getAllEntities().values()) {
+            if ((e.type === "mob" || e.type === "boss") && (e as any).taggedBy === ref.entityId) {
+              (e as any).taggedBy = undefined;
+              (e as any).taggedAtTick = undefined;
+            }
+          }
+          unregisterSpawnedWallet(wallet);
+        }
+
+        // Remove entity from world
+        getAllEntities().delete(ref.entityId);
+        server.log.info(`[agent/stop] Despawned ${entity.name} from ${entity.region ?? ref.zoneId}`);
+      }
+
+      // Clear stale entity ref so next deploy spawns fresh
+      await clearAgentEntityRef(authWallet);
+    }
+
+    return reply.send({ ok: true, despawned: !!ref });
   });
 
   // ── GET /agent/status/:walletAddress ─────────────────────────────────────

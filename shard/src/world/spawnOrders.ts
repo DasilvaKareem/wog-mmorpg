@@ -33,6 +33,7 @@ interface SpawnOrderBody {
   characterTokenId?: string;
   raceId?: string;
   classId?: string;
+  calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
   gender?: "male" | "female";
 }
 
@@ -54,7 +55,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
   }, async (request, reply) => {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
-      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, gender,
+      walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, calling, gender,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
@@ -99,6 +100,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
+    const resolvedCalling = (saved?.calling as "adventurer" | "farmer" | "merchant" | "craftsman" | undefined) ?? calling;
     const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
     const resolvedSkinColor = saved?.skinColor;
     const resolvedHairStyle = saved?.hairStyle;
@@ -133,6 +135,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedTokenId != null && { characterTokenId: resolvedTokenId }),
       ...(resolvedRaceId != null && { raceId: resolvedRaceId }),
       ...(resolvedClassId != null && { classId: resolvedClassId }),
+      ...(resolvedCalling != null && { calling: resolvedCalling }),
       ...(resolvedGender != null && { gender: resolvedGender }),
       ...(resolvedSkinColor != null && { skinColor: resolvedSkinColor }),
       ...(resolvedHairStyle != null && { hairStyle: resolvedHairStyle }),
@@ -170,6 +173,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
         xp: entity.xp ?? 0,
         raceId: resolvedRaceId ?? "human",
         classId: resolvedClassId ?? "warrior",
+        calling: resolvedCalling,
         gender: resolvedGender,
         zone: spawnZoneId,
         x: entity.x,

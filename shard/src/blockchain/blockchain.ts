@@ -511,12 +511,21 @@ export async function burnItem(
   });
 }
 
-// --- ERC-8004 Identity Registry ---
+// --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---
 
 const IDENTITY_REGISTRY_ABI = [
-  "function createIdentity(uint256 characterTokenId, address characterOwner, string metadataURI) external returns (uint256)",
-  "function characterToIdentity(uint256) view returns (uint256)",
-  "function identities(uint256) view returns (uint256 characterTokenId, address characterOwner, string metadataURI, uint256 createdAt, bool active)",
+  "function register(string agentURI) returns (uint256 agentId)",
+  "function setAgentURI(uint256 agentId, string newURI)",
+  "function setAgentWallet(uint256 agentId, address newWallet, uint256 deadline, bytes signature)",
+  "function setMetadata(uint256 agentId, string metadataKey, bytes metadataValue)",
+  "function getMetadata(uint256 agentId, string metadataKey) view returns (bytes)",
+  "function getAgentWallet(uint256 agentId) view returns (address)",
+  "function tokenURI(uint256 tokenId) view returns (string)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function transferFrom(address from, address to, uint256 tokenId)",
+  "function isAuthorizedOrOwner(address spender, uint256 agentId) view returns (bool)",
+  "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
 ];
 
 const identityRegistryAddress = process.env.IDENTITY_REGISTRY_ADDRESS;
@@ -525,13 +534,14 @@ const identityRegistryContract = identityRegistryAddress && biteWallet
   : null;
 
 if (identityRegistryAddress) {
-  console.log(`[blockchain] Identity registry at ${identityRegistryAddress}`);
+  console.log(`[blockchain] Identity registry (ERC-8004) at ${identityRegistryAddress}`);
 } else {
   console.warn("[blockchain] IDENTITY_REGISTRY_ADDRESS not set — identity registration disabled");
 }
 
 /**
- * Register a character identity on the ERC-8004 identity registry.
+ * Register an agent identity on the ERC-8004 IdentityRegistryUpgradeable.
+ * Mints to the server wallet, then transfers to the agent's wallet.
  * Fire-and-forget safe — logs errors but never throws.
  */
 export async function registerIdentity(
@@ -539,23 +549,43 @@ export async function registerIdentity(
   ownerAddress: string,
   metadataURI: string
 ): Promise<string | null> {
-  if (!identityRegistryContract) return null;
+  if (!identityRegistryContract || !biteWallet) return null;
 
   try {
-    // Check if identity already exists for this character
-    const existingId = await identityRegistryContract.characterToIdentity(characterTokenId);
-    if (existingId > 0n) {
-      console.log(`[identity] Character ${characterTokenId} already registered as identity ${existingId}`);
-      return null;
+    const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
+
+    // Register agent — mints NFT to server wallet (msg.sender)
+    const agentURI = metadataURI || `erc8004:wog:character:${characterTokenId}`;
+    const registerTx = await identityRegistryContract["register(string)"](agentURI);
+    const receipt = await registerTx.wait();
+
+    // Extract agentId from the Registered event
+    const registeredEvent = receipt.logs.find(
+      (log: any) => log.fragment?.name === "Registered" || log.topics?.[0] === ethers.id("Registered(uint256,string,address)")
+    );
+    const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
+
+    if (!agentId) {
+      console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
+      return receipt.hash;
     }
 
-    const tx = await identityRegistryContract.createIdentity(
-      characterTokenId,
-      ownerAddress,
-      metadataURI
-    );
-    const receipt = await tx.wait();
-    console.log(`[identity] Registered identity for character ${characterTokenId} → tx ${receipt.hash}`);
+    console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} → tx ${receipt.hash}`);
+
+    // Store character tokenId as metadata
+    const charTokenBytes = ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]);
+    await identityRegistryContract.setMetadata(agentId, "characterTokenId", charTokenBytes)
+      .then((tx: any) => tx.wait())
+      .catch((err: any) => console.warn(`[identity] setMetadata failed: ${err.message?.slice(0, 80)}`));
+
+    // Transfer the agent NFT to the character's owner
+    if (ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
+      await identityRegistryContract.transferFrom(serverAddress, ownerAddress, agentId)
+        .then((tx: any) => tx.wait())
+        .then(() => console.log(`[identity] Transferred agent #${agentId} → ${ownerAddress}`))
+        .catch((err: any) => console.warn(`[identity] Transfer to ${ownerAddress} failed: ${err.message?.slice(0, 80)}`));
+    }
+
     return receipt.hash;
   } catch (err: any) {
     console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);

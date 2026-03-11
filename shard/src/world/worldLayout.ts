@@ -160,12 +160,12 @@ function loadLayout(): WorldLayout {
   const offsets: Record<string, Vec2> = world.worldOffsets ?? {};
   const zoneIds: string[] = world.zones ?? [];
 
-  const zones: Record<string, ZoneLayout> = {};
-  let maxX = 0;
-  let maxZ = 0;
+  // First pass: read zone sizes and find min offsets (some zones have negative coords)
+  const rawZones: { id: string; offset: Vec2; width: number; height: number }[] = [];
+  let minX = Infinity;
+  let minZ = Infinity;
 
   for (const zoneId of zoneIds) {
-    // Read zone bounds from src/data/zones/<zoneId>.json
     const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
     let width = 300;
     let height = 300;
@@ -180,16 +180,34 @@ function loadLayout(): WorldLayout {
     }
 
     const offset = offsets[zoneId] ?? { x: 0, z: 0 };
+    rawZones.push({ id: zoneId, offset, width, height });
+    minX = Math.min(minX, offset.x);
+    minZ = Math.min(minZ, offset.z);
+  }
 
-    zones[zoneId] = {
-      id: zoneId,
-      offset,
-      size: { width, height },
-      levelReq: ZONE_LEVEL_REQUIREMENTS[zoneId] ?? 1,
+  // Normalize: shift all offsets so the minimum becomes (0,0)
+  const shiftX = minX < 0 ? -minX : 0;
+  const shiftZ = minZ < 0 ? -minZ : 0;
+
+  const zones: Record<string, ZoneLayout> = {};
+  let maxX = 0;
+  let maxZ = 0;
+
+  for (const raw of rawZones) {
+    const normalizedOffset = {
+      x: raw.offset.x + shiftX,
+      z: raw.offset.z + shiftZ,
     };
 
-    maxX = Math.max(maxX, offset.x + width);
-    maxZ = Math.max(maxZ, offset.z + height);
+    zones[raw.id] = {
+      id: raw.id,
+      offset: normalizedOffset,
+      size: { width: raw.width, height: raw.height },
+      levelReq: ZONE_LEVEL_REQUIREMENTS[raw.id] ?? 1,
+    };
+
+    maxX = Math.max(maxX, normalizedOffset.x + raw.width);
+    maxZ = Math.max(maxZ, normalizedOffset.z + raw.height);
   }
 
   cachedLayout = {
@@ -199,7 +217,8 @@ function loadLayout(): WorldLayout {
   };
 
   console.log(
-    `[worldLayout] Loaded ${zoneIds.length} zones, total world: ${maxX}x${maxZ}`
+    `[worldLayout] Loaded ${zoneIds.length} zones, total world: ${maxX}x${maxZ}` +
+    (shiftX || shiftZ ? ` (shifted by +${shiftX},+${shiftZ} to normalize)` : "")
   );
 
   return cachedLayout;

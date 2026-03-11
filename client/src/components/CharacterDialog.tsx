@@ -8,6 +8,7 @@ import { useCharacters } from "@/hooks/useCharacters";
 import { useWallet } from "@/hooks/useWallet";
 import { getAuthToken } from "@/lib/agentAuth";
 import { WalletManager } from "@/lib/walletManager";
+import { gameBus } from "@/lib/eventBus";
 import { API_URL } from "@/config";
 import { fetchDiary, type DiaryEntry } from "@/ShardClient";
 
@@ -132,6 +133,15 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
         setDeployResult("Failed to authenticate. Try reconnecting your wallet.");
         return;
       }
+
+      // Stop existing agent first (saves + despawns old entity)
+      await fetch(`${API_URL}/agent/stop`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ walletAddress: address }),
+      });
+
+      // Deploy the selected character
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -148,6 +158,10 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
         setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
+        if (data.zoneId) {
+          gameBus.emit("switchZone", { zoneId: data.zoneId });
+        }
+        gameBus.emit("lockToPlayer", { walletAddress: address });
       } else {
         setDeployResult(data.error ?? "Deploy failed");
       }

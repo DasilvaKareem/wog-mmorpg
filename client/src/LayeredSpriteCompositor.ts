@@ -149,8 +149,12 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
   for (const skin of SKIN_TONES) {
     scene.load.image(`layer-body-${skin}`, `${base}/body/body-${skin}.png`);
   }
-  // Eyes layer preload skipped — body sprites already include facial features
-  // Hair layer preload skipped — AI-generated hair PNGs are oversized
+  // Eyes: only load clean dot-style PNGs (blue, gold, red are clean; brown/green have face outlines)
+  const CLEAN_EYES = ["blue", "gold", "red"];
+  for (const eye of CLEAN_EYES) {
+    scene.load.image(`layer-eyes-${eye}`, `${base}/eyes/eyes-${eye}.png`);
+  }
+  // Hair layer preload skipped — AI-generated hair PNGs contain full character outlines
   for (const tier of CHEST_TIERS) {
     scene.load.image(`layer-chest-${tier}`, `${base}/chest/chest-${tier}.png`);
   }
@@ -166,9 +170,10 @@ export function preloadLayerSprites(scene: Phaser.Scene): void {
   for (const tier of SHOULDER_TIERS) {
     scene.load.image(`layer-shoulders-${tier}`, `${base}/shoulders/shoulders-${tier}.png`);
   }
-  for (const weapon of WEAPON_TYPES) {
-    scene.load.image(`layer-weapon-${weapon}`, `${base}/weapons/weapon-${weapon}.png`);
-  }
+  // Weapon PNGs skipped — procedural weapon sprites generated at runtime
+  // for (const weapon of WEAPON_TYPES) {
+  //   scene.load.image(`layer-weapon-${weapon}`, `${base}/weapons/weapon-${weapon}.png`);
+  // }
 }
 
 // ── Layer key builder ───────────────────────────────────────────────
@@ -234,6 +239,434 @@ export function layerCacheKey(keys: LayerKeys): string {
   ].join("|");
 }
 
+// ── Procedural weapon sprites (animated) ────────────────────────────
+
+const proceduralWeaponsDone = new Set<string>();
+
+/** Weapon pixel-art color palette */
+const WC = {
+  blade:     "#C0C0C0",
+  bladeHi:   "#E0E0E0",
+  bladeTrail:"rgba(192,192,192,0.25)",
+  handle:    "#6B3410",
+  guard:     "#808080",
+  wood:      "#B8860B",
+  gem:       "#00BFFF",
+  gemBright: "#80DFFF",
+  gemPurple: "#9060FF",
+  gemDark:   "#006090",
+  sparkle:   "#FFFFFF",
+  bowString: "#D2B48C",
+  arrow:     "#D4A574",
+  arrowHead: "#A0A0A0",
+  maceHead:  "#505050",
+  maceLt:    "#707070",
+  maceTrail: "rgba(80,80,80,0.25)",
+  axeTrail:  "rgba(168,168,168,0.25)",
+};
+
+type PxFn = (x: number, y: number, w: number, h: number, color: string) => void;
+
+/**
+ * Generate procedural weapon textures for any types not loaded as PNGs.
+ * Each weapon has 4 animation frames per direction:
+ *   col 0 = idle1 (rest), col 1 = idle2 (breathing),
+ *   col 2 = walk1 (swing forward), col 3 = walk2 (swing back)
+ */
+function ensureProceduralWeapons(scene: Phaser.Scene): void {
+  for (const wtype of WEAPON_TYPES) {
+    const key = `layer-weapon-${wtype}`;
+    if (scene.textures.exists(key) || proceduralWeaponsDone.has(key)) continue;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const c = canvas.getContext("2d")!;
+    c.imageSmoothingEnabled = false;
+
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const fx = col * PLAYER_FW;
+        const fy = row * PLAYER_FH;
+        const px: PxFn = (x, y, w, h, color) => {
+          c.fillStyle = color;
+          c.fillRect(fx + x, fy + y, w, h);
+        };
+        drawWeaponShape(px, wtype, row, col);
+      }
+    }
+
+    scene.textures.addCanvas(key, canvas);
+    proceduralWeaponsDone.add(key);
+  }
+}
+
+function drawWeaponShape(px: PxFn, type: string, dir: number, col: number): void {
+  switch (type) {
+    case "sword":  drawSword(px, dir, col); break;
+    case "axe":    drawAxe(px, dir, col); break;
+    case "staff":  drawStaff(px, dir, col); break;
+    case "bow":    drawBow(px, dir, col); break;
+    case "dagger": drawDagger(px, dir, col); break;
+    case "mace":   drawMace(px, dir, col); break;
+  }
+}
+
+// ─── Sword: swing arc with motion trails ────────────────────────────
+
+function drawSword(px: PxFn, dir: number, col: number): void {
+  if (dir === DIR_DOWN || dir === DIR_UP) {
+    const x = dir === DIR_DOWN ? 10 : 6;
+    const dy = col === 1 ? -1 : 0;           // idle2 raised
+
+    if (col < 2) {
+      // Idle frames: straight blade
+      px(x, 4 + dy, 1, 1, WC.bladeHi);
+      px(x, 5 + dy, 1, 8, WC.blade);
+      px(x - 1, 13 + dy, 3, 1, WC.guard);
+      px(x, 14 + dy, 1, 4, WC.handle);
+    } else if (col === 2) {
+      // Walk1: swing right — diagonal blade + trail left
+      px(x - 2, 5, 1, 7, WC.bladeTrail);     // motion trail
+      px(x + 2, 4, 1, 1, WC.bladeHi);        // tip far right
+      px(x + 2, 5, 1, 4, WC.blade);           // upper blade offset
+      px(x + 1, 9, 1, 4, WC.blade);           // lower blade
+      px(x - 1, 13, 3, 1, WC.guard);
+      px(x, 14, 1, 4, WC.handle);
+    } else {
+      // Walk2: swing left — diagonal blade + trail right
+      px(x + 2, 5, 1, 7, WC.bladeTrail);
+      px(x - 2, 4, 1, 1, WC.bladeHi);
+      px(x - 2, 5, 1, 4, WC.blade);
+      px(x - 1, 9, 1, 4, WC.blade);
+      px(x - 1, 13, 3, 1, WC.guard);
+      px(x, 14, 1, 4, WC.handle);
+    }
+  } else {
+    // LEFT / RIGHT — horizontal blade
+    const y = 11;
+    const left = dir === DIR_LEFT;
+    const dy = col === 1 ? -1 : 0;
+
+    if (col < 2) {
+      // Idle frames
+      if (left) {
+        px(2, y + dy, 1, 1, WC.bladeHi);
+        px(3, y + dy, 7, 1, WC.blade);
+        px(10, y - 1 + dy, 1, 3, WC.guard);
+        px(11, y + dy, 4, 1, WC.handle);
+      } else {
+        px(14, y + dy, 1, 1, WC.bladeHi);
+        px(7, y + dy, 7, 1, WC.blade);
+        px(6, y - 1 + dy, 1, 3, WC.guard);
+        px(2, y + dy, 4, 1, WC.handle);
+      }
+    } else {
+      // Walk: tip swings up(col2) / down(col3) with trail
+      const swing = col === 2 ? -2 : 2;
+      if (left) {
+        px(2, y - swing, 8, 1, WC.bladeTrail);  // trail opposite
+        px(2, y + swing, 1, 1, WC.bladeHi);      // tip swung
+        px(3, y + swing, 4, 1, WC.blade);         // front half
+        px(7, y, 3, 1, WC.blade);                 // back half level
+        px(10, y - 1, 1, 3, WC.guard);
+        px(11, y, 4, 1, WC.handle);
+      } else {
+        px(7, y - swing, 8, 1, WC.bladeTrail);
+        px(14, y + swing, 1, 1, WC.bladeHi);
+        px(10, y + swing, 4, 1, WC.blade);
+        px(7, y, 3, 1, WC.blade);
+        px(6, y - 1, 1, 3, WC.guard);
+        px(2, y, 4, 1, WC.handle);
+      }
+    }
+  }
+}
+
+// ─── Axe: heavy chop with trail ─────────────────────────────────────
+
+function drawAxe(px: PxFn, dir: number, col: number): void {
+  if (dir === DIR_DOWN || dir === DIR_UP) {
+    const x = dir === DIR_DOWN ? 10 : 6;
+
+    if (col < 2) {
+      // Idle: standard + slight raise on col1
+      const dy = col === 1 ? -1 : 0;
+      px(x, 5 + dy, 1, 4, WC.blade);
+      px(x + 1, 4 + dy, 1, 5, WC.blade);
+      px(x + 2, 5 + dy, 1, 3, WC.blade);
+      px(x, 9 + dy, 1, 8, WC.handle);
+    } else if (col === 2) {
+      // Walk1: axe raised high (wind-up)
+      px(x, 7, 1, 6, WC.axeTrail);             // trail at rest pos
+      px(x, 2, 1, 4, WC.blade);
+      px(x + 1, 1, 1, 5, WC.blade);
+      px(x + 2, 2, 1, 3, WC.blade);
+      px(x, 6, 1, 11, WC.handle);
+    } else {
+      // Walk2: axe chopping down (follow-through)
+      px(x, 2, 1, 5, WC.axeTrail);             // trail from raised
+      px(x, 8, 1, 4, WC.blade);
+      px(x + 1, 7, 1, 5, WC.blade);
+      px(x + 2, 8, 1, 3, WC.blade);
+      px(x, 12, 1, 6, WC.handle);
+    }
+  } else {
+    const y = 11;
+    const left = dir === DIR_LEFT;
+    const dy = col === 1 ? -1 : 0;
+
+    if (col < 2) {
+      if (left) {
+        px(2, y + dy, 4, 1, WC.blade);
+        px(2, y - 1 + dy, 3, 1, WC.blade);
+        px(2, y + 1 + dy, 3, 1, WC.blade);
+        px(6, y + dy, 8, 1, WC.handle);
+      } else {
+        px(11, y + dy, 4, 1, WC.blade);
+        px(12, y - 1 + dy, 3, 1, WC.blade);
+        px(12, y + 1 + dy, 3, 1, WC.blade);
+        px(2, y + dy, 9, 1, WC.handle);
+      }
+    } else {
+      // Walk: head swings up(col2) / down(col3)
+      const swing = col === 2 ? -2 : 2;
+      if (left) {
+        px(2, y - swing, 4, 1, WC.axeTrail);
+        px(2, y + swing, 4, 1, WC.blade);
+        px(2, y - 1 + swing, 3, 1, WC.blade);
+        px(2, y + 1 + swing, 3, 1, WC.blade);
+        px(6, y, 8, 1, WC.handle);
+      } else {
+        px(11, y - swing, 4, 1, WC.axeTrail);
+        px(11, y + swing, 4, 1, WC.blade);
+        px(12, y - 1 + swing, 3, 1, WC.blade);
+        px(12, y + 1 + swing, 3, 1, WC.blade);
+        px(2, y, 9, 1, WC.handle);
+      }
+    }
+  }
+}
+
+// ─── Staff: gem pulse + magic sparkles ──────────────────────────────
+
+function drawStaff(px: PxFn, dir: number, col: number): void {
+  const x = (dir === DIR_DOWN || dir === DIR_RIGHT) ? 11 : 5;
+  // Shaft sway for walk frames
+  const sway = col === 2 ? 1 : col === 3 ? -1 : 0;
+  const gemX = x + sway;
+
+  // Gem color cycles: normal → bright → purple → normal
+  const gemColors = [WC.gem, WC.gemBright, WC.gemPurple, WC.gem];
+  const gc = gemColors[col];
+
+  // Gem (diamond shape)
+  px(gemX, 2, 1, 1, gc);
+  px(gemX - 1, 3, 3, 1, gc);
+  px(gemX, 4, 1, 1, gc);
+  px(gemX, 3, 1, 1, WC.gemDark);
+
+  // Sparkle pixel on idle2
+  if (col === 1) {
+    px(gemX + 2, 2, 1, 1, WC.sparkle);
+  }
+  // Magic particles on walk frames
+  if (col === 2) {
+    px(gemX - 2, 1, 1, 1, WC.sparkle);
+    px(gemX + 1, 5, 1, 1, WC.gemBright);
+  }
+  if (col === 3) {
+    px(gemX + 2, 1, 1, 1, WC.sparkle);
+    px(gemX - 1, 5, 1, 1, WC.gemBright);
+  }
+
+  // Long shaft (top follows gem, bottom anchored)
+  px(gemX, 5, 1, 3, WC.wood);           // upper shaft follows sway
+  px(x, 8, 1, 11, WC.wood);             // lower shaft stays anchored
+}
+
+// ─── Bow: draw / release cycle with arrow ───────────────────────────
+
+function drawBow(px: PxFn, dir: number, col: number): void {
+  const bx = (dir === DIR_DOWN || dir === DIR_RIGHT) ? 10 : 6;
+  const cd = (dir === DIR_DOWN || dir === DIR_RIGHT) ? 1 : -1;
+
+  // String pull: idle=0, idle2=1px, walk1=2px (full draw), walk2=0 (release)
+  const pull = col === 0 ? 0 : col === 1 ? 1 : col === 2 ? 2 : 0;
+  const stringX = bx - cd * pull;
+
+  // String
+  px(stringX, 5, 1, 7, WC.bowString);
+
+  // Arrow visible when string is pulled (col 1 and 2)
+  if (pull > 0) {
+    // Arrow shaft from string toward limb
+    const arrowLen = 3 + pull;
+    const arrowX = cd > 0
+      ? stringX + 1                       // arrow points right
+      : stringX - arrowLen;                // arrow points left
+    px(arrowX, 8, arrowLen, 1, WC.arrow);
+    // Arrowhead
+    const headX = cd > 0 ? arrowX + arrowLen : arrowX;
+    px(headX, 7, 1, 1, WC.arrowHead);
+    px(headX, 9, 1, 1, WC.arrowHead);
+  }
+
+  // Curved limb
+  px(bx, 4, 1, 1, WC.wood);
+  px(bx + cd, 5, 1, 1, WC.wood);
+  px(bx + cd * 2, 6, 1, 5, WC.wood);
+  px(bx + cd, 11, 1, 1, WC.wood);
+  px(bx, 12, 1, 1, WC.wood);
+
+  // Release snap: walk2 shows string overshoot (vibration)
+  if (col === 3) {
+    px(bx + cd, 7, 1, 1, WC.bowString);  // string vibration pixel
+    px(bx + cd, 9, 1, 1, WC.bowString);
+  }
+}
+
+// ─── Dagger: quick jab ──────────────────────────────────────────────
+
+function drawDagger(px: PxFn, dir: number, col: number): void {
+  if (dir === DIR_DOWN || dir === DIR_UP) {
+    const x = dir === DIR_DOWN ? 10 : 6;
+    const dy = col === 1 ? -1 : 0;
+
+    if (col < 2) {
+      // Idle
+      px(x, 9 + dy, 1, 1, WC.bladeHi);
+      px(x, 10 + dy, 1, 3, WC.blade);
+      px(x - 1, 13 + dy, 3, 1, WC.guard);
+      px(x, 14 + dy, 1, 3, WC.handle);
+    } else if (col === 2) {
+      // Walk1: thrust up (blade extended 2px)
+      px(x, 14, 1, 6, WC.bladeTrail);         // trail at rest
+      px(x, 7, 1, 1, WC.bladeHi);
+      px(x, 8, 1, 3, WC.blade);
+      px(x - 1, 11, 3, 1, WC.guard);
+      px(x, 12, 1, 3, WC.handle);
+    } else {
+      // Walk2: pulled back
+      px(x, 7, 1, 3, WC.bladeTrail);          // trail from thrust
+      px(x, 11, 1, 1, WC.bladeHi);
+      px(x, 12, 1, 3, WC.blade);
+      px(x - 1, 15, 3, 1, WC.guard);
+      px(x, 16, 1, 3, WC.handle);
+    }
+  } else {
+    const y = 12;
+    const left = dir === DIR_LEFT;
+    const dy = col === 1 ? -1 : 0;
+
+    if (col < 2) {
+      if (left) {
+        px(6, y + dy, 1, 1, WC.bladeHi);
+        px(7, y + dy, 3, 1, WC.blade);
+        px(10, y - 1 + dy, 1, 3, WC.guard);
+        px(11, y + dy, 3, 1, WC.handle);
+      } else {
+        px(10, y + dy, 1, 1, WC.bladeHi);
+        px(7, y + dy, 3, 1, WC.blade);
+        px(6, y - 1 + dy, 1, 3, WC.guard);
+        px(3, y + dy, 3, 1, WC.handle);
+      }
+    } else if (col === 2) {
+      // Walk1: thrust forward
+      if (left) {
+        px(8, y, 3, 1, WC.bladeTrail);
+        px(4, y, 1, 1, WC.bladeHi);
+        px(5, y, 3, 1, WC.blade);
+        px(8, y - 1, 1, 3, WC.guard);
+        px(9, y, 3, 1, WC.handle);
+      } else {
+        px(6, y, 3, 1, WC.bladeTrail);
+        px(12, y, 1, 1, WC.bladeHi);
+        px(9, y, 3, 1, WC.blade);
+        px(8, y - 1, 1, 3, WC.guard);
+        px(5, y, 3, 1, WC.handle);
+      }
+    } else {
+      // Walk2: pulled back
+      if (left) {
+        px(5, y, 3, 1, WC.bladeTrail);
+        px(8, y, 1, 1, WC.bladeHi);
+        px(9, y, 3, 1, WC.blade);
+        px(12, y - 1, 1, 3, WC.guard);
+        px(13, y, 2, 1, WC.handle);
+      } else {
+        px(9, y, 3, 1, WC.bladeTrail);
+        px(8, y, 1, 1, WC.bladeHi);
+        px(5, y, 3, 1, WC.blade);
+        px(4, y - 1, 1, 3, WC.guard);
+        px(1, y, 3, 1, WC.handle);
+      }
+    }
+  }
+}
+
+// ─── Mace: heavy overhead swing ─────────────────────────────────────
+
+function drawMace(px: PxFn, dir: number, col: number): void {
+  if (dir === DIR_DOWN || dir === DIR_UP) {
+    const x = dir === DIR_DOWN ? 10 : 6;
+
+    if (col < 2) {
+      const dy = col === 1 ? -1 : 0;
+      px(x - 1, 5 + dy, 3, 3, WC.maceHead);
+      px(x - 1, 5 + dy, 1, 1, WC.maceLt);
+      px(x + 1, 7 + dy, 1, 1, WC.maceLt);
+      px(x, 8 + dy, 1, 9, WC.handle);
+    } else if (col === 2) {
+      // Walk1: mace raised high
+      px(x - 1, 5, 3, 3, WC.maceTrail);        // ghost at rest
+      px(x - 1, 2, 3, 3, WC.maceHead);          // head raised 3px
+      px(x - 1, 2, 1, 1, WC.maceLt);
+      px(x + 1, 4, 1, 1, WC.maceLt);
+      px(x, 5, 1, 12, WC.handle);
+    } else {
+      // Walk2: mace slammed down
+      px(x - 1, 2, 3, 3, WC.maceTrail);         // ghost from raised
+      px(x - 1, 7, 3, 3, WC.maceHead);           // head lowered 2px
+      px(x - 1, 7, 1, 1, WC.maceLt);
+      px(x + 1, 9, 1, 1, WC.maceLt);
+      px(x, 10, 1, 7, WC.handle);
+      px(x - 1, 10, 3, 1, WC.maceTrail);         // impact line
+    }
+  } else {
+    const y = 11;
+    const left = dir === DIR_LEFT;
+    const dy = col === 1 ? -1 : 0;
+
+    if (col < 2) {
+      if (left) {
+        px(2, y - 1 + dy, 3, 3, WC.maceHead);
+        px(2, y - 1 + dy, 1, 1, WC.maceLt);
+        px(5, y + dy, 9, 1, WC.handle);
+      } else {
+        px(12, y - 1 + dy, 3, 3, WC.maceHead);
+        px(12, y - 1 + dy, 1, 1, WC.maceLt);
+        px(2, y + dy, 10, 1, WC.handle);
+      }
+    } else {
+      const swing = col === 2 ? -2 : 2;
+      if (left) {
+        px(2, y - 1 - swing, 3, 3, WC.maceTrail);  // ghost
+        px(2, y - 1 + swing, 3, 3, WC.maceHead);
+        px(2, y - 1 + swing, 1, 1, WC.maceLt);
+        px(5, y, 9, 1, WC.handle);
+        if (col === 3) px(2, y + swing + 2, 3, 1, WC.maceTrail);  // impact
+      } else {
+        px(12, y - 1 - swing, 3, 3, WC.maceTrail);
+        px(12, y - 1 + swing, 3, 3, WC.maceHead);
+        px(12, y - 1 + swing, 1, 1, WC.maceLt);
+        px(2, y, 10, 1, WC.handle);
+        if (col === 3) px(12, y + swing + 2, 3, 1, WC.maceTrail);
+      }
+    }
+  }
+}
+
 // ── Compositor ──────────────────────────────────────────────────────
 
 /** Texture cache — tracks which composite textures have been created */
@@ -261,6 +694,13 @@ export function getOrCreateLayeredTexture(
     return null;
   }
 
+  // Generate procedural weapon textures if PNG layers didn't load
+  ensureProceduralWeapons(scene);
+
+  // Equipment layers are AI-generated at ~100% cell fill, but the body sprite
+  // only occupies ~65% of each 16×22 cell. Scale equipment frames down to match.
+  const EQUIP_SCALE = 0.7;
+
   // Composite all layers
   const canvas = document.createElement("canvas");
   canvas.width = CANVAS_W;
@@ -268,55 +708,90 @@ export function getOrCreateLayeredTexture(
   const ctx = canvas.getContext("2d")!;
   ctx.imageSmoothingEnabled = false;
 
-  const drawLayer = (textureKey: string) => {
+  /**
+   * Draw a layer onto the composite canvas.
+   * When scale < 1, each individual frame is shrunk and centered within its
+   * cell so equipment overlays align with the body sprite's proportions.
+   * offsetY > 0 pushes content down (anchor toward feet).
+   */
+  const drawLayer = (textureKey: string, opts?: { scale?: number; offsetX?: number; offsetY?: number }) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
-    ctx.drawImage(img, 0, 0);
+    const s = opts?.scale ?? 1;
+    const ox = opts?.offsetX ?? 0;
+    const oy = opts?.offsetY ?? 0;
+
+    if (s !== 1) {
+      // Scale each frame individually so it stays centered in its cell
+      const fw = PLAYER_FW * s;
+      const fh = PLAYER_FH * s;
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const sx = c * PLAYER_FW;
+          const sy = r * PLAYER_FH;
+          // Center horizontally, anchor to bottom of cell vertically
+          const dx = sx + (PLAYER_FW - fw) / 2 + ox;
+          const dy = sy + (PLAYER_FH - fh) + oy;
+          ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+        }
+      }
+    } else {
+      ctx.drawImage(img, ox, oy);
+    }
   };
 
-  const drawWeaponBehind = (textureKey: string) => {
+  const drawWeaponBehind = (textureKey: string, scale = EQUIP_SCALE) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
-    // Clip to up + left rows only (weapon behind body)
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, DIR_LEFT * PLAYER_FH, CANVAS_W, PLAYER_FH);   // left row
-    ctx.rect(0, DIR_UP * PLAYER_FH, CANVAS_W, PLAYER_FH);     // up row
-    ctx.clip();
-    ctx.drawImage(img, 0, 0);
-    ctx.restore();
+    const fw = PLAYER_FW * scale;
+    const fh = PLAYER_FH * scale;
+    // Only draw up + left rows (weapon behind body)
+    for (const r of [DIR_LEFT, DIR_UP]) {
+      for (let c = 0; c < COLS; c++) {
+        const sx = c * PLAYER_FW;
+        const sy = r * PLAYER_FH;
+        const dx = sx + (PLAYER_FW - fw) / 2;
+        const dy = sy + (PLAYER_FH - fh);
+        ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+      }
+    }
   };
 
-  const drawWeaponFront = (textureKey: string) => {
+  const drawWeaponFront = (textureKey: string, scale = EQUIP_SCALE) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
-    // Clip to down + right rows only (weapon in front of body)
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, DIR_DOWN * PLAYER_FH, CANVAS_W, PLAYER_FH);   // down row
-    ctx.rect(0, DIR_RIGHT * PLAYER_FH, CANVAS_W, PLAYER_FH);  // right row
-    ctx.clip();
-    ctx.drawImage(img, 0, 0);
-    ctx.restore();
+    const fw = PLAYER_FW * scale;
+    const fh = PLAYER_FH * scale;
+    // Only draw down + right rows (weapon in front of body)
+    for (const r of [DIR_DOWN, DIR_RIGHT]) {
+      for (let c = 0; c < COLS; c++) {
+        const sx = c * PLAYER_FW;
+        const sy = r * PLAYER_FH;
+        const dx = sx + (PLAYER_FW - fw) / 2;
+        const dy = sy + (PLAYER_FH - fh);
+        ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+      }
+    }
   };
 
-  // Layer 1: base body only
+  // Layer 1: base body
   drawLayer(keys.body);
-  // NOTE: eyes layer skipped — body sprites already include facial features,
-  // and the AI-generated eyes PNGs contain full face outlines that overpower
-  // the body layer. Eyes remain in the key for cache differentiation.
-  // NOTE: hair layer skipped — AI-generated hair PNGs are oversized and
-  // cover the entire character sprite. Hair remains in the key for cache.
+
+  // Layer 2: eyes (only clean dot-style PNGs; broken ones won't be loaded so drawLayer no-ops)
+  if (keys.eyes) drawLayer(keys.eyes);
+
+  // Hair layer skipped — AI-generated PNGs contain full character outlines, not just hair.
+  // Hair remains in the cache key for future use when proper PNGs are made.
 
   // Layer 4: weapon behind body
   if (keys.weapon) drawWeaponBehind(keys.weapon);
 
-  // Layer 5-9: equipment
-  if (keys.chest) drawLayer(keys.chest);
-  if (keys.legs) drawLayer(keys.legs);
-  if (keys.boots) drawLayer(keys.boots);
-  if (keys.shoulders) drawLayer(keys.shoulders);
-  if (keys.helm) drawLayer(keys.helm);
+  // Layer 5-9: equipment (scaled to match body proportions)
+  if (keys.chest) drawLayer(keys.chest, { scale: EQUIP_SCALE });
+  if (keys.legs) drawLayer(keys.legs, { scale: EQUIP_SCALE });
+  if (keys.boots) drawLayer(keys.boots, { scale: EQUIP_SCALE });
+  if (keys.shoulders) drawLayer(keys.shoulders, { scale: EQUIP_SCALE });
+  if (keys.helm) drawLayer(keys.helm, { scale: EQUIP_SCALE });
 
   // Layer 10: weapon in front
   if (keys.weapon) drawWeaponFront(keys.weapon);

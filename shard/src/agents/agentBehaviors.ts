@@ -6,9 +6,22 @@
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
+import { getClassById } from "../character/classes.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import type { AgentContext } from "./agentUtils.js";
+
+const MELEE_RANGE = 40;
+
+/** Return the attack range for an entity based on its class, with a small buffer so
+ *  the entity stops just inside range rather than right at the edge. */
+function getCombatStopDist(me: any): number {
+  if (me.classId) {
+    const classDef = getClassById(me.classId);
+    if (classDef) return Math.max(MELEE_RANGE - 5, classDef.attackRange - 10);
+  }
+  return MELEE_RANGE - 5;
+}
 
 // ── Combat ───────────────────────────────────────────────────────────────────
 
@@ -63,11 +76,13 @@ export async function doCombat(
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
 
-    // Navigate toward the best target. Once in range, the zone runtime's
-    // auto-combat AI handles technique selection and attacking — it picks
-    // buffs, heals, debuffs, or the strongest attack automatically.
+    // Navigate toward the best target — stop at class attack range so
+    // ranged classes (ranger, mage, warlock, cleric) don't walk into melee.
+    // Once in range, the zone runtime's auto-combat AI handles technique
+    // selection and attacking automatically.
     const [, mob] = sorted[0] as [string, any];
-    const moving = await ctx.moveToEntity(me, mob);
+    const stopDist = getCombatStopDist(me);
+    const moving = await ctx.moveToEntity(me, mob, stopDist);
     if (!moving) {
       void ctx.logActivity(`Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
     }
@@ -723,7 +738,8 @@ async function doQuestCombat(
 
     const [, mob] = sorted[0] as [string, any];
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
-    const moving = await ctx.moveToEntity(me, mob);
+    const stopDist = getCombatStopDist(me);
+    const moving = await ctx.moveToEntity(me, mob, stopDist);
     if (!moving) {
       void ctx.logActivity(isQuestTarget
         ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
