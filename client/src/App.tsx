@@ -8,7 +8,10 @@ import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
+import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
+
 import { WalletManager } from "@/lib/walletManager";
+import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
 
 const AuctionHouseDialog = React.lazy(() =>
   import("@/components/AuctionHouseDialog").then((mod) => ({ default: mod.AuctionHouseDialog }))
@@ -46,14 +49,23 @@ const ChatLog = React.lazy(() =>
 const AgentChatPanel = React.lazy(() =>
   import("@/components/AgentChatPanel").then((mod) => ({ default: mod.AgentChatPanel }))
 );
+const DeferredWorldDialogs = React.lazy(() =>
+  import("@/components/DeferredWorldDialogs").then((mod) => ({ default: mod.DeferredWorldDialogs }))
+);
 const HotkeyBar = React.lazy(() =>
   import("@/components/HotkeyBar").then((mod) => ({ default: mod.HotkeyBar }))
 );
 const OnboardingFlow = React.lazy(() =>
   import("@/components/OnboardingFlow").then((mod) => ({ default: mod.OnboardingFlow }))
 );
+const TutorialMasterModal = React.lazy(() =>
+  import("@/components/TutorialMasterModal").then((mod) => ({ default: mod.TutorialMasterModal }))
+);
 const SettingsDialog = React.lazy(() =>
   import("@/components/SettingsDialog").then((mod) => ({ default: mod.SettingsDialog }))
+);
+const InboxDialog = React.lazy(() =>
+  import("@/components/InboxDialog").then((mod) => ({ default: mod.InboxDialog }))
 );
 const PlayerPanel = React.lazy(() =>
   import("@/components/PlayerPanel").then((mod) => ({ default: mod.PlayerPanel }))
@@ -99,7 +111,45 @@ const FarcasterMiniApp = React.lazy(() =>
 );
 
 function RouteFallback(): React.ReactElement {
-  return <div className="min-h-screen bg-[#060d12]" />;
+  return (
+    <div className="min-h-screen bg-[#060d12] flex items-center justify-center px-6">
+      <div className="text-center text-[#9aa7cc]">
+        <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-2 border-[#24314d] border-t-[#ffcc00]" />
+        <p className="text-[11px] uppercase tracking-[0.2em]">Loading World of Geneva</p>
+      </div>
+    </div>
+  );
+}
+
+/* ── Zone-aware PWA theming ────────────────────────────────────────────── */
+const ZONE_THEMES: Record<string, { color: string; label: string }> = {
+  "village-square":   { color: "#1a1408", label: "Village Square" },
+  "wild-meadow":      { color: "#0d1a0a", label: "Wild Meadow" },
+  "dark-forest":      { color: "#070f07", label: "Dark Forest" },
+  "emerald-woods":    { color: "#082010", label: "Emerald Woods" },
+  "auroral-plains":   { color: "#0f0a1a", label: "Auroral Plains" },
+  "viridian-range":   { color: "#0a1210", label: "Viridian Range" },
+  "moondancer-glade": { color: "#100a18", label: "Moondancer Glade" },
+  "felsrock-citadel": { color: "#14100a", label: "Felsrock Citadel" },
+  "lake-lumina":      { color: "#081018", label: "Lake Lumina" },
+  "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
+};
+const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
+
+function useZoneTheme(zoneId: string | null) {
+  React.useEffect(() => {
+    const theme = (zoneId && ZONE_THEMES[zoneId]) || DEFAULT_THEME;
+
+    // Update all theme-color meta tags
+    document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((el) => {
+      el.content = theme.color;
+    });
+
+    // Dynamic title: "Zone Name — World of Geneva"
+    document.title = zoneId && ZONE_THEMES[zoneId]
+      ? `${theme.label} — World of Geneva`
+      : "World of Geneva";
+  }, [zoneId]);
 }
 
 function resolveOnboardingMode(event: Event): OnboardingStartMode {
@@ -114,9 +164,12 @@ function GameWorld(): React.ReactElement {
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [inboxOpen, setInboxOpen] = React.useState(false);
+  const [tutorialMasterOpen, setTutorialMasterOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
-  const { address } = useWalletContext();
+  const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
+  const { address, characterProgress } = useWalletContext();
 
   // Toggleable panel visibility: null = use default (shown on desktop, hidden on mobile)
   const [chatVisible, setChatVisible] = React.useState<boolean | null>(null);
@@ -179,21 +232,34 @@ function GameWorld(): React.ReactElement {
         setRanksVisible((v) => !(v ?? !isCompactWorldUI));
       } else if (key === "w") {
         setWalletVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (key === "n") {
+        setInboxOpen((c) => !c);
       } else if (event.code === "Space" && address) {
         event.preventDefault();
-        focusOwnedCharacter();
+        focusOwnedCharacter(characterProgress?.zoneId);
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [address, currentZone, focusOwnedCharacter, isCompactWorldUI]);
+  }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI]);
 
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
       setCurrentZone(zoneId);
     });
     return unsubscribe;
+  }, []);
+
+  // Dynamic PWA theme color + title per zone
+  useZoneTheme(currentZone);
+
+  // Deep link: ?inbox=1 opens the inbox on load
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("inbox") === "1") {
+      setInboxOpen(true);
+    }
   }, []);
 
   React.useEffect(() => {
@@ -219,12 +285,40 @@ function GameWorld(): React.ReactElement {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (deferredDialogsReady || typeof window === "undefined") return;
+
+    let cancelled = false;
+    const ready = () => {
+      if (!cancelled) setDeferredDialogsReady(true);
+    };
+
+    const idle = "requestIdleCallback" in window
+      ? (window as Window & {
+          requestIdleCallback: (callback: () => void, options?: { timeout: number }) => number;
+          cancelIdleCallback: (handle: number) => void;
+        }).requestIdleCallback(ready, { timeout: 600 })
+      : null;
+    const fallback = window.setTimeout(ready, 400);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallback);
+      if (idle !== null && "cancelIdleCallback" in window) {
+        (window as Window & { cancelIdleCallback: (handle: number) => void }).cancelIdleCallback(idle);
+      }
+    };
+  }, [deferredDialogsReady]);
+
   // Lock camera to connected player's agent entity
   React.useEffect(() => {
     if (address) {
       focusOwnedCharacter();
     }
   }, [address, focusOwnedCharacter]);
+
+  // Background music (low volume, looping)
+  useBackgroundMusic("world-theme");
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -250,30 +344,30 @@ function GameWorld(): React.ReactElement {
             />
           )
         )}
-        <ShopDialog />
-        <GuildDialog />
-        <AuctionHouseDialog />
-        <ColiseumDialog />
-        <InspectDialog />
-        <NpcInfoDialog />
-        <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
-        <CharacterDialog
-          onOpenChange={setCharacterOpen}
-          open={characterOpen}
-          onRequestCreate={() => {
-            setCharacterOpen(false);
-            setOnboardingMode("create-character");
-            setOnboardingOpen(true);
-          }}
-        />
+        {deferredDialogsReady && <DeferredWorldDialogs />}
+        {questLogOpen && (
+          <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
+        )}
+        {characterOpen && (
+          <CharacterDialog
+            onOpenChange={setCharacterOpen}
+            open={characterOpen}
+            onRequestCreate={() => {
+              setCharacterOpen(false);
+              setOnboardingMode("create-character");
+              setOnboardingOpen(true);
+            }}
+          />
+        )}
         {onboardingOpen && (
           <OnboardingFlow
             initialMode={onboardingMode}
             onClose={() => setOnboardingOpen(false)}
           />
         )}
-        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-        <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
+        {settingsOpen && <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
+        {inboxOpen && <InboxDialog open={inboxOpen} onClose={() => setInboxOpen(false)} />}
+        {mapOpen && <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />}
         <div
           className="absolute left-1/2 -translate-x-1/2 z-30"
           style={{
@@ -290,10 +384,12 @@ function GameWorld(): React.ReactElement {
                 gameBus.emit("inspectSelf", { zoneId: currentZone, walletAddress: address });
               }
             }}
+            onInbox={() => setInboxOpen((c) => !c)}
             onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
             onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
             onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
             onSettings={() => setSettingsOpen((s) => !s)}
+            inboxActive={inboxOpen}
             chatActive={showChat}
             ranksActive={showRanks}
             walletActive={showWallet}
@@ -368,10 +464,14 @@ function AppShell(): React.ReactElement {
  * At the root path, renders the Mini App instead of the landing page.
  */
 function RootDetector(): React.ReactElement {
-  const [mode, setMode] = React.useState<"checking" | "miniapp" | "website">("checking");
+  const [mode, setMode] = React.useState<"miniapp" | "website">("website");
 
   React.useEffect(() => {
     let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) setMode("website");
+    }, 400);
+
     (async () => {
       try {
         const { sdk } = await import("@farcaster/miniapp-sdk");
@@ -379,15 +479,15 @@ function RootDetector(): React.ReactElement {
         if (!cancelled) setMode(inMiniApp ? "miniapp" : "website");
       } catch {
         if (!cancelled) setMode("website");
+      } finally {
+        window.clearTimeout(timeout);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
   }, []);
-
-  if (mode === "checking") {
-    // Brief blank screen while detecting — resolves in <100ms
-    return <div className="min-h-screen bg-[#060d12]" />;
-  }
 
   if (mode === "miniapp") {
     return (

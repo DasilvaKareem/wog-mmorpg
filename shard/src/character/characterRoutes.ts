@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
@@ -110,7 +111,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
    * { walletAddress, name, race, className, calling?, tier?, paymentProof? } → mint ERC-721 NFT with computed stats
    *
    * Paid tiers (starter/pro) require a paymentProof.transactionHash.
-   * Internal callers (agentCharacterSetup) pass x-internal header to bypass the gate.
    */
   server.post<{
     Body: {
@@ -127,8 +127,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       tier?: string;
       paymentProof?: { transactionHash: string };
     };
-  }>("/character/create", async (request, reply) => {
+  }>("/character/create", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const { walletAddress, name, race, className, calling, gender, skinColor, hairStyle, eyeColor, origin } = request.body;
+
+    if (!requireWalletMatch(reply, authenticatedWallet, walletAddress, "Not authorized to create a character for this wallet")) {
+      return;
+    }
 
     // Validate calling if provided
     const validCallings: CharacterCalling[] = ["adventurer", "farmer", "merchant", "craftsman"];
@@ -143,10 +150,9 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       return { error };
     }
 
-    // Payment gate for paid tiers — skip for internal callers (agent setup)
-    const isInternal = request.headers["x-internal"] === "true";
+    // Payment gate for paid tiers
     const tier = request.body.tier ?? "free";
-    if (!isInternal && (tier === "starter" || tier === "pro")) {
+    if (tier === "starter" || tier === "pro") {
       if (!request.body.paymentProof?.transactionHash) {
         const pricing: Record<string, { usd: number; description: string }> = {
           starter: { usd: 4.99, description: "Starter tier — AI supervisor, 12h sessions, all zones" },

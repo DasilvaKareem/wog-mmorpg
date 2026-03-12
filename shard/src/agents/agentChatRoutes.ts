@@ -37,6 +37,7 @@ import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
 import { sendInboxMessage } from "./agentInbox.js";
+import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 
@@ -301,6 +302,23 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
       // Track successful deploy count for payment gating
       const newCount = await incrementDeployCount(authWallet);
+
+      // Welcome push notification + inbox message (fire-and-forget)
+      const charName = result.characterName ?? "Your champion";
+      const zoneName = (result.zoneId ?? "village-square").split("-").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      sendPushToWallet(authWallet, {
+        title: `${charName} has entered the world!`,
+        body: `Your champion spawned in ${zoneName}. They'll explore, fight, and quest on their own — check in anytime.`,
+        tag: "wog-deploy-welcome",
+        url: "/world",
+      }).catch(() => {});
+      sendInboxMessage({
+        from: "0x0000000000000000000000000000000000000000",
+        fromName: "World of Geneva",
+        to: authWallet,
+        type: "direct",
+        body: `Welcome to Arcadia, ${charName}! Your agent is now alive in ${zoneName}. They'll fight monsters, complete quests, gather resources, and grow stronger autonomously. Use the chat panel to talk to them or give commands. Good luck out there!`,
+      }).catch(() => {});
 
       return reply.send({
         ok: true,

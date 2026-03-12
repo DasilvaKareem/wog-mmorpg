@@ -77,7 +77,27 @@ const deploymentRateLimit = new Map<string, number>();
  * Check if source is rate-limited (free tier only)
  */
 export function checkRateLimit(_source: string, _tier: string): { allowed: boolean; waitTime?: number } {
-  return { allowed: true };
+  const source = _source.trim().toLowerCase();
+  const tier = _tier.trim().toLowerCase();
+  if (!source || tier !== "free") {
+    return { allowed: true };
+  }
+
+  const lastDeploymentAt = deploymentRateLimit.get(source);
+  if (!lastDeploymentAt) {
+    return { allowed: true };
+  }
+
+  const elapsedMs = Date.now() - lastDeploymentAt;
+  const windowMs = 60 * 60 * 1000;
+  if (elapsedMs >= windowMs) {
+    return { allowed: true };
+  }
+
+  return {
+    allowed: false,
+    waitTime: Math.ceil((windowMs - elapsedMs) / 60000),
+  };
 }
 
 /**

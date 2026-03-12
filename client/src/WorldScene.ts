@@ -96,6 +96,10 @@ export class WorldScene extends Phaser.Scene {
   private lastPinchDistance: number | null = null;
   private pollInFlight = false;
   private pollDelayMs = POLL_INTERVAL;
+  private lastOverviewDotUpdateAt = 0;
+  private lastViewportSyncX = Number.NaN;
+  private lastViewportSyncY = Number.NaN;
+  private lastViewportSyncZoom = Number.NaN;
 
   // LOD overview mode — rendered when zoom drops below OVERVIEW_ENTER
   private overviewMode = false;
@@ -138,7 +142,7 @@ export class WorldScene extends Phaser.Scene {
 
     this.worldLayout = new WorldLayoutManager();
     this.tilemapRenderer = new TilemapRenderer(this);
-    this.entityRenderer = new EntityRenderer(this);
+    this.entityRenderer = new EntityRenderer(this, { lowPower: this.mobileMode });
     this.abilityLayer = new AbilityEffectsLayer(this);
     this.floatingText = new FloatingTextLayer(this);
 
@@ -382,6 +386,10 @@ export class WorldScene extends Phaser.Scene {
       } else if (this.overviewMode) {
         this.updateOverviewDots();
       }
+    }
+
+    if (!this.overviewMode) {
+      this.syncEntityViewportVisibility();
     }
 
     if (!this.mobileMode && now - this.lastHudUpdateAt >= 150) {
@@ -849,6 +857,11 @@ export class WorldScene extends Phaser.Scene {
   /** Redraw entity dots on the overview (called every update frame) */
   private updateOverviewDots(): void {
     if (!this.overviewDotGraphics) return;
+    const now = this.time.now;
+    const minInterval = this.mobileMode ? 500 : 200;
+    if (now - this.lastOverviewDotUpdateAt < minInterval) return;
+    this.lastOverviewDotUpdateAt = now;
+
     const g = this.overviewDotGraphics;
     g.clear();
 
@@ -873,6 +886,7 @@ export class WorldScene extends Phaser.Scene {
     this.entityRenderer.setSpritesVisible(false);
     this.buildOverviewGraphics();
     this.overviewDotGraphics = this.add.graphics().setDepth(52);
+    this.lastOverviewDotUpdateAt = 0;
     this.updateOverviewDots();
     console.log("[WorldScene] Entered overview mode");
   }
@@ -1045,8 +1059,10 @@ export class WorldScene extends Phaser.Scene {
           this.connected = true;
           this.tick = data.tick;
           this.entityRenderer.update(data.entities);
-          const pixelPositions = this.entityRenderer.getPixelPositions();
-          this.processEvents(data.recentEvents ?? [], pixelPositions);
+          if ((data.recentEvents?.length ?? 0) > 0) {
+            const pixelPositions = this.entityRenderer.getPixelPositions();
+            this.processEvents(data.recentEvents ?? [], pixelPositions);
+          }
         } else {
           this.connected = false;
         }
@@ -1085,9 +1101,17 @@ export class WorldScene extends Phaser.Scene {
       this.entityRenderer.update(allEntities);
 
       // Play VFX, animations, floating text — centralized dedup
-      const pixelPositions = this.entityRenderer.getPixelPositions();
-      for (const { data } of results) {
-        this.processEvents(data?.recentEvents ?? [], pixelPositions);
+      const hasRecentEvents = results.some(({ data }) => (data?.recentEvents?.length ?? 0) > 0);
+      if (hasRecentEvents) {
+        const pixelPositions = this.entityRenderer.getPixelPositions();
+        for (const { data } of results) {
+          this.processEvents(data?.recentEvents ?? [], pixelPositions);
+        }
+      }
+
+      if (this.overviewMode) {
+        this.lastOverviewDotUpdateAt = 0;
+        this.updateOverviewDots();
       }
 
       // Re-apply wallet lock after each poll (entity may have just spawned)
@@ -1100,6 +1124,27 @@ export class WorldScene extends Phaser.Scene {
     } finally {
       this.pollInFlight = false;
     }
+  }
+
+  private syncEntityViewportVisibility(): void {
+    const cam = this.cameras.main;
+    if (
+      Math.abs(cam.scrollX - this.lastViewportSyncX) < 8 &&
+      Math.abs(cam.scrollY - this.lastViewportSyncY) < 8 &&
+      Math.abs(cam.zoom - this.lastViewportSyncZoom) < 0.01
+    ) {
+      return;
+    }
+
+    this.lastViewportSyncX = cam.scrollX;
+    this.lastViewportSyncY = cam.scrollY;
+    this.lastViewportSyncZoom = cam.zoom;
+
+    const width = cam.width / cam.zoom;
+    const height = cam.height / cam.zoom;
+    this.entityRenderer.updateViewport(
+      new Phaser.Geom.Rectangle(cam.scrollX, cam.scrollY, width, height),
+    );
   }
 
   /** Compute and apply quest marker states for NPC entities. */

@@ -279,7 +279,7 @@ function NotificationSettingsPanel({
         {permission === "denied" && (
           <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
             <p className="text-xs text-red-300">
-              Notifications are blocked. Open your browser/OS settings and allow notifications for worldofgeneva.xyz.
+              Notifications are blocked. Open your browser/OS settings and allow notifications for worldofgeneva.com.
             </p>
           </div>
         )}

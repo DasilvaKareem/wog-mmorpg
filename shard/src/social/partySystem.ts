@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
 import { getRedis } from "../redis.js";
 
@@ -199,12 +200,20 @@ function getPartyWallets(party: Party): string[] {
 }
 
 export function registerPartyRoutes(server: FastifyInstance): void {
+  async function controlsWallet(authenticatedWallet: string, targetWallet: string | undefined): Promise<boolean> {
+    if (!targetWallet) return false;
+    if (targetWallet.toLowerCase() === authenticatedWallet.toLowerCase()) return true;
+    const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+    return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+  }
+
   // Create a party
   server.post<{
     Body: { zoneId: string; leaderId: string };
   }>("/party/create", {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { zoneId, leaderId } = req.body;
 
     const leader = getEntity(leaderId);
@@ -215,6 +224,10 @@ export function registerPartyRoutes(server: FastifyInstance): void {
 
     if (leader.type !== "player") {
       return reply.status(400).send({ error: "Only players can create parties" });
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, (leader as any).walletAddress))) {
+      return reply.status(403).send({ error: "Not authorized to create a party for this player" });
     }
 
     // Check if already in a party
@@ -250,11 +263,17 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   }>("/party/invite", {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { partyId, invitedPlayerId } = req.body;
 
     const party = parties.get(partyId);
     if (!party) {
       return reply.status(404).send({ error: "Party not found" });
+    }
+
+    const leader = getEntity(party.leaderId) as any;
+    if (!(await controlsWallet(authenticatedWallet, leader?.walletAddress))) {
+      return reply.status(403).send({ error: "Only the party leader can invite players" });
     }
 
     // Check if player is already in a party
@@ -295,6 +314,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   }>("/party/leave", {
     preHandler: authenticateRequest,
   }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { partyId, playerId } = req.body;
 
     const party = parties.get(partyId);
@@ -308,6 +328,9 @@ export function registerPartyRoutes(server: FastifyInstance): void {
 
     const leavingEntity = getEntity(playerId) as any;
     const leavingWallet = leavingEntity?.walletAddress;
+    if (!(await controlsWallet(authenticatedWallet, leavingWallet))) {
+      return reply.status(403).send({ error: "Not authorized to remove this player from the party" });
+    }
 
     // Remove from party
     party.memberIds = party.memberIds.filter(id => id !== playerId);
@@ -464,12 +487,19 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // Creates party for fromEntity if they don't have one, then queues invite
   server.post<{
     Body: { fromEntityId: string; fromZoneId: string; toCustodialWallet: string };
-  }>("/party/invite-champion", async (req, reply) => {
+  }>("/party/invite-champion", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { fromEntityId, fromZoneId, toCustodialWallet } = req.body;
 
     const fromEntity = getEntity(fromEntityId) as any;
     if (!fromEntity || fromEntity.type !== "player") {
       return reply.code(404).send({ error: "Your champion is not online" });
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, fromEntity.walletAddress))) {
+      return reply.code(403).send({ error: "Not authorized to invite from this champion" });
     }
 
     // Prevent self-invite
@@ -536,8 +566,16 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // POST /party/accept-invite  { custodialWallet, inviteId }
   server.post<{
     Body: { custodialWallet: string; inviteId: string };
-  }>("/party/accept-invite", async (req, reply) => {
+  }>("/party/accept-invite", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { custodialWallet, inviteId } = req.body;
+
+    if (!(await controlsWallet(authenticatedWallet, custodialWallet))) {
+      return reply.code(403).send({ error: "Not authorized to accept invites for this champion" });
+    }
+
     const invites = freshInvites(custodialWallet);
     const invite = invites.find((i) => i.id === inviteId);
     if (!invite) return reply.code(404).send({ error: "Invite not found or expired" });
@@ -567,8 +605,16 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // POST /party/decline-invite  { custodialWallet, inviteId }
   server.post<{
     Body: { custodialWallet: string; inviteId: string };
-  }>("/party/decline-invite", async (req, reply) => {
+  }>("/party/decline-invite", {
+    preHandler: authenticateRequest,
+  }, async (req, reply) => {
+    const authenticatedWallet = (req as any).walletAddress as string;
     const { custodialWallet, inviteId } = req.body;
+
+    if (!(await controlsWallet(authenticatedWallet, custodialWallet))) {
+      return reply.code(403).send({ error: "Not authorized to decline invites for this champion" });
+    }
+
     const invites = freshInvites(custodialWallet);
     pendingInvites.set(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
     return reply.send({ success: true });
@@ -617,7 +663,15 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   // POST /party/leave-wallet  { custodialWallet }  — leave from Champions page
   server.post<{ Body: { custodialWallet: string } }>(
     "/party/leave-wallet",
+    {
+      preHandler: authenticateRequest,
+    },
     async (req, reply) => {
+      const authenticatedWallet = (req as any).walletAddress as string;
+      if (!(await controlsWallet(authenticatedWallet, req.body.custodialWallet))) {
+        return reply.code(403).send({ error: "Not authorized to manage this champion" });
+      }
+
       const ref = findEntityByCustodialWallet(req.body.custodialWallet);
       if (!ref) return reply.code(404).send({ error: "Champion not online" });
 

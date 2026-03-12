@@ -59,6 +59,7 @@ export class TilemapRenderer {
   private scene: Phaser.Scene;
   private waterTimer: Phaser.Time.TimerEvent | null = null;
   private waterFrame = 0;
+  private lowPower = false;
 
   /** Which tileset is active: "overworld" for real art, "tile-atlas" for procedural */
   private activeTileset: "overworld" | "tile-atlas" = "tile-atlas";
@@ -95,8 +96,9 @@ export class TilemapRenderer {
   /** Initialize chunk streaming mode */
   initChunkMode(tileSize: number, options?: { lowPower?: boolean }): void {
     this.destroyAll();
+    this.lowPower = options?.lowPower ?? false;
     this.coordScale = tileSize > 0 ? CLIENT_TILE_PX / tileSize : 1.6;
-    const waterDelay = options?.lowPower ? 900 : 500;
+    const waterDelay = this.lowPower ? 1400 : 500;
 
     // Prefer overworld tileset if loaded, fall back to procedural atlas
     if (isOverworldLoaded(this.scene)) {
@@ -367,6 +369,8 @@ export class TilemapRenderer {
   // ─── Water animation (works for both modes) ───────────────────────
 
   private animateWaterAll(): void {
+    if (this.lowPower && this.chunkVisuals.size > 12) return;
+
     this.waterFrame = (this.waterFrame + 1) % 3;
     const useOverworld = this.activeTileset === "overworld";
     const frames = useOverworld

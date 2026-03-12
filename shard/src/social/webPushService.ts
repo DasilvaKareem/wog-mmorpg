@@ -12,7 +12,7 @@
  * Environment variables required:
  *   VAPID_PUBLIC_KEY  — base64url encoded 65-byte uncompressed EC public key
  *   VAPID_PRIVATE_KEY — base64url encoded 32-byte EC private key
- *   VAPID_EMAIL       — contact email for push service (e.g. mailto:admin@worldofgeneva.xyz)
+ *   VAPID_EMAIL       — contact email for push service (e.g. mailto:admin@worldofgeneva.com)
  *
  * Generate keys once with:
  *   npx web-push generate-vapid-keys
@@ -29,7 +29,7 @@ function ensureVapidConfigured(): void {
   if (vapidConfigured) return;
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const email = process.env.VAPID_EMAIL ?? "mailto:admin@worldofgeneva.xyz";
+  const email = process.env.VAPID_EMAIL ?? "mailto:admin@worldofgeneva.com";
 
   if (!publicKey || !privateKey) {
     console.warn(

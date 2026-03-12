@@ -6,10 +6,12 @@ interface HotkeyBarProps {
   onMap: () => void;
   onQuestLog: () => void;
   onInspect: () => void;
+  onInbox: () => void;
   onChat: () => void;
   onRanks: () => void;
   onWallet: () => void;
   onSettings: () => void;
+  inboxActive?: boolean;
   chatActive?: boolean;
   ranksActive?: boolean;
   walletActive?: boolean;
@@ -22,7 +24,7 @@ type Slot = {
   label: string;
   icon?: string;
   text?: string;
-  actionKey: "character" | "map" | "questLog" | "inspect" | "chat" | "ranks" | "wallet" | "settings";
+  actionKey: "character" | "map" | "questLog" | "inspect" | "inbox" | "chat" | "ranks" | "wallet" | "settings";
   toggleable?: boolean;
 };
 
@@ -31,6 +33,7 @@ const slots: Slot[] = [
   { icon: "/icons/commet.png", key: "M", label: "Map", actionKey: "map" },
   { icon: "/icons/quest.png", key: "Q", label: "Quest Log", actionKey: "questLog" },
   { icon: "/icons/sword.png", key: "I", label: "Inspect", actionKey: "inspect" },
+  { text: "\u2709", key: "N", label: "Inbox", actionKey: "inbox", toggleable: true },
   { text: "...", key: "L", label: "Chat", actionKey: "chat", toggleable: true },
   { icon: "/icons/level.png", key: "R", label: "Ranks", actionKey: "ranks", toggleable: true },
   { icon: "/icons/gold.png", key: "W", label: "Wallet", actionKey: "wallet", toggleable: true },
@@ -42,10 +45,12 @@ export function HotkeyBar({
   onMap,
   onQuestLog,
   onInspect,
+  onInbox,
   onChat,
   onRanks,
   onWallet,
   onSettings,
+  inboxActive = false,
   chatActive = false,
   ranksActive = false,
   walletActive = false,
@@ -57,6 +62,7 @@ export function HotkeyBar({
     map: onMap,
     questLog: onQuestLog,
     inspect: onInspect,
+    inbox: onInbox,
     chat: onChat,
     ranks: onRanks,
     wallet: onWallet,
@@ -64,6 +70,7 @@ export function HotkeyBar({
   };
 
   const activeMap: Record<string, boolean> = {
+    inbox: inboxActive,
     chat: chatActive,
     ranks: ranksActive,
     wallet: walletActive,
@@ -74,7 +81,7 @@ export function HotkeyBar({
   const imgSize = mobile ? "w-7 h-7" : "w-7 h-7";
 
   return (
-    <div className="flex gap-1">
+    <div className="flex gap-1" data-tutorial-id="hotkey-bar">
       {slots.map((slot) => {
         const isActive = slot.toggleable && activeMap[slot.actionKey];
         return (
@@ -82,6 +89,7 @@ export function HotkeyBar({
             key={slot.key}
             onClick={actions[slot.actionKey]}
             title={`${slot.label} (${slot.key})`}
+            data-tutorial-id={`hotkey-${slot.actionKey}`}
             className={cn(
               "relative flex flex-col items-center justify-center border-2 border-black backdrop-blur-sm shadow-[2px_2px_0_0_#000] hover:border-[#54f28b] active:shadow-none active:translate-x-[2px] active:translate-y-[2px] transition-none cursor-pointer",
               size,
@@ -98,7 +106,7 @@ export function HotkeyBar({
                 draggable={false}
               />
             ) : (
-              <span className="text-[10px] text-[#9aa7cc] font-bold leading-none">{slot.text}</span>
+              <span className="text-[20px] text-[#9aa7cc] font-bold leading-none">{slot.text}</span>
             )}
             <span className="text-[7px] leading-none text-[#9aa7cc] mt-[2px] font-bold">{slot.key}</span>
           </button>

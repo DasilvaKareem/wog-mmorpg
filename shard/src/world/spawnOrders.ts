@@ -12,6 +12,7 @@ import {
 import { randomUUID } from "crypto";
 import { computeStatsAtLevel } from "../character/leveling.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -53,6 +54,13 @@ function parseOnChainTokenId(value: string | undefined): bigint | undefined {
 }
 
 export function registerSpawnOrders(server: FastifyInstance) {
+  async function controlsWallet(authenticatedWallet: string, targetWallet: string | undefined): Promise<boolean> {
+    if (!targetWallet) return false;
+    if (targetWallet.toLowerCase() === authenticatedWallet.toLowerCase()) return true;
+    const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+    return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+  }
+
   // POST /spawn — inject an entity into a zone (PROTECTED)
   server.post<{ Body: SpawnOrderBody }>("/spawn", {
     preHandler: authenticateRequest,
@@ -250,6 +258,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
 
   // DELETE /spawn/:entityId — remove an entity
   const deleteSpawnHandler = async (request: any, reply: any) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const entityId = request.params.entityId;
     const entity = getEntity(entityId);
 
@@ -258,14 +267,22 @@ export function registerSpawnOrders(server: FastifyInstance) {
       return { error: "Entity not found" };
     }
 
-    if (entity.type === "player" && entity.walletAddress) {
-      unregisterSpawnedWallet(entity.walletAddress);
+    if (entity.type !== "player") {
+      reply.code(403);
+      return { error: "Only player entities can be despawned via this route" };
     }
+
+    if (!(await controlsWallet(authenticatedWallet, entity.walletAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to despawn this entity" };
+    }
+
+    if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
     getAllEntities().delete(entityId);
     return { deleted: entityId };
   };
 
-  server.delete("/spawn/:entityId", deleteSpawnHandler);
+  server.delete("/spawn/:entityId", { preHandler: authenticateRequest }, deleteSpawnHandler);
   // Compat alias
-  server.delete("/spawn/:zoneId/:entityId", deleteSpawnHandler);
+  server.delete("/spawn/:zoneId/:entityId", { preHandler: authenticateRequest }, deleteSpawnHandler);
 }

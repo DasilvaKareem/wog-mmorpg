@@ -38,6 +38,34 @@ export function verifyAuthToken(token: string): string | null {
   }
 }
 
+export function getAuthenticatedWallet(request: FastifyRequest): string | null {
+  const walletAddress = (request as any).walletAddress;
+  return typeof walletAddress === "string" && walletAddress.length > 0
+    ? walletAddress
+    : null;
+}
+
+export function walletsMatch(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  return Boolean(left && right && left.toLowerCase() === right.toLowerCase());
+}
+
+export function requireWalletMatch(
+  reply: FastifyReply,
+  authenticatedWallet: string | null | undefined,
+  requestedWallet: string | null | undefined,
+  errorMessage = "Not authorized to use this wallet"
+): boolean {
+  if (walletsMatch(authenticatedWallet, requestedWallet)) {
+    return true;
+  }
+
+  reply.code(403).send({ error: errorMessage });
+  return false;
+}
+
 /**
  * Verify a wallet signature
  * Message format: "Sign this message to authenticate with WoG MMORPG\nTimestamp: {timestamp}\nWallet: {address}"

@@ -16,6 +16,9 @@ RUN pnpm install --frozen-lockfile
 # Copy source code
 COPY . .
 
+RUN chown -R node:node /app
+USER node
+
 # Expose port
 EXPOSE 3000
 

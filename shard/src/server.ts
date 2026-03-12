@@ -76,6 +76,75 @@ import { getLearnedProfessions } from "./professions/professions.js";
 import { biteProvider, SKALE_BASE_CHAIN_ID } from "./blockchain/biteChain.js";
 
 const server = Fastify({ logger: true });
+const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
+const DEFAULT_CORS_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://wog.urbantech.dev",
+];
+
+type RateLimitRule = {
+  key: string;
+  methods?: string[];
+  exact?: string;
+  prefix?: string;
+  max: number;
+  windowMs: number;
+};
+
+const RATE_LIMIT_RULES: RateLimitRule[] = [
+  { key: "auth-challenge", methods: ["GET"], exact: "/auth/challenge", max: 20, windowMs: 60_000 },
+  { key: "auth-verify", methods: ["POST"], exact: "/auth/verify", max: 12, windowMs: 60_000 },
+  { key: "auth-farcaster", methods: ["POST"], exact: "/auth/farcaster", max: 12, windowMs: 60_000 },
+  { key: "wallet-register", methods: ["POST"], exact: "/wallet/register", max: 10, windowMs: 60_000 },
+  { key: "character-create", methods: ["POST"], exact: "/character/create", max: 10, windowMs: 60_000 },
+  { key: "x402-deploy", methods: ["POST"], exact: "/x402/deploy", max: 6, windowMs: 60_000 },
+  { key: "admin", methods: ["POST"], prefix: "/admin/", max: 5, windowMs: 60_000 },
+  { key: "mutating", methods: ["POST", "PUT", "PATCH", "DELETE"], max: 120, windowMs: 60_000 },
+];
+
+const rateLimitHits = new Map<string, number[]>();
+
+function getAllowedCorsOrigins(): Set<string> {
+  const configured = process.env.CORS_ORIGINS
+    ?.split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return new Set((configured && configured.length > 0) ? configured : DEFAULT_CORS_ORIGINS);
+}
+
+function getRateLimitRule(method: string, url: string): RateLimitRule | null {
+  const path = url.split("?", 1)[0] || url;
+
+  for (const rule of RATE_LIMIT_RULES) {
+    if (rule.methods && !rule.methods.includes(method)) continue;
+    if (rule.exact && rule.exact !== path) continue;
+    if (rule.prefix && !path.startsWith(rule.prefix)) continue;
+    return rule;
+  }
+
+  return null;
+}
+
+function enforceRateLimit(ip: string, rule: RateLimitRule): { ok: boolean; retryAfterSeconds: number } {
+  const now = Date.now();
+  const bucketKey = `${rule.key}:${ip}`;
+  const existing = rateLimitHits.get(bucketKey) ?? [];
+  const recent = existing.filter((ts) => now - ts < rule.windowMs);
+
+  if (recent.length >= rule.max) {
+    const retryAfterMs = rule.windowMs - (now - recent[0]);
+    return {
+      ok: false,
+      retryAfterSeconds: Math.max(1, Math.ceil(retryAfterMs / 1000)),
+    };
+  }
+
+  recent.push(now);
+  rateLimitHits.set(bucketKey, recent);
+  return { ok: true, retryAfterSeconds: 0 };
+}
 
 async function assertMainnetRpc(): Promise<void> {
   const network = await biteProvider.getNetwork();
@@ -227,8 +296,12 @@ server.get("/play", async (_req, reply) => {
 
 // Admin: mint gold to any wallet — protected by ADMIN_SECRET env var
 server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", async (req, reply) => {
+  if (!ADMIN_SECRET) {
+    return reply.code(503).send({ error: "Admin route disabled: ADMIN_SECRET is not configured" });
+  }
+
   const secret = req.headers["x-admin-secret"];
-  if (secret !== (process.env.ADMIN_SECRET || "wog-admin")) {
+  if (secret !== ADMIN_SECRET) {
     return reply.code(401).send({ error: "Unauthorized" });
   }
   const { address, copper } = req.body;
@@ -372,7 +445,27 @@ server.post<{
 });
 
 // Register subsystems
-server.register(cors, { origin: true });
+server.addHook("onRequest", async (request, reply) => {
+  const rule = getRateLimitRule(request.method, request.url);
+  if (!rule) return;
+
+  const verdict = enforceRateLimit(request.ip, rule);
+  if (verdict.ok) return;
+
+  reply.header("Retry-After", verdict.retryAfterSeconds.toString());
+  reply.code(429).send({ error: "Rate limit exceeded" });
+});
+
+const allowedCorsOrigins = getAllowedCorsOrigins();
+server.register(cors, {
+  origin(origin, cb) {
+    if (!origin || allowedCorsOrigins.has(origin)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error("Origin not allowed"), false);
+  },
+});
 registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);

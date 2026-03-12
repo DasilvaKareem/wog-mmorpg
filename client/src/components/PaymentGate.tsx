@@ -67,7 +67,7 @@ export function PaymentGate({ label, amount, onSuccess, onCancel }: PaymentGateP
             },
             metadata: {
               name: label,
-              image: "https://worldofgeneva.xyz/favicon.ico",
+              image: "https://worldofgeneva.com/favicon.ico",
             },
             onPurchaseSuccess: () => {
               onSuccess();

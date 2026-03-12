@@ -16,6 +16,8 @@ export interface GameEventMap {
   agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string; teachesProfession?: string };
   /** User clicked an NPC that has no dedicated dialog — show info panel */
   npcInfoClick: Entity;
+  /** Open the inbox panel */
+  inboxOpen: void;
 }
 
 type GameEventKey = keyof GameEventMap;

@@ -50,6 +50,7 @@ import { detectTrigger, type TriggerState } from "./agentTriggers.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
 import { emitAgentChat, getAgentOrigin, maybeReactToChat } from "./agentDialogue.js";
+import { sendAgentPush } from "./agentPushService.js";
 
 const TICK_MS = 1200;
 /** Safety-net: call supervisor if no trigger has fired in about 30s. */
@@ -791,8 +792,10 @@ export class AgentRunner {
           emitAgentChat({ ...dCtx, event: "loot_found", detail: latest.message });
         } else if (latest.type === "technique" && latest.entityId === this.entityId) {
           emitAgentChat({ ...dCtx, event: "technique_learn", detail: getTechniqueDetail(latest) });
+          void sendAgentPush(this.userWallet, { type: "technique_learned", agentName: entity.name, detail: getTechniqueDetail(latest) });
         } else if (latest.type === "quest") {
           emitAgentChat({ ...dCtx, event: "quest_complete", detail: latest.message });
+          void sendAgentPush(this.userWallet, { type: "quest_complete", agentName: entity.name, detail: latest.message });
         } else if (latest.type === "quest-progress" && latest.entityId === this.entityId) {
           const milestone = getQuestProgressMilestone(latest);
           if (milestone) {
@@ -808,9 +811,13 @@ export class AgentRunner {
     }
 
     if (latest.type === "levelup") {
+      const entity = this.entityId ? getWorldEntity(this.entityId) : null;
+      void sendAgentPush(this.userWallet, { type: "level_up", agentName: entity?.name ?? "Agent", detail: latest.message });
       return { type: "level_up", detail: latest.message };
     }
     if (latest.type === "death") {
+      const entity = this.entityId ? getWorldEntity(this.entityId) : null;
+      void sendAgentPush(this.userWallet, { type: "death", agentName: entity?.name ?? "Agent", detail: this.currentRegion });
       return { type: "stuck", detail: `Recent death: ${latest.message}` };
     }
     if (latest.type === "quest-progress") {
@@ -1118,6 +1125,7 @@ export class AgentRunner {
         emitAgentChat({ ...dCtx, event: "level_up", detail: `${entity.level}` });
       } else if (trigger.type === "zone_arrived") {
         emitAgentChat({ ...dCtx, event: "zone_enter", detail: this.currentRegion });
+        void sendAgentPush(this.userWallet, { type: "zone_arrived", agentName: entity.name, detail: this.currentRegion });
       } else if (trigger.type === "stuck" && trigger.detail?.includes("death")) {
         emitAgentChat({ ...dCtx, event: "death" });
       }
@@ -1279,6 +1287,8 @@ export class AgentRunner {
             const hours = Math.round(this.currentCaps.sessionLimitMs / 3600_000);
             console.log(`[agent:${this.walletTag}] Session limit reached (${hours}h) — stopping`);
             void this.logActivity(`Session limit reached (${hours}h) — upgrade tier for longer sessions`);
+            const sessionEntity = this.entityId ? getWorldEntity(this.entityId) : null;
+            void sendAgentPush(this.userWallet, { type: "session_ended", agentName: sessionEntity?.name ?? "Agent", detail: `Session limit reached (${hours}h)` });
             await patchAgentConfig(this.userWallet, { enabled: false });
             this.running = false;
             break;

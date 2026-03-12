@@ -23,6 +23,64 @@ export interface NpcDef {
   teachesClass?: string;
 }
 
+// ── Humanoid NPC appearance generation ─────────────────────────────────
+// NPCs with these types get random layered-sprite appearances so the
+// client renders them with the same compositor used for player characters.
+
+const HUMANOID_NPC_TYPES = new Set([
+  "merchant", "quest-giver", "lore-npc", "guild-registrar",
+  "auctioneer", "arena-master", "trainer", "profession-trainer",
+]);
+
+const NPC_SKINS   = ["fair", "light", "medium", "tan", "brown", "dark"];
+const NPC_EYES    = ["brown", "blue", "green", "amber", "gray", "violet"];
+const NPC_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald"];
+
+// Female-presenting NPC names (used to assign gender for hair diversity)
+const FEMALE_NAMES = new Set([
+  "lysandra", "kira", "willow", "mirelle", "hilda", "elara",
+  "seraphina", "velindra", "ashara", "ember", "lunara", "yuki",
+  "zephyra", "freya", "althea", "mirabel", "selene", "ivy",
+  "aurora", "brielle", "cassandra", "dahlia", "elena", "fiona",
+  "gwendolyn", "iris", "jade", "kaela", "lilith", "nadia",
+  "ophelia", "petra", "rosalind", "sylvia", "thalia", "una",
+  "vivienne", "wren", "xena", "yara", "zara",
+]);
+
+/** Simple deterministic hash from NPC name → stable random seed */
+function nameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function pick<T>(arr: readonly T[], seed: number): T {
+  return arr[seed % arr.length];
+}
+
+/** Infer gender from NPC name for appearance variety */
+function inferGender(name: string): "male" | "female" {
+  const lower = name.toLowerCase();
+  for (const fem of FEMALE_NAMES) {
+    if (lower.includes(fem)) return "female";
+  }
+  return "male";
+}
+
+/** Generate a deterministic random appearance for a humanoid NPC */
+function randomNpcAppearance(name: string) {
+  const h = nameHash(name);
+  const gender = inferGender(name);
+  return {
+    gender,
+    skinColor:  pick(NPC_SKINS, h),
+    eyeColor:   pick(NPC_EYES, (h >>> 4)),
+    hairStyle:  pick(NPC_HAIRS, (h >>> 8)),
+  };
+}
+
 // ── Mob combat stats ────────────────────────────────────────────────
 // Base stats for mobs (L1). Scaled by statScale(level) like player stats.
 // Mobs are individually weaker than players but dangerous in groups.
@@ -55,6 +113,14 @@ export const NPC_DEFS: NpcDef[] = [
     name: "Guard Captain Marcus",
     x: 50,
     y: 40,
+    hp: 999,
+  },
+  {
+    zoneId: "village-square",
+    type: "lore-npc",
+    name: "Scout Kaela",
+    x: 110,
+    y: 108,
     hp: 999,
   },
 
@@ -2828,6 +2894,11 @@ function spawnSingleNpc(def: NpcDef): void {
 
   const isCombatant = def.type === "mob" || def.type === "boss";
 
+  // Assign layered-sprite appearance to humanoid NPCs
+  const appearance = HUMANOID_NPC_TYPES.has(def.type)
+    ? randomNpcAppearance(def.name)
+    : undefined;
+
   const entity: Entity = {
     id: randomUUID(),
     type: def.type,
@@ -2848,6 +2919,13 @@ function spawnSingleNpc(def: NpcDef): void {
     // Give mobs/bosses real combat stats so they use the stat-based damage formula
     ...(isCombatant && def.level != null && {
       stats: computeMobStats(def.level, def.hp, def.type === "boss"),
+    }),
+    // Layered-sprite appearance for humanoid NPCs
+    ...(appearance && {
+      gender: appearance.gender,
+      skinColor: appearance.skinColor,
+      eyeColor: appearance.eyeColor,
+      hairStyle: appearance.hairStyle,
     }),
   };
 

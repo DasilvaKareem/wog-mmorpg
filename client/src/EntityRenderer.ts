@@ -38,6 +38,7 @@ interface EntityVisual {
   hovered: boolean;
   fx: AppliedFx;
   spriteScale: number; // mob/boss scale multiplier
+  inViewport: boolean;
 }
 
 const SPRITE_SIZE = 16;
@@ -103,6 +104,9 @@ export class EntityRenderer {
   private onClickCallback: ((entity: Entity) => void) | null = null;
   private dying = new Set<string>(); // entities mid-death animation
   private questMarkerStates = new Map<string, QuestMarkerState>(); // entityId → marker state
+  private lowPower = false;
+  private spritesVisible = true;
+  private viewport: Phaser.Geom.Rectangle | null = null;
 
   /**
    * Scale factor: multiply entity world coords by this to get pixel position.
@@ -113,8 +117,9 @@ export class EntityRenderer {
   /** Optional elevation query for depth sorting */
   private elevationQuery: ElevationQuery | null = null;
 
-  constructor(scene: Phaser.Scene) {
+  constructor(scene: Phaser.Scene, options?: { lowPower?: boolean }) {
     this.scene = scene;
+    this.lowPower = options?.lowPower ?? false;
   }
 
   /** Set coordinate scale (called when terrain loads and we know the ratio) */
@@ -382,33 +387,35 @@ export class EntityRenderer {
       positions.set(id, { px: entity.x * this.coordScale, py: entity.y * this.coordScale });
     }
 
-    // Client-side visual separation — push overlapping sprites apart so they don't stack
     const ids = Array.from(positions.keys());
-    const SKIP_TYPES = new Set(["ore-node", "herb-node", "nectar-node", "corpse"]);
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < ids.length; i++) {
-        const a = positions.get(ids[i])!;
-        const ea = entities[ids[i]];
-        if (SKIP_TYPES.has(ea.type)) continue;
-        for (let j = i + 1; j < ids.length; j++) {
-          const b = positions.get(ids[j])!;
-          const eb = entities[ids[j]];
-          if (SKIP_TYPES.has(eb.type)) continue;
-          const dx = a.px - b.px;
-          const dy = a.py - b.py;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          if (dist < VISUAL_SEPARATION_RADIUS) {
-            if (dist > 0.01) {
-              const overlap = (VISUAL_SEPARATION_RADIUS - dist) / 2;
-              const nx = (dx / dist) * overlap;
-              const ny = (dy / dist) * overlap;
-              a.px += nx; a.py += ny;
-              b.px -= nx; b.py -= ny;
-            } else {
-              // Exact overlap — offset deterministically by id hash
-              const hash = ids[i].charCodeAt(0) - ids[j].charCodeAt(0);
-              a.px += hash >= 0 ? VISUAL_SEPARATION_RADIUS / 2 : -VISUAL_SEPARATION_RADIUS / 2;
-              b.px += hash >= 0 ? -VISUAL_SEPARATION_RADIUS / 2 : VISUAL_SEPARATION_RADIUS / 2;
+    const separationPasses = this.getSeparationPassCount(ids.length);
+    if (separationPasses > 0) {
+      const SKIP_TYPES = new Set(["ore-node", "herb-node", "nectar-node", "corpse"]);
+      for (let pass = 0; pass < separationPasses; pass++) {
+        for (let i = 0; i < ids.length; i++) {
+          const a = positions.get(ids[i])!;
+          const ea = entities[ids[i]];
+          if (SKIP_TYPES.has(ea.type)) continue;
+          for (let j = i + 1; j < ids.length; j++) {
+            const b = positions.get(ids[j])!;
+            const eb = entities[ids[j]];
+            if (SKIP_TYPES.has(eb.type)) continue;
+            const dx = a.px - b.px;
+            const dy = a.py - b.py;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < VISUAL_SEPARATION_RADIUS) {
+              if (dist > 0.01) {
+                const overlap = (VISUAL_SEPARATION_RADIUS - dist) / 2;
+                const nx = (dx / dist) * overlap;
+                const ny = (dy / dist) * overlap;
+                a.px += nx; a.py += ny;
+                b.px -= nx; b.py -= ny;
+              } else {
+                // Exact overlap — offset deterministically by id hash
+                const hash = ids[i].charCodeAt(0) - ids[j].charCodeAt(0);
+                a.px += hash >= 0 ? VISUAL_SEPARATION_RADIUS / 2 : -VISUAL_SEPARATION_RADIUS / 2;
+                b.px += hash >= 0 ? -VISUAL_SEPARATION_RADIUS / 2 : VISUAL_SEPARATION_RADIUS / 2;
+              }
             }
           }
         }
@@ -454,6 +461,7 @@ export class EntityRenderer {
         hovered: false,
         fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
         spriteScale: 1,
+        inViewport: true,
       };
     }
 
@@ -598,10 +606,12 @@ export class EntityRenderer {
       hovered: false,
       fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
       spriteScale: mobScale,
+      inViewport: true,
     };
 
     // Apply initial FX for any active effects
     this.syncEffectFx(visual, entity);
+    this.refreshVisualVisibility(id, visual);
 
     return visual;
   }
@@ -726,6 +736,7 @@ export class EntityRenderer {
 
     // Sync buff/debuff FX
     this.syncEffectFx(visual, entity);
+    this.refreshVisualVisibility(entity.id, visual);
 
     visual.lastX = px;
     visual.lastY = py;
@@ -760,7 +771,17 @@ export class EntityRenderer {
 
   /** Check if the renderer has WebGL FX support */
   private get hasFxSupport(): boolean {
-    return this.scene.renderer?.type === Phaser.WEBGL;
+    return !this.lowPower && this.scene.renderer?.type === Phaser.WEBGL;
+  }
+
+  private getSeparationPassCount(entityCount: number): number {
+    if (entityCount <= 1) return 0;
+    if (this.lowPower) {
+      return entityCount <= 24 ? 1 : 0;
+    }
+    if (entityCount <= 48) return 2;
+    if (entityCount <= 96) return 1;
+    return 0;
   }
 
   /** Derive the set of active effect types from an entity */
@@ -993,23 +1014,65 @@ export class EntityRenderer {
     return this.visuals.size;
   }
 
+  updateViewport(viewport: Phaser.Geom.Rectangle): void {
+    this.viewport = viewport;
+    for (const [id, visual] of this.visuals) {
+      this.refreshVisualVisibility(id, visual);
+    }
+  }
+
   /** Show or hide all entity visuals — used by LOD overview mode */
   setSpritesVisible(visible: boolean): void {
+    this.spritesVisible = visible;
     for (const visual of this.visuals.values()) {
-      visual.sprite.setVisible(visible);
-      // NPC labels/HP stay hidden unless hovered
-      const showDetails = visible && (!visual.isNpc || visual.hovered);
-      visual.label.setVisible(showDetails);
-      visual.hpBar.setVisible(showDetails);
-      visual.hpBg.setVisible(showDetails);
-      visual.partyRing?.setVisible(visible);
-      visual.questMarker?.setVisible(visible);
-      if (visual.speechBubble) {
-        visual.speechBubble.bg.setVisible(visible);
-        visual.speechBubble.text.setVisible(visible);
-        visual.speechBubble.tail.setVisible(visible);
-      }
+      this.refreshVisualVisibility(this.findVisualId(visual), visual);
     }
+  }
+
+  private refreshVisualVisibility(id: string | null, visual: EntityVisual): void {
+    const entity = id ? this.entities.get(id) : undefined;
+    const inViewport = !this.viewport || this.isInViewport(visual);
+    visual.inViewport = inViewport;
+
+    const showSprite = this.spritesVisible && inViewport;
+    const showDetails = showSprite && (!visual.isNpc || visual.hovered);
+    const showMarker = showSprite && (!this.lowPower || !entity || entity.type === "player" || entity.type === "boss");
+
+    visual.sprite.setVisible(showSprite);
+    visual.label.setVisible(showDetails);
+    visual.hpBar.setVisible(showDetails);
+    visual.hpBg.setVisible(showDetails);
+    visual.partyRing?.setVisible(showSprite);
+    visual.questMarker?.setVisible(showMarker);
+    if (visual.speechBubble) {
+      visual.speechBubble.bg.setVisible(showSprite);
+      visual.speechBubble.text.setVisible(showSprite);
+      visual.speechBubble.tail.setVisible(showSprite);
+    }
+  }
+
+  private isInViewport(visual: EntityVisual): boolean {
+    if (!this.viewport) return true;
+    const margin = this.lowPower ? 64 : 96;
+    const halfSize = SPRITE_SIZE * visual.spriteScale;
+    const left = visual.sprite.x - halfSize;
+    const right = visual.sprite.x + halfSize;
+    const top = visual.sprite.y - halfSize;
+    const bottom = visual.sprite.y + halfSize;
+
+    return !(
+      right < this.viewport.x - margin ||
+      left > this.viewport.right + margin ||
+      bottom < this.viewport.y - margin ||
+      top > this.viewport.bottom + margin
+    );
+  }
+
+  private findVisualId(target: EntityVisual): string | null {
+    for (const [id, visual] of this.visuals) {
+      if (visual === target) return id;
+    }
+    return null;
   }
 }
 

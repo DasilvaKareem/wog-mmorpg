@@ -10,6 +10,14 @@ import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import type { OnboardingStartMode } from "@/lib/onboarding";
+import {
+  TUTORIAL_MASTER_INTRO,
+  TUTORIAL_MASTER_NAME,
+  getTutorialMasterPortraitUrl,
+  hasSeenTutorialMasterIntro,
+  queueTutorialMasterIntro,
+  warmTutorialMasterPortraitCache,
+} from "@/lib/tutorialMaster";
 import { PaymentGate } from "@/components/PaymentGate";
 import type { RaceInfo, ClassInfo, CharacterStats } from "@/types";
 import { CharacterPreview } from "@/components/CharacterPreview";
@@ -216,6 +224,7 @@ export function OnboardingFlow({
   const [telegramLinked, setTelegramLinked] = React.useState(false);
   const [botLinkUrl, setBotLinkUrl] = React.useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = React.useState<"free" | "adventurer" | "champion">("free");
+  const [tutorialPortraitFailed, setTutorialPortraitFailed] = React.useState(false);
 
   // PWA install prompt
   const [pwaInstalled, setPwaInstalled] = React.useState(() =>
@@ -233,10 +242,18 @@ export function OnboardingFlow({
     window.addEventListener("beforeinstallprompt", handler);
     const mq = window.matchMedia("(display-mode: standalone)");
     const mqHandler = () => setPwaInstalled(mq.matches);
-    mq.addEventListener("change", mqHandler);
+    if (mq.addEventListener) {
+      mq.addEventListener("change", mqHandler);
+    } else {
+      mq.addListener(mqHandler);
+    }
     return () => {
       window.removeEventListener("beforeinstallprompt", handler);
-      mq.removeEventListener("change", mqHandler);
+      if (mq.removeEventListener) {
+        mq.removeEventListener("change", mqHandler);
+      } else {
+        mq.removeListener(mqHandler);
+      }
     };
   }, []);
 
@@ -383,6 +400,7 @@ export function OnboardingFlow({
     selectedRace && selectedClass
       ? combineStats(selectedClass.baseStats, selectedRace.statModifiers)
       : null;
+  const shouldShowTutorialTeaser = !hasSeenTutorialMasterIntro();
   const nameValidationError = validateCharacterName(charName);
 
   const canCreate =
@@ -459,6 +477,8 @@ export function OnboardingFlow({
         txHash: result.txHash,
         agentDeploying: true,
       };
+      queueTutorialMasterIntro();
+      void warmTutorialMasterPortraitCache();
       setSuccessData(successBase);
       setStep("success");
 
@@ -1077,6 +1097,33 @@ export function OnboardingFlow({
                   </p>
                 )}
               </div>
+
+              {shouldShowTutorialTeaser && (
+                <div className="grid gap-3 border-2 border-[#2a3450] bg-[#0b1020] p-3 md:grid-cols-[140px_minmax(0,1fr)]">
+                  {!tutorialPortraitFailed ? (
+                    <img
+                      alt={`${TUTORIAL_MASTER_NAME} portrait`}
+                      className="h-full min-h-[180px] w-full border border-[#2a3450] object-cover"
+                      onError={() => setTutorialPortraitFailed(true)}
+                      src={getTutorialMasterPortraitUrl()}
+                    />
+                  ) : (
+                    <div className="flex min-h-[180px] items-end border border-[#2a3450] bg-[radial-gradient(circle_at_top,#3a2b1c,#0b1020_70%)] p-3 text-[10px] text-[#9aa7cc]">
+                      Portrait path ready. Drop the supplied PNG into `client/public/assets/npcs/tutorial-master.png`.
+                    </div>
+                  )}
+                  <div className="flex flex-col justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-[0.28em] text-[#ffcc00]">Village Square Guide</p>
+                      <p className="text-[15px] text-[#f1f5ff]">{TUTORIAL_MASTER_NAME}</p>
+                      <p className="mt-2 text-[11px] leading-relaxed text-[#9aa7cc]">{TUTORIAL_MASTER_INTRO}</p>
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-[#8b95c2]">
+                      When you enter the world, Kaela will brief you on hotkeys, deploying your agent, rankings, quests, and the systems you can use across Geneva.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Agent deploy status */}
               {successData.agentDeploying ? (

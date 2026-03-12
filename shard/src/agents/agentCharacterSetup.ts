@@ -103,6 +103,10 @@ export async function setupAgentCharacter(
   // ── Step 3: Mint character NFT (only if no saved character exists) ────
   // CRITICAL: /character/create used to overwrite Redis with level 1.
   // Skip it entirely when a saved character already exists to preserve progress.
+  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
+  const rawPrivateKey = await exportCustodialWallet(custodialAddress);
+  const token = await authenticateWithWallet(rawPrivateKey);
+
   const existingSave = await loadCharacter(custodialAddress, characterName);
   if (existingSave) {
     console.log(`[agentSetup] Character "${characterName}" already saved (L${existingSave.level}) — skipping create`);
@@ -114,7 +118,7 @@ export async function setupAgentCharacter(
         race: raceId,
         className: classId,
         ...(calling && { calling }),
-      });
+      }, token);
       console.log(`[agentSetup] Minted character "${characterName}" for ${custodialAddress}`);
     } catch (err: any) {
       // Character may already exist (duplicate name or wallet) — that's fine
@@ -123,11 +127,6 @@ export async function setupAgentCharacter(
   }
 
   // ── Step 4: Authenticate custodial wallet to get JWT ──────────────────
-  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
-  const rawPrivateKey = await exportCustodialWallet(custodialAddress);
-
-  const token = await authenticateWithWallet(rawPrivateKey);
-
   // ── Step 5: Load character NFT to get level/xp/tokenId ────────────────
   let character: any;
   try {

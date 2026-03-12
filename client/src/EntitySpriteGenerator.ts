@@ -331,12 +331,20 @@ export function inferMobCategory(name: string): string | null {
   return null;
 }
 
+/** Entity types that support layered composite sprites (humanoid characters) */
+const LAYERED_ENTITY_TYPES = new Set([
+  "player", "merchant", "quest-giver", "lore-npc", "guild-registrar",
+  "auctioneer", "arena-master", "trainer", "profession-trainer",
+]);
+
 /**
- * Try to get a layered composite texture for a player entity.
+ * Try to get a layered composite texture for a player or humanoid NPC entity.
  * Returns the texture key if layers are available, null otherwise.
  */
 export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity): string | null {
-  if (entity.type !== "player") return null;
+  if (!LAYERED_ENTITY_TYPES.has(entity.type)) return null;
+  // NPCs need at least skinColor to use layered sprites
+  if (entity.type !== "player" && !entity.skinColor) return null;
   const key = getOrCreateLayeredTexture(scene, entity);
   if (key && !scene.anims.exists(`${key}-idle-down`)) {
     createAnimations(scene, key);
@@ -345,11 +353,11 @@ export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity): strin
 }
 
 /**
- * Check if a player entity's layered texture needs re-compositing
+ * Check if an entity's layered texture needs re-compositing
  * (e.g., equipment changed).
  */
 export function checkLayeredRecomposite(scene: Phaser.Scene, entity: Entity, currentKey: string): string | null {
-  if (entity.type !== "player") return null;
+  if (!LAYERED_ENTITY_TYPES.has(entity.type)) return null;
   if (!needsRecomposite(entity, currentKey)) return null;
   const newKey = getOrCreateLayeredTexture(scene, entity);
   if (newKey && !scene.anims.exists(`${newKey}-idle-down`)) {

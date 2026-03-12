@@ -124,14 +124,18 @@ export function registerX402Routes(server: FastifyInstance): void {
     }
 
     // Execute deployment
-    console.log(`[x402] New deployment request from ${metadata?.source || "unknown"}: ${agentName}`);
+    const requestSource = request.ip || metadata?.source || "unknown";
+    console.log(`[x402] New deployment request from ${requestSource}: ${agentName}`);
 
     const result = await deployAgent({
       agentName,
       character,
       payment,
       deploymentZone,
-      metadata,
+      metadata: {
+        ...metadata,
+        source: requestSource,
+      },
     } as DeploymentRequest);
 
     if (!result.success) {

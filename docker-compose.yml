@@ -4,6 +4,8 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     environment:
       NODE_ENV: production
       PORT: "3000"

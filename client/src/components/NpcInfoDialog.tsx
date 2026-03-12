@@ -7,6 +7,13 @@ import { useWalletContext } from "@/context/WalletContext";
 import { getAuthToken } from "@/lib/agentAuth";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import type { TechniqueInfo } from "@/hooks/useTechniques";
+import {
+  TUTORIAL_MASTER_HOTKEYS,
+  TUTORIAL_MASTER_INTRO,
+  TUTORIAL_MASTER_SECTIONS,
+  getTutorialMasterPortraitUrl,
+  isTutorialMaster,
+} from "@/lib/tutorialMaster";
 
 /* ── 8-bit retro palette (matches InspectDialog) ──────────── */
 const BG = "#11182b";
@@ -184,6 +191,18 @@ const FALLBACK_ROLE: NpcRoleInfo = {
   details: () => [],
 };
 
+const TUTORIAL_MASTER_ROLE: NpcRoleInfo = {
+  title: "Tutorial Master",
+  icon: ">>",
+  color: "#ffcc00",
+  description: () => TUTORIAL_MASTER_INTRO,
+  details: () => [
+    "Explains the core hotkeys and starter flow",
+    "Points new players to quests, rankings, and agent deploy",
+    "Summarizes what you can do across Geneva",
+  ],
+};
+
 /* ── Technique list for trainers ──────────────────────────── */
 function TrainerTechniqueList({ className }: { className: string }): React.ReactElement {
   const [techniques, setTechniques] = React.useState<TechniqueInfo[]>([]);
@@ -325,15 +344,18 @@ function AgentActionButton({ entity, onClose }: { entity: Entity; onClose: () =>
 export function NpcInfoDialog(): React.ReactElement | null {
   const [open, setOpen] = React.useState(false);
   const [entity, setEntity] = React.useState<Entity | null>(null);
+  const [imageFailed, setImageFailed] = React.useState(false);
 
   useGameBridge("npcInfoClick", (npc) => {
     setEntity(npc);
+    setImageFailed(false);
     setOpen(true);
   });
 
   if (!open || !entity) return null;
 
-  const role = NPC_ROLES[entity.type] ?? FALLBACK_ROLE;
+  const tutorialMaster = isTutorialMaster(entity.name);
+  const role = tutorialMaster ? TUTORIAL_MASTER_ROLE : (NPC_ROLES[entity.type] ?? FALLBACK_ROLE);
   const description = role.description(entity);
   const details = role.details(entity);
   const trainerClass = entity.type === "trainer" ? (entity.teachesClass ?? "").toLowerCase() : "";
@@ -402,6 +424,24 @@ export function NpcInfoDialog(): React.ReactElement | null {
         </div>
       )}
 
+      {tutorialMaster && (
+        <div className="px-3 py-3 border-b" style={{ borderColor: BORDER }}>
+          {!imageFailed ? (
+            <img
+              alt={`${entity.name} portrait`}
+              className="w-full border"
+              onError={() => setImageFailed(true)}
+              src={getTutorialMasterPortraitUrl()}
+              style={{ borderColor: BORDER, background: "#0a1020" }}
+            />
+          ) : (
+            <div className="border p-3 text-[10px]" style={{ borderColor: BORDER, background: "#0a1020", color: DIM }}>
+              Portrait path ready. Add the supplied PNG at `client/public/assets/npcs/tutorial-master.png`.
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Description */}
       <div className="px-3 py-2 border-b" style={{ borderColor: BORDER }}>
         <div className="text-[11px] leading-relaxed" style={{ color: DIM }}>
@@ -424,6 +464,42 @@ export function NpcInfoDialog(): React.ReactElement | null {
             ))}
           </div>
         </div>
+      )}
+
+      {tutorialMaster && (
+        <>
+          <div className="px-3 py-2 border-b" style={{ borderColor: BORDER }}>
+            <div className="text-[10px] font-bold uppercase mb-1.5" style={{ color: "#5dadec" }}>
+              Hot Keys
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {TUTORIAL_MASTER_HOTKEYS.map((hotkey) => (
+                <div key={hotkey.key} className="flex items-center gap-1.5 border px-2 py-1" style={{ borderColor: BORDER, background: "#0a1020" }}>
+                  <span className="min-w-[42px] text-[10px] font-bold" style={{ color: role.color }}>{hotkey.key}</span>
+                  <span className="text-[10px]" style={{ color: TEXT }}>{hotkey.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="px-3 py-2 border-b" style={{ borderColor: BORDER }}>
+            {TUTORIAL_MASTER_SECTIONS.map((section) => (
+              <div key={section.title} className="mb-2 last:mb-0">
+                <div className="text-[10px] font-bold uppercase mb-1" style={{ color: ACCENT }}>
+                  {section.title}
+                </div>
+                <div className="space-y-1">
+                  {section.lines.map((line) => (
+                    <div key={line} className="flex gap-1.5 text-[11px]">
+                      <span style={{ color: role.color }}>{">"}</span>
+                      <span style={{ color: TEXT }}>{line}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* Techniques list for combat trainers */}

@@ -14,6 +14,8 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { API_URL } from "../config.js";
+import { getAuthToken } from "../lib/agentAuth.js";
 
 export type NotificationPermission = "default" | "granted" | "denied" | "unsupported";
 
@@ -68,7 +70,7 @@ function isPushSupported(): boolean {
 
 async function getVapidPublicKey(): Promise<string | null> {
   try {
-    const res = await fetch("/notifications/push/vapid-public-key");
+    const res = await fetch(`${API_URL}/notifications/push/vapid-public-key`);
     if (!res.ok) return null;
     const data = await res.json();
     return data.publicKey ?? null;
@@ -77,11 +79,12 @@ async function getVapidPublicKey(): Promise<string | null> {
   }
 }
 
-function urlBase64ToUint8Array(base64String: string): Uint8Array {
+function urlBase64ToArrayBuffer(base64String: string): ArrayBuffer {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = atob(base64);
-  return Uint8Array.from(Array.from(rawData).map((c) => c.charCodeAt(0)));
+  const bytes = Uint8Array.from(Array.from(rawData).map((c) => c.charCodeAt(0)));
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 }
 
 export function usePushNotifications(
@@ -105,8 +108,12 @@ export function usePushNotifications(
   useEffect(() => {
     const mq = window.matchMedia("(display-mode: standalone)");
     const onChange = () => setIsInstalled(detectIsInstalled());
-    mq.addEventListener("change", onChange);
-    return () => mq.removeEventListener("change", onChange);
+    if (mq.addEventListener) {
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+    mq.addListener(onChange);
+    return () => mq.removeListener(onChange);
   }, []);
 
   // Sync permission state
@@ -144,6 +151,11 @@ export function usePushNotifications(
     setError(null);
 
     try {
+      const token = await getAuthToken(walletAddress);
+      if (!token) {
+        throw new Error("Authentication required to enable push notifications");
+      }
+
       // 1. Fetch VAPID public key from server
       const vapidKey = await getVapidPublicKey();
       if (!vapidKey) {
@@ -169,13 +181,16 @@ export function usePushNotifications(
       // 4. Subscribe to push manager
       const subscription = await sw.pushManager.subscribe({
         userVisibleOnly: true, // Required: must show notification on push (iOS + Chrome)
-        applicationServerKey: urlBase64ToUint8Array(vapidKey),
+        applicationServerKey: urlBase64ToArrayBuffer(vapidKey),
       });
 
       // 5. Send subscription to server
-      const res = await fetch("/notifications/push/subscribe", {
+      const res = await fetch(`${API_URL}/notifications/push/subscribe`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           wallet: walletAddress,
           subscription: subscription.toJSON(),
@@ -201,14 +216,22 @@ export function usePushNotifications(
     setError(null);
 
     try {
+      const token = await getAuthToken(walletAddress);
+      if (!token) {
+        throw new Error("Authentication required to disable push notifications");
+      }
+
       const sw = await navigator.serviceWorker.ready;
       const existing = await sw.pushManager.getSubscription();
       if (existing) {
         await existing.unsubscribe();
       }
 
-      await fetch(`/notifications/push/subscribe/${walletAddress}`, {
+      await fetch(`${API_URL}/notifications/push/subscribe/${walletAddress}`, {
         method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
 
       setIsSubscribed(false);
@@ -224,8 +247,16 @@ export function usePushNotifications(
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/notifications/push/test/${walletAddress}`, {
+      const token = await getAuthToken(walletAddress);
+      if (!token) {
+        throw new Error("Authentication required to test push notifications");
+      }
+
+      const res = await fetch(`${API_URL}/notifications/push/test/${walletAddress}`, {
         method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));

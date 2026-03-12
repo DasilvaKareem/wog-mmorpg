@@ -235,13 +235,10 @@ export function getLayerKeys(entity: Entity): LayerKeys {
 export function layerCacheKey(keys: LayerKeys): string {
   return [
     keys.body,
-    keys.eyes,
-    keys.hair ?? "no-hair",
     keys.weapon ?? "no-weapon",
     keys.chest ?? "no-chest",
     keys.legs ?? "no-legs",
     keys.boots ?? "no-boots",
-    keys.helm ?? "no-helm",
     keys.shoulders ?? "no-shoulders",
   ].join("|");
 }
@@ -780,11 +777,6 @@ export function getOrCreateLayeredTexture(
   // Layer 1: base body
   drawLayer(keys.body);
 
-  // Layer 2: eyes (only clean dot-style PNGs; broken ones won't be loaded so drawLayer no-ops)
-  if (keys.eyes) drawLayer(keys.eyes);
-
-  if (keys.hair) drawLayer(keys.hair);
-
   // Layer 4: weapon behind body
   if (keys.weapon) drawWeaponBehind(keys.weapon);
 
@@ -793,8 +785,6 @@ export function getOrCreateLayeredTexture(
   if (keys.legs) drawLayer(keys.legs, { scale: LEGS_LAYER_SCALE });
   if (keys.boots) drawLayer(keys.boots, { scale: BOOTS_LAYER_SCALE });
   if (keys.shoulders) drawLayer(keys.shoulders, { scale: SHOULDER_LAYER_SCALE });
-  if (keys.helm) drawLayer(keys.helm, { scale: HELM_LAYER_SCALE });
-
   // Layer 10: weapon in front
   if (keys.weapon) drawWeaponFront(keys.weapon);
 

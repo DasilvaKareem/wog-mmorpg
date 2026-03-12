@@ -118,7 +118,7 @@ function StatusDot({ healthy }: { healthy: boolean }) {
   );
 }
 
-const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || "wog-admin-2026";
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD?.trim() || "";
 
 export function AdminDashboardPage(): React.ReactElement {
   const [authed, setAuthed] = React.useState(false);
@@ -149,6 +149,7 @@ export function AdminDashboardPage(): React.ReactElement {
   }, [fetchData, authed]);
 
   if (!authed) {
+    const adminConfigured = ADMIN_PASSWORD.length > 0;
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] p-8 shadow-[6px_6px_0_0_#000] w-80">
@@ -159,6 +160,10 @@ export function AdminDashboardPage(): React.ReactElement {
           <form
             onSubmit={(e) => {
               e.preventDefault();
+              if (!adminConfigured) {
+                setPwError(true);
+                return;
+              }
               if (pw === ADMIN_PASSWORD) {
                 setAuthed(true);
                 setPwError(false);
@@ -176,9 +181,14 @@ export function AdminDashboardPage(): React.ReactElement {
               style={{ fontFamily: "monospace" }}
               autoFocus
             />
-            {pwError && <p className="mb-2 text-[9px] text-[#f25454]" style={{ fontFamily: "monospace" }}>Wrong password</p>}
+            {pwError && (
+              <p className="mb-2 text-[9px] text-[#f25454]" style={{ fontFamily: "monospace" }}>
+                {adminConfigured ? "Wrong password" : "Admin dashboard disabled: VITE_ADMIN_PASSWORD is not configured"}
+              </p>
+            )}
             <button
               type="submit"
+              disabled={!adminConfigured}
               className="w-full border-2 border-[#ffcc00] bg-[#1a2240] py-2 text-[10px] uppercase tracking-widest text-[#ffcc00] hover:bg-[#ffcc00] hover:text-[#0b1020] transition-colors"
               style={{ fontFamily: "monospace" }}
             >

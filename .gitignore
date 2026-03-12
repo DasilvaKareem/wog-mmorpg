@@ -2,6 +2,7 @@ node_modules/
 dist/
 *.log
 .env
+client/.env.production
 .DS_Store
 
 # Astro generated

@@ -15,9 +15,6 @@ export function GameCanvas(): React.ReactElement {
   React.useEffect(() => {
     if (!containerRef.current || gameRef.current) return;
 
-    const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
-    const resolution = Math.min(dpr, isLowPowerDevice ? 1.5 : 2);
-
     const game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: containerRef.current,
@@ -27,10 +24,11 @@ export function GameCanvas(): React.ReactElement {
         pixelArt: true,
         antialias: false,
         roundPixels: true,
+        autoMobilePipeline: true,
         powerPreference: isLowPowerDevice ? "low-power" : "high-performance",
       },
       fps: {
-        target: isLowPowerDevice ? 45 : 60,
+        target: isLowPowerDevice ? 40 : 60,
         forceSetTimeOut: true,
       },
       scene: [WorldScene],
@@ -38,6 +36,7 @@ export function GameCanvas(): React.ReactElement {
         mode: Phaser.Scale.RESIZE,
         width: "100%",
         height: "100%",
+        autoRound: true,
       },
     });
 
@@ -49,5 +48,5 @@ export function GameCanvas(): React.ReactElement {
     };
   }, [gameRef, isLowPowerDevice]);
 
-  return <div className="world-canvas-container h-full w-full" ref={containerRef} />;
+  return <div className="world-canvas-container h-full w-full" data-tutorial-id="world-canvas" ref={containerRef} />;
 }

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import {
   getTelegramChatId,
   unlinkTelegramChat,
@@ -35,8 +36,15 @@ export function registerNotificationRoutes(server: FastifyInstance): void {
   // Unlinks a wallet from Telegram
   server.delete<{ Params: { walletAddress: string } }>(
     "/notifications/telegram/:walletAddress",
-    async (request) => {
+    {
+      preHandler: authenticateRequest,
+    },
+    async (request, reply) => {
+      const authenticatedWallet = (request as any).walletAddress as string;
       const { walletAddress } = request.params;
+      if (!requireWalletMatch(reply, authenticatedWallet, walletAddress, "Not authorized to unlink this wallet")) {
+        return;
+      }
       await unlinkTelegramChat(walletAddress);
       return { success: true };
     },

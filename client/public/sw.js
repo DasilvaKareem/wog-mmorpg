@@ -2,13 +2,13 @@
  * World of Geneva — Service Worker
  *
  * Responsibilities:
- *  1. Cache static assets for offline/fast loading
- *  2. Handle Web Push notifications (all platforms)
- *  3. Handle notification clicks (focus/open app)
- *  4. Background sync for missed events
+ *  1. Cache static assets for instant loading (cache-first for immutables)
+ *  2. Stale-while-revalidate for HTML shell (fast start, update in background)
+ *  3. Handle Web Push notifications (all platforms)
+ *  4. Handle notification clicks (focus/open app)
  */
 
-const CACHE_NAME = "wog-v2";
+const CACHE_NAME = "wog-1773335974";
 const APP_SHELL = [
   "/",
   "/favicon.ico",
@@ -16,10 +16,21 @@ const APP_SHELL = [
   "/favicon-512.png",
   "/manifest.json",
   "/browserconfig.xml",
+  "/icons/pwa/icon-180x180.png",
   "/icons/pwa/icon-192x192.png",
   "/icons/pwa/icon-512x512.png",
   "/icons/pwa/icon-maskable-192x192.png",
   "/icons/pwa/icon-maskable-512x512.png",
+  // HotkeyBar icons (always visible on /world)
+  "/icons/armor.png",
+  "/icons/commet.png",
+  "/icons/essence.png",
+  "/icons/gold.png",
+  "/icons/heart.png",
+  "/icons/level.png",
+  "/icons/quest.png",
+  "/icons/sword.png",
+  "/icons/weapon.png",
 ];
 
 // ── Install: pre-cache app shell ──────────────────────────────────────────
@@ -48,7 +59,39 @@ self.addEventListener("activate", (event) => {
   );
 });
 
-// ── Fetch: network-first with cache fallback ──────────────────────────────
+// ── Fetch strategies ─────────────────────────────────────────────────────
+
+// Cache-first: serve from cache instantly, only fetch on cache miss.
+// Used for immutable assets (Vite hashed bundles, sprites, icons, fonts).
+function cacheFirst(request) {
+  return caches.match(request).then(
+    (cached) =>
+      cached ||
+      fetch(request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+        }
+        return response;
+      })
+  );
+}
+
+// Stale-while-revalidate: serve cached version instantly, update in background.
+// Used for HTML shell and manifest — fast start, picks up deploys on next load.
+function staleWhileRevalidate(request) {
+  return caches.match(request).then((cached) => {
+    const networkFetch = fetch(request).then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+      }
+      return response;
+    });
+    return cached || networkFetch;
+  });
+}
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   const url = new URL(request.url);
@@ -66,39 +109,57 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    fetch(request)
-      .then((networkResponse) => {
-        // Cache fresh responses for static assets
-        if (
-          networkResponse.ok &&
-          (url.pathname.startsWith("/assets/") ||
-            url.pathname.startsWith("/icons/") ||
-            url.pathname.startsWith("/sprites/") ||
-            url.pathname.endsWith(".png") ||
-            url.pathname.endsWith(".ico") ||
-            url.pathname.endsWith(".json"))
-        ) {
-          const clone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
-        }
-        return networkResponse;
-      })
-      .catch(() =>
-        // Network failed — try cache, then offline fallback
-        caches.match(request).then(
-          (cached) =>
-            cached ||
-            caches.match("/").then(
-              (fallback) =>
-                fallback ||
-                new Response("Offline — World of Geneva requires a connection to load.", {
-                  status: 503,
-                  headers: { "Content-Type": "text/plain" },
-                })
-            )
+  const p = url.pathname;
+
+  // 1. Vite hashed bundles — immutable (content hash in filename), cache-first
+  if (p.startsWith("/assets/")) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  // 2. Sprites & icons — stable filenames, cache-first
+  if (
+    p.startsWith("/sprites/") ||
+    p.startsWith("/icons/") ||
+    p.endsWith(".png") ||
+    p.endsWith(".ico")
+  ) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  // 3. Fonts — cache-first
+  if (p.endsWith(".woff2") || p.endsWith(".woff") || p.endsWith(".ttf")) {
+    event.respondWith(cacheFirst(request));
+    return;
+  }
+
+  // 4. Navigation & HTML shell — stale-while-revalidate for instant start
+  if (request.mode === "navigate" || p === "/" || p === "/manifest.json" || p === "/browserconfig.xml") {
+    event.respondWith(
+      staleWhileRevalidate(request).catch(() =>
+        caches.match("/").then(
+          (fallback) =>
+            fallback ||
+            new Response("Offline — World of Geneva requires a connection to load.", {
+              status: 503,
+              headers: { "Content-Type": "text/plain" },
+            })
         )
       )
+    );
+    return;
+  }
+
+  // 5. Everything else same-origin — stale-while-revalidate
+  event.respondWith(
+    staleWhileRevalidate(request).catch(() =>
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          new Response("Offline", { status: 503, headers: { "Content-Type": "text/plain" } })
+      )
+    )
   );
 });
 
@@ -133,12 +194,24 @@ self.addEventListener("push", (event) => {
     vibrate: [200, 100, 200],
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.registration.showNotification(title, options).then(() => {
+      // Increment app icon badge (PWA only, ignored if unsupported)
+      if (navigator.setAppBadge) {
+        navigator.setAppBadge().catch(() => {});
+      }
+    })
+  );
 });
 
 // ── Notification click: focus or open the app ─────────────────────────────
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
+
+  // Clear app icon badge when user interacts with a notification
+  if (navigator.clearAppBadge) {
+    navigator.clearAppBadge().catch(() => {});
+  }
 
   if (event.action === "dismiss") return;
 

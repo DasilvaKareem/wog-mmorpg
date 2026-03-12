@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getMemberFromChain } from "./guildChain.js";
@@ -46,6 +48,12 @@ function formatLoan(loan: LoanInfo) {
 }
 
 export function registerGuildVaultRoutes(server: FastifyInstance) {
+  async function controlsWallet(authenticatedWallet: string, targetWallet: string): Promise<boolean> {
+    if (targetWallet.toLowerCase() === authenticatedWallet.toLowerCase()) return true;
+    const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+    return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+  }
+
   /**
    * GET /guild/:guildId/vault
    * Get all items in guild vault + active loans.
@@ -83,7 +91,10 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { memberAddress: string; tokenId: number; quantity: number };
-  }>("/guild/:guildId/vault/deposit", async (request, reply) => {
+  }>("/guild/:guildId/vault/deposit", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const guildId = parseInt(request.params.guildId, 10);
     const { memberAddress, tokenId, quantity } = request.body;
 
@@ -95,6 +106,11 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
     if (quantity <= 0) {
       reply.code(400);
       return { error: "Quantity must be positive" };
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, memberAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to deposit for this wallet" };
     }
 
     try {
@@ -140,7 +156,10 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { officerAddress: string; tokenId: number; quantity: number; recipientAddress: string };
-  }>("/guild/:guildId/vault/withdraw", async (request, reply) => {
+  }>("/guild/:guildId/vault/withdraw", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const guildId = parseInt(request.params.guildId, 10);
     const { officerAddress, tokenId, quantity, recipientAddress } = request.body;
 
@@ -157,6 +176,11 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
     if (quantity <= 0) {
       reply.code(400);
       return { error: "Quantity must be positive" };
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, officerAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to withdraw for this wallet" };
     }
 
     try {
@@ -205,7 +229,10 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
       borrowerAddress: string;
       durationDays: number;
     };
-  }>("/guild/:guildId/vault/lend", async (request, reply) => {
+  }>("/guild/:guildId/vault/lend", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const guildId = parseInt(request.params.guildId, 10);
     const { officerAddress, tokenId, quantity, borrowerAddress, durationDays } = request.body;
 
@@ -227,6 +254,11 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
     if (durationDays <= 0 || durationDays > 30) {
       reply.code(400);
       return { error: "Duration must be 1-30 days" };
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, officerAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to lend for this wallet" };
     }
 
     try {
@@ -283,13 +315,21 @@ export function registerGuildVaultRoutes(server: FastifyInstance) {
   server.post<{
     Params: { guildId: string };
     Body: { loanId: number; borrowerAddress: string };
-  }>("/guild/:guildId/vault/return", async (request, reply) => {
+  }>("/guild/:guildId/vault/return", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authenticatedWallet = (request as any).walletAddress as string;
     const guildId = parseInt(request.params.guildId, 10);
     const { loanId, borrowerAddress } = request.body;
 
     if (!borrowerAddress || !/^0x[a-fA-F0-9]{40}$/.test(borrowerAddress)) {
       reply.code(400);
       return { error: "Invalid borrower address" };
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, borrowerAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to return for this wallet" };
     }
 
     try {

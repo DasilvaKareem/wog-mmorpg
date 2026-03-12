@@ -13,6 +13,7 @@ import type {
   ZoneChunkInfo,
 } from "./types.js";
 import { API_URL } from "./config.js";
+import { getAuthToken } from "./lib/agentAuth.js";
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   try {
@@ -78,9 +79,13 @@ export async function createCharacter(
   }
 ): Promise<CharacterCreateResponse | { error: string }> {
   try {
+    const token = await getAuthToken(walletAddress);
     const res = await fetch(`${API_URL}/character/create`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify({ walletAddress, name, race, className, ...appearance }),
     });
     return await res.json();

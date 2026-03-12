@@ -117,7 +117,11 @@ function CharacterSection({
             }
           }}
         >
-          {characters.length > 1 && <option value="">Auto (highest level)</option>}
+          {characters.length > 1 && (
+            <option value="">
+              {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
+            </option>
+          )}
           {characters.map((c) => {
             const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
             const isDeployed = deployedCharacterName && (baseName === deployedCharacterName || c.name === deployedCharacterName);
@@ -176,7 +180,10 @@ export function WalletPanel(): React.ReactElement {
   if (!isConnected) return <></>;
 
   return (
-    <Card className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4">
+    <Card
+      className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4"
+      data-tutorial-id="wallet-panel"
+    >
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
           <div className="flex items-center gap-2">

@@ -3,7 +3,15 @@ import { thirdwebClient } from "./chain.js";
 import { encrypt, decrypt } from "./encryption.js";
 import type { Account } from "thirdweb/wallets";
 
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || "default-key-change-in-production";
+function getEncryptionKey(): string {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) {
+    throw new Error("ENCRYPTION_KEY environment variable is required");
+  }
+  return key;
+}
+
+const ENCRYPTION_KEY = getEncryptionKey();
 
 /**
  * In-memory storage for custodial wallets

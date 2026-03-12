@@ -13,7 +13,10 @@
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
 const API = process.argv[2] || process.env.SHARD_URL || "http://localhost:3000";
-const ADMIN_SECRET = process.env.ADMIN_SECRET || "wog-admin";
+const ADMIN_SECRET = process.env.ADMIN_SECRET;
+if (!ADMIN_SECRET) {
+  throw new Error("ADMIN_SECRET environment variable is required");
+}
 const ZONE = "village-square";
 const GOLD_PER_AGENT = 5000; // copper (0.5 GOLD)
 
