@@ -7,6 +7,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeMine } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity } from "./professionXp.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 const GATHER_RANGE = 50;
 
@@ -177,6 +178,9 @@ export function registerMiningRoutes(server: FastifyInstance) {
       const xpAmount = xpForRarity(oreProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
       const profXpResult = awardProfessionXp(entity, region, xpAmount, "mining", undefined, oreProps.label);
+
+      // Advance gather quest progress
+      advanceGatherQuests(entity, oreProps.label);
 
       // Log mine diary entry
       if (walletAddress) {

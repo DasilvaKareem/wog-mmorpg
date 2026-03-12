@@ -2886,6 +2886,45 @@ export function isQuestComplete(quest: Quest, progress: number): boolean {
 }
 
 /**
+ * Check if an item name matches a gather or craft quest objective.
+ * Uses substring matching so "Meadow Lily" matches "Meadow Lily Patch".
+ */
+export function doesItemCountForQuest(
+  quest: Quest,
+  itemName: string
+): boolean {
+  if (quest.objective.type !== "gather" && quest.objective.type !== "craft") return false;
+  if (!quest.objective.targetItemName) return false;
+
+  const target = quest.objective.targetItemName.toLowerCase();
+  const item = itemName.toLowerCase();
+
+  return item.includes(target) || target.includes(item);
+}
+
+/**
+ * Increment gather/craft quest progress for a player entity.
+ * Call from any profession endpoint (herbalism, mining, skinning, alchemy, cooking, crafting, etc).
+ */
+export function advanceGatherQuests(
+  entity: Entity,
+  itemName: string
+): void {
+  const activeQuests: ActiveQuest[] = entity.activeQuests ?? [];
+  for (const aq of activeQuests) {
+    const questDef = QUEST_CATALOG.find((q) => q.id === aq.questId);
+    if (!questDef) continue;
+    if (aq.progress >= questDef.objective.count) continue;
+    if (doesItemCountForQuest(questDef, itemName)) {
+      aq.progress++;
+      console.log(
+        `[quest] ${entity.name} progress: ${questDef.title} (${aq.progress}/${questDef.objective.count})`
+      );
+    }
+  }
+}
+
+/**
  * Check if a killed mob counts toward a quest objective
  */
 export function doesKillCountForQuest(

@@ -8,7 +8,7 @@ import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
-import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
+
 
 import { WalletManager } from "@/lib/walletManager";
 import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
@@ -497,48 +497,35 @@ function RootDetector(): React.ReactElement {
     );
   }
 
-  return (
-    <GameProvider>
-      <WalletProvider>
-        <ToastProvider>
-          <AppShell />
-        </ToastProvider>
-      </WalletProvider>
-    </GameProvider>
-  );
+  return <AppShell />;
 }
 
 export default function App(): React.ReactElement {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* Farcaster Mini App — explicit route always works */}
-        <Route
-          path="/farcaster"
-          element={(
-            <React.Suspense fallback={<RouteFallback />}>
-              <FarcasterMiniApp />
-            </React.Suspense>
-          )}
-        />
+      <GameProvider>
+        <WalletProvider>
+          <ToastProvider>
+            <Routes>
+              {/* Farcaster Mini App — explicit route always works */}
+              <Route
+                path="/farcaster"
+                element={(
+                  <React.Suspense fallback={<RouteFallback />}>
+                    <FarcasterMiniApp />
+                  </React.Suspense>
+                )}
+              />
 
-        {/* Root — auto-detect Warpcast vs normal browser */}
-        <Route path="/" element={<RootDetector />} />
+              {/* Root — auto-detect Warpcast vs normal browser */}
+              <Route path="/" element={<RootDetector />} />
 
-        {/* All other routes — normal app */}
-        <Route
-          path="*"
-          element={
-            <GameProvider>
-              <WalletProvider>
-                <ToastProvider>
-                  <AppShell />
-                </ToastProvider>
-              </WalletProvider>
-            </GameProvider>
-          }
-        />
-      </Routes>
+              {/* All other routes — normal app */}
+              <Route path="*" element={<AppShell />} />
+            </Routes>
+          </ToastProvider>
+        </WalletProvider>
+      </GameProvider>
     </BrowserRouter>
   );
 }

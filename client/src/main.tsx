@@ -5,6 +5,19 @@ import { ThirdwebProvider } from "thirdweb/react";
 import App from "@/App";
 import "@/index.css";
 
+const CHUNK_RELOAD_KEY = "wog:chunk-reload-at";
+
+function reloadOnceForChunkError(): void {
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || "0");
+    if (Date.now() - last < 15_000) return;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    // Ignore storage failures and still attempt a single reload.
+  }
+  window.location.reload();
+}
+
 // ── Badge clear on focus ──────────────────────────────────────────────────
 // Clear app icon badge when user returns to the app (PWA only).
 if (navigator.clearAppBadge) {
@@ -55,6 +68,21 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
+window.addEventListener("vite:preloadError", (event) => {
+  event.preventDefault();
+  reloadOnceForChunkError();
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  const reason = event.reason;
+  const message = typeof reason === "object" && reason && "message" in reason
+    ? String((reason as { message?: unknown }).message ?? "")
+    : String(reason ?? "");
+  if (message.includes("Failed to fetch dynamically imported module")) {
+    reloadOnceForChunkError();
+  }
+});
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

@@ -12,6 +12,7 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getPotionEffect, type PotionEffect } from "./potionEffects.js";
 import { randomUUID } from "crypto";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -620,6 +621,8 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           ? PROFESSION_XP.BREW_TIER2
           : PROFESSION_XP.BREW_TIER3;
       const profXpResult = awardProfessionXp(entity, zoneId, brewXp, "alchemy", outputItem?.name);
+
+      advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${outputItem?.name ?? recipeId}`);
       server.log.info(

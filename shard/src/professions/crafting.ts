@@ -11,6 +11,7 @@ import { logDiary, narrativeCraft } from "../social/diary.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -635,6 +636,8 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           data: { quality: instance.quality.tier, instanceId: instance.instanceId },
         });
       }
+
+      advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(

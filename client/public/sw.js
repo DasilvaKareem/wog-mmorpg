@@ -8,7 +8,7 @@
  *  4. Handle notification clicks (focus/open app)
  */
 
-const CACHE_NAME = "wog-1773335974";
+const CACHE_NAME = "wog-1773338240";
 const APP_SHELL = [
   "/",
   "/favicon.ico",
@@ -78,7 +78,6 @@ function cacheFirst(request) {
 }
 
 // Stale-while-revalidate: serve cached version instantly, update in background.
-// Used for HTML shell and manifest — fast start, picks up deploys on next load.
 function staleWhileRevalidate(request) {
   return caches.match(request).then((cached) => {
     const networkFetch = fetch(request).then((response) => {
@@ -90,6 +89,33 @@ function staleWhileRevalidate(request) {
     });
     return cached || networkFetch;
   });
+}
+
+// Network-first: prefer the latest HTML shell so deploys don't reference deleted chunks.
+// Falls back to cache when offline.
+function networkFirst(request, fallbackPath = "/") {
+  return fetch(request)
+    .then((response) => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
+      }
+      return response;
+    })
+    .catch(() =>
+      caches.match(request).then(
+        (cached) =>
+          cached ||
+          caches.match(fallbackPath).then(
+            (fallback) =>
+              fallback ||
+              new Response("Offline — World of Geneva requires a connection to load.", {
+                status: 503,
+                headers: { "Content-Type": "text/plain" },
+              })
+          )
+      )
+    );
 }
 
 self.addEventListener("fetch", (event) => {
@@ -134,24 +160,19 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // 4. Navigation & HTML shell — stale-while-revalidate for instant start
-  if (request.mode === "navigate" || p === "/" || p === "/manifest.json" || p === "/browserconfig.xml") {
-    event.respondWith(
-      staleWhileRevalidate(request).catch(() =>
-        caches.match("/").then(
-          (fallback) =>
-            fallback ||
-            new Response("Offline — World of Geneva requires a connection to load.", {
-              status: 503,
-              headers: { "Content-Type": "text/plain" },
-            })
-        )
-      )
-    );
+  // 4. Navigation & HTML shell — network-first to avoid stale HTML referencing removed chunks
+  if (request.mode === "navigate" || p === "/") {
+    event.respondWith(networkFirst(request));
     return;
   }
 
-  // 5. Everything else same-origin — stale-while-revalidate
+  // 5. Manifest and browser metadata — network-first to pick up icon/theme updates
+  if (p === "/manifest.json" || p === "/browserconfig.xml") {
+    event.respondWith(networkFirst(request, p));
+    return;
+  }
+
+  // 6. Everything else same-origin — stale-while-revalidate
   event.respondWith(
     staleWhileRevalidate(request).catch(() =>
       caches.match(request).then(

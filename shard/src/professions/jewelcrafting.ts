@@ -8,6 +8,7 @@ import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 export interface JewelcraftingRecipe {
   recipeId: string;
@@ -237,6 +238,8 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
         ? PROFESSION_XP.JEWEL_AMULET
         : PROFESSION_XP.JEWEL_RING;
       const profXpResult = awardProfessionXp(entity, zoneId, jcXp, "jewelcrafting", outputItem?.name);
+
+      advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(

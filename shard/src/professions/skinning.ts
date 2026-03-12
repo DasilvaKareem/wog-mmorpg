@@ -7,6 +7,7 @@ import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeSkin } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 const SKINNING_RANGE = 50;
 
@@ -188,6 +189,9 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
       );
+
+      // Advance gather quest progress (skinning quests use "corpse" as targetItemName)
+      advanceGatherQuests(entity, "corpse");
 
       // Log skin diary entry
       if (walletAddress) {

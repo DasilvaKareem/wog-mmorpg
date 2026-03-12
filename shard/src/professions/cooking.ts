@@ -8,6 +8,7 @@ import { getItemBalance } from "../blockchain/blockchain.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeCook, narrativeConsume } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 const COOKING_RANGE = 50;
 
@@ -204,6 +205,8 @@ export function registerCookingRoutes(server: FastifyInstance) {
           ? PROFESSION_XP.COOK_TIER2
           : PROFESSION_XP.COOK_TIER3;
       const profXpResult = awardProfessionXp(entity, zoneId, cookXp, "cooking", recipe.name);
+
+      advanceGatherQuests(entity, recipe.name);
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 1, `Crafted: ${recipe.name}`);
       server.log.info(

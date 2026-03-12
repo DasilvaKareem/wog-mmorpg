@@ -8,6 +8,7 @@ import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 export interface LeatherworkingRecipe {
   recipeId: string;
@@ -333,6 +334,8 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
         ? PROFESSION_XP.LEATHER_ADVANCED
         : PROFESSION_XP.LEATHER_BASIC;
       const profXpResult = awardProfessionXp(entity, zoneId, lwXp, "leatherworking", outputItem?.name);
+
+      advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
       reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
       server.log.info(

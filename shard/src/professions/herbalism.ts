@@ -9,6 +9,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeGatherHerb } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity } from "./professionXp.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 const GATHER_RANGE = 50;
 
@@ -191,6 +192,9 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         entityId: entity.id,
         entityName: entity.name,
       });
+
+      // Advance gather quest progress
+      advanceGatherQuests(entity, flowerProps.label);
 
       // Log gather_herb diary entry
       if (walletAddress) {
@@ -397,6 +401,9 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       const xpAmount = xpForRarity(nectarProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
       const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, nectarProps.label);
+
+      // Advance gather quest progress
+      advanceGatherQuests(entity, nectarProps.label);
 
       // Log diary
       if (walletAddress) {
