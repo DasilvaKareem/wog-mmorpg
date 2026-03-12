@@ -9,9 +9,11 @@ interface HotkeyBarProps {
   onChat: () => void;
   onRanks: () => void;
   onWallet: () => void;
+  onSettings: () => void;
   chatActive?: boolean;
   ranksActive?: boolean;
   walletActive?: boolean;
+  settingsActive?: boolean;
   mobile?: boolean;
 }
 
@@ -20,7 +22,7 @@ type Slot = {
   label: string;
   icon?: string;
   text?: string;
-  actionKey: "character" | "map" | "questLog" | "inspect" | "chat" | "ranks" | "wallet";
+  actionKey: "character" | "map" | "questLog" | "inspect" | "chat" | "ranks" | "wallet" | "settings";
   toggleable?: boolean;
 };
 
@@ -32,6 +34,7 @@ const slots: Slot[] = [
   { text: "...", key: "L", label: "Chat", actionKey: "chat", toggleable: true },
   { icon: "/icons/level.png", key: "R", label: "Ranks", actionKey: "ranks", toggleable: true },
   { icon: "/icons/gold.png", key: "W", label: "Wallet", actionKey: "wallet", toggleable: true },
+  { text: "\u2699", key: "O", label: "Settings", actionKey: "settings", toggleable: true },
 ];
 
 export function HotkeyBar({
@@ -42,9 +45,11 @@ export function HotkeyBar({
   onChat,
   onRanks,
   onWallet,
+  onSettings,
   chatActive = false,
   ranksActive = false,
   walletActive = false,
+  settingsActive = false,
   mobile = false,
 }: HotkeyBarProps): React.ReactElement {
   const actions: Record<string, () => void> = {
@@ -55,12 +60,14 @@ export function HotkeyBar({
     chat: onChat,
     ranks: onRanks,
     wallet: onWallet,
+    settings: onSettings,
   };
 
   const activeMap: Record<string, boolean> = {
     chat: chatActive,
     ranks: ranksActive,
     wallet: walletActive,
+    settings: settingsActive,
   };
 
   const size = mobile ? "w-11 h-11" : "w-12 h-12";

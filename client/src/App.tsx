@@ -52,6 +52,9 @@ const HotkeyBar = React.lazy(() =>
 const OnboardingFlow = React.lazy(() =>
   import("@/components/OnboardingFlow").then((mod) => ({ default: mod.OnboardingFlow }))
 );
+const SettingsDialog = React.lazy(() =>
+  import("@/components/SettingsDialog").then((mod) => ({ default: mod.SettingsDialog }))
+);
 const PlayerPanel = React.lazy(() =>
   import("@/components/PlayerPanel").then((mod) => ({ default: mod.PlayerPanel }))
 );
@@ -110,6 +113,7 @@ function GameWorld(): React.ReactElement {
   const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
   const [mapOpen, setMapOpen] = React.useState(false);
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const { address } = useWalletContext();
@@ -268,6 +272,7 @@ function GameWorld(): React.ReactElement {
             onClose={() => setOnboardingOpen(false)}
           />
         )}
+        <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
         <WorldMap open={mapOpen} onClose={() => setMapOpen(false)} />
         <div
           className="absolute left-1/2 -translate-x-1/2 z-30"
@@ -288,9 +293,11 @@ function GameWorld(): React.ReactElement {
             onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
             onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
             onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
+            onSettings={() => setSettingsOpen((s) => !s)}
             chatActive={showChat}
             ranksActive={showRanks}
             walletActive={showWallet}
+            settingsActive={settingsOpen}
           />
         </div>
       </React.Suspense>
