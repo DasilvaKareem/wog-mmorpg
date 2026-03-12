@@ -4,9 +4,42 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>World of Geneva</title>
+
+    <!-- ── PWA Manifest ──────────────────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- ── Icons ─────────────────────────────────────────────────────────── -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/favicon-512.png" />
+
+    <!-- ── iOS / Safari PWA ──────────────────────────────────────────────── -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WoG" />
     <link rel="apple-touch-icon" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/favicon-512.png" />
+    <!-- iOS splash screens (portrait) -->
+    <meta name="apple-touch-fullscreen" content="yes" />
+
+    <!-- ── Android / Chrome ───────────────────────────────────────────────── -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#060d12" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#060d12" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#060d12" />
+
+    <!-- ── Windows / Edge ────────────────────────────────────────────────── -->
+    <meta name="msapplication-TileColor" content="#060d12" />
+    <meta name="msapplication-TileImage" content="/favicon-192.png" />
+    <meta name="msapplication-config" content="none" />
+    <meta name="msapplication-tap-highlight" content="no" />
+
+    <!-- ── General PWA / SEO ─────────────────────────────────────────────── -->
+    <meta name="application-name" content="World of Geneva" />
+    <meta name="description" content="An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain." />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="HandheldFriendly" content="true" />
 
     <!-- Open Graph / Social Preview -->
     <meta property="og:type" content="website" />

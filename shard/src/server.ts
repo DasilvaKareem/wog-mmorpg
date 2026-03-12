@@ -61,6 +61,8 @@ import { registerWorldMapRoutes } from "./world/worldMapRoutes.js";
 import { registerDiaryRoutes } from "./social/diary.js";
 import { registerFarcasterAuthRoutes } from "./auth/farcasterAuth.js";
 import { registerNotificationRoutes } from "./social/notificationRoutes.js";
+import { registerWebPushRoutes } from "./social/webPushRoutes.js";
+import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
@@ -423,6 +425,7 @@ registerDungeonGateTick(server);
 registerWorldMapRoutes(server);
 registerDiaryRoutes(server);
 registerNotificationRoutes(server);
+registerWebPushRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh();
 spawnNpcs();
@@ -452,6 +455,9 @@ const start = async () => {
   initTelegramBot().catch((err: any) => {
     server.log.warn(`[telegram] Bot init failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
+
+  // Wire web push alerts into the diary system (graceful no-op if VAPID keys not set)
+  initWebPushAlerts();
 
   // Restore gold reservations from Redis (prevents double-spend after restart)
   restoreReservations().catch((err: any) => {

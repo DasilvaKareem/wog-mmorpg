@@ -1,0 +1,60 @@
+{
+  "name": "World of Geneva",
+  "short_name": "WoG",
+  "description": "An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#060d12",
+  "background_color": "#060d12",
+  "lang": "en",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    {
+      "src": "/favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/favicon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Play Now",
+      "short_name": "Play",
+      "description": "Jump into the World of Geneva",
+      "url": "/world",
+      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Leaderboards",
+      "short_name": "Ranks",
+      "description": "View the top players",
+      "url": "/leaderboards",
+      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Marketplace",
+      "short_name": "Market",
+      "description": "Trade items and equipment",
+      "url": "/marketplace",
+      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/assets/og-image.png",
+      "sizes": "1366x768",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "World of Geneva MMORPG"
+    }
+  ],
+  "prefer_related_applications": false
+}
