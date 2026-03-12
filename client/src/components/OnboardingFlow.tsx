@@ -217,6 +217,29 @@ export function OnboardingFlow({
   const [botLinkUrl, setBotLinkUrl] = React.useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = React.useState<"free" | "adventurer" | "champion">("free");
 
+  // PWA install prompt
+  const [pwaInstalled, setPwaInstalled] = React.useState(() =>
+    typeof window !== "undefined" &&
+    (window.matchMedia("(display-mode: standalone)").matches ||
+      (window.navigator as any).standalone === true)
+  );
+  const [pwaPrompt, setPwaPrompt] = React.useState<any>(null);
+  const isIosPwa = typeof navigator !== "undefined" &&
+    (/iphone|ipad|ipod/i.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
+
+  React.useEffect(() => {
+    const handler = (e: Event) => { e.preventDefault(); setPwaPrompt(e); };
+    window.addEventListener("beforeinstallprompt", handler);
+    const mq = window.matchMedia("(display-mode: standalone)");
+    const mqHandler = () => setPwaInstalled(mq.matches);
+    mq.addEventListener("change", mqHandler);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handler);
+      mq.removeEventListener("change", mqHandler);
+    };
+  }, []);
+
   // Sync wallet address into local state when it arrives (e.g. after Connect Wallet)
   React.useEffect(() => {
     if (walletAddress && !connectedAddress) {
@@ -1196,6 +1219,46 @@ export function OnboardingFlow({
                     <span className="ml-1">Waiting for connection...</span>
                   </div>
 
+                  {/* ── PWA Install CTA ── */}
+                  {!pwaInstalled && isIosPwa && (
+                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <p className="text-[11px] text-[#ffcc00] font-bold mb-1">[ INSTALL APP ]</p>
+                      <p className="text-[10px] text-[#9aa7cc] leading-relaxed mb-2">
+                        Get push alerts for level-ups &amp; deaths. Tap{" "}
+                        <span className="text-white font-bold">Share ⬆</span> then{" "}
+                        <span className="text-white font-bold">Add to Home Screen</span>.
+                      </p>
+                      <div className="flex items-center gap-2 text-[10px] text-[#6d77a3]">
+                        <span className="text-[16px]">⬆</span>
+                        <span>Safari → Share → Add to Home Screen</span>
+                      </div>
+                    </div>
+                  )}
+                  {pwaInstalled ? (
+                    <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2 flex items-center gap-2">
+                      <span className="text-[#54f28b] text-[12px]">[✓]</span>
+                      <p className="text-[11px] text-[#54f28b]">App installed — push notifications enabled</p>
+                    </div>
+                  ) : !isIosPwa && (
+                    <button
+                      onClick={async () => {
+                        if (!pwaPrompt) return;
+                        pwaPrompt.prompt();
+                        const { outcome } = await pwaPrompt.userChoice;
+                        if (outcome === "accepted") { setPwaInstalled(true); setPwaPrompt(null); }
+                      }}
+                      disabled={!pwaPrompt}
+                      className={`w-full border-2 px-4 py-2.5 text-[12px] uppercase tracking-wide font-bold transition flex items-center justify-center gap-2 ${
+                        pwaPrompt
+                          ? "border-[#ffcc00] bg-[#0f1a08] text-[#ffcc00] hover:bg-[#1a2a10] shadow-[3px_3px_0_0_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
+                          : "border-[#2a3450] bg-[#0b1020] text-[#3d4a6a] cursor-not-allowed"
+                      }`}
+                    >
+                      <span className="text-[16px]">⬇</span>
+                      {pwaPrompt ? "Install App for Notifications" : "Open in Chrome/Edge to Install"}
+                    </button>
+                  )}
+
                   <button
                     onClick={() => setStep("done")}
                     className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
@@ -1208,6 +1271,37 @@ export function OnboardingFlow({
                   <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2">
                     <p className="text-[12px] text-[#54f28b]">[✓] Telegram Connected</p>
                   </div>
+
+                  {/* ── PWA Install CTA (after Telegram connected) ── */}
+                  {!pwaInstalled && isIosPwa && (
+                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <p className="text-[11px] text-[#ffcc00] font-bold mb-1">[ INSTALL APP ]</p>
+                      <p className="text-[10px] text-[#9aa7cc] leading-relaxed mb-2">
+                        Also install the app for push alerts even when offline. Tap{" "}
+                        <span className="text-white font-bold">Share ⬆</span> →{" "}
+                        <span className="text-white font-bold">Add to Home Screen</span>.
+                      </p>
+                    </div>
+                  )}
+                  {!pwaInstalled && !isIosPwa && pwaPrompt && (
+                    <button
+                      onClick={async () => {
+                        pwaPrompt.prompt();
+                        const { outcome } = await pwaPrompt.userChoice;
+                        if (outcome === "accepted") { setPwaInstalled(true); setPwaPrompt(null); }
+                      }}
+                      className="w-full border-2 border-[#ffcc00] bg-[#0f1a08] px-4 py-2.5 text-[12px] uppercase tracking-wide font-bold text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:bg-[#1a2a10] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000] flex items-center justify-center gap-2"
+                    >
+                      <span className="text-[16px]">⬇</span>
+                      Install App for Push Notifications
+                    </button>
+                  )}
+                  {pwaInstalled && (
+                    <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2 flex items-center gap-2">
+                      <span className="text-[#54f28b] text-[12px]">[✓]</span>
+                      <p className="text-[11px] text-[#54f28b]">App installed — push notifications ready</p>
+                    </div>
+                  )}
 
                   <button
                     onClick={() => setStep("done")}
