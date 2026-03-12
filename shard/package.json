@@ -21,12 +21,14 @@
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
     "thirdweb": "^5.118.1",
-    "viem": "^2.45.3"
+    "viem": "^2.45.3",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@openzeppelin/contracts": "^4.9.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.0",
+    "@types/web-push": "^3.6.4",
     "solc": "^0.8.33",
     "tsx": "^4.7.0",
     "typescript": "^5.7.0"

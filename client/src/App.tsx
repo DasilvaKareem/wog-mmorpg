@@ -5,6 +5,7 @@ import { Navbar } from "@/components/Navbar";
 import { ToastProvider } from "@/components/ui/toast";
 import { GameProvider } from "@/context/GameContext";
 import { WalletProvider, useWalletContext } from "@/context/WalletContext";
+import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
 import { WalletManager } from "@/lib/walletManager";
@@ -302,6 +303,7 @@ function AppShell(): React.ReactElement {
   const isWorldRoute = location.pathname === "/world";
   const [onboardingOpen, setOnboardingOpen] = React.useState(false);
   const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
+  const { address } = useWalletContext();
 
   // Listen for global "open onboarding" event on non-world routes
   React.useEffect(() => {
@@ -317,6 +319,7 @@ function AppShell(): React.ReactElement {
   return (
     <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
       <Navbar />
+      <PushNotificationBanner walletAddress={address} />
       {isWorldRoute ? (
         <div className="h-full w-full pt-0">
           <GameWorld />

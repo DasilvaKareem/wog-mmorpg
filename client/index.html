@@ -1,36 +1,83 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>World of Geneva</title>
+
+    <!-- ── PWA Manifest ──────────────────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- ── Standard Favicons ─────────────────────────────────────────────── -->
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
-    <link rel="apple-touch-icon" href="/favicon-192.png" />
+    <link rel="icon" type="image/png" sizes="16x16"  href="/icons/pwa/icon-16x16.png" />
+    <link rel="icon" type="image/png" sizes="32x32"  href="/icons/pwa/icon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="48x48"  href="/icons/pwa/icon-48x48.png" />
+    <link rel="icon" type="image/png" sizes="96x96"  href="/icons/pwa/icon-96x96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/pwa/icon-192x192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icons/pwa/icon-512x512.png" />
 
-    <!-- Open Graph / Social Preview -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="World of Geneva" />
+    <!-- ── Apple / iOS PWA ────────────────────────────────────────────────── -->
+    <!-- Enables full-screen standalone mode on iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WoG" />
+    <!-- Apple touch icons — iOS picks the closest size automatically -->
+    <link rel="apple-touch-icon"                        href="/icons/pwa/icon-180x180.png" />
+    <link rel="apple-touch-icon" sizes="152x152"        href="/icons/pwa/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="167x167"        href="/icons/pwa/icon-167x167.png" />
+    <link rel="apple-touch-icon" sizes="180x180"        href="/icons/pwa/icon-180x180.png" />
+    <!-- iOS splash screens (portrait only — required by Safari for full PWA feel) -->
+    <link rel="apple-touch-startup-image" href="/icons/pwa/icon-512x512.png" />
+
+    <!-- ── Android / Chrome ───────────────────────────────────────────────── -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <!-- theme-color: browser chrome color (works on Android Chrome, Samsung Internet) -->
+    <meta name="theme-color" content="#060d12" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)"  content="#060d12" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#060d12" />
+
+    <!-- ── Windows / Edge (MSApp tiles) ──────────────────────────────────── -->
+    <meta name="msapplication-TileColor"   content="#060d12" />
+    <meta name="msapplication-TileImage"   content="/icons/pwa/icon-144x144.png" />
+    <meta name="msapplication-square70x70logo"   content="/icons/pwa/icon-72x72.png" />
+    <meta name="msapplication-square150x150logo" content="/icons/pwa/icon-152x152.png" />
+    <meta name="msapplication-wide310x150logo"   content="/icons/pwa/icon-384x384.png" />
+    <meta name="msapplication-square310x310logo" content="/icons/pwa/icon-384x384.png" />
+    <meta name="msapplication-config"      content="/browserconfig.xml" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <!-- Edge sidebar panel width -->
+    <meta name="msapplication-starturl"    content="/" />
+
+    <!-- ── General PWA / App ─────────────────────────────────────────────── -->
+    <meta name="application-name"   content="World of Geneva" />
+    <meta name="description"        content="An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain." />
+    <meta name="keywords"           content="MMORPG, blockchain, game, AI agents, on-chain, fantasy, RPG" />
+    <meta name="format-detection"   content="telephone=no" />
+    <meta name="HandheldFriendly"   content="true" />
+    <meta name="color-scheme"       content="dark" />
+    <!-- Disable phone number detection -->
+    <meta name="format-detection"   content="telephone=no, date=no, email=no, address=no" />
+
+    <!-- ── Open Graph / Social Preview ───────────────────────────────────── -->
+    <meta property="og:site_name"   content="World of Geneva" />
+    <meta property="og:type"        content="website" />
+    <meta property="og:title"       content="World of Geneva" />
     <meta property="og:description" content="An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain." />
-    <meta property="og:image" content="https://worldofgeneva.xyz/assets/og-image.png" />
-    <meta property="og:image:width" content="1366" />
+    <meta property="og:image"       content="https://worldofgeneva.xyz/assets/og-image.png" />
+    <meta property="og:image:width"  content="1366" />
     <meta property="og:image:height" content="768" />
-    <meta property="og:url" content="https://worldofgeneva.xyz" />
+    <meta property="og:image:alt"   content="World of Geneva game screenshot" />
+    <meta property="og:url"         content="https://worldofgeneva.xyz" />
+    <meta property="og:locale"      content="en_US" />
 
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="World of Geneva" />
+    <!-- ── Twitter / X Card ─────────────────────────────────────────────── -->
+    <meta name="twitter:card"        content="summary_large_image" />
+    <meta name="twitter:site"        content="@worldofgeneva" />
+    <meta name="twitter:title"       content="World of Geneva" />
     <meta name="twitter:description" content="An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain." />
-    <meta name="twitter:image" content="https://worldofgeneva.xyz/assets/og-image.png" />
-
-    <!-- Google Analytics (GA4) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-XXXXXXXXXX"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-XXXXXXXXXX');
-    </script>
+    <meta name="twitter:image"       content="https://worldofgeneva.xyz/assets/og-image.png" />
+    <meta name="twitter:image:alt"   content="World of Geneva game screenshot" />
   </head>
   <body>
     <div id="root"></div>

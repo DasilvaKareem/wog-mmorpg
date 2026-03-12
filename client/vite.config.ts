@@ -78,6 +78,7 @@ export default defineConfig({
       "/agent": API_URL,
       "/diary": API_URL,
       "/admin": API_URL,
+      "/notifications": API_URL,
     },
   },
 });

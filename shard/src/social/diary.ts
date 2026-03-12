@@ -57,13 +57,19 @@ export interface DiaryEntry {
 const MAX_ENTRIES = 200;
 const REDIS_KEY_PREFIX = "diary:";
 
-// ── Instant-alert hook (set by telegramNotifications.ts) ───────────
+// ── Instant-alert hooks ────────────────────────────────────────────
 
 type DiaryAlertHook = (wallet: string, action: DiaryAction, entry: DiaryEntry) => void;
 let diaryAlertHook: DiaryAlertHook | null = null;
+let diaryPushHook: DiaryAlertHook | null = null;
 
 export function setDiaryAlertHook(hook: DiaryAlertHook): void {
   diaryAlertHook = hook;
+}
+
+/** Secondary hook for web push notifications (set by webPushService). */
+export function setDiaryPushHook(hook: DiaryAlertHook): void {
+  diaryPushHook = hook;
 }
 
 // ── In-memory store ────────────────────────────────────────────────
@@ -446,9 +452,15 @@ export function logDiary(
       );
   }
 
-  // Fire instant alert for significant events (level-up, death)
-  if (diaryAlertHook && (action === "level_up" || action === "death")) {
-    try { diaryAlertHook(walletAddress, action, entry); } catch { /* non-fatal */ }
+  // Fire instant alerts for significant events (level-up, death, quest_complete)
+  const isAlertAction = action === "level_up" || action === "death" || action === "quest_complete";
+  if (isAlertAction) {
+    if (diaryAlertHook) {
+      try { diaryAlertHook(walletAddress, action, entry); } catch { /* non-fatal */ }
+    }
+    if (diaryPushHook) {
+      try { diaryPushHook(walletAddress, action, entry); } catch { /* non-fatal */ }
+    }
   }
 }
 
