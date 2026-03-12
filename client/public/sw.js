@@ -8,13 +8,18 @@
  *  4. Background sync for missed events
  */
 
-const CACHE_NAME = "wog-v1";
+const CACHE_NAME = "wog-v2";
 const APP_SHELL = [
   "/",
   "/favicon.ico",
   "/favicon-192.png",
   "/favicon-512.png",
   "/manifest.json",
+  "/browserconfig.xml",
+  "/icons/pwa/icon-192x192.png",
+  "/icons/pwa/icon-512x512.png",
+  "/icons/pwa/icon-maskable-192x192.png",
+  "/icons/pwa/icon-maskable-512x512.png",
 ];
 
 // ── Install: pre-cache app shell ──────────────────────────────────────────

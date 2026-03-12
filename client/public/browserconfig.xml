@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<browserconfig>
+  <msapplication>
+    <tile>
+      <square70x70logo   src="/icons/pwa/icon-72x72.png"/>
+      <square150x150logo src="/icons/pwa/icon-152x152.png"/>
+      <wide310x150logo   src="/icons/pwa/icon-384x384.png"/>
+      <square310x310logo src="/icons/pwa/icon-384x384.png"/>
+      <TileColor>#060d12</TileColor>
+    </tile>
+    <notification>
+      <polling-uri  src="https://worldofgeneva.xyz/notifications/push/vapid-public-key"/>
+      <frequency>30</frequency>
+      <cycle>1</cycle>
+    </notification>
+  </msapplication>
+</browserconfig>

@@ -2,59 +2,182 @@
   "name": "World of Geneva",
   "short_name": "WoG",
   "description": "An autonomous MMORPG where AI agents are the players. Explore, battle, trade, and form guilds — all on-chain.",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
+  "id": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui", "browser"],
   "orientation": "any",
   "theme_color": "#060d12",
   "background_color": "#060d12",
   "lang": "en",
+  "dir": "ltr",
   "categories": ["games", "entertainment"],
+
   "icons": [
     {
-      "src": "/favicon-192.png",
-      "sizes": "192x192",
+      "src": "/icons/pwa/icon-16x16.png",
+      "sizes": "16x16",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "/favicon-512.png",
+      "src": "/icons/pwa/icon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-48x48.png",
+      "sizes": "48x48",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-72x72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-96x96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-128x128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-144x144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-152x152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-167x167.png",
+      "sizes": "167x167",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-180x180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-256x256.png",
+      "sizes": "256x256",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-384x384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/pwa/icon-maskable-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/pwa/icon-maskable-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
+
   "shortcuts": [
     {
       "name": "Play Now",
       "short_name": "Play",
       "description": "Jump into the World of Geneva",
-      "url": "/world",
-      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+      "url": "/world?source=shortcut",
+      "icons": [
+        { "src": "/icons/pwa/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
     },
     {
       "name": "Leaderboards",
       "short_name": "Ranks",
-      "description": "View the top players",
-      "url": "/leaderboards",
-      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+      "description": "View the top players and champions",
+      "url": "/leaderboards?source=shortcut",
+      "icons": [
+        { "src": "/icons/pwa/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
     },
     {
       "name": "Marketplace",
       "short_name": "Market",
-      "description": "Trade items and equipment",
-      "url": "/marketplace",
-      "icons": [{ "src": "/favicon-192.png", "sizes": "192x192" }]
+      "description": "Trade items and equipment on-chain",
+      "url": "/marketplace?source=shortcut",
+      "icons": [
+        { "src": "/icons/pwa/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
+    },
+    {
+      "name": "Champions",
+      "short_name": "Champions",
+      "description": "View legendary champions",
+      "url": "/champions?source=shortcut",
+      "icons": [
+        { "src": "/icons/pwa/icon-192x192.png", "sizes": "192x192", "type": "image/png" }
+      ]
     }
   ],
+
   "screenshots": [
     {
       "src": "/assets/og-image.png",
       "sizes": "1366x768",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "World of Geneva MMORPG"
+      "label": "World of Geneva — the autonomous MMORPG"
     }
   ],
-  "prefer_related_applications": false
+
+  "related_applications": [],
+  "prefer_related_applications": false,
+
+  "share_target": {
+    "action": "/world",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+
+  "protocol_handlers": [],
+
+  "edge_side_panel": {
+    "preferred_width": 480
+  }
 }
