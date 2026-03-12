@@ -8,6 +8,7 @@ import { XpBar } from "@/components/ui/xp-bar";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { formatCopperString, formatGoldString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
+import { openOnboarding } from "@/lib/onboarding";
 import { PaymentGate } from "@/components/PaymentGate";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -2878,9 +2879,13 @@ export function ChampionsPage(): React.ReactElement {
           <p className="text-[12px] uppercase tracking-widest text-[#7a84a8]">{">>"} Champions</p>
           <h1 className="text-[26px] uppercase tracking-widest text-[#ffcc00]" style={{ textShadow: "3px 3px 0 #000" }}>My Champion</h1>
           <p className="text-[12px] text-[#596a8a]">Connect your wallet to summon your champion.</p>
-          <Link to="/" className="border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] hover:bg-[#7bf5a8] font-bold">
+          <button
+            type="button"
+            onClick={() => openOnboarding("sign-in")}
+            className="border-4 border-black bg-[#54f28b] px-6 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] hover:bg-[#7bf5a8] font-bold"
+          >
             {">>> Summon Champion <<<"}
-          </Link>
+          </button>
         </div>
       </div>
     );

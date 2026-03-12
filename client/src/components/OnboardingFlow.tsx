@@ -247,13 +247,6 @@ export function OnboardingFlow({
     }
   }, [walletAddress, connectedAddress]);
 
-  React.useEffect(() => {
-    if (walletAddress && step === "login") {
-      setStep(signInOnly ? "done" : "create-char");
-    }
-  }, [signInOnly, walletAddress, step]);
-
-
   // Load races/classes when entering create-char step
   React.useEffect(() => {
     if (step !== "create-char") return;
