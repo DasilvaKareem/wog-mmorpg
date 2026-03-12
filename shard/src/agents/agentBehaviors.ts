@@ -12,7 +12,15 @@ import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
-import type { AgentContext } from "./agentUtils.js";
+import {
+  actionBlocked,
+  actionCompleted,
+  actionIdle,
+  actionProgressed,
+  formatAgentError,
+  type ActionResult,
+  type AgentContext,
+} from "./agentUtils.js";
 
 const MELEE_RANGE = 40;
 const PROFESSION_HUB_ZONE = "village-square";
@@ -168,15 +176,15 @@ export async function doCombat(
   ctx: AgentContext,
   strategy: AgentStrategy,
   learnNextTechnique?: () => Promise<{ ok: boolean; reason: string }>,
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     if (ctx.currentCaps.techniquesEnabled && learnNextTechnique) {
       const trainResult = await learnNextTechnique();
-      if (trainResult.ok) return;
+      if (trainResult.ok) return actionProgressed(trainResult.reason);
     }
 
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     // Disengage if HP too low (only if retreat enabled)
@@ -190,7 +198,7 @@ export async function doCombat(
       if (hpPct < retreatThreshold[strategy]) {
         ctx.issueCommand({ action: "move", x: 150, y: 150 });
         void ctx.logActivity(`Low HP (${Math.round(hpPct * 100)}%) — disengaging`);
-        return;
+        return actionProgressed(`Disengaging at ${Math.round(hpPct * 100)}% HP`);
       }
     }
 
@@ -205,7 +213,12 @@ export async function doCombat(
     const eligible = Object.entries(entities).filter(
       ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel,
     );
-    if (eligible.length === 0) return;
+    if (eligible.length === 0) {
+      return actionBlocked("No eligible mobs in zone", {
+        failureKey: `combat:no-targets:${ctx.currentRegion}`,
+        targetName: ctx.currentRegion,
+      });
+    }
 
     const sorted = eligible.sort(([, a]: any, [, b]: any) => {
       if (strategy === "aggressive") {
@@ -222,11 +235,13 @@ export async function doCombat(
     const [, mob] = sorted[0] as [string, any];
     const stopDist = getCombatStopDist(me);
     const moving = await ctx.moveToEntity(me, mob, stopDist);
-    if (!moving) {
-      void ctx.logActivity(`Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
-    }
+    if (moving) return actionProgressed(`Closing on ${mob.name ?? "mob"}`);
+    void ctx.logActivity(`Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    return actionProgressed(`Fighting ${mob.name ?? "mob"}`);
   } catch (err: any) {
-    console.debug(`[agent] combat tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] combat tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `combat:error:${ctx.currentRegion}` });
   }
 }
 
@@ -236,16 +251,15 @@ export async function doGathering(
   ctx: AgentContext,
   strategy: AgentStrategy,
   preference: GatherPreference = "both",
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const node = findGatherNode(entities, me, preference);
     if (!node) {
-      await fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
-      return;
+      return fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
     }
 
     const [nodeId, nodeEntity] = node;
@@ -253,10 +267,10 @@ export async function doGathering(
     // Auto-learn required profession before attempting to gather
     if (nodeEntity.type === "ore-node") {
       const learned = await ctx.learnProfession("mining");
-      if (!learned) return;
+      if (!learned) return actionProgressed("Working toward mining access");
     } else {
       const learned = await ctx.learnProfession("herbalism");
-      if (!learned) return;
+      if (!learned) return actionProgressed("Working toward herbalism access");
     }
 
     const toolKind: GatheringToolKind = nodeEntity.type === "ore-node" ? "pickaxe" : "sickle";
@@ -267,10 +281,10 @@ export async function doGathering(
       toolKind,
       requiredNodeTier(nodeEntity),
     );
-    if (!toolReady) return;
+    if (!toolReady) return actionProgressed(`Preparing ${toolKind} for gathering`);
 
     const moving = await ctx.moveToEntity(me, nodeEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${nodeEntity.name ?? "resource node"}`);
 
     if (nodeEntity.type === "ore-node") {
       try {
@@ -279,8 +293,16 @@ export async function doGathering(
           entityId: ctx.entityId, oreNodeId: nodeId,
         });
         void ctx.logActivity(`Mined ${nodeEntity.name ?? "ore node"}`);
+        return actionCompleted(`Mined ${nodeEntity.name ?? "ore node"}`);
       } catch (err: any) {
-        void ctx.logActivity(`Mining failed: ${err.message?.slice(0, 80) ?? "unknown error"}`);
+        const reason = formatAgentError(err);
+        void ctx.logActivity(`Mining failed: ${reason}`);
+        return actionBlocked(reason, {
+          failureKey: `mining:${nodeId}`,
+          endpoint: "/mining/gather",
+          targetId: nodeId,
+          targetName: nodeEntity.name,
+        });
       }
     } else {
       try {
@@ -289,48 +311,57 @@ export async function doGathering(
           entityId: ctx.entityId, flowerNodeId: nodeId,
         });
         void ctx.logActivity(`Gathered ${nodeEntity.name ?? "flower node"}`);
+        return actionCompleted(`Gathered ${nodeEntity.name ?? "flower node"}`);
       } catch (err: any) {
-        void ctx.logActivity(`Herbalism failed: ${err.message?.slice(0, 80) ?? "unknown error"}`);
+        const reason = formatAgentError(err);
+        void ctx.logActivity(`Herbalism failed: ${reason}`);
+        return actionBlocked(reason, {
+          failureKey: `herbalism:${nodeId}`,
+          endpoint: "/herbalism/gather",
+          targetId: nodeId,
+          targetName: nodeEntity.name,
+        });
       }
     }
   } catch (err: any) {
-    console.debug(`[agent] gathering tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] gathering tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `gather:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Alchemy ──────────────────────────────────────────────────────────────────
 
-export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     // Auto-learn alchemy profession before attempting to brew
     const learned = await ctx.learnProfession("alchemy");
     if (!learned) {
-      return;
+      return actionProgressed("Working toward alchemy access");
     }
 
     const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
     if (!lab) {
       void ctx.logActivity("No alchemy lab here — gathering herbs instead");
-      await doGathering(ctx, strategy, "herb");
-      return;
+      return doGathering(ctx, strategy, "herb");
     }
 
     const [labId, labEntity] = lab;
     const moving = await ctx.moveToEntity(me, labEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${labEntity.name ?? "alchemy lab"}`);
 
     const recipesRes = await ctx.api("GET", "/alchemy/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
     if (recipes.length === 0) {
       void ctx.logActivity("No alchemy recipes available — gathering materials");
-      await doGathering(ctx, strategy, "herb");
-      return;
+      return doGathering(ctx, strategy, "herb");
     }
 
+    let lastError: string | null = null;
     for (const recipe of recipes) {
       try {
         await ctx.api("POST", "/alchemy/brew", {
@@ -340,48 +371,54 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Brewed ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Brewed ${recipe.name ?? recipe.recipeId}`);
-        return;
+        return actionCompleted(`Brewed ${recipe.name ?? recipe.recipeId}`);
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] brew ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
+        lastError = formatAgentError(err);
+        console.debug(`[agent:${ctx.walletTag}] brew ${recipe.name ?? recipe.recipeId}: ${lastError.slice(0, 60)}`);
       }
     }
 
     void ctx.logActivity("Missing ingredients for all potions — gathering herbs");
-    await doGathering(ctx, strategy, "herb");
+    const gatherResult = await doGathering(ctx, strategy, "herb");
+    return lastError ? actionBlocked(lastError, {
+      failureKey: `alchemy:brew:${ctx.currentRegion}`,
+      endpoint: "/alchemy/brew",
+    }) : gatherResult;
   } catch (err: any) {
-    console.debug(`[agent] alchemy tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] alchemy tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `alchemy:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Cooking ──────────────────────────────────────────────────────────────────
 
-export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     // Auto-learn cooking profession
     const learned = await ctx.learnProfession("cooking");
     if (!learned) {
       void ctx.logActivity("Can't cook — no cooking trainer nearby");
-      await doGathering(ctx, strategy);
-      return;
+      return doGathering(ctx, strategy);
     }
 
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const campfire = ctx.findNearestEntity(entities, me, (e) => e.type === "campfire");
     if (!campfire) {
       void ctx.logActivity("No campfire here — gathering ingredients instead");
-      await doGathering(ctx, strategy);
-      return;
+      return doGathering(ctx, strategy);
     }
 
     const [campfireId, campfireEntity] = campfire;
     const moving = await ctx.moveToEntity(me, campfireEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${campfireEntity.name ?? "campfire"}`);
 
     const recipesRes = await ctx.api("GET", "/cooking/recipes");
     const recipes = recipesRes?.recipes ?? [];
+    let lastError: string | null = null;
     for (const recipe of recipes) {
       try {
         await ctx.api("POST", "/cooking/cook", {
@@ -391,42 +428,47 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Cooked ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Cooked ${recipe.name ?? recipe.recipeId}`);
-        return;
+        return actionCompleted(`Cooked ${recipe.name ?? recipe.recipeId}`);
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] cook ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
+        lastError = formatAgentError(err);
+        console.debug(`[agent:${ctx.walletTag}] cook ${recipe.name ?? recipe.recipeId}: ${lastError.slice(0, 60)}`);
       }
     }
 
     void ctx.logActivity("Can't cook anything — missing ingredients, going to gather");
-    await doGathering(ctx, strategy);
+    const gatherResult = await doGathering(ctx, strategy);
+    return lastError ? actionBlocked(lastError, {
+      failureKey: `cooking:cook:${ctx.currentRegion}`,
+      endpoint: "/cooking/cook",
+    }) : gatherResult;
   } catch (err: any) {
-    console.debug(`[agent] cooking tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] cooking tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `cooking:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Enchanting ───────────────────────────────────────────────────────────────
 
-export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const altar = ctx.findNearestEntity(entities, me, (e) => e.type === "enchanting-altar");
     if (!altar) {
-      await fallbackToCombat(ctx, "No enchanting altar in this zone", strategy);
-      return;
+      return fallbackToCombat(ctx, "No enchanting altar in this zone", strategy);
     }
 
     const [altarId, altarEntity] = altar;
     const moving = await ctx.moveToEntity(me, altarEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${altarEntity.name ?? "enchanting altar"}`);
 
     if (me.equipment?.weapon) {
       if (me.equipment.weapon.enchantments && me.equipment.weapon.enchantments.length > 0) {
         void ctx.logActivity("Weapon already enchanted — crafting more gear");
-        await doCrafting(ctx, strategy);
-        return;
+        return doCrafting(ctx, strategy);
       }
 
       const { items } = await ctx.getWalletBalance();
@@ -436,8 +478,7 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
       );
       if (!elixir) {
         void ctx.logActivity("No enchantment elixirs — brewing some first");
-        await doAlchemy(ctx, strategy);
-        return;
+        return doAlchemy(ctx, strategy);
       }
 
       await ctx.api("POST", "/enchanting/apply", {
@@ -447,39 +488,42 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
         equipmentSlot: "weapon",
       });
       void ctx.logActivity(`Enchanted weapon with ${elixir.name}`);
+      return actionCompleted(`Enchanted weapon with ${elixir.name}`);
     } else {
       void ctx.logActivity("No weapon to enchant — forging one first");
-      await doCrafting(ctx, strategy);
+      return doCrafting(ctx, strategy);
     }
   } catch (err: any) {
-    console.debug(`[agent] enchanting tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] enchanting tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `enchanting:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Crafting ─────────────────────────────────────────────────────────────────
 
-export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const learned = await ctx.learnProfession("blacksmithing");
-    if (!learned) return;
+    if (!learned) return actionProgressed("Working toward blacksmithing access");
 
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const forge = ctx.findNearestEntity(entities, me, (e) => e.type === "forge");
     if (!forge) {
-      await fallbackToCombat(ctx, "No forge in this zone", strategy);
-      return;
+      return fallbackToCombat(ctx, "No forge in this zone", strategy);
     }
 
     const [forgeId, forgeEntity] = forge;
     const moving = await ctx.moveToEntity(me, forgeEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${forgeEntity.name ?? "forge"}`);
 
     const recipesRes = await ctx.api("GET", "/crafting/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
 
+    let lastError: string | null = null;
     for (const recipe of recipes) {
       try {
         const result = await ctx.api("POST", "/crafting/forge", {
@@ -502,42 +546,47 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
             void ctx.logActivity(`Equipped ${craftedName}`);
           }
         }
-        return;
+        return actionCompleted(`Crafted ${craftedName}`);
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] craft ${recipe.name ?? recipe.recipeId}: ${err.message?.slice(0, 60)}`);
+        lastError = formatAgentError(err);
+        console.debug(`[agent:${ctx.walletTag}] craft ${recipe.name ?? recipe.recipeId}: ${lastError.slice(0, 60)}`);
       }
     }
 
     void ctx.logActivity("Missing materials for all recipes — gathering ore");
-    await doGathering(ctx, strategy, "ore");
+    const gatherResult = await doGathering(ctx, strategy, "ore");
+    return lastError ? actionBlocked(lastError, {
+      failureKey: `crafting:forge:${ctx.currentRegion}`,
+      endpoint: "/crafting/forge",
+    }) : gatherResult;
   } catch (err: any) {
-    console.debug(`[agent] crafting tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] crafting tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `crafting:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Shopping ─────────────────────────────────────────────────────────────────
 
-export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const merchant = ctx.findNearestEntity(entities, me, (e) => e.type === "merchant");
     if (!merchant) {
-      await fallbackToCombat(ctx, "No merchants in this zone", strategy);
-      return;
+      return fallbackToCombat(ctx, "No merchants in this zone", strategy);
     }
 
     const [merchantId, merchantEntity] = merchant;
     const moving = await ctx.moveToEntity(me, merchantEntity);
-    if (moving) return;
+    if (moving) return actionProgressed(`Moving to ${merchantEntity.name ?? "merchant"}`);
 
     const shopData = await ctx.api("GET", `/shop/npc/${merchantId}`);
     const items: any[] = shopData?.items ?? [];
     if (items.length === 0) {
-      await fallbackToCombat(ctx, "Merchant has nothing to sell", strategy);
-      return;
+      return fallbackToCombat(ctx, "Merchant has nothing to sell", strategy);
     }
 
     const equipment = me.equipment ?? {};
@@ -548,8 +597,7 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
 
     if (emptySlots.length === 0) {
       void ctx.logActivity("Fully geared up — back to fighting");
-      await doCombat(ctx, strategy);
-      return;
+      return doCombat(ctx, strategy);
     }
 
     const { copper: copperBalance } = await ctx.getWalletBalance();
@@ -572,18 +620,20 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
       await ctx.equipItem(tokenId);
       console.log(`[agent:${ctx.walletTag}] Shopping: bought+equipped ${cheapest.name ?? tokenId} for slot=${slot}`);
       void ctx.logActivity(`Bought & equipped ${cheapest.name ?? `token #${tokenId}`} (${slot})`);
-      return; // one purchase per tick
+      return actionCompleted(`Bought ${cheapest.name ?? `token #${tokenId}`}`); // one purchase per tick
     }
 
-    await fallbackToCombat(ctx, "Can't afford any upgrades right now", strategy);
+    return fallbackToCombat(ctx, "Can't afford any upgrades right now", strategy);
   } catch (err: any) {
-    console.debug(`[agent] shopping tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] shopping tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `shopping:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Trading / Recycling ─────────────────────────────────────────────────────
 
-export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Promise<void> {
+export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const inventory = await ctx.getLiquidationInventory();
     const candidates = inventory.items
@@ -605,7 +655,7 @@ export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Pro
       const result = await ctx.recycleItem(Number(best.tokenId), quantity);
       if (result.ok) {
         void ctx.logActivity(`Traded ${quantity}x ${best.name} for ${result.totalPayoutCopper ?? 0}c`);
-        return;
+        return actionCompleted(`Traded ${quantity}x ${best.name}`);
       }
       void ctx.logActivity(`Recycle failed for ${best.name}: ${result.error ?? "unknown error"}`);
     }
@@ -616,20 +666,21 @@ export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Pro
       const emptySlots = ["weapon", "chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"]
         .filter((slot) => !me.equipment?.[slot]);
       if (emptySlots.length > 0 && inventory.copper >= 10) {
-        await doShopping(ctx, strategy);
-        return;
+        return doShopping(ctx, strategy);
       }
     }
 
-    await fallbackToCombat(ctx, "No goods worth trading right now", strategy);
+    return fallbackToCombat(ctx, "No goods worth trading right now", strategy);
   } catch (err: any) {
-    console.debug(`[agent] trading tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] trading tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `trading:error:${ctx.currentRegion}` });
   }
 }
 
 // ── Travel ───────────────────────────────────────────────────────────────────
 
-export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Promise<void> {
+export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const config = await getAgentConfig(ctx.userWallet);
     const rawTargetZone = config?.targetZone;
@@ -639,21 +690,24 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
       console.log(`[agent:${ctx.walletTag}] Invalid travel target zone: ${rawTargetZone}`);
       void ctx.logActivity(`Unknown destination "${rawTargetZone}" — clearing travel target`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
-      return;
+      return actionCompleted(`Cleared invalid destination ${rawTargetZone}`);
     }
 
     if (!targetZone || targetZone === ctx.currentRegion) {
       console.log(`[agent:${ctx.walletTag}] Arrived at ${ctx.currentRegion}, switching to questing`);
       void ctx.logActivity(`Arrived at ${ctx.currentRegion}, resuming questing`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
-      return;
+      return actionCompleted(`Arrived at ${ctx.currentRegion}`);
     }
 
     const center = getRegionCenter(targetZone);
     if (!center) {
       console.log(`[agent:${ctx.walletTag}] Unknown region: ${targetZone}`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
-      return;
+      return actionBlocked(`Unknown region: ${targetZone}`, {
+        failureKey: `travel:unknown:${targetZone}`,
+        targetName: targetZone,
+      });
     }
 
     // Set travel state directly on the entity (bypasses HTTP /command to avoid
@@ -661,15 +715,20 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
     const entity = getWorldEntity(ctx.entityId);
     if (!entity) {
       console.log(`[agent:${ctx.walletTag}] Travel failed: entity ${ctx.entityId} not found in world`);
-      return;
+      return actionBlocked(`Travel failed: entity ${ctx.entityId} not found`, {
+        failureKey: `travel:entity:${ctx.entityId}`,
+      });
     }
     entity.order = { action: "move", x: center.x, y: center.z };
     entity.travelTargetZone = targetZone;
     entity.gotoMode = true;
     console.log(`[agent:${ctx.walletTag}] Traveling ${ctx.currentRegion} → ${targetZone} (order → ${center.x},${center.z})`);
     void ctx.logActivity(`Traveling ${ctx.currentRegion} → ${targetZone}`);
+    return actionProgressed(`Traveling to ${targetZone}`);
   } catch (err: any) {
-    console.log(`[agent:${ctx.walletTag}] travel tick ERROR: ${err.message?.slice(0, 120)}`);
+    const reason = formatAgentError(err);
+    console.log(`[agent:${ctx.walletTag}] travel tick ERROR: ${reason.slice(0, 120)}`);
+    return actionBlocked(reason, { failureKey: `travel:error:${ctx.currentRegion}` });
   }
 }
 
@@ -678,7 +737,7 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
 export async function doGotoNpc(
   ctx: AgentContext,
   findNextZoneOnPath: (neighbors: Array<{ zone: string }>, targetZone: string) => string | null,
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     ctx.setEntityGotoMode(true);
 
@@ -688,7 +747,7 @@ export async function doGotoNpc(
       ctx.setEntityGotoMode(false);
       await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
       ctx.setScript(null);
-      return;
+      return actionCompleted("Goto target cleared");
     }
 
     const { entityId: targetEntityId, zoneId: targetZoneId, name: targetName } = target;
@@ -705,13 +764,17 @@ export async function doGotoNpc(
       if (nextZone) {
         ctx.issueCommand({ action: "travel", targetZone: nextZone });
         void ctx.logActivity(`Heading to ${targetZoneId} to find ${targetName ?? targetEntityId}`);
+        return actionProgressed(`Traveling toward ${targetName ?? targetEntityId}`);
       }
-      return;
+      return actionBlocked(`No route to ${targetZoneId}`, {
+        failureKey: `goto:route:${targetZoneId}`,
+        targetName: targetName ?? targetEntityId,
+      });
     }
 
     // In the right zone — find the entity
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     let targetEntity: any = entities[targetEntityId];
@@ -727,13 +790,18 @@ export async function doGotoNpc(
       ctx.setEntityGotoMode(false);
       await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
       ctx.setScript(null);
-      return;
+      return actionBlocked(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`, {
+        failureKey: `goto:missing:${targetEntityId}`,
+        targetId: targetEntityId,
+        targetName,
+        category: "strategic",
+      });
     }
 
     const moving = await ctx.moveToEntity(me, targetEntity);
     if (moving) {
       void ctx.logActivity(`Walking to ${targetName ?? "NPC"}`);
-      return;
+      return actionProgressed(`Walking to ${targetName ?? "NPC"}`);
     }
 
     // Arrived — execute on-arrival action
@@ -749,7 +817,15 @@ export async function doGotoNpc(
         void ctx.logActivity(`Learned profession: ${profession}`);
         console.log(`[agent:${ctx.walletTag}] Learned profession ${profession} (user-initiated)`);
       } catch (learnErr: any) {
-        void ctx.logActivity(`Could not learn ${profession}: ${learnErr.message?.slice(0, 60)}`);
+        const reason = formatAgentError(learnErr);
+        void ctx.logActivity(`Could not learn ${profession}: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:learn-profession:${profession}:${targetEntityId}`,
+          endpoint: "/professions/learn",
+          targetId: targetEntityId,
+          targetName,
+        });
       }
     } else if (arrivalAction === "learn-technique" && (target as any).techniqueId) {
       try {
@@ -760,7 +836,15 @@ export async function doGotoNpc(
         void ctx.logActivity(`Learned technique: ${(target as any).techniqueName ?? (target as any).techniqueId}`);
         console.log(`[agent:${ctx.walletTag}] Learned technique ${(target as any).techniqueId} (user-initiated)`);
       } catch (learnErr: any) {
-        void ctx.logActivity(`Could not learn technique: ${learnErr.message?.slice(0, 60)}`);
+        const reason = formatAgentError(learnErr);
+        void ctx.logActivity(`Could not learn technique: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:learn-technique:${(target as any).techniqueId}:${targetEntityId}`,
+          endpoint: "/techniques/learn",
+          targetId: targetEntityId,
+          targetName,
+        });
       }
     } else {
       void ctx.logActivity(`Arrived at ${targetName ?? "NPC"}`);
@@ -772,9 +856,12 @@ export async function doGotoNpc(
     // The runner will pick the next script based on whatever focus the user had set.
     await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
     ctx.setScript(null);
+    return actionCompleted(`Arrived at ${targetName ?? targetEntityId}`);
   } catch (err: any) {
     ctx.setEntityGotoMode(false);
-    console.debug(`[agent] doGotoNpc: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] doGotoNpc: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `goto:error:${ctx.currentRegion}` });
   }
 }
 
@@ -784,10 +871,10 @@ export async function doQuesting(
   ctx: AgentContext,
   strategy: AgentStrategy,
   findNextZoneForLevel: (level: number) => string | null,
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     // 1. Check for completed quests and turn them in
@@ -803,10 +890,12 @@ export async function doQuesting(
         });
         if (npcEntry) {
           const [npcEntityId, npcEntity] = npcEntry;
+          const cooldownKey = `quest-complete:${aq.questId}:${npcEntityId}`;
+          if (ctx.isInteractionOnCooldown(cooldownKey)) continue;
           const moving = await ctx.moveToEntity(me, npcEntity);
           if (moving) {
             void ctx.logActivity(`Walking to ${aq.quest?.npcId} to turn in "${aq.quest?.title}"`);
-            return;
+            return actionProgressed(`Walking to ${aq.quest?.npcId}`);
           }
           try {
             const completeRes = await ctx.api("POST", "/quests/complete", {
@@ -820,10 +909,20 @@ export async function doQuesting(
                 Math.max(1, Math.floor((completeRes.rewards?.xp ?? 50) / 50)),
                 `Agent completed quest: ${aq.quest?.title ?? "unknown"}`,
               );
-              return;
+              ctx.clearInteractionCooldown(cooldownKey);
+              return actionCompleted(`Completed quest ${aq.quest?.title ?? aq.questId}`);
             }
           } catch (err: any) {
-            console.debug(`[agent:${ctx.walletTag}] quest complete: ${err.message?.slice(0, 60)}`);
+            const reason = formatAgentError(err);
+            ctx.setInteractionCooldown(cooldownKey, 20_000);
+            void ctx.logActivity(`Could not turn in "${aq.quest?.title}": ${reason}`);
+            console.warn(`[agent:${ctx.walletTag}] quest complete failed: ${reason}`);
+            return actionBlocked(reason, {
+              failureKey: cooldownKey,
+              endpoint: "/quests/complete",
+              targetId: npcEntityId,
+              targetName: aq.quest?.npcId,
+            });
           }
         }
       }
@@ -842,19 +941,32 @@ export async function doQuesting(
         });
         if (npcEntry) {
           const [npcEntityId, npcEntity] = npcEntry;
+          const cooldownKey = `quest-talk:${tq.questId}:${npcEntityId}`;
+          if (ctx.isInteractionOnCooldown(cooldownKey)) continue;
           const moving = await ctx.moveToEntity(me, npcEntity);
           if (moving) {
             void ctx.logActivity(`Walking to ${targetNpcName} for talk quest`);
-            return;
+            return actionProgressed(`Walking to ${targetNpcName} for talk quest`);
           }
           try {
             await ctx.api("POST", "/quests/talk", {
               zoneId: ctx.currentRegion, playerId: ctx.entityId, npcEntityId,
             });
+            ctx.clearInteractionCooldown(cooldownKey);
             void ctx.logActivity(`Talked to ${targetNpcName} for "${tq.quest?.title}"`);
-            return;
+            return actionCompleted(`Talked to ${targetNpcName}`);
           } catch (err: any) {
-            console.debug(`[agent:${ctx.walletTag}] quest talk: ${err.message?.slice(0, 60)}`);
+            const reason = formatAgentError(err);
+            const backoffMs = /no talk quest available/i.test(reason) ? 60_000 : 20_000;
+            ctx.setInteractionCooldown(cooldownKey, backoffMs);
+            void ctx.logActivity(`Could not talk to ${tq.quest?.objective?.targetNpcName ?? "NPC"}: ${reason}`);
+            console.warn(`[agent:${ctx.walletTag}] quest talk failed: ${reason}`);
+            return actionBlocked(reason, {
+              failureKey: cooldownKey,
+              endpoint: "/quests/talk",
+              targetId: npcEntityId,
+              targetName: tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId,
+            });
           }
         }
       }
@@ -885,6 +997,7 @@ export async function doQuesting(
           });
           if (acceptRes?.accepted) {
             void ctx.logActivity(`Accepted quest: "${q.title}" from ${q.npcName}`);
+            return actionCompleted(`Accepted quest ${q.title}`);
           }
         } else if (currentActive === 0) {
           const myLevel = me.level ?? 1;
@@ -894,7 +1007,7 @@ export async function doQuesting(
             void ctx.logActivity(`No quests remaining — traveling to ${nextZone}`);
             await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: nextZone });
             ctx.setScript(null);
-            return;
+            return actionProgressed(`Traveling to ${nextZone} for new quests`);
           }
         }
       } catch (err: any) {
@@ -915,16 +1028,17 @@ export async function doQuesting(
       const questMobNames = new Set(
         killQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
       );
-      await doQuestCombat(ctx, strategy, questMobNames);
+      return doQuestCombat(ctx, strategy, questMobNames);
     } else if (hasGatherQuest) {
       void ctx.logActivity("Gathering resources for quest");
-      await doGathering(ctx, strategy);
+      return doGathering(ctx, strategy);
     } else {
-      await fallbackToCombat(ctx, "No quest objectives to work on", strategy);
+      return fallbackToCombat(ctx, "No quest objectives to work on", strategy);
     }
   } catch (err: any) {
-    console.debug(`[agent] questing tick: ${err.message?.slice(0, 60)}`);
-    await fallbackToCombat(ctx, "Quest system error", strategy);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] questing tick: ${reason.slice(0, 60)}`);
+    return fallbackToCombat(ctx, `Quest system error: ${reason}`, strategy);
   }
 }
 
@@ -935,10 +1049,10 @@ async function doQuestCombat(
   ctx: AgentContext,
   strategy: AgentStrategy,
   questMobNames: Set<string>,
-): Promise<void> {
+): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
-    if (!zs) return;
+    if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
     const myLevel = me.level ?? 1;
@@ -947,7 +1061,12 @@ async function doQuestCombat(
     const eligible = Object.entries(entities).filter(
       ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel,
     );
-    if (eligible.length === 0) return;
+    if (eligible.length === 0) {
+      return actionBlocked("No mobs available for quest progression", {
+        failureKey: `quest-combat:no-targets:${ctx.currentRegion}`,
+        targetName: ctx.currentRegion,
+      });
+    }
 
     // Sort: quest mobs first, then by distance
     const sorted = eligible.sort(([, a]: any, [, b]: any) => {
@@ -961,13 +1080,15 @@ async function doQuestCombat(
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
     const stopDist = getCombatStopDist(me);
     const moving = await ctx.moveToEntity(me, mob, stopDist);
-    if (!moving) {
-      void ctx.logActivity(isQuestTarget
-        ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
-        : `Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
-    }
+    if (moving) return actionProgressed(`Moving to ${mob.name ?? "mob"}`);
+    void ctx.logActivity(isQuestTarget
+      ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
+      : `Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    return actionProgressed(`Engaging ${mob.name ?? "mob"}`);
   } catch (err: any) {
-    console.debug(`[agent] quest combat tick: ${err.message?.slice(0, 60)}`);
+    const reason = formatAgentError(err);
+    console.debug(`[agent] quest combat tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `quest-combat:error:${ctx.currentRegion}` });
   }
 }
 
@@ -977,8 +1098,9 @@ async function fallbackToCombat(
   ctx: AgentContext,
   reason: string,
   strategy: AgentStrategy,
-): Promise<void> {
+): Promise<ActionResult> {
   void ctx.logActivity(`${reason} — fighting to earn XP/gold`);
   ctx.setScript({ type: "combat", maxLevelOffset: 1, reason: `Farming gold: ${reason}` });
-  await doCombat(ctx, strategy);
+  const result = await doCombat(ctx, strategy);
+  return result.status === "idle" ? actionProgressed(reason) : result;
 }

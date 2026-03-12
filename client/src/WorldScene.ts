@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 
-import { CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
+import { API_URL, CAMERA_SPEED, POLL_INTERVAL, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT } from "@/config";
 import { EntityRenderer } from "@/EntityRenderer";
 import { TilemapRenderer } from "@/TilemapRenderer";
 import { ChunkStreamManager } from "@/ChunkStreamManager";
@@ -1125,12 +1125,11 @@ export class WorldScene extends Phaser.Scene {
 
   /** Fetch available + active quest state for NPC markers. */
   private async pollQuestState(zoneId: string, playerId: string): Promise<void> {
-    const apiUrl = (await import("./config")).API_URL;
     try {
       const [availRes, logRes] = await Promise.all([
-        fetch(`${apiUrl}/quests/zone/${zoneId}/${playerId}`),
+        fetch(`${API_URL}/quests/zone/${zoneId}/${playerId}`),
         this.lockedWalletAddress
-          ? fetch(`${apiUrl}/questlog/${this.lockedWalletAddress}`)
+          ? fetch(`${API_URL}/questlog/${this.lockedWalletAddress}`)
           : null,
       ]);
 

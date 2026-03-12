@@ -30,7 +30,22 @@ import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
 
 // Extracted modules
-import { sleep, fetchLiquidationInventory, fetchWalletBalance, issueAgentCommand, type ApiCaller, type AgentContext } from "./agentUtils.js";
+import {
+  actionBlocked,
+  actionCompleted,
+  actionIdle,
+  actionProgressed,
+  sleep,
+  fetchLiquidationInventory,
+  fetchWalletBalance,
+  formatAgentError,
+  issueAgentCommand,
+  type ActionResult,
+  type ApiCaller,
+  type AgentContext,
+  type FailureCategory,
+  type FailureMemoryEntry,
+} from "./agentUtils.js";
 import { detectTrigger, type TriggerState } from "./agentTriggers.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
@@ -74,6 +89,7 @@ interface AgentTelemetrySnapshot {
   loop: TimingMetric;
   walletBalance: TimingMetric;
   supervisor: TimingMetric & { errors: number };
+  actionResults: Record<string, number>;
   commands: {
     total: number;
     move: number;
@@ -81,6 +97,14 @@ interface AgentTelemetrySnapshot {
     travel: number;
     failed: number;
     lastAt: number | null;
+  };
+  failures: {
+    total: number;
+    repeated: number;
+    recent: FailureMemoryEntry[];
+    topEndpoints: Array<{ name: string; count: number }>;
+    topTargets: Array<{ name: string; count: number }>;
+    topReasons: Array<{ name: string; count: number }>;
   };
   triggers: Record<string, number>;
   lastLoopAt: number | null;
@@ -167,16 +191,28 @@ export class AgentRunner {
   private failedTechniqueIds = new Set<string>();
   private mcpClient: AgentMcpClient | null = null;
   private lastPrivateKey: string | null = null;
+  private pendingTrigger: TriggerEvent | null = null;
+  private lastActionResult: ActionResult | null = null;
   private moveToStaleCount = 0;
   private moveToLastTarget = "";
   private moveToLastDistance = Number.POSITIVE_INFINITY;
   private moveToLastCommandAt = 0;
   private moveToLastLogAt = 0;
+  private interactionCooldowns = new Map<string, number>();
+  private failureMemory = new Map<string, FailureMemoryEntry>();
   private telemetry = {
     loop: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     walletBalance: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     supervisor: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0, errors: 0 },
+    actionResults: { idle: 0, progressed: 0, blocked: 0, completed: 0 },
     commands: { total: 0, move: 0, attack: 0, travel: 0, failed: 0, lastAt: null as number | null },
+    failures: {
+      total: 0,
+      repeated: 0,
+      byEndpoint: {} as Record<string, number>,
+      byTarget: {} as Record<string, number>,
+      byReason: {} as Record<string, number>,
+    },
     triggers: {} as Record<string, number>,
     lastLoopAt: null as number | null,
   };
@@ -215,6 +251,8 @@ export class AgentRunner {
       lastTrigger: this.lastTrigger
         ? { type: this.lastTrigger.type, detail: this.lastTrigger.detail }
         : null,
+      lastActionResult: this.lastActionResult ? { ...this.lastActionResult } : null,
+      recentFailures: this.getRecentFailures(),
       running: this.running,
       telemetry: this.getTelemetrySnapshot(),
     };
@@ -371,6 +409,17 @@ export class AgentRunner {
 
   async repairGear(): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
+    const cooldownKey = `repair:${this.currentRegion}`;
+    let smithId: string | undefined;
+    let smithEntity: any;
+    if (this.isInteractionOnCooldown(cooldownKey)) {
+      this.lastActionResult = actionBlocked("Repair on cooldown", {
+        failureKey: cooldownKey,
+        endpoint: "/equipment/repair",
+        category: "transient",
+      });
+      return false;
+    }
     try {
       const zs = await this.getZoneState();
       if (!zs) return false;
@@ -386,7 +435,7 @@ export class AgentRunner {
       );
       if (!smith) return false;
 
-      const [smithId, smithEntity] = smith;
+      [smithId, smithEntity] = smith;
       const moving = await this.moveToEntity(me, smithEntity);
       if (moving) return true;
 
@@ -395,13 +444,38 @@ export class AgentRunner {
         entityId: this.entityId, walletAddress: this.custodialWallet,
       });
       if (result?.ok) {
+        this.clearInteractionCooldown(cooldownKey);
+        this.clearFailure(cooldownKey);
         const repaired = result.repairs?.map((r: any) => r.name).join(", ") ?? "gear";
+        this.lastActionResult = actionCompleted(`Repaired ${repaired}`);
         console.log(`[agent:${this.walletTag}] Repaired ${repaired} (cost: ${result.totalCost}g)`);
         void this.logActivity(`Repaired ${repaired} (${result.totalCost}g)`);
       }
       return true;
     } catch (err: any) {
-      console.debug(`[agent] repairGear: ${err.message?.slice(0, 60)}`);
+      const reason = formatAgentError(err);
+      const backoffMs = /insufficient gold|no damaged equipped items|must reference a blacksmith/i.test(reason)
+        ? 60_000
+        : 20_000;
+      this.setInteractionCooldown(cooldownKey, backoffMs);
+      const failure = this.recordFailure({
+        key: cooldownKey,
+        reason,
+        scriptType: "repair",
+        endpoint: "/equipment/repair",
+        targetId: smithId,
+        targetName: smithEntity?.name,
+      });
+      this.lastActionResult = actionBlocked(reason, {
+        failureKey: cooldownKey,
+        endpoint: "/equipment/repair",
+        targetId: smithId,
+        targetName: smithEntity?.name,
+        category: failure.category,
+      });
+      this.maybeScheduleBlockedTrigger(failure);
+      console.warn(`[agent:${this.walletTag}] repairGear failed: ${reason}`);
+      void this.logActivity(`Repair delayed: ${reason}`);
       return false;
     }
   }
@@ -472,6 +546,21 @@ export class AgentRunner {
     metric.avgMs += (durationMs - metric.avgMs) / metric.count;
   }
 
+  private getRecentFailures(limit = 6): FailureMemoryEntry[] {
+    return [...this.failureMemory.values()]
+      .filter((entry) => entry.consecutive > 0)
+      .sort((a, b) => b.lastAt - a.lastAt)
+      .slice(0, limit)
+      .map((entry) => ({ ...entry }));
+  }
+
+  private topCountEntries(source: Record<string, number>, limit = 5): Array<{ name: string; count: number }> {
+    return Object.entries(source)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([name, count]) => ({ name, count }));
+  }
+
   private getTelemetrySnapshot(): AgentTelemetrySnapshot {
     const round = (value: number) => Math.round(value * 10) / 10;
     return {
@@ -494,7 +583,16 @@ export class AgentRunner {
         lastMs: round(this.telemetry.supervisor.lastMs),
         errors: this.telemetry.supervisor.errors,
       },
+      actionResults: { ...this.telemetry.actionResults },
       commands: { ...this.telemetry.commands },
+      failures: {
+        total: this.telemetry.failures.total,
+        repeated: this.telemetry.failures.repeated,
+        recent: this.getRecentFailures(),
+        topEndpoints: this.topCountEntries(this.telemetry.failures.byEndpoint),
+        topTargets: this.topCountEntries(this.telemetry.failures.byTarget),
+        topReasons: this.topCountEntries(this.telemetry.failures.byReason),
+      },
       triggers: { ...this.telemetry.triggers },
       lastLoopAt: this.telemetry.lastLoopAt,
     };
@@ -531,6 +629,117 @@ export class AgentRunner {
     if (!this.entityId) return;
     const entity = getWorldEntity(this.entityId);
     if (entity) entity.gotoMode = on;
+  }
+
+  private isInteractionOnCooldown(key: string): boolean {
+    const until = this.interactionCooldowns.get(key);
+    if (!until) return false;
+    if (until <= Date.now()) {
+      this.interactionCooldowns.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  private setInteractionCooldown(key: string, ms: number): void {
+    if (ms <= 0) {
+      this.interactionCooldowns.delete(key);
+      return;
+    }
+    this.interactionCooldowns.set(key, Date.now() + ms);
+  }
+
+  private clearInteractionCooldown(key: string): void {
+    this.interactionCooldowns.delete(key);
+  }
+
+  private clearFailure(key: string | undefined): void {
+    if (!key) return;
+    const existing = this.failureMemory.get(key);
+    if (!existing) return;
+    this.failureMemory.set(key, {
+      ...existing,
+      consecutive: 0,
+      lastAt: Date.now(),
+    });
+  }
+
+  private recordFailure(args: {
+    key: string;
+    reason: string;
+    scriptType?: string;
+    endpoint?: string;
+    targetId?: string;
+    targetName?: string;
+    category?: FailureCategory;
+  }): FailureMemoryEntry {
+    const now = Date.now();
+    const existing = this.failureMemory.get(args.key);
+    const next: FailureMemoryEntry = {
+      key: args.key,
+      reason: args.reason,
+      count: (existing?.count ?? 0) + 1,
+      consecutive: (existing?.consecutive ?? 0) + 1,
+      firstAt: existing?.firstAt ?? now,
+      lastAt: now,
+      scriptType: args.scriptType ?? existing?.scriptType,
+      endpoint: args.endpoint ?? existing?.endpoint,
+      targetId: args.targetId ?? existing?.targetId,
+      targetName: args.targetName ?? existing?.targetName,
+      category: args.category ?? existing?.category,
+    };
+    this.failureMemory.set(args.key, next);
+    this.telemetry.failures.total += 1;
+    if (next.consecutive > 1) this.telemetry.failures.repeated += 1;
+    if (next.endpoint) {
+      this.telemetry.failures.byEndpoint[next.endpoint] = (this.telemetry.failures.byEndpoint[next.endpoint] ?? 0) + 1;
+    }
+    const target = next.targetName ?? next.targetId;
+    if (target) {
+      this.telemetry.failures.byTarget[target] = (this.telemetry.failures.byTarget[target] ?? 0) + 1;
+    }
+    this.telemetry.failures.byReason[next.reason] = (this.telemetry.failures.byReason[next.reason] ?? 0) + 1;
+    return next;
+  }
+
+  private maybeScheduleBlockedTrigger(failure: FailureMemoryEntry): void {
+    const threshold = failure.category === "strategic" ? 2 : 3;
+    if (failure.consecutive < threshold) return;
+    this.pendingTrigger = {
+      type: "blocked",
+      detail: `${failure.scriptType ?? "action"} blocked at ${failure.targetName ?? failure.targetId ?? failure.endpoint ?? failure.key}: ${failure.reason} (x${failure.consecutive})`,
+    };
+  }
+
+  private handleActionResult(script: BotScript | null, result: ActionResult): void {
+    this.lastActionResult = result;
+    this.telemetry.actionResults[result.status] = (this.telemetry.actionResults[result.status] ?? 0) + 1;
+
+    if (result.status === "blocked") {
+      const failure = this.recordFailure({
+        key: result.failureKey ?? `${script?.type ?? "action"}:${result.endpoint ?? result.targetId ?? result.reason ?? "unknown"}`,
+        reason: result.reason ?? "unknown failure",
+        scriptType: script?.type,
+        endpoint: result.endpoint,
+        targetId: result.targetId,
+        targetName: result.targetName,
+        category: result.category,
+      });
+      this.maybeScheduleBlockedTrigger(failure);
+      return;
+    }
+
+    if (result.failureKey) {
+      this.clearFailure(result.failureKey);
+      return;
+    }
+
+    if (!script?.type) return;
+    for (const entry of this.failureMemory.values()) {
+      if (entry.scriptType === script.type) {
+        this.clearFailure(entry.key);
+      }
+    }
   }
 
   private issueCommand(
@@ -730,6 +939,9 @@ export class AgentRunner {
       findNearestEntity: (e, m, p) => self.findNearestEntity(e, m, p),
       moveToEntity: (m, t, d?) => self.moveToEntity(m, t, d),
       issueCommand: (command) => self.issueCommand(command),
+      isInteractionOnCooldown: (key) => self.isInteractionOnCooldown(key),
+      setInteractionCooldown: (key, ms) => self.setInteractionCooldown(key, ms),
+      clearInteractionCooldown: (key) => self.clearInteractionCooldown(key),
       logActivity: (text) => { void self.logActivity(text); },
       setEntityGotoMode: (on) => self.setEntityGotoMode(on),
       getWalletBalance: () => self.getWalletBalance(),
@@ -745,26 +957,31 @@ export class AgentRunner {
 
   // ── Script execution ───────────────────────────────────────────────────────
 
-  private async executeCurrentScript(entity: any, entities: Record<string, any>, strategy: AgentStrategy): Promise<void> {
+  private async executeCurrentScript(entity: any, entities: Record<string, any>, strategy: AgentStrategy): Promise<ActionResult> {
     const script = this.currentScript;
-    if (!script) return;
+    if (!script) return actionIdle("No active script");
 
     const ctx = this.buildContext();
-    if (!ctx) return;
+    if (!ctx) return actionBlocked("Agent context unavailable", { failureKey: "context:missing" });
 
     switch (script.type) {
-      case "combat":  await behaviors.doCombat(ctx, strategy, () => this.learnNextTechnique()); break;
-      case "gather":  await behaviors.doGathering(ctx, strategy); break;
-      case "travel":  await behaviors.doTravel(ctx, strategy); break;
-      case "goto":    await behaviors.doGotoNpc(ctx, (n, t) => this.findNextZoneOnPath(n, t)); break;
-      case "shop":    await behaviors.doShopping(ctx, strategy); break;
-      case "trade":   await behaviors.doTrading(ctx, strategy); break;
-      case "craft":   await behaviors.doCrafting(ctx, strategy); break;
-      case "brew":    await behaviors.doAlchemy(ctx, strategy); break;
-      case "cook":    await behaviors.doCooking(ctx, strategy); break;
-      case "quest":   await behaviors.doQuesting(ctx, strategy, (l) => this.findNextZoneForLevel(l)); break;
-      case "learn":   await this.learnNextTechnique(); break;
-      case "idle":    break;
+      case "combat":  return behaviors.doCombat(ctx, strategy, () => this.learnNextTechnique());
+      case "gather":  return behaviors.doGathering(ctx, strategy);
+      case "travel":  return behaviors.doTravel(ctx, strategy);
+      case "goto":    return behaviors.doGotoNpc(ctx, (n, t) => this.findNextZoneOnPath(n, t));
+      case "shop":    return behaviors.doShopping(ctx, strategy);
+      case "trade":   return behaviors.doTrading(ctx, strategy);
+      case "craft":   return behaviors.doCrafting(ctx, strategy);
+      case "brew":    return behaviors.doAlchemy(ctx, strategy);
+      case "cook":    return behaviors.doCooking(ctx, strategy);
+      case "quest":   return behaviors.doQuesting(ctx, strategy, (l) => this.findNextZoneForLevel(l));
+      case "learn": {
+        const result = await this.learnNextTechnique();
+        return result.ok
+          ? actionProgressed(result.reason)
+          : actionBlocked(result.reason, { failureKey: "learn-technique", endpoint: "/techniques/learn" });
+      }
+      case "idle":    return actionIdle("Idle");
     }
   }
 
@@ -790,7 +1007,10 @@ export class AgentRunner {
     this.ticksSinceLastDecision++;
     this.ticksOnCurrentScript++;
 
-    const trigger = this.detectZoneEventTrigger(this.cachedZoneState?.recentEvents ?? [])
+    const pendingTrigger = this.pendingTrigger;
+    this.pendingTrigger = null;
+    const trigger = pendingTrigger
+      ?? this.detectZoneEventTrigger(this.cachedZoneState?.recentEvents ?? [])
       ?? detectTrigger(entity, entities, triggerState);
 
     if (trigger) {
@@ -865,6 +1085,7 @@ export class AgentRunner {
             currentScript: this.currentScript,
             recentActivities: this.recentActivities,
             recentZoneEvents: this.cachedZoneState?.recentEvents ?? [],
+            recentFailures: this.getRecentFailures(),
             userDirective,
             apiCall: this.api!,
             walletGoldCopper,
@@ -902,7 +1123,9 @@ export class AgentRunner {
       }
     }
 
-    await this.executeCurrentScript(entity, entities, strategy);
+    const executedScript = this.currentScript;
+    const actionResult = await this.executeCurrentScript(entity, entities, strategy);
+    this.handleActionResult(executedScript, actionResult);
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────

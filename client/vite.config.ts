@@ -14,7 +14,22 @@ export default defineConfig({
     },
   },
   build: {
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
+      onwarn(warning, warn) {
+        const message = typeof warning === "string" ? warning : warning.message;
+        const id = typeof warning === "string" ? "" : (warning.id ?? "");
+
+        if (
+          (message.includes("contains an annotation that Rollup cannot interpret due to the position of the comment") &&
+            id.includes("node_modules")) ||
+          message.includes("dynamic import will not move module into another chunk")
+        ) {
+          return;
+        }
+
+        warn(warning);
+      },
       output: {
         manualChunks: {
           phaser:   ["phaser"],

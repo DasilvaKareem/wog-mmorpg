@@ -13,7 +13,7 @@
 
 import { type Content, type FunctionDeclaration, type Part, type Type } from "@google/genai";
 import { gemini, GEMINI_MODEL } from "./geminiClient.js";
-import { fetchLiquidationInventory } from "./agentUtils.js";
+import { fetchLiquidationInventory, type FailureMemoryEntry } from "./agentUtils.js";
 import { findPortalInZone, getSharedEdge, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { getEntitiesInRegion } from "../world/zoneRuntime.js";
@@ -35,6 +35,7 @@ export interface SupervisorContext {
   currentScript: BotScript | null;
   recentActivities: string[];
   recentZoneEvents: ZoneEvent[];
+  recentFailures: FailureMemoryEntry[];
   userDirective: string;
   /** Bound API caller from the runner (already authenticated) */
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
@@ -63,6 +64,14 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext, hasMcp: 
     .slice(-4)
     .map((zoneEvent) => `${zoneEvent.type}: ${zoneEvent.message}`)
     .join(" | ") || "none";
+  const recentFailures = ctx.recentFailures
+    .slice(-4)
+    .map((failure) => {
+      const where = failure.targetName ?? failure.targetId ?? failure.endpoint ?? failure.key;
+      const streak = failure.consecutive > 1 ? ` x${failure.consecutive}` : "";
+      return `${where}: ${failure.reason}${streak}`;
+    })
+    .join(" | ") || "none";
 
   const mcpHint = hasMcp
     ? `\n- You have MCP tools: scan_zone (zone overview), get_my_status (character snapshot), find_mobs_for_level, shop_get_catalog, items_get_inventory. Call at most 1-2 reads then IMMEDIATELY call set_script. Do NOT explore — decide fast.`
@@ -77,6 +86,7 @@ AGENT STATE:
   Equipped: ${equipped}
   Recent: ${ctx.recentActivities.slice(-4).join(" → ") || "none"}
   Zone Events: ${recentEvents}
+  Recent Failures: ${recentFailures}
 
 CURRENT SCRIPT: ${ctx.currentScript ? `${ctx.currentScript.type} — ${ctx.currentScript.reason ?? ""}` : "none"}
 
@@ -85,6 +95,7 @@ USER DIRECTIVE: ${ctx.userDirective}
 Your job: Decide the next bot script to execute.
 - IMPORTANT: If the current script is still valid and making progress, RE-ISSUE the same script type with the same parameters. Do NOT change scripts just because you were called. Walking to a distant target is normal progress — let it finish.
 - Only change scripts when: the current goal is impossible, completed, or a clearly better opportunity exists.${mcpHint}
+- Treat repeated failures as real state. If an NPC, endpoint, or action has failed repeatedly, avoid retry loops and choose a different script unless the failure is clearly transient.
 - Call set_script once to finalize — this is the ONLY output that matters
 - Be strategic: consider level, zone difficulty, gear, gold
 - HP REGEN: You passively regenerate HP when out of combat (after ~10s). Do NOT gather herbs, cook, or shop for food just because HP is low — simply wait or keep moving and HP will recover on its own. Only use food/potions during active combat emergencies (below 20% HP). Never switch to gathering or cooking solely because of low HP.
@@ -374,6 +385,11 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
     if (goldCopper >= 10) return { type: "shop", reason: "Has gold — buying a weapon" };
     // Broke + no weapon → fight unarmed to earn gold first
     return { type: "combat", maxLevelOffset: 0, reason: "No gold or weapon — fighting unarmed to earn gold" };
+  }
+  if (event.type === "blocked") {
+    if (ctx.currentScript?.type === "quest") return { type: "combat", maxLevelOffset: 1, reason: "Quest path blocked — regroup with combat" };
+    if (ctx.currentScript?.type === "shop" || ctx.currentScript?.type === "trade") return { type: "combat", maxLevelOffset: 1, reason: "Economy path blocked — farming gold instead" };
+    return { type: "combat", maxLevelOffset: 1, reason: "Action blocked — switching to reliable combat" };
   }
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
   if (event.type === "zone_arrived") return { type: "quest", reason: "New region — check for quests" };

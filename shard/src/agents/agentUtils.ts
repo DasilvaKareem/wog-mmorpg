@@ -17,6 +17,112 @@ export function sleep(ms: number): Promise<void> {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+export function formatAgentError(error: unknown): string {
+  const fallback = "unknown error";
+  if (!error || typeof error !== "object") return fallback;
+
+  const rawMessage = typeof (error as any).message === "string"
+    ? (error as any).message.trim()
+    : "";
+  const stripped = rawMessage.replace(/^API Error:\s*/i, "").trim();
+  if (!stripped) return fallback;
+
+  try {
+    const parsed = JSON.parse(stripped);
+    if (parsed && typeof parsed === "object") {
+      if (typeof parsed.error === "string" && parsed.error.trim()) {
+        if (typeof parsed.distance === "number" && typeof parsed.maxRange === "number") {
+          return `${parsed.error} (${parsed.distance}/${parsed.maxRange})`;
+        }
+        return parsed.error.trim();
+      }
+      if (typeof parsed.message === "string" && parsed.message.trim()) {
+        return parsed.message.trim();
+      }
+    }
+  } catch {
+    // Non-JSON errors fall back to the raw message.
+  }
+
+  return stripped;
+}
+
+export type ActionStatus = "idle" | "progressed" | "blocked" | "completed";
+export type FailureCategory = "transient" | "strategic";
+
+export interface ActionResult {
+  status: ActionStatus;
+  reason?: string;
+  failureKey?: string;
+  endpoint?: string;
+  targetId?: string;
+  targetName?: string;
+  category?: FailureCategory;
+}
+
+export interface FailureMemoryEntry {
+  key: string;
+  reason: string;
+  count: number;
+  consecutive: number;
+  firstAt: number;
+  lastAt: number;
+  scriptType?: string;
+  endpoint?: string;
+  targetId?: string;
+  targetName?: string;
+  category?: FailureCategory;
+}
+
+export function actionIdle(reason?: string): ActionResult {
+  return { status: "idle", reason };
+}
+
+export function actionProgressed(reason?: string): ActionResult {
+  return { status: "progressed", reason };
+}
+
+export function actionCompleted(reason?: string): ActionResult {
+  return { status: "completed", reason };
+}
+
+export function actionBlocked(
+  reason: string,
+  options: Omit<ActionResult, "status" | "reason"> = {},
+): ActionResult {
+  return {
+    status: "blocked",
+    reason,
+    category: options.category ?? classifyFailureReason(reason),
+    ...options,
+  };
+}
+
+export function classifyFailureReason(reason: string | undefined): FailureCategory {
+  const text = String(reason ?? "").toLowerCase();
+  if (!text) return "transient";
+  if (
+    text.includes("insufficient gold")
+    || text.includes("no talk quest available")
+    || text.includes("wrong class")
+    || text.includes("already learned")
+    || text.includes("must learn")
+    || text.includes("missing ingredients")
+    || text.includes("can't afford")
+    || text.includes("merchant has nothing")
+    || text.includes("no merchant")
+    || text.includes("no forge")
+    || text.includes("no alchemy lab")
+    || text.includes("no campfire")
+    || text.includes("no enchanting altar")
+    || text.includes("no resource nodes")
+    || text.includes("no eligible mobs")
+  ) {
+    return "strategic";
+  }
+  return "transient";
+}
+
 /**
  * Extract the raw character name from an NFT-formatted name.
  * "Zephyr the Mage" → "Zephyr"
@@ -76,6 +182,9 @@ export interface AgentContext {
       | { action: "attack"; targetId: string }
       | { action: "travel"; targetZone: string },
   ): boolean;
+  isInteractionOnCooldown(key: string): boolean;
+  setInteractionCooldown(key: string, ms: number): void;
+  clearInteractionCooldown(key: string): void;
   logActivity(text: string): void;
   setEntityGotoMode(on: boolean): void;
   getWalletBalance(): Promise<{ copper: number; items: any[] }>;

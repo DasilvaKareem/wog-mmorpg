@@ -44,6 +44,7 @@ export type TriggerType =
   | "zone_arrived"    // arrived in a new zone — orient and plan
   | "script_done"     // script completed its goal (travel arrived, fully equipped)
   | "no_targets"      // nothing to do with current script (zone cleared, no nodes)
+  | "blocked"         // action failed repeatedly with a concrete reason
   | "user_directive"  // user changed focus via chat — re-evaluate
   | "stuck"           // script running too long with no progress (~30s)
   | "periodic";       // max-stale safety net (~30s)
