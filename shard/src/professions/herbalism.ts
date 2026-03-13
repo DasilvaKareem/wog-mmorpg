@@ -191,6 +191,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         message: `${entity.name}: Gathered ${flowerProps.label}`,
         entityId: entity.id,
         entityName: entity.name,
+        data: { gatherType: "herbalism", itemName: flowerProps.label, nodeId: flowerNodeId },
       });
 
       // Advance gather quest progress

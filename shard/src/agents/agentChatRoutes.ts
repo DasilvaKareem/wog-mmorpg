@@ -4,6 +4,7 @@
  * POST /agent/deploy    — Create custodial wallet + mint char + start agent loop
  * POST /agent/stop      — Stop the agent loop
  * GET  /agent/status/:wallet — Get agent running status + config
+ * POST /agent/recommend  — AI-powered dynamic recommendations for what to do next
  */
 
 import type { FastifyInstance } from "fastify";
@@ -23,22 +24,28 @@ import {
   defaultConfig,
   getDeployCount,
   incrementDeployCount,
+  getSummonerQuestion,
+  replySummonerQuestion,
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
+import { sendAgentPush } from "./agentPushService.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getRedis } from "../redis.js";
-import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
-import { getWorldLayout, resolveRegionId } from "../world/worldLayout.js";
+import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
+import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
+import { getAgentOrigin } from "./agentDialogue.js";
+import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
@@ -548,6 +555,266 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     });
   });
 
+  // ── POST /agent/recommend ────────────────────────────────────────────────
+  // AI-powered recommendations — the player presses a button and gets 3
+  // dynamic, context-aware suggestions for what their agent should do next.
+  server.post("/agent/recommend", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+
+    const config = await getAgentConfig(authWallet);
+    if (!config) {
+      return reply.code(404).send({ error: "No agent found. Deploy your agent first." });
+    }
+
+    const gameState = await getFullGameState(authWallet);
+    const custodialWallet = await getAgentCustodialWallet(authWallet);
+    if (!gameState?.entity) {
+      return reply.code(404).send({ error: "Agent entity not found in world." });
+    }
+
+    const entity = gameState.entity;
+    const region = entity.region ?? gameState.ref?.zoneId ?? "village-square";
+    const hpPct = Math.round((entity.hp / Math.max(entity.maxHp, 1)) * 100);
+    const myLevel = entity.level ?? 1;
+
+    // ── Gather rich context ─────────────────────────────────────────────────
+
+    // Equipment
+    const eq = entity.equipment ?? {};
+    const equipped = Object.entries(eq)
+      .filter(([, v]) => v != null)
+      .map(([slot, item]: any) => `${slot}: ${item.name ?? `#${item.tokenId}`}${item.broken ? " (BROKEN)" : ""}`)
+      .join(", ") || "nothing";
+
+    // Inventory + gold
+    let goldCopper = 0;
+    let inventorySummary = "unknown";
+    if (custodialWallet) {
+      try {
+        const inv = await fetchLiquidationInventory(custodialWallet);
+        goldCopper = inv.copper;
+        const items = inv.items
+          .filter((i: any) => Number(i.balance) > 0)
+          .map((i: any) => `${i.name} x${i.balance} (${i.category})`)
+          .slice(0, 15);
+        inventorySummary = items.length > 0 ? items.join(", ") : "empty";
+      } catch { /* non-fatal */ }
+    }
+    const goldDisplay = goldCopper >= 10000
+      ? `${(goldCopper / 10000).toFixed(2)} gold`
+      : `${goldCopper} copper`;
+
+    // Nearby mobs, NPCs, nodes, players
+    const nearby = gameState.nearby ?? [];
+    const nearbyMobs = nearby
+      .filter((e: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0)
+      .slice(0, 6)
+      .map((e: any) => `${e.name} (L${e.level ?? "?"})`)
+      .join(", ") || "none";
+    const nearbyNodes = nearby
+      .filter((e: any) => e.type === "ore-node" || e.type === "flower-node")
+      .slice(0, 4)
+      .map((e: any) => e.name)
+      .join(", ") || "none";
+    const nearbyPlayers = nearby
+      .filter((e: any) => e.type === "player")
+      .slice(0, 4)
+      .map((e: any) => `${e.name} (L${e.level ?? "?"})`)
+      .join(", ") || "none";
+
+    // Available quests
+    const completedQuestIds = entity.completedQuests ?? [];
+    const activeQuestIds = (entity.activeQuests ?? []).map((q: any) => q.questId);
+    const activeQuestDescs = (entity.activeQuests ?? [])
+      .map((q: any) => `${q.questId} (progress: ${q.progress})`)
+      .join(", ") || "none";
+    const availableQuests: string[] = [];
+    for (const zoneEntity of getEntitiesInRegion(region)) {
+      if (!isQuestNpc(zoneEntity)) continue;
+      const quests = getAvailableQuestsForPlayer(zoneEntity.name, completedQuestIds, activeQuestIds);
+      for (const q of quests) {
+        availableQuests.push(`"${q.title}" from ${zoneEntity.name}`);
+      }
+    }
+
+    // Professions
+    let professions = "none";
+    if (custodialWallet) {
+      try {
+        const learned = getLearnedProfessions(custodialWallet);
+        professions = learned.length > 0 ? learned.join(", ") : "none learned";
+      } catch { /* non-fatal */ }
+    }
+
+    // Zone connections
+    const connections = getZoneConnections(region).map((z) => {
+      const req = ZONE_LEVEL_REQUIREMENTS[z] ?? 1;
+      const accessible = myLevel >= req;
+      return `${z} (L${req}${accessible ? "" : " LOCKED"})`;
+    }).join(", ") || "none";
+
+    // Techniques
+    const techniques = (entity.learnedTechniques ?? []).join(", ") || "none";
+
+    // Current agent state
+    const runner = agentManager.getRunner(authWallet);
+    const currentActivity = runner?.currentActivity ?? "Idle";
+    const recentActivities = runner?.recentActivities?.slice(-5).join(" → ") ?? "none";
+
+    // ── Build AI prompt ──────────────────────────────────────────────────────
+
+    const prompt = `You are a strategic advisor for a player's AI champion in World of Geneva, an MMORPG.
+
+CHARACTER STATE:
+  Name: ${entity.name ?? "Unknown"} | Level ${myLevel} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"}
+  HP: ${entity.hp}/${entity.maxHp} (${hpPct}%) | Gold: ${goldDisplay}
+  Region: ${region} | Current focus: ${config.focus} | Strategy: ${config.strategy}
+  Equipped: ${equipped}
+  Techniques: ${techniques}
+  Professions: ${professions}
+
+INVENTORY: ${inventorySummary}
+
+SURROUNDINGS:
+  Nearby mobs: ${nearbyMobs}
+  Nearby nodes: ${nearbyNodes}
+  Nearby players: ${nearbyPlayers}
+  Available quests: ${availableQuests.length > 0 ? availableQuests.join("; ") : "none in this zone"}
+  Active quests: ${activeQuestDescs}
+  Zone connections: ${connections}
+
+RECENT ACTIVITY: ${recentActivities}
+CURRENT: ${currentActivity}
+
+Generate exactly 3 recommendations. Each should be a DIFFERENT type of activity — do NOT suggest 3 combat variants. Think creatively: questing, exploring new zones, crafting, gathering, trading, learning new techniques, socializing, shopping for upgrades, brewing potions.
+
+Consider:
+- What's the most impactful thing for progression right now?
+- What's something fun/different from what the agent has been doing?
+- What's a strategic long-term play (gear, professions, zone unlocks)?
+
+Respond ONLY with valid JSON, no markdown, no explanation:
+{
+  "recommendations": [
+    {
+      "title": "short catchy title (3-6 words)",
+      "description": "1 sentence explaining why this is a good idea right now",
+      "focus": "the AgentFocus value to set",
+      "strategy": "aggressive|balanced|defensive",
+      "targetZone": "zone-id or null",
+      "priority": "high|medium|low",
+      "icon": "one emoji that fits"
+    }
+  ]
+}
+
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, learning, idle
+Zone IDs: ${availableZoneIds.join(", ")}`;
+
+    // ── Call Gemini ──────────────────────────────────────────────────────────
+
+    if (!process.env.GOOGLE_CLOUD_PROJECT && !process.env.GEMINI_API_KEY) {
+      return reply.code(503).send({ error: "AI not configured" });
+    }
+
+    try {
+      const res = await gemini.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        config: {
+          temperature: 0.8,
+          maxOutputTokens: 512,
+        },
+      });
+
+      const raw = res.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!raw) {
+        return reply.code(500).send({ error: "AI returned empty response" });
+      }
+
+      // Parse JSON — strip markdown fences if present
+      const jsonStr = raw.replace(/^```json?\s*/i, "").replace(/\s*```$/i, "").trim();
+      let parsed: any;
+      try {
+        parsed = JSON.parse(jsonStr);
+      } catch {
+        server.log.warn(`[recommend] Failed to parse AI response: ${raw.slice(0, 200)}`);
+        return reply.code(500).send({ error: "AI returned invalid JSON" });
+      }
+
+      const recommendations = (parsed.recommendations ?? []).slice(0, 3).map((rec: any) => ({
+        title: String(rec.title ?? "").slice(0, 60),
+        description: String(rec.description ?? "").slice(0, 200),
+        focus: String(rec.focus ?? "combat"),
+        strategy: String(rec.strategy ?? "balanced"),
+        targetZone: rec.targetZone || null,
+        priority: String(rec.priority ?? "medium"),
+        icon: String(rec.icon ?? "").slice(0, 4),
+      }));
+
+      return reply.send({
+        recommendations,
+        context: {
+          level: myLevel,
+          region,
+          gold: goldCopper,
+          currentFocus: config.focus,
+        },
+      });
+    } catch (err: any) {
+      server.log.warn(`[recommend] AI call failed: ${err.message?.slice(0, 100)}`);
+      return reply.code(500).send({ error: "AI recommendation failed" });
+    }
+  });
+
+  // ── POST /agent/recommend/apply ──────────────────────────────────────────
+  // Apply a recommendation — player presses one of the 3 suggestion buttons.
+  server.post<{
+    Body: { focus: string; strategy?: string; targetZone?: string; title?: string };
+  }>("/agent/recommend/apply", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { focus, strategy, targetZone, title } = request.body;
+
+    if (!focus) {
+      return reply.code(400).send({ error: "focus is required" });
+    }
+
+    const validFocuses = new Set([
+      "questing", "combat", "gathering", "crafting", "enchanting",
+      "alchemy", "cooking", "shopping", "trading", "traveling", "learning", "idle",
+    ]);
+    if (!validFocuses.has(focus)) {
+      return reply.code(400).send({ error: `Invalid focus: ${focus}` });
+    }
+
+    const patch: Record<string, unknown> = { focus };
+    if (strategy && ["aggressive", "balanced", "defensive"].includes(strategy)) {
+      patch.strategy = strategy;
+    }
+    if (targetZone && focus === "traveling") {
+      const normalized = resolveRegionId(targetZone);
+      if (normalized) patch.targetZone = normalized;
+    }
+
+    await patchAgentConfig(authWallet, patch);
+
+    // Clear the runner's current script so it picks up the new focus immediately
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) runner.clearScript();
+
+    server.log.info(`[recommend/apply] ${authWallet.slice(0, 8)} applied: ${title ?? focus} (${strategy ?? "balanced"})`);
+
+    return reply.send({
+      ok: true,
+      applied: { focus, strategy: strategy ?? "balanced", targetZone: targetZone ?? null },
+      message: title ? `Now doing: ${title}` : `Focus changed to ${focus}`,
+    });
+  });
+
   // ── POST /agent/chat ──────────────────────────────────────────────────────
   server.post<{
     Body: { message: string };
@@ -559,6 +826,21 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     if (!message?.trim()) {
       return reply.code(400).send({ error: "message is required" });
+    }
+
+    // ── Slash command intercept — instant, no AI ───────────────────────────
+    if (message.trim().startsWith("/")) {
+      const cmdResult = await handleSlashCommand(message, authWallet);
+      if (cmdResult) {
+        // Save to chat history so it appears in conversation
+        await appendChatMessage(authWallet, { role: "user", text: message, ts: Date.now() });
+        await appendChatMessage(authWallet, { role: "agent", text: cmdResult.response, ts: Date.now() });
+        return reply.send({
+          response: cmdResult.response,
+          configUpdated: cmdResult.configChanged ?? false,
+          isCommand: true,
+        });
+      }
     }
 
     const config = await getAgentConfig(authWallet);
@@ -604,6 +886,14 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
     if (!charName) charName = "Unknown";
 
+    // Load character origin for personality
+    let charOrigin: string | null = null;
+    if (custodialWallet && charName !== "Unknown") {
+      try {
+        charOrigin = await getAgentOrigin(custodialWallet, charName);
+      } catch { /* non-fatal */ }
+    }
+
     const nearbyDesc = nearby
       .map((e: any) => `${e.name} (${e.type}, L${e.level ?? "?"}, HP ${e.hp}/${e.maxHp})`)
       .join(", ") || "none visible";
@@ -642,28 +932,37 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       .filter((m) => m.role === "user" || m.text.length > 0)
       .slice(-10);
 
+    // Build personality block from origin
+    const ORIGIN_PERSONALITIES: Record<string, string> = {
+      sunforged: `PERSONALITY: You are Sunforged — brave, honorable, and steadfast. You speak with conviction and purpose, referencing duty, the light, and protecting the weak. You are noble but not preachy — think paladin energy. Short, strong statements. "For the dawn." "Another oath kept."`,
+      veilborn: `PERSONALITY: You are Veilborn — cunning, calculating, and sharp-tongued. You speak in clipped, observant phrases. You notice everything. Dry wit, subtle menace, efficient. Think rogue/spy energy. "Noted." "They never saw me coming." "...interesting."`,
+      dawnkeeper: `PERSONALITY: You are Dawnkeeper — warm, curious, and genuinely kind. You speak with enthusiasm and care about others. Optimistic but not naive. Think healer/friend energy. "That's exciting!" "Anyone need a hand?" "What a beautiful place."`,
+      ironvow: `PERSONALITY: You are Ironvow — ruthless, blunt, and hungry for power. You speak in short, aggressive bursts. No patience for weakness or small talk. Think gladiator energy. "Weak." "Next." "Show me a real challenge."`,
+    };
+    const personalityBlock = charOrigin && ORIGIN_PERSONALITIES[charOrigin]
+      ? `\n${ORIGIN_PERSONALITIES[charOrigin]}\n`
+      : "\nPERSONALITY: You are a seasoned adventurer — practical, direct, and grounded. Speak naturally.\n";
+
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva.
 Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
 Current focus: ${config.focus} | Strategy: ${config.strategy}
 Nearby: ${nearbyDesc}
 Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
-Interaction mode: ${interactionMode}
-
+${personalityBlock}
 RULES:
-1. Respond in character as ${charName}. Sound like a person in the world, not an operator panel.
-2. BE BRIEF. 1-2 short sentences max. No monologues, no essays. Say what you're doing and move on. Think terse RPG companion, not narrator.
-3. If the user is chatting or being social, stay conversational. Do NOT mention focus, strategy, tools, configs, or internal mechanics unless the user asked.
-4. Only call update_focus when the user is clearly asking you to change your ongoing behavior. Do NOT treat casual banter as a control command.
-5. Call take_action for one-off actions: learning a profession, learning a technique from a trainer (use learn_technique), buying an item, equipping gear.
-6. You can call BOTH tools in one response if needed.
-7. If focus is traveling, targetZone MUST be a canonical zone ID from: ${availableZoneIds.join(", ")}
-8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when the user asks about surroundings, gear, items, recipes, or quests. Call these tools BEFORE answering.
-9. Use send_message to communicate with nearby players. Match by name and use their wallet address.
-10. After any tool result, explain what happened briefly. Never use bracket tags or canned acknowledgements.
+1. Stay in character. Your personality colors EVERY response — word choice, tone, attitude. You are NOT a game UI or assistant.
+2. BE BRIEF. 1-2 short sentences max. Terse RPG companion, not narrator.
+3. If the user is chatting, stay conversational. Never mention focus, strategy, tools, or configs unless asked.
+4. Only call update_focus when the user clearly wants to change behavior. Casual chat is NOT a command.
+5. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
+6. If focus is traveling, targetZone MUST be one of: ${availableZoneIds.join(", ")}
+7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
+8. Use send_message to talk to nearby players.
+9. After tool results, explain briefly in character. No bracket tags.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
-Strategy options: aggressive (fight higher-level mobs), balanced (default), defensive (fight lower, flee early)`;
+Strategy options: aggressive, balanced, defensive`;
 
     // Get MCP client from the runner if available
     const runner = agentManager.getRunner(authWallet);
@@ -772,15 +1071,16 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
       },
     ];
 
-    // When MCP is connected, replace hardcoded read tools with the full MCP tool surface
+    // When MCP is connected, replace hardcoded read tools with curated MCP subset
+    // Using chatOnly=true to keep tool count low (~13 MCP + 3 local = ~16 total)
+    // instead of dumping all ~60 MCP tools which bloats token count and confuses the LLM
     if (mcpClient) {
-      // Remove hardcoded read tools — MCP equivalents are richer
       const localOnlyTools = new Set(["update_focus", "take_action", "send_message"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
-      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true);
+      const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
       chatToolDecls.length = 0;
       chatToolDecls.push(...localTools, ...mcpTools);
-      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools`);
+      server.log.info(`[agent/chat] MCP connected — ${mcpTools.length} MCP tools + ${localTools.length} local tools (curated)`);
     }
 
     const fullSystemInstruction = recentActivity
@@ -1610,5 +1910,58 @@ Strategy options: aggressive (fight higher-level mobs), balanced (default), defe
         ? `Promo code applied! Upgraded to ${tier} tier with ${goldBonus} gold bonus.`
         : `Upgraded to ${tier} tier! ${goldBonus} gold bonus minted.`,
     });
+  });
+
+  // ── Champion Questions ────────────────────────────────────────────────────
+
+  /**
+   * GET /agent/question/:wallet — Get the current pending question (if any).
+   * Returns { ok, question } where question is null or PendingQuestion.
+   */
+  server.get<{
+    Params: { wallet: string };
+  }>("/agent/question/:wallet", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet: string = (request as any).walletAddress;
+    const { wallet } = request.params;
+
+    if (wallet.toLowerCase() !== authWallet.toLowerCase()) {
+      return reply.code(403).send({ error: "Cannot view another agent's questions" });
+    }
+
+    const question = await getSummonerQuestion(authWallet);
+    return reply.send({ ok: true, question });
+  });
+
+  /**
+   * POST /agent/question/reply — Summoner answers a champion's question.
+   * Body: { questionId: string, reply: string }
+   */
+  server.post<{
+    Body: { questionId: string; reply: string };
+  }>("/agent/question/reply", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet: string = (request as any).walletAddress;
+    const { questionId, reply: answer } = request.body ?? {};
+
+    if (!questionId || !answer) {
+      return reply.code(400).send({ error: "Missing questionId or reply" });
+    }
+
+    const updated = await replySummonerQuestion(authWallet, questionId, answer);
+    if (!updated) {
+      return reply.code(404).send({ error: "No matching pending question found, or invalid choice" });
+    }
+
+    // Post the answer to chat so both sides see it
+    await appendChatMessage(authWallet, {
+      role: "user",
+      text: `[Reply: ${answer}]`,
+      ts: Date.now(),
+    });
+
+    return reply.send({ ok: true, question: updated });
   });
 }

@@ -72,6 +72,24 @@ const SUPERVISOR_TOOLS = new Set([
   "quests_get_catalog",
 ]);
 
+/** Chat allowlist — curated subset for user-facing chat. Keeps tool count low
+ *  so Gemini responds fast and doesn't get confused by 60+ tools. */
+const CHAT_TOOLS = new Set([
+  "scan_zone",
+  "get_my_status",
+  "find_mobs_for_level",
+  "items_get_inventory",
+  "shop_get_catalog",
+  "what_can_i_craft",
+  "quests_get_active",
+  "quests_get_catalog",
+  "world_list_zones",
+  "fight_until_dead",
+  "grind_mobs",
+  "travel_to_zone",
+  "navigate_to_npc",
+]);
+
 export class AgentMcpClient {
   private client: Client | null = null;
   private transport: StreamableHTTPClientTransport | null = null;
@@ -192,14 +210,16 @@ export class AgentMcpClient {
    *
    * @param includeBlocking If false, blocking tools (fight_until_dead, grind_mobs, etc.) are excluded.
    * @param supervisorOnly If true, only return the small set of read tools the supervisor needs.
+   * @param chatOnly If true, only return the curated chat subset (~13 tools instead of ~60).
    */
-  getGeminiTools(includeBlocking = true, supervisorOnly = false): FunctionDeclaration[] {
+  getGeminiTools(includeBlocking = true, supervisorOnly = false, chatOnly = false): FunctionDeclaration[] {
     const decls: FunctionDeclaration[] = [];
 
     for (const tool of this.tools) {
       if (HIDDEN_TOOLS.has(tool.name)) continue;
       if (!includeBlocking && BLOCKING_TOOLS.has(tool.name)) continue;
       if (supervisorOnly && !SUPERVISOR_TOOLS.has(tool.name)) continue;
+      if (chatOnly && !CHAT_TOOLS.has(tool.name)) continue;
 
       // Deep clone schema so we can strip auto-inject params
       const schema = structuredClone(tool.inputSchema) as any;

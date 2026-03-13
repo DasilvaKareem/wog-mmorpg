@@ -18,7 +18,8 @@ export type AgentPushType =
   | "loot_rare"
   | "technique_learned"
   | "session_ended"
-  | "agent_message";
+  | "agent_message"
+  | "champion_question";
 
 export interface AgentPushEvent {
   type: AgentPushType;
@@ -112,6 +113,12 @@ function buildPayload(event: AgentPushEvent): PushPayload {
         title: agentName,
         body: detail ?? "",
         tag: `wog-agent-msg`,
+      };
+    case "champion_question":
+      return {
+        title: `${agentName} needs your decision`,
+        body: detail ?? "Your champion has a question for you!",
+        tag: `wog-agent-question`,
       };
   }
 }

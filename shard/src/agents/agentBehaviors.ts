@@ -615,6 +615,18 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
       const priceCopper = cheapest.currentPrice ?? cheapest.copperPrice ?? cheapest.buyPrice ?? 0;
       if (priceCopper > copperBalance) continue;
 
+      // Ask summoner before expensive purchases (> 50% of balance)
+      if (priceCopper > copperBalance * 0.5) {
+        const goldPrice = Math.round(priceCopper / 100);
+        const goldBalance = Math.round(copperBalance / 100);
+        const asked = await ctx.askSummoner(
+          `Buy ${cheapest.name ?? `item #${cheapest.tokenId}`} (${slot}) for ${goldPrice}g? I have ${goldBalance}g.`,
+          ["Yes", "No"],
+          { action: "buy", tokenId: cheapest.tokenId, slot, price: priceCopper },
+        );
+        if (asked) return actionProgressed("Waiting for summoner approval on purchase");
+      }
+
       const tokenId = Number(cheapest.tokenId);
       const bought = await ctx.buyItem(tokenId);
       if (!bought) continue;

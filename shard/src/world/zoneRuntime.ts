@@ -8,6 +8,7 @@ import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
 import { type ProfessionType, getLearnedProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
+import { CROP_CATALOG, GROWTH_MULTIPLIERS, type CropType } from "../farming/cropCatalog.js";
 import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
@@ -24,6 +25,7 @@ import {
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSystem.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "../social/diary.js";
+import { getGameTime, checkPhaseTransition, formatGameTime } from "./worldClock.js";
 import { recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { upsertItemInstanceFromEquipment } from "../items/itemRng.js";
@@ -137,6 +139,10 @@ export interface Entity {
   flowerType?: FlowerType;
   /** Nectar node fields. */
   nectarType?: string;
+  /** Crop node fields. */
+  cropType?: CropType;
+  /** Accumulated fractional growth toward respawn (time-of-day scaled). */
+  growthProgress?: number;
   /** Profession trainer fields. */
   teachesProfession?: ProfessionType;
   /** Class trainer fields. */
@@ -1394,7 +1400,7 @@ function moveToward(
       if (other.id === entity.id) continue;
       if ((other.hp ?? 0) <= 0) continue; // ignore corpses/dead
       if (other.type === "flower-node" || other.type === "ore-node" ||
-          other.type === "nectar-node" || other.type === "corpse") continue;
+          other.type === "nectar-node" || other.type === "crop-node" || other.type === "corpse") continue;
       const ox = nx - other.x;
       const oy = ny - other.y;
       const oDist = Math.sqrt(ox * ox + oy * oy);
@@ -1414,6 +1420,27 @@ function moveToward(
 
 async function worldTick() {
   world.tick++;
+
+  // Broadcast day/night phase transitions to all zones
+  const newPhase = checkPhaseTransition(world.tick);
+  if (newPhase) {
+    const gt = getGameTime(world.tick);
+    const phaseMessages: Record<string, string> = {
+      dawn: `The sun rises over the horizon. Day ${gt.day} begins.`,
+      day: "Bright sunlight fills the land.",
+      dusk: "The sun sets, casting long shadows across the world.",
+      night: "Darkness falls. The night creatures stir.",
+    };
+    for (const zone of getAllZones().values()) {
+      logZoneEvent({
+        zoneId: zone.zoneId,
+        tick: world.tick,
+        type: "system",
+        message: phaseMessages[newPhase],
+        data: { phase: newPhase, gameTime: gt },
+      });
+    }
+  }
 
   for (const zone of getAllZones().values()) {
 
@@ -2082,7 +2109,7 @@ async function worldTick() {
     for (const e of zone.entities.values()) {
       if ((e.hp ?? 0) <= 0) continue;
       if (e.type === "flower-node" || e.type === "ore-node" ||
-          e.type === "nectar-node" || e.type === "corpse") continue;
+          e.type === "nectar-node" || e.type === "crop-node" || e.type === "corpse") continue;
       livingEntities.push(e);
     }
     // Run 3 passes for better convergence when many entities cluster
@@ -2303,6 +2330,24 @@ async function worldTick() {
       }
     }
 
+    // Respawn depleted crop nodes — growth speed varies by time of day
+    const currentPhase = getGameTime(zone.tick).phase;
+    for (const entity of zone.entities.values()) {
+      if (entity.type === "crop-node" && entity.depletedAtTick != null) {
+        const cropProps = entity.cropType ? CROP_CATALOG[entity.cropType as CropType] : null;
+        const pref = cropProps?.preferredPhase ?? "any";
+        const growthMult = GROWTH_MULTIPLIERS[pref][currentPhase];
+        // Accumulate fractional growth progress instead of raw tick delta
+        entity.growthProgress = (entity.growthProgress ?? 0) + growthMult;
+        const required = entity.respawnTicks ?? 120;
+        if (entity.growthProgress >= required) {
+          entity.charges = entity.maxCharges;
+          entity.depletedAtTick = undefined;
+          entity.growthProgress = 0;
+        }
+      }
+    }
+
     // Cleanup expired corpses
     const now = Date.now();
     const corpsesToRemove: string[] = [];
@@ -2436,10 +2481,11 @@ export function registerZoneRuntime(server: FastifyInstance) {
         return { error: "Zone not found" };
       }
       const zone = getOrCreateZone(zoneId);
-      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 8000, ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot"]);
+      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 8000, ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"]);
       return {
         zoneId: zone.zoneId,
         tick: zone.tick,
+        gameTime: getGameTime(zone.tick),
         entities: Object.fromEntries(
           Array.from(zone.entities.entries()).map(([id, entity]) => [
             id,
@@ -2450,4 +2496,10 @@ export function registerZoneRuntime(server: FastifyInstance) {
       };
     }
   );
+
+  // Global game time endpoint
+  server.get("/time", async () => {
+    const gt = getGameTime(world.tick);
+    return { tick: world.tick, gameTime: gt, formatted: formatGameTime(gt) };
+  });
 }

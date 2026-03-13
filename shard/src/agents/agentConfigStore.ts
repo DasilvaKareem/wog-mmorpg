@@ -27,9 +27,26 @@ export type AgentFocus =
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 
 export interface ChatMessage {
-  role: "user" | "agent" | "activity";
+  role: "user" | "agent" | "activity" | "question";
   text: string;
   ts: number;
+  /** Present only when role === "question" */
+  questionId?: string;
+  /** Answer choices, e.g. ["Yes", "No"] */
+  choices?: string[];
+}
+
+/** A pending champion→summoner question awaiting a reply. */
+export interface PendingQuestion {
+  questionId: string;
+  text: string;
+  choices: string[];
+  /** Extra context the agent stores for itself to act on the reply */
+  context?: Record<string, unknown>;
+  askedAt: number;
+  expiresAt: number;
+  reply?: string;
+  repliedAt?: number;
 }
 
 export interface AgentConfig {
@@ -286,4 +303,121 @@ export async function clearAgentEntityRef(userWallet: string): Promise<void> {
     assertRedisAvailable("clearAgentEntityRef");
   }
   memEntity.delete(key);
+}
+
+// ── Champion Questions ──────────────────────────────────────────────────────
+
+function questionKey(k: string) { return `agent:question:${k.toLowerCase()}`; }
+const memQuestions = new Map<string, PendingQuestion>();
+
+/** Default question TTL — 2 minutes */
+const QUESTION_TTL_MS = 2 * 60_000;
+
+let questionIdCounter = 0;
+
+/**
+ * Champion asks the summoner a question. Only one pending question at a time.
+ * Returns the questionId.
+ */
+export async function askSummonerQuestion(
+  userWallet: string,
+  text: string,
+  choices: string[] = ["Yes", "No"],
+  context?: Record<string, unknown>,
+): Promise<PendingQuestion> {
+  const key = userWallet.toLowerCase();
+  const now = Date.now();
+  const question: PendingQuestion = {
+    questionId: `q-${now}-${++questionIdCounter}`,
+    text,
+    choices,
+    context,
+    askedAt: now,
+    expiresAt: now + QUESTION_TTL_MS,
+  };
+
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(questionKey(key), JSON.stringify(question), "PX", QUESTION_TTL_MS);
+      return question;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("askSummonerQuestion");
+  }
+  memQuestions.set(key, question);
+  return question;
+}
+
+/** Get the current pending question (if any). Returns null if expired or none. */
+export async function getSummonerQuestion(userWallet: string): Promise<PendingQuestion | null> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(questionKey(key));
+      if (!raw) return null;
+      const q = JSON.parse(raw) as PendingQuestion;
+      if (Date.now() > q.expiresAt && !q.reply) return null;
+      return q;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getSummonerQuestion");
+  }
+  const q = memQuestions.get(key);
+  if (!q) return null;
+  if (Date.now() > q.expiresAt && !q.reply) { memQuestions.delete(key); return null; }
+  return q;
+}
+
+/** Summoner replies to the pending question. Returns the updated question or null if not found. */
+export async function replySummonerQuestion(
+  userWallet: string,
+  questionId: string,
+  reply: string,
+): Promise<PendingQuestion | null> {
+  const key = userWallet.toLowerCase();
+  const existing = await getSummonerQuestion(userWallet);
+  if (!existing || existing.questionId !== questionId) return null;
+  if (!existing.choices.map(c => c.toLowerCase()).includes(reply.toLowerCase())) return null;
+
+  existing.reply = reply;
+  existing.repliedAt = Date.now();
+
+  const redis = getRedis();
+  if (redis) {
+    try {
+      // Keep for 30s after reply so the agent runner picks it up
+      await redis.set(questionKey(key), JSON.stringify(existing), "PX", 30_000);
+      return existing;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("replySummonerQuestion");
+  }
+  memQuestions.set(key, existing);
+  return existing;
+}
+
+/** Clear the pending question after the agent has processed the reply. */
+export async function clearSummonerQuestion(userWallet: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.del(questionKey(key));
+      memQuestions.delete(key);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("clearSummonerQuestion");
+  }
+  memQuestions.delete(key);
 }

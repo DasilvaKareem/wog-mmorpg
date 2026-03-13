@@ -871,6 +871,140 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
       { tokenId: 72n, minQuantity: 8, maxQuantity: 12, chance: 0.9 }, // Ancient Bone
     ],
   },
+
+  // --- Farm Zone Mobs ---
+  "Wild Chicken": {
+    mobName: "Wild Chicken",
+    copperMin: 3, copperMax: 8,
+    autoDrops: [{ tokenId: 1n, minQuantity: 1, maxQuantity: 1, chance: 0.5 }],
+    skinningDrops: [{ tokenId: 68n, minQuantity: 1, maxQuantity: 1, chance: 0.4 }],
+  },
+  "Field Mouse": {
+    mobName: "Field Mouse",
+    copperMin: 2, copperMax: 6,
+    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [{ tokenId: 62n, minQuantity: 1, maxQuantity: 1, chance: 0.5 }],
+  },
+  "Scarecrow": {
+    mobName: "Scarecrow",
+    copperMin: 5, copperMax: 12,
+    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Sunflower Golem": {
+    mobName: "Sunflower Golem",
+    copperMin: 8, copperMax: 18,
+    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 3, chance: 0.5 }, { tokenId: 190n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [],
+  },
+  "Hay Elemental": {
+    mobName: "Hay Elemental",
+    copperMin: 10, copperMax: 22,
+    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Corn Stalker": {
+    mobName: "Corn Stalker",
+    copperMin: 12, copperMax: 25,
+    autoDrops: [{ tokenId: 201n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Mud Golem": {
+    mobName: "Mud Golem",
+    copperMin: 15, copperMax: 30,
+    autoDrops: [{ tokenId: 191n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, { tokenId: 197n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [],
+  },
+  "Vine Lurker": {
+    mobName: "Vine Lurker",
+    copperMin: 10, copperMax: 22,
+    autoDrops: [{ tokenId: 190n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [{ tokenId: 63n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }],
+  },
+  "Peat Golem": {
+    mobName: "Peat Golem",
+    copperMin: 14, copperMax: 28,
+    autoDrops: [{ tokenId: 197n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Bramble Wolf": {
+    mobName: "Bramble Wolf",
+    copperMin: 18, copperMax: 35,
+    autoDrops: [{ tokenId: 1n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }],
+    skinningDrops: [{ tokenId: 64n, minQuantity: 1, maxQuantity: 2, chance: 0.6 }, { tokenId: 65n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+  },
+  "Hedgerow Bear": {
+    mobName: "Hedgerow Bear",
+    copperMin: 25, copperMax: 45,
+    autoDrops: [{ tokenId: 1n, minQuantity: 2, maxQuantity: 3, chance: 0.6 }],
+    skinningDrops: [{ tokenId: 64n, minQuantity: 2, maxQuantity: 4, chance: 0.7 }, { tokenId: 66n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+  },
+  "Root Elemental": {
+    mobName: "Root Elemental",
+    copperMin: 22, copperMax: 40,
+    autoDrops: [{ tokenId: 190n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, { tokenId: 196n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [],
+  },
+  "Trellis Golem": {
+    mobName: "Trellis Golem",
+    copperMin: 28, copperMax: 50,
+    autoDrops: [{ tokenId: 190n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, { tokenId: 192n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Apple Treant": {
+    mobName: "Apple Treant",
+    copperMin: 30, copperMax: 55,
+    autoDrops: [{ tokenId: 211n, minQuantity: 2, maxQuantity: 4, chance: 0.6 }, { tokenId: 190n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Stone Golem": {
+    mobName: "Stone Golem",
+    copperMin: 30, copperMax: 55,
+    autoDrops: [{ tokenId: 191n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, { tokenId: 197n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Garden Phantom": {
+    mobName: "Garden Phantom",
+    copperMin: 35, copperMax: 65,
+    autoDrops: [{ tokenId: 213n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Enchanted Scarecrow": {
+    mobName: "Enchanted Scarecrow",
+    copperMin: 40, copperMax: 75,
+    autoDrops: [{ tokenId: 193n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, { tokenId: 196n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Iron Root Golem": {
+    mobName: "Iron Root Golem",
+    copperMin: 40, copperMax: 70,
+    autoDrops: [{ tokenId: 191n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, { tokenId: 192n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Stone Sentinel": {
+    mobName: "Stone Sentinel",
+    copperMin: 50, copperMax: 90,
+    autoDrops: [{ tokenId: 191n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, { tokenId: 197n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }],
+    skinningDrops: [],
+  },
+  "Crystal Sentinel": {
+    mobName: "Crystal Sentinel",
+    copperMin: 60, copperMax: 110,
+    autoDrops: [{ tokenId: 195n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, { tokenId: 198n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Bloom Golem": {
+    mobName: "Bloom Golem",
+    copperMin: 55, copperMax: 100,
+    autoDrops: [{ tokenId: 190n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, { tokenId: 196n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Terrace Guardian": {
+    mobName: "Terrace Guardian",
+    copperMin: 65, copperMax: 120,
+    autoDrops: [{ tokenId: 191n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, { tokenId: 195n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
 };
 
 // ── Economy scaling ─────────────────────────────────────────────────────────

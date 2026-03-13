@@ -171,6 +171,535 @@ export class AbilityEffectsLayer {
         this.fxCorruption(dst, sig);
         return true;
 
+      // ── WARRIOR R2/R3 + NEW ──────────────────────────────────────────
+      case "warrior_heroic_strike_r2":
+        this.fxSlashArc(dst, sig, 1.4);
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(5, 160);
+        return true;
+      case "warrior_heroic_strike_r3":
+        this.fxSlashArc(dst, sig, 2.0);
+        this.fxSlashArc(dst, sig, 2.0, -1);
+        this.fxShockwave(dst, sig, 2);
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(7, 220);
+        return true;
+      case "warrior_cleave_r2":
+        this.fxSlashArc(dst, sig, 2.2);
+        this.fxSlashArc(dst, sig, 2.2, -1);
+        this.fxShockwave(dst, sig, 2);
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(5, 180);
+        return true;
+      case "warrior_rallying_cry":
+        this.fxShockwave(src, sig, 4);
+        this.burst(sig, "buff", src);
+        this.fxScreenShake(3, 120);
+        return true;
+      case "warrior_rending_strike": {
+        this.fxSlashArc(dst, sig, 1.2);
+        // Blood drip particles
+        const bloodDrip = this.scene.add.particles(0, 0, TEX_DOT, {
+          x: dst.x, y: dst.y,
+          speed: { min: 8, max: 25 },
+          angle: { min: 200, max: 340 },
+          scale: { start: 0.3, end: 0.05 },
+          lifespan: 600,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, 0xcc0000],
+          alpha: { start: 0.9, end: 0 },
+          gravityY: 50,
+          emitting: false,
+        });
+        bloodDrip.setDepth(90);
+        bloodDrip.explode(8, dst.x, dst.y);
+        this.scene.time.delayedCall(700, () => bloodDrip.destroy());
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(4, 130);
+        return true;
+      }
+
+      // ── PALADIN R2/R3 + NEW ──────────────────────────────────────────
+      case "paladin_holy_smite_r2":
+        this.fxHolySmite(dst, sig);
+        this.fxScreenShake(4, 130);
+        return true;
+      case "paladin_holy_smite_r3":
+        this.fxHolySmite(dst, sig);
+        this.fxShockwave(dst, sig, 2);
+        this.fxScreenShake(6, 180);
+        return true;
+      case "paladin_judgment":
+        this.playProjectile(sig, techType, src, dst);
+        this.scene.time.delayedCall(250, () => {
+          this.fxHolySmite(dst, sig);
+          this.fxShockwave(dst, sig, 2);
+        });
+        return true;
+      case "paladin_aura_of_resolve":
+        // Expanding shield rings rising upward
+        for (let i = 0; i < 4; i++) {
+          this.scene.time.delayedCall(i * 150, () => {
+            const ring = this.scene.add.arc(src.x, src.y - i * 4, 6, 0, 360, false);
+            ring.setStrokeStyle(1.5, sig.primary, 0.7 - i * 0.12);
+            ring.setFillStyle();
+            ring.setDepth(92);
+            ring.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: ring,
+              scaleX: 3 + i, scaleY: 3 + i, alpha: 0, y: src.y - i * 4 - 10,
+              duration: 500, ease: "Sine.easeOut",
+              onComplete: () => ring.destroy(),
+            });
+          });
+        }
+        this.burst(sig, "buff", src);
+        return true;
+
+      // ── ROGUE R2/R3 + NEW ────────────────────────────────────────────
+      case "rogue_backstab_r2":
+        this.fxBackstab(src, dst, sig);
+        this.fxScreenShake(3, 80);
+        return true;
+      case "rogue_backstab_r3":
+        this.fxBackstab(src, dst, sig);
+        this.fxShockwave(dst, sig, 1);
+        this.fxScreenShake(5, 140);
+        return true;
+      case "rogue_smoke_bomb": {
+        // Dark cloud expanding with lingering particles
+        const cloud = this.scene.add.particles(0, 0, TEX_SOFT, {
+          x: dst.x, y: dst.y,
+          speed: { min: 10, max: 40 },
+          scale: { start: 0.8, end: 0.2 },
+          lifespan: 900,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, 0x444444],
+          alpha: { start: 0.6, end: 0 },
+          frequency: 40,
+        });
+        cloud.setDepth(90);
+        this.scene.time.delayedCall(600, () => {
+          cloud.stop();
+          this.scene.time.delayedCall(1000, () => cloud.destroy());
+        });
+        this.fxShockwave(dst, sig, 2);
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
+      case "rogue_blade_flurry":
+        // Rapid 3-slash arcs in sequence
+        for (let i = 0; i < 3; i++) {
+          this.scene.time.delayedCall(i * 80, () => {
+            this.fxSlashArc(dst, sig, 1.0 + i * 0.2, i % 2 === 0 ? 1 : -1);
+          });
+        }
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(4, 150);
+        return true;
+
+      // ── RANGER R2/R3 + NEW ───────────────────────────────────────────
+      case "ranger_aimed_shot_r2":
+        this.fxSniperShot(src, dst, sig);
+        this.fxScreenShake(3, 100);
+        return true;
+      case "ranger_aimed_shot_r3":
+        this.fxSniperShot(src, dst, sig);
+        this.fxShockwave(dst, sig, 2);
+        this.fxScreenShake(5, 150);
+        return true;
+      case "ranger_entangling_roots": {
+        // Vines spiraling up from ground + green particles
+        for (let i = 0; i < 6; i++) {
+          const angle = (Math.PI * 2 * i) / 6;
+          const vineX = dst.x + Math.cos(angle) * 8;
+          const vineY = dst.y + Math.sin(angle) * 8;
+          const vine = this.scene.add.graphics();
+          vine.setDepth(91);
+          vine.setBlendMode(Phaser.BlendModes.ADD);
+          vine.lineStyle(1.5, sig.primary, 0.8);
+          vine.beginPath();
+          vine.moveTo(vineX, vineY + 6);
+          vine.lineTo(vineX + Math.cos(angle) * 3, vineY - 4);
+          vine.lineTo(vineX, vineY - 10);
+          vine.strokePath();
+          vine.setAlpha(0);
+          this.scene.tweens.add({
+            targets: vine,
+            alpha: 1,
+            duration: 150,
+            delay: i * 60,
+            onComplete: () => {
+              this.scene.tweens.add({
+                targets: vine,
+                alpha: 0,
+                duration: 500, delay: 300,
+                onComplete: () => vine.destroy(),
+              });
+            },
+          });
+        }
+        const rootParticles = this.scene.add.particles(0, 0, TEX_SOFT, {
+          x: dst.x, y: dst.y,
+          speed: { min: 6, max: 18 },
+          angle: { min: 230, max: 310 },
+          scale: { start: 0.35, end: 0 },
+          lifespan: 650,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, sig.accent],
+          alpha: { start: 0.7, end: 0 },
+          emitting: false,
+        });
+        rootParticles.setDepth(90);
+        rootParticles.explode(10, dst.x, dst.y);
+        this.scene.time.delayedCall(750, () => rootParticles.destroy());
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
+      case "ranger_volley": {
+        // Rain of arrow lines falling from above + impacts
+        for (let i = 0; i < 8; i++) {
+          const offsetX = (Math.random() - 0.5) * 30;
+          const offsetY = (Math.random() - 0.5) * 20;
+          const tx = dst.x + offsetX;
+          const ty = dst.y + offsetY;
+          this.scene.time.delayedCall(i * 50, () => {
+            const arrow = this.scene.add.graphics();
+            arrow.setDepth(94);
+            arrow.setBlendMode(Phaser.BlendModes.ADD);
+            arrow.lineStyle(1.2, sig.accent, 0.9);
+            arrow.beginPath();
+            arrow.moveTo(tx, ty - 30);
+            arrow.lineTo(tx, ty - 22);
+            arrow.strokePath();
+            this.scene.tweens.add({
+              targets: arrow,
+              y: 30,
+              duration: 150, ease: "Quad.easeIn",
+              onComplete: () => {
+                arrow.destroy();
+                this.burst(sig, techType, { x: tx, y: ty });
+              },
+            });
+          });
+        }
+        this.fxScreenShake(4, 200);
+        return true;
+      }
+
+      // ── MAGE R2/R3 + NEW ─────────────────────────────────────────────
+      case "mage_fireball_r2":
+        this.playProjectile(sig, techType, src, dst);
+        this.fxScreenShake(5, 150);
+        return true;
+      case "mage_fireball_r3": {
+        this.playProjectile(sig, techType, src, dst);
+        this.fxScreenShake(7, 200);
+        // Ground fire embers on impact
+        this.scene.time.delayedCall(350, () => {
+          const embers = this.scene.add.particles(0, 0, TEX_SPARK, {
+            x: dst.x, y: dst.y,
+            speed: { min: 8, max: 30 },
+            scale: { start: 0.35, end: 0 },
+            lifespan: 700,
+            blendMode: Phaser.BlendModes.ADD,
+            tint: [sig.primary, sig.secondary, 0xff4400],
+            alpha: { start: 0.8, end: 0 },
+            gravityY: 25,
+            emitting: false,
+          });
+          embers.setDepth(89);
+          embers.explode(14, dst.x, dst.y);
+          this.scene.time.delayedCall(800, () => embers.destroy());
+        });
+        return true;
+      }
+      case "mage_frost_nova": {
+        // Ice crystal shards expanding + frozen rings
+        for (let i = 0; i < 8; i++) {
+          const angle = (Math.PI * 2 * i) / 8;
+          const shard = this.scene.add.graphics();
+          shard.setDepth(93);
+          shard.setBlendMode(Phaser.BlendModes.ADD);
+          shard.lineStyle(1.5, sig.accent, 0.9);
+          shard.beginPath();
+          shard.moveTo(src.x, src.y);
+          shard.lineTo(src.x + Math.cos(angle) * 6, src.y + Math.sin(angle) * 6);
+          shard.strokePath();
+          this.scene.tweens.add({
+            targets: shard,
+            x: Math.cos(angle) * 20, y: Math.sin(angle) * 20, alpha: 0,
+            duration: 300, ease: "Quad.easeOut",
+            delay: i * 25,
+            onComplete: () => shard.destroy(),
+          });
+        }
+        this.fxShockwave(src, sig, 3);
+        this.burst(sig, techType, src);
+        this.fxScreenShake(5, 160);
+        return true;
+      }
+      case "mage_mana_shield":
+        // Arcane ward circles forming around caster
+        for (let i = 0; i < 3; i++) {
+          this.scene.time.delayedCall(i * 120, () => {
+            const ward = this.scene.add.arc(src.x, src.y, 6 + i * 3, 0, 360, false);
+            ward.setStrokeStyle(1.5, i === 0 ? sig.accent : sig.primary, 0.7 - i * 0.15);
+            ward.setFillStyle();
+            ward.setDepth(92);
+            ward.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: ward,
+              scaleX: 2.5, scaleY: 2.5, alpha: 0,
+              duration: 600, ease: "Sine.easeOut",
+              onComplete: () => ward.destroy(),
+            });
+          });
+        }
+        this.burst(sig, "buff", src);
+        return true;
+
+      // ── CLERIC R2/R3 + NEW ───────────────────────────────────────────
+      case "cleric_holy_light_r2":
+        this.fxHolyLight(dst, sig);
+        this.burst(sig, "healing", dst);
+        return true;
+      case "cleric_holy_light_r3": {
+        this.fxHolyLight(dst, sig);
+        // Extra golden sparks
+        const holySpks = this.scene.add.particles(0, 0, TEX_SPARK, {
+          x: dst.x, y: dst.y,
+          speed: { min: 10, max: 30 },
+          scale: { start: 0.3, end: 0 },
+          lifespan: 500,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.accent, 0xffd700],
+          alpha: { start: 0.9, end: 0 },
+          emitting: false,
+        });
+        holySpks.setDepth(91);
+        holySpks.explode(12, dst.x, dst.y);
+        this.scene.time.delayedCall(600, () => holySpks.destroy());
+        this.burst(sig, "healing", dst);
+        return true;
+      }
+      case "cleric_holy_nova":
+        // Golden meteor impact from above + healing ring
+        this.fxMeteor(dst, sig);
+        this.scene.time.delayedCall(280, () => {
+          const healRing = this.scene.add.arc(dst.x, dst.y, 4, 0, 360, false);
+          healRing.setStrokeStyle(2, sig.accent, 0.8);
+          healRing.setFillStyle();
+          healRing.setDepth(91);
+          healRing.setBlendMode(Phaser.BlendModes.ADD);
+          this.scene.tweens.add({
+            targets: healRing,
+            scaleX: 6, scaleY: 6, alpha: 0,
+            duration: 500, ease: "Quad.easeOut",
+            onComplete: () => healRing.destroy(),
+          });
+        });
+        return true;
+      case "cleric_spirit_of_redemption": {
+        // Ascending spirit particles + golden aura
+        const spiritEmitter = this.scene.add.particles(0, 0, TEX_SOFT, {
+          x: src.x, y: src.y,
+          speed: { min: 5, max: 15 },
+          angle: { min: 250, max: 290 },
+          scale: { start: 0.5, end: 0.1 },
+          lifespan: 1000,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.accent, 0xffd700],
+          alpha: { start: 0.8, end: 0 },
+          frequency: 50,
+        });
+        spiritEmitter.setDepth(91);
+        // Golden aura ring
+        const aura = this.scene.add.arc(src.x, src.y, 8, 0, 360, false, sig.accent, 0.25);
+        aura.setDepth(88);
+        aura.setBlendMode(Phaser.BlendModes.ADD);
+        this.scene.tweens.add({
+          targets: aura,
+          scaleX: 3, scaleY: 3, alpha: 0,
+          duration: 1200, ease: "Sine.easeOut",
+          onComplete: () => aura.destroy(),
+        });
+        this.scene.time.delayedCall(1000, () => {
+          spiritEmitter.stop();
+          this.scene.time.delayedCall(1100, () => spiritEmitter.destroy());
+        });
+        this.burst(sig, "healing", src);
+        return true;
+      }
+
+      // ── WARLOCK R2/R3 + NEW ──────────────────────────────────────────
+      case "warlock_shadow_bolt_r2":
+        this.fxShadowBolt(src, dst, sig);
+        this.fxScreenShake(4, 100);
+        return true;
+      case "warlock_shadow_bolt_r3":
+        this.fxShadowBolt(src, dst, sig);
+        this.fxShockwave(dst, sig, 2);
+        this.fxScreenShake(6, 160);
+        return true;
+      case "warlock_howl_of_terror": {
+        // Dark expanding shockwaves + fear particles
+        this.fxShockwave(src, sig, 4);
+        const fearParts = this.scene.add.particles(0, 0, TEX_SPARK, {
+          x: src.x, y: src.y,
+          speed: { min: 20, max: 50 },
+          scale: { start: 0.4, end: 0 },
+          lifespan: 500,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, 0x220000],
+          alpha: { start: 0.8, end: 0 },
+          emitting: false,
+        });
+        fearParts.setDepth(90);
+        fearParts.explode(12, src.x, src.y);
+        this.scene.time.delayedCall(600, () => fearParts.destroy());
+        this.burst(sig, "debuff", src);
+        this.fxScreenShake(6, 200);
+        return true;
+      }
+      case "warlock_siphon_soul": {
+        // Tether beam + soul orbs flowing to caster
+        const tether = this.scene.add.graphics();
+        tether.setDepth(88);
+        tether.setBlendMode(Phaser.BlendModes.ADD);
+        tether.lineStyle(2.5, sig.primary, 0.4);
+        tether.beginPath();
+        tether.moveTo(src.x, src.y);
+        tether.lineTo(dst.x, dst.y);
+        tether.strokePath();
+        this.scene.tweens.add({
+          targets: tether,
+          alpha: 0,
+          duration: 800,
+          onComplete: () => tether.destroy(),
+        });
+        // Soul orbs from target to caster
+        for (let i = 0; i < 6; i++) {
+          this.scene.time.delayedCall(i * 110, () => {
+            const soul = this.scene.add.arc(dst.x, dst.y, 2, 0, 360, false, i % 2 === 0 ? sig.accent : sig.secondary, 0.85);
+            soul.setDepth(93);
+            soul.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: soul,
+              x: src.x + (Math.random() - 0.5) * 6,
+              y: src.y + (Math.random() - 0.5) * 6,
+              scaleX: 0.3, scaleY: 0.3, alpha: 0,
+              duration: 400, ease: "Quad.easeIn",
+              onComplete: () => soul.destroy(),
+            });
+          });
+        }
+        this.burst(sig, techType, dst);
+        return true;
+      }
+
+      // ── MONK R2/R3 + NEW ─────────────────────────────────────────────
+      case "monk_palm_strike_r2":
+        this.fxPalmStrike(dst, sig);
+        this.fxScreenShake(5, 120);
+        return true;
+      case "monk_chi_burst_r2":
+        this.fxChiBurst(src, dst, sig);
+        this.fxScreenShake(5, 120);
+        return true;
+      case "monk_chi_burst_r3":
+        this.fxChiBurst(src, dst, sig);
+        this.scene.time.delayedCall(350, () => {
+          // Triple ring impact at destination
+          for (let i = 0; i < 3; i++) {
+            const ring = this.scene.add.arc(dst.x, dst.y, 3, 0, 360, false);
+            ring.setStrokeStyle(2 - i * 0.4, i === 0 ? sig.accent : sig.primary, 0.9 - i * 0.2);
+            ring.setFillStyle();
+            ring.setDepth(92);
+            ring.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: ring,
+              scaleX: 6 + i * 2, scaleY: 6 + i * 2, alpha: 0,
+              duration: 350 + i * 80, ease: "Quad.easeOut",
+              delay: i * 50,
+              onComplete: () => ring.destroy(),
+            });
+          }
+        });
+        this.fxScreenShake(7, 180);
+        return true;
+      case "monk_flying_kick": {
+        // Dash trail + impact shockwave + screen shake
+        const kickTrail = this.scene.add.graphics();
+        kickTrail.setDepth(92);
+        kickTrail.setBlendMode(Phaser.BlendModes.ADD);
+        kickTrail.lineStyle(3, sig.primary, 0.7);
+        kickTrail.beginPath();
+        kickTrail.moveTo(src.x, src.y);
+        kickTrail.lineTo(dst.x, dst.y);
+        kickTrail.strokePath();
+        this.scene.tweens.add({
+          targets: kickTrail,
+          alpha: 0,
+          duration: 250,
+          onComplete: () => kickTrail.destroy(),
+        });
+        this.fxShockwave(dst, sig, 2);
+        this.burst(sig, techType, dst);
+        this.fxScreenShake(6, 160);
+        return true;
+      }
+      case "monk_whirlwind_kick": {
+        // Spinning slash arcs in circle + shockwave
+        for (let i = 0; i < 4; i++) {
+          this.scene.time.delayedCall(i * 70, () => {
+            this.fxSlashArc(src, sig, 1.3, i % 2 === 0 ? 1 : -1);
+          });
+        }
+        this.scene.time.delayedCall(280, () => {
+          this.fxShockwave(src, sig, 2);
+        });
+        this.burst(sig, techType, src);
+        this.fxScreenShake(5, 150);
+        return true;
+      }
+      case "monk_meditation_r2": {
+        // More pulse rings + brighter particles
+        const medEmitter = this.scene.add.particles(0, 0, TEX_SOFT, {
+          x: src.x, y: src.y,
+          speed: { min: 8, max: 22 },
+          angle: { min: 240, max: 300 },
+          scale: { start: 0.55, end: 0 },
+          lifespan: 900,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, sig.accent],
+          alpha: { start: 0.8, end: 0 },
+          frequency: 45,
+        });
+        medEmitter.setDepth(90);
+        for (let i = 0; i < 6; i++) {
+          this.scene.time.delayedCall(i * 200, () => {
+            const ring = this.scene.add.arc(src.x, src.y, 4, 0, 360, false);
+            ring.setStrokeStyle(1.2, sig.primary, 0.7);
+            ring.setFillStyle();
+            ring.setDepth(91);
+            ring.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: ring,
+              scaleX: 4, scaleY: 4, alpha: 0,
+              duration: 500, ease: "Sine.easeOut",
+              onComplete: () => ring.destroy(),
+            });
+          });
+        }
+        this.scene.time.delayedCall(1200, () => {
+          medEmitter.stop();
+          this.scene.time.delayedCall(1000, () => medEmitter.destroy());
+        });
+        this.burst(sig, "healing", src);
+        return true;
+      }
+
       default:
         return false;
     }

@@ -67,9 +67,18 @@ export interface ZoneEvent {
   data?: Record<string, unknown>;
 }
 
+export interface GameTime {
+  hour: number;
+  minute: number;
+  day: number;
+  phase: "dawn" | "day" | "dusk" | "night";
+  progress: number;
+}
+
 export interface ZoneResponse {
   zoneId: string;
   tick: number;
+  gameTime?: GameTime;
   entities: Record<string, Entity>;
   recentEvents?: ZoneEvent[];
 }

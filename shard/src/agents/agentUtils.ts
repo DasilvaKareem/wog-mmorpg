@@ -199,6 +199,9 @@ export interface AgentContext {
   equipItem(tokenId: number, instanceId?: string): Promise<boolean>;
   learnProfession(professionId: string): Promise<boolean>;
   recycleItem(tokenId: number, quantity?: number): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }>;
+
+  /** Ask the summoner a yes/no (or multi-choice) question. Returns true if question was posted. */
+  askSummoner(text: string, choices?: string[], context?: Record<string, unknown>): Promise<boolean>;
 }
 
 /**

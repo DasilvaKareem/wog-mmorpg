@@ -132,6 +132,106 @@ const FLOWER_SPAWN_DEFS: FlowerSpawnDef[] = [
   { zoneId: "azurshard-chasm", flowerType: "dragons-breath", x: 200, y: 550 },
   { zoneId: "azurshard-chasm", flowerType: "dragons-breath", x: 550, y: 400 },
   { zoneId: "azurshard-chasm", flowerType: "dragons-breath", x: 100, y: 300 },
+
+  // sunflower-fields - meadow-lily x2, wild-rose x2, dandelion x2, clover x2
+  { zoneId: "sunflower-fields", flowerType: "meadow-lily", x: 160, y: 180 },
+  { zoneId: "sunflower-fields", flowerType: "meadow-lily", x: 420, y: 250 },
+  { zoneId: "sunflower-fields", flowerType: "wild-rose", x: 280, y: 350 },
+  { zoneId: "sunflower-fields", flowerType: "wild-rose", x: 530, y: 300 },
+  { zoneId: "sunflower-fields", flowerType: "dandelion", x: 100, y: 450 },
+  { zoneId: "sunflower-fields", flowerType: "dandelion", x: 360, y: 500 },
+  { zoneId: "sunflower-fields", flowerType: "clover", x: 200, y: 550 },
+  { zoneId: "sunflower-fields", flowerType: "clover", x: 480, y: 420 },
+
+  // harvest-hollow - meadow-lily x1, wild-rose x1, dandelion x1, clover x1, lavender x2, sage x2
+  { zoneId: "harvest-hollow", flowerType: "meadow-lily", x: 130, y: 180 },
+  { zoneId: "harvest-hollow", flowerType: "wild-rose", x: 350, y: 200 },
+  { zoneId: "harvest-hollow", flowerType: "dandelion", x: 500, y: 150 },
+  { zoneId: "harvest-hollow", flowerType: "clover", x: 200, y: 350 },
+  { zoneId: "harvest-hollow", flowerType: "lavender", x: 400, y: 400 },
+  { zoneId: "harvest-hollow", flowerType: "lavender", x: 150, y: 500 },
+  { zoneId: "harvest-hollow", flowerType: "sage", x: 300, y: 550 },
+  { zoneId: "harvest-hollow", flowerType: "sage", x: 550, y: 450 },
+
+  // willowfen-pastures - meadow-lily x2, wild-rose x2, lavender x2, mint x2
+  { zoneId: "willowfen-pastures", flowerType: "meadow-lily", x: 180, y: 150 },
+  { zoneId: "willowfen-pastures", flowerType: "meadow-lily", x: 450, y: 250 },
+  { zoneId: "willowfen-pastures", flowerType: "wild-rose", x: 300, y: 350 },
+  { zoneId: "willowfen-pastures", flowerType: "wild-rose", x: 550, y: 400 },
+  { zoneId: "willowfen-pastures", flowerType: "lavender", x: 120, y: 450 },
+  { zoneId: "willowfen-pastures", flowerType: "lavender", x: 400, y: 500 },
+  { zoneId: "willowfen-pastures", flowerType: "mint", x: 250, y: 550 },
+  { zoneId: "willowfen-pastures", flowerType: "mint", x: 500, y: 300 },
+
+  // bramblewood-homestead - lavender x2, sage x2, mint x2, moonflower x2
+  { zoneId: "bramblewood-homestead", flowerType: "lavender", x: 180, y: 200 },
+  { zoneId: "bramblewood-homestead", flowerType: "lavender", x: 450, y: 300 },
+  { zoneId: "bramblewood-homestead", flowerType: "sage", x: 300, y: 400 },
+  { zoneId: "bramblewood-homestead", flowerType: "sage", x: 550, y: 180 },
+  { zoneId: "bramblewood-homestead", flowerType: "mint", x: 120, y: 500 },
+  { zoneId: "bramblewood-homestead", flowerType: "mint", x: 400, y: 550 },
+  { zoneId: "bramblewood-homestead", flowerType: "moonflower", x: 250, y: 150 },
+  { zoneId: "bramblewood-homestead", flowerType: "moonflower", x: 500, y: 450 },
+
+  // goldenreach-grange - lavender x2, sage x2, mint x2, moonflower x2
+  { zoneId: "goldenreach-grange", flowerType: "lavender", x: 150, y: 180 },
+  { zoneId: "goldenreach-grange", flowerType: "lavender", x: 400, y: 250 },
+  { zoneId: "goldenreach-grange", flowerType: "sage", x: 250, y: 350 },
+  { zoneId: "goldenreach-grange", flowerType: "sage", x: 550, y: 300 },
+  { zoneId: "goldenreach-grange", flowerType: "mint", x: 120, y: 450 },
+  { zoneId: "goldenreach-grange", flowerType: "mint", x: 350, y: 500 },
+  { zoneId: "goldenreach-grange", flowerType: "moonflower", x: 200, y: 550 },
+  { zoneId: "goldenreach-grange", flowerType: "moonflower", x: 480, y: 400 },
+
+  // dewveil-orchard - sage x2, mint x2, moonflower x2, starbloom x2
+  { zoneId: "dewveil-orchard", flowerType: "sage", x: 180, y: 200 },
+  { zoneId: "dewveil-orchard", flowerType: "sage", x: 450, y: 300 },
+  { zoneId: "dewveil-orchard", flowerType: "mint", x: 300, y: 400 },
+  { zoneId: "dewveil-orchard", flowerType: "mint", x: 550, y: 180 },
+  { zoneId: "dewveil-orchard", flowerType: "moonflower", x: 120, y: 500 },
+  { zoneId: "dewveil-orchard", flowerType: "moonflower", x: 400, y: 550 },
+  { zoneId: "dewveil-orchard", flowerType: "starbloom", x: 250, y: 150 },
+  { zoneId: "dewveil-orchard", flowerType: "starbloom", x: 500, y: 450 },
+
+  // thornwall-ranch - sage x2, mint x2, moonflower x2, starbloom x2
+  { zoneId: "thornwall-ranch", flowerType: "sage", x: 150, y: 180 },
+  { zoneId: "thornwall-ranch", flowerType: "sage", x: 400, y: 250 },
+  { zoneId: "thornwall-ranch", flowerType: "mint", x: 250, y: 350 },
+  { zoneId: "thornwall-ranch", flowerType: "mint", x: 550, y: 300 },
+  { zoneId: "thornwall-ranch", flowerType: "moonflower", x: 120, y: 450 },
+  { zoneId: "thornwall-ranch", flowerType: "moonflower", x: 350, y: 500 },
+  { zoneId: "thornwall-ranch", flowerType: "starbloom", x: 200, y: 550 },
+  { zoneId: "thornwall-ranch", flowerType: "starbloom", x: 480, y: 400 },
+
+  // moonpetal-gardens - moonflower x3, starbloom x3, dragons-breath x2
+  { zoneId: "moonpetal-gardens", flowerType: "moonflower", x: 180, y: 200 },
+  { zoneId: "moonpetal-gardens", flowerType: "moonflower", x: 400, y: 300 },
+  { zoneId: "moonpetal-gardens", flowerType: "moonflower", x: 550, y: 150 },
+  { zoneId: "moonpetal-gardens", flowerType: "starbloom", x: 250, y: 400 },
+  { zoneId: "moonpetal-gardens", flowerType: "starbloom", x: 450, y: 500 },
+  { zoneId: "moonpetal-gardens", flowerType: "starbloom", x: 120, y: 550 },
+  { zoneId: "moonpetal-gardens", flowerType: "dragons-breath", x: 300, y: 150 },
+  { zoneId: "moonpetal-gardens", flowerType: "dragons-breath", x: 500, y: 450 },
+
+  // ironroot-farmstead - moonflower x2, starbloom x3, dragons-breath x3
+  { zoneId: "ironroot-farmstead", flowerType: "moonflower", x: 200, y: 200 },
+  { zoneId: "ironroot-farmstead", flowerType: "moonflower", x: 450, y: 350 },
+  { zoneId: "ironroot-farmstead", flowerType: "starbloom", x: 150, y: 400 },
+  { zoneId: "ironroot-farmstead", flowerType: "starbloom", x: 350, y: 500 },
+  { zoneId: "ironroot-farmstead", flowerType: "starbloom", x: 550, y: 200 },
+  { zoneId: "ironroot-farmstead", flowerType: "dragons-breath", x: 100, y: 550 },
+  { zoneId: "ironroot-farmstead", flowerType: "dragons-breath", x: 300, y: 300 },
+  { zoneId: "ironroot-farmstead", flowerType: "dragons-breath", x: 500, y: 450 },
+
+  // crystalbloom-terrace - starbloom x3, dragons-breath x5
+  { zoneId: "crystalbloom-terrace", flowerType: "starbloom", x: 180, y: 150 },
+  { zoneId: "crystalbloom-terrace", flowerType: "starbloom", x: 400, y: 250 },
+  { zoneId: "crystalbloom-terrace", flowerType: "starbloom", x: 550, y: 350 },
+  { zoneId: "crystalbloom-terrace", flowerType: "dragons-breath", x: 120, y: 300 },
+  { zoneId: "crystalbloom-terrace", flowerType: "dragons-breath", x: 300, y: 450 },
+  { zoneId: "crystalbloom-terrace", flowerType: "dragons-breath", x: 450, y: 550 },
+  { zoneId: "crystalbloom-terrace", flowerType: "dragons-breath", x: 200, y: 500 },
+  { zoneId: "crystalbloom-terrace", flowerType: "dragons-breath", x: 500, y: 200 },
 ];
 
 export function spawnFlowerNodes(): void {

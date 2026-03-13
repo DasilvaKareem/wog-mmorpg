@@ -132,6 +132,36 @@ export class FloatingTextLayer {
     });
   }
 
+  /**
+   * Show floating gather loot text ("+1 Copper Ore", "+2 Wheat", etc.)
+   * Color varies by profession: mining=orange, herbalism=green, farming=brown-gold
+   */
+  showGatherText(
+    eventId: string,
+    pos: Pos,
+    itemName: string,
+    gatherType: string,
+  ): void {
+    if (this.seen.has(eventId)) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    const color =
+      gatherType === "mining" ? "#ffaa33" :
+      gatherType === "herbalism" ? "#66dd88" :
+      gatherType === "farming" ? "#ddbb44" :
+      "#ffffff";
+
+    this.spawn(pos, {
+      text: `+${itemName}`,
+      color,
+      fontSize: 10,
+      offsetY: -18,
+      duration: 1400,
+      scatter: 4,
+    });
+  }
+
   private pruneSeen(): void {
     // Keep set bounded — clear periodically
     if (this.seen.size > 500) {

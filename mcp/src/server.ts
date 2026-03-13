@@ -8,6 +8,7 @@ import { registerWorldTools } from "./tools/world.js";
 import { registerShopTools } from "./tools/shop.js";
 import { registerProfessionTools } from "./tools/professions.js";
 import { registerSocialTools } from "./tools/social.js";
+import { registerFarmingTools } from "./tools/farming.js";
 
 export function createMcpServer(): McpServer {
   const server = new McpServer({
@@ -26,6 +27,7 @@ export function createMcpServer(): McpServer {
   registerShopTools(server);
   registerProfessionTools(server);
   registerSocialTools(server);
+  registerFarmingTools(server);
 
   return server;
 }

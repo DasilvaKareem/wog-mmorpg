@@ -9,7 +9,17 @@
     "moondancer-glade",
     "felsrock-citadel",
     "lake-lumina",
-    "azurshard-chasm"
+    "azurshard-chasm",
+    "sunflower-fields",
+    "harvest-hollow",
+    "willowfen-pastures",
+    "bramblewood-homestead",
+    "goldenreach-grange",
+    "dewveil-orchard",
+    "thornwall-ranch",
+    "moonpetal-gardens",
+    "ironroot-farmstead",
+    "crystalbloom-terrace"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -22,7 +32,17 @@
     { "from": "viridian-range", "to": "felsrock-citadel", "portal": "citadel-pass" },
     { "from": "moondancer-glade", "to": "felsrock-citadel", "portal": "citadel-path" },
     { "from": "felsrock-citadel", "to": "lake-lumina", "portal": "lumina-passage" },
-    { "from": "lake-lumina", "to": "azurshard-chasm", "portal": "chasm-descent" }
+    { "from": "lake-lumina", "to": "azurshard-chasm", "portal": "chasm-descent" },
+    { "from": "village-square", "to": "sunflower-fields", "portal": "sunflower-gate" },
+    { "from": "wild-meadow", "to": "harvest-hollow", "portal": "hollow-gate" },
+    { "from": "wild-meadow", "to": "willowfen-pastures", "portal": "pastures-gate" },
+    { "from": "dark-forest", "to": "bramblewood-homestead", "portal": "homestead-gate" },
+    { "from": "auroral-plains", "to": "goldenreach-grange", "portal": "grange-gate" },
+    { "from": "emerald-woods", "to": "dewveil-orchard", "portal": "orchard-gate" },
+    { "from": "viridian-range", "to": "thornwall-ranch", "portal": "ranch-gate" },
+    { "from": "moondancer-glade", "to": "moonpetal-gardens", "portal": "gardens-gate" },
+    { "from": "felsrock-citadel", "to": "ironroot-farmstead", "portal": "farmstead-gate" },
+    { "from": "lake-lumina", "to": "crystalbloom-terrace", "portal": "terrace-gate" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
@@ -34,7 +54,17 @@
     "moondancer-glade": { "x": 2560, "z": 0 },
     "felsrock-citadel": { "x": 2560, "z": -640 },
     "lake-lumina": { "x": 3200, "z": -640 },
-    "azurshard-chasm": { "x": 3840, "z": -640 }
+    "azurshard-chasm": { "x": 3840, "z": -640 },
+    "sunflower-fields": { "x": 0, "z": 640 },
+    "harvest-hollow": { "x": 640, "z": 640 },
+    "willowfen-pastures": { "x": 640, "z": 1280 },
+    "bramblewood-homestead": { "x": 1280, "z": 640 },
+    "goldenreach-grange": { "x": 640, "z": -1280 },
+    "dewveil-orchard": { "x": 1920, "z": 640 },
+    "thornwall-ranch": { "x": 1920, "z": -1280 },
+    "moonpetal-gardens": { "x": 2560, "z": 640 },
+    "ironroot-farmstead": { "x": 2560, "z": -1280 },
+    "crystalbloom-terrace": { "x": 3200, "z": -1280 }
   },
   "continents": [
     {

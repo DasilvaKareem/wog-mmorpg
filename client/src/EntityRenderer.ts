@@ -57,7 +57,7 @@ const BOSS_SCALE = 1.8;
 const HIDE_LABEL_TYPES = new Set([
   "merchant", "trainer", "profession-trainer", "guild-registrar",
   "auctioneer", "arena-master", "quest-giver", "lore-npc", "npc",
-  "ore-node", "herb-node",
+  "ore-node", "herb-node", "crop-node",
 ]);
 
 /** NPC types that can potentially give quests */
@@ -234,6 +234,116 @@ export class EntityRenderer {
     });
   }
 
+  /**
+   * Animate an entity being knocked back: fly away from impact point, bounce,
+   * flash white, then settle at the new server position.
+   */
+  triggerKnockback(entityId: string, fromX: number, fromY: number, distance: number): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    const sx = visual.sprite.x;
+    const sy = visual.sprite.y;
+
+    // Direction vector: pushed AWAY from fromX/fromY
+    const dx = sx - fromX;
+    const dy = sy - fromY;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+
+    // Visual knockback distance (pixels) — scale by coordScale
+    const kbPx = distance * this.coordScale;
+    const destX = sx + nx * kbPx;
+    const destY = sy + ny * kbPx;
+
+    // Mark as in combat
+    visual.combatUntil = Date.now() + COMBAT_LINGER_MS;
+
+    // White flash on impact
+    visual.sprite.setTint(0xffffff);
+    this.scene.time.delayedCall(100, () => visual.sprite?.clearTint());
+
+    // Phase 1: fast launch to knockback destination
+    this.scene.tweens.add({
+      targets: visual.sprite,
+      x: destX,
+      y: destY,
+      duration: 180,
+      ease: "Quad.easeOut",
+      onUpdate: () => {
+        const s = visual.spriteScale;
+        visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+        visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
+        this.repositionOverlays(visual);
+      },
+      onComplete: () => {
+        // Phase 2: small bounce back (settle)
+        this.scene.tweens.add({
+          targets: visual.sprite,
+          x: destX - nx * kbPx * 0.15,
+          y: destY - ny * kbPx * 0.15,
+          duration: 150,
+          ease: "Bounce.easeOut",
+          onUpdate: () => {
+            const s = visual.spriteScale;
+            visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+            visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+            visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
+            this.repositionOverlays(visual);
+          },
+        });
+      },
+    });
+  }
+
+  /**
+   * Animate a caster lunging toward a target: fast dash forward.
+   * The server already moved the entity, so the next poll will snap to the correct position.
+   */
+  triggerLunge(attackerId: string, targetX: number, targetY: number): void {
+    const visual = this.visuals.get(attackerId);
+    if (!visual?.sprite) return;
+
+    const sx = visual.sprite.x;
+    const sy = visual.sprite.y;
+
+    // Mark as in combat
+    visual.combatUntil = Date.now() + COMBAT_LINGER_MS;
+
+    // Face the target
+    const dx = targetX - sx;
+    const dy = targetY - sy;
+    const dir = inferDirection(dx, dy);
+    visual.facing = dir;
+
+    // Swap to armed texture
+    const entity = this.entities.get(attackerId);
+    if (entity) {
+      const armedKey = getLayeredTextureKey(this.scene, entity, true);
+      if (armedKey && this.scene.textures.exists(armedKey)) {
+        visual.sprite.setTexture(armedKey);
+      }
+    }
+
+    // Fast dash toward target
+    this.scene.tweens.add({
+      targets: visual.sprite,
+      x: targetX,
+      y: targetY,
+      duration: 140,
+      ease: "Quad.easeIn",
+      onUpdate: () => {
+        const s = visual.spriteScale;
+        visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+        visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        visual.partyRing?.setPosition(visual.sprite.x, visual.sprite.y);
+        this.repositionOverlays(visual);
+      },
+    });
+  }
+
   /** Spin, shrink, and fade out a dying entity, then clean it up. */
   triggerDeath(entityId: string): void {
     const visual = this.visuals.get(entityId);
@@ -366,6 +476,153 @@ export class EntityRenderer {
     }
   }
 
+  /**
+   * Play a profession-specific gathering animation on the gatherer entity,
+   * plus a depletion flash on the resource node.
+   *
+   * Mining:    orange tint + downward strike bob + spark particles
+   * Herbalism: green tint + gentle crouch bob + leaf particles
+   * Farming:   brown tint + dig motion + earth particles
+   */
+  triggerGather(entityId: string, gatherType: string, nodeId?: string): void {
+    const visual = this.visuals.get(entityId);
+    if (!visual?.sprite) return;
+
+    const sx = visual.sprite.x;
+    const sy = visual.sprite.y;
+
+    // Per-profession tint + motion
+    if (gatherType === "mining") {
+      // Orange tint flash
+      visual.sprite.setTint(0xffaa33);
+      this.scene.time.delayedCall(400, () => visual.sprite?.clearTint());
+
+      // Downward strike bob (pickaxe swing feel)
+      this.scene.tweens.add({
+        targets: visual.sprite,
+        y: sy + 3,
+        duration: 100,
+        ease: "Quad.easeIn",
+        yoyo: true,
+        repeat: 1,
+        onUpdate: () => {
+          const s = visual.spriteScale;
+          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        },
+        onComplete: () => {
+          visual.sprite.setPosition(sx, sy);
+        },
+      });
+
+      // Orange spark particles
+      this.spawnGatherParticles(sx, sy - 4, 0xffaa33, 0xffdd66, 4);
+
+    } else if (gatherType === "herbalism") {
+      // Green tint flash
+      visual.sprite.setTint(0x66dd88);
+      this.scene.time.delayedCall(350, () => visual.sprite?.clearTint());
+
+      // Gentle crouch bob (plucking motion)
+      this.scene.tweens.add({
+        targets: visual.sprite,
+        y: sy + 2,
+        scaleY: visual.spriteScale * 0.92,
+        duration: 200,
+        ease: "Sine.easeInOut",
+        yoyo: true,
+        onUpdate: () => {
+          const s = visual.spriteScale;
+          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        },
+        onComplete: () => {
+          visual.sprite.setPosition(sx, sy);
+          visual.sprite.setScale(visual.spriteScale);
+        },
+      });
+
+      // Green leaf particles floating upward
+      this.spawnGatherParticles(sx, sy - 6, 0x66dd88, 0x44bb66, 3);
+
+    } else if (gatherType === "farming") {
+      // Brown-gold tint flash
+      visual.sprite.setTint(0xddbb44);
+      this.scene.time.delayedCall(400, () => visual.sprite?.clearTint());
+
+      // Dig motion: tilt + bob
+      this.scene.tweens.add({
+        targets: visual.sprite,
+        y: sy + 4,
+        angle: -8,
+        duration: 150,
+        ease: "Quad.easeIn",
+        yoyo: true,
+        onUpdate: () => {
+          const s = visual.spriteScale;
+          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        },
+        onComplete: () => {
+          visual.sprite.setPosition(sx, sy);
+          visual.sprite.setAngle(0);
+        },
+      });
+
+      // Brown earth particles
+      this.spawnGatherParticles(sx, sy - 2, 0xbb8833, 0xddaa44, 5);
+    }
+
+    // Node depletion flash — flash the resource node white then fade back
+    if (nodeId) {
+      const nodeVisual = this.visuals.get(nodeId);
+      if (nodeVisual?.sprite) {
+        nodeVisual.sprite.setTint(0xffffff);
+        this.scene.tweens.add({
+          targets: nodeVisual.sprite,
+          alpha: 0.5,
+          duration: 150,
+          yoyo: true,
+          onComplete: () => {
+            nodeVisual.sprite?.clearTint();
+            nodeVisual.sprite?.setAlpha(1);
+          },
+        });
+      }
+    }
+  }
+
+  /** Spawn small colored particle dots that float upward and fade. */
+  private spawnGatherParticles(
+    x: number,
+    y: number,
+    color1: number,
+    color2: number,
+    count: number,
+  ): void {
+    for (let i = 0; i < count; i++) {
+      const px = x + (Math.random() - 0.5) * 16;
+      const py = y + (Math.random() - 0.5) * 8;
+      const color = Math.random() > 0.5 ? color1 : color2;
+      const size = 1.5 + Math.random() * 1.5;
+
+      const dot = this.scene.add
+        .circle(px, py, size, color)
+        .setDepth(125)
+        .setAlpha(0.9);
+
+      this.scene.tweens.add({
+        targets: dot,
+        y: py - 12 - Math.random() * 8,
+        x: px + (Math.random() - 0.5) * 10,
+        alpha: 0,
+        duration: 500 + Math.random() * 400,
+        ease: "Quad.easeOut",
+        onComplete: () => dot.destroy(),
+      });
+    }
+  }
+
   /** Snapshot pixel positions for all tracked entities (used by VFX layer). */
   getPixelPositions(): Map<string, { x: number; y: number }> {
     const out = new Map<string, { x: number; y: number }>();
@@ -423,7 +680,7 @@ export class EntityRenderer {
     const ids = Array.from(positions.keys());
     const separationPasses = this.getSeparationPassCount(ids.length);
     if (separationPasses > 0) {
-      const SKIP_TYPES = new Set(["ore-node", "herb-node", "nectar-node", "corpse"]);
+      const SKIP_TYPES = new Set(["ore-node", "herb-node", "nectar-node", "crop-node", "corpse"]);
       for (let pass = 0; pass < separationPasses; pass++) {
         for (let i = 0; i < ids.length; i++) {
           const a = positions.get(ids[i])!;

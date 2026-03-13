@@ -8,7 +8,7 @@ import { WorldLayoutManager } from "@/WorldLayoutManager";
 import { AbilityEffectsLayer } from "@/AbilityEffectsLayer";
 import { FloatingTextLayer } from "@/FloatingTextLayer";
 import { fetchZone, fetchZoneChunkInfo } from "@/ShardClient";
-import type { Entity } from "@/types";
+import type { Entity, GameTime } from "@/types";
 import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites, preloadMobSprites, registerMobSpriteAnimations } from "@/EntitySpriteGenerator";
 import { preloadOverworld } from "@/OverworldAtlas";
@@ -106,6 +106,12 @@ export class WorldScene extends Phaser.Scene {
   private overviewGraphics: Phaser.GameObjects.Graphics | null = null;
   private overviewDotGraphics: Phaser.GameObjects.Graphics | null = null;
   private overviewLabels: Phaser.GameObjects.Text[] = [];
+
+  // Day/night cycle overlay
+  private dayNightOverlay!: Phaser.GameObjects.Rectangle;
+  private currentPhase: GameTime["phase"] = "day";
+  private dayNightTween: Phaser.Tweens.Tween | null = null;
+  private gameTimeText!: Phaser.GameObjects.Text;
 
   constructor() {
     super({ key: "WorldScene" });
@@ -277,6 +283,34 @@ export class WorldScene extends Phaser.Scene {
       this.tooltipBg.setVisible(false);
     }
 
+    // Day/night cycle overlay — covers the entire viewport with a tinted rect
+    const mainCam = this.cameras.main;
+    this.dayNightOverlay = this.add
+      .rectangle(0, 0, mainCam.width, mainCam.height, 0xffffff, 1)
+      .setOrigin(0, 0)
+      .setScrollFactor(0)
+      .setDepth(95)  // below HUD (100) but above everything else
+      .setBlendMode(Phaser.BlendModes.MULTIPLY);
+
+    // Game time display (top-right corner)
+    this.gameTimeText = this.add
+      .text(mainCam.width - 12, 12, "", {
+        fontSize: "11px",
+        fontFamily: "monospace",
+        color: "#ffdd88",
+        stroke: "#000000",
+        strokeThickness: 3,
+      })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(100);
+
+    // Resize overlay when the game window resizes
+    this.scale.on("resize", (gameSize: Phaser.Structs.Size) => {
+      this.dayNightOverlay.setSize(gameSize.width, gameSize.height);
+      this.gameTimeText.setX(gameSize.width - 12);
+    });
+
     // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
       this.scrollToZone(zoneId);
@@ -325,6 +359,66 @@ export class WorldScene extends Phaser.Scene {
   private releaseFollow(): void {
     this.followTarget = null;
     this.lockedWalletAddress = null;
+  }
+
+  /**
+   * Day/night overlay colors and alpha per phase.
+   * MULTIPLY blend: 0xffffff = no change, darker = dims scene.
+   * We tween between phases for smooth transitions.
+   */
+  private static readonly PHASE_COLORS: Record<GameTime["phase"], { color: number; alpha: number }> = {
+    dawn:  { color: 0xffc8a0, alpha: 0.92 }, // warm orange-pink tint
+    day:   { color: 0xffffff, alpha: 1.0  }, // full brightness (no effect)
+    dusk:  { color: 0xd09060, alpha: 0.85 }, // deep amber
+    night: { color: 0x3844a0, alpha: 0.75 }, // dark blue
+  };
+
+  /** Update the day/night overlay to match the current game time */
+  private updateDayNight(gameTime: GameTime): void {
+    // Update clock text
+    const hh = String(gameTime.hour).padStart(2, "0");
+    const mm = String(gameTime.minute).padStart(2, "0");
+    const icon = gameTime.phase === "night" ? "\u263D" : gameTime.phase === "dawn" || gameTime.phase === "dusk" ? "\u263C" : "\u2600";
+    this.gameTimeText.setText(`${icon} ${hh}:${mm}  Day ${gameTime.day}`);
+
+    if (gameTime.phase === this.currentPhase) return;
+    this.currentPhase = gameTime.phase;
+
+    const target = WorldScene.PHASE_COLORS[gameTime.phase];
+
+    // Extract RGB components from the target color
+    const r = (target.color >> 16) & 0xff;
+    const g = (target.color >> 8) & 0xff;
+    const b = target.color & 0xff;
+
+    // Kill any running tween before starting a new one
+    if (this.dayNightTween) {
+      this.dayNightTween.stop();
+      this.dayNightTween = null;
+    }
+
+    // Smoothly tween the overlay to the new phase over 3 seconds
+    const overlay = this.dayNightOverlay;
+    // Current color
+    const curColor = overlay.fillColor;
+    const cr = (curColor >> 16) & 0xff;
+    const cg = (curColor >> 8) & 0xff;
+    const cb = curColor & 0xff;
+
+    const tweenObj = { r: cr, g: cg, b: cb, a: overlay.alpha };
+
+    this.dayNightTween = this.tweens.add({
+      targets: tweenObj,
+      r, g, b, a: target.alpha,
+      duration: 3000,
+      ease: "Sine.easeInOut",
+      onUpdate: () => {
+        const nr = Math.round(tweenObj.r);
+        const ng = Math.round(tweenObj.g);
+        const nb = Math.round(tweenObj.b);
+        overlay.setFillStyle((nr << 16) | (ng << 8) | nb, tweenObj.a);
+      },
+    });
   }
 
   update(): void {
@@ -1009,6 +1103,26 @@ export class WorldScene extends Phaser.Scene {
         this.entityRenderer.triggerMeleeAttack(evt.entityId, evt.targetId);
       }
 
+      // Knockback animation — target gets launched away from caster
+      if (evt.type === "ability" && evtData?.knockback && evt.targetId) {
+        const casterPos = pixelPositions.get(evt.entityId ?? "");
+        if (casterPos) {
+          this.entityRenderer.triggerKnockback(
+            evt.targetId,
+            casterPos.x, casterPos.y,
+            evtData.knockback as number,
+          );
+        }
+      }
+
+      // Lunge animation — caster dashes toward target
+      if (evt.type === "ability" && evtData?.lunge && evt.entityId && evt.targetId) {
+        const targetPos = pixelPositions.get(evt.targetId);
+        if (targetPos) {
+          this.entityRenderer.triggerLunge(evt.entityId, targetPos.x, targetPos.y);
+        }
+      }
+
       // Floating damage/heal numbers
       if ((evt.type === "combat" || evt.type === "ability") && evtData) {
         // Damage on target
@@ -1043,6 +1157,24 @@ export class WorldScene extends Phaser.Scene {
           this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2000);
         }
       }
+
+      // Gathering profession animations — triggered by loot events with gatherType data
+      if (evt.type === "loot" && evt.entityId && evtData?.gatherType) {
+        const gatherType = evtData.gatherType as string;
+        const nodeId = evtData.nodeId as string | undefined;
+        const itemName = evtData.itemName as string | undefined;
+
+        // Play profession-specific gather animation on the gatherer
+        this.entityRenderer.triggerGather(evt.entityId, gatherType, nodeId);
+
+        // Floating loot text above the gatherer
+        if (itemName) {
+          const pos = pixelPositions.get(evt.entityId);
+          if (pos) {
+            this.floatingText.showGatherText(evt.id + ":gather", pos, itemName, gatherType);
+          }
+        }
+      }
     }
   }
 
@@ -1058,6 +1190,7 @@ export class WorldScene extends Phaser.Scene {
         if (data) {
           this.connected = true;
           this.tick = data.tick;
+          if (data.gameTime) this.updateDayNight(data.gameTime);
           this.entityRenderer.update(data.entities);
           if ((data.recentEvents?.length ?? 0) > 0) {
             const pixelPositions = this.entityRenderer.getPixelPositions();
@@ -1098,6 +1231,11 @@ export class WorldScene extends Phaser.Scene {
 
       this.connected = anyConnected;
       this.tick = maxTick;
+
+      // Update day/night overlay from any zone's gameTime (all zones share the same clock)
+      const firstGameTime = results.find(({ data }) => data?.gameTime)?.data?.gameTime;
+      if (firstGameTime) this.updateDayNight(firstGameTime);
+
       this.entityRenderer.update(allEntities);
 
       // Play VFX, animations, floating text — centralized dedup

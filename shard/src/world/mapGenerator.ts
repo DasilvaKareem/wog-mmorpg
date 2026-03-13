@@ -198,7 +198,7 @@ function biomeBaseTile(biome: string, noise: number): number {
   if (biome === "forest") {
     // Mix dark grass with occasional plain grass for depth
     return noise < 0.08 ? TILE.GRASS_PLAIN : noise < 0.15 ? TILE.GRASS_LIGHT : TILE.GRASS_DARK;
-  } else if (biome === "village") {
+  } else if (biome === "village" || biome === "farmland") {
     // Mix plain and light grass for a tended look
     return noise < 0.15 ? TILE.GRASS_LIGHT : noise < 0.25 ? TILE.GRASS_FLOWERS_YELLOW : TILE.GRASS_PLAIN;
   } else {
@@ -209,7 +209,7 @@ function biomeBaseTile(biome: string, noise: number): number {
 
 /** Get the elevation profile for a biome */
 function getElevProfile(biome: string): { noiseScale: number; maxElev: number; baseElev: number } {
-  if (biome === "village") return { noiseScale: 0.02, maxElev: 1, baseElev: 0 };
+  if (biome === "village" || biome === "farmland") return { noiseScale: 0.02, maxElev: 1, baseElev: 0 };
   if (biome === "forest") return { noiseScale: 0.04, maxElev: 3, baseElev: 1 };
   return { noiseScale: 0.03, maxElev: 2, baseElev: 0 }; // grassland
 }
@@ -406,6 +406,9 @@ function detectBiome(zone: ZoneData): string {
   return "grassland";
 }
 
+// NOTE: "farmland" biome is treated as "village" variant for rendering
+// (flat terrain, cultivated look with flowers)
+
 // ── Exclusion grid ───────────────────────────────────────────────────
 
 function buildExclusionGrid(w: number, h: number, pois: PoiDef[]): boolean[] {
@@ -497,6 +500,12 @@ function scatterDecoration(
       } else if (effectiveBiome === "forest") {
         if (n < 0.03) ground[idx] = TILE.GRASS_PLAIN;
         else if (n < 0.06) ground[idx] = TILE.GRASS_LIGHT;
+      } else if (effectiveBiome === "farmland") {
+        // Farmland — more flowers, cultivated look
+        if (n < 0.025) ground[idx] = TILE.GRASS_FLOWERS_RED;
+        else if (n < 0.05) ground[idx] = TILE.GRASS_FLOWERS_YELLOW;
+        else if (n < 0.065) ground[idx] = TILE.GRASS_FLOWERS_BLUE;
+        else if (n < 0.09) ground[idx] = TILE.GRASS_LIGHT;
       } else {
         // village
         if (n < 0.015) ground[idx] = TILE.GRASS_FLOWERS_RED;
@@ -526,13 +535,13 @@ function placeTrees(
       const n = seededNoise2D(wtx, wtz, s);
 
       // Blended density
-      let density = biome === "forest" ? 0.08 : biome === "village" ? 0.01 : 0.03;
+      let density = biome === "forest" ? 0.08 : (biome === "village" || biome === "farmland") ? 0.01 : 0.03;
       let isDark = biome === "forest";
 
       const adj = findAdjacentBlend(wtx, wtz, zoneId);
       if (adj && adj.distance < BLEND_TILES) {
         const blendWeight = (1.0 - adj.distance / BLEND_TILES) * 0.5;
-        const adjDensity = adj.biome === "forest" ? 0.08 : adj.biome === "village" ? 0.01 : 0.03;
+        const adjDensity = adj.biome === "forest" ? 0.08 : (adj.biome === "village" || adj.biome === "farmland") ? 0.01 : 0.03;
         density = density * (1 - blendWeight) + adjDensity * blendWeight;
 
         // Blend tree type (dark vs normal) probabilistically
@@ -600,6 +609,10 @@ function placeTrees(
         if (n < 0.02) overlay[idx] = TILE.BUSH;
         else if (n < 0.025) overlay[idx] = TILE.ROCK_SMALL;
         else if (n < 0.04) overlay[idx] = TILE.TALL_GRASS;
+      } else if (effectiveBiome === "farmland") {
+        // Sparse decorations — cultivated land
+        if (n < 0.005) overlay[idx] = TILE.BUSH;
+        else if (n < 0.008) overlay[idx] = TILE.ROCK_SMALL;
       } else if (effectiveBiome === "grassland") {
         if (n < 0.008) overlay[idx] = TILE.BUSH;
         else if (n < 0.012) overlay[idx] = TILE.ROCK_SMALL;
@@ -619,7 +632,7 @@ function placeWaterPonds(
   exclusion: boolean[], worldOffTx: number, worldOffTz: number,
 ): void {
   const s = hashStr("world-pond");
-  const pondCount = biome === "forest" ? 2 : biome === "village" ? 1 : 3;
+  const pondCount = biome === "forest" ? 2 : (biome === "village" || biome === "farmland") ? 1 : 3;
 
   for (let p = 0; p < pondCount; p++) {
     // Pick pond center using deterministic noise

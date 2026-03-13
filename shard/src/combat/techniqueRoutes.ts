@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { getTechniquesByClass, getLearnedTechniques, getTechniqueById } from "./techniques.js";
+import { getTechniquesByClass, getLearnedTechniques, getTechniqueById, getRequiredPreviousRank, getPreviousRankId } from "./techniques.js";
 import type { TechniqueDefinition } from "./techniques.js";
 import { getOrCreateZone, getEntity, recalculateEntityVitals, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { clampToZoneBounds } from "../world/worldLayout.js";
 import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
 import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
@@ -155,6 +156,16 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Technique already learned" });
     }
 
+    // Rank prerequisite check: must know R1 to learn R2, R2 to learn R3
+    const requiredPrev = getRequiredPreviousRank(techniqueId);
+    if (requiredPrev && !learned.includes(requiredPrev)) {
+      const prevTech = getTechniqueById(requiredPrev);
+      return reply.status(400).send({
+        error: `Must know ${prevTech?.name ?? requiredPrev} before learning this rank`,
+        requiredTechnique: requiredPrev,
+      });
+    }
+
     // Check distance to trainer
     const dx = player.x - trainer.x;
     const dy = player.y - trainer.y;
@@ -184,6 +195,12 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       player.learnedTechniques = [];
     }
     player.learnedTechniques.push(techniqueId);
+
+    // Remove previous rank if upgrading (R2 replaces R1, R3 replaces R2)
+    const replacedRank = getPreviousRankId(techniqueId);
+    if (replacedRank) {
+      player.learnedTechniques = player.learnedTechniques.filter(id => id !== replacedRank);
+    }
 
     // Persist to Redis
     saveCharacter(player.walletAddress, player.name, {
@@ -336,6 +353,12 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
         casterZ: caster.y,
         targetX: target.id !== caster.id ? target.x : undefined,
         targetZ: target.id !== caster.id ? target.y : undefined,
+        knockback: result.knockback,
+        lunge: result.lunge,
+        targetNewX: result.targetNewX,
+        targetNewZ: result.targetNewZ,
+        casterNewX: result.casterNewX,
+        casterNewZ: result.casterNewZ,
       },
     });
 
@@ -408,12 +431,48 @@ function applyTechniqueEffects(
       }
     }
 
-    // Lifesteal for Drain Life
+    // Lifesteal (Drain Life, Siphon Soul — attacks with healAmount)
     if (effects.healAmount && type === "attack") {
       const heal = Math.floor(damage * (effects.healAmount / 100));
       const actualHeal = Math.min(heal, caster.maxHp - caster.hp);
       caster.hp = Math.min(caster.maxHp, caster.hp + actualHeal);
       result.healing = actualHeal;
+    }
+
+    // Hybrid: attack + debuff (Judgment, Flying Kick, Shadow Bolt R3)
+    if (effects.statReduction && effects.duration) {
+      const debuffEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: technique.id,
+        name: technique.name,
+        type: "debuff",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        statModifiers: effects.statReduction,
+      };
+      addActiveEffect(target, debuffEffect);
+      recalculateEntityVitals(target);
+      result.debuffs = effects.statReduction;
+    }
+
+    // Hybrid: attack + DoT (Rending Strike, Holy Smite R3, Fireball R3)
+    if (effects.dotDamage && effects.duration) {
+      const dotEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: technique.id,
+        name: `${technique.name} DoT`,
+        type: "dot",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        dotDamage: effects.dotDamage,
+      };
+      addActiveEffect(target, dotEffect);
+      result.dotApplied = true;
+      result.dotDamage = effects.dotDamage;
     }
   }
 
@@ -465,9 +524,56 @@ function applyTechniqueEffects(
     recalculateEntityVitals(target);
     result.buffs = effects.statBonus;
     result.duration = effects.duration;
+
+    // Hybrid: buff + instant heal (Rallying Cry — buff with healAmount, no HoT)
+    if (effects.healAmount && !effects.shield) {
+      const healAmount = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const actualHeal = Math.min(healAmount, target.maxHp - target.hp);
+      target.hp = Math.min(target.maxHp, target.hp + actualHeal);
+      result.healing = actualHeal;
+    }
+
+    // Hybrid: buff + shield (Aura of Resolve — stat bonus + absorb)
+    if (effects.shield) {
+      const shieldHp = Math.floor(target.maxHp * (effects.shield / 100));
+      const shieldEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: `${technique.id}_shield`,
+        name: `${technique.name} Shield`,
+        type: "shield",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        shieldHp,
+        shieldMaxHp: shieldHp,
+      };
+      addActiveEffect(target, shieldEffect);
+      result.shield = shieldHp;
+    }
+
+    // Hybrid: buff + HoT (Spirit of Redemption — DEF buff with healAmount as HoT)
+    if (effects.healAmount && effects.duration && technique.id === "cleric_spirit_of_redemption") {
+      const totalHeal = Math.floor(target.maxHp * (effects.healAmount / 100));
+      const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
+      const hotEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: `${technique.id}_hot`,
+        name: `${technique.name} HoT`,
+        type: "hot",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        hotHealPerTick: healPerTick,
+      };
+      addActiveEffect(target, hotEffect);
+      result.hotApplied = true;
+      result.healPerTick = healPerTick;
+    }
   }
 
-  // Debuffs with stat reductions
+  // Debuffs with stat reductions (pure debuffs only — hybrid attack+debuff handled above)
   if (type === "debuff" && effects.statReduction && effects.duration) {
     const debuffEffect: ActiveEffect = {
       id: randomUUID(),
@@ -486,8 +592,8 @@ function applyTechniqueEffects(
     result.duration = effects.duration;
   }
 
-  // DoTs (Poison Blade, Consecration, Corruption)
-  if (effects.dotDamage && effects.duration) {
+  // DoTs (pure debuff-type DoTs like Poison Blade, Consecration, Corruption)
+  if (type !== "attack" && effects.dotDamage && effects.duration) {
     const dotEffect: ActiveEffect = {
       id: randomUUID(),
       techniqueId: technique.id,
@@ -505,8 +611,8 @@ function applyTechniqueEffects(
     result.duration = effects.duration;
   }
 
-  // Shields (Divine Protection, Soul Shield)
-  if (effects.shield && effects.duration) {
+  // Shields (pure buff-type shields like Divine Protection, Soul Shield, Mana Shield)
+  if (effects.shield && effects.duration && !effects.statBonus) {
     const shieldHp = Math.floor(target.maxHp * (effects.shield / 100));
     const shieldEffect: ActiveEffect = {
       id: randomUUID(),
@@ -523,6 +629,38 @@ function applyTechniqueEffects(
     addActiveEffect(target, shieldEffect);
     result.shield = shieldHp;
     result.duration = effects.duration;
+  }
+
+  // ── Knockback: push target away from caster ──────────────────────
+  if (effects.knockback && target.id !== caster.id) {
+    const dx = target.x - caster.x;
+    const dy = target.y - caster.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    target.x += Math.round(nx * effects.knockback);
+    target.y += Math.round(ny * effects.knockback);
+    clampToZoneBounds(target, zone.zoneId);
+    result.knockback = effects.knockback;
+    result.targetNewX = target.x;
+    result.targetNewZ = target.y;
+  }
+
+  // ── Lunge: dash caster toward target ─────────────────────────────
+  if (effects.lunge && target.id !== caster.id) {
+    const dx = target.x - caster.x;
+    const dy = target.y - caster.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    const nx = dx / dist;
+    const ny = dy / dist;
+    // Don't overshoot — stop 5 units short of target
+    const lungeActual = Math.min(effects.lunge, Math.max(0, dist - 5));
+    caster.x += Math.round(nx * lungeActual);
+    caster.y += Math.round(ny * lungeActual);
+    clampToZoneBounds(caster, zone.zoneId);
+    result.lunge = effects.lunge;
+    result.casterNewX = caster.x;
+    result.casterNewZ = caster.y;
   }
 
   return result;

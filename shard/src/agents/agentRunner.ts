@@ -15,8 +15,12 @@ import {
   patchAgentConfig,
   appendChatMessage,
   getChatHistory,
+  askSummonerQuestion,
+  getSummonerQuestion,
+  clearSummonerQuestion,
   type AgentFocus,
   type AgentStrategy,
+  type PendingQuestion,
 } from "./agentConfigStore.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
@@ -200,6 +204,7 @@ export class AgentRunner {
   private moveToLastCommandAt = 0;
   private moveToLastLogAt = 0;
   private interactionCooldowns = new Map<string, number>();
+  private pendingQuestionId: string | null = null;
   private failureMemory = new Map<string, FailureMemoryEntry>();
   private telemetry = {
     loop: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
@@ -537,6 +542,79 @@ export class AgentRunner {
       if (idsToAck.length > 0) await ackInboxMessages(this.userWallet, idsToAck);
     } catch (err: any) {
       console.debug(`[agent:${this.walletTag}] Inbox check failed: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  /**
+   * Champion asks the summoner a yes/no (or multi-choice) question.
+   * Posts the question to the chat log and sends a push notification.
+   * Returns the PendingQuestion or null if there's already one pending.
+   */
+  public async askSummoner(
+    text: string,
+    choices: string[] = ["Yes", "No"],
+    context?: Record<string, unknown>,
+  ): Promise<PendingQuestion | null> {
+    try {
+      // Don't stack questions — only one pending at a time
+      const existing = await getSummonerQuestion(this.userWallet);
+      if (existing && !existing.reply) return null;
+
+      const question = await askSummonerQuestion(this.userWallet, text, choices, context);
+      this.pendingQuestionId = question.questionId;
+
+      // Post to chat as a "question" message so the UI renders buttons
+      await appendChatMessage(this.userWallet, {
+        role: "question",
+        text,
+        ts: Date.now(),
+        questionId: question.questionId,
+        choices,
+      });
+
+      // Push notification to the summoner
+      const entityName = this.entityId
+        ? (getWorldEntity(this.entityId)?.name ?? "Your champion")
+        : "Your champion";
+      void sendAgentPush(this.userWallet, {
+        type: "champion_question",
+        agentName: entityName,
+        detail: text,
+      });
+
+      void this.logActivity(`[QUESTION] ${text} (${choices.join("/")})`);
+      return question;
+    } catch (err: any) {
+      console.debug(`[agent:${this.walletTag}] askSummoner failed: ${err.message?.slice(0, 60)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Check if the summoner has replied to a pending question.
+   * Returns the reply string if answered, "expired" if timed out, or null if still waiting.
+   */
+  private async checkQuestionReply(): Promise<{ reply: string; context?: Record<string, unknown> } | "expired" | null> {
+    if (!this.pendingQuestionId) return null;
+    try {
+      const q = await getSummonerQuestion(this.userWallet);
+      if (!q || q.questionId !== this.pendingQuestionId) {
+        // Question expired or was cleared
+        this.pendingQuestionId = null;
+        return "expired";
+      }
+      if (q.reply) {
+        // Summoner answered
+        this.pendingQuestionId = null;
+        await clearSummonerQuestion(this.userWallet);
+        void this.logActivity(`[REPLY] Summoner said: ${q.reply}`);
+        return { reply: q.reply, context: q.context };
+      }
+      // Still waiting
+      return null;
+    } catch {
+      this.pendingQuestionId = null;
+      return "expired";
     }
   }
 
@@ -986,6 +1064,10 @@ export class AgentRunner {
       equipItem: (id, instanceId) => self.equipItem(id, instanceId),
       learnProfession: (id) => self.learnProfession(id),
       recycleItem: (id, quantity) => self.recycleItem(id, quantity),
+      askSummoner: async (text, choices, context) => {
+        const q = await self.askSummoner(text, choices, context);
+        return q !== null;
+      },
     };
   }
 
@@ -1383,6 +1465,33 @@ export class AgentRunner {
         // Inbox check every 5 ticks
         if (this.ticksSinceFocusChange % 5 === 0) {
           await this.processInbox();
+        }
+
+        // Check for summoner reply to pending question
+        if (this.pendingQuestionId) {
+          const qReply = await this.checkQuestionReply();
+          if (qReply === null) {
+            // Still waiting — skip heavy decision-making, just idle
+            await sleep(TICK_MS);
+            continue;
+          }
+          if (qReply !== "expired" && qReply.context) {
+            // Process the reply based on context
+            const action = qReply.context.action as string | undefined;
+            if (action === "buy" && qReply.reply.toLowerCase() === "yes") {
+              void this.logActivity(`Summoner approved purchase — proceeding`);
+            } else if (action === "buy" && qReply.reply.toLowerCase() === "no") {
+              void this.logActivity(`Summoner declined purchase — skipping`);
+              this.currentScript = null; // Clear shopping script
+            } else if (action === "travel" && qReply.reply.toLowerCase() === "yes") {
+              void this.logActivity(`Summoner approved travel — proceeding`);
+            } else if (action === "travel" && qReply.reply.toLowerCase() === "no") {
+              void this.logActivity(`Summoner declined travel — staying`);
+              await patchAgentConfig(this.userWallet, { focus: "combat", targetZone: undefined });
+              this.currentScript = null;
+            }
+          }
+          // Fall through to normal tick after processing reply
         }
 
         // Chat reactions: check for other agents' chat and maybe respond

@@ -8,6 +8,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeMine } from "../social/diary.js";
 import { awardProfessionXp, xpForRarity } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 const GATHER_RANGE = 50;
 
@@ -178,6 +179,17 @@ export function registerMiningRoutes(server: FastifyInstance) {
       const xpAmount = xpForRarity(oreProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
       const profXpResult = awardProfessionXp(entity, region, xpAmount, "mining", undefined, oreProps.label);
+
+      // Emit zone event for client gather animation
+      logZoneEvent({
+        zoneId: region,
+        type: "loot",
+        tick: getWorldTick(),
+        message: `${entity.name}: Mined ${oreProps.label}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: { gatherType: "mining", itemName: oreProps.label, nodeId: oreNodeId },
+      });
 
       // Advance gather quest progress
       advanceGatherQuests(entity, oreProps.label);

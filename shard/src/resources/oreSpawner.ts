@@ -90,6 +90,86 @@ const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   { zoneId: "azurshard-chasm", oreType: "gold", x: 200, y: 450 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 400, y: 550 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 560, y: 400 },
+
+  // sunflower-fields - coal x3, tin x2, copper x1
+  { zoneId: "sunflower-fields", oreType: "coal", x: 180, y: 200 },
+  { zoneId: "sunflower-fields", oreType: "coal", x: 400, y: 300 },
+  { zoneId: "sunflower-fields", oreType: "coal", x: 550, y: 450 },
+  { zoneId: "sunflower-fields", oreType: "tin", x: 250, y: 400 },
+  { zoneId: "sunflower-fields", oreType: "tin", x: 480, y: 150 },
+  { zoneId: "sunflower-fields", oreType: "copper", x: 350, y: 550 },
+
+  // harvest-hollow - coal x2, tin x2, copper x2
+  { zoneId: "harvest-hollow", oreType: "coal", x: 150, y: 250 },
+  { zoneId: "harvest-hollow", oreType: "coal", x: 500, y: 180 },
+  { zoneId: "harvest-hollow", oreType: "tin", x: 300, y: 400 },
+  { zoneId: "harvest-hollow", oreType: "tin", x: 450, y: 520 },
+  { zoneId: "harvest-hollow", oreType: "copper", x: 200, y: 550 },
+  { zoneId: "harvest-hollow", oreType: "copper", x: 550, y: 350 },
+
+  // willowfen-pastures - coal x2, tin x2, copper x2
+  { zoneId: "willowfen-pastures", oreType: "coal", x: 200, y: 150 },
+  { zoneId: "willowfen-pastures", oreType: "coal", x: 450, y: 400 },
+  { zoneId: "willowfen-pastures", oreType: "tin", x: 300, y: 250 },
+  { zoneId: "willowfen-pastures", oreType: "tin", x: 150, y: 500 },
+  { zoneId: "willowfen-pastures", oreType: "copper", x: 500, y: 200 },
+  { zoneId: "willowfen-pastures", oreType: "copper", x: 350, y: 550 },
+
+  // bramblewood-homestead - tin x2, copper x2, silver x2
+  { zoneId: "bramblewood-homestead", oreType: "tin", x: 200, y: 200 },
+  { zoneId: "bramblewood-homestead", oreType: "tin", x: 450, y: 350 },
+  { zoneId: "bramblewood-homestead", oreType: "copper", x: 300, y: 500 },
+  { zoneId: "bramblewood-homestead", oreType: "copper", x: 550, y: 200 },
+  { zoneId: "bramblewood-homestead", oreType: "silver", x: 150, y: 400 },
+  { zoneId: "bramblewood-homestead", oreType: "silver", x: 400, y: 550 },
+
+  // goldenreach-grange - coal x2, copper x2, silver x2
+  { zoneId: "goldenreach-grange", oreType: "coal", x: 200, y: 200 },
+  { zoneId: "goldenreach-grange", oreType: "coal", x: 500, y: 400 },
+  { zoneId: "goldenreach-grange", oreType: "copper", x: 300, y: 300 },
+  { zoneId: "goldenreach-grange", oreType: "copper", x: 150, y: 500 },
+  { zoneId: "goldenreach-grange", oreType: "silver", x: 450, y: 150 },
+  { zoneId: "goldenreach-grange", oreType: "silver", x: 350, y: 550 },
+
+  // dewveil-orchard - copper x2, silver x2, gold x2
+  { zoneId: "dewveil-orchard", oreType: "copper", x: 200, y: 250 },
+  { zoneId: "dewveil-orchard", oreType: "copper", x: 450, y: 400 },
+  { zoneId: "dewveil-orchard", oreType: "silver", x: 300, y: 150 },
+  { zoneId: "dewveil-orchard", oreType: "silver", x: 550, y: 300 },
+  { zoneId: "dewveil-orchard", oreType: "gold", x: 150, y: 500 },
+  { zoneId: "dewveil-orchard", oreType: "gold", x: 400, y: 550 },
+
+  // thornwall-ranch - copper x2, silver x2, gold x2
+  { zoneId: "thornwall-ranch", oreType: "copper", x: 150, y: 200 },
+  { zoneId: "thornwall-ranch", oreType: "copper", x: 400, y: 350 },
+  { zoneId: "thornwall-ranch", oreType: "silver", x: 300, y: 500 },
+  { zoneId: "thornwall-ranch", oreType: "silver", x: 550, y: 150 },
+  { zoneId: "thornwall-ranch", oreType: "gold", x: 200, y: 450 },
+  { zoneId: "thornwall-ranch", oreType: "gold", x: 500, y: 550 },
+
+  // moonpetal-gardens - silver x2, gold x4
+  { zoneId: "moonpetal-gardens", oreType: "silver", x: 200, y: 200 },
+  { zoneId: "moonpetal-gardens", oreType: "silver", x: 450, y: 350 },
+  { zoneId: "moonpetal-gardens", oreType: "gold", x: 300, y: 150 },
+  { zoneId: "moonpetal-gardens", oreType: "gold", x: 550, y: 300 },
+  { zoneId: "moonpetal-gardens", oreType: "gold", x: 150, y: 500 },
+  { zoneId: "moonpetal-gardens", oreType: "gold", x: 400, y: 550 },
+
+  // ironroot-farmstead - silver x2, gold x4
+  { zoneId: "ironroot-farmstead", oreType: "silver", x: 200, y: 150 },
+  { zoneId: "ironroot-farmstead", oreType: "silver", x: 500, y: 300 },
+  { zoneId: "ironroot-farmstead", oreType: "gold", x: 150, y: 350 },
+  { zoneId: "ironroot-farmstead", oreType: "gold", x: 350, y: 200 },
+  { zoneId: "ironroot-farmstead", oreType: "gold", x: 450, y: 500 },
+  { zoneId: "ironroot-farmstead", oreType: "gold", x: 250, y: 550 },
+
+  // crystalbloom-terrace - gold x6
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 150, y: 150 },
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 350, y: 200 },
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 550, y: 250 },
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 200, y: 450 },
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 400, y: 500 },
+  { zoneId: "crystalbloom-terrace", oreType: "gold", x: 500, y: 550 },
 ];
 
 export function spawnOreNodes(): void {

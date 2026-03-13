@@ -67,6 +67,10 @@ import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
+import { registerFarmingRoutes } from "./farming/farming.js";
+import { registerPlotRoutes } from "./farming/plotRoutes.js";
+import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
+import { spawnCropNodes } from "./farming/cropSpawner.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats, mintGold } from "./blockchain/blockchain.js";
 import { getWorldLayout } from "./world/worldLayout.js";
@@ -527,6 +531,9 @@ registerNameServiceRoutes(server);
 registerDungeonGateRoutes(server);
 registerEssenceTechniqueRoutes(server);
 registerDungeonGateTick(server);
+registerFarmingRoutes(server);
+registerPlotRoutes(server);
+registerBuildingRoutes(server);
 registerWorldMapRoutes(server);
 registerDiaryRoutes(server);
 registerNotificationRoutes(server);
@@ -544,6 +551,7 @@ setTimeout(() => {
 spawnOreNodes();
 spawnFlowerNodes();
 spawnNectarNodes();
+spawnCropNodes();
 
 // Mob respawner - check every 5 seconds
 setInterval(() => {

@@ -56,6 +56,17 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "felsrock-citadel": 35,
   "lake-lumina": 40,
   "azurshard-chasm": 45,
+  // Farmland zones — no level gate
+  "sunflower-fields": 1,
+  "harvest-hollow": 1,
+  "willowfen-pastures": 1,
+  "bramblewood-homestead": 1,
+  "goldenreach-grange": 1,
+  "dewveil-orchard": 1,
+  "thornwall-ranch": 1,
+  "moonpetal-gardens": 1,
+  "ironroot-farmstead": 1,
+  "crystalbloom-terrace": 1,
 };
 
 // ── Connection graph (loaded from world.json) ───────────────────────
