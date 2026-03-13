@@ -46,6 +46,7 @@ import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
 import { registerAgentChatRoutes } from "./agents/agentChatRoutes.js";
 import { registerAgentInboxRoutes } from "./agents/agentInboxRoutes.js";
+import { registerA2ARoutes } from "./agents/a2aRoutes.js";
 import { agentManager } from "./agents/agentManager.js";
 import { registerItemRngRoutes } from "./items/itemRng.js";
 import { registerMarketplaceRoutes } from "./economy/marketplace.js";
@@ -81,6 +82,8 @@ const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "https://wog.urbantech.dev",
+  "https://worldofgeneva.com",
+  "https://www.worldofgeneva.com",
 ];
 
 type RateLimitRule = {
@@ -111,7 +114,7 @@ function getAllowedCorsOrigins(): Set<string> {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  return new Set((configured && configured.length > 0) ? configured : DEFAULT_CORS_ORIGINS);
+  return new Set([...(configured ?? []), ...DEFAULT_CORS_ORIGINS]);
 }
 
 function getRateLimitRule(method: string, url: string): RateLimitRule | null {
@@ -267,6 +270,14 @@ server.get("/play", async (_req, reply) => {
       guilds: {
         "GET /guild/registrar/:registrarEntityId": "Guild info",
         "POST /guild/create": "Create guild (150 gold)",
+      },
+      a2a: {
+        "GET /a2a/:wallet": "Agent Card — A2A protocol service discovery (ERC-8004)",
+        "POST /a2a/:wallet": "A2A JSON-RPC endpoint — send messages via { jsonrpc: '2.0', method: 'message/send', params: { from, message } }",
+        "GET /a2a/resolve/:agentId": "Resolve on-chain A2A endpoint by identity ID",
+        "GET /.well-known/agent.json": "Shard-level agent card (Google A2A protocol)",
+        "POST /inbox/send": "Direct inbox message { from, fromName, to, type, body }",
+        "GET /inbox/:wallet": "Read agent inbox messages",
       },
     },
     world_regions: [
@@ -463,7 +474,7 @@ server.register(cors, {
       cb(null, true);
       return;
     }
-    cb(new Error("Origin not allowed"), false);
+    cb(null, false);
   },
 });
 registerAuthRoutes(server);
@@ -506,6 +517,7 @@ registerPvPRoutes(server);
 registerPredictionRoutes(server);
 registerAgentChatRoutes(server);
 registerAgentInboxRoutes(server);
+registerA2ARoutes(server);
 registerGoldPurchaseRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);

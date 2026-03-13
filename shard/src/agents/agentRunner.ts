@@ -18,7 +18,7 @@ import {
   type AgentFocus,
   type AgentStrategy,
 } from "./agentConfigStore.js";
-import { peekInbox, ackInboxMessages } from "./agentInbox.js";
+import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
@@ -49,7 +49,7 @@ import {
 import { detectTrigger, type TriggerState } from "./agentTriggers.js";
 import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.js";
 import * as behaviors from "./agentBehaviors.js";
-import { emitAgentChat, getAgentOrigin, maybeReactToChat } from "./agentDialogue.js";
+import { emitAgentChat, getAgentOrigin, maybeReactToChat, pickLine } from "./agentDialogue.js";
 import { sendAgentPush } from "./agentPushService.js";
 
 const TICK_MS = 1200;
@@ -796,6 +796,19 @@ export class AgentRunner {
         } else if (latest.type === "quest") {
           emitAgentChat({ ...dCtx, event: "quest_complete", detail: latest.message });
           void sendAgentPush(this.userWallet, { type: "quest_complete", agentName: entity.name, detail: latest.message });
+          // Notify summoner in inbox
+          if (this.custodialWallet) {
+            const questLine = pickLine(this.agentOrigin ?? undefined, entity.classId ?? undefined, "summon_quest_complete")
+              ?? `Just finished "${latest.message ?? "a quest"}"! What should I do next?`;
+            const questBody = questLine.replace(/\{detail\}/g, latest.message ?? "a quest");
+            void sendInboxMessage({
+              from: this.custodialWallet,
+              fromName: entity.name,
+              to: this.userWallet,
+              type: "direct",
+              body: questBody,
+            });
+          }
         } else if (latest.type === "quest-progress" && latest.entityId === this.entityId) {
           const milestone = getQuestProgressMilestone(latest);
           if (milestone) {
@@ -813,6 +826,20 @@ export class AgentRunner {
     if (latest.type === "levelup") {
       const entity = this.entityId ? getWorldEntity(this.entityId) : null;
       void sendAgentPush(this.userWallet, { type: "level_up", agentName: entity?.name ?? "Agent", detail: latest.message });
+      // Notify summoner in inbox
+      if (this.custodialWallet) {
+        const lvl = String(entity?.level ?? "?");
+        const lvlLine = pickLine(this.agentOrigin ?? undefined, entity?.classId ?? undefined, "summon_level_up")
+          ?? `Just hit level ${lvl}! Should I keep going here or move to a new zone?`;
+        const lvlBody = lvlLine.replace(/\{detail\}/g, lvl);
+        void sendInboxMessage({
+          from: this.custodialWallet,
+          fromName: entity?.name ?? "Agent",
+          to: this.userWallet,
+          type: "direct",
+          body: lvlBody,
+        });
+      }
       return { type: "level_up", detail: latest.message };
     }
     if (latest.type === "death") {

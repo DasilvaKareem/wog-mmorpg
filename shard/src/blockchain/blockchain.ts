@@ -555,7 +555,9 @@ export async function registerIdentity(
     const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
 
     // Register agent — mints NFT to server wallet (msg.sender)
-    const agentURI = metadataURI || `erc8004:wog:character:${characterTokenId}`;
+    // Use A2A endpoint URL as the agentURI so it's discoverable on-chain
+    const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
+    const agentURI = `${base}/a2a/${ownerAddress}`;
     const registerTx = await identityRegistryContract["register(string)"](agentURI);
     const receipt = await registerTx.wait();
 
@@ -589,6 +591,49 @@ export async function registerIdentity(
     return receipt.hash;
   } catch (err: any) {
     console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);
+    return null;
+  }
+}
+
+/**
+ * Read the A2A endpoint (agentURI) for a given agent identity from the ERC-8004 registry.
+ * Returns the URL string or null if not set / contract unavailable.
+ */
+export async function getA2AEndpoint(agentId: bigint): Promise<string | null> {
+  if (!identityRegistryContract) return null;
+  try {
+    const uri: string = await identityRegistryContract.tokenURI(agentId);
+    return uri || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Update the A2A endpoint (agentURI) for a registered agent identity.
+ * Fire-and-forget safe — logs errors but never throws.
+ */
+export async function setA2AEndpoint(agentId: bigint, endpointUrl: string): Promise<string | null> {
+  if (!identityRegistryContract) return null;
+  try {
+    const tx = await identityRegistryContract.setAgentURI(agentId, endpointUrl);
+    const receipt = await tx.wait();
+    console.log(`[identity] Updated A2A endpoint for agent #${agentId} → ${endpointUrl}`);
+    return receipt.hash;
+  } catch (err: any) {
+    console.warn(`[identity] Failed to set A2A endpoint for agent #${agentId}: ${err.message?.slice(0, 80)}`);
+    return null;
+  }
+}
+
+/**
+ * Look up the agent wallet address for a given agent identity.
+ */
+export async function getAgentWallet(agentId: bigint): Promise<string | null> {
+  if (!identityRegistryContract) return null;
+  try {
+    return await identityRegistryContract.getAgentWallet(agentId);
+  } catch {
     return null;
   }
 }

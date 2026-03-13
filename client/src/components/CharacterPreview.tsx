@@ -12,7 +12,10 @@ import { ASSET_BASE_URL } from "@/config";
 const FRAME_W = 16;
 const FRAME_H = 22;
 const SCALE = 8;
-const CANVAS_W = FRAME_W * SCALE; // 128
+const BODY_X = 6;
+const WEAPON_OFFSET_X = -4;
+const BUFFER_W = FRAME_W + BODY_X;
+const CANVAS_W = BUFFER_W * SCALE; // 176
 const CANVAS_H = FRAME_H * SCALE; // 176
 
 // Map onboarding skin color ids → available body layer filenames
@@ -75,7 +78,12 @@ interface Props {
 
 interface LayerDef {
   src: string;
+  dx?: number;
+  dy?: number;
+  scale?: number;
 }
+
+const ARMOR_SCALE = 0.9;
 
 // Image cache to avoid reloading PNGs on every render
 const imageCache = new Map<string, HTMLImageElement>();
@@ -133,21 +141,24 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
     // 4. Equipment based on class
     const equip = CLASS_EQUIPMENT[classId ?? "warrior"] ?? CLASS_EQUIPMENT.warrior;
     if (equip.chest) {
-      layers.push({ src: `${base}/chest/chest-${equip.chest}.png` });
+      layers.push({ src: `${base}/chest/chest-${equip.chest}.png`, dx: BODY_X, scale: ARMOR_SCALE });
     }
     if (equip.legs) {
-      layers.push({ src: `${base}/legs/legs-${equip.legs}.png` });
+      layers.push({ src: `${base}/legs/legs-${equip.legs}.png`, dx: BODY_X, scale: ARMOR_SCALE });
     }
     if (equip.boots) {
-      layers.push({ src: `${base}/boots/boots-${equip.boots}.png` });
+      layers.push({ src: `${base}/boots/boots-${equip.boots}.png`, dx: BODY_X, scale: ARMOR_SCALE });
     }
-    if (equip.weapon) {
-      layers.push({ src: `${base}/weapons/weapon-${equip.weapon}.png` });
-    }
+
+    const weaponLayer: LayerDef | null = equip.weapon
+      ? { src: `${base}/weapons/weapon-${equip.weapon}.png`, dx: BODY_X + WEAPON_OFFSET_X }
+      : null;
 
     let cancelled = false;
 
-    Promise.all(layers.map((l) => loadImage(l.src).catch(() => null))).then(
+    const layerDefs = weaponLayer ? [...layers, weaponLayer] : layers;
+
+    Promise.all(layerDefs.map((l) => loadImage(l.src).catch(() => null))).then(
       (images) => {
         if (cancelled) return;
 
@@ -160,7 +171,7 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
         // Composite at native resolution into an offscreen 16×22 buffer,
         // then scale the result up to the display canvas.
         const buf = document.createElement("canvas");
-        buf.width = FRAME_W;
+        buf.width = BUFFER_W;
         buf.height = FRAME_H;
         const bctx = buf.getContext("2d")!;
         bctx.imageSmoothingEnabled = false;
@@ -168,15 +179,21 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
         for (let i = 0; i < images.length; i++) {
           const img = images[i];
           if (!img) continue;
+          const layer = layerDefs[i];
+          const scale = layer?.scale ?? 1;
+          const drawW = Math.round(FRAME_W * scale);
+          const drawH = Math.round(FRAME_H * scale);
+          const dx = (layer?.dx ?? BODY_X) + Math.round((FRAME_W - drawW) / 2);
+          const dy = (layer?.dy ?? 0) + Math.round((FRAME_H - drawH) / 2);
           // Extract first frame (row 0, col 0) = down-facing idle.
           // Preview art is already aligned inside each 16x22 cell.
-          bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
+          bctx.drawImage(img, 0, 0, FRAME_W, FRAME_H, dx, dy, drawW, drawH);
         }
 
         // Scale up to display canvas
         ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(buf, 0, 0, FRAME_W, FRAME_H, 0, 0, CANVAS_W, CANVAS_H);
+        ctx.drawImage(buf, 0, 0, BUFFER_W, FRAME_H, 0, 0, CANVAS_W, CANVAS_H);
       }
     );
 

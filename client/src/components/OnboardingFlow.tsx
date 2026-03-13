@@ -640,44 +640,34 @@ export function OnboardingFlow({
                 <div className="flex-1 border-t border-[#2a3450]" />
               </div>
 
-              {[
-                { type: "walletconnect" as const, label: "Connect Wallet", sub: "WalletConnect — any wallet", icon: "W", border: "#54f28b" },
-                { type: "metamask" as const, label: "MetaMask", sub: "Browser extension", icon: "M", border: "#f6851b" },
-                { type: "coinbase" as const, label: "Coinbase Wallet", sub: "Browser extension", icon: "C", border: "#0052ff" },
-              ].map((w) => (
-                <button
-                  key={w.type}
-                  onClick={async () => {
-                    setError(null);
-                    setStep("connecting");
-                    try {
-                      await connect(w.type);
-                      const nextAddress = WalletManager.getInstance().address;
-                      if (!nextAddress) {
-                        throw new Error("Wallet connected but no address was returned.");
-                      }
-                      await handleAuthSuccess(nextAddress, { skipSync: true });
-                    } catch (e) {
-                      setError(e instanceof Error ? e.message : "Wallet connection failed.");
+              <button
+                onClick={async () => {
+                  setError(null);
+                  setStep("connecting");
+                  try {
+                    await connect();
+                    const nextAddress = WalletManager.getInstance().address;
+                    if (!nextAddress) {
                       setStep("login");
+                      return;
                     }
-                  }}
-                  className="flex w-full items-center gap-3 border-2 bg-[#0a1a0e] px-4 py-2 text-left text-[13px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
-                  style={{ borderColor: w.border }}
-                >
-                  <span
-                    className="flex h-6 w-6 shrink-0 items-center justify-center border text-[13px] font-bold"
-                    style={{ borderColor: w.border, color: w.border }}
-                  >
-                    {w.icon}
-                  </span>
-                  <div className="flex flex-col">
-                    <span>{w.label}</span>
-                    <span className="text-[10px] text-[#6d77a3]">{w.sub}</span>
-                  </div>
-                  <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
-                </button>
-              ))}
+                    await handleAuthSuccess(nextAddress, { skipSync: true });
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : "Wallet connection failed.");
+                    setStep("login");
+                  }
+                }}
+                className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 text-left text-[13px] text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center border border-[#54f28b] text-[13px] font-bold text-[#54f28b]">
+                  W
+                </span>
+                <div className="flex flex-col">
+                  <span>Browse Wallets</span>
+                  <span className="text-[10px] text-[#6d77a3]">MetaMask, Rabby, Rainbow, Coinbase, WalletConnect, more</span>
+                </div>
+                <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
+              </button>
 
               {pendingMintAfterAuth && (
                 <button

@@ -77,18 +77,38 @@ export class WalletManager {
 
   private constructor() {}
 
-  /** Sync an address obtained via social/in-app wallet into WalletManager state */
-  async syncExternalAddress(address: string): Promise<void> {
+  private primeConnectedWallet(
+    address: string,
+    account: { address: string; signMessage: (args: { message: string }) => Promise<string> } | null
+  ): void {
     this._address = address;
+    this._account = account;
     this._custodialAddress = null;
     this._custodialResolved = false;
-    // Fire-and-forget registration + balance — don't block the wallet becoming "connected"
+  }
+
+  private registerConnectedWallet(address: string, forceBalance = false): void {
     void fetch(`${API_URL}/wallet/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ address }),
     }).catch(() => {});
-    void this.fetchBalance(true).catch(() => {});
+    void this.fetchBalance(forceBalance).catch(() => {});
+  }
+
+  /** Sync an address obtained via social/in-app wallet into WalletManager state */
+  async syncExternalAddress(address: string): Promise<void> {
+    this.primeConnectedWallet(address, null);
+    this.registerConnectedWallet(address, true);
+  }
+
+  /** Sync a connected wallet account so auth can sign challenges with it later. */
+  async syncConnectedAccount(account: {
+    address: string;
+    signMessage: (args: { message: string }) => Promise<string>;
+  }): Promise<void> {
+    this.primeConnectedWallet(account.address, account);
+    this.registerConnectedWallet(account.address, true);
   }
 
   static getInstance(): WalletManager {
@@ -127,20 +147,10 @@ export class WalletManager {
       ),
     ]);
 
-    this._address = account.address;
-    this._account = account as any;
-    this._custodialAddress = null;
-    this._custodialResolved = false;
+    this.primeConnectedWallet(account.address, account as any);
+    this.registerConnectedWallet(account.address);
 
-    // Fire-and-forget registration + balance — don't block on these
-    void fetch(`${API_URL}/wallet/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address: this._address }),
-    }).catch(() => {});
-    void this.fetchBalance().catch(() => {});
-
-    return this._address;
+    return account.address;
   }
 
   disconnect(): void {

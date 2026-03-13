@@ -52,6 +52,13 @@ export interface DeploymentResponse {
     position: { x: number; y: number };
     goldBalance: string;
   };
+  a2a: {
+    endpoint: string;
+    agentCard: string;
+    inbox: string;
+    protocol: string;
+    chainId: number;
+  };
   apiDocs: string;
   quickStart: {
     move: string;
@@ -322,6 +329,8 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     const duration = Date.now() - startTime;
     console.log(`[x402] ${deploymentId}: Deployment complete in ${duration}ms`);
 
+    const shardBase = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
+
     return {
       success: true,
       deploymentId,
@@ -344,6 +353,13 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
         zoneId: deploymentZone,
         position: { x: spawnX, y: spawnY },
         goldBalance: goldBonus.toString(),
+      },
+      a2a: {
+        endpoint: `${shardBase}/a2a/${wallet.address}`,
+        agentCard: `${shardBase}/a2a/${wallet.address}`,
+        inbox: `${shardBase}/inbox/${wallet.address}`,
+        protocol: "ERC-8004",
+        chainId: 103698795,
       },
       apiDocs: "https://github.com/yourusername/wog-mmorpg/blob/master/docs/API.md",
       quickStart: {

@@ -8,6 +8,8 @@ import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIR
 import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getClassById } from "../character/classes.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { sendInboxMessage } from "./agentInbox.js";
+import { pickLine } from "./agentDialogue.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
@@ -997,6 +999,20 @@ export async function doQuesting(
           });
           if (acceptRes?.accepted) {
             void ctx.logActivity(`Accepted quest: "${q.title}" from ${q.npcName}`);
+            // Tell summoner what quest we're doing next
+            const agentName = me.name ?? "Agent";
+            const origin = me.origin ?? undefined;
+            const classId = me.classId ?? undefined;
+            const acceptLine = pickLine(origin, classId, "summon_quest_accept")
+              ?? `Just picked up a new quest: "${q.title}". Should I go for it?`;
+            const acceptBody = acceptLine.replace(/\{detail\}/g, q.title ?? "a quest");
+            void sendInboxMessage({
+              from: ctx.custodialWallet,
+              fromName: agentName,
+              to: ctx.userWallet,
+              type: "direct",
+              body: acceptBody,
+            });
             return actionCompleted(`Accepted quest ${q.title}`);
           }
         } else if (currentActive === 0) {

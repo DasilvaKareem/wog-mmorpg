@@ -186,6 +186,7 @@ export class TilemapRenderer {
     const groundLayer = groundMap.createLayer(0, groundTileset, offsetX, offsetY);
     if (!groundLayer) return;
     groundLayer.setDepth(0);
+    groundLayer.setSkipCull(true);
 
     // Apply elevation tinting to ground layer
     if (hasElevation) {
@@ -213,6 +214,7 @@ export class TilemapRenderer {
     const overlayLayer = overlayMap.createLayer(0, overlayTileset, offsetX, offsetY);
     if (!overlayLayer) return;
     overlayLayer.setDepth(20);
+    overlayLayer.setSkipCull(true);
 
     // Generate cliff overlay layer if elevation data exists
     let cliffLayerResult: ElevationLayer | null = null;
@@ -282,6 +284,7 @@ export class TilemapRenderer {
 
     // Cliff edges render between ground (0) and overlay (20)
     layer.setDepth(5);
+    layer.setSkipCull(true);
 
     return { map, layer };
   }
@@ -472,6 +475,7 @@ export class TilemapRenderer {
       return false;
     }
     this.groundLayer.setDepth(0);
+    this.groundLayer.setSkipCull(true);
 
     const overlayMap = this.scene.make.tilemap({
       data: overlayData,
@@ -497,6 +501,7 @@ export class TilemapRenderer {
       return false;
     }
     this.overlayLayer.setDepth(20);
+    this.overlayLayer.setSkipCull(true);
 
     if (this.waterPositions.length > 0) {
       this.waterTimer = this.scene.time.addEvent({

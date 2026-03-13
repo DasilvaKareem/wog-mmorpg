@@ -341,11 +341,11 @@ const LAYERED_ENTITY_TYPES = new Set([
  * Try to get a layered composite texture for a player or humanoid NPC entity.
  * Returns the texture key if layers are available, null otherwise.
  */
-export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity): string | null {
+export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity, showWeapon = false): string | null {
   if (!LAYERED_ENTITY_TYPES.has(entity.type)) return null;
   // NPCs need at least skinColor to use layered sprites
   if (entity.type !== "player" && !entity.skinColor) return null;
-  const key = getOrCreateLayeredTexture(scene, entity);
+  const key = getOrCreateLayeredTexture(scene, entity, showWeapon);
   if (key && !scene.anims.exists(`${key}-idle-down`)) {
     createAnimations(scene, key);
   }
@@ -356,10 +356,10 @@ export function getLayeredTextureKey(scene: Phaser.Scene, entity: Entity): strin
  * Check if an entity's layered texture needs re-compositing
  * (e.g., equipment changed).
  */
-export function checkLayeredRecomposite(scene: Phaser.Scene, entity: Entity, currentKey: string): string | null {
+export function checkLayeredRecomposite(scene: Phaser.Scene, entity: Entity, currentKey: string, showWeapon = false): string | null {
   if (!LAYERED_ENTITY_TYPES.has(entity.type)) return null;
   if (!needsRecomposite(entity, currentKey)) return null;
-  const newKey = getOrCreateLayeredTexture(scene, entity);
+  const newKey = getOrCreateLayeredTexture(scene, entity, showWeapon);
   if (newKey && !scene.anims.exists(`${newKey}-idle-down`)) {
     createAnimations(scene, newKey);
   }
@@ -431,6 +431,17 @@ function createAnimations(scene: Phaser.Scene, key: string): void {
         frames: [{ key, frame: base + 2 }, { key, frame: base + 3 }],
         frameRate: 6,
         repeat: -1,
+      });
+    }
+
+    // Attack animation: same frames as walk, faster, plays once (for weapon swipe)
+    const attackKey = `${key}-attack-${dir}`;
+    if (!scene.anims.exists(attackKey)) {
+      scene.anims.create({
+        key: attackKey,
+        frames: [{ key, frame: base + 2 }, { key, frame: base + 3 }],
+        frameRate: 10,
+        repeat: 0,
       });
     }
   }

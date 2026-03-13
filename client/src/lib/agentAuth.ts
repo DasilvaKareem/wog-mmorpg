@@ -1,7 +1,7 @@
 /**
  * Client-side auth token management for agent API calls.
  * Obtains a JWT by challenge-signing with the thirdweb in-app wallet,
- * falling back to MetaMask / external wallet when in-app wallet is unavailable.
+ * falling back to the currently connected external wallet when in-app wallet is unavailable.
  */
 
 import { API_URL } from "@/config";
@@ -88,10 +88,10 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
     if (!challengeRes.ok) return null;
     const { message, timestamp } = await challengeRes.json();
 
-    // Try in-app wallet first, then fall back to external (MetaMask) wallet
+    // Try in-app wallet first, then fall back to the connected external wallet
     let account = await sharedInAppWallet.getAccount();
     if (!account) {
-      // Fall back to MetaMask / external wallet
+      // Fall back to the external wallet stored in WalletManager
       const externalAccount = WalletManager.getInstance().account;
       if (externalAccount) {
         account = externalAccount as any;

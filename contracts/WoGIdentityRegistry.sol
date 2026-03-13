@@ -21,6 +21,7 @@ contract WoGIdentityRegistry is ERC721, Ownable {
         uint256 characterTokenId;
         address characterOwner;
         string metadataURI;
+        string agentEndpoint;   // A2A service endpoint URL (ERC-8004)
         uint256 createdAt;
         bool active;
     }
@@ -51,6 +52,11 @@ contract WoGIdentityRegistry is ERC721, Ownable {
     event IdentityUpdated(
         uint256 indexed identityId,
         string newMetadataURI
+    );
+
+    event AgentEndpointUpdated(
+        uint256 indexed identityId,
+        string endpoint
     );
 
     event IdentityDeactivated(uint256 indexed identityId);
@@ -86,6 +92,23 @@ contract WoGIdentityRegistry is ERC721, Ownable {
         address characterOwner,
         string memory metadataURI
     ) external returns (uint256) {
+        return createIdentityWithEndpoint(characterTokenId, characterOwner, metadataURI, "");
+    }
+
+    /**
+     * @notice Create a new identity with an A2A service endpoint
+     * @param characterTokenId The character NFT token ID
+     * @param characterOwner Owner of the character
+     * @param metadataURI URI pointing to identity metadata
+     * @param agentEndpoint A2A service endpoint URL
+     * @return identityId The new identity token ID
+     */
+    function createIdentityWithEndpoint(
+        uint256 characterTokenId,
+        address characterOwner,
+        string memory metadataURI,
+        string memory agentEndpoint
+    ) public returns (uint256) {
         if (!authorizedMinters[msg.sender]) revert Unauthorized();
         if (characterToIdentity[characterTokenId] != 0) revert IdentityAlreadyExists();
 
@@ -96,6 +119,7 @@ contract WoGIdentityRegistry is ERC721, Ownable {
             characterTokenId: characterTokenId,
             characterOwner: characterOwner,
             metadataURI: metadataURI,
+            agentEndpoint: agentEndpoint,
             createdAt: block.timestamp,
             active: true
         });
@@ -107,6 +131,9 @@ contract WoGIdentityRegistry is ERC721, Ownable {
         _mint(characterOwner, identityId);
 
         emit IdentityCreated(identityId, characterTokenId, characterOwner, metadataURI);
+        if (bytes(agentEndpoint).length > 0) {
+            emit AgentEndpointUpdated(identityId, agentEndpoint);
+        }
 
         return identityId;
     }
@@ -144,6 +171,34 @@ contract WoGIdentityRegistry is ERC721, Ownable {
         identity.active = false;
 
         emit IdentityDeactivated(identityId);
+    }
+
+    /**
+     * @notice Set or update the A2A service endpoint for an identity
+     * @param identityId Identity to update
+     * @param endpoint A2A endpoint URL (e.g. https://host/a2a/0x...)
+     */
+    function setAgentEndpoint(uint256 identityId, string memory endpoint) external {
+        Identity storage identity = identities[identityId];
+        if (identity.createdAt == 0) revert IdentityNotFound();
+        if (ownerOf(identityId) != msg.sender && !authorizedMinters[msg.sender]) {
+            revert Unauthorized();
+        }
+        if (!identity.active) revert IdentityInactive();
+
+        identity.agentEndpoint = endpoint;
+        emit AgentEndpointUpdated(identityId, endpoint);
+    }
+
+    /**
+     * @notice Get the A2A service endpoint for an identity
+     * @param identityId Identity to query
+     * @return endpoint The A2A endpoint URL
+     */
+    function getAgentEndpoint(uint256 identityId) external view returns (string memory) {
+        Identity memory identity = identities[identityId];
+        if (identity.createdAt == 0) revert IdentityNotFound();
+        return identity.agentEndpoint;
     }
 
     /**

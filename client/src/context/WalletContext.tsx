@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useActiveWallet, useConnectModal, useDisconnect } from "thirdweb/react";
 
 import {
   fetchCharactersWithLive,
@@ -9,7 +10,7 @@ import {
 } from "@/ShardClient";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance, type ExternalWalletType } from "@/lib/walletManager";
-import { thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
+import { skaleChain, thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { clearCachedToken } from "@/lib/agentAuth";
 import type { OwnedCharacter } from "@/types";
 
@@ -80,6 +81,9 @@ function pickPrimaryCharacterProgress(
 
 export function WalletProvider({ children }: { children: React.ReactNode }): React.ReactElement {
   const walletManager = React.useMemo(() => WalletManager.getInstance(), []);
+  const activeWallet = useActiveWallet();
+  const { connect: openConnectModal } = useConnectModal();
+  const { disconnect: disconnectActiveWallet } = useDisconnect();
   const [address, setAddress] = React.useState<string | null>(walletManager.address);
   const [balance, setBalance] = React.useState<WalletBalance | null>(walletManager.balance);
   const [loading, setLoading] = React.useState(true); // true until auto-connect attempt completes
@@ -212,7 +216,31 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   const connect = React.useCallback(async (walletType?: ExternalWalletType) => {
     setLoading(true);
     try {
-      await walletManager.connect(walletType);
+      if (!walletType || walletType === "walletconnect") {
+        let wallet;
+        try {
+          wallet = await openConnectModal({
+            client: thirdwebClient,
+            chain: skaleChain,
+            showAllWallets: true,
+            size: "wide",
+            appMetadata: {
+              name: "World of Geneva",
+              url: typeof window !== "undefined" ? window.location.origin : undefined,
+            },
+          });
+        } catch {
+          return;
+        }
+
+        const account = wallet.getAccount();
+        if (!account) {
+          throw new Error("Wallet connected but no account was returned.");
+        }
+        await walletManager.syncConnectedAccount(account as any);
+      } else {
+        await walletManager.connect(walletType);
+      }
       setAddress(walletManager.address);
       setBalance(walletManager.balance);
     } finally {
@@ -227,6 +255,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     // stale auth leaking across wallet switches
     clearCachedToken();
     walletManager.disconnect();
+    if (activeWallet) {
+      try {
+        disconnectActiveWallet(activeWallet);
+      } catch {}
+    }
     // Destroy the thirdweb in-app wallet session so autoConnect won't
     // restore the old user on next page load / new wallet connection
     sharedInAppWallet.disconnect().catch(() => {});
@@ -236,7 +269,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     setCharacters([]);
     setSelectedCharacterTokenId(null);
     setProfessions(null);
-  }, [walletManager]);
+  }, [activeWallet, disconnectActiveWallet, walletManager]);
 
   const syncAddress = React.useCallback(async (addr: string) => {
     setLoading(true);

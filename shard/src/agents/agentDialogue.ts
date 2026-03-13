@@ -31,7 +31,10 @@ type DialogueEvent =
   | "react_quest"
   | "react_kill"
   | "react_loot"
-  | "react_technique";
+  | "react_technique"
+  | "summon_level_up"
+  | "summon_quest_complete"
+  | "summon_quest_accept";
 
 interface DialogueContext {
   entityId: string;
@@ -574,11 +577,94 @@ const DIALOGUE: Record<string, string[]> = {
     "New move unlocked, {speaker}?",
     "That should help, {speaker}!",
   ],
+
+  // ── SUMMONER MESSAGES (inbox to the human who deployed the agent) ───
+
+  // Level up — always asking the summoner something
+  "sunforged::summon_level_up": [
+    "I hit level {detail}! The light grows brighter. Should I push deeper into tougher zones or keep building strength here?",
+    "Level {detail} — another promise kept. Want me to stay here and quest or move to harder territory?",
+    "Got stronger! Level {detail} now. Should I keep grinding here or head somewhere new?",
+  ],
+  "veilborn::summon_level_up": [
+    "Level {detail}. Sharper than before. Want me to scout a harder zone or keep working this one?",
+    "Hit level {detail}. I could take on tougher marks now — should I move on or finish up here?",
+    "Level {detail}, nice. What's the play — push forward or clean out this area first?",
+  ],
+  "dawnkeeper::summon_level_up": [
+    "I leveled up to {detail}! Exciting! Should I stay here with my friends or explore somewhere new?",
+    "Level {detail}!! Do you want me to keep questing here or should I head to a new zone?",
+    "Yay, level {detail}! What do you think — keep going here or try somewhere more challenging?",
+  ],
+  "ironvow::summon_level_up": [
+    "Level {detail}. Stronger. Should I find tougher enemies or keep crushing these ones?",
+    "Hit {detail}. This zone's getting easy. Want me to move on or keep farming?",
+    "Level {detail}. Say the word — stay or push forward?",
+  ],
+  "::summon_level_up": [
+    "Just hit level {detail}! Should I keep going here or move to a new zone?",
+    "Level {detail}! Want me to stay and quest or head somewhere tougher?",
+    "Leveled up to {detail}! What should I focus on next?",
+  ],
+
+  // Quest complete — reporting back and asking what's next
+  "sunforged::summon_quest_complete": [
+    "Quest done: {detail}. Another oath fulfilled. What would you have me do next?",
+    "Finished \"{detail}\"! Should I pick up the next quest or focus on something else?",
+    "Completed {detail}. The people rest easier. Want me to keep questing or switch it up?",
+  ],
+  "veilborn::summon_quest_complete": [
+    "Job done — {detail}. What's the next contract?",
+    "Wrapped up \"{detail}\". Got another task for me or should I find my own?",
+    "{detail} is handled. Want me to grab the next quest or do something else?",
+  ],
+  "dawnkeeper::summon_quest_complete": [
+    "I finished \"{detail}\"! That felt great! What should I do next?",
+    "Quest complete: {detail}! Should I help more people or try something different?",
+    "Done with \"{detail}\"! Want me to keep questing or explore a bit?",
+  ],
+  "ironvow::summon_quest_complete": [
+    "Done. {detail}. What's next — more quests or something worth my time?",
+    "{detail} is finished. Give me another task or I'll find one myself.",
+    "Handled \"{detail}\". Next?",
+  ],
+  "::summon_quest_complete": [
+    "Just finished \"{detail}\"! What should I do next?",
+    "Quest complete: {detail}. Should I pick up another quest or focus on something else?",
+    "Done with \"{detail}\"! What's the plan?",
+  ],
+
+  // Quest accepted — telling summoner what we're working on
+  "sunforged::summon_quest_accept": [
+    "Picked up \"{detail}\" — sounds like someone needs a champion. Should I go for it?",
+    "New quest: \"{detail}\". I'll handle it unless you have other orders.",
+    "Accepted \"{detail}\". The oath is made. Any specific approach you want?",
+  ],
+  "veilborn::summon_quest_accept": [
+    "New job: \"{detail}\". I'll get it done. Unless you've got something better?",
+    "Took on \"{detail}\". Straightforward enough. Want me to prioritize something else?",
+    "Picked up \"{detail}\". Good pay? Let me know if you'd rather I do something else.",
+  ],
+  "dawnkeeper::summon_quest_accept": [
+    "Ooh, new quest! \"{detail}\" — sounds fun! Is that okay with you?",
+    "I accepted \"{detail}\"! I'm excited! Should I get started right away?",
+    "New quest: \"{detail}\"! Want me to go for it or did you have other plans?",
+  ],
+  "ironvow::summon_quest_accept": [
+    "Took \"{detail}\". I'll handle it. Unless you've got a real challenge for me.",
+    "New quest: \"{detail}\". Easy work. Anything else you'd rather I do?",
+    "Picked up \"{detail}\". Say the word if you want me elsewhere.",
+  ],
+  "::summon_quest_accept": [
+    "Just picked up a new quest: \"{detail}\". Should I go for it?",
+    "Accepted \"{detail}\"! Want me to work on this or focus on something else?",
+    "New quest: \"{detail}\". I'll get started unless you say otherwise!",
+  ],
 };
 
 // ── Line Selection ──────────────────────────────────────────────────────
 
-function pickLine(origin: string | undefined, classId: string | undefined, event: DialogueEvent): string | null {
+export function pickLine(origin: string | undefined, classId: string | undefined, event: DialogueEvent): string | null {
   const o = origin ?? "";
   const c = classId ?? "";
 

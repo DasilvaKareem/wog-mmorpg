@@ -10,7 +10,7 @@ export const CLIENT_TILE_PX = 16;
 export const POLL_INTERVAL = 1000; // ms
 
 export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 6;
+export const ZOOM_MAX = 4;
 export const ZOOM_STEP = 0.15;
 export const ZOOM_DEFAULT = 2.0;
 

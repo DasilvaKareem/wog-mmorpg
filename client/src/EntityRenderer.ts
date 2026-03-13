@@ -39,6 +39,7 @@ interface EntityVisual {
   fx: AppliedFx;
   spriteScale: number; // mob/boss scale multiplier
   inViewport: boolean;
+  combatUntil: number; // timestamp when combat state expires
 }
 
 const SPRITE_SIZE = 16;
@@ -46,6 +47,8 @@ const HP_BAR_W = 24;
 const HP_BAR_H = 3;
 const TWEEN_DURATION = 500; // ms — matches poll interval
 const VISUAL_SEPARATION_RADIUS = 20; // pixels — minimum visual distance between sprites
+const COMBAT_LINGER_MS = 5000; // combat state persists after last combat event
+const DISABLE_ENTITY_VIEWPORT_CULLING = true; // keep characters renderable even when viewport math is wrong
 
 /** Scale multipliers for mob/boss sprites so they're visually larger */
 const MOB_SCALE = 1.4;
@@ -174,6 +177,36 @@ export class EntityRenderer {
     const lunge = Math.min(8, dist * 0.4);
     const nx = (tx - ax) / dist;
     const ny = (ty - ay) / dist;
+
+    // Mark both entities as in combat
+    const combatExpiry = Date.now() + COMBAT_LINGER_MS;
+    attVisual.combatUntil = combatExpiry;
+    tgtVisual.combatUntil = combatExpiry;
+
+    // Swap attacker to armed texture so weapon is visible during attack
+    const attEntity = this.entities.get(attackerId);
+    if (attEntity) {
+      const armedKey = getLayeredTextureKey(this.scene, attEntity, true);
+      if (armedKey && attVisual.sprite.texture.key !== armedKey && this.scene.textures.exists(armedKey)) {
+        attVisual.sprite.setTexture(armedKey);
+      }
+    }
+
+    // Face the target and play attack/swipe animation
+    const dirToTarget = inferDirection(tx - ax, ty - ay);
+    attVisual.facing = dirToTarget;
+    const attackAnim = `${attVisual.sprite.texture.key}-attack-${dirToTarget}`;
+    if (this.scene.anims.exists(attackAnim)) {
+      attVisual.sprite.play(attackAnim);
+      attVisual.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+        if (!attVisual.sprite) return;
+        const curKey = attVisual.sprite.texture.key;
+        const idleAnim = `${curKey}-idle-${attVisual.facing}`;
+        if (this.scene.anims.exists(idleAnim)) {
+          attVisual.sprite.play(idleAnim);
+        }
+      });
+    }
 
     // Lunge forward
     this.scene.tweens.add({
@@ -462,11 +495,15 @@ export class EntityRenderer {
         fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
         spriteScale: 1,
         inViewport: true,
+        combatUntil: 0,
       };
     }
 
+    // Determine initial combat/weapon state
+    const initialCombat = (entity.activeEffects?.length ?? 0) > 0;
+
     // Try layered composite first for players, fall back to class-based
-    const layeredKey = getLayeredTextureKey(this.scene, entity);
+    const layeredKey = getLayeredTextureKey(this.scene, entity, initialCombat);
     const textureKey = layeredKey ?? getEntityTextureKey(entity.type, entity.classId, entity.name);
 
     // Elevation-aware depth: base 10 + elevation * 2
@@ -607,6 +644,7 @@ export class EntityRenderer {
       fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
       spriteScale: mobScale,
       inViewport: true,
+      combatUntil: initialCombat ? Date.now() + COMBAT_LINGER_MS : 0,
     };
 
     // Apply initial FX for any active effects
@@ -626,10 +664,28 @@ export class EntityRenderer {
     const dy = py - visual.lastY;
     const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
 
+    // Weapon visible only when in combat AND standing idle
+    const inCombat = this.isEntityInCombat(visual, entity);
+    const showWeapon = inCombat && !moved && !visual.moving;
+
     // Try layered composite, check for recomposite (equipment changes), fall back to class-based
     const currentKey = visual.sprite.texture.key;
-    const recompKey = checkLayeredRecomposite(this.scene, entity, currentKey);
-    const layeredKey = recompKey ?? (currentKey.includes("|") ? currentKey : getLayeredTextureKey(this.scene, entity));
+    const recompKey = checkLayeredRecomposite(this.scene, entity, currentKey, showWeapon);
+
+    let layeredKey = recompKey;
+    if (!layeredKey) {
+      if (currentKey.includes("|")) {
+        // Already layered — check if weapon state changed (armed ↔ unarmed)
+        const wantSuffix = showWeapon ? "|armed" : "|unarmed";
+        if (!currentKey.endsWith(wantSuffix)) {
+          layeredKey = getLayeredTextureKey(this.scene, entity, showWeapon);
+        } else {
+          layeredKey = currentKey;
+        }
+      } else {
+        layeredKey = getLayeredTextureKey(this.scene, entity, showWeapon);
+      }
+    }
     const textureKey = layeredKey ?? getEntityTextureKey(entity.type, entity.classId, entity.name);
 
     // Swap texture if it changed
@@ -697,8 +753,9 @@ export class EntityRenderer {
         },
         onComplete: () => {
           visual.moving = false;
-          // Switch to idle after movement
-          const idleAnim = `${textureKey}-idle-${visual.facing}`;
+          // Switch to idle after movement (use current texture key, not captured)
+          const curKey = visual.sprite.texture.key;
+          const idleAnim = `${curKey}-idle-${visual.facing}`;
           if (this.scene.anims.exists(idleAnim)) {
             visual.sprite.play(idleAnim);
           }
@@ -768,6 +825,13 @@ export class EntityRenderer {
   }
 
   // ─── Buff/Debuff FX Pipeline ──────────────────────────────────────────
+
+  /** Check if an entity is currently in combat (from melee events or active effects). */
+  private isEntityInCombat(visual: EntityVisual, entity: Entity): boolean {
+    if (Date.now() < visual.combatUntil) return true;
+    if (entity.activeEffects && entity.activeEffects.length > 0) return true;
+    return false;
+  }
 
   /** Check if the renderer has WebGL FX support */
   private get hasFxSupport(): boolean {
@@ -1031,7 +1095,7 @@ export class EntityRenderer {
 
   private refreshVisualVisibility(id: string | null, visual: EntityVisual): void {
     const entity = id ? this.entities.get(id) : undefined;
-    const inViewport = !this.viewport || this.isInViewport(visual);
+    const inViewport = DISABLE_ENTITY_VIEWPORT_CULLING || !this.viewport || this.isInViewport(visual);
     visual.inViewport = inViewport;
 
     const showSprite = this.spritesVisible && inViewport;

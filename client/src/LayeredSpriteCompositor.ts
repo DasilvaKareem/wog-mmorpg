@@ -232,7 +232,7 @@ export function getLayerKeys(entity: Entity): LayerKeys {
 }
 
 /** Build a cache key string from layer keys */
-export function layerCacheKey(keys: LayerKeys): string {
+export function layerCacheKey(keys: LayerKeys, showWeapon = false): string {
   return [
     keys.body,
     keys.weapon ?? "no-weapon",
@@ -240,6 +240,7 @@ export function layerCacheKey(keys: LayerKeys): string {
     keys.legs ?? "no-legs",
     keys.boots ?? "no-boots",
     keys.shoulders ?? "no-shoulders",
+    showWeapon ? "armed" : "unarmed",
   ].join("|");
 }
 
@@ -684,9 +685,10 @@ const composited = new Set<string>();
 export function getOrCreateLayeredTexture(
   scene: Phaser.Scene,
   entity: Entity,
+  showWeapon = false,
 ): string | null {
   const keys = getLayerKeys(entity);
-  const cacheKey = layerCacheKey(keys);
+  const cacheKey = layerCacheKey(keys, showWeapon);
 
   // Already composited
   if (composited.has(cacheKey) && scene.textures.exists(cacheKey)) {
@@ -740,36 +742,44 @@ export function getOrCreateLayeredTexture(
     }
   };
 
-  const drawWeaponBehind = (textureKey: string, scale = WEAPON_LAYER_SCALE) => {
+  /**
+   * Draw weapon for combat stance.
+   * Idle frames (cols 0,1): Down/Up rotated 90° (weapon held at side), Left/Right normal.
+   * Attack frames (cols 2,3): drawn as-is (swing animations with motion trails).
+   */
+  const drawWeaponCombat = (textureKey: string, rows: number[]) => {
     if (!scene.textures.exists(textureKey)) return;
     const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
+    const scale = WEAPON_LAYER_SCALE;
     const fw = PLAYER_FW * scale;
     const fh = PLAYER_FH * scale;
-    // Only draw up + left rows (weapon behind body)
-    for (const r of [DIR_LEFT, DIR_UP]) {
-      for (let c = 0; c < COLS; c++) {
-        const sx = c * PLAYER_FW;
-        const sy = r * PLAYER_FH;
-        const dx = sx + (PLAYER_FW - fw) / 2;
-        const dy = sy + (PLAYER_FH - fh);
-        ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
-      }
-    }
-  };
 
-  const drawWeaponFront = (textureKey: string, scale = WEAPON_LAYER_SCALE) => {
-    if (!scene.textures.exists(textureKey)) return;
-    const img = scene.textures.get(textureKey).getSourceImage() as HTMLImageElement;
-    const fw = PLAYER_FW * scale;
-    const fh = PLAYER_FH * scale;
-    // Only draw down + right rows (weapon in front of body)
-    for (const r of [DIR_DOWN, DIR_RIGHT]) {
+    for (const r of rows) {
       for (let c = 0; c < COLS; c++) {
         const sx = c * PLAYER_FW;
         const sy = r * PLAYER_FH;
-        const dx = sx + (PLAYER_FW - fw) / 2;
-        const dy = sy + (PLAYER_FH - fh);
-        ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+        const dx = c * PLAYER_FW + (PLAYER_FW - fw) / 2;
+        const dy = r * PLAYER_FH + (PLAYER_FH - fh);
+
+        if (c < 2 && (r === DIR_DOWN || r === DIR_UP)) {
+          // Idle frames, DOWN/UP: rotate 90° CCW (weapon held at side)
+          const cellX = c * PLAYER_FW;
+          const cellY = r * PLAYER_FH;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(cellX, cellY, PLAYER_FW, PLAYER_FH);
+          ctx.clip();
+          const cx = cellX + PLAYER_FW / 2;
+          const cy = cellY + PLAYER_FH / 2;
+          ctx.translate(cx, cy);
+          ctx.rotate(-Math.PI / 2);
+          ctx.translate(-cx, -cy);
+          ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+          ctx.restore();
+        } else {
+          // Attack frames (cols 2-3) or LEFT/RIGHT idle: draw as-is
+          ctx.drawImage(img, sx, sy, PLAYER_FW, PLAYER_FH, dx, dy, fw, fh);
+        }
       }
     }
   };
@@ -777,16 +787,16 @@ export function getOrCreateLayeredTexture(
   // Layer 1: base body
   drawLayer(keys.body);
 
-  // Layer 4: weapon behind body
-  if (keys.weapon) drawWeaponBehind(keys.weapon);
+  // Layer 4: weapon behind body (only in armed/combat mode, idle frames only)
+  if (showWeapon && keys.weapon) drawWeaponCombat(keys.weapon, [DIR_LEFT, DIR_UP]);
 
   // Layer 5-9: equipment
   if (keys.chest) drawLayer(keys.chest, { scale: CHEST_LAYER_SCALE });
   if (keys.legs) drawLayer(keys.legs, { scale: LEGS_LAYER_SCALE });
   if (keys.boots) drawLayer(keys.boots, { scale: BOOTS_LAYER_SCALE });
   if (keys.shoulders) drawLayer(keys.shoulders, { scale: SHOULDER_LAYER_SCALE });
-  // Layer 10: weapon in front
-  if (keys.weapon) drawWeaponFront(keys.weapon);
+  // Layer 10: weapon in front (only in armed/combat mode, idle frames only)
+  if (showWeapon && keys.weapon) drawWeaponCombat(keys.weapon, [DIR_DOWN, DIR_RIGHT]);
 
   // Register as Phaser texture with per-frame coordinates
   const tex = scene.textures.addCanvas(cacheKey, canvas);
@@ -808,8 +818,17 @@ export function getOrCreateLayeredTexture(
  */
 export function needsRecomposite(entity: Entity, currentTextureKey: string): boolean {
   const keys = getLayerKeys(entity);
-  const cacheKey = layerCacheKey(keys);
-  return cacheKey !== currentTextureKey;
+  // Compare base equipment, ignoring armed/unarmed state
+  const baseKey = [
+    keys.body,
+    keys.weapon ?? "no-weapon",
+    keys.chest ?? "no-chest",
+    keys.legs ?? "no-legs",
+    keys.boots ?? "no-boots",
+    keys.shoulders ?? "no-shoulders",
+  ].join("|");
+  const currentBase = currentTextureKey.replace(/\|(armed|unarmed)$/, "");
+  return baseKey !== currentBase;
 }
 
 /** Invalidate a cached composite (e.g., on equipment change). */
