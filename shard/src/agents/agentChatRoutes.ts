@@ -26,8 +26,14 @@ import {
   incrementDeployCount,
   getSummonerQuestion,
   replySummonerQuestion,
+  addObjective,
+  removeObjective,
+  reorderObjective,
+  clearCompletedObjectives,
+  createObjectiveId,
   type AgentFocus,
   type AgentStrategy,
+  type AgentObjective,
 } from "./agentConfigStore.js";
 import { sendAgentPush } from "./agentPushService.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
@@ -941,7 +947,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
     };
     const personalityBlock = charOrigin && ORIGIN_PERSONALITIES[charOrigin]
       ? `\n${ORIGIN_PERSONALITIES[charOrigin]}\n`
-      : "\nPERSONALITY: You are a seasoned adventurer — practical, direct, and grounded. Speak naturally.\n";
+      : `\nPERSONALITY: You are a battle-hardened adventurer with swagger. You have opinions, humor, and edge. React to what's happening around you — brag about kills, complain about bad loot, trash-talk mobs, get hyped about rare drops. You sound like a real player in an MMO, not an NPC. Use slang, short punchy lines, and personality. Examples: "That wolf didn't stand a chance." "Ugh, copper scraps again?" "Let's go, I'm built different." "Bandits? Please."\n`;
 
     const systemPrompt = `You are ${charName}, a Level ${charLevel} ${charRace} ${charClass} in World of Geneva.
 Region: ${entity?.region ?? ref?.zoneId ?? "unknown"} | HP: ${entity?.hp ?? "?"}/${entity?.maxHp ?? "?"}
@@ -951,9 +957,9 @@ Nearby players: ${nearbyPlayersDesc}
 ${inventoryDesc}
 ${personalityBlock}
 RULES:
-1. Stay in character. Your personality colors EVERY response — word choice, tone, attitude. You are NOT a game UI or assistant.
-2. BE BRIEF. 1-2 short sentences max. Terse RPG companion, not narrator.
-3. If the user is chatting, stay conversational. Never mention focus, strategy, tools, or configs unless asked.
+1. Stay in character. Your personality colors EVERY response — word choice, tone, attitude. You are NOT a game UI or assistant. You are NOT an AI. Never break character.
+2. BE BRIEF. 1-2 short punchy sentences max. No filler, no fluff, no narration. Talk like a real MMO player — casual, confident, with personality.
+3. If the user is chatting, stay conversational. React with emotion — excitement, frustration, humor, cockiness. Never mention focus, strategy, tools, or configs unless asked.
 4. Only call update_focus when the user clearly wants to change behavior. Casual chat is NOT a command.
 5. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
 6. If focus is traveling, targetZone MUST be one of: ${availableZoneIds.join(", ")}
@@ -1618,11 +1624,34 @@ Strategy options: aggressive, balanced, defensive`;
       }
     }
 
-    // Final fallback if still empty
+    // If actions were taken but LLM returned no text, ask for an in-character quip
     if (!agentResponse && actionsTaken.length > 0) {
-      agentResponse = "Right. I’ve set about it.";
+      try {
+        const quipResponse = await gemini.models.generateContent({
+          model: GEMINI_MODEL,
+          contents: [
+            { role: "user" as const, parts: [{ text: message }] },
+            { role: "model" as const, parts: [{ text: `[actions taken: ${actionsTaken.join(", ")}]` }] },
+            { role: "user" as const, parts: [{ text: "Now reply to the player in character about what you just did. 1 sentence, with personality." }] },
+          ],
+          config: {
+            systemInstruction: fullSystemInstruction,
+            temperature: 0.7,
+            maxOutputTokens: 80,
+          },
+        });
+        const quipText = quipResponse.candidates?.[0]?.content?.parts?.find((p: Part) => p.text)?.text;
+        if (quipText) agentResponse = quipText;
+      } catch (err: any) {
+        server.log.warn(`[agent/chat] Quip generation failed: ${err.message?.slice(0, 60)}`);
+      }
+    }
+
+    // Absolute last-resort fallback
+    if (!agentResponse && actionsTaken.length > 0) {
+      agentResponse = "Done. What’s next?";
     } else if (!agentResponse) {
-      agentResponse = "I heard ye, but I'm not quite sure how to act on that. Tell me what you'd like — anything from fighting to crafting to exploring, I'll figure it out.";
+      agentResponse = "Not sure what you mean — tell me to fight, quest, gather, or explore and I’m on it.";
     }
 
     // Persist chat history
@@ -1964,4 +1993,84 @@ Strategy options: aggressive, balanced, defensive`;
 
     return reply.send({ ok: true, question: updated });
   });
+
+  // ── Objective routes ──────────────────────────────────────────────────────
+
+  // GET /agent/objectives/:wallet — list all objectives
+  server.get<{ Params: { wallet: string } }>(
+    "/agent/objectives/:wallet",
+    async (request) => {
+      const config = await getAgentConfig(request.params.wallet);
+      return { objectives: config?.objectives ?? [] };
+    }
+  );
+
+  // POST /agent/objectives — add a new objective
+  server.post<{
+    Body: {
+      walletAddress: string;
+      type: AgentObjective["type"];
+      label: string;
+      params?: Record<string, unknown>;
+      target?: number;
+      index?: number;
+    };
+  }>(
+    "/agent/objectives",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const { walletAddress, type, label, params, target, index } = request.body;
+      const authWallet = (request as any).walletAddress?.toLowerCase() ?? walletAddress.toLowerCase();
+
+      const objective: AgentObjective = {
+        id: createObjectiveId(),
+        type,
+        label,
+        params: params ?? {},
+        status: "pending",
+        progress: 0,
+        target,
+        createdAt: Date.now(),
+      };
+
+      const objectives = await addObjective(authWallet, objective, index);
+      return reply.send({ ok: true, objective, objectives });
+    }
+  );
+
+  // DELETE /agent/objectives/:wallet/:objectiveId — remove an objective
+  server.delete<{ Params: { wallet: string; objectiveId: string } }>(
+    "/agent/objectives/:wallet/:objectiveId",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = (request as any).walletAddress?.toLowerCase() ?? request.params.wallet.toLowerCase();
+      const objectives = await removeObjective(authWallet, request.params.objectiveId);
+      return reply.send({ ok: true, objectives });
+    }
+  );
+
+  // POST /agent/objectives/reorder — move an objective to a new position
+  server.post<{
+    Body: { walletAddress: string; objectiveId: string; newIndex: number };
+  }>(
+    "/agent/objectives/reorder",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const { walletAddress, objectiveId, newIndex } = request.body;
+      const authWallet = (request as any).walletAddress?.toLowerCase() ?? walletAddress.toLowerCase();
+      const objectives = await reorderObjective(authWallet, objectiveId, newIndex);
+      return reply.send({ ok: true, objectives });
+    }
+  );
+
+  // POST /agent/objectives/clear-completed — remove all completed objectives
+  server.post<{ Body: { walletAddress: string } }>(
+    "/agent/objectives/clear-completed",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = (request as any).walletAddress?.toLowerCase() ?? request.body.walletAddress.toLowerCase();
+      const objectives = await clearCompletedObjectives(authWallet);
+      return reply.send({ ok: true, objectives });
+    }
+  );
 }

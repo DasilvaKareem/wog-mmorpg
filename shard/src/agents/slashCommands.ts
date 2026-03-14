@@ -341,12 +341,13 @@ cmd({
       trade: "trading", trading: "trading", sell: "trading",
       travel: "traveling", traveling: "traveling", go: "traveling", move: "traveling",
       learn: "learning", learning: "learning", train: "learning",
+      dungeon: "dungeon", dungeons: "dungeon", gate: "dungeon",
       idle: "idle", rest: "idle", stop: "idle", afk: "idle",
     };
 
     const focus = VALID_FOCUSES[focusInput];
     if (!focus) {
-      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, enchanting, shopping, trading, traveling, learning, idle` };
+      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, enchanting, shopping, trading, traveling, learning, dungeon, idle` };
     }
 
     const patch: Record<string, unknown> = { focus };

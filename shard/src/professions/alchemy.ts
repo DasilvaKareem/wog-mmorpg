@@ -790,11 +790,18 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     // Log zone event
     logZoneEvent({
       zoneId,
-      type: "system",
+      type: "consume",
       tick: zone.tick,
       message: `${entity.name} consumed ${itemName}`,
       entityId: entity.id,
       entityName: entity.name,
+      data: {
+        itemName,
+        consumeType: effect.category,
+        hpRestored: (results.hpRestored as number) ?? 0,
+        mpRestored: (results.mpRestored as number) ?? 0,
+        buffName: effect.buff?.name,
+      },
     });
 
     // Log diary

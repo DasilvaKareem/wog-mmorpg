@@ -8,6 +8,7 @@
 
 import { ethers } from "ethers";
 import { biteWallet } from "./biteChain.js";
+import { traceTx } from "./txTracer.js";
 
 const NAME_SERVICE_ADDRESS = process.env.NAME_SERVICE_CONTRACT_ADDRESS;
 
@@ -79,10 +80,12 @@ export async function registerNameOnChain(
 
   if (!nameServiceContract) return false;
   try {
-    const tx = await nameServiceContract.registerName(walletAddress, name);
-    await tx.wait();
-    console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
-    return true;
+    return await traceTx("name-register", "registerNameOnChain", { wallet: walletAddress, name }, "bite", async () => {
+      const tx = await nameServiceContract.registerName(walletAddress, name);
+      await tx.wait();
+      console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
+      return true;
+    });
   } catch (err) {
     // Revert cache on failure
     addressToNameCache.delete(addrKey);
@@ -109,10 +112,12 @@ export async function releaseNameOnChain(
 
   if (!nameServiceContract) return false;
   try {
-    const tx = await nameServiceContract.releaseName(walletAddress);
-    await tx.wait();
-    console.log(`[nameServiceChain] released name for ${walletAddress}`);
-    return true;
+    return await traceTx("name-release", "releaseNameOnChain", { wallet: walletAddress }, "bite", async () => {
+      const tx = await nameServiceContract.releaseName(walletAddress);
+      await tx.wait();
+      console.log(`[nameServiceChain] released name for ${walletAddress}`);
+      return true;
+    });
   } catch (err) {
     console.warn(`[nameServiceChain] releaseName failed for ${walletAddress}:`, err);
     return false;

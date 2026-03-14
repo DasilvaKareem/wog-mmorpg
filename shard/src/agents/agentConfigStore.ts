@@ -22,7 +22,8 @@ export type AgentFocus =
   | "traveling"
   | "learning"
   | "idle"
-  | "goto";
+  | "goto"
+  | "dungeon";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 
@@ -49,6 +50,24 @@ export interface PendingQuestion {
   repliedAt?: number;
 }
 
+/** A single user-defined objective for the agent to work toward. */
+export interface AgentObjective {
+  id: string;
+  /** What the agent should accomplish */
+  type: "reach_level" | "travel_to" | "gather" | "craft" | "earn_gold" | "complete_quest" | "learn_profession" | "learn_technique" | "buy_item" | "custom";
+  /** Human-readable label shown in UI */
+  label: string;
+  /** Type-specific parameters */
+  params: Record<string, unknown>;
+  /** Current status */
+  status: "pending" | "active" | "completed" | "failed";
+  /** Optional completion condition check context */
+  progress?: number;
+  target?: number;
+  createdAt: number;
+  completedAt?: number;
+}
+
 export interface AgentConfig {
   enabled: boolean;
   focus: AgentFocus;
@@ -61,6 +80,8 @@ export interface AgentConfig {
   tier?: AgentTier;
   /** Epoch ms when the current session started (for session limit enforcement) */
   sessionStartedAt?: number;
+  /** Ordered list of objectives — agent works through them in order */
+  objectives?: AgentObjective[];
 }
 
 export interface AgentEntityRef {
@@ -420,4 +441,133 @@ export async function clearSummonerQuestion(userWallet: string): Promise<void> {
     assertRedisAvailable("clearSummonerQuestion");
   }
   memQuestions.delete(key);
+}
+
+// ── Objectives ─────────────────────────────────────────────────────────────
+
+let objectiveIdCounter = 0;
+
+export function createObjectiveId(): string {
+  return `obj-${Date.now()}-${++objectiveIdCounter}`;
+}
+
+/** Get the ordered objective list for an agent. */
+export async function getObjectives(userWallet: string): Promise<AgentObjective[]> {
+  const config = await getAgentConfig(userWallet);
+  return config?.objectives ?? [];
+}
+
+/** Add a new objective at the end (or at a specific index). */
+export async function addObjective(
+  userWallet: string,
+  objective: AgentObjective,
+  index?: number,
+): Promise<AgentObjective[]> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const objectives = config.objectives ?? [];
+  if (index != null && index >= 0 && index <= objectives.length) {
+    objectives.splice(index, 0, objective);
+  } else {
+    objectives.push(objective);
+  }
+  await patchAgentConfig(userWallet, { objectives });
+  return objectives;
+}
+
+/** Remove an objective by ID. */
+export async function removeObjective(
+  userWallet: string,
+  objectiveId: string,
+): Promise<AgentObjective[]> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const objectives = (config.objectives ?? []).filter((o) => o.id !== objectiveId);
+  await patchAgentConfig(userWallet, { objectives });
+  return objectives;
+}
+
+/** Mark an objective as completed and advance to the next one. */
+export async function completeObjective(
+  userWallet: string,
+  objectiveId: string,
+): Promise<AgentObjective[]> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const objectives = config.objectives ?? [];
+  const obj = objectives.find((o) => o.id === objectiveId);
+  if (obj) {
+    obj.status = "completed";
+    obj.completedAt = Date.now();
+  }
+  await patchAgentConfig(userWallet, { objectives });
+  return objectives;
+}
+
+/** Update progress on the active objective. */
+export async function updateObjectiveProgress(
+  userWallet: string,
+  objectiveId: string,
+  progress: number,
+): Promise<void> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const obj = (config.objectives ?? []).find((o) => o.id === objectiveId);
+  if (obj) {
+    obj.progress = progress;
+    await patchAgentConfig(userWallet, { objectives: config.objectives });
+  }
+}
+
+/** Reorder objectives (move an objective to a new index). */
+export async function reorderObjective(
+  userWallet: string,
+  objectiveId: string,
+  newIndex: number,
+): Promise<AgentObjective[]> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const objectives = config.objectives ?? [];
+  const idx = objectives.findIndex((o) => o.id === objectiveId);
+  if (idx < 0) return objectives;
+  const [removed] = objectives.splice(idx, 1);
+  objectives.splice(Math.max(0, Math.min(newIndex, objectives.length)), 0, removed);
+  await patchAgentConfig(userWallet, { objectives });
+  return objectives;
+}
+
+/** Clear all completed objectives. */
+export async function clearCompletedObjectives(userWallet: string): Promise<AgentObjective[]> {
+  const config = (await getAgentConfig(userWallet)) ?? defaultConfig();
+  const objectives = (config.objectives ?? []).filter((o) => o.status !== "completed");
+  await patchAgentConfig(userWallet, { objectives });
+  return objectives;
+}
+
+/** Get the first non-completed objective (the one the agent should work on). */
+export function getActiveObjective(objectives: AgentObjective[]): AgentObjective | null {
+  return objectives.find((o) => o.status === "pending" || o.status === "active") ?? null;
+}
+
+/** Derive the focus + targetZone an objective implies. */
+export function objectiveToFocus(obj: AgentObjective): { focus: AgentFocus; targetZone?: string; strategy?: AgentStrategy } {
+  switch (obj.type) {
+    case "reach_level":
+      return { focus: "combat", strategy: "balanced" };
+    case "travel_to":
+      return { focus: "traveling", targetZone: obj.params.zoneId as string };
+    case "gather":
+      return { focus: "gathering" };
+    case "craft":
+      return { focus: "crafting" };
+    case "earn_gold":
+      return { focus: "combat", strategy: "aggressive" };
+    case "complete_quest":
+      return { focus: "questing" };
+    case "learn_profession":
+      return { focus: "learning" };
+    case "learn_technique":
+      return { focus: "learning" };
+    case "buy_item":
+      return { focus: "shopping" };
+    case "custom":
+      return { focus: (obj.params.focus as AgentFocus) ?? "questing" };
+    default:
+      return { focus: "questing" };
+  }
 }

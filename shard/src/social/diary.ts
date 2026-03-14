@@ -62,6 +62,7 @@ const REDIS_KEY_PREFIX = "diary:";
 type DiaryAlertHook = (wallet: string, action: DiaryAction, entry: DiaryEntry) => void;
 let diaryAlertHook: DiaryAlertHook | null = null;
 let diaryPushHook: DiaryAlertHook | null = null;
+let diaryInboxHook: DiaryAlertHook | null = null;
 
 export function setDiaryAlertHook(hook: DiaryAlertHook): void {
   diaryAlertHook = hook;
@@ -70,6 +71,11 @@ export function setDiaryAlertHook(hook: DiaryAlertHook): void {
 /** Secondary hook for web push notifications (set by webPushService). */
 export function setDiaryPushHook(hook: DiaryAlertHook): void {
   diaryPushHook = hook;
+}
+
+/** Inbox notification hook (set by server startup). */
+export function setDiaryInboxHook(hook: DiaryAlertHook): void {
+  diaryInboxHook = hook;
 }
 
 // ── In-memory store ────────────────────────────────────────────────
@@ -460,6 +466,9 @@ export function logDiary(
     }
     if (diaryPushHook) {
       try { diaryPushHook(walletAddress, action, entry); } catch { /* non-fatal */ }
+    }
+    if (diaryInboxHook) {
+      try { diaryInboxHook(walletAddress, action, entry); } catch { /* non-fatal */ }
     }
   }
 }

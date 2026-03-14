@@ -18,8 +18,13 @@ import {
   askSummonerQuestion,
   getSummonerQuestion,
   clearSummonerQuestion,
+  getActiveObjective,
+  objectiveToFocus,
+  completeObjective,
+  updateObjectiveProgress,
   type AgentFocus,
   type AgentStrategy,
+  type AgentObjective,
   type PendingQuestion,
 } from "./agentConfigStore.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
@@ -129,6 +134,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
     case "goto":       return "Walk to the target NPC the user pointed at.";
     case "learning":   return "Find a trainer NPC and learn new techniques/skills.";
+    case "dungeon":    return "Enter dungeon gates and clear all mobs inside for XP and loot.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     default:           return "Be autonomous — quest and improve your character.";
   }
@@ -150,6 +156,7 @@ function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: 
     case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
     case "goto":       return { type: "goto",    reason: "User clicked an NPC" };
     case "learning":   return { type: "learn",   reason: "User focus: learn techniques" };
+    case "dungeon":    return { type: "dungeon", reason: "User focus: dungeon" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
   }
@@ -1036,6 +1043,66 @@ export class AgentRunner {
   }
 
   /** Build the AgentContext object passed to extracted behavior/survival functions. */
+  // ── Objective helpers ──────────────────────────────────────────────────────
+
+  /** Check if an objective's completion condition is met. */
+  private checkObjectiveCompletion(obj: AgentObjective, entity: any): boolean {
+    switch (obj.type) {
+      case "reach_level":
+        return (entity.level ?? 1) >= (obj.params.level as number ?? 99);
+      case "travel_to":
+        return this.currentRegion === (obj.params.zoneId as string);
+      case "earn_gold": {
+        // Progress is tracked via getObjectiveProgress
+        return (obj.progress ?? 0) >= (obj.target ?? Infinity);
+      }
+      case "complete_quest":
+        return (entity.completedQuests ?? []).includes(obj.params.questId as string);
+      case "learn_profession": {
+        const learned = entity.learnedProfessions ?? [];
+        return learned.includes(obj.params.professionId as string);
+      }
+      case "learn_technique": {
+        const techniques = entity.learnedTechniques ?? [];
+        return techniques.includes(obj.params.techniqueId as string);
+      }
+      case "gather": {
+        // Complete when progress >= target quantity
+        return (obj.progress ?? 0) >= (obj.target ?? 1);
+      }
+      case "craft":
+        return (obj.progress ?? 0) >= (obj.target ?? 1);
+      case "buy_item":
+        return obj.progress != null && obj.progress >= (obj.target ?? 1);
+      case "custom":
+        // Custom objectives are only completed manually or by the supervisor
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  /** Get current progress number for an objective (null if not trackable). */
+  private getObjectiveProgress(obj: AgentObjective, entity: any): number | null {
+    switch (obj.type) {
+      case "reach_level":
+        return entity.level ?? 1;
+      case "travel_to":
+        return this.currentRegion === (obj.params.zoneId as string) ? 1 : 0;
+      case "earn_gold":
+        // Gold is tracked externally; return null to avoid overwriting
+        return null;
+      case "complete_quest": {
+        const active = (entity.activeQuests ?? []).find((q: any) => q.questId === obj.params.questId);
+        if (active) return active.progress ?? 0;
+        if ((entity.completedQuests ?? []).includes(obj.params.questId)) return obj.target ?? 1;
+        return 0;
+      }
+      default:
+        return null;
+    }
+  }
+
   private buildContext(): AgentContext | null {
     if (!this.api || !this.entityId || !this.custodialWallet) return null;
     const self = this;
@@ -1097,6 +1164,7 @@ export class AgentRunner {
           ? actionProgressed(result.reason)
           : actionBlocked(result.reason, { failureKey: "learn-technique", endpoint: "/techniques/learn" });
       }
+      case "dungeon": return behaviors.doDungeon(ctx, strategy, { gateEntityId: script.gateEntityId, gateRank: script.gateRank });
       case "idle":    return actionIdle("Idle");
     }
   }
@@ -1106,9 +1174,12 @@ export class AgentRunner {
   private async decideAndAct(
     entity: any,
     entities: Record<string, any>,
-    config: { focus: AgentFocus; strategy: AgentStrategy; targetZone?: string },
+    config: { focus: AgentFocus; strategy: AgentStrategy; targetZone?: string; objectives?: AgentObjective[] },
     strategy: AgentStrategy,
   ): Promise<void> {
+    const objectives = config.objectives ?? [];
+    const activeObj = getActiveObjective(objectives);
+
     const triggerState: TriggerState = {
       currentScript: this.currentScript,
       ticksSinceLastDecision: this.ticksSinceLastDecision,
@@ -1137,8 +1208,12 @@ export class AgentRunner {
       this.lastTrigger = trigger;
       console.log(`[agent:${this.walletTag}] Trigger [${trigger.type}]: ${trigger.detail}`);
 
-      // Include the user's actual latest chat message so the supervisor/script honors directives
+      // Include the user's actual latest chat message + active objective so the supervisor honors directives
       let userDirective = focusToDirective(config.focus, config.targetZone);
+      if (activeObj) {
+        const pct = activeObj.target ? ` (${activeObj.progress ?? 0}/${activeObj.target})` : "";
+        userDirective = `OBJECTIVE: ${activeObj.label}${pct} — ${userDirective}`;
+      }
       try {
         const recentChat = await getChatHistory(this.userWallet, 5);
         const lastUserMsg = [...recentChat].reverse().find((m) => m.role === "user");
@@ -1154,8 +1229,9 @@ export class AgentRunner {
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else if (trigger.type === "level_up") {
         const lvl = entity.level ?? 1;
+        // Only auto-travel to a new zone if there's no active objective driving focus
         const bestZone = this.findNextZoneForLevel(lvl);
-        if (bestZone && bestZone !== this.currentRegion
+        if (!activeObj && bestZone && bestZone !== this.currentRegion
           && lvl >= (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1)
           && lvl < (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1) + 2) {
           console.log(`[agent:${this.walletTag}] Level ${lvl} unlocked ${bestZone}, heading there`);
@@ -1169,19 +1245,26 @@ export class AgentRunner {
           void this.logActivity(`Level ${lvl}! Continuing ${config.focus}`);
         }
       } else if (trigger.type === "no_targets") {
-        const lvl = entity.level ?? 1;
-        const allowed = this.currentCaps.allowedZones;
-        const accessibleNeighbors = getZoneConnections(this.currentRegion)
-          .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1))
-          .filter((z) => allowed === "all" || allowed.includes(z));
-        if (accessibleNeighbors.length > 0) {
-          const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
-          console.log(`[agent:${this.walletTag}] No targets in ${this.currentRegion}, moving to ${pick}`);
-          void this.logActivity(`Zone cleared — exploring ${pick}`);
-          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
-          this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
-          this.ticksOnCurrentScript = 0;
+        // Only wander to a new zone if there's no active objective
+        if (!activeObj) {
+          const lvl = entity.level ?? 1;
+          const allowed = this.currentCaps.allowedZones;
+          const accessibleNeighbors = getZoneConnections(this.currentRegion)
+            .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1))
+            .filter((z) => allowed === "all" || allowed.includes(z));
+          if (accessibleNeighbors.length > 0) {
+            const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
+            console.log(`[agent:${this.walletTag}] No targets in ${this.currentRegion}, moving to ${pick}`);
+            void this.logActivity(`Zone cleared — exploring ${pick}`);
+            await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: pick });
+            this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
+            this.ticksOnCurrentScript = 0;
+          } else {
+            this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+            this.ticksOnCurrentScript = 0;
+          }
         } else {
+          // Has objective — stay on task, just re-issue current focus script
           this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
           this.ticksOnCurrentScript = 0;
         }
@@ -1452,13 +1535,21 @@ export class AgentRunner {
         }
         this.ticksSinceFocusChange++;
 
-        // Suppress auto-combat for non-combat focuses
-        const suppressCombat = focus !== "combat" && focus !== "questing";
+        // Suppress auto-combat for non-combat focuses (but allow in dungeons)
+        const suppressCombat = focus !== "combat" && focus !== "questing" && !this.currentRegion.startsWith("dungeon-");
         this.setEntityGotoMode(suppressCombat);
 
         // Track zone-stay duration
         if (this.currentRegion !== this.lastKnownZone && this.lastKnownZone !== "") {
           this.ticksInCurrentZone = 0;
+
+          // Detect dungeon exit — agent was teleported back to overworld
+          if (this.lastKnownZone.startsWith("dungeon-") && !this.currentRegion.startsWith("dungeon-")) {
+            console.log(`[agent:${this.walletTag}] Exited dungeon → ${this.currentRegion}`);
+            void this.logActivity(`Returned from dungeon to ${this.currentRegion}`);
+            this.currentScript = null;
+            this.ticksSinceLastDecision = MAX_STALE_TICKS; // Force supervisor re-evaluation
+          }
         }
         this.ticksInCurrentZone++;
 
@@ -1529,6 +1620,31 @@ export class AgentRunner {
           this.nextIdleChatTick = this.ticksSinceFocusChange + 100 + Math.floor(Math.random() * 150);
         }
 
+        // Dungeon gate auto-detection — check every 10 ticks when in combat/questing
+        if (
+          this.ticksSinceFocusChange % 10 === 0
+          && !this.currentRegion.startsWith("dungeon-")
+          && (focus === "combat" || focus === "questing")
+          && this.currentScript?.type !== "dungeon"
+        ) {
+          const zoneState = this.cachedZoneState ?? await this.getZoneState();
+          if (zoneState) {
+            const gates = Object.entries(zoneState.entities).filter(
+              ([, e]) => e.type === "dungeon-gate" && !e.gateOpened && (!e.gateExpiresAt || e.gateExpiresAt > Date.now()),
+            );
+            const myLevel = entity.level ?? 1;
+            const RANK_LEVELS: Record<string, number> = { E: 3, D: 7, C: 12, B: 18, A: 28, S: 40 };
+            const eligible = gates.filter(([, g]) => myLevel >= (RANK_LEVELS[g.gateRank] ?? 999));
+            if (eligible.length > 0) {
+              const [gateId, gate] = eligible[0] as [string, any];
+              console.log(`[agent:${this.walletTag}] Detected dungeon gate Rank ${gate.gateRank} — switching to dungeon mode`);
+              void this.logActivity(`Dungeon gate appeared! Rank ${gate.gateRank}${gate.isDangerGate ? " DANGER" : ""} — heading in`);
+              this.currentScript = { type: "dungeon", gateEntityId: gateId, gateRank: gate.gateRank, reason: `Gate surge: Rank ${gate.gateRank}` };
+              this.ticksSinceLastDecision = 0;
+            }
+          }
+        }
+
         // Survival: low HP handling
         const ctx = this.buildContext();
         if (ctx) {
@@ -1536,8 +1652,13 @@ export class AgentRunner {
           if (usedPotion) { await sleep(TICK_MS); continue; }
         }
 
-        // Self-adaptation
+        // Compute active objective early so trigger handlers + self-adaptation can see it
+        const objectives = config.objectives ?? [];
+        const activeObj = getActiveObjective(objectives);
+
+        // Self-adaptation (skip inside dungeons — stay focused on clearing)
         const allowAutoAdapt = this.currentCaps.selfAdaptationEnabled
+          && !this.currentRegion.startsWith("dungeon-")
           && (focus === "questing" || focus === "combat" || focus === "cooking" || focus === "shopping" || focus === "gathering" || focus === "crafting");
         if (allowAutoAdapt && this.ticksSinceFocusChange % 10 === 0 && this.ticksSinceFocusChange > 0 && ctx) {
           const adapted = await checkSelfAdaptation(ctx, entity, strategy, {
@@ -1545,6 +1666,7 @@ export class AgentRunner {
             ticksSinceFocusChange: this.ticksSinceFocusChange,
             ticksInCurrentZone: this.ticksInCurrentZone,
             findNextZoneForLevel: (l) => this.findNextZoneForLevel(l),
+            hasActiveObjective: !!activeObj,
           });
           if (adapted) { this.currentScript = null; await sleep(TICK_MS); continue; }
         }
@@ -1555,34 +1677,99 @@ export class AgentRunner {
           if (repairing) { await sleep(TICK_MS); continue; }
         }
 
-        // Normalize target zone
-        const normalizedTargetZone = resolveRegionId(config.targetZone);
-        if (config.targetZone && !normalizedTargetZone) {
-          await patchAgentConfig(this.userWallet, { targetZone: undefined });
-          this.currentScript = null;
-        }
-        if (normalizedTargetZone && normalizedTargetZone !== config.targetZone) {
-          await patchAgentConfig(this.userWallet, { targetZone: normalizedTargetZone });
-        }
-        if (normalizedTargetZone && normalizedTargetZone !== this.currentRegion && focus !== "traveling") {
-          await patchAgentConfig(this.userWallet, { focus: "traveling" });
-          this.currentScript = null;
-        }
+        // Skip zone management while inside a dungeon instance
+        const inDungeon = this.currentRegion.startsWith("dungeon-");
 
-        // Zone restriction enforcement
-        if (this.currentCaps.allowedZones !== "all") {
-          const allowed = this.currentCaps.allowedZones;
-          if (!allowed.includes(this.currentRegion)) {
-            const fallbackZone = allowed[0] ?? "village-square";
-            console.log(`[agent:${this.walletTag}] Zone ${this.currentRegion} not allowed — forcing travel to ${fallbackZone}`);
-            void this.logActivity(`Zone restricted — returning to ${fallbackZone}`);
-            await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
-            this.currentScript = null;
-          }
-          if (normalizedTargetZone && !allowed.includes(normalizedTargetZone)) {
-            console.log(`[agent:${this.walletTag}] Target zone ${normalizedTargetZone} not allowed — clearing`);
+        if (!inDungeon) {
+          // Normalize target zone
+          const normalizedTargetZone = resolveRegionId(config.targetZone);
+          if (config.targetZone && !normalizedTargetZone) {
             await patchAgentConfig(this.userWallet, { targetZone: undefined });
             this.currentScript = null;
+          }
+          if (normalizedTargetZone && normalizedTargetZone !== config.targetZone) {
+            await patchAgentConfig(this.userWallet, { targetZone: normalizedTargetZone });
+          }
+          if (normalizedTargetZone && normalizedTargetZone !== this.currentRegion && focus !== "traveling") {
+            await patchAgentConfig(this.userWallet, { focus: "traveling" });
+            this.currentScript = null;
+          }
+
+          // Zone restriction enforcement
+          if (this.currentCaps.allowedZones !== "all") {
+            const allowed = this.currentCaps.allowedZones;
+            if (!allowed.includes(this.currentRegion)) {
+              const fallbackZone = allowed[0] ?? "village-square";
+              console.log(`[agent:${this.walletTag}] Zone ${this.currentRegion} not allowed — forcing travel to ${fallbackZone}`);
+              void this.logActivity(`Zone restricted — returning to ${fallbackZone}`);
+              await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: fallbackZone });
+              this.currentScript = null;
+            }
+            if (normalizedTargetZone && !allowed.includes(normalizedTargetZone)) {
+              console.log(`[agent:${this.walletTag}] Target zone ${normalizedTargetZone} not allowed — clearing`);
+              await patchAgentConfig(this.userWallet, { targetZone: undefined });
+              this.currentScript = null;
+            }
+          }
+        }
+
+        // ── Objective system: check/advance the active objective ──
+        if (activeObj) {
+          const objCompleted = this.checkObjectiveCompletion(activeObj, entity);
+          if (objCompleted) {
+            await completeObjective(this.userWallet, activeObj.id);
+            void this.logActivity(`Objective complete: ${activeObj.label}`);
+            console.log(`[agent:${this.walletTag}] Objective completed: ${activeObj.label}`);
+
+            // Find next objective and switch focus
+            const updatedConfig = await getAgentConfig(this.userWallet);
+            const nextObj = getActiveObjective(updatedConfig?.objectives ?? []);
+            if (nextObj) {
+              const derived = objectiveToFocus(nextObj);
+              nextObj.status = "active";
+              await patchAgentConfig(this.userWallet, {
+                focus: derived.focus,
+                targetZone: derived.targetZone,
+                strategy: derived.strategy ?? config.strategy,
+                objectives: updatedConfig?.objectives,
+              });
+              this.currentScript = null;
+              this.ticksSinceLastDecision = MAX_STALE_TICKS;
+              void this.logActivity(`Next objective: ${nextObj.label}`);
+              console.log(`[agent:${this.walletTag}] Next objective: ${nextObj.label}`);
+            } else {
+              // All objectives done — fall back to questing
+              await patchAgentConfig(this.userWallet, { focus: "questing" });
+              this.currentScript = null;
+              this.ticksSinceLastDecision = MAX_STALE_TICKS;
+              void this.logActivity("All objectives complete! Returning to questing.");
+            }
+            await sleep(TICK_MS);
+            continue;
+          } else {
+            // If the active objective's implied focus differs from current, switch
+            if (activeObj.status === "pending") {
+              activeObj.status = "active";
+              const derived = objectiveToFocus(activeObj);
+              if (derived.focus !== config.focus || (derived.targetZone && derived.targetZone !== config.targetZone)) {
+                await patchAgentConfig(this.userWallet, {
+                  focus: derived.focus,
+                  targetZone: derived.targetZone,
+                  strategy: derived.strategy ?? config.strategy,
+                  objectives,
+                });
+                this.currentScript = null;
+                this.ticksSinceLastDecision = MAX_STALE_TICKS;
+                void this.logActivity(`Working on objective: ${activeObj.label}`);
+                await sleep(TICK_MS);
+                continue;
+              }
+            }
+            // Update progress tracking
+            const progress = this.getObjectiveProgress(activeObj, entity);
+            if (progress != null && progress !== activeObj.progress) {
+              await updateObjectiveProgress(this.userWallet, activeObj.id, progress);
+            }
           }
         }
 

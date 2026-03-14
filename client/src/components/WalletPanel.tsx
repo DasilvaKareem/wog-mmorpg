@@ -250,6 +250,65 @@ export function WalletPanel(): React.ReactElement {
         >
           View Champion
         </Link>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => gameBus.emit("characterOpen", undefined as never)}
+            className="flex-1 border-2 border-[#c83232]/40 bg-[#1e1010] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#c83232] transition hover:bg-[#2a1818]"
+          >
+            Character
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (address) {
+                const zoneId = characterProgress?.zoneId;
+                if (zoneId) {
+                  gameBus.emit("inspectSelf", { zoneId, walletAddress: address });
+                } else {
+                  // No known zone — scan all zones for this player
+                  fetch(`${API_URL}/zones`).then(r => r.json()).then(zones => {
+                    const zoneIds = Object.keys(zones);
+                    for (const zid of zoneIds) {
+                      fetch(`${API_URL}/zones/${zid}`).then(r => r.json()).then(data => {
+                        const entities = data.entities as Record<string, any> | undefined;
+                        if (!entities) return;
+                        const normalized = address.toLowerCase();
+                        const custodial = WalletManager.getInstance().custodialAddress?.toLowerCase();
+                        const self = Object.values(entities).find(e => {
+                          if (e.type !== "player") return false;
+                          const ew = e.walletAddress?.toLowerCase();
+                          return ew === normalized || (custodial && ew === custodial);
+                        });
+                        if (self) gameBus.emit("inspectSelf", { zoneId: zid, walletAddress: address });
+                      }).catch(() => {});
+                    }
+                  }).catch(() => {});
+                }
+              }
+            }}
+            disabled={!address}
+            className="flex-1 border-2 border-[#ffcc00]/40 bg-[#1e1a10] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#2a2418] disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Inspect
+          </button>
+        </div>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => gameBus.emit("inboxOpen", undefined as never)}
+            className="flex-1 border-2 border-[#6ea8fe]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#6ea8fe] transition hover:bg-[#1a2840]"
+          >
+            Inbox
+          </button>
+          <button
+            type="button"
+            onClick={() => gameBus.emit("settingsOpen", undefined as never)}
+            className="flex-1 border-2 border-[#9aa7cc]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#9aa7cc] transition hover:bg-[#1a2840]"
+          >
+            Settings
+          </button>
+        </div>
       </CardContent>}
     </Card>
   );

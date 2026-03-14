@@ -10,11 +10,13 @@ interface HotkeyBarProps {
   onChat: () => void;
   onRanks: () => void;
   onWallet: () => void;
+  onProfessions: () => void;
   onSettings: () => void;
   inboxActive?: boolean;
   chatActive?: boolean;
   ranksActive?: boolean;
   walletActive?: boolean;
+  professionsActive?: boolean;
   settingsActive?: boolean;
   mobile?: boolean;
 }
@@ -24,20 +26,15 @@ type Slot = {
   label: string;
   icon?: string;
   text?: string;
-  actionKey: "character" | "map" | "questLog" | "inspect" | "inbox" | "chat" | "ranks" | "wallet" | "settings";
+  actionKey: "character" | "map" | "questLog" | "inspect" | "inbox" | "chat" | "ranks" | "wallet" | "professions" | "settings";
   toggleable?: boolean;
 };
 
 const slots: Slot[] = [
-  { icon: "/icons/armor.png", key: "C", label: "Character", actionKey: "character" },
-  { icon: "/icons/commet.png", key: "M", label: "Map", actionKey: "map" },
-  { icon: "/icons/quest.png", key: "Q", label: "Quest Log", actionKey: "questLog" },
-  { icon: "/icons/sword.png", key: "I", label: "Inspect", actionKey: "inspect" },
-  { text: "\u2709", key: "N", label: "Inbox", actionKey: "inbox", toggleable: true },
-  { text: "...", key: "L", label: "Chat", actionKey: "chat", toggleable: true },
+  { text: "\u{1F5E8}", key: "L", label: "Chat", actionKey: "chat", toggleable: true },
   { icon: "/icons/level.png", key: "R", label: "Ranks", actionKey: "ranks", toggleable: true },
   { icon: "/icons/gold.png", key: "W", label: "Wallet", actionKey: "wallet", toggleable: true },
-  { text: "\u2699", key: "O", label: "Settings", actionKey: "settings", toggleable: true },
+  { text: "\u{1F6E0}\uFE0F", key: "P", label: "Professions", actionKey: "professions", toggleable: true },
 ];
 
 export function HotkeyBar({
@@ -49,11 +46,13 @@ export function HotkeyBar({
   onChat,
   onRanks,
   onWallet,
+  onProfessions,
   onSettings,
   inboxActive = false,
   chatActive = false,
   ranksActive = false,
   walletActive = false,
+  professionsActive = false,
   settingsActive = false,
   mobile = false,
 }: HotkeyBarProps): React.ReactElement {
@@ -66,6 +65,7 @@ export function HotkeyBar({
     chat: onChat,
     ranks: onRanks,
     wallet: onWallet,
+    professions: onProfessions,
     settings: onSettings,
   };
 
@@ -74,6 +74,7 @@ export function HotkeyBar({
     chat: chatActive,
     ranks: ranksActive,
     wallet: walletActive,
+    professions: professionsActive,
     settings: settingsActive,
   };
 

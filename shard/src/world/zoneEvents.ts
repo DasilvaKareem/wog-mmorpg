@@ -18,7 +18,8 @@ export type ZoneEventType =
   | "quest-progress"
   | "system"
   | "ability"
-  | "technique";
+  | "technique"
+  | "consume";
 
 export interface ZoneEvent {
   id: string;

@@ -16,6 +16,7 @@ import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteWallet } from "./biteChain.js";
 import { ethers } from "ethers";
+import { traceTx } from "./txTracer.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
 const skaleProvider = new ethers.JsonRpcProvider("https://skale-base.skalenodes.com/v1/base");
@@ -336,34 +337,38 @@ async function sendTransactionWithManagedGas(
  * SKALE sFUEL is the native gas token — free, but wallets need a dust amount.
  */
 export async function distributeSFuel(toAddress: string): Promise<string> {
-  return queueTransaction(async () => {
-    const tx = prepareTransaction({
-      to: toAddress,
-      value: toWei(SFUEL_DISTRIBUTION_AMOUNT),
-      chain: skaleBase,
-      client: thirdwebClient,
-    });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.sfuelDistributions++;
-    recordTx("sfuel", receipt.transactionHash);
-    return receipt.transactionHash;
-  });
+  return traceTx("sfuel", "distributeSFuel", { to: toAddress }, "skale", () =>
+    queueTransaction(async () => {
+      const tx = prepareTransaction({
+        to: toAddress,
+        value: toWei(SFUEL_DISTRIBUTION_AMOUNT),
+        chain: skaleBase,
+        client: thirdwebClient,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.sfuelDistributions++;
+      recordTx("sfuel", receipt.transactionHash);
+      return receipt.transactionHash;
+    })
+  );
 }
 
 /** Mint gold (ERC-20) to a player address. `amount` is in whole tokens (e.g. "50"). */
 export async function mintGold(toAddress: string, amount: string): Promise<string> {
-  return queueTransaction(async () => {
-    const tx = mintERC20({
-      contract: goldContract,
-      to: toAddress,
-      amount,
-    });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.goldMints++;
-    recordTx("gold-mint", receipt.transactionHash);
-    goldCache.invalidate(toAddress.toLowerCase());
-    return receipt.transactionHash;
-  });
+  return traceTx("gold-mint", "mintGold", { to: toAddress, amount }, "skale", () =>
+    queueTransaction(async () => {
+      const tx = mintERC20({
+        contract: goldContract,
+        to: toAddress,
+        amount,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.goldMints++;
+      recordTx("gold-mint", receipt.transactionHash);
+      goldCache.invalidate(toAddress.toLowerCase());
+      return receipt.transactionHash;
+    })
+  );
 }
 
 /** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
@@ -422,17 +427,19 @@ export async function transferGoldFrom(
   toAddress: string,
   amount: string
 ): Promise<string> {
-  const tx = transferERC20({
-    contract: goldContract,
-    to: toAddress,
-    amount,
+  return traceTx("gold-transfer", "transferGoldFrom", { from: fromAccount.address, to: toAddress, amount }, "skale", async () => {
+    const tx = transferERC20({
+      contract: goldContract,
+      to: toAddress,
+      amount,
+    });
+    const receipt = await sendTransactionWithManagedGas(tx, fromAccount);
+    txStats.goldTransfers++;
+    recordTx("gold-transfer", receipt.transactionHash);
+    goldCache.invalidate(fromAccount.address.toLowerCase());
+    goldCache.invalidate(toAddress.toLowerCase());
+    return receipt.transactionHash;
   });
-  const receipt = await sendTransactionWithManagedGas(tx, fromAccount);
-  txStats.goldTransfers++;
-  recordTx("gold-transfer", receipt.transactionHash);
-  goldCache.invalidate(fromAccount.address.toLowerCase());
-  goldCache.invalidate(toAddress.toLowerCase());
-  return receipt.transactionHash;
 }
 
 /** Mint an ERC-1155 item to a player address (existing tokenId). */
@@ -441,19 +448,21 @@ export async function mintItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  await ensureItemTokenIdExists(tokenId);
-  return queueTransaction(async () => {
-    const tx = mintAdditionalSupplyTo({
-      contract: itemsContract,
-      to: toAddress,
-      tokenId,
-      supply: quantity,
+  return traceTx("item-mint", "mintItem", { to: toAddress, tokenId, quantity }, "skale", async () => {
+    await ensureItemTokenIdExists(tokenId);
+    return queueTransaction(async () => {
+      const tx = mintAdditionalSupplyTo({
+        contract: itemsContract,
+        to: toAddress,
+        tokenId,
+        supply: quantity,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.itemMints++;
+      recordTx("item-mint", receipt.transactionHash);
+      itemCache.invalidate(toAddress.toLowerCase());
+      return receipt.transactionHash;
     });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.itemMints++;
-    recordTx("item-mint", receipt.transactionHash);
-    itemCache.invalidate(toAddress.toLowerCase());
-    return receipt.transactionHash;
   });
 }
 
@@ -496,19 +505,21 @@ export async function burnItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  return queueTransaction(async () => {
-    const tx = burn({
-      contract: itemsContract,
-      account: fromAddress,
-      id: tokenId,
-      value: quantity,
-    });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.itemBurns++;
-    recordTx("item-burn", receipt.transactionHash);
-    itemCache.invalidate(fromAddress.toLowerCase());
-    return receipt.transactionHash;
-  });
+  return traceTx("item-burn", "burnItem", { from: fromAddress, tokenId, quantity }, "skale", () =>
+    queueTransaction(async () => {
+      const tx = burn({
+        contract: itemsContract,
+        account: fromAddress,
+        id: tokenId,
+        value: quantity,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.itemBurns++;
+      recordTx("item-burn", receipt.transactionHash);
+      itemCache.invalidate(fromAddress.toLowerCase());
+      return receipt.transactionHash;
+    })
+  );
 }
 
 // --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---
@@ -704,37 +715,39 @@ export async function mintCharacter(
   toAddress: string,
   nft: { name: string; description: string; properties: Record<string, unknown> }
 ): Promise<string> {
-  return queueTransaction(async () => {
-    const tx = mintERC721({
-      contract: characterContract,
-      to: toAddress,
-      nft,
-    });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.characterMints++;
-    recordTx("character-mint", receipt.transactionHash);
-    characterCache.invalidate(toAddress.toLowerCase());
+  return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", () =>
+    queueTransaction(async () => {
+      const tx = mintERC721({
+        contract: characterContract,
+        to: toAddress,
+        nft,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.characterMints++;
+      recordTx("character-mint", receipt.transactionHash);
+      characterCache.invalidate(toAddress.toLowerCase());
 
-    // Extract tokenId from the ERC-721 Transfer event and register identity
-    if (identityRegistryContract) {
-      void (async () => {
-        try {
-          const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
-          const transferLog = fullReceipt?.logs.find(
-            (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
-          );
-          if (transferLog?.topics[3]) {
-            const tokenId = BigInt(transferLog.topics[3]);
-            await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
+      // Extract tokenId from the ERC-721 Transfer event and register identity
+      if (identityRegistryContract) {
+        void (async () => {
+          try {
+            const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
+            const transferLog = fullReceipt?.logs.find(
+              (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
+            );
+            if (transferLog?.topics[3]) {
+              const tokenId = BigInt(transferLog.topics[3]);
+              await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
+            }
+          } catch (err: any) {
+            console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
           }
-        } catch (err: any) {
-          console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
-        }
-      })();
-    }
+        })();
+      }
 
-    return receipt.transactionHash;
-  });
+      return receipt.transactionHash;
+    })
+  );
 }
 
 /** Get all character NFTs owned by a wallet address. Cached 30s (empty results not cached). */
@@ -786,29 +799,31 @@ export async function updateCharacterMetadata(entity: {
   xp: number;
   stats: CharacterStats;
 }): Promise<string> {
-  const metadata = {
-    name: entity.name,
-    description: `Level ${entity.level} ${entity.raceId} ${entity.classId}`,
-    properties: {
-      race: entity.raceId,
-      class: entity.classId,
-      level: entity.level,
-      xp: entity.xp,
-      stats: entity.stats,
-    },
-  };
+  return traceTx("metadata-update", "updateCharacterMetadata", { tokenId: entity.characterTokenId, name: entity.name, level: entity.level }, "skale", async () => {
+    const metadata = {
+      name: entity.name,
+      description: `Level ${entity.level} ${entity.raceId} ${entity.classId}`,
+      properties: {
+        race: entity.raceId,
+        class: entity.classId,
+        level: entity.level,
+        xp: entity.xp,
+        stats: entity.stats,
+      },
+    };
 
-  const uri = await upload({ client: thirdwebClient, files: [metadata] });
+    const uri = await upload({ client: thirdwebClient, files: [metadata] });
 
-  return queueTransaction(async () => {
-    const tx = setTokenURI({
-      contract: characterContract,
-      tokenId: entity.characterTokenId,
-      uri,
+    return queueTransaction(async () => {
+      const tx = setTokenURI({
+        contract: characterContract,
+        tokenId: entity.characterTokenId,
+        uri,
+      });
+      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      txStats.metadataUpdates++;
+      recordTx("metadata-update", receipt.transactionHash);
+      return receipt.transactionHash;
     });
-    const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-    txStats.metadataUpdates++;
-    recordTx("metadata-update", receipt.transactionHash);
-    return receipt.transactionHash;
   });
 }

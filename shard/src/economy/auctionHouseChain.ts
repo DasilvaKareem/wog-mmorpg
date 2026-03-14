@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { biteWallet, biteProvider } from "../blockchain/biteChain.js";
+import { traceTx } from "../blockchain/txTracer.js";
 
 const AUCTION_HOUSE_CONTRACT_ADDRESS = process.env.AUCTION_HOUSE_CONTRACT_ADDRESS;
 
@@ -72,49 +73,51 @@ export async function createAuctionOnChain(
   durationSeconds: number,
   buyoutPrice: number
 ): Promise<{ auctionId: number; txHash: string }> {
-  const contract = ensureAuctionHouseEnabled();
-  const startPriceWei = ethers.parseUnits(startPrice.toString(), 18);
-  const buyoutPriceWei = buyoutPrice > 0 ? ethers.parseUnits(buyoutPrice.toString(), 18) : 0;
+  return traceTx("auction-create", "createAuctionOnChain", { zoneId, seller, tokenId, quantity, startPrice, buyoutPrice }, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const startPriceWei = ethers.parseUnits(startPrice.toString(), 18);
+    const buyoutPriceWei = buyoutPrice > 0 ? ethers.parseUnits(buyoutPrice.toString(), 18) : 0;
 
-  const tx = await contract.createAuction(
-    zoneId,
-    seller,
-    tokenId,
-    quantity,
-    startPriceWei,
-    durationSeconds,
-    buyoutPriceWei
-  );
-  const receipt = await tx.wait();
+    const tx = await contract.createAuction(
+      zoneId,
+      seller,
+      tokenId,
+      quantity,
+      startPriceWei,
+      durationSeconds,
+      buyoutPriceWei
+    );
+    const receipt = await tx.wait();
 
-  // Parse AuctionCreated event to extract auctionId and cache the auction
-  for (const log of receipt.logs) {
-    try {
-      const parsed = contract.interface.parseLog(log);
-      if (parsed?.name === "AuctionCreated") {
-        const auctionId = Number(parsed.args.auctionId);
-        cacheAuction({
-          auctionId,
-          zoneId,
-          seller,
-          tokenId,
-          quantity,
-          startPrice,
-          buyoutPrice,
-          endTime: Number(parsed.args.endTime),
-          highBidder: ethers.ZeroAddress,
-          highBid: 0,
-          status: 0, // Active
-          extensionCount: 0,
-        });
-        return { auctionId, txHash: receipt.hash };
+    // Parse AuctionCreated event to extract auctionId and cache the auction
+    for (const log of receipt.logs) {
+      try {
+        const parsed = contract.interface.parseLog(log);
+        if (parsed?.name === "AuctionCreated") {
+          const auctionId = Number(parsed.args.auctionId);
+          cacheAuction({
+            auctionId,
+            zoneId,
+            seller,
+            tokenId,
+            quantity,
+            startPrice,
+            buyoutPrice,
+            endTime: Number(parsed.args.endTime),
+            highBidder: ethers.ZeroAddress,
+            highBid: 0,
+            status: 0, // Active
+            extensionCount: 0,
+          });
+          return { auctionId, txHash: receipt.hash };
+        }
+      } catch {
+        // Not our event, skip
       }
-    } catch {
-      // Not our event, skip
     }
-  }
 
-  throw new Error("AuctionCreated event not found in receipt");
+    throw new Error("AuctionCreated event not found in receipt");
+  });
 }
 
 /**
@@ -126,40 +129,42 @@ export async function placeBidOnChain(
   bidder: string,
   bidAmount: number
 ): Promise<{ txHash: string; previousBidder: string; previousBid: number }> {
-  const contract = ensureAuctionHouseEnabled();
-  const bidAmountWei = ethers.parseUnits(bidAmount.toString(), 18);
+  return traceTx("auction-bid", "placeBidOnChain", { auctionId, bidder, bidAmount }, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const bidAmountWei = ethers.parseUnits(bidAmount.toString(), 18);
 
-  const tx = await contract.placeBid(
-    auctionId,
-    bidder,
-    bidAmountWei
-  );
-  const receipt = await tx.wait();
+    const tx = await contract.placeBid(
+      auctionId,
+      bidder,
+      bidAmountWei
+    );
+    const receipt = await tx.wait();
 
-  // Parse BidPlaced event to get previous bidder and update cache
-  for (const log of receipt.logs) {
-    try {
-      const parsed = contract.interface.parseLog(log);
-      if (parsed?.name === "BidPlaced") {
-        const cached = auctionCache.get(auctionId);
-        if (cached) {
-          cached.highBidder = bidder;
-          cached.highBid = bidAmount;
-          cached.endTime = Number(parsed.args.newEndTime);
-          if (parsed.args.extended) cached.extensionCount++;
+    // Parse BidPlaced event to get previous bidder and update cache
+    for (const log of receipt.logs) {
+      try {
+        const parsed = contract.interface.parseLog(log);
+        if (parsed?.name === "BidPlaced") {
+          const cached = auctionCache.get(auctionId);
+          if (cached) {
+            cached.highBidder = bidder;
+            cached.highBid = bidAmount;
+            cached.endTime = Number(parsed.args.newEndTime);
+            if (parsed.args.extended) cached.extensionCount++;
+          }
+          return {
+            txHash: receipt.hash,
+            previousBidder: parsed.args.previousBidder,
+            previousBid: parseFloat(ethers.formatUnits(parsed.args.previousBid, 18)),
+          };
         }
-        return {
-          txHash: receipt.hash,
-          previousBidder: parsed.args.previousBidder,
-          previousBid: parseFloat(ethers.formatUnits(parsed.args.previousBid, 18)),
-        };
+      } catch {
+        // Not our event, skip
       }
-    } catch {
-      // Not our event, skip
     }
-  }
 
-  throw new Error("BidPlaced event not found in receipt");
+    throw new Error("BidPlaced event not found in receipt");
+  });
 }
 
 /**
@@ -169,34 +174,40 @@ export async function buyoutAuctionOnChain(
   auctionId: number,
   buyer: string
 ): Promise<{ txHash: string }> {
-  const contract = ensureAuctionHouseEnabled();
-  const tx = await contract.buyout(auctionId, buyer);
-  const receipt = await tx.wait();
-  return { txHash: receipt.hash };
+  return traceTx("auction-buyout", "buyoutAuctionOnChain", { auctionId, buyer }, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const tx = await contract.buyout(auctionId, buyer);
+    const receipt = await tx.wait();
+    return { txHash: receipt.hash };
+  });
 }
 
 /**
  * End an expired auction (server calls this when time is up).
  */
 export async function endAuctionOnChain(auctionId: number): Promise<string> {
-  const contract = ensureAuctionHouseEnabled();
-  const tx = await contract.endAuction(auctionId);
-  const receipt = await tx.wait();
-  const cached = auctionCache.get(auctionId);
-  if (cached) cached.status = 1; // Ended
-  return receipt.hash;
+  return traceTx("auction-end", "endAuctionOnChain", { auctionId }, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const tx = await contract.endAuction(auctionId);
+    const receipt = await tx.wait();
+    const cached = auctionCache.get(auctionId);
+    if (cached) cached.status = 1; // Ended
+    return receipt.hash;
+  });
 }
 
 /**
  * Cancel an auction (before any bids).
  */
 export async function cancelAuctionOnChain(auctionId: number): Promise<string> {
-  const contract = ensureAuctionHouseEnabled();
-  const tx = await contract.cancelAuction(auctionId);
-  const receipt = await tx.wait();
-  const cached = auctionCache.get(auctionId);
-  if (cached) cached.status = 2; // Cancelled
-  return receipt.hash;
+  return traceTx("auction-cancel", "cancelAuctionOnChain", { auctionId }, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const tx = await contract.cancelAuction(auctionId);
+    const receipt = await tx.wait();
+    const cached = auctionCache.get(auctionId);
+    if (cached) cached.status = 2; // Cancelled
+    return receipt.hash;
+  });
 }
 
 /**

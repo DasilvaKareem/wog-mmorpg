@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity } from "../world/zoneRuntime.js";
+import { getEntity, getOrCreateZone } from "../world/zoneRuntime.js";
 import { burnItem, mintItem } from "../blockchain/blockchain.js";
 import { hasLearnedProfession } from "./professions.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
@@ -9,6 +9,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeCook, narrativeConsume } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 const COOKING_RANGE = 50;
 
@@ -300,6 +301,22 @@ export function registerCookingRoutes(server: FastifyInstance) {
       // Restore HP
       const healAmount = Math.min(recipe.hpRestoration, entity.maxHp - entity.hp);
       entity.hp = Math.min(entity.maxHp, entity.hp + recipe.hpRestoration);
+
+      const zone = getOrCreateZone(zoneId);
+      logZoneEvent({
+        zoneId,
+        type: "consume",
+        tick: zone.tick,
+        message: `${entity.name} ate ${recipe.name}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          itemName: recipe.name,
+          consumeType: "food",
+          hpRestored: healAmount,
+          mpRestored: 0,
+        },
+      });
 
       server.log.info(
         `[cooking] ${entity.name} consumed ${recipe.name}, restored ${healAmount} HP → ${burnTx}`

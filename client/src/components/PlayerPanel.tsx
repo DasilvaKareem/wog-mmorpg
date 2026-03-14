@@ -190,7 +190,7 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
   const [collapsed, setCollapsed] = React.useState(false);
   const [sortBy, setSortBy] = React.useState<SortBy>("power");
 
-  const { lobbies, loading: lobbyLoading } = useZonePlayers({ pollInterval: 3000 });
+  const { lobbies, gameTime, loading: lobbyLoading } = useZonePlayers({ pollInterval: 3000 });
   const { entries, loading: lbLoading } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
 
   const totalPlayers = lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0);
@@ -239,7 +239,15 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
 
           {/* Right side: context-dependent info */}
           {tab === "lobby" ? (
-            <Badge variant="success">{totalPlayers} online</Badge>
+            <div className="flex items-center gap-2">
+              {gameTime && (
+                <span className="text-[8px] text-[#9aa7cc] font-mono">
+                  {gameTime.phase === "night" ? "\u263D" : gameTime.phase === "dawn" || gameTime.phase === "dusk" ? "\u263C" : "\u2600"}{" "}
+                  {String(gameTime.hour).padStart(2, "0")}:{String(gameTime.minute).padStart(2, "0")}
+                </span>
+              )}
+              <Badge variant="success">{totalPlayers} online</Badge>
+            </div>
           ) : (
             <div className="flex gap-1">
               {SORT_TABS.map((s) => (
@@ -296,6 +304,18 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
             <LeaderboardRow key={entry.entityId} entry={entry} />
           ))}
         </CardContent>
+      )}
+
+      {!collapsed && (
+        <div className="px-3 pb-3">
+          <button
+            type="button"
+            onClick={() => gameBus.emit("mapOpen", undefined as never)}
+            className="flex w-full items-center justify-center gap-1 border-2 border-[#54f28b]/40 bg-[#0f1e10] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#54f28b] transition hover:bg-[#1a2e18]"
+          >
+            Map
+          </button>
+        </div>
       )}
     </Card>
   );

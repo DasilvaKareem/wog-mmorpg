@@ -17,7 +17,8 @@ export type BotScriptType =
   | "quest"
   | "learn"
   | "idle"
-  | "goto";
+  | "goto"
+  | "dungeon";
 
 export interface BotScript {
   type: BotScriptType;
@@ -35,6 +36,10 @@ export interface BotScript {
   targetEntityId?: string;
   /** goto: human-readable NPC name for activity log */
   targetName?: string;
+  /** dungeon: gate entity ID to open */
+  gateEntityId?: string;
+  /** dungeon: gate rank */
+  gateRank?: string;
 }
 
 /** Events that fire during bot script execution and trigger the AI supervisor. */

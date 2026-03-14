@@ -5,7 +5,9 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllZones } from "../world/zoneRuntime.js";
+import { getPlayerPartyId } from "../social/partySystem.js";
+import { getItemBalance } from "../blockchain/blockchain.js";
 import { getClassById } from "../character/classes.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { sendInboxMessage } from "./agentInbox.js";
@@ -72,9 +74,10 @@ function findGatherNode(
 ): [string, any] | null {
   const matches = Object.entries(entities)
     .filter(([, e]) => {
-      if (preference === "ore") return e.type === "ore-node";
-      if (preference === "herb") return e.type === "flower-node";
-      return e.type === "ore-node" || e.type === "flower-node";
+      const alive = !e.depletedAtTick && (e.charges ?? 0) > 0;
+      if (preference === "ore") return e.type === "ore-node" && alive;
+      if (preference === "herb") return e.type === "flower-node" && alive;
+      return (e.type === "ore-node" || e.type === "flower-node") && alive;
     })
     .sort(([, a], [, b]) => {
       const tierDiff = requiredNodeTier(a) - requiredNodeTier(b);
@@ -998,36 +1001,45 @@ export async function doQuesting(
       }
     }
 
-    // 3. Accept new quests
+    // 3. Request quest approval from summoner (don't auto-accept)
     const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
-    if (currentActive < 3) {
+    const pendingApprovals: string[] = me.pendingQuestApprovals ?? [];
+    if (currentActive + pendingApprovals.length < 3) {
       try {
         const availRes = await ctx.api("GET", `/quests/zone/${ctx.currentRegion}/${ctx.entityId}`);
         const available: any[] = availRes?.quests ?? [];
-        if (available.length > 0) {
-          const q = available[0];
-          const acceptRes = await ctx.api("POST", "/quests/accept", {
-            zoneId: ctx.currentRegion, playerId: ctx.entityId, questId: q.questId,
+        // Filter out quests already pending approval
+        const pendingSet = new Set(pendingApprovals);
+        const requestable = available.filter((q: any) => !pendingSet.has(q.questId));
+        if (requestable.length > 0) {
+          const q = requestable[0];
+          // Mark as pending on the entity so we don't spam the summoner
+          if (!me.pendingQuestApprovals) me.pendingQuestApprovals = [];
+          me.pendingQuestApprovals.push(q.questId);
+          // Ask summoner for approval via inbox
+          const agentName = me.name ?? "Agent";
+          const origin = me.origin ?? undefined;
+          const classId = me.classId ?? undefined;
+          const askLine = pickLine(origin, classId, "summon_quest_accept")
+            ?? `I found a quest: "${q.title}". May I take it, summoner?`;
+          const askBody = askLine.replace(/\{detail\}/g, q.title ?? "a quest");
+          void sendInboxMessage({
+            from: ctx.custodialWallet,
+            fromName: agentName,
+            to: ctx.userWallet,
+            type: "quest-approval",
+            body: askBody,
+            data: {
+              questId: q.questId,
+              questTitle: q.title,
+              npcName: q.npcName,
+              rewards: q.rewards,
+              objective: q.objective,
+            },
           });
-          if (acceptRes?.accepted) {
-            void ctx.logActivity(`Accepted quest: "${q.title}" from ${q.npcName}`);
-            // Tell summoner what quest we're doing next
-            const agentName = me.name ?? "Agent";
-            const origin = me.origin ?? undefined;
-            const classId = me.classId ?? undefined;
-            const acceptLine = pickLine(origin, classId, "summon_quest_accept")
-              ?? `Just picked up a new quest: "${q.title}". Should I go for it?`;
-            const acceptBody = acceptLine.replace(/\{detail\}/g, q.title ?? "a quest");
-            void sendInboxMessage({
-              from: ctx.custodialWallet,
-              fromName: agentName,
-              to: ctx.userWallet,
-              type: "direct",
-              body: acceptBody,
-            });
-            return actionCompleted(`Accepted quest ${q.title}`);
-          }
-        } else if (currentActive === 0) {
+          void ctx.logActivity(`Requesting approval for quest: "${q.title}"`);
+          return actionProgressed(`Awaiting summoner approval for ${q.title}`);
+        } else if (currentActive === 0 && requestable.length === 0 && pendingApprovals.length === 0) {
           const myLevel = me.level ?? 1;
           const nextZone = findNextZoneForLevel(myLevel);
           if (nextZone && nextZone !== ctx.currentRegion) {
@@ -1039,7 +1051,7 @@ export async function doQuesting(
           }
         }
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] quest accept: ${err.message?.slice(0, 60)}`);
+        console.debug(`[agent:${ctx.walletTag}] quest approval request: ${err.message?.slice(0, 60)}`);
       }
     }
 
@@ -1131,4 +1143,202 @@ async function fallbackToCombat(
   ctx.setScript({ type: "combat", maxLevelOffset: 1, reason: `Farming gold: ${reason}` });
   const result = await doCombat(ctx, strategy);
   return result.status === "idle" ? actionProgressed(reason) : result;
+}
+
+// ── Dungeon ──────────────────────────────────────────────────────────────────
+
+/** Rank → key token ID mapping */
+const RANK_TO_KEY_TOKEN: Record<string, bigint> = {
+  E: 134n, D: 135n, C: 136n, B: 137n, A: 138n, S: 139n,
+};
+const RANK_LEVEL_REQS: Record<string, number> = {
+  E: 3, D: 7, C: 12, B: 18, A: 28, S: 40,
+};
+const GATE_PROXIMITY = 50;
+
+/**
+ * Dungeon behavior — handles the full dungeon lifecycle:
+ * 1. If inside a dungeon zone → fight mobs (auto-exit handled by dungeonGateTick)
+ * 2. If in overworld with a target gate → walk to gate and open it
+ * 3. If in overworld with no target → scan for gates, pick best one
+ */
+export async function doDungeon(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  script: { gateEntityId?: string; gateRank?: string },
+): Promise<ActionResult> {
+  try {
+    // ── Phase 1: Already inside a dungeon — just fight ──────────────────
+    if (ctx.currentRegion.startsWith("dungeon-")) {
+      return doDungeonCombat(ctx, strategy);
+    }
+
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    // ── Phase 2: Find or validate a target gate ─────────────────────────
+    let targetGate: any = null;
+    let targetGateId: string | null = script.gateEntityId ?? null;
+
+    if (targetGateId) {
+      targetGate = entities[targetGateId];
+      // Gate might have expired or been opened
+      if (!targetGate || targetGate.type !== "dungeon-gate" || targetGate.gateOpened) {
+        void ctx.logActivity("Target gate is gone — scanning for new gates");
+        targetGateId = null;
+        targetGate = null;
+      }
+    }
+
+    if (!targetGate) {
+      // Scan zone for available gates, pick the best one we can handle
+      const gates = Object.entries(entities).filter(
+        ([, e]) => e.type === "dungeon-gate" && !e.gateOpened && (!e.gateExpiresAt || e.gateExpiresAt > Date.now()),
+      );
+
+      if (gates.length === 0) {
+        return fallbackToCombat(ctx, "No dungeon gates available", strategy);
+      }
+
+      const myLevel = me.level ?? 1;
+
+      // Pick the highest-rank gate we qualify for
+      const eligible = gates.filter(([, g]) => {
+        const rank = g.gateRank as string;
+        return myLevel >= (RANK_LEVEL_REQS[rank] ?? 999);
+      }).sort(([, a], [, b]) => {
+        // Prefer higher rank
+        const rankOrder = "EDCBAS";
+        return rankOrder.indexOf(b.gateRank) - rankOrder.indexOf(a.gateRank);
+      });
+
+      if (eligible.length === 0) {
+        return fallbackToCombat(ctx, "No gates match my level", strategy);
+      }
+
+      [targetGateId, targetGate] = eligible[0] as [string, any];
+    }
+
+    const rank = targetGate.gateRank as string;
+    const keyTokenId = RANK_TO_KEY_TOKEN[rank];
+
+    // ── Phase 3: Check key ──────────────────────────────────────────────
+    if (keyTokenId) {
+      try {
+        const keyBalance = await getItemBalance(ctx.custodialWallet, keyTokenId);
+        if (keyBalance < 1n) {
+          void ctx.logActivity(`No ${rank}-Key to open gate — need to forge one`);
+          return fallbackToCombat(ctx, `Missing ${rank}-Key for dungeon gate`, strategy);
+        }
+      } catch {
+        // If blockchain check fails, try anyway
+      }
+    }
+
+    // ── Phase 4: Ensure party ───────────────────────────────────────────
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (!partyId) {
+      try {
+        await ctx.api("POST", "/party/create", {
+          zoneId: ctx.currentRegion,
+          leaderId: ctx.entityId,
+        });
+        void ctx.logActivity("Created solo party for dungeon entry");
+      } catch (err: any) {
+        // Already in party or other error — proceed anyway
+        if (!err.message?.includes("Already in a party")) {
+          return actionBlocked(`Party creation failed: ${err.message?.slice(0, 60)}`, {
+            failureKey: "dungeon:party",
+          });
+        }
+      }
+    }
+
+    // ── Phase 5: Walk to gate ───────────────────────────────────────────
+    const dist = Math.hypot(me.x - targetGate.x, me.y - targetGate.y);
+    if (dist > GATE_PROXIMITY) {
+      const moving = await ctx.moveToEntity(me, targetGate, GATE_PROXIMITY - 10);
+      if (moving) {
+        ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Approaching Rank ${rank} gate` });
+        return actionProgressed(`Moving to Rank ${rank} dungeon gate (${Math.round(dist)} away)`);
+      }
+    }
+
+    // ── Phase 6: Open gate ──────────────────────────────────────────────
+    void ctx.logActivity(`Opening Rank ${rank}${targetGate.isDangerGate ? " DANGER" : ""} dungeon gate...`);
+
+    try {
+      const result = await ctx.api("POST", "/dungeon/open", {
+        walletAddress: ctx.custodialWallet,
+        zoneId: ctx.currentRegion,
+        entityId: ctx.entityId,
+        gateEntityId: targetGateId,
+      });
+
+      const dungeonZoneId = result?.dungeonZoneId;
+      const totalMobs = result?.totalMobs ?? "?";
+      void ctx.logActivity(`Entered Rank ${rank} dungeon! ${totalMobs} enemies inside.`);
+
+      // Script stays as "dungeon" — next tick we'll be in the dungeon zone and fight
+      ctx.setScript({ type: "dungeon", reason: `Inside Rank ${rank} dungeon — clear all mobs` });
+      return actionProgressed(`Entered dungeon ${dungeonZoneId}`);
+    } catch (err: any) {
+      const msg = err.message?.slice(0, 80) ?? "unknown error";
+      void ctx.logActivity(`Gate opening failed: ${msg}`);
+      return actionBlocked(`Dungeon open failed: ${msg}`, {
+        failureKey: `dungeon:open:${rank}`,
+        targetName: `${rank}-gate`,
+      });
+    }
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    console.debug(`[agent] dungeon tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `dungeon:error:${ctx.currentRegion}` });
+  }
+}
+
+/** Fight mobs inside a dungeon zone. Same as regular combat but no level filtering. */
+async function doDungeonCombat(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
+  try {
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Dungeon zone state unavailable");
+    const { entities, me } = zs;
+
+    // Check if dungeon is cleared (no mobs left)
+    const mobs = Object.entries(entities).filter(
+      ([, e]) => e.type === "mob" && (e.hp ?? 0) > 0,
+    );
+
+    if (mobs.length === 0) {
+      void ctx.logActivity("Dungeon cleared! Waiting for teleport...");
+      return actionCompleted("Dungeon cleared — all mobs defeated");
+    }
+
+    // Already attacking something? Let it play out.
+    if (me.order?.action === "attack") {
+      const target = entities[me.order.targetId];
+      if (target && (target.hp ?? 0) > 0) {
+        return actionProgressed(`Fighting ${target.name ?? "mob"} (${target.hp}/${target.maxHp} HP) — ${mobs.length} mobs remaining`);
+      }
+    }
+
+    // Find closest mob
+    const sorted = mobs.sort(([, a], [, b]) => {
+      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
+    });
+    const [mobId, mob] = sorted[0] as [string, any];
+    const stopDist = getCombatStopDist(me);
+
+    const moving = await ctx.moveToEntity(me, mob, stopDist);
+    if (moving) return actionProgressed(`Moving to ${mob.name ?? "mob"} — ${mobs.length} remain`);
+
+    // In range — attack
+    ctx.issueCommand({ action: "attack", targetId: mobId });
+    void ctx.logActivity(`Dungeon: fighting ${mob.name ?? "mob"} (${mobs.length} remain)`);
+    return actionProgressed(`Attacking ${mob.name ?? "mob"} in dungeon`);
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    return actionBlocked(reason, { failureKey: "dungeon:combat" });
+  }
 }

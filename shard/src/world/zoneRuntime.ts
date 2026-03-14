@@ -183,6 +183,8 @@ export interface Entity {
   leashing?: boolean;
   /** True when a player agent is navigating to an NPC — suppresses auto-combat. */
   gotoMode?: boolean;
+  /** Quest IDs awaiting summoner approval (players only). */
+  pendingQuestApprovals?: string[];
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {

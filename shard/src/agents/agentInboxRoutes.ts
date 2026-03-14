@@ -20,9 +20,10 @@ import {
   getMessageHistory,
   type InboxMessageType,
 } from "./agentInbox.js";
-import { getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { getAgentEntityRef, getAgentCustodialWallet } from "./agentConfigStore.js";
+import { getAllEntities, getEntitiesInRegion, getEntity } from "../world/zoneRuntime.js";
 
-const VALID_TYPES: InboxMessageType[] = ["direct", "trade-request", "party-invite", "broadcast"];
+const VALID_TYPES: InboxMessageType[] = ["direct", "trade-request", "party-invite", "broadcast", "quest-approval"];
 
 export function registerAgentInboxRoutes(server: FastifyInstance): void {
 
@@ -186,6 +187,94 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
 
     const { messages, total } = await getMessageHistory(wallet, limit, offset);
     return { ok: true, messages, total, limit, offset };
+  });
+
+  // ── Quest approval (summoner accepts/denies quest for their champion) ─────
+
+  server.post<{
+    Body: {
+      questId: string;
+      approved: boolean;
+    };
+  }>("/inbox/quest-approve", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const userWallet: string = (request as any).walletAddress;
+    const { questId, approved } = request.body ?? {};
+
+    if (!questId || typeof approved !== "boolean") {
+      reply.code(400);
+      return { error: "Missing required fields: questId, approved" };
+    }
+
+    // Look up the agent's entity
+    const ref = await getAgentEntityRef(userWallet);
+    if (!ref?.entityId) {
+      reply.code(404);
+      return { error: "No agent entity found" };
+    }
+
+    const entity = getEntity(ref.entityId);
+    if (!entity) {
+      reply.code(404);
+      return { error: "Agent entity not in world" };
+    }
+
+    // Remove from pending approvals
+    if (!entity.pendingQuestApprovals) entity.pendingQuestApprovals = [];
+    entity.pendingQuestApprovals = entity.pendingQuestApprovals.filter(
+      (id: string) => id !== questId,
+    );
+
+    if (!approved) {
+      // Notify agent that summoner denied the quest
+      const custodialWallet = await getAgentCustodialWallet(userWallet);
+      if (custodialWallet) {
+        void sendInboxMessage({
+          from: userWallet,
+          fromName: "Summoner",
+          to: custodialWallet,
+          type: "direct",
+          body: `Quest denied. Skip this one.`,
+        });
+      }
+      return { ok: true, approved: false, questId };
+    }
+
+    // Accept the quest for the agent by calling the quest accept internally
+    // (same logic as POST /quests/accept but done server-side)
+    try {
+      const injectRes = await server.inject({
+        method: "POST",
+        url: "/quests/accept",
+        headers: { authorization: request.headers.authorization },
+        payload: {
+          zoneId: ref.zoneId,
+          entityId: ref.entityId,
+          questId,
+        },
+      });
+      const data = JSON.parse(injectRes.body);
+      if (injectRes.statusCode === 200 && data.accepted) {
+        // Notify agent
+        const custodialWallet = await getAgentCustodialWallet(userWallet);
+        if (custodialWallet) {
+          void sendInboxMessage({
+            from: userWallet,
+            fromName: "Summoner",
+            to: custodialWallet,
+            type: "direct",
+            body: `Quest approved! Get to it, champion.`,
+          });
+        }
+        return { ok: true, approved: true, questId, quest: data.quest };
+      }
+      reply.code(injectRes.statusCode);
+      return { error: data.error ?? "Failed to accept quest" };
+    } catch (err: any) {
+      reply.code(500);
+      return { error: err.message ?? "Internal error accepting quest" };
+    }
   });
 }
 

@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { bite, biteWallet, biteProvider } from "./biteChain.js";
+import { traceTx } from "./txTracer.js";
 
 const TRADE_CONTRACT_ADDRESS = process.env.TRADE_CONTRACT_ADDRESS!;
 
@@ -58,30 +59,32 @@ export async function createTradeOnChain(
   quantity: number,
   seller: string
 ): Promise<{ tradeId: number; txHash: string }> {
-  const tx = await tradeContract.createTrade(
-    encryptedAskPrice,
-    tokenId,
-    quantity,
-    seller
-  );
-  const receipt = await tx.wait();
+  return traceTx("trade-create", "createTradeOnChain", { tokenId, quantity, seller }, "bite", async () => {
+    const tx = await tradeContract.createTrade(
+      encryptedAskPrice,
+      tokenId,
+      quantity,
+      seller
+    );
+    const receipt = await tx.wait();
 
-  // Parse TradeCreated event to extract the tradeId
-  for (const log of receipt.logs) {
-    try {
-      const parsed = tradeContract.interface.parseLog(log);
-      if (parsed?.name === "TradeCreated") {
-        return {
-          tradeId: Number(parsed.args.tradeId),
-          txHash: receipt.hash,
-        };
+    // Parse TradeCreated event to extract the tradeId
+    for (const log of receipt.logs) {
+      try {
+        const parsed = tradeContract.interface.parseLog(log);
+        if (parsed?.name === "TradeCreated") {
+          return {
+            tradeId: Number(parsed.args.tradeId),
+            txHash: receipt.hash,
+          };
+        }
+      } catch {
+        // Not our event, skip
       }
-    } catch {
-      // Not our event, skip
     }
-  }
 
-  throw new Error("TradeCreated event not found in receipt");
+    throw new Error("TradeCreated event not found in receipt");
+  });
 }
 
 /**
@@ -94,14 +97,16 @@ export async function submitOfferOnChain(
   encryptedBidPrice: string,
   buyer: string
 ): Promise<{ txHash: string }> {
-  const tx = await tradeContract.submitOffer(
-    tradeId,
-    encryptedBidPrice,
-    buyer,
-    { value: ethers.parseEther("0.00001") }
-  );
-  const receipt = await tx.wait();
-  return { txHash: receipt.hash };
+  return traceTx("trade-offer", "submitOfferOnChain", { tradeId, buyer }, "bite", async () => {
+    const tx = await tradeContract.submitOffer(
+      tradeId,
+      encryptedBidPrice,
+      buyer,
+      { value: ethers.parseEther("0.00001") }
+    );
+    const receipt = await tx.wait();
+    return { txHash: receipt.hash };
+  });
 }
 
 /**
@@ -126,9 +131,11 @@ export async function waitForTradeResolution(
 
 /** Cancel a trade that hasn't received an offer yet. */
 export async function cancelTradeOnChain(tradeId: number): Promise<string> {
-  const tx = await tradeContract.cancelTrade(tradeId);
-  const receipt = await tx.wait();
-  return receipt.hash;
+  return traceTx("trade-cancel", "cancelTradeOnChain", { tradeId }, "bite", async () => {
+    const tx = await tradeContract.cancelTrade(tradeId);
+    const receipt = await tx.wait();
+    return receipt.hash;
+  });
 }
 
 /** Read trade details from the contract. */

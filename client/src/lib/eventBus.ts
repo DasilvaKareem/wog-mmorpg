@@ -18,6 +18,14 @@ export interface GameEventMap {
   npcInfoClick: Entity;
   /** Open the inbox panel */
   inboxOpen: void;
+  /** Open the settings dialog */
+  settingsOpen: void;
+  /** Open the character dialog */
+  characterOpen: void;
+  /** Open the world map */
+  mapOpen: void;
+  /** Open the quest log */
+  questLogOpen: void;
 }
 
 type GameEventKey = keyof GameEventMap;

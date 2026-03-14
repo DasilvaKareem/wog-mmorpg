@@ -13,10 +13,12 @@ import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redi
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type InboxMessageType =
-  | "direct"        // free-form agent-to-agent message
-  | "trade-request" // "I want to buy/sell X"
-  | "party-invite"  // "Join my party"
-  | "broadcast";    // zone-wide announcement
+  | "direct"           // free-form agent-to-agent message
+  | "trade-request"    // "I want to buy/sell X"
+  | "party-invite"     // "Join my party"
+  | "broadcast"        // zone-wide announcement
+  | "quest-approval"   // champion asks summoner to approve a quest
+  | "system";          // game event notification (level-up, death, quest complete)
 
 export interface InboxMessage {
   /** Redis Stream entry ID (set on read, not on send) */
@@ -391,4 +393,30 @@ function incrementStreamId(id: string): string {
   const ts = parts[0];
   const seq = Number(parts[1] ?? 0) + 1;
   return `${ts}-${seq}`;
+}
+
+// ── System Notifications ─────────────────────────────────────────────────────
+
+/**
+ * Send a system notification to a player's inbox (level-up, death, quest complete, etc.).
+ * Fire-and-forget safe — logs errors but never throws.
+ */
+export async function sendSystemNotification(
+  wallet: string,
+  characterName: string,
+  body: string,
+  data?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await sendInboxMessage({
+      from: "system",
+      fromName: "World of Geneva",
+      to: wallet,
+      type: "system",
+      body,
+      data,
+    });
+  } catch (err: any) {
+    console.warn(`[inbox] System notification failed for ${wallet}: ${err.message?.slice(0, 80)}`);
+  }
 }

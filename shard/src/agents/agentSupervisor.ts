@@ -105,7 +105,8 @@ Your job: Decide the next bot script to execute.
   * No weapon AND has gold (≥ 10c): SHOP — buy the cheapest weapon available.
       * If inventory contains recyclable loot and funds are low, choose trade to recycle it into gold.
       * Has weapon + ≥ 100c: quest or combat based on zone and level.
-  * If outleveled: travel to an easier zone.`.trim();
+  * If outleveled: travel to an easier zone.
+- DUNGEONS: Dungeon gates spawn every 5 minutes (gate surge). If you see a dungeon-gate entity in scan_zone, you can set script to "dungeon" with gateEntityId and gateRank. The agent will walk to it, form a party, and enter. Rank E needs L3+, D=L7+, C=L12+, B=L18+, A=L28+, S=L40+. Dungeons give excellent XP. You need a matching key (E-Key, D-Key, etc.) from forging gate essences.`.trim();
 }
 
 // ── set_script declaration (always present) ──────────────────────────────
@@ -118,8 +119,8 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
     properties: {
       type: {
         type: "STRING" as Type,
-        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle"],
-        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC.",
+        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon"],
+        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate.",
       },
       maxLevelOffset: {
         type: "NUMBER" as Type,
@@ -137,6 +138,14 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
       maxGold: {
         type: "NUMBER" as Type,
         description: "shop only: maximum gold to spend this session",
+      },
+      gateEntityId: {
+        type: "STRING" as Type,
+        description: "dungeon only: entity ID of the dungeon gate to open",
+      },
+      gateRank: {
+        type: "STRING" as Type,
+        description: "dungeon only: rank of the gate (E/D/C/B/A/S)",
       },
       reason: {
         type: "STRING" as Type,

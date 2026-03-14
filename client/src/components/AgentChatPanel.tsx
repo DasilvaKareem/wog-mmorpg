@@ -71,6 +71,38 @@ const QUICK_SUGGESTIONS = [
   "do some quests",
 ];
 
+// ── Slash command registry (for autocomplete + highlighting) ──────────────
+const SLASH_COMMANDS = [
+  { cmd: "/help",     desc: "List all commands" },
+  { cmd: "/status",   desc: "Your stats, HP, gear" },
+  { cmd: "/who",      desc: "Online players" },
+  { cmd: "/look",     desc: "Scan nearby entities" },
+  { cmd: "/find",     desc: "Search by name" },
+  { cmd: "/bag",      desc: "Inventory & gold" },
+  { cmd: "/quests",   desc: "Active & available quests" },
+  { cmd: "/map",      desc: "World map & zones" },
+  { cmd: "/focus",    desc: "Change agent activity" },
+  { cmd: "/strategy", desc: "Combat strategy" },
+  { cmd: "/party",    desc: "Party members" },
+  { cmd: "/travel",   desc: "Travel to a zone" },
+  { cmd: "/where",    desc: "Current position" },
+];
+
+const CMD_COLOR = "#c792ea";
+
+/** Highlight /commands in message text */
+function renderWithCommands(text: string): React.ReactNode {
+  const parts = text.split(/(\/[a-z]+)/g);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    /^\/[a-z]+$/.test(part) ? (
+      <span key={i} style={{ color: CMD_COLOR, fontWeight: 600 }}>{part}</span>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    )
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 interface AgentChatPanelProps {
@@ -94,6 +126,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<"chat" | "zonelog">("chat");
   const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string } | null>(null);
+  const [cmdSuggestions, setCmdSuggestions] = React.useState<typeof SLASH_COMMANDS>([]);
+  const [selectedSuggestion, setSelectedSuggestion] = React.useState(0);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const lastSyncTs = React.useRef(0);
 
@@ -329,7 +363,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   return (
     <div
       data-tutorial-id="agent-chat-panel"
-      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] w-80 lg:w-96 max-w-[45vw] ${collapsed ? "" : "h-[45vh] max-h-[400px]"} ${className}`}
+      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] w-96 lg:w-[28rem] max-w-[50vw] ${collapsed ? "" : "h-[45vh] max-h-[400px]"} ${className}`}
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
@@ -348,6 +382,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {isDeployed && (
+            <button
+              onClick={() => gameBus.emit("questLogOpen", undefined as never)}
+              className="text-[11px] text-[#7a8b9e] hover:text-[#5dadec] transition-colors uppercase tracking-widest"
+              title="Open quest log"
+            >
+              [quests]
+            </button>
+          )}
           {isDeployed && (
             <button
               onClick={() => setViewMode(viewMode === "chat" ? "zonelog" : "chat")}
@@ -472,25 +515,25 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
             {m.role === "user" && (
               <div className="flex gap-1">
                 <span className="text-[#ffcc00] shrink-0">[You]</span>
-                <span className="text-[#d6deff]">{m.text}</span>
+                <span className="text-[#d6deff]">{renderWithCommands(m.text)}</span>
               </div>
             )}
             {m.role === "agent" && (
               <div className="flex gap-1">
                 <span className="text-[#54f28b] shrink-0">[{entityName}]</span>
-                <span className="text-[#9aa7cc]">{m.text}</span>
+                <span className="text-[#9aa7cc]">{renderWithCommands(m.text)}</span>
               </div>
             )}
             {m.role === "activity" && (
               <div className="flex gap-1" style={{ color: m.text.startsWith("⚠") ? "#e0af68" : m.text.startsWith("✓") ? "#54f28b" : "#8bb8a4" }}>
                 <span className="shrink-0">{m.text.startsWith("⚠") ? "⚠" : m.text.startsWith("✓") ? "✓" : "▸"}</span>
                 <span>
-                  {m.text.startsWith("⚠") || m.text.startsWith("✓") ? m.text.slice(2) : m.text}
+                  {m.text.startsWith("⚠") || m.text.startsWith("✓") ? renderWithCommands(m.text.slice(2)) : renderWithCommands(m.text)}
                 </span>
               </div>
             )}
             {m.role === "system" && (
-              <span className="text-[#7a84ad] italic">{m.text}</span>
+              <span className="text-[#7a84ad] italic">{renderWithCommands(m.text)}</span>
             )}
           </div>
         ))}
@@ -519,13 +562,86 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {/* ── Chat input ─────────────────────────────────────────────── */}
       {isDeployed && viewMode === "chat" && (
         <div className="border-t-2 border-[#1a2a18] bg-[#080f0a] p-2">
-          <div className="flex gap-1">
+          <div className="flex gap-1 relative">
+            {/* Autocomplete dropdown */}
+            {cmdSuggestions.length > 0 && (
+              <div className="absolute bottom-full left-0 right-0 mb-1 border border-[#2a3450] bg-[#0b1020] z-50 max-h-[160px] overflow-y-auto" style={{ scrollbarWidth: "thin", scrollbarColor: "#1a3a22 transparent" }}>
+                {cmdSuggestions.map((s, i) => (
+                  <button
+                    key={s.cmd}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setInput(s.cmd + " ");
+                      setCmdSuggestions([]);
+                      setSelectedSuggestion(0);
+                    }}
+                    className={`w-full text-left px-2 py-1 text-[12px] flex items-center gap-2 transition-colors ${
+                      i === selectedSuggestion ? "bg-[#1a2a3a]" : "hover:bg-[#111a28]"
+                    }`}
+                  >
+                    <span style={{ color: CMD_COLOR, fontWeight: 600 }}>{s.cmd}</span>
+                    <span className="text-[#5f6b8f] text-[11px]">{s.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") void handleSend(); }}
-              placeholder="Tell your agent what to do..."
+              onChange={(e) => {
+                const val = e.target.value;
+                setInput(val);
+                // Update autocomplete suggestions
+                if (val.startsWith("/") && !val.includes(" ")) {
+                  const q = val.toLowerCase();
+                  const matches = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(q));
+                  setCmdSuggestions(matches);
+                  setSelectedSuggestion(0);
+                } else {
+                  setCmdSuggestions([]);
+                }
+              }}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (cmdSuggestions.length > 0) {
+                  if (e.key === "Tab" || e.key === "ArrowRight") {
+                    e.preventDefault();
+                    const pick = cmdSuggestions[selectedSuggestion];
+                    if (pick) { setInput(pick.cmd + " "); setCmdSuggestions([]); setSelectedSuggestion(0); }
+                    return;
+                  }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSelectedSuggestion((prev) => Math.min(prev + 1, cmdSuggestions.length - 1));
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSelectedSuggestion((prev) => Math.max(prev - 1, 0));
+                    return;
+                  }
+                  if (e.key === "Escape") {
+                    setCmdSuggestions([]);
+                    setSelectedSuggestion(0);
+                    return;
+                  }
+                  if (e.key === "Enter") {
+                    // If they have a suggestion highlighted and typed partial, complete it first
+                    const pick = cmdSuggestions[selectedSuggestion];
+                    if (pick && input !== pick.cmd && input !== pick.cmd + " ") {
+                      e.preventDefault();
+                      setInput(pick.cmd + " ");
+                      setCmdSuggestions([]);
+                      setSelectedSuggestion(0);
+                      return;
+                    }
+                  }
+                }
+                if (e.key === "Enter") void handleSend();
+              }}
+              onBlur={() => { setTimeout(() => setCmdSuggestions([]), 150); }}
+              placeholder="Tell your agent what to do... (/ for commands)"
               disabled={!token || sending || authLoading}
               className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[12px] text-[#d6deff] placeholder-[#6b7394] outline-none focus:border-[#54f28b] disabled:opacity-40"
             />

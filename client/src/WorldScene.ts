@@ -110,7 +110,6 @@ export class WorldScene extends Phaser.Scene {
   // Day/night cycle overlay
   private dayNightOverlay!: Phaser.GameObjects.Rectangle;
   private currentPhase: GameTime["phase"] = "day";
-  private dayNightTween: Phaser.Tweens.Tween | null = null;
   private gameTimeText!: Phaser.GameObjects.Text;
 
   constructor() {
@@ -362,16 +361,51 @@ export class WorldScene extends Phaser.Scene {
   }
 
   /**
-   * Day/night overlay colors and alpha per phase.
-   * MULTIPLY blend: 0xffffff = no change, darker = dims scene.
-   * We tween between phases for smooth transitions.
+   * Continuous day/night gradient — color stops around the 24h cycle.
+   * Each stop: [hour, r, g, b, alpha].  Linearly interpolated between stops
+   * so the overlay shifts gradually instead of snapping per phase.
+   *
+   * MULTIPLY blend: 0xffffff/1.0 = no change; darker/lower alpha = dims scene.
    */
-  private static readonly PHASE_COLORS: Record<GameTime["phase"], { color: number; alpha: number }> = {
-    dawn:  { color: 0xffc8a0, alpha: 0.92 }, // warm orange-pink tint
-    day:   { color: 0xffffff, alpha: 1.0  }, // full brightness (no effect)
-    dusk:  { color: 0xd09060, alpha: 0.85 }, // deep amber
-    night: { color: 0x3844a0, alpha: 0.75 }, // dark blue
-  };
+  private static readonly COLOR_STOPS: [number, number, number, number, number][] = [
+    //  hour   R     G     B    alpha
+    [  0,    0x28, 0x30, 0x80, 0.70 ], // midnight — deep blue
+    [  2,    0x20, 0x28, 0x70, 0.72 ], // late night — darkest
+    [  4,    0xc0, 0x70, 0x60, 0.88 ], // early dawn — pink-orange horizon
+    [  4.5,  0xff, 0xc8, 0xa0, 0.92 ], // dawn peak — warm golden
+    [  5,    0xf0, 0xe8, 0xd8, 0.96 ], // sunrise finishing — fading warmth
+    [  6,    0xff, 0xff, 0xff, 1.00 ], // morning — full brightness
+    [ 19,    0xff, 0xff, 0xff, 1.00 ], // late afternoon — still full brightness
+    [ 20,    0xff, 0xf0, 0xd8, 0.98 ], // golden hour — gentle warmth
+    [ 20.5,  0xe8, 0xb0, 0x70, 0.90 ], // early dusk — amber
+    [ 21,    0xd0, 0x90, 0x60, 0.85 ], // dusk peak — deep amber
+    [ 21.5,  0x90, 0x60, 0x80, 0.80 ], // twilight — purple-amber
+    [ 22.5,  0x50, 0x44, 0x90, 0.76 ], // early night — indigo
+    [ 23.5,  0x38, 0x38, 0x90, 0.73 ], // night — dark blue
+    [ 24,    0x28, 0x30, 0x80, 0.70 ], // wraps to midnight
+  ];
+
+  /** Interpolate the overlay color for an exact fractional hour. */
+  private static lerpOverlay(hour: number): { r: number; g: number; b: number; a: number } {
+    const stops = WorldScene.COLOR_STOPS;
+    // Find the two surrounding stops
+    let lo = stops[0], hi = stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 1; i++) {
+      if (hour >= stops[i][0] && hour < stops[i + 1][0]) {
+        lo = stops[i];
+        hi = stops[i + 1];
+        break;
+      }
+    }
+    const range = hi[0] - lo[0];
+    const t = range > 0 ? (hour - lo[0]) / range : 0;
+    return {
+      r: Math.round(lo[1] + (hi[1] - lo[1]) * t),
+      g: Math.round(lo[2] + (hi[2] - lo[2]) * t),
+      b: Math.round(lo[3] + (hi[3] - lo[3]) * t),
+      a: lo[4] + (hi[4] - lo[4]) * t,
+    };
+  }
 
   /** Update the day/night overlay to match the current game time */
   private updateDayNight(gameTime: GameTime): void {
@@ -381,44 +415,11 @@ export class WorldScene extends Phaser.Scene {
     const icon = gameTime.phase === "night" ? "\u263D" : gameTime.phase === "dawn" || gameTime.phase === "dusk" ? "\u263C" : "\u2600";
     this.gameTimeText.setText(`${icon} ${hh}:${mm}  Day ${gameTime.day}`);
 
-    if (gameTime.phase === this.currentPhase) return;
+    // Continuous interpolation — fractional hour for smooth gradient
+    const fractionalHour = gameTime.hour + gameTime.minute / 60;
+    const { r, g, b, a } = WorldScene.lerpOverlay(fractionalHour);
+    this.dayNightOverlay.setFillStyle((r << 16) | (g << 8) | b, a);
     this.currentPhase = gameTime.phase;
-
-    const target = WorldScene.PHASE_COLORS[gameTime.phase];
-
-    // Extract RGB components from the target color
-    const r = (target.color >> 16) & 0xff;
-    const g = (target.color >> 8) & 0xff;
-    const b = target.color & 0xff;
-
-    // Kill any running tween before starting a new one
-    if (this.dayNightTween) {
-      this.dayNightTween.stop();
-      this.dayNightTween = null;
-    }
-
-    // Smoothly tween the overlay to the new phase over 3 seconds
-    const overlay = this.dayNightOverlay;
-    // Current color
-    const curColor = overlay.fillColor;
-    const cr = (curColor >> 16) & 0xff;
-    const cg = (curColor >> 8) & 0xff;
-    const cb = curColor & 0xff;
-
-    const tweenObj = { r: cr, g: cg, b: cb, a: overlay.alpha };
-
-    this.dayNightTween = this.tweens.add({
-      targets: tweenObj,
-      r, g, b, a: target.alpha,
-      duration: 3000,
-      ease: "Sine.easeInOut",
-      onUpdate: () => {
-        const nr = Math.round(tweenObj.r);
-        const ng = Math.round(tweenObj.g);
-        const nb = Math.round(tweenObj.b);
-        overlay.setFillStyle((nr << 16) | (ng << 8) | nb, tweenObj.a);
-      },
-    });
   }
 
   update(): void {
@@ -1156,6 +1157,12 @@ export class WorldScene extends Phaser.Scene {
         } else if (evt.type === "loot") {
           this.entityRenderer.showSpeechBubble(evt.entityId, evt.message, 2000);
         }
+      }
+
+      // Consumable VFX — potions, food, elixirs, tonics
+      if (evt.type === "consume" && evt.entityId && evtData) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) this.floatingText.showConsumeText(evt.id + ":consume", pos, evtData);
       }
 
       // Gathering profession animations — triggered by loot events with gatherType data

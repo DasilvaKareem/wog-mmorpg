@@ -84,10 +84,12 @@ const server = Fastify({ logger: true });
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
+  "http://localhost:5174",
   "http://127.0.0.1:5173",
   "https://wog.urbantech.dev",
   "https://worldofgeneva.com",
   "https://www.worldofgeneva.com",
+  "https://storage.googleapis.com",
 ];
 
 type RateLimitRule = {
@@ -332,6 +334,160 @@ server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", a
 // Transaction stats — live blockchain activity dashboard
 server.get("/stats/transactions", async () => getTxStats());
 
+// Transaction error tracing — all blockchain errors with structured data
+import { getRecentTxErrors, getTxErrorsByType, getTxErrorsByChain, getTxErrorSummary } from "./blockchain/txTracer.js";
+
+server.get<{ Querystring: { limit?: string; type?: string; chain?: string } }>(
+  "/stats/tx-errors",
+  async (request) => {
+    const limit = Math.min(parseInt(request.query.limit ?? "50") || 50, 200);
+    const { type, chain } = request.query;
+    if (type) return { errors: getTxErrorsByType(type, limit) };
+    if (chain === "skale" || chain === "bite") return { errors: getTxErrorsByChain(chain, limit) };
+    return { summary: getTxErrorSummary(), errors: getRecentTxErrors(limit) };
+  }
+);
+
+// Transaction error dashboard — shareable HTML page at /tx-errors
+server.get("/tx-errors", async (_request, reply) => {
+  reply.type("text/html").send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WoG — Blockchain Tx Errors</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0a0f1a;color:#c8d6e5;font-family:'Courier New',monospace;font-size:13px;padding:16px}
+  h1{font-size:16px;color:#ffcc00;margin-bottom:4px;letter-spacing:.1em;text-transform:uppercase}
+  .subtitle{font-size:11px;color:#556b8a;margin-bottom:16px}
+  .controls{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+  .controls select,.controls input,.controls button{background:#121a2e;border:1px solid #24314d;color:#c8d6e5;padding:5px 8px;font-family:inherit;font-size:12px;border-radius:2px}
+  .controls button{cursor:pointer;color:#ffcc00;border-color:#ffcc00}
+  .controls button:hover{background:#1a2e1a}
+  .summary{display:flex;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .stat{background:#121a2e;border:1px solid #24314d;padding:8px 14px;min-width:90px}
+  .stat .label{font-size:9px;color:#556b8a;text-transform:uppercase;letter-spacing:.1em}
+  .stat .value{font-size:18px;color:#ff6b6b;font-weight:bold;margin-top:2px}
+  .stat .value.zero{color:#54f28b}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;padding:6px 8px;background:#121a2e;color:#ffcc00;font-size:10px;text-transform:uppercase;letter-spacing:.08em;border-bottom:2px solid #24314d;position:sticky;top:0}
+  td{padding:5px 8px;border-bottom:1px solid #1a2233;vertical-align:top;max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  tr:hover td{background:#121a2e}
+  .chain-skale{color:#54f28b}.chain-bite{color:#a78bfa}
+  .retryable{color:#ffcc00}.permanent{color:#ff6b6b}
+  .type-badge{background:#1a2e1a;padding:1px 6px;border-radius:2px;font-size:11px;color:#54f28b}
+  .code{color:#ff6b6b;font-weight:bold}
+  .ts{color:#556b8a;font-size:11px}
+  .error-msg{color:#ff9f43;cursor:pointer}
+  .error-msg:hover{white-space:normal;word-break:break-all}
+  .args{color:#556b8a;cursor:pointer;font-size:11px}
+  .args:hover{white-space:normal;word-break:break-all}
+  .empty{text-align:center;padding:40px;color:#3a4a6a;font-size:14px}
+  .auto-label{font-size:10px;color:#3a4a6a}
+  #last-refresh{font-size:10px;color:#3a4a6a;margin-left:auto}
+</style>
+</head>
+<body>
+<h1>Blockchain Tx Errors</h1>
+<div class="subtitle">World of Geneva — live error trace dashboard</div>
+
+<div class="controls">
+  <select id="filterType"><option value="">All types</option></select>
+  <select id="filterChain"><option value="">All chains</option><option value="skale">SKALE</option><option value="bite">BITE</option></select>
+  <input id="filterLimit" type="number" value="50" min="1" max="200" style="width:60px" title="Limit">
+  <button onclick="fetchErrors()">Refresh</button>
+  <label class="auto-label"><input type="checkbox" id="autoRefresh" checked> Auto 10s</label>
+  <span id="last-refresh"></span>
+</div>
+
+<div class="summary" id="summary"></div>
+<div id="table-container"></div>
+
+<script>
+let autoTimer;
+const API = location.origin + '/stats/tx-errors';
+
+async function fetchErrors() {
+  const type = document.getElementById('filterType').value;
+  const chain = document.getElementById('filterChain').value;
+  const limit = document.getElementById('filterLimit').value;
+  const params = new URLSearchParams();
+  if (type) params.set('type', type);
+  if (chain) params.set('chain', chain);
+  if (limit) params.set('limit', limit);
+  try {
+    const res = await fetch(API + '?' + params);
+    const data = await res.json();
+    renderSummary(data.summary);
+    renderTable(data.errors || []);
+    populateTypeFilter(data.summary);
+    document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById('table-container').innerHTML = '<div class="empty">Failed to fetch: ' + e.message + '</div>';
+  }
+}
+
+function renderSummary(s) {
+  if (!s) { document.getElementById('summary').innerHTML = ''; return; }
+  let html = '<div class="stat"><div class="label">Total errors</div><div class="value ' + (s.total===0?'zero':'') + '">' + s.total + '</div></div>';
+  if (s.byChain) for (const [c,n] of Object.entries(s.byChain)) {
+    html += '<div class="stat"><div class="label">' + c + '</div><div class="value">' + n + '</div></div>';
+  }
+  if (s.byType) for (const [t,n] of Object.entries(s.byType)) {
+    html += '<div class="stat"><div class="label">' + t + '</div><div class="value">' + n + '</div></div>';
+  }
+  document.getElementById('summary').innerHTML = html;
+}
+
+function renderTable(errors) {
+  if (!errors.length) {
+    document.getElementById('table-container').innerHTML = '<div class="empty">No errors recorded — blockchain is healthy</div>';
+    return;
+  }
+  let html = '<table><thead><tr><th>Time</th><th>Chain</th><th>Type</th><th>Function</th><th>Code</th><th>Error</th><th>Retry?</th><th>Args</th></tr></thead><tbody>';
+  for (const e of [...errors].reverse()) {
+    const t = new Date(e.timestamp);
+    const ts = t.toLocaleTimeString() + '.' + String(t.getMilliseconds()).padStart(3,'0');
+    html += '<tr>'
+      + '<td class="ts">' + ts + '</td>'
+      + '<td class="chain-' + e.chain + '">' + e.chain.toUpperCase() + '</td>'
+      + '<td><span class="type-badge">' + e.type + '</span></td>'
+      + '<td>' + e.fn + '</td>'
+      + '<td class="code">' + (e.code ?? '-') + '</td>'
+      + '<td class="error-msg" title="' + esc(e.error) + '">' + esc(e.error.slice(0,120)) + '</td>'
+      + '<td class="' + (e.retryable?'retryable':'permanent') + '">' + (e.retryable?'yes':'NO') + '</td>'
+      + '<td class="args" title="' + esc(JSON.stringify(e.args)) + '">' + esc(JSON.stringify(e.args).slice(0,80)) + '</td>'
+      + '</tr>';
+  }
+  html += '</tbody></table>';
+  document.getElementById('table-container').innerHTML = html;
+}
+
+function populateTypeFilter(s) {
+  const sel = document.getElementById('filterType');
+  const cur = sel.value;
+  const types = s?.byType ? Object.keys(s.byType) : [];
+  sel.innerHTML = '<option value="">All types</option>' + types.map(t => '<option value="'+t+'"' + (t===cur?' selected':'') + '>'+t+'</option>').join('');
+}
+
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function toggleAuto() {
+  clearInterval(autoTimer);
+  if (document.getElementById('autoRefresh').checked) {
+    autoTimer = setInterval(fetchErrors, 10000);
+  }
+}
+
+document.getElementById('autoRefresh').addEventListener('change', toggleAuto);
+fetchErrors();
+toggleAuto();
+</script>
+</body>
+</html>`);
+});
+
 // World layout — zone positions for seamless world rendering
 server.get("/world/layout", async () => getWorldLayout());
 
@@ -571,6 +727,30 @@ const start = async () => {
 
   // Wire web push alerts into the diary system (graceful no-op if VAPID keys not set)
   initWebPushAlerts();
+
+  // Wire inbox notifications for game events (level-up, death, quest complete)
+  {
+    const { setDiaryInboxHook } = await import("./social/diary.js");
+    const { sendSystemNotification } = await import("./agents/agentInbox.js");
+    setDiaryInboxHook((wallet, action, entry) => {
+      const name = entry.characterName;
+      let body = "";
+      if (action === "level_up") {
+        const level = (entry.details.newLevel as number) ?? "?";
+        body = `${name} reached level ${level}!`;
+      } else if (action === "death") {
+        const zone = entry.zoneId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+        body = `${name} was slain in ${zone}.`;
+      } else if (action === "quest_complete") {
+        const quest = (entry.details.questName as string) ?? "a quest";
+        body = `${name} completed "${quest}"!`;
+      }
+      if (body) {
+        void sendSystemNotification(wallet, name, body, { action, ...entry.details });
+      }
+    });
+    server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
+  }
 
   // Restore gold reservations from Redis (prevents double-spend after restart)
   restoreReservations().catch((err: any) => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { API_URL } from "../config.js";
+import type { GameTime } from "@/types";
 
 export interface PlayerInfo {
   id: string;
@@ -31,6 +32,7 @@ interface UseZonePlayersOptions {
 export function useZonePlayers(options: UseZonePlayersOptions = {}) {
   const { pollInterval = 3000 } = options;
   const [lobbies, setLobbies] = useState<ZoneLobby[]>([]);
+  const [gameTime, setGameTime] = useState<GameTime | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -47,6 +49,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
       const zoneIds = Object.keys(zonesData);
 
       // Fetch details for each zone
+      let capturedGameTime: GameTime | null = null;
       const lobbyPromises = zoneIds.map(async (zoneId) => {
         const zoneResponse = await fetch(`${API_URL}/zones/${zoneId}`);
 
@@ -56,6 +59,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
         }
 
         const zoneData = await zoneResponse.json();
+        if (!capturedGameTime && zoneData.gameTime) capturedGameTime = zoneData.gameTime;
         const entities = Object.values(zoneData.entities || {}) as any[];
 
         // Filter for player entities
@@ -92,6 +96,9 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
       // Sort zones by player count descending
       validLobbies.sort((a, b) => b.players.length - a.players.length);
 
+      // Grab gameTime from first zone response
+      if (capturedGameTime) setGameTime(capturedGameTime);
+
       setLobbies(validLobbies);
       setError(null);
     } catch (err) {
@@ -113,5 +120,5 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
     return () => clearInterval(interval);
   }, [pollInterval, fetchZonePlayers]);
 
-  return { lobbies, loading, error, refresh: fetchZonePlayers };
+  return { lobbies, gameTime, loading, error, refresh: fetchZonePlayers };
 }

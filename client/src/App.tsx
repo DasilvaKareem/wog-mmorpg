@@ -70,6 +70,9 @@ const InboxDialog = React.lazy(() =>
 const PlayerPanel = React.lazy(() =>
   import("@/components/PlayerPanel").then((mod) => ({ default: mod.PlayerPanel }))
 );
+const ProfessionsPanel = React.lazy(() =>
+  import("@/components/ProfessionsPanel").then((mod) => ({ default: mod.ProfessionsPanel }))
+);
 const WorldMap = React.lazy(() =>
   import("@/components/WorldMap").then((mod) => ({ default: mod.WorldMap }))
 );
@@ -175,6 +178,7 @@ function GameWorld(): React.ReactElement {
   const [chatVisible, setChatVisible] = React.useState<boolean | null>(null);
   const [ranksVisible, setRanksVisible] = React.useState<boolean | null>(null);
   const [walletVisible, setWalletVisible] = React.useState<boolean | null>(null);
+  const [professionsVisible, setProfessionsVisible] = React.useState(false);
 
   const showChat = chatVisible ?? !isCompactWorldUI;
   const showRanks = ranksVisible ?? !isCompactWorldUI;
@@ -232,6 +236,8 @@ function GameWorld(): React.ReactElement {
         setRanksVisible((v) => !(v ?? !isCompactWorldUI));
       } else if (key === "w") {
         setWalletVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (key === "p") {
+        setProfessionsVisible((v) => !v);
       } else if (key === "n") {
         setInboxOpen((c) => !c);
       } else if (event.code === "Space" && address) {
@@ -245,10 +251,15 @@ function GameWorld(): React.ReactElement {
   }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI]);
 
   React.useEffect(() => {
-    const unsubscribe = gameBus.on("zoneChanged", ({ zoneId }) => {
+    const unsub1 = gameBus.on("zoneChanged", ({ zoneId }) => {
       setCurrentZone(zoneId);
     });
-    return unsubscribe;
+    const unsub2 = gameBus.on("inboxOpen", () => setInboxOpen(true));
+    const unsub3 = gameBus.on("settingsOpen", () => setSettingsOpen(true));
+    const unsub4 = gameBus.on("characterOpen", () => setCharacterOpen(true));
+    const unsub5 = gameBus.on("mapOpen", () => setMapOpen(true));
+    const unsub6 = gameBus.on("questLogOpen", () => setQuestLogOpen(true));
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, []);
 
   // Dynamic PWA theme color + title per zone
@@ -327,6 +338,9 @@ function GameWorld(): React.ReactElement {
       </React.Suspense>
       <React.Suspense fallback={null}>
         {showWallet && <WalletPanel />}
+        {professionsVisible && (
+          <ProfessionsPanel className="absolute top-14 left-2 md:left-4 z-30" />
+        )}
         {showRanks && (
           <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
         )}
@@ -388,11 +402,13 @@ function GameWorld(): React.ReactElement {
             onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
             onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
             onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
+            onProfessions={() => setProfessionsVisible((v) => !v)}
             onSettings={() => setSettingsOpen((s) => !s)}
             inboxActive={inboxOpen}
             chatActive={showChat}
             ranksActive={showRanks}
             walletActive={showWallet}
+            professionsActive={professionsVisible}
             settingsActive={settingsOpen}
           />
         </div>

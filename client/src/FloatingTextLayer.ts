@@ -162,6 +162,88 @@ export class FloatingTextLayer {
     });
   }
 
+  /**
+   * Show floating consume VFX — colored "+" signs that spiral upward.
+   * Colors: food=orange, potion(hp)=red, potion(mp)=blue, elixir/buff=gold, tonic=purple
+   */
+  showConsumeText(
+    eventId: string,
+    pos: Pos,
+    data: Record<string, unknown>,
+  ): void {
+    if (this.seen.has(eventId)) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    const consumeType = data.consumeType as string | undefined;
+    const hpRestored = data.hpRestored as number | undefined;
+    const mpRestored = data.mpRestored as number | undefined;
+    const buffName = data.buffName as string | undefined;
+    const itemName = (data.itemName as string) ?? "Potion";
+
+    // Pick color + label based on effect type
+    let color: string;
+    let label: string;
+    if (consumeType === "food") {
+      color = "#ffaa33";             // orange
+      label = hpRestored ? `+${hpRestored} HP` : `+${itemName}`;
+    } else if ((mpRestored ?? 0) > 0 && (hpRestored ?? 0) === 0) {
+      color = "#55aaff";             // blue — mana potion
+      label = `+${mpRestored} MP`;
+    } else if ((hpRestored ?? 0) > 0) {
+      color = "#ff5555";             // red — health potion
+      label = `+${hpRestored} HP`;
+    } else if (buffName) {
+      color = "#ffd700";             // gold — buff/elixir
+      label = `+${buffName}`;
+    } else {
+      color = "#cc77ff";             // purple — tonic/other
+      label = `+${itemName}`;
+    }
+
+    // Main floating label
+    this.spawn(pos, {
+      text: label,
+      color,
+      fontSize: 12,
+      offsetY: -16,
+      duration: 1400,
+      scatter: 4,
+    });
+
+    // Extra sparkle "+" signs that fan outward
+    const sparkleCount = 3;
+    for (let i = 0; i < sparkleCount; i++) {
+      const angle = ((Math.PI * 2) / sparkleCount) * i - Math.PI / 2;
+      const radius = 8 + Math.random() * 6;
+      const sx = pos.x + Math.cos(angle) * radius;
+      const sy = pos.y - 12 + Math.sin(angle) * radius;
+
+      const txt = this.scene.add
+        .text(sx, sy, "+", {
+          fontSize: "9px",
+          fontFamily: "monospace",
+          color,
+          stroke: "#000000",
+          strokeThickness: 2,
+        })
+        .setOrigin(0.5, 0.5)
+        .setDepth(131)
+        .setAlpha(0.9);
+
+      this.scene.tweens.add({
+        targets: txt,
+        x: sx + Math.cos(angle) * 14,
+        y: sy - 18 + Math.sin(angle) * 6,
+        alpha: 0,
+        scale: 0.4,
+        duration: 900 + Math.random() * 300,
+        ease: "Quad.easeOut",
+        onComplete: () => txt.destroy(),
+      });
+    }
+  }
+
   private pruneSeen(): void {
     // Keep set bounded — clear periodically
     if (this.seen.size > 500) {

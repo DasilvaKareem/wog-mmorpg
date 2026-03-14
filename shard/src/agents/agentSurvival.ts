@@ -6,6 +6,17 @@
 import { patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections } from "../world/worldLayout.js";
 import type { AgentContext } from "./agentUtils.js";
+import { COOKING_RECIPES } from "../professions/cooking.js";
+import { getPotionEffect } from "../professions/potionEffects.js";
+
+/** Token IDs of cooked food (usable via /cooking/consume). */
+const FOOD_TOKEN_IDS = new Set(COOKING_RECIPES.map((r) => Number(r.outputTokenId)));
+
+/** True when the item is a health-restoring potion (usable via /alchemy/consume). */
+function isHealthPotion(tokenId: number): boolean {
+  const eff = getPotionEffect(BigInt(tokenId));
+  return eff != null && (eff.hpRestore ?? 0) > 0;
+}
 
 // ── Low HP handling ──────────────────────────────────────────────────────────
 
@@ -27,8 +38,8 @@ export async function handleLowHp(
   // Check inventory for consumables
   const { items: ownedItems } = await ctx.getWalletBalance();
 
-  // Try food first
-  const food = ownedItems.find((i: any) => i.category === "food" && Number(i.balance) > 0);
+  // Try food first (cooked food token IDs 81-85)
+  const food = ownedItems.find((i: any) => FOOD_TOKEN_IDS.has(Number(i.tokenId)) && Number(i.balance) > 0);
   if (food) {
     try {
       await ctx.api("POST", "/cooking/consume", {
@@ -45,9 +56,9 @@ export async function handleLowHp(
     }
   }
 
-  // Try potion
+  // Try health potion
   const potion = ownedItems.find(
-    (i: any) => (i.category === "potion" || i.category === "consumable") && Number(i.balance) > 0,
+    (i: any) => isHealthPotion(Number(i.tokenId)) && Number(i.balance) > 0,
   );
   if (potion) {
     try {
@@ -99,6 +110,10 @@ export interface AdaptationState {
   ticksSinceFocusChange: number;
   ticksInCurrentZone: number;
   findNextZoneForLevel(level: number): string | null;
+  /** When true, the user has set explicit objectives — suppress focus overrides
+   *  that would distract the agent from its current goal. Only critical survival
+   *  actions (no weapon, critically low HP) should still fire. */
+  hasActiveObjective?: boolean;
 }
 
 export async function checkSelfAdaptation(
@@ -110,16 +125,18 @@ export async function checkSelfAdaptation(
   try {
     const hpPct = entity.hp / (entity.maxHp || 1);
     const { copper, items } = await ctx.getWalletBalance();
-    const hasFood = items.some((i: any) => i.category === "food" && Number(i.balance) > 0);
+    const hasFood = items.some((i: any) => FOOD_TOKEN_IDS.has(Number(i.tokenId)) && Number(i.balance) > 0);
     const hasPotions = items.some(
-      (i: any) => (i.category === "potion" || i.category === "consumable") && Number(i.balance) > 0,
+      (i: any) => isHealthPotion(Number(i.tokenId)) && Number(i.balance) > 0,
     );
     const equipment = entity.equipment ?? {};
     const hasWeapon = Boolean(equipment.weapon);
     const currentFocus = state.currentFocus;
 
     // Crafting escape hatch: stuck in gathering/crafting for 60+ ticks → return to questing
+    // Skip if user has an active objective — they explicitly want this focus.
     if (
+      !state.hasActiveObjective &&
       (currentFocus === "gathering" || currentFocus === "crafting") &&
       state.ticksSinceFocusChange > 60
     ) {
@@ -130,7 +147,8 @@ export async function checkSelfAdaptation(
     }
 
     // Priority 0: Early-game bootstrap — keep killing mobs until 100 copper
-    if (copper < 100 && currentFocus !== "combat" && currentFocus !== "shopping") {
+    // Skip if user has an active objective — respect their goal over gold bootstrapping.
+    if (!state.hasActiveObjective && copper < 100 && currentFocus !== "combat" && currentFocus !== "shopping") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: only ${copper}c, need 100c — staying in combat`);
       void ctx.logActivity(`Only ${copper}c — killing mobs for starter gold`);
       await patchAgentConfig(ctx.userWallet, { focus: "combat" });
@@ -145,10 +163,10 @@ export async function checkSelfAdaptation(
       return true;
     }
 
-    // Priority 1b: Missing armor pieces → go shopping
+    // Priority 1b: Missing armor pieces → go shopping (skip if objective is active)
     const armorSlots = ["chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"];
     const emptyArmorSlots = armorSlots.filter((s) => !equipment[s]);
-    if (emptyArmorSlots.length >= 2 && copper >= 40 && currentFocus !== "shopping") {
+    if (!state.hasActiveObjective && emptyArmorSlots.length >= 2 && copper >= 40 && currentFocus !== "shopping") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: ${emptyArmorSlots.length} empty armor slots, going shopping`);
       void ctx.logActivity(`Missing ${emptyArmorSlots.length} armor pieces — heading to shop`);
       await patchAgentConfig(ctx.userWallet, { focus: "shopping" });
@@ -177,8 +195,9 @@ export async function checkSelfAdaptation(
       return false;
     }
 
-    // Priority 2b: Periodic gathering → crafting cycle
+    // Priority 2b: Periodic gathering → crafting cycle (skip if objective is active)
     if (
+      !state.hasActiveObjective &&
       state.ticksSinceFocusChange > 100 &&
       copper >= 200 &&
       (currentFocus === "questing" || currentFocus === "combat")
@@ -189,10 +208,10 @@ export async function checkSelfAdaptation(
       return true;
     }
 
-    // Priority 3: Outleveled current zone → travel
+    // Priority 3: Outleveled current zone → travel (skip if objective is active)
     const myLevel = entity.level ?? 1;
     const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[ctx.currentRegion] ?? 1;
-    if (myLevel >= currentZoneLevelReq + 2) {
+    if (!state.hasActiveObjective && myLevel >= currentZoneLevelReq + 2) {
       const nextZone = state.findNextZoneForLevel(myLevel);
       if (nextZone && nextZone !== ctx.currentRegion) {
         console.log(`[agent:${ctx.walletTag}] Self-adapt: level ${myLevel} outleveled ${ctx.currentRegion}, traveling to ${nextZone}`);
@@ -202,8 +221,9 @@ export async function checkSelfAdaptation(
       }
     }
 
-    // Priority 4: Roaming — been in same zone too long
+    // Priority 4: Roaming — been in same zone too long (skip if objective is active)
     if (
+      !state.hasActiveObjective &&
       state.ticksInCurrentZone >= 200 &&
       (currentFocus === "questing" || currentFocus === "combat")
     ) {

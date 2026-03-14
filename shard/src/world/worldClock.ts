@@ -3,10 +3,10 @@
  * 6 real hours = 24 in-game hours (1 full day/night cycle).
  *
  * Time phases:
- *   Dawn    05:00 – 07:00
- *   Day     07:00 – 17:00
- *   Dusk    17:00 – 19:00
- *   Night   19:00 – 05:00
+ *   Dawn    04:00 – 06:00
+ *   Day     06:00 – 20:00
+ *   Dusk    20:00 – 22:00
+ *   Night   22:00 – 04:00
  */
 
 // 1 tick = 1 second real time.  4× speed → 1 tick = 4 game-seconds.
@@ -43,9 +43,9 @@ export function getGameTime(tick: number): GameTime {
 }
 
 function getPhase(hour: number): TimePhase {
-  if (hour >= 5 && hour < 7) return "dawn";
-  if (hour >= 7 && hour < 17) return "day";
-  if (hour >= 17 && hour < 19) return "dusk";
+  if (hour >= 4 && hour < 6) return "dawn";
+  if (hour >= 6 && hour < 20) return "day";
+  if (hour >= 20 && hour < 22) return "dusk";
   return "night";
 }
 

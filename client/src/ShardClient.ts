@@ -334,7 +334,7 @@ export async function fetchProfessions(
     if (!res.ok) return { learned: [], available: [] };
     const data = await res.json();
     return {
-      learned: data.learned || [],
+      learned: data.professions || [],
       available: data.available || [],
     };
   } catch {
