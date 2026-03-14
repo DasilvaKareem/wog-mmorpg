@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>World of Geneva — XR</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #111; }
+    canvas { display: block; }
+
+    #hud {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      color: #ddd;
+      font: 14px/1.4 monospace;
+      pointer-events: none;
+      z-index: 10;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    #hud .label { color: #888; font-size: 12px; }
+    #hud .value { color: #4f8; }
+
+    #zone-bar {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 4px;
+      z-index: 10;
+    }
+    #zone-bar button {
+      padding: 4px 10px;
+      background: rgba(30, 35, 50, 0.85);
+      color: #999;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 4px;
+      font: 11px monospace;
+      cursor: pointer;
+      backdrop-filter: blur(4px);
+      transition: all 0.15s;
+    }
+    #zone-bar button:hover { color: #ddd; border-color: rgba(255,255,255,0.3); }
+    #zone-bar button.active {
+      color: #4f8;
+      border-color: #4f8;
+      background: rgba(30, 60, 40, 0.85);
+    }
+
+    #controls-help {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      color: #555;
+      font: 11px/1.5 monospace;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    #lock-indicator {
+      position: fixed;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      padding: 6px 16px;
+      background: rgba(30, 60, 40, 0.9);
+      border: 1px solid #4f8;
+      border-radius: 6px;
+      color: #4f8;
+      font: bold 12px monospace;
+      z-index: 10;
+      pointer-events: none;
+      text-shadow: 0 0 6px rgba(68, 255, 136, 0.4);
+    }
+
+    #vr-button {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 12px 24px;
+      background: #2a6;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font: bold 16px monospace;
+      cursor: pointer;
+      z-index: 10;
+      display: none;
+    }
+    #vr-button:hover { background: #3b7; }
+  </style>
+</head>
+<body>
+  <div id="hud">
+    <div><span class="label">Zone:</span> <span id="hud-zone" class="value">--</span></div>
+    <div><span class="label">Entities:</span> <span id="hud-entities" class="value">0</span></div>
+    <div><span class="label">Time:</span> <span id="hud-time" class="value">--</span></div>
+    <div><span class="label">FPS:</span> <span id="hud-fps" class="value">--</span></div>
+  </div>
+
+  <div id="zone-bar"></div>
+
+  <div id="lock-indicator"></div>
+
+  <div id="controls-help">
+    Right-drag: orbit | Scroll: zoom | WASD: pan | 1-0: zones | Click: lock | Esc: unlock
+  </div>
+
+  <button id="vr-button">Enter VR</button>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

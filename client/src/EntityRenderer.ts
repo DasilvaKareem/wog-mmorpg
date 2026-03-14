@@ -40,6 +40,9 @@ interface EntityVisual {
   spriteScale: number; // mob/boss scale multiplier
   inViewport: boolean;
   combatUntil: number; // timestamp when combat state expires
+  /** When > Date.now(), updateVisual will NOT override the current animation.
+   *  Set by attack/knockback/lunge/gather to prevent idle flickering. */
+  animLockUntil: number;
 }
 
 const SPRITE_SIZE = 16;
@@ -179,9 +182,15 @@ export class EntityRenderer {
     const ny = (ty - ay) / dist;
 
     // Mark both entities as in combat
-    const combatExpiry = Date.now() + COMBAT_LINGER_MS;
+    const now = Date.now();
+    const combatExpiry = now + COMBAT_LINGER_MS;
     attVisual.combatUntil = combatExpiry;
     tgtVisual.combatUntil = combatExpiry;
+
+    // Lock attacker animation for the full attack sequence (lunge 120 + snapback 180 + buffer)
+    attVisual.animLockUntil = now + 600;
+    // Lock target briefly so hit flash isn't stomped by idle
+    tgtVisual.animLockUntil = now + 300;
 
     // Swap attacker to armed texture so weapon is visible during attack
     const attEntity = this.entities.get(attackerId);
@@ -200,6 +209,7 @@ export class EntityRenderer {
       attVisual.sprite.play(attackAnim);
       attVisual.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
         if (!attVisual.sprite) return;
+        attVisual.animLockUntil = 0; // release lock when attack anim finishes
         const curKey = attVisual.sprite.texture.key;
         const idleAnim = `${curKey}-idle-${attVisual.facing}`;
         if (this.scene.anims.exists(idleAnim)) {
@@ -257,8 +267,10 @@ export class EntityRenderer {
     const destX = sx + nx * kbPx;
     const destY = sy + ny * kbPx;
 
-    // Mark as in combat
-    visual.combatUntil = Date.now() + COMBAT_LINGER_MS;
+    // Mark as in combat + lock animation for knockback sequence (180ms + 150ms bounce)
+    const kbNow = Date.now();
+    visual.combatUntil = kbNow + COMBAT_LINGER_MS;
+    visual.animLockUntil = kbNow + 400;
 
     // White flash on impact
     visual.sprite.setTint(0xffffff);
@@ -309,8 +321,10 @@ export class EntityRenderer {
     const sx = visual.sprite.x;
     const sy = visual.sprite.y;
 
-    // Mark as in combat
-    visual.combatUntil = Date.now() + COMBAT_LINGER_MS;
+    // Mark as in combat + lock animation for lunge dash
+    const lungeNow = Date.now();
+    visual.combatUntil = lungeNow + COMBAT_LINGER_MS;
+    visual.animLockUntil = lungeNow + 300;
 
     // Face the target
     const dx = targetX - sx;
@@ -490,6 +504,9 @@ export class EntityRenderer {
 
     const sx = visual.sprite.x;
     const sy = visual.sprite.y;
+
+    // Lock animation for the gather motion so idle doesn't stomp it
+    visual.animLockUntil = Date.now() + 500;
 
     // Per-profession tint + motion
     if (gatherType === "mining") {
@@ -753,6 +770,7 @@ export class EntityRenderer {
         spriteScale: 1,
         inViewport: true,
         combatUntil: 0,
+        animLockUntil: 0,
       };
     }
 
@@ -902,6 +920,7 @@ export class EntityRenderer {
       spriteScale: mobScale,
       inViewport: true,
       combatUntil: initialCombat ? Date.now() + COMBAT_LINGER_MS : 0,
+      animLockUntil: 0,
     };
 
     // Apply initial FX for any active effects
@@ -945,8 +964,12 @@ export class EntityRenderer {
     }
     const textureKey = layeredKey ?? getEntityTextureKey(entity.type, entity.classId, entity.name);
 
-    // Swap texture if it changed
-    if (visual.sprite.texture.key !== textureKey && this.scene.textures.exists(textureKey)) {
+    // Swap texture if it changed (skip during anim lock — attack may have set armed texture)
+    if (
+      visual.sprite.texture.key !== textureKey &&
+      this.scene.textures.exists(textureKey) &&
+      Date.now() >= visual.animLockUntil
+    ) {
       visual.sprite.setTexture(textureKey);
       const idleAnim = `${textureKey}-idle-${visual.facing}`;
       if (this.scene.anims.exists(idleAnim)) {
@@ -976,16 +999,20 @@ export class EntityRenderer {
       visual.label.setText(expectedLabel);
     }
 
+    const animLocked = Date.now() < visual.animLockUntil;
+
     if (moved) {
       // Determine facing direction
       const dir = inferDirection(dx, dy);
       visual.facing = dir;
       visual.moving = true;
 
-      // Play walk animation
-      const walkAnim = `${textureKey}-walk-${dir}`;
-      if (this.scene.anims.exists(walkAnim) && visual.sprite.anims.getName() !== walkAnim) {
-        visual.sprite.play(walkAnim);
+      // Play walk animation (movement overrides lock — entity physically relocated)
+      if (!animLocked) {
+        const walkAnim = `${textureKey}-walk-${dir}`;
+        if (this.scene.anims.exists(walkAnim) && visual.sprite.anims.getName() !== walkAnim) {
+          visual.sprite.play(walkAnim);
+        }
       }
 
       // Tween to new position
@@ -1010,16 +1037,18 @@ export class EntityRenderer {
         },
         onComplete: () => {
           visual.moving = false;
-          // Switch to idle after movement (use current texture key, not captured)
-          const curKey = visual.sprite.texture.key;
-          const idleAnim = `${curKey}-idle-${visual.facing}`;
-          if (this.scene.anims.exists(idleAnim)) {
-            visual.sprite.play(idleAnim);
+          // Switch to idle after movement only if no action animation is playing
+          if (Date.now() >= visual.animLockUntil) {
+            const curKey = visual.sprite.texture.key;
+            const idleAnim = `${curKey}-idle-${visual.facing}`;
+            if (this.scene.anims.exists(idleAnim)) {
+              visual.sprite.play(idleAnim);
+            }
           }
         },
       });
-    } else if (!visual.moving) {
-      // Not moving — ensure idle animation
+    } else if (!visual.moving && !animLocked) {
+      // Not moving and no action animation playing — ensure idle animation
       const idleAnim = `${textureKey}-idle-${visual.facing}`;
       if (
         this.scene.anims.exists(idleAnim) &&
