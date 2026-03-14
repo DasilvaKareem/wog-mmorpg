@@ -12,6 +12,8 @@ const SKIN_COLORS: Record<string, number> = {
 const HAIR_COLORS: Record<string, number> = {
   short: 0x4a3728, long: 0xc4a46e, mohawk: 0xcc2222,
   ponytail: 0x1a1a2e, braided: 0x7a5530, bald: 0x000000,
+  locs: 0x2a1a0e, afro: 0x1a0e06, cornrows: 0x1a1008,
+  "bantu-knots": 0x1a0e06, bangs: 0x8a6a42, topknot: 0x3a2818,
 };
 
 const EYE_COLORS: Record<string, number> = {
@@ -278,25 +280,24 @@ function addArmorPieces(
     }
   }
 
-  // ── Legs ──
+  // ── Legs — child of leg meshes so they swing with walk ──
   if (eq.legs) {
     const mt = inferArmorMaterial(eq.legs.name ?? "");
-
-    for (const dx of [-0.1, 0.1]) {
+    const legRefs = [leftLeg, rightLeg];
+    for (let i = 0; i < 2; i++) {
+      const leg = legRefs[i];
       if (mt === "plate") {
-        // Heavy greaves with knee plate
         const mat = makeArmorMat(mt, eq.legs.quality, { transparent: true, opacity: 0.75 });
         const greave = new THREE.Mesh(greaveGeo, mat);
-        greave.position.set(dx, 0.35, 0.02); group.add(greave);
-        // Knee cap
         const kneeMat = makeArmorMat(mt, eq.legs.quality);
         const knee = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), kneeMat);
-        knee.position.set(dx, 0.45, 0.1); group.add(knee);
+        if (leg) { greave.position.set(0, 0, 0.02); leg.add(greave); knee.position.set(0, 0.1, 0.08); leg.add(knee); }
+        else { const dx = i === 0 ? -0.1 : 0.1; greave.position.set(dx, 0.35, 0.02); group.add(greave); knee.position.set(dx, 0.45, 0.1); group.add(knee); }
       } else {
-        // Leather/chain pants — slimmer fit
         const mat = makeArmorMat(mt, eq.legs.quality, { transparent: true, opacity: 0.65 });
         const pant = new THREE.Mesh(leatherPantsGeo, mat);
-        pant.position.set(dx, 0.35, 0.01); group.add(pant);
+        if (leg) { pant.position.set(0, 0, 0.01); leg.add(pant); }
+        else { const dx = i === 0 ? -0.1 : 0.1; pant.position.set(dx, 0.35, 0.01); group.add(pant); }
       }
     }
   }
@@ -305,38 +306,36 @@ function addArmorPieces(
   if (eq.boots) {
     const mt = inferArmorMaterial(eq.boots.name ?? "");
     const mat = makeArmorMat(mt, eq.boots.quality);
-
     for (const dx of [-0.1, 0.1]) {
       if (mt === "plate") {
-        // Heavy armored boots: box + cuff
         const boot = new THREE.Mesh(bootPlateGeo, mat);
-        boot.position.set(dx, 0.08, 0.03); group.add(boot);
+        boot.position.set(dx, 0.07, 0.03); group.add(boot);
         const cuff = new THREE.Mesh(bootCuffGeo, mat);
-        cuff.position.set(dx, 0.18, 0); group.add(cuff);
+        cuff.position.set(dx, 0.16, 0); group.add(cuff);
       } else {
-        // Leather/chain boots: softer capsule shape
         const boot = new THREE.Mesh(bootLeatherGeo, mat);
-        boot.position.set(dx, 0.1, 0.02); group.add(boot);
+        boot.position.set(dx, 0.09, 0.02); group.add(boot);
       }
     }
   }
 
-  // ── Gloves ──
+  // ── Gloves — child of arm groups so they swing with arms ──
   if (eq.gloves) {
     const mt = inferArmorMaterial(eq.gloves.name ?? "");
     const mat = makeArmorMat(mt, eq.gloves.quality);
-
-    for (const dx of [-1, 1]) {
+    const armRefs = [leftArm, rightArm];
+    for (let i = 0; i < 2; i++) {
+      const arm = armRefs[i];
+      const dx = i === 0 ? -1 : 1;
       if (mt === "plate") {
-        // Full gauntlets: box + cuff
         const gaunt = new THREE.Mesh(gauntletGeo, mat);
-        gaunt.position.set(dx * 0.38, 0.62, 0); group.add(gaunt);
         const cuff = new THREE.Mesh(gauntletCuffGeo, mat);
-        cuff.position.set(dx * 0.38, 0.7, 0); group.add(cuff);
+        if (arm) { gaunt.position.set(0, -0.38, 0); arm.add(gaunt); cuff.position.set(0, -0.3, 0); arm.add(cuff); }
+        else { gaunt.position.set(dx * 0.38, 0.62, 0); group.add(gaunt); cuff.position.set(dx * 0.38, 0.7, 0); group.add(cuff); }
       } else {
-        // Leather gloves: soft sphere hands
         const glove = new THREE.Mesh(gloveLeatherGeo, mat);
-        glove.position.set(dx * 0.38, 0.62, 0); group.add(glove);
+        if (arm) { glove.position.set(0, -0.4, 0); arm.add(glove); }
+        else { glove.position.set(dx * 0.38, 0.62, 0); group.add(glove); }
       }
     }
   }
@@ -505,6 +504,14 @@ const hairShortGeo = new THREE.SphereGeometry(0.22, 6, 4, 0, Math.PI * 2, 0, Mat
 const hairLongGeo = new THREE.CapsuleGeometry(0.15, 0.3, 4, 6);
 const hairMohawkGeo = new THREE.BoxGeometry(0.06, 0.25, 0.3);
 const hairBraidedGeo = new THREE.CylinderGeometry(0.06, 0.04, 0.5, 5);
+// New hair styles
+const hairAfroGeo = new THREE.SphereGeometry(0.32, 8, 6);
+const hairLocGeo = new THREE.CylinderGeometry(0.03, 0.025, 0.45, 5);
+const hairCornrowGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4);
+const hairKnotGeo = new THREE.SphereGeometry(0.07, 5, 4);
+const hairBangsGeo = new THREE.BoxGeometry(0.38, 0.08, 0.15);
+const hairTopknotGeo = new THREE.CylinderGeometry(0.04, 0.08, 0.2, 6);
+const hairTopknotBunGeo = new THREE.SphereGeometry(0.08, 6, 5);
 const shieldGeo = new THREE.BoxGeometry(0.04, 0.35, 0.25);
 const mobBodyGeo = new THREE.CapsuleGeometry(0.3, 0.5, 4, 8);
 const npcBodyGeo = new THREE.CapsuleGeometry(0.22, 0.65, 4, 8);
@@ -1271,82 +1278,218 @@ export class EntityManager {
     };
   }
 
+  // ── Hair builder (all 12 styles) ─────────────────────────────────
+
+  private buildHair(group: THREE.Group, style: string, mat: THREE.MeshLambertMaterial, headY: number) {
+    switch (style) {
+      case "short": {
+        const h = new THREE.Mesh(hairShortGeo, mat);
+        h.position.set(0, headY + 0.1, 0);
+        group.add(h);
+        break;
+      }
+      case "long": {
+        // Full cap + back drape
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); group.add(cap);
+        const drape = new THREE.Mesh(hairLongGeo, mat);
+        drape.position.set(0, headY + 0.05, -0.12); group.add(drape);
+        break;
+      }
+      case "mohawk": {
+        const h = new THREE.Mesh(hairMohawkGeo, mat);
+        h.position.set(0, headY + 0.25, 0);
+        group.add(h);
+        break;
+      }
+      case "ponytail": {
+        const top = new THREE.Mesh(hairShortGeo, mat);
+        top.position.set(0, headY + 0.1, 0); group.add(top);
+        const tail = new THREE.Mesh(hairLongGeo, mat);
+        tail.position.set(0, headY - 0.15, -0.2); tail.rotation.x = 0.3;
+        group.add(tail);
+        break;
+      }
+      case "braided": {
+        const top = new THREE.Mesh(hairShortGeo, mat);
+        top.position.set(0, headY + 0.1, 0); group.add(top);
+        // Two braids hanging down
+        for (const dx of [-0.12, 0.12]) {
+          const b = new THREE.Mesh(hairBraidedGeo, mat);
+          b.position.set(dx, headY - 0.25, -0.1); group.add(b);
+        }
+        break;
+      }
+      case "locs": {
+        // Many thin cylindrical locs hanging from scalp
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.6, 1);
+        group.add(cap);
+        const angles = [0, 0.7, 1.4, 2.1, 2.8, 3.5, 4.2, 4.9, 5.6];
+        for (const a of angles) {
+          const loc = new THREE.Mesh(hairLocGeo, mat);
+          const r = 0.16;
+          loc.position.set(
+            Math.sin(a) * r,
+            headY - 0.1,
+            Math.cos(a) * r - 0.03,
+          );
+          loc.rotation.x = Math.cos(a) * 0.15;
+          loc.rotation.z = Math.sin(a) * 0.15;
+          group.add(loc);
+        }
+        break;
+      }
+      case "afro": {
+        const h = new THREE.Mesh(hairAfroGeo, mat);
+        h.position.set(0, headY + 0.08, 0);
+        group.add(h);
+        break;
+      }
+      case "cornrows": {
+        // Parallel rows running front to back
+        for (const dx of [-0.12, -0.06, 0, 0.06, 0.12]) {
+          const row = new THREE.Mesh(hairCornrowGeo, mat);
+          row.position.set(dx, headY + 0.08, -0.05);
+          row.rotation.x = Math.PI / 2 * 0.3; // slight tilt back
+          group.add(row);
+        }
+        // Back nape extension
+        for (const dx of [-0.09, -0.03, 0.03, 0.09]) {
+          const tail = new THREE.Mesh(hairCornrowGeo, mat);
+          tail.position.set(dx, headY - 0.12, -0.15);
+          tail.scale.set(1, 0.6, 1);
+          group.add(tail);
+        }
+        break;
+      }
+      case "bantu-knots": {
+        // 5-7 small spherical knots arranged on top of head
+        const positions: [number, number, number][] = [
+          [0, headY + 0.22, 0],
+          [-0.13, headY + 0.15, 0.05],
+          [0.13, headY + 0.15, 0.05],
+          [-0.1, headY + 0.15, -0.1],
+          [0.1, headY + 0.15, -0.1],
+          [0, headY + 0.12, -0.14],
+        ];
+        for (const [kx, ky, kz] of positions) {
+          const knot = new THREE.Mesh(hairKnotGeo, mat);
+          knot.position.set(kx, ky, kz);
+          group.add(knot);
+        }
+        break;
+      }
+      case "bangs": {
+        // Full cap + front bangs piece
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); group.add(cap);
+        const fringe = new THREE.Mesh(hairBangsGeo, mat);
+        fringe.position.set(0, headY + 0.02, 0.16); group.add(fringe);
+        // Side drape
+        const drape = new THREE.Mesh(hairLongGeo, mat);
+        drape.position.set(0, headY + 0.02, -0.1); group.add(drape);
+        break;
+      }
+      case "topknot": {
+        // Shaved sides + tied bun on top
+        const base = new THREE.Mesh(hairTopknotGeo, mat);
+        base.position.set(0, headY + 0.18, 0); group.add(base);
+        const bun = new THREE.Mesh(hairTopknotBunGeo, mat);
+        bun.position.set(0, headY + 0.3, 0); group.add(bun);
+        break;
+      }
+      default: {
+        // Fallback to short
+        const h = new THREE.Mesh(hairShortGeo, mat);
+        h.position.set(0, headY + 0.1, 0);
+        group.add(h);
+        break;
+      }
+    }
+  }
+
   // ── Player ────────────────────────────────────────────────────────
 
   private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group } {
     const skinHex = SKIN_COLORS[ent.skinColor ?? "medium"] ?? 0xd4a574;
     const classId = ent.classId ?? "warrior";
     const cls = CLASS_BODY[classId] ?? CLASS_BODY.warrior;
+    const isFemale = ent.gender === "female";
+
+    // Gender body modifiers
+    const gsx = isFemale ? 0.88 : 1.0;  // narrower shoulders
+    const gsy = isFemale ? 0.95 : 1.0;  // slightly shorter torso
+    const gsz = isFemale ? 0.92 : 1.0;
+    const hipW = isFemale ? 0.12 : 0.1; // wider hip stance
 
     // Legs (pivot at hip)
     const legMat = new THREE.MeshLambertMaterial({ color: skinHex });
     const leftLeg = new THREE.Mesh(legGeo, legMat);
-    leftLeg.position.set(-0.1, 0.35, 0);
+    leftLeg.position.set(-hipW, 0.35, 0);
+    if (isFemale) leftLeg.scale.set(0.9, 1.05, 0.9); // slimmer, slightly longer
     group.add(leftLeg);
     const rightLeg = new THREE.Mesh(legGeo, legMat);
-    rightLeg.position.set(0.1, 0.35, 0);
+    rightLeg.position.set(hipW, 0.35, 0);
+    if (isFemale) rightLeg.scale.set(0.9, 1.05, 0.9);
     group.add(rightLeg);
 
     const bodyMat = new THREE.MeshLambertMaterial({ color: cls.color });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.position.y = 0.8;
-    body.scale.set(cls.sx, cls.sy, cls.sz);
+    body.scale.set(cls.sx * gsx, cls.sy * gsy, cls.sz * gsz);
     body.castShadow = true;
     group.add(body);
 
+    const headScale = isFemale ? 0.95 : 1.0;
     const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: skinHex }));
-    head.position.y = 1.5;
+    head.position.y = isFemale ? 1.46 : 1.5;
+    head.scale.setScalar(headScale);
     group.add(head);
 
     const eyeHex = EYE_COLORS[ent.eyeColor ?? "brown"] ?? 0x6b3a1f;
     const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
+    const eyeY = isFemale ? 1.49 : 1.53;
     for (const dx of [-0.08, 0.08]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(dx, 1.53, 0.17);
+      eye.position.set(dx * headScale, eyeY, 0.17 * headScale);
       group.add(eye);
     }
 
+    // ── Hair (all 12 styles) ──
     const style = ent.hairStyle ?? "short";
     if (style !== "bald") {
       const hairHex = HAIR_COLORS[style] ?? 0x4a3728;
       const hairMat = new THREE.MeshLambertMaterial({ color: hairHex });
-      if (style === "long") {
-        const h = new THREE.Mesh(hairLongGeo, hairMat); h.position.set(0, 1.55, -0.12); group.add(h);
-      } else if (style === "mohawk") {
-        const h = new THREE.Mesh(hairMohawkGeo, hairMat); h.position.set(0, 1.75, 0); group.add(h);
-      } else if (style === "ponytail") {
-        const top = new THREE.Mesh(hairShortGeo, hairMat); top.position.set(0, 1.6, 0); group.add(top);
-        const tail = new THREE.Mesh(hairLongGeo, hairMat); tail.position.set(0, 1.35, -0.2); tail.rotation.x = 0.3; group.add(tail);
-      } else if (style === "braided") {
-        const top = new THREE.Mesh(hairShortGeo, hairMat); top.position.set(0, 1.6, 0); group.add(top);
-        for (const dx of [-0.12, 0.12]) { const b = new THREE.Mesh(hairBraidedGeo, hairMat); b.position.set(dx, 1.25, -0.1); group.add(b); }
-      } else {
-        const h = new THREE.Mesh(hairShortGeo, hairMat); h.position.set(0, 1.6, 0); group.add(h);
-      }
+      const headY = isFemale ? 1.46 : 1.5;
+      this.buildHair(group, style, hairMat, headY);
     }
 
     // ── Arms + hands (pivot at shoulder) ──
     const skinMat = new THREE.MeshLambertMaterial({ color: skinHex });
+    const shoulderW = 0.3 * cls.sx * gsx;
+    const shoulderY = isFemale ? 1.12 : 1.15;
+    const armScale = isFemale ? 0.9 : 1.0;
 
     // Left arm group — pivots at shoulder
     const leftArm = new THREE.Group();
-    leftArm.position.set(-0.3 * cls.sx, 1.15, 0); // shoulder joint
+    leftArm.position.set(-shoulderW, shoulderY, 0);
     const lUpperArm = new THREE.Mesh(armGeo, skinMat);
-    lUpperArm.position.y = -0.2; // hangs down from pivot
+    lUpperArm.position.y = -0.2; lUpperArm.scale.setScalar(armScale);
     leftArm.add(lUpperArm);
     const lHand = new THREE.Mesh(handGeo, skinMat);
-    lHand.position.y = -0.42;
+    lHand.position.y = -0.42 * armScale; lHand.scale.setScalar(armScale);
     leftArm.add(lHand);
     group.add(leftArm);
 
     // Right arm group — pivots at shoulder
     const rightArm = new THREE.Group();
-    rightArm.position.set(0.3 * cls.sx, 1.15, 0);
+    rightArm.position.set(shoulderW, shoulderY, 0);
     const rUpperArm = new THREE.Mesh(armGeo, skinMat);
-    rUpperArm.position.y = -0.2;
+    rUpperArm.position.y = -0.2; rUpperArm.scale.setScalar(armScale);
     rightArm.add(rUpperArm);
     const rHand = new THREE.Mesh(handGeo, skinMat);
-    rHand.position.y = -0.42;
+    rHand.position.y = -0.42 * armScale; rHand.scale.setScalar(armScale);
     rightArm.add(rHand);
 
     // Weapon attaches to right hand
