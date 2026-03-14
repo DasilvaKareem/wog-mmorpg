@@ -2813,6 +2813,307 @@ export const QUEST_CATALOG: Quest[] = [
       items: [{ tokenId: 54, quantity: 2 }],
     },
   },
+
+  // === PROFESSION FARMSTEAD QUESTS — sunflower-fields (16 quests, 2 per profession) ===
+  // Each profession gets two quests from Farmhand Amos that guide players toward
+  // claiming land in the farmland zones and starting construction on their homestead.
+
+  // -- Mining --
+  {
+    id: "farm_mining_foundation",
+    title: "Foundation Stones",
+    description:
+      "Farmhand Amos eyes the empty plots around Sunflower Fields. 'Every homestead starts with stone. If you know Mining, go quarry 5 Stone Blocks from the ore nodes. I'll pay you well — and those blocks are exactly what you need to lay a foundation.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "gather",
+      targetItemName: "Stone Blocks",
+      count: 5,
+    },
+    rewards: {
+      copper: 80,
+      xp: 200,
+      items: [{ tokenId: 190, quantity: 10 }], // 10x Lumber — to start building
+    },
+  },
+  {
+    id: "farm_mining_claim",
+    title: "Stake Your Claim",
+    description:
+      "Amos grins at your haul. 'You've got the stone, you've got the lumber — now go talk to Plot Registrar Helga about claiming a plot. She'll show you the available land. Once you own a plot, you can start building your homestead right here in Sunflower Fields.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_mining_foundation",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 120,
+      xp: 250,
+      items: [{ tokenId: 191, quantity: 8 }, { tokenId: 192, quantity: 10 }], // 8x Stone Blocks, 10x Iron Nails
+    },
+  },
+
+  // -- Herbalism --
+  {
+    id: "farm_herb_first_harvest",
+    title: "First Harvest",
+    description:
+      "Farmhand Amos looks at the golden fields stretching out before you. 'These fields are rich with crops — Wheat, Corn, Berries. If you know Herbalism, you already understand plants. Go harvest 5 Wheat from the crop nodes. That's your first step toward becoming a landowner.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "gather",
+      targetItemName: "Wheat",
+      count: 5,
+    },
+    rewards: {
+      copper: 60,
+      xp: 180,
+      items: [{ tokenId: 220, quantity: 1 }], // 1x Wooden Hoe
+    },
+  },
+  {
+    id: "farm_herb_green_acres",
+    title: "Green Acres",
+    description:
+      "Amos nods approvingly at your wheat bundle. 'You've got the touch. Now here's the thing — if you claim a plot from Helga, you'll have your own land right next to these fields. Imagine harvesting crops steps from your front door. Go talk to her.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_herb_first_harvest",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 100,
+      xp: 220,
+      items: [{ tokenId: 190, quantity: 10 }, { tokenId: 193, quantity: 8 }], // 10x Lumber, 8x Thatch Bundle
+    },
+  },
+
+  // -- Skinning --
+  {
+    id: "farm_skin_pest_control",
+    title: "Pest Control",
+    description:
+      "Farmhand Amos frowns at the fields. 'Wild Chickens and Field Mice have been tearing up the crops. A Skinner like you could clear them out and harvest their hides. Kill and skin 5 of the pests — I need this farmland protected.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "kill",
+      targetMobType: "mob",
+      targetMobName: "Wild Chicken",
+      count: 5,
+    },
+    rewards: {
+      copper: 70,
+      xp: 200,
+      items: [{ tokenId: 193, quantity: 10 }], // 10x Thatch Bundle
+    },
+  },
+  {
+    id: "farm_skin_homesteader",
+    title: "The Homesteader's Way",
+    description:
+      "Amos claps you on the back. 'The fields are safer thanks to you. You know, a lot of adventurers settle down here after they've had their fill of combat. Helga at the registrar can set you up with a plot — thatch and hides make fine roofing. Go see her.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_skin_pest_control",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 100,
+      xp: 230,
+      items: [{ tokenId: 190, quantity: 8 }, { tokenId: 191, quantity: 5 }], // 8x Lumber, 5x Stone Blocks
+    },
+  },
+
+  // -- Blacksmithing --
+  {
+    id: "farm_smith_nails",
+    title: "Nails for the Cause",
+    description:
+      "Farmhand Amos gestures at a half-built fence. 'We're always short on Iron Nails around here. If you can work a forge, hammer out 8 Iron Nails at the Farmer's Forge. Every homestead in these fields was built with nails just like those.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "craft",
+      targetItemName: "Iron Nails",
+      count: 8,
+    },
+    rewards: {
+      copper: 90,
+      xp: 220,
+      items: [{ tokenId: 196, quantity: 5 }], // 5x Timber Frame
+    },
+  },
+  {
+    id: "farm_smith_real_estate",
+    title: "Built to Last",
+    description:
+      "Amos runs his thumb along one of your nails. 'Fine work. You know, a smith who owns land is never short on work — everyone needs repairs, tools, nails. Helga can sell you a plot. Build a cottage, then a farmhouse. This could be your forge town.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_smith_nails",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 130,
+      xp: 280,
+      items: [{ tokenId: 194, quantity: 10 }, { tokenId: 197, quantity: 8 }], // 10x Clay Bricks, 8x Mortar
+    },
+  },
+
+  // -- Alchemy --
+  {
+    id: "farm_alch_field_remedy",
+    title: "Field Remedy",
+    description:
+      "Farmhand Amos wipes sweat from his brow. 'Farming is hard work and the sun doesn't forgive. Brew 3 Health Potions — the field hands need them. An alchemist who can keep workers standing is worth their weight in gold out here.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "craft",
+      targetItemName: "Health Potion",
+      count: 3,
+    },
+    rewards: {
+      copper: 80,
+      xp: 200,
+      items: [{ tokenId: 190, quantity: 8 }], // 8x Lumber
+    },
+  },
+  {
+    id: "farm_alch_apothecary",
+    title: "The Farm Apothecary",
+    description:
+      "Amos bottles your last potion carefully. 'You could make a killing out here — every farmer needs remedies, every rancher needs salves. Claim a plot from Helga, build a cottage, set up shop. You'd be the only apothecary for miles.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_alch_field_remedy",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 110,
+      xp: 240,
+      items: [{ tokenId: 191, quantity: 8 }, { tokenId: 195, quantity: 5 }], // 8x Stone Blocks, 5x Glass Panes
+    },
+  },
+
+  // -- Cooking --
+  {
+    id: "farm_cook_harvest_feast",
+    title: "Harvest Feast",
+    description:
+      "Farmhand Amos's stomach growls. 'The field hands are starving and morale is low. If you can cook, whip up 3 Hearty Stews at the Farm Campfire. Fresh ingredients are all around us — corn, carrots, potatoes. Feed the workers and they'll remember you.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "craft",
+      targetItemName: "Hearty Stew",
+      count: 3,
+    },
+    rewards: {
+      copper: 70,
+      xp: 190,
+      items: [{ tokenId: 193, quantity: 10 }, { tokenId: 198, quantity: 5 }], // 10x Thatch, 5x Roof Tiles
+    },
+  },
+  {
+    id: "farm_cook_kitchen_dreams",
+    title: "A Kitchen of Your Own",
+    description:
+      "Amos licks the bowl clean. 'Best stew I've had in years. You know what would make it even better? Your own kitchen. Claim a plot from Helga, build a farmhouse with a proper hearth. You could run the best tavern in all the farmlands.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_cook_harvest_feast",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 100,
+      xp: 230,
+      items: [{ tokenId: 190, quantity: 10 }, { tokenId: 192, quantity: 10 }], // 10x Lumber, 10x Iron Nails
+    },
+  },
+
+  // -- Leatherworking --
+  {
+    id: "farm_leather_saddles",
+    title: "Saddles and Straps",
+    description:
+      "Farmhand Amos adjusts a worn leather belt. 'Everything out here runs on leather — saddles, straps, harnesses, boots. Craft 3 pieces of leather gear and I'll make it worth your while. The ranchers pay top coin for quality work.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "craft",
+      targetItemName: "Leather",
+      count: 3,
+    },
+    rewards: {
+      copper: 85,
+      xp: 210,
+      items: [{ tokenId: 196, quantity: 5 }, { tokenId: 192, quantity: 8 }], // 5x Timber Frame, 8x Iron Nails
+    },
+  },
+  {
+    id: "farm_leather_ranch",
+    title: "Ranch Life",
+    description:
+      "Amos tests the stitching on your work. 'Solid craftsmanship. A leatherworker with their own ranch? That's the dream. Helga has plots available — claim one, build on it, and you'll have a workshop and a home in one. The land pays for itself.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_leather_saddles",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 110,
+      xp: 250,
+      items: [{ tokenId: 194, quantity: 8 }, { tokenId: 195, quantity: 5 }], // 8x Clay Bricks, 5x Glass Panes
+    },
+  },
+
+  // -- Jewelcrafting --
+  {
+    id: "farm_jewel_sunstone",
+    title: "Sunstone Prospecting",
+    description:
+      "Farmhand Amos pulls a rough gem from his pocket. 'Found this in the fields last week. The soil here is full of minerals — perfect for a Jewelcrafter. Gather 3 gems from the ore nodes around the farmlands. Cut them and they'll fetch a fortune.'",
+    npcId: "Farmhand Amos",
+    objective: {
+      type: "gather",
+      targetItemName: "Rough Gem",
+      count: 3,
+    },
+    rewards: {
+      copper: 90,
+      xp: 220,
+      items: [{ tokenId: 195, quantity: 5 }], // 5x Glass Panes
+    },
+  },
+  {
+    id: "farm_jewel_gem_estate",
+    title: "The Gem Estate",
+    description:
+      "Amos holds your cut gem up to the sunlight. 'Beautiful. You know, the finest jewelers in Geneva all started on farmland — cheap plots, rich soil full of minerals. Talk to Helga about claiming a plot. Build a manor with glass panes and you've got yourself a gem studio.'",
+    npcId: "Farmhand Amos",
+    prerequisiteQuestId: "farm_jewel_sunstone",
+    objective: {
+      type: "talk",
+      targetNpcName: "Plot Registrar Helga",
+      count: 1,
+    },
+    rewards: {
+      copper: 130,
+      xp: 280,
+      items: [{ tokenId: 191, quantity: 10 }, { tokenId: 197, quantity: 8 }, { tokenId: 198, quantity: 5 }], // 10x Stone, 8x Mortar, 5x Roof Tiles
+    },
+  },
 ];
 
 // ── Economy scaling ─────────────────────────────────────────────────────────

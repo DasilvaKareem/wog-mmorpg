@@ -894,6 +894,27 @@ export class AgentRunner {
               body: questBody,
             });
           }
+
+          // After completing a farm "talk to Helga" quest, suggest buying land
+          const FARM_LAND_QUESTS = [
+            "farm_mining_claim", "farm_herb_green_acres", "farm_skin_homesteader",
+            "farm_smith_real_estate", "farm_alch_apothecary", "farm_cook_kitchen_dreams",
+            "farm_leather_ranch", "farm_jewel_gem_estate",
+          ];
+          const completedIds = entity.completedQuests ?? [];
+          const justCompletedFarmQuest = FARM_LAND_QUESTS.some((qid) => completedIds.includes(qid));
+          if (justCompletedFarmQuest && this.custodialWallet) {
+            // Check if they already own a plot
+            const { getOwnedPlot } = await import("../farming/plotSystem.js");
+            const owned = getOwnedPlot(this.custodialWallet) ?? getOwnedPlot(this.userWallet);
+            if (!owned) {
+              void this.askSummoner(
+                `I talked to Plot Registrar Helga and there's a small plot in Sunflower Fields for just 25 gold. Should I claim it for us? We can start building a homestead there.`,
+                ["Yes, claim it!", "Not yet"],
+                { action: "claim_plot", zoneId: "sunflower-fields" },
+              );
+            }
+          }
         } else if (latest.type === "quest-progress" && latest.entityId === this.entityId) {
           const milestone = getQuestProgressMilestone(latest);
           if (milestone) {
@@ -1574,6 +1595,45 @@ export class AgentRunner {
             } else if (action === "buy" && qReply.reply.toLowerCase() === "no") {
               void this.logActivity(`Summoner declined purchase — skipping`);
               this.currentScript = null; // Clear shopping script
+            } else if (action === "claim_plot" && qReply.reply.toLowerCase().includes("yes")) {
+              // Summoner approved land purchase — travel to sunflower-fields and claim cheapest plot
+              void this.logActivity(`Summoner approved land purchase — heading to claim a plot`);
+              const targetZone = (qReply.context?.zoneId as string) ?? "sunflower-fields";
+              if (this.currentRegion !== targetZone) {
+                this.currentScript = { type: "travel", targetZone, reason: "Claiming a plot" };
+                this.issueCommand({ action: "travel", targetZone });
+              } else {
+                // Already in the zone — claim the cheapest available plot
+                try {
+                  const { getPlotsInZone, getPlotDef, claimPlot } = await import("../farming/plotSystem.js");
+                  const plots = getPlotsInZone(targetZone);
+                  const available = plots
+                    .filter((p) => !p.owner)
+                    .map((p) => ({ state: p, def: getPlotDef(p.plotId) }))
+                    .filter((p) => p.def)
+                    .sort((a, b) => (a.def!.cost - b.def!.cost));
+                  if (available.length > 0) {
+                    const cheapest = available[0];
+                    const walletToUse = this.custodialWallet ?? this.userWallet;
+                    const charName = entity.name ?? "Champion";
+                    const result = claimPlot(cheapest.state.plotId, walletToUse, charName);
+                    if (result.ok) {
+                      void this.logActivity(`Claimed plot ${cheapest.state.plotId} in ${targetZone} for ${cheapest.def!.cost}g!`);
+                      await appendChatMessage(this.userWallet, {
+                        role: "agent",
+                        text: `I claimed a plot in ${targetZone.replace(/-/g, " ")}! Plot ${cheapest.state.plotId} is ours for ${cheapest.def!.cost} gold. We can start building a cottage there.`,
+                        ts: Date.now(),
+                      });
+                    } else {
+                      void this.logActivity(`Failed to claim plot: ${result.error}`);
+                    }
+                  }
+                } catch (err: any) {
+                  void this.logActivity(`Plot claim failed: ${err.message?.slice(0, 60)}`);
+                }
+              }
+            } else if (action === "claim_plot" && !qReply.reply.toLowerCase().includes("yes")) {
+              void this.logActivity(`Summoner declined land purchase — will ask again later`);
             } else if (action === "travel" && qReply.reply.toLowerCase() === "yes") {
               void this.logActivity(`Summoner approved travel — proceeding`);
             } else if (action === "travel" && qReply.reply.toLowerCase() === "no") {

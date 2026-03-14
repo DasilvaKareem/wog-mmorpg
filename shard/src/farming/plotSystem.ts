@@ -32,17 +32,17 @@ export interface PlotState {
 // ── Plot definitions per zone ────────────────────────────────────────
 
 const PLOT_DEFS: PlotDefinition[] = [
-  // sunflower-fields — 10 plots
-  { plotId: "sf-plot-1", zoneId: "sunflower-fields", x: 100, y: 100, cost: 50 },
-  { plotId: "sf-plot-2", zoneId: "sunflower-fields", x: 250, y: 100, cost: 60 },
-  { plotId: "sf-plot-3", zoneId: "sunflower-fields", x: 400, y: 100, cost: 70 },
-  { plotId: "sf-plot-4", zoneId: "sunflower-fields", x: 550, y: 100, cost: 80 },
-  { plotId: "sf-plot-5", zoneId: "sunflower-fields", x: 100, y: 280, cost: 55 },
-  { plotId: "sf-plot-6", zoneId: "sunflower-fields", x: 250, y: 280, cost: 65 },
-  { plotId: "sf-plot-7", zoneId: "sunflower-fields", x: 400, y: 280, cost: 75 },
-  { plotId: "sf-plot-8", zoneId: "sunflower-fields", x: 550, y: 280, cost: 85 },
-  { plotId: "sf-plot-9", zoneId: "sunflower-fields", x: 200, y: 450, cost: 90 },
-  { plotId: "sf-plot-10", zoneId: "sunflower-fields", x: 450, y: 450, cost: 100 },
+  // sunflower-fields — 10 plots (starter zone, cheapest land in the game)
+  { plotId: "sf-plot-1", zoneId: "sunflower-fields", x: 100, y: 100, cost: 25 },
+  { plotId: "sf-plot-2", zoneId: "sunflower-fields", x: 250, y: 100, cost: 30 },
+  { plotId: "sf-plot-3", zoneId: "sunflower-fields", x: 400, y: 100, cost: 35 },
+  { plotId: "sf-plot-4", zoneId: "sunflower-fields", x: 550, y: 100, cost: 40 },
+  { plotId: "sf-plot-5", zoneId: "sunflower-fields", x: 100, y: 280, cost: 30 },
+  { plotId: "sf-plot-6", zoneId: "sunflower-fields", x: 250, y: 280, cost: 35 },
+  { plotId: "sf-plot-7", zoneId: "sunflower-fields", x: 400, y: 280, cost: 40 },
+  { plotId: "sf-plot-8", zoneId: "sunflower-fields", x: 550, y: 280, cost: 45 },
+  { plotId: "sf-plot-9", zoneId: "sunflower-fields", x: 200, y: 450, cost: 45 },
+  { plotId: "sf-plot-10", zoneId: "sunflower-fields", x: 450, y: 450, cost: 50 },
 
   // harvest-hollow — 12 plots
   { plotId: "hh-plot-1", zoneId: "harvest-hollow", x: 80, y: 80, cost: 75 },
