@@ -60,11 +60,16 @@ export class TerrainRenderer {
   readonly group = new THREE.Group();
   private waterMeshes: THREE.Mesh[] = [];
   private portalMeshes: THREE.Mesh[] = [];
+  private canopyMeshes: { mesh: THREE.Mesh; baseX: number; baseZ: number }[] = [];
+  private bushMeshes: THREE.Mesh[] = [];
+  private groundMesh: THREE.Mesh | null = null;
+  private baseColors: Float32Array | null = null; // snapshot of vertex colors for shimmer
   private elapsed = 0;
   private built = false;
   private elevationData: number[] = [];
   private gridWidth = 0;
   private gridHeight = 0;
+  private grassIndices: number[] = []; // vertex indices that are grass tiles
 
   // Shared materials
   private wallMat = new THREE.MeshLambertMaterial({ color: 0x887766 });
@@ -156,6 +161,22 @@ export class TerrainRenderer {
     groundMesh.position.set(W * TILE_UNIT / 2, 0, H * TILE_UNIT / 2);
     groundMesh.receiveShadow = true;
     this.group.add(groundMesh);
+    this.groundMesh = groundMesh;
+
+    // Store base colors + grass indices for shimmer animation
+    this.baseColors = new Float32Array(colors);
+    this.grassIndices = [];
+    for (let iz = 0; iz <= H; iz++) {
+      for (let ix = 0; ix <= W; ix++) {
+        const vi = iz * (W + 1) + ix;
+        const tx = Math.min(ix, W - 1);
+        const tz = Math.min(iz, H - 1);
+        const tileIdx = data.ground[tz * W + tx] ?? 0;
+        if (tileIdx >= 0 && tileIdx <= 5) {
+          this.grassIndices.push(vi);
+        }
+      }
+    }
 
     // ── Overlay objects + water ──
     for (let iz = 0; iz < H; iz++) {
@@ -193,6 +214,7 @@ export class TerrainRenderer {
           canopy.position.set(wx, 2.8 + elev, wz);
           canopy.castShadow = true;
           this.group.add(canopy);
+          this.canopyMeshes.push({ mesh: canopy, baseX: wx, baseZ: wz });
         } else if (ROCK_TILES.has(ov)) {
           const s = ov === 51 ? 1.5 : 1;
           const m = new THREE.Mesh(this.rockGeo, this.rockMat);
@@ -205,6 +227,7 @@ export class TerrainRenderer {
           m.position.set(wx, 0.35 + elev, wz);
           m.castShadow = true;
           this.group.add(m);
+          this.bushMeshes.push(m);
         } else if (FENCE_TILES.has(ov)) {
           const m = new THREE.Mesh(this.fenceGeo, this.fenceMat);
           m.position.set(wx, 0.4 + elev, wz);
@@ -223,18 +246,63 @@ export class TerrainRenderer {
     this.built = true;
   }
 
-  /** Animate water bobbing and portal rotation */
+  /** Animate water, trees, bushes, grass, and portals */
   update(dt: number) {
     if (!this.built) return;
     this.elapsed += dt;
+    const t = this.elapsed;
 
+    // ── Water: bob + color shift ──
     for (const w of this.waterMeshes) {
-      w.position.y = 0.05 + Math.sin(this.elapsed * 1.5 + w.position.x * 0.5 + w.position.z * 0.3) * 0.04;
+      const phase = t * 1.5 + w.position.x * 0.5 + w.position.z * 0.3;
+      w.position.y = 0.05 + Math.sin(phase) * 0.04;
+    }
+    // Slow water hue shift
+    const wh = 0.55 + Math.sin(t * 0.3) * 0.04;
+    this.waterMat.color.setHSL(wh, 0.55, 0.35);
+
+    // ── Tree canopy sway (wind) ──
+    for (const { mesh: c, baseX, baseZ } of this.canopyMeshes) {
+      const phase = t * 0.8 + baseX * 0.4 + baseZ * 0.3;
+      c.position.x = baseX + Math.sin(phase) * 0.15;
+      c.position.z = baseZ + Math.cos(phase * 0.7) * 0.1;
     }
 
+    // ── Bush rustle ──
+    for (const b of this.bushMeshes) {
+      const phase = t * 1.8 + b.position.x * 0.9 + b.position.z * 0.7;
+      const sway = Math.sin(phase) * 0.02;
+      b.scale.setScalar(1 + Math.sin(phase * 1.3) * 0.04);
+      b.rotation.y = sway;
+    }
+
+    // ── Grass shimmer (vertex color wave) ──
+    if (this.groundMesh && this.baseColors && this.grassIndices.length > 0) {
+      const geo = this.groundMesh.geometry;
+      const colorAttr = geo.getAttribute("color") as THREE.BufferAttribute;
+      const posAttr = geo.getAttribute("position") as THREE.BufferAttribute;
+      const base = this.baseColors;
+
+      for (const vi of this.grassIndices) {
+        const px = posAttr.getX(vi);
+        const pz = posAttr.getZ(vi);
+        // Slow rolling wave of brightness
+        const wave = Math.sin(t * 0.6 + px * 0.3 + pz * 0.2) * 0.04
+                   + Math.sin(t * 1.1 + px * 0.15 - pz * 0.4) * 0.02;
+        colorAttr.setXYZ(
+          vi,
+          base[vi * 3]     + wave,
+          base[vi * 3 + 1] + wave * 1.3, // green shifts more
+          base[vi * 3 + 2] + wave * 0.5,
+        );
+      }
+      colorAttr.needsUpdate = true;
+    }
+
+    // ── Portals: spin + pulse ──
     for (const p of this.portalMeshes) {
       p.rotation.z += dt * 0.8;
-      (p.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(this.elapsed * 2) * 0.2;
+      (p.material as THREE.MeshBasicMaterial).opacity = 0.5 + Math.sin(t * 2) * 0.2;
     }
   }
 
@@ -245,6 +313,11 @@ export class TerrainRenderer {
     }
     this.waterMeshes = [];
     this.portalMeshes = [];
+    this.canopyMeshes = [];
+    this.bushMeshes = [];
+    this.groundMesh = null;
+    this.baseColors = null;
+    this.grassIndices = [];
     this.elevationData = [];
     this.built = false;
   }
