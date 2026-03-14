@@ -4,6 +4,7 @@ import { getEntity } from "../world/zoneRuntime.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { saveCharacter, getProfessionsForWallet } from "../character/characterStore.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold } from "../blockchain/currency.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
@@ -118,10 +119,25 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       // fall back to the persisted character data in Redis
       if (learned.length === 0) {
         const fromRedis = await getProfessionsForWallet(walletAddress);
-        // Restore into memory so future calls are fast
         if (fromRedis.length > 0) {
           restoreProfessions(walletAddress, fromRedis);
           learned = getLearnedProfessions(walletAddress);
+        }
+      }
+
+      // If still empty, this might be an owner wallet — check the custodial wallet
+      // (agents learn professions under their custodial address)
+      if (learned.length === 0) {
+        const custodial = await getAgentCustodialWallet(walletAddress);
+        if (custodial) {
+          learned = getLearnedProfessions(custodial);
+          if (learned.length === 0) {
+            const fromRedis = await getProfessionsForWallet(custodial);
+            if (fromRedis.length > 0) {
+              restoreProfessions(custodial, fromRedis);
+              learned = getLearnedProfessions(custodial);
+            }
+          }
         }
       }
 
