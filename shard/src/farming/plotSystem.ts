@@ -2,9 +2,15 @@
  * Plot System — land claiming, ownership, and management.
  * Each farmland zone has 8-12 fixed plot positions.
  * Players can claim one plot at a time for gold.
+ *
+ * Three-layer persistence:
+ *   1. In-memory (fast read source)
+ *   2. Redis (survives server restarts)
+ *   3. On-chain ERC-721 (proof of ownership, fire-and-forget)
  */
 
-import { randomUUID } from "crypto";
+import { getRedis } from "../redis.js";
+import { claimPlotOnChain, releasePlotOnChain, transferPlotOnChain, updateBuildingOnChain } from "./plotChain.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -13,7 +19,7 @@ export interface PlotDefinition {
   zoneId: string;
   x: number;
   y: number;
-  /** Gold cost range [min, max] — actual cost is min for now */
+  /** Gold cost to claim */
   cost: number;
 }
 
@@ -28,6 +34,14 @@ export interface PlotState {
   buildingType: string | null;
   buildingStage: number; // 0 = empty, 1-4 = stages
 }
+
+// ── Redis key helpers ────────────────────────────────────────────────
+
+const PLOT_KEY_PREFIX = "plot:";
+const OWNER_KEY_PREFIX = "plot:owner:";
+
+function plotKey(plotId: string): string { return `${PLOT_KEY_PREFIX}${plotId}`; }
+function ownerKey(wallet: string): string { return `${OWNER_KEY_PREFIX}${wallet.toLowerCase()}`; }
 
 // ── Plot definitions per zone ────────────────────────────────────────
 
@@ -152,7 +166,7 @@ const PLOT_DEFS: PlotDefinition[] = [
 const plotStates = new Map<string, PlotState>();
 const ownerPlots = new Map<string, string>(); // walletAddress → plotId (one plot per player)
 
-/** Initialize plot states from definitions */
+/** Initialize plot states from definitions (defaults — no ownership) */
 function ensureInitialized(): void {
   if (plotStates.size > 0) return;
   for (const def of PLOT_DEFS) {
@@ -168,6 +182,72 @@ function ensureInitialized(): void {
       buildingStage: 0,
     });
   }
+}
+
+// ── Redis persistence ────────────────────────────────────────────────
+
+/** Persist a plot's ownership to Redis (fire-and-forget). */
+function persistPlotToRedis(state: PlotState): void {
+  const redis = getRedis();
+  if (!redis) return;
+  const fields: Record<string, string> = {
+    owner: state.owner ?? "",
+    ownerName: state.ownerName ?? "",
+    claimedAt: String(state.claimedAt ?? 0),
+    buildingType: state.buildingType ?? "",
+    buildingStage: String(state.buildingStage),
+    zoneId: state.zoneId,
+  };
+  redis.hset(plotKey(state.plotId), fields).catch((err: any) =>
+    console.warn(`[plots] Redis write failed for ${state.plotId}: ${err.message?.slice(0, 60)}`)
+  );
+  if (state.owner) {
+    redis.set(ownerKey(state.owner), state.plotId).catch(() => {});
+  }
+}
+
+/** Clear a plot's ownership from Redis (fire-and-forget). */
+function clearPlotInRedis(plotId: string, wallet: string): void {
+  const redis = getRedis();
+  if (!redis) return;
+  redis.del(plotKey(plotId)).catch(() => {});
+  redis.del(ownerKey(wallet)).catch(() => {});
+}
+
+/**
+ * Restore all plot ownership from Redis on boot.
+ * Call once during server startup before routes are registered.
+ */
+export async function initializePlotsFromRedis(): Promise<void> {
+  ensureInitialized();
+  const redis = getRedis();
+  if (!redis) {
+    console.log("[plots] No Redis — plots are in-memory only");
+    return;
+  }
+
+  let restored = 0;
+  for (const def of PLOT_DEFS) {
+    try {
+      const data = await redis.hgetall(plotKey(def.plotId));
+      if (data?.owner && data.owner !== "") {
+        const state = plotStates.get(def.plotId);
+        if (state) {
+          state.owner = data.owner;
+          state.ownerName = data.ownerName || null;
+          state.claimedAt = Number(data.claimedAt) || null;
+          state.buildingType = data.buildingType || null;
+          state.buildingStage = Number(data.buildingStage) || 0;
+          ownerPlots.set(data.owner, def.plotId);
+          restored++;
+        }
+      }
+    } catch (err: any) {
+      console.warn(`[plots] Redis read failed for ${def.plotId}: ${err.message?.slice(0, 60)}`);
+    }
+  }
+
+  console.log(`[plots] Restored ${restored} owned plots from Redis (${PLOT_DEFS.length} total)`);
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -209,7 +289,6 @@ export function claimPlot(
   ensureInitialized();
   const wallet = walletAddress.toLowerCase();
 
-  // Check if player already owns a plot
   if (ownerPlots.has(wallet)) {
     return { ok: false, error: "You already own a plot. Release it first." };
   }
@@ -222,6 +301,10 @@ export function claimPlot(
   state.ownerName = ownerName;
   state.claimedAt = Date.now();
   ownerPlots.set(wallet, plotId);
+
+  // Persist to Redis + chain
+  persistPlotToRedis(state);
+  void claimPlotOnChain(plotId, state.zoneId, state.x, state.y, wallet).catch(() => {});
 
   return { ok: true, plot: state };
 }
@@ -244,6 +327,11 @@ export function releasePlot(
   }
 
   ownerPlots.delete(wallet);
+
+  // Persist to Redis + chain
+  clearPlotInRedis(plotId, wallet);
+  void releasePlotOnChain(wallet).catch(() => {});
+
   return { ok: true, plotId };
 }
 
@@ -271,6 +359,11 @@ export function transferPlot(
   ownerPlots.delete(from);
   ownerPlots.set(to, plotId);
 
+  // Persist to Redis + chain
+  persistPlotToRedis(state);
+  clearPlotInRedis(plotId, from); // remove old owner key
+  void transferPlotOnChain(from, to).catch(() => {});
+
   return { ok: true };
 }
 
@@ -285,6 +378,10 @@ export function setPlotBuilding(
   if (!state) return;
   state.buildingType = buildingType;
   state.buildingStage = stage;
+
+  // Persist to Redis + chain
+  persistPlotToRedis(state);
+  void updateBuildingOnChain(plotId, buildingType ?? "", stage).catch(() => {});
 }
 
 /** Check if a wallet owns a specific plot */

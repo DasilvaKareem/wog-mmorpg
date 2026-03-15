@@ -757,6 +757,12 @@ const start = async () => {
     server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
 
+  // Restore plot ownership from Redis (land persists across restarts)
+  const { initializePlotsFromRedis } = await import("./farming/plotSystem.js");
+  await initializePlotsFromRedis().catch((err: any) => {
+    server.log.warn(`[plots] Plot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
   await Promise.race([
     initWorldMapStore(),
     new Promise<void>((_, reject) =>
@@ -775,10 +781,10 @@ const start = async () => {
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
 
-  // Agent boot restore disabled — agents deploy on demand via /agent/deploy.
-  // agentManager.restoreFromRedis().catch((err: any) => {
-  //   server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  // });
+  // Restore agents that were running before restart
+  agentManager.restoreFromRedis().catch((err: any) => {
+    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
 };
 
 // Graceful shutdown: stop all agent loops
