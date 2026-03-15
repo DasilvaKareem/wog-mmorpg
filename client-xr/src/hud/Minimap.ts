@@ -15,12 +15,13 @@ const TYPE_DOT_COLORS: Record<string, string> = {
 /**
  * Canvas-based minimap overlay in the top-right corner.
  * Shows entity dots on a dark background.
+ * In unified-world mode, the minimap shows a window around the camera.
  */
 export class Minimap {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
-  private zoneWidth = 640;
-  private zoneHeight = 640;
+  /** Visible range in server coords centered on camera */
+  private viewRange = 800;
 
   constructor() {
     this.canvas = document.createElement("canvas");
@@ -42,19 +43,25 @@ export class Minimap {
     this.ctx = this.canvas.getContext("2d")!;
   }
 
-  update(entities: Record<string, Entity>, cameraX?: number, cameraZ?: number) {
+  update(entities: Record<string, Entity>, cameraSX?: number, cameraSZ?: number) {
     const ctx = this.ctx;
-    const scale = SIZE / this.zoneWidth;
+    const cx = cameraSX ?? 320;
+    const cz = cameraSZ ?? 320;
+    const half = this.viewRange / 2;
 
     // Background
     ctx.fillStyle = "rgba(10, 12, 18, 0.85)";
     ctx.fillRect(0, 0, SIZE, SIZE);
 
-    // Entity dots
+    // Entity dots (positions in server coords)
     for (const ent of Object.values(entities)) {
+      const rx = ent.x - (cx - half);
+      const ry = ent.y - (cz - half);
+      if (rx < 0 || rx > this.viewRange || ry < 0 || ry > this.viewRange) continue;
+
+      const px = (rx / this.viewRange) * SIZE;
+      const py = (ry / this.viewRange) * SIZE;
       const color = TYPE_DOT_COLORS[ent.type] ?? "#666";
-      const px = ent.x * scale;
-      const py = ent.y * scale;
       const radius = ent.type === "boss" ? 3 : ent.type === "player" ? 2 : 1.5;
 
       ctx.beginPath();
@@ -63,13 +70,15 @@ export class Minimap {
       ctx.fill();
     }
 
-    // Camera indicator
-    if (cameraX !== undefined && cameraZ !== undefined) {
-      const cx = cameraX * scale;
-      const cy = cameraZ * scale;
-      ctx.strokeStyle = "rgba(255,255,255,0.4)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(cx - 15, cy - 10, 30, 20);
-    }
+    // Camera crosshair at center
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 1;
+    const mid = SIZE / 2;
+    ctx.beginPath();
+    ctx.moveTo(mid - 6, mid);
+    ctx.lineTo(mid + 6, mid);
+    ctx.moveTo(mid, mid - 6);
+    ctx.lineTo(mid, mid + 6);
+    ctx.stroke();
   }
 }

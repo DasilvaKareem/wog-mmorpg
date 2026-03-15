@@ -14,6 +14,9 @@ export class DesktopControls {
   private lastMouse = { x: 0, y: 0 };
   private keys = new Set<string>();
 
+  /** Optional collision check — return false to block movement */
+  collisionCheck: ((x: number, z: number) => boolean) | null = null;
+
   // Ground plane for click-to-move raycasting
   readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
@@ -37,16 +40,38 @@ export class DesktopControls {
     this.target.set(x, y, z);
   }
 
-  /** Per-frame update: handle WASD camera movement */
+  /** Get current orbit target position */
+  getTarget(): THREE.Vector3 {
+    return this.target;
+  }
+
+  /** Per-frame update: handle WASD camera movement with collision */
   update(dt: number) {
     const speed = 20 * dt;
     const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
-    if (this.keys.has("w") || this.keys.has("arrowup")) this.target.addScaledVector(forward, speed);
-    if (this.keys.has("s") || this.keys.has("arrowdown")) this.target.addScaledVector(forward, -speed);
-    if (this.keys.has("a") || this.keys.has("arrowleft")) this.target.addScaledVector(right, -speed);
-    if (this.keys.has("d") || this.keys.has("arrowright")) this.target.addScaledVector(right, speed);
+    // Accumulate desired movement
+    let moveX = 0;
+    let moveZ = 0;
+
+    if (this.keys.has("w") || this.keys.has("arrowup")) { moveX += forward.x * speed; moveZ += forward.z * speed; }
+    if (this.keys.has("s") || this.keys.has("arrowdown")) { moveX -= forward.x * speed; moveZ -= forward.z * speed; }
+    if (this.keys.has("a") || this.keys.has("arrowleft")) { moveX -= right.x * speed; moveZ -= right.z * speed; }
+    if (this.keys.has("d") || this.keys.has("arrowright")) { moveX += right.x * speed; moveZ += right.z * speed; }
+
+    if (moveX !== 0 || moveZ !== 0) {
+      if (this.collisionCheck) {
+        // Try X and Z independently for wall sliding
+        const canX = this.collisionCheck(this.target.x + moveX, this.target.z);
+        const canZ = this.collisionCheck(this.target.x, this.target.z + moveZ);
+        if (canX) this.target.x += moveX;
+        if (canZ) this.target.z += moveZ;
+      } else {
+        this.target.x += moveX;
+        this.target.z += moveZ;
+      }
+    }
 
     this.updateCamera();
   }

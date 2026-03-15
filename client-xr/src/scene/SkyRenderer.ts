@@ -3,6 +3,7 @@ import type { GameTime } from "../types.js";
 
 /**
  * Day/night sky + directional lighting + fog color sync.
+ * Uses a cubemap skybox for the daytime sky and tints it per time-of-day.
  */
 export class SkyRenderer {
   readonly ambientLight: THREE.AmbientLight;
@@ -17,6 +18,8 @@ export class SkyRenderer {
 
   private ambientLevels = { dawn: 0.5, day: 0.8, dusk: 0.4, night: 0.15 };
   private sunLevels = { dawn: 0.6, day: 1.0, dusk: 0.5, night: 0.05 };
+
+  private cubeTexture: THREE.CubeTexture | null = null;
 
   constructor(private scene: THREE.Scene) {
     this.ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -35,7 +38,27 @@ export class SkyRenderer {
     this.sunLight.shadow.camera.bottom = -d;
     scene.add(this.sunLight);
 
+    // Load skybox immediately — use color fallback until it's ready
     scene.background = this.skyColors.day.clone();
+    this.loadSkybox();
+  }
+
+  private loadSkybox() {
+    const loader = new THREE.CubeTextureLoader();
+    const base = import.meta.env.BASE_URL + "skybox/";
+    loader.setPath(base);
+    loader.load(
+      ["px.png", "nx.png", "py.png", "ny.png", "pz.png", "nz.png"],
+      (texture) => {
+        console.log("Skybox loaded successfully");
+        this.cubeTexture = texture;
+        this.scene.background = texture;
+      },
+      undefined,
+      (err) => {
+        console.warn("Skybox failed to load, falling back to color:", err);
+      }
+    );
   }
 
   update(gameTime: GameTime | undefined) {
@@ -43,12 +66,11 @@ export class SkyRenderer {
 
     const phase = gameTime.phase;
     const targetSky = this.skyColors[phase] ?? this.skyColors.day;
-    const bg = this.scene.background as THREE.Color;
-    bg.lerp(targetSky, 0.02);
 
-    // Sync fog color to sky
+    // Sync fog color to sky tint
+    const fogTarget = targetSky.clone();
     if (this.scene.fog instanceof THREE.FogExp2) {
-      this.scene.fog.color.copy(bg);
+      this.scene.fog.color.lerp(fogTarget, 0.02);
     }
 
     // Ambient + sun intensity
@@ -71,5 +93,17 @@ export class SkyRenderer {
       Math.sin(angle) * 60 + 20,
       30
     );
+
+    // Always keep skybox as background if loaded — lighting handles mood
+    if (this.cubeTexture) {
+      if (this.scene.background !== this.cubeTexture) {
+        this.scene.background = this.cubeTexture;
+      }
+    } else {
+      // No skybox loaded yet — use color fallback
+      if (this.scene.background instanceof THREE.Color) {
+        this.scene.background.lerp(targetSky, 0.02);
+      }
+    }
   }
 }

@@ -1,6 +1,5 @@
 import * as THREE from "three";
-import type { Entity } from "../types.js";
-import type { TerrainRenderer } from "./TerrainRenderer.js";
+import type { Entity, ElevationProvider } from "../types.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
 
@@ -520,7 +519,9 @@ const flowerGeo = new THREE.ConeGeometry(0.2, 0.5, 5);
 const stationGeo = new THREE.BoxGeometry(0.6, 0.5, 0.6);
 const gateGeo = new THREE.BoxGeometry(0.8, 1.8, 0.3);
 const legGeo = new THREE.CapsuleGeometry(0.08, 0.35, 3, 6);
+const thighGeo = new THREE.CapsuleGeometry(0.09, 0.15, 3, 6);
 const armGeo = new THREE.CapsuleGeometry(0.055, 0.3, 3, 6);
+const shoulderJointGeo = new THREE.SphereGeometry(0.07, 5, 4);
 const handGeo = new THREE.SphereGeometry(0.06, 5, 4);
 const hpBarBgGeo = new THREE.PlaneGeometry(0.6, 0.06);
 const hpBarFgGeo = new THREE.PlaneGeometry(0.58, 0.04);
@@ -566,14 +567,12 @@ function makeFloatingText(text: string, color: string): THREE.Sprite {
   return sprite;
 }
 
+import { CharacterRig } from "./CharacterRig.js";
+import { AnimationLibrary } from "./AnimationLibrary.js";
+
 // ── Animation types ─────────────────────────────────────────────────
 
-interface ActiveAnim {
-  type: "attack" | "damage" | "death" | "heal" | "ability" | "gather" | "craft";
-  elapsed: number;
-  duration: number;
-  data?: any;
-}
+type AnimName = "walk" | "idle" | "attack" | "damage" | "heal" | "death" | "gather" | "craft";
 
 interface FloatingText {
   sprite: THREE.Sprite;
@@ -587,7 +586,7 @@ interface EntityObject {
   group: THREE.Group;
   targetX: number;
   targetZ: number;
-  prevTargetX: number;  // previous tick's target (for velocity estimation)
+  prevTargetX: number;
   prevTargetZ: number;
   prevX: number;
   prevZ: number;
@@ -596,47 +595,42 @@ interface EntityObject {
   hpBarBg: THREE.Mesh | null;
   entity: Entity;
   prevHp: number;
-  anims: ActiveAnim[];
   bodyMesh: THREE.Mesh | null;
   headMesh: THREE.Mesh | null;
-  walkPhase: number;        // 0-2PI cycling walk animation
-  idleTime: number;         // seconds spent idle (for idle anim progression)
-  isMoving: boolean;        // smoothed moving flag for walk anim
-  movingSmooth: number;     // 0→1 blend for walk cycle fade in/out
+  isMoving: boolean;
+  movingSmooth: number;
+  // Rig + animation
+  rig: CharacterRig | null;
+  mixer: THREE.AnimationMixer | null;
+  actions: Map<string, THREE.AnimationAction>;
+  currentAnim: AnimName | null;
+  /** Bones needed for old-style references (armor attach, etc.) */
   leftLeg: THREE.Mesh | null;
   rightLeg: THREE.Mesh | null;
-  leftArm: THREE.Group | null;
-  rightArm: THREE.Group | null;
+  leftArm: THREE.Group | null;   // kept as alias → rig L_Shoulder bone
+  rightArm: THREE.Group | null;  // kept as alias → rig R_Shoulder bone
 }
 
 export class EntityManager {
   readonly group = new THREE.Group();
   private entities = new Map<string, EntityObject>();
   private floatingTexts: FloatingText[] = [];
-  private zoneOffsetX = 0;
-  private zoneOffsetZ = 0;
-  private terrainRef: TerrainRenderer | null = null;
+  private elevationProvider: ElevationProvider | null = null;
 
   constructor() {
     this.group.name = "entities";
   }
 
-  /** Link to terrain so entities can sample elevation */
-  setTerrain(t: TerrainRenderer) {
-    this.terrainRef = t;
+  /** Link to an elevation provider (WorldManager or TerrainRenderer) */
+  setElevationProvider(ep: ElevationProvider) {
+    this.elevationProvider = ep;
   }
 
-  /** Set zone world-space offset (from /world/layout) */
-  setZoneOffset(x: number, z: number) {
-    this.zoneOffsetX = x;
-    this.zoneOffsetZ = z;
-  }
-
-  /** Convert server world coords to zone-local 3D coords */
+  /** Convert server world coords to 3D world coords */
   private toLocal(serverX: number, serverY: number): { x: number; z: number } {
     return {
-      x: (serverX - this.zoneOffsetX) * COORD_SCALE,
-      z: (serverY - this.zoneOffsetZ) * COORD_SCALE,
+      x: serverX * COORD_SCALE,
+      z: serverY * COORD_SCALE,
     };
   }
 
@@ -715,11 +709,9 @@ export class EntityManager {
 
       if (dist > 0.01) {
         if (dist <= step) {
-          // Close enough — snap
           g.position.x = obj.targetX;
           g.position.z = obj.targetZ;
         } else {
-          // Move at constant speed toward target
           const f = step / dist;
           g.position.x += toX * f;
           g.position.z += toZ * f;
@@ -727,8 +719,8 @@ export class EntityManager {
       }
 
       // Sample terrain elevation so entities sit on the ground
-      if (this.terrainRef) {
-        const targetY = this.terrainRef.getElevationAt(g.position.x, g.position.z);
+      if (this.elevationProvider) {
+        const targetY = this.elevationProvider.getElevationAt(g.position.x, g.position.z);
         g.position.y += (targetY - g.position.y) * Math.min(8 * dt, 1);
       }
 
@@ -742,85 +734,31 @@ export class EntityManager {
       const targetBlend = obj.isMoving ? 1 : 0;
       obj.movingSmooth += (targetBlend - obj.movingSmooth) * Math.min(8 * dt, 1);
 
-      // Only update yaw if actually moving (threshold avoids jitter when stationary)
+      // Only update yaw if actually moving
       if (moveDist > 0.001) {
         obj.targetYaw = Math.atan2(dx, dz);
       }
 
-      // Smooth yaw rotation (shortest path)
-      if (!obj.anims.some(a => a.type === "attack" || a.type === "death")) {
+      // Smooth yaw rotation (shortest path) — skip during attack/death
+      const curAnim = obj.currentAnim;
+      if (curAnim !== "attack" && curAnim !== "death") {
         let yawDiff = obj.targetYaw - g.rotation.y;
         while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
         while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
         g.rotation.y += yawDiff * Math.min(10 * dt, 1);
       }
 
-      // ── Walk cycle / Idle animation ──
-      const hasLimbs = obj.leftLeg || obj.bodyMesh;
-      if (obj.movingSmooth > 0.01 && hasLimbs) {
-        // Walking
-        obj.idleTime = 0;
-        obj.walkPhase += dt * 10;
-        const swing = Math.sin(obj.walkPhase) * 0.4 * obj.movingSmooth;
-
-        if (obj.leftLeg && obj.rightLeg) {
-          obj.leftLeg.rotation.x = swing;
-          obj.rightLeg.rotation.x = -swing;
+      // ── Animation blending via mixer ──
+      if (obj.mixer && obj.rig) {
+        // Pick the right locomotion animation
+        const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "idle";
+        if (!isOneShot) {
+          const wantAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          if (curAnim !== wantAnim) {
+            this.playAnimation(obj, wantAnim, true);
+          }
         }
-        if (obj.leftArm && obj.rightArm) {
-          obj.leftArm.rotation.x = -swing * 0.7;
-          obj.rightArm.rotation.x = swing * 0.7;
-        }
-        if (obj.bodyMesh) {
-          obj.bodyMesh.position.y = 0.8 + Math.abs(Math.sin(obj.walkPhase * 2)) * 0.03 * obj.movingSmooth;
-        }
-        // Reset head to forward during walk
-        if (obj.headMesh) {
-          obj.headMesh.rotation.y *= 0.85;
-          obj.headMesh.rotation.x *= 0.85;
-        }
-      } else if (hasLimbs) {
-        // Idle — accumulate idle time
-        obj.idleTime += dt;
-        const it = obj.idleTime;
-
-        // Smoothly return walk pose to rest
-        if (obj.leftLeg && obj.rightLeg) {
-          obj.leftLeg.rotation.x *= 0.85;
-          obj.rightLeg.rotation.x *= 0.85;
-        }
-        if (obj.leftArm) obj.leftArm.rotation.x *= 0.85;
-        if (obj.rightArm) obj.rightArm.rotation.x *= 0.85;
-
-        // ── Breathing: body + scale pulse ──
-        if (obj.bodyMesh) {
-          const breath = Math.sin(it * 1.8) * 0.015;
-          obj.bodyMesh.position.y = 0.8 + breath;
-          obj.bodyMesh.scale.z = 1 + Math.sin(it * 1.8) * 0.012; // chest expansion
-        }
-
-        // ── Weight shift: subtle side-to-side sway ──
-        if (obj.leftLeg && obj.rightLeg) {
-          const shift = Math.sin(it * 0.5) * 0.03;
-          obj.leftLeg.rotation.z = shift;
-          obj.rightLeg.rotation.z = shift;
-        }
-
-        // ── Head look-around (slow, periodic) ──
-        if (obj.headMesh) {
-          // Slow yaw sweep + occasional glance
-          const yaw = Math.sin(it * 0.4) * 0.25 + Math.sin(it * 1.1) * 0.1;
-          const pitch = Math.sin(it * 0.3 + 0.5) * 0.08;
-          obj.headMesh.rotation.y += (yaw - obj.headMesh.rotation.y) * Math.min(3 * dt, 1);
-          obj.headMesh.rotation.x += (pitch - obj.headMesh.rotation.x) * Math.min(3 * dt, 1);
-        }
-
-        // ── Arm idle fidget (very subtle) ──
-        if (obj.leftArm && obj.rightArm) {
-          const armSway = Math.sin(it * 0.7) * 0.06;
-          obj.leftArm.rotation.z += (armSway - obj.leftArm.rotation.z) * Math.min(4 * dt, 1);
-          obj.rightArm.rotation.z += (-armSway - obj.rightArm.rotation.z) * Math.min(4 * dt, 1);
-        }
+        obj.mixer.update(dt);
       }
 
       // Billboard HP bars toward camera
@@ -828,20 +766,30 @@ export class EntityManager {
         obj.hpBarBg.lookAt(camera.position);
         obj.hpBarFg!.lookAt(camera.position);
       }
+    }
 
-      // Process animations
-      for (let i = obj.anims.length - 1; i >= 0; i--) {
-        const anim = obj.anims[i];
-        anim.elapsed += dt;
-        const t = anim.elapsed / anim.duration;
-
-        if (t >= 1) {
-          this.resetAnim(obj, anim);
-          obj.anims.splice(i, 1);
-          continue;
+    // ── Entity push-apart (prevent visual overlap) ──
+    const entArr = Array.from(this.entities.values());
+    const PUSH_RADIUS = 0.6;
+    const PUSH_STRENGTH = 3.0;
+    for (let i = 0; i < entArr.length; i++) {
+      const a = entArr[i];
+      for (let j = i + 1; j < entArr.length; j++) {
+        const b = entArr[j];
+        const dx = a.group.position.x - b.group.position.x;
+        const dz = a.group.position.z - b.group.position.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < PUSH_RADIUS * PUSH_RADIUS && distSq > 0.0001) {
+          const dist = Math.sqrt(distSq);
+          const overlap = PUSH_RADIUS - dist;
+          const nx = dx / dist;
+          const nz = dz / dist;
+          const push = overlap * PUSH_STRENGTH * dt;
+          a.group.position.x += nx * push * 0.5;
+          a.group.position.z += nz * push * 0.5;
+          b.group.position.x -= nx * push * 0.5;
+          b.group.position.z -= nz * push * 0.5;
         }
-
-        this.applyAnim(obj, anim, t);
       }
     }
 
@@ -849,7 +797,7 @@ export class EntityManager {
     for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
       const ft = this.floatingTexts[i];
       ft.elapsed += dt;
-      const t = ft.elapsed / 1.2; // 1.2s lifetime
+      const t = ft.elapsed / 1.2;
       ft.sprite.position.y = ft.startY + t * 2;
       (ft.sprite.material as THREE.SpriteMaterial).opacity = 1 - t;
       if (t >= 1) {
@@ -857,6 +805,55 @@ export class EntityManager {
         this.floatingTexts.splice(i, 1);
       }
     }
+  }
+
+  // ── Animation playback helpers ──────────────────────────────────────
+
+  private playAnimation(obj: EntityObject, name: AnimName, loop: boolean, onFinish?: () => void) {
+    if (!obj.mixer) return;
+
+    // Get or create the action
+    let action = obj.actions.get(name);
+    if (!action) {
+      const clip = AnimationLibrary.get(name);
+      if (!clip) return;
+      action = obj.mixer.clipAction(clip);
+      obj.actions.set(name, action);
+    }
+
+    action.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
+    action.clampWhenFinished = !loop;
+
+    // Crossfade from current
+    const current = obj.currentAnim ? obj.actions.get(obj.currentAnim) : null;
+    if (current && current !== action) {
+      action.reset();
+      action.play();
+      current.crossFadeTo(action, 0.15, true);
+    } else {
+      action.reset();
+      action.play();
+    }
+
+    obj.currentAnim = name;
+
+    // One-shot: return to idle/walk when done
+    if (!loop) {
+      const mixer = obj.mixer;
+      const handler = (e: { action: THREE.AnimationAction }) => {
+        if (e.action !== action) return;
+        mixer.removeEventListener("finished", handler);
+        onFinish?.();
+        // Return to locomotion
+        const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+        this.playAnimation(obj, nextAnim, true);
+      };
+      mixer.addEventListener("finished", handler);
+    }
+  }
+
+  private playOneShot(obj: EntityObject, name: AnimName, onFinish?: () => void) {
+    this.playAnimation(obj, name, false, onFinish);
   }
 
   getEntityAt(intersects: THREE.Intersection[]): Entity | null {
@@ -875,7 +872,25 @@ export class EntityManager {
   // ── Animation triggers ────────────────────────────────────────────
 
   private triggerDamage(obj: EntityObject, amount: number) {
-    obj.anims.push({ type: "damage", elapsed: 0, duration: 0.5 });
+    this.playOneShot(obj, "damage");
+
+    // Flash body emissive
+    if (obj.bodyMesh) {
+      const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
+      if (mat.emissive) {
+        mat.emissive.setHex(0xff2200);
+        mat.emissiveIntensity = 0.7;
+        // Fade out over 0.5s
+        const startTime = performance.now();
+        const fadeEmissive = () => {
+          const elapsed = (performance.now() - startTime) / 500;
+          if (elapsed >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+          mat.emissiveIntensity = 0.7 * (1 - elapsed);
+          requestAnimationFrame(fadeEmissive);
+        };
+        requestAnimationFrame(fadeEmissive);
+      }
+    }
 
     // Floating damage number
     const ft = makeFloatingText(`-${amount}`, "#ff4444");
@@ -890,15 +905,37 @@ export class EntityManager {
       const dx = other.group.position.x - obj.group.position.x;
       const dz = other.group.position.z - obj.group.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < 3 && !other.anims.some(a => a.type === "attack")) {
-        other.anims.push({ type: "attack", elapsed: 0, duration: 0.55, data: { targetPos: obj.group.position.clone() } });
+      if (dist < 3 && other.currentAnim !== "attack") {
+        // Face target then attack
+        other.targetYaw = Math.atan2(
+          obj.group.position.x - other.group.position.x,
+          obj.group.position.z - other.group.position.z,
+        );
+        this.playOneShot(other, "attack");
         break;
       }
     }
   }
 
   private triggerHeal(obj: EntityObject, amount: number) {
-    obj.anims.push({ type: "heal", elapsed: 0, duration: 0.8 });
+    this.playOneShot(obj, "heal");
+
+    // Green glow
+    if (obj.bodyMesh) {
+      const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
+      if (mat.emissive) {
+        mat.emissive.setHex(0x44ff66);
+        mat.emissiveIntensity = 0.6;
+        const startTime = performance.now();
+        const fadeEmissive = () => {
+          const elapsed = (performance.now() - startTime) / 800;
+          if (elapsed >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+          mat.emissiveIntensity = 0.6 * (1 - elapsed);
+          requestAnimationFrame(fadeEmissive);
+        };
+        requestAnimationFrame(fadeEmissive);
+      }
+    }
 
     const ft = makeFloatingText(`+${amount}`, "#44ff66");
     ft.position.set(0, 2.0, 0);
@@ -907,289 +944,36 @@ export class EntityManager {
   }
 
   private triggerDeath(obj: EntityObject) {
-    obj.anims.push({ type: "death", elapsed: 0, duration: 1.5 });
+    this.playOneShot(obj, "death", () => {
+      // Fade out after death anim completes
+      obj.group.traverse((child) => {
+        if ((child as THREE.Mesh).material) {
+          const mat = (child as THREE.Mesh).material as THREE.Material;
+          mat.transparent = true;
+          mat.opacity = 0.3;
+        }
+      });
+    });
   }
 
   /** Trigger gather/craft anims from zone events */
   processEvents(events: import("../types.js").ZoneEvent[]) {
     for (const ev of events) {
-      // Gathering: loot events with gatherType data
       if (ev.type === "loot" && ev.entityId && ev.data?.gatherType) {
         const obj = this.entities.get(ev.entityId);
-        if (obj && !obj.anims.some(a => a.type === "gather")) {
-          obj.anims.push({ type: "gather", elapsed: 0, duration: 1.8 });
+        if (obj && obj.currentAnim !== "gather") {
+          this.playOneShot(obj, "gather");
         }
       }
-      // Crafting: loot events at crafting stations (or craft type)
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
-        if (obj && !obj.anims.some(a => a.type === "craft")) {
-          obj.anims.push({ type: "craft", elapsed: 0, duration: 2.0 });
+        if (obj && obj.currentAnim !== "craft") {
+          this.playOneShot(obj, "craft");
         }
       }
     }
   }
 
-  /** Apply animation at progress t (0-1) */
-  private applyAnim(obj: EntityObject, anim: ActiveAnim, t: number) {
-    switch (anim.type) {
-      case "attack": {
-        const targetPos = anim.data?.targetPos as THREE.Vector3 | undefined;
-        if (!targetPos) break;
-
-        const dx = targetPos.x - obj.group.position.x;
-        const dz = targetPos.z - obj.group.position.z;
-        const len = Math.sqrt(dx * dx + dz * dz) || 1;
-        const dirX = dx / len;
-        const dirZ = dz / len;
-
-        // Face target
-        obj.group.rotation.y = Math.atan2(dx, dz);
-
-        // Phase 1 (0-0.2): Wind up — lean back, raise right arm
-        // Phase 2 (0.2-0.45): Lunge + slash — burst forward, swing arm down
-        // Phase 3 (0.45-0.7): Impact hold — slight bounce, body tense
-        // Phase 4 (0.7-1.0): Recovery — return to idle
-        if (t < 0.2) {
-          const p = t / 0.2;
-          if (obj.bodyMesh) {
-            obj.bodyMesh.rotation.x = p * 0.3; // lean back
-            obj.bodyMesh.position.x = -dirX * p * 0.1;
-            obj.bodyMesh.position.z = -dirZ * p * 0.1;
-          }
-          if (obj.rightArm) obj.rightArm.rotation.x = -p * 1.8; // arm back
-          if (obj.leftArm) obj.leftArm.rotation.x = p * 0.3; // brace
-        } else if (t < 0.45) {
-          const p = (t - 0.2) / 0.25;
-          const strike = Math.sin(p * Math.PI * 0.5); // ease-in
-          if (obj.bodyMesh) {
-            obj.bodyMesh.rotation.x = 0.3 - strike * 0.9; // whip forward
-            obj.bodyMesh.position.x = dirX * strike * 0.5;
-            obj.bodyMesh.position.z = dirZ * strike * 0.5;
-          }
-          if (obj.rightArm) obj.rightArm.rotation.x = -1.8 + strike * 2.8; // slash down
-          if (obj.leftArm) obj.leftArm.rotation.x = 0.3 - strike * 0.5;
-        } else if (t < 0.7) {
-          const p = (t - 0.45) / 0.25;
-          const bounce = Math.sin(p * Math.PI) * 0.15;
-          if (obj.bodyMesh) {
-            obj.bodyMesh.rotation.x = -0.6 + bounce;
-            obj.bodyMesh.position.x = dirX * (0.5 - p * 0.2);
-            obj.bodyMesh.position.z = dirZ * (0.5 - p * 0.2);
-          }
-          if (obj.rightArm) obj.rightArm.rotation.x = 1.0 - bounce * 2;
-        } else {
-          const p = (t - 0.7) / 0.3;
-          if (obj.bodyMesh) {
-            obj.bodyMesh.rotation.x = (-0.6 + 0.15) * (1 - p);
-            obj.bodyMesh.position.x = dirX * 0.3 * (1 - p);
-            obj.bodyMesh.position.z = dirZ * 0.3 * (1 - p);
-          }
-          if (obj.rightArm) obj.rightArm.rotation.x = 1.0 * (1 - p);
-          if (obj.leftArm) obj.leftArm.rotation.x = -0.2 * (1 - p);
-        }
-        break;
-      }
-
-      case "damage": {
-        if (!obj.bodyMesh) break;
-        // Phase 1 (0-0.15): Impact — flash white, jolt backward
-        // Phase 2 (0.15-0.5): Stagger — shake violently, red tint
-        // Phase 3 (0.5-1.0): Recovery — fade back to normal
-        const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
-
-        if (t < 0.15) {
-          const p = t / 0.15;
-          // White flash on impact
-          if (mat.emissive) {
-            mat.emissive.setHex(0xffffff);
-            mat.emissiveIntensity = (1 - p) * 1.0;
-          }
-          // Jolt backward
-          obj.bodyMesh.rotation.x = p * 0.4;
-          obj.bodyMesh.position.z = -p * 0.15;
-        } else if (t < 0.5) {
-          const p = (t - 0.15) / 0.35;
-          // Violent shake that decays
-          const shake = Math.sin(t * Math.PI * 14) * (1 - p) * 0.12;
-          obj.bodyMesh.position.x = shake;
-          obj.bodyMesh.position.z = -0.15 * (1 - p);
-          obj.bodyMesh.rotation.x = 0.4 * (1 - p);
-          // Red tint
-          if (mat.emissive) {
-            mat.emissive.setHex(0xff2200);
-            mat.emissiveIntensity = (1 - p) * 0.7;
-          }
-          // Stagger arms outward
-          if (obj.leftArm) obj.leftArm.rotation.x = -0.5 * (1 - p);
-          if (obj.rightArm) obj.rightArm.rotation.x = -0.5 * (1 - p);
-          if (obj.leftArm) obj.leftArm.rotation.z = -0.3 * (1 - p);
-          if (obj.rightArm) obj.rightArm.rotation.z = 0.3 * (1 - p);
-        } else {
-          const p = (t - 0.5) / 0.5;
-          obj.bodyMesh.position.x = 0;
-          obj.bodyMesh.position.z = 0;
-          obj.bodyMesh.rotation.x = 0;
-          if (mat.emissive) {
-            mat.emissive.setHex(0xff0000);
-            mat.emissiveIntensity = (1 - p) * 0.2;
-          }
-          if (obj.leftArm) { obj.leftArm.rotation.x = 0; obj.leftArm.rotation.z = 0; }
-          if (obj.rightArm) { obj.rightArm.rotation.x = 0; obj.rightArm.rotation.z = 0; }
-        }
-        break;
-      }
-
-      case "heal": {
-        if (!obj.bodyMesh) break;
-        const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
-        // Rising glow with arms spread upward
-        const pulse = Math.sin(t * Math.PI * 3) * 0.5 + 0.5;
-        if (mat.emissive) {
-          mat.emissive.setHex(0x44ff66);
-          mat.emissiveIntensity = pulse * 0.6;
-        }
-        // Arms float up gently
-        const lift = Math.sin(t * Math.PI) * 0.8;
-        if (obj.leftArm) { obj.leftArm.rotation.x = -lift; obj.leftArm.rotation.z = -lift * 0.4; }
-        if (obj.rightArm) { obj.rightArm.rotation.x = -lift; obj.rightArm.rotation.z = lift * 0.4; }
-        // Slight float
-        obj.bodyMesh.position.y = 0.8 + Math.sin(t * Math.PI) * 0.1;
-        break;
-      }
-
-      case "death": {
-        // Phase 1 (0-0.3): Stagger — stumble, arms flail
-        // Phase 2 (0.3-0.7): Collapse — fall to knees then sideways
-        // Phase 3 (0.7-1.0): Fade out on the ground
-        if (t < 0.3) {
-          const p = t / 0.3;
-          obj.group.rotation.z = p * 0.2;
-          if (obj.bodyMesh) obj.bodyMesh.rotation.x = p * 0.3;
-          if (obj.leftArm) obj.leftArm.rotation.x = -p * 1.5;
-          if (obj.rightArm) obj.rightArm.rotation.x = -p * 1.2;
-          // Flash
-          obj.group.traverse((child) => {
-            const mesh = child as THREE.Mesh;
-            if (mesh.material && (mesh.material as THREE.MeshLambertMaterial).emissive) {
-              const m = mesh.material as THREE.MeshLambertMaterial;
-              m.emissive.setHex(0xff2200);
-              m.emissiveIntensity = (1 - p) * 0.5;
-            }
-          });
-        } else if (t < 0.7) {
-          const p = (t - 0.3) / 0.4;
-          // Topple sideways
-          obj.group.rotation.z = 0.2 + p * (Math.PI / 2 - 0.2);
-          obj.group.position.y = -p * 0.6;
-          obj.group.scale.setScalar(1 - p * 0.15);
-          if (obj.leftArm) obj.leftArm.rotation.x = -1.5 * (1 - p * 0.5);
-          if (obj.rightArm) obj.rightArm.rotation.x = -1.2 * (1 - p * 0.5);
-          if (obj.leftLeg) obj.leftLeg.rotation.x = p * 0.5;
-          if (obj.rightLeg) obj.rightLeg.rotation.x = -p * 0.3;
-        } else {
-          const p = (t - 0.7) / 0.3;
-          // Lying on ground, fade out
-          obj.group.rotation.z = Math.PI / 2;
-          obj.group.position.y = -0.6;
-          obj.group.scale.setScalar(0.85);
-          obj.group.traverse((child) => {
-            if ((child as THREE.Mesh).material) {
-              const mat = (child as THREE.Mesh).material as THREE.Material;
-              mat.transparent = true;
-              mat.opacity = 1 - p;
-            }
-          });
-        }
-        break;
-      }
-
-      case "gather": {
-        // Bend over, reach down with right arm, pull up
-        // Phase 1 (0-0.4): Bend down — torso tilts, arm reaches to ground
-        // Phase 2 (0.4-0.7): Hold — small arm wobble (pulling/picking)
-        // Phase 3 (0.7-1.0): Stand up — return with item
-        if (t < 0.4) {
-          const p = t / 0.4;
-          const ease = p * p; // ease-in
-          if (obj.bodyMesh) obj.bodyMesh.rotation.x = -ease * 1.0;
-          if (obj.rightArm) obj.rightArm.rotation.x = ease * 2.2;
-          if (obj.leftArm) obj.leftArm.rotation.x = ease * 0.5;
-          // Bend knees
-          if (obj.leftLeg) obj.leftLeg.rotation.x = ease * 0.4;
-          if (obj.rightLeg) obj.rightLeg.rotation.x = ease * 0.4;
-        } else if (t < 0.7) {
-          const p = (t - 0.4) / 0.3;
-          // Hold pose with small arm wobble
-          if (obj.bodyMesh) obj.bodyMesh.rotation.x = -1.0;
-          if (obj.rightArm) obj.rightArm.rotation.x = 2.2 + Math.sin(p * Math.PI * 4) * 0.15;
-          if (obj.leftArm) obj.leftArm.rotation.x = 0.5;
-          if (obj.leftLeg) obj.leftLeg.rotation.x = 0.4;
-          if (obj.rightLeg) obj.rightLeg.rotation.x = 0.4;
-        } else {
-          const p = (t - 0.7) / 0.3;
-          const ease = 1 - (1 - p) * (1 - p); // ease-out
-          if (obj.bodyMesh) obj.bodyMesh.rotation.x = -1.0 * (1 - ease);
-          if (obj.rightArm) obj.rightArm.rotation.x = 2.2 * (1 - ease);
-          if (obj.leftArm) obj.leftArm.rotation.x = 0.5 * (1 - ease);
-          if (obj.leftLeg) obj.leftLeg.rotation.x = 0.4 * (1 - ease);
-          if (obj.rightLeg) obj.rightLeg.rotation.x = 0.4 * (1 - ease);
-        }
-        break;
-      }
-
-      case "craft": {
-        // Hammering motion: body stays level, right arm swings up/down repeatedly
-        const cycle = (t * 4) % 1; // 4 hammer strikes over the duration
-        const swing = Math.sin(cycle * Math.PI);
-        if (obj.bodyMesh) obj.bodyMesh.rotation.x = -0.15; // slight lean forward
-        if (obj.rightArm) obj.rightArm.rotation.x = -1.0 + swing * 1.8; // arm up → down
-        if (obj.leftArm) obj.leftArm.rotation.x = 0.3; // brace arm
-        // Slight body bounce on each strike
-        if (obj.bodyMesh) obj.bodyMesh.position.y = 0.8 + (cycle > 0.4 && cycle < 0.6 ? 0.03 : 0);
-        break;
-      }
-    }
-  }
-
-  /** Reset entity after animation completes */
-  private resetAnim(obj: EntityObject, anim: ActiveAnim) {
-    switch (anim.type) {
-      case "attack":
-      case "gather":
-      case "craft":
-        if (obj.bodyMesh) {
-          obj.bodyMesh.rotation.x = 0;
-          obj.bodyMesh.position.x = 0;
-          obj.bodyMesh.position.z = 0;
-          obj.bodyMesh.position.y = 0.8;
-        }
-        if (obj.leftArm) { obj.leftArm.rotation.x = 0; obj.leftArm.rotation.z = 0; }
-        if (obj.rightArm) { obj.rightArm.rotation.x = 0; obj.rightArm.rotation.z = 0; }
-        if (obj.leftLeg) obj.leftLeg.rotation.x = 0;
-        if (obj.rightLeg) obj.rightLeg.rotation.x = 0;
-        break;
-      case "damage":
-      case "heal":
-        if (obj.bodyMesh) {
-          obj.bodyMesh.position.x = 0;
-          obj.bodyMesh.position.z = 0;
-          obj.bodyMesh.position.y = 0.8;
-          obj.bodyMesh.rotation.x = 0;
-          const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
-          if (mat.emissive) {
-            mat.emissive.setHex(0x000000);
-            mat.emissiveIntensity = 0;
-          }
-        }
-        if (obj.leftArm) { obj.leftArm.rotation.x = 0; obj.leftArm.rotation.z = 0; }
-        if (obj.rightArm) { obj.rightArm.rotation.x = 0; obj.rightArm.rotation.z = 0; }
-        break;
-      case "death":
-        // Leave dead
-        break;
-    }
-  }
 
   // ── Entity creation ───────────────────────────────────────────────
 
@@ -1198,7 +982,7 @@ export class EntityManager {
     group.userData.entityId = ent.id;
 
     const pos = this.toLocal(ent.x, ent.y);
-    const elev = this.terrainRef?.getElevationAt(pos.x, pos.z) ?? 0;
+    const elev = this.elevationProvider?.getElevationAt(pos.x, pos.z) ?? 0;
     group.position.set(pos.x, elev, pos.z);
 
     const info = ENTITY_STYLE[ent.type] ?? { color: 0x888888, style: "object" };
@@ -1208,6 +992,8 @@ export class EntityManager {
     let rightLeg: THREE.Mesh | null = null;
     let leftArm: THREE.Group | null = null;
     let rightArm: THREE.Group | null = null;
+    let rig: CharacterRig | null = null;
+    let mixer: THREE.AnimationMixer | null = null;
 
     switch (info.style) {
       case "humanoid": {
@@ -1220,6 +1006,7 @@ export class EntityManager {
         rightLeg = result.rightLeg;
         leftArm = result.leftArm;
         rightArm = result.rightArm;
+        rig = result.rig;
         break;
       }
       case "mob": {
@@ -1230,6 +1017,7 @@ export class EntityManager {
         rightLeg = result.rightLeg;
         leftArm = result.leftArm;
         rightArm = result.rightArm;
+        rig = result.rig;
         break;
       }
       case "resource":
@@ -1238,6 +1026,11 @@ export class EntityManager {
       case "object":
         this.buildObject(group, ent, info.color);
         break;
+    }
+
+    // Set up animation mixer if rigged
+    if (rig) {
+      mixer = new THREE.AnimationMixer(rig.rootBone);
     }
 
     // HP bar + label
@@ -1273,14 +1066,23 @@ export class EntityManager {
     return {
       group, targetX: pos.x, targetZ: pos.z, prevTargetX: pos.x, prevTargetZ: pos.z,
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
-      prevHp: ent.hp, anims: [], bodyMesh, headMesh, walkPhase: 0, idleTime: 0,
-      isMoving: false, movingSmooth: 0, leftLeg, rightLeg, leftArm, rightArm,
+      prevHp: ent.hp, bodyMesh, headMesh,
+      isMoving: false, movingSmooth: 0,
+      rig, mixer, actions: new Map(), currentAnim: null,
+      leftLeg, rightLeg, leftArm, rightArm,
     };
+  }
+
+  // ── Hair builder (bone-relative: Y=0 is head center) ─────────────
+
+  private buildHairOnBone(bone: THREE.Bone, style: string, mat: THREE.MeshLambertMaterial) {
+    // Offsets are relative to head bone (Y=0 at head center)
+    this.buildHair(bone, style, mat, 0);
   }
 
   // ── Hair builder (all 12 styles) ─────────────────────────────────
 
-  private buildHair(group: THREE.Group, style: string, mat: THREE.MeshLambertMaterial, headY: number) {
+  private buildHair(group: THREE.Object3D, style: string, mat: THREE.MeshLambertMaterial, headY: number) {
     switch (style) {
       case "short": {
         const h = new THREE.Mesh(hairShortGeo, mat);
@@ -1411,88 +1213,101 @@ export class EntityManager {
 
   // ── Player ────────────────────────────────────────────────────────
 
-  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group } {
+  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
     const skinHex = SKIN_COLORS[ent.skinColor ?? "medium"] ?? 0xd4a574;
     const classId = ent.classId ?? "warrior";
     const cls = CLASS_BODY[classId] ?? CLASS_BODY.warrior;
     const isFemale = ent.gender === "female";
 
     // Gender body modifiers
-    const gsx = isFemale ? 0.88 : 1.0;  // narrower shoulders
-    const gsy = isFemale ? 0.95 : 1.0;  // slightly shorter torso
+    const gsx = isFemale ? 0.88 : 1.0;
+    const gsy = isFemale ? 0.95 : 1.0;
     const gsz = isFemale ? 0.92 : 1.0;
-    const hipW = isFemale ? 0.12 : 0.1; // wider hip stance
+    const armScale = isFemale ? 0.9 : 1.0;
+    const headScale = isFemale ? 0.95 : 1.0;
 
-    // Legs (pivot at hip)
-    const legMat = new THREE.MeshLambertMaterial({ color: skinHex });
-    const leftLeg = new THREE.Mesh(legGeo, legMat);
-    leftLeg.position.set(-hipW, 0.35, 0);
-    if (isFemale) leftLeg.scale.set(0.9, 1.05, 0.9); // slimmer, slightly longer
-    group.add(leftLeg);
-    const rightLeg = new THREE.Mesh(legGeo, legMat);
-    rightLeg.position.set(hipW, 0.35, 0);
-    if (isFemale) rightLeg.scale.set(0.9, 1.05, 0.9);
-    group.add(rightLeg);
+    // ── Build skeleton ──
+    const rig = new CharacterRig({
+      shoulderWidth: 0.3 * cls.sx * gsx,
+      hipWidth: isFemale ? 0.12 : 0.1,
+      isFemale,
+    });
+    group.add(rig.rootBone);
 
+    // ── Attach visual meshes to bones ──
+
+    // Body → Chest bone
     const bodyMat = new THREE.MeshLambertMaterial({ color: cls.color });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.position.y = 0.8;
     body.scale.set(cls.sx * gsx, cls.sy * gsy, cls.sz * gsz);
     body.castShadow = true;
-    group.add(body);
+    rig.chest.add(body);
 
-    const headScale = isFemale ? 0.95 : 1.0;
+    // Head → Head bone
     const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: skinHex }));
-    head.position.y = isFemale ? 1.46 : 1.5;
     head.scale.setScalar(headScale);
-    group.add(head);
+    rig.head.add(head);
 
+    // Eyes → Head bone
     const eyeHex = EYE_COLORS[ent.eyeColor ?? "brown"] ?? 0x6b3a1f;
     const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
-    const eyeY = isFemale ? 1.49 : 1.53;
     for (const dx of [-0.08, 0.08]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(dx * headScale, eyeY, 0.17 * headScale);
-      group.add(eye);
+      eye.position.set(dx * headScale, 0.03, 0.17 * headScale);
+      rig.head.add(eye);
     }
 
-    // ── Hair (all 12 styles) ──
+    // Hair → Head bone
     const style = ent.hairStyle ?? "short";
     if (style !== "bald") {
       const hairHex = HAIR_COLORS[style] ?? 0x4a3728;
       const hairMat = new THREE.MeshLambertMaterial({ color: hairHex });
-      const headY = isFemale ? 1.46 : 1.5;
-      this.buildHair(group, style, hairMat, headY);
+      this.buildHairOnBone(rig.head, style, hairMat);
     }
 
-    // ── Arms + hands (pivot at shoulder) ──
+    // Legs → thigh on hip bones, shin on knee bones
+    const legMat = new THREE.MeshLambertMaterial({ color: skinHex });
+    const lThigh = new THREE.Mesh(thighGeo, legMat);
+    lThigh.position.y = -0.10;
+    if (isFemale) lThigh.scale.set(0.95, 1.05, 0.95);
+    rig.lHip.add(lThigh);
+    const rThigh = new THREE.Mesh(thighGeo, legMat);
+    rThigh.position.y = -0.10;
+    if (isFemale) rThigh.scale.set(0.95, 1.05, 0.95);
+    rig.rHip.add(rThigh);
+    const leftLeg = new THREE.Mesh(legGeo, legMat);
+    if (isFemale) leftLeg.scale.set(0.9, 1.05, 0.9);
+    leftLeg.position.y = -0.12;
+    rig.lKnee.add(leftLeg);
+    const rightLeg = new THREE.Mesh(legGeo, legMat);
+    if (isFemale) rightLeg.scale.set(0.9, 1.05, 0.9);
+    rightLeg.position.y = -0.12;
+    rig.rKnee.add(rightLeg);
+
+    // Arms + hands → shoulder/hand bones
     const skinMat = new THREE.MeshLambertMaterial({ color: skinHex });
-    const shoulderW = 0.3 * cls.sx * gsx;
-    const shoulderY = isFemale ? 1.12 : 1.15;
-    const armScale = isFemale ? 0.9 : 1.0;
 
-    // Left arm group — pivots at shoulder
-    const leftArm = new THREE.Group();
-    leftArm.position.set(-shoulderW, shoulderY, 0);
+    // Shoulder joints to bridge chest→arm gap
+    const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rig.lShoulder.add(lShoulderJoint);
+    const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rig.rShoulder.add(rShoulderJoint);
+
     const lUpperArm = new THREE.Mesh(armGeo, skinMat);
-    lUpperArm.position.y = -0.2; lUpperArm.scale.setScalar(armScale);
-    leftArm.add(lUpperArm);
+    lUpperArm.position.y = -0.15; lUpperArm.scale.setScalar(armScale);
+    rig.lArm.add(lUpperArm);
     const lHand = new THREE.Mesh(handGeo, skinMat);
-    lHand.position.y = -0.42 * armScale; lHand.scale.setScalar(armScale);
-    leftArm.add(lHand);
-    group.add(leftArm);
+    lHand.scale.setScalar(armScale);
+    rig.lHand.add(lHand);
 
-    // Right arm group — pivots at shoulder
-    const rightArm = new THREE.Group();
-    rightArm.position.set(shoulderW, shoulderY, 0);
     const rUpperArm = new THREE.Mesh(armGeo, skinMat);
-    rUpperArm.position.y = -0.2; rUpperArm.scale.setScalar(armScale);
-    rightArm.add(rUpperArm);
+    rUpperArm.position.y = -0.15; rUpperArm.scale.setScalar(armScale);
+    rig.rArm.add(rUpperArm);
     const rHand = new THREE.Mesh(handGeo, skinMat);
-    rHand.position.y = -0.42 * armScale; rHand.scale.setScalar(armScale);
-    rightArm.add(rHand);
+    rHand.scale.setScalar(armScale);
+    rig.rHand.add(rHand);
 
-    // Weapon attaches to right hand
+    // Weapon → right hand bone
     if (ent.equipment?.weapon) {
       const eq = ent.equipment.weapon;
       const wType = inferWeaponType(eq.name ?? "sword");
@@ -1502,136 +1317,177 @@ export class EntityManager {
       const wpn = buildWeaponMesh(wType, metalHex, emHex);
 
       if (wType === "bow") {
-        wpn.position.set(0, -0.35, -0.1);
+        wpn.position.set(0, -0.1, -0.1);
       } else if (wType === "staff") {
-        wpn.position.set(0, -0.05, 0); wpn.rotation.z = 0.05;
+        wpn.position.set(0, 0.2, 0); wpn.rotation.z = 0.05;
       } else {
-        wpn.position.set(0, -0.3, 0); wpn.rotation.z = -0.15;
+        wpn.position.set(0, -0.05, 0); wpn.rotation.z = -0.15;
       }
-      rightArm.add(wpn);
+      rig.rHand.add(wpn);
     }
-    group.add(rightArm);
 
     // Shield on left hand for paladin/warrior
     if (classId === "paladin" || classId === "warrior") {
       const s = new THREE.Mesh(shieldGeo, new THREE.MeshLambertMaterial({ color: cls.color }));
-      s.position.set(0, -0.32, 0.1);
-      leftArm.add(s);
+      s.position.set(0, -0.05, 0.1);
+      rig.lHand.add(s);
     }
+
+    // Alias arm bones as Groups for armor attachment compatibility
+    const leftArm = rig.lShoulder as unknown as THREE.Group;
+    const rightArm = rig.rShoulder as unknown as THREE.Group;
 
     // Procedural armor pieces
     addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg);
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── Mob ───────────────────────────────────────────────────────────
 
-  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group } {
+  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
     const isBoss = ent.type === "boss";
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
 
     const mat = new THREE.MeshLambertMaterial({ color });
 
-    // Legs
-    const leftLeg = new THREE.Mesh(legGeo, mat);
-    leftLeg.position.set(-0.12 * s, 0.3 * s, 0); leftLeg.scale.setScalar(s);
-    group.add(leftLeg);
-    const rightLeg = new THREE.Mesh(legGeo, mat);
-    rightLeg.position.set(0.12 * s, 0.3 * s, 0); rightLeg.scale.setScalar(s);
-    group.add(rightLeg);
+    const rig = new CharacterRig({
+      scale: s,
+      shoulderWidth: 0.35,
+      hipWidth: 0.12,
+    });
+    group.add(rig.rootBone);
 
+    // Body → Chest
     const body = new THREE.Mesh(mobBodyGeo, mat);
-    body.position.y = 0.7; body.scale.setScalar(s); body.castShadow = true;
-    group.add(body);
+    body.castShadow = true;
+    rig.chest.add(body);
 
+    // Head → Head bone
     const head = new THREE.Mesh(headGeo, mat);
-    head.position.y = 1.3 * s; head.scale.setScalar(s * 0.9); group.add(head);
+    head.scale.setScalar(0.9);
+    rig.head.add(head);
 
+    // Eyes → Head bone
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
     for (const dx of [-0.06, 0.06]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(dx * s, 1.33 * s, 0.15 * s); group.add(eye);
+      eye.position.set(dx, 0.03, 0.15);
+      rig.head.add(eye);
     }
 
-    // Arms + claws
-    const leftArm = new THREE.Group();
-    leftArm.position.set(-0.35 * s, 1.0 * s, 0);
-    const lArm = new THREE.Mesh(armGeo, mat);
-    lArm.position.y = -0.18; lArm.scale.setScalar(s);
-    leftArm.add(lArm);
-    const lClaw = new THREE.Mesh(handGeo, mat);
-    lClaw.position.y = -0.38 * s; lClaw.scale.setScalar(s);
-    leftArm.add(lClaw);
-    group.add(leftArm);
+    // Legs → thigh on hip bones, shin on knee bones
+    const lThigh = new THREE.Mesh(thighGeo, mat);
+    lThigh.position.y = -0.10;
+    rig.lHip.add(lThigh);
+    const rThigh = new THREE.Mesh(thighGeo, mat);
+    rThigh.position.y = -0.10;
+    rig.rHip.add(rThigh);
+    const leftLeg = new THREE.Mesh(legGeo, mat);
+    leftLeg.position.y = -0.12;
+    rig.lKnee.add(leftLeg);
+    const rightLeg = new THREE.Mesh(legGeo, mat);
+    rightLeg.position.y = -0.12;
+    rig.rKnee.add(rightLeg);
 
-    const rightArm = new THREE.Group();
-    rightArm.position.set(0.35 * s, 1.0 * s, 0);
+    // Arms + claws → shoulder joint + arm/hand bones
+    const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, mat);
+    rig.lShoulder.add(lShoulderJoint);
+    const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, mat);
+    rig.rShoulder.add(rShoulderJoint);
+    const lArm = new THREE.Mesh(armGeo, mat);
+    lArm.position.y = -0.15;
+    rig.lArm.add(lArm);
+    const lClaw = new THREE.Mesh(handGeo, mat);
+    rig.lHand.add(lClaw);
+
     const rArm = new THREE.Mesh(armGeo, mat);
-    rArm.position.y = -0.18; rArm.scale.setScalar(s);
-    rightArm.add(rArm);
+    rArm.position.y = -0.15;
+    rig.rArm.add(rArm);
     const rClaw = new THREE.Mesh(handGeo, mat);
-    rClaw.position.y = -0.38 * s; rClaw.scale.setScalar(s);
-    rightArm.add(rClaw);
-    group.add(rightArm);
+    rig.rHand.add(rClaw);
 
     if (isBoss) {
       const crown = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.25, 5), new THREE.MeshBasicMaterial({ color: 0xffdd00 }));
-      crown.position.y = 1.7 * s; group.add(crown);
+      crown.position.y = 0.2;
+      rig.head.add(crown);
     }
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm };
+    const leftArm = rig.lShoulder as unknown as THREE.Group;
+    const rightArm = rig.rShoulder as unknown as THREE.Group;
+
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── NPC ───────────────────────────────────────────────────────────
 
-  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group } {
+  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
     const mat = new THREE.MeshLambertMaterial({ color });
 
-    // Legs
+    const rig = new CharacterRig({
+      shoulderWidth: 0.27,
+      hipWidth: 0.09,
+    });
+    group.add(rig.rootBone);
+
+    // Legs → thigh on hip bones, shin on knee bones
     const legMat = new THREE.MeshLambertMaterial({ color: 0x555566 });
+    const lThigh = new THREE.Mesh(thighGeo, legMat);
+    lThigh.position.y = -0.10;
+    rig.lHip.add(lThigh);
+    const rThigh = new THREE.Mesh(thighGeo, legMat);
+    rThigh.position.y = -0.10;
+    rig.rHip.add(rThigh);
     const leftLeg = new THREE.Mesh(legGeo, legMat);
-    leftLeg.position.set(-0.09, 0.3, 0);
-    group.add(leftLeg);
+    leftLeg.position.y = -0.12;
+    rig.lKnee.add(leftLeg);
     const rightLeg = new THREE.Mesh(legGeo, legMat);
-    rightLeg.position.set(0.09, 0.3, 0);
-    group.add(rightLeg);
+    rightLeg.position.y = -0.12;
+    rig.rKnee.add(rightLeg);
 
+    // Body → Chest bone
     const body = new THREE.Mesh(npcBodyGeo, mat);
-    body.position.y = 0.75; body.castShadow = true; group.add(body);
+    body.castShadow = true;
+    rig.chest.add(body);
 
+    // Head → Head bone
     const skinHex = ent.skinColor ? (SKIN_COLORS[ent.skinColor] ?? color) : color;
     const skinMat = new THREE.MeshLambertMaterial({ color: skinHex });
     const head = new THREE.Mesh(headGeo, skinMat);
-    head.position.y = 1.45; group.add(head);
+    rig.head.add(head);
 
     if (ent.eyeColor) {
       const eyeHex = EYE_COLORS[ent.eyeColor] ?? 0x333333;
       const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
-      for (const dx of [-0.07, 0.07]) { const eye = new THREE.Mesh(eyeGeo, eyeMat); eye.position.set(dx, 1.48, 0.16); group.add(eye); }
+      for (const dx of [-0.07, 0.07]) {
+        const eye = new THREE.Mesh(eyeGeo, eyeMat);
+        eye.position.set(dx, 0.03, 0.16);
+        rig.head.add(eye);
+      }
     }
     if (ent.hairStyle && ent.hairStyle !== "bald") {
       const h = new THREE.Mesh(hairShortGeo, new THREE.MeshLambertMaterial({ color: HAIR_COLORS[ent.hairStyle] ?? 0x4a3728 }));
-      h.position.set(0, 1.55, 0); group.add(h);
+      h.position.set(0, 0.1, 0);
+      rig.head.add(h);
     }
 
-    // Arms + hands
-    const leftArm = new THREE.Group();
-    leftArm.position.set(-0.27, 1.1, 0);
+    // Arms + hands → shoulder joint + arm/hand bones
+    const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rig.lShoulder.add(lShoulderJoint);
+    const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rig.rShoulder.add(rShoulderJoint);
     const lArm = new THREE.Mesh(armGeo, skinMat);
-    lArm.position.y = -0.18; leftArm.add(lArm);
+    lArm.position.y = -0.15;
+    rig.lArm.add(lArm);
     const lHand = new THREE.Mesh(handGeo, skinMat);
-    lHand.position.y = -0.38; leftArm.add(lHand);
-    group.add(leftArm);
+    rig.lHand.add(lHand);
 
-    const rightArm = new THREE.Group();
-    rightArm.position.set(0.27, 1.1, 0);
     const rArm = new THREE.Mesh(armGeo, skinMat);
-    rArm.position.y = -0.18; rightArm.add(rArm);
+    rArm.position.y = -0.15;
+    rig.rArm.add(rArm);
     const rHand = new THREE.Mesh(handGeo, skinMat);
-    rHand.position.y = -0.38; rightArm.add(rHand);
-    group.add(rightArm);
+    rig.rHand.add(rHand);
 
     if (ent.type === "quest-giver") {
       const q = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xffdd00 }));
@@ -1639,10 +1495,14 @@ export class EntityManager {
     }
     if (ent.type === "merchant") {
       const bag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.15), new THREE.MeshLambertMaterial({ color: 0xbb8833 }));
-      bag.position.set(0, -0.3, 0); rightArm.add(bag);
+      bag.position.set(0, -0.05, 0);
+      rig.rHand.add(bag);
     }
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm };
+    const leftArm = rig.lShoulder as unknown as THREE.Group;
+    const rightArm = rig.rShoulder as unknown as THREE.Group;
+
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── Resource node ─────────────────────────────────────────────────
@@ -1696,6 +1556,9 @@ export class EntityManager {
   }
 
   dispose() {
+    for (const obj of this.entities.values()) {
+      obj.mixer?.stopAllAction();
+    }
     while (this.group.children.length > 0) {
       this.group.remove(this.group.children[0]);
     }

@@ -94,3 +94,8 @@ export interface WorldLayout {
   totalSize: { width: number; height: number };
   zones: Record<string, WorldLayoutZone>;
 }
+
+/** Anything that can answer elevation queries in world 3D coords */
+export interface ElevationProvider {
+  getElevationAt(x: number, z: number): number;
+}

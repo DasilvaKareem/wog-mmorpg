@@ -7,7 +7,7 @@ window.onerror = (msg, src, line, col, err) => {
 };
 
 import * as THREE from "three";
-import { TerrainRenderer } from "./scene/TerrainRenderer.js";
+import { WorldManager } from "./scene/WorldManager.js";
 import { EntityManager } from "./scene/EntityManager.js";
 import { EffectsManager } from "./scene/EffectsManager.js";
 import { SkyRenderer } from "./scene/SkyRenderer.js";
@@ -18,13 +18,15 @@ type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
 import { Minimap } from "./hud/Minimap.js";
 import { ChatLog } from "./hud/ChatLog.js";
-import { fetchZone, fetchZoneList, fetchTerrain, fetchWorldLayout } from "./api.js";
-import type { ZoneResponse, WorldLayout } from "./types.js";
+import { fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
+import type { Entity, ZoneResponse } from "./types.js";
 
 // ── Config ──────────────────────────────────────────────────────────
 
 const POLL_INTERVAL = 1000;
-const COORD_SCALE = 1 / 10; // server coords (0-640) → 3D units (0-64)
+const COORD_SCALE = 1 / 10; // server coords → 3D units
+/** Poll zones whose center is within this distance (3D units) of the camera */
+const POLL_RADIUS = 140;
 
 // ── Renderer ────────────────────────────────────────────────────────
 
@@ -36,7 +38,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x88aacc, 0.008);
+scene.fog = new THREE.FogExp2(0x88aacc, 0.012);
 
 const camera = new THREE.PerspectiveCamera(
   60,
@@ -47,20 +49,21 @@ const camera = new THREE.PerspectiveCamera(
 
 // ── Subsystems ──────────────────────────────────────────────────────
 
-const terrain = new TerrainRenderer();
-scene.add(terrain.group);
+const world = new WorldManager();
+scene.add(world.group);
 
 const entities = new EntityManager();
-entities.setTerrain(terrain);
+entities.setElevationProvider(world);
 scene.add(entities.group);
 
 const effects = new EffectsManager(entities);
-effects.setTerrain(terrain);
+effects.setElevationProvider(world);
 effects.setCamera(camera);
 scene.add(effects.group);
 
 const sky = new SkyRenderer(scene);
 const controls = new DesktopControls(camera, renderer.domElement);
+controls.collisionCheck = (x, z) => world.isWalkable(x, z);
 const inspector = new EntityInspector();
 const minimap = new Minimap();
 const chatLog = new ChatLog();
@@ -79,9 +82,6 @@ const hudLock = document.getElementById("lock-indicator")!;
 
 // ── State ───────────────────────────────────────────────────────────
 
-let currentZoneId = "";
-let lastZoneData: ZoneResponse | null = null;
-let worldLayout: WorldLayout | null = null;
 let lockedEntityId: string | null = null;
 
 // ── Lock-on mode ────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ function unlockCamera() {
   hudLock.style.display = "none";
 }
 
-// ── Find first zone with most entities ──────────────────────────────
+// ── Find initial zone with most entities ────────────────────────────
 
 async function pickInitialZone(): Promise<string> {
   const zones = await fetchZoneList();
@@ -114,58 +114,66 @@ async function pickInitialZone(): Promise<string> {
   return best;
 }
 
-// ── Terrain loading ─────────────────────────────────────────────────
+// ── Multi-zone polling ──────────────────────────────────────────────
 
-async function loadTerrain(zoneId: string) {
-  const data = await fetchTerrain(zoneId);
-  if (!data) {
-    console.warn(`Failed to load terrain for ${zoneId}`);
-    return;
+async function pollNearbyZones() {
+  const target = controls.getTarget();
+  const nearbyIds = world.getNearbyZoneIds(target.x, target.z, POLL_RADIUS);
+  if (nearbyIds.length === 0) return;
+
+  // Fetch all nearby zones in parallel
+  const results = await Promise.all(
+    nearbyIds.map((id) => fetchZone(id).then((data) => ({ id, data })))
+  );
+
+  // Merge entities from all zones
+  const merged: Record<string, Entity> = {};
+  let gameTime: ZoneResponse["gameTime"] = undefined;
+  let totalEntities = 0;
+  const allEvents: NonNullable<ZoneResponse["recentEvents"]> = [];
+
+  for (const { id, data } of results) {
+    if (!data) continue;
+    for (const [eid, ent] of Object.entries(data.entities)) {
+      merged[eid] = ent;
+    }
+    totalEntities += Object.keys(data.entities).length;
+    if (data.gameTime) gameTime = data.gameTime;
+    if (data.recentEvents) allEvents.push(...data.recentEvents);
   }
-  terrain.build(data);
-}
 
-// ── Zone polling ────────────────────────────────────────────────────
-
-async function pollZone() {
-  if (!currentZoneId) return;
-
-  const data = await fetchZone(currentZoneId);
-  if (!data) return;
-
-  lastZoneData = data;
-  entities.sync(data.entities);
+  entities.sync(merged);
 
   // HUD
-  hudZone.textContent = data.zoneId;
-  hudEntities.textContent = String(Object.keys(data.entities).length);
+  hudZone.textContent = nearbyIds.join(", ");
+  hudEntities.textContent = String(totalEntities);
 
-  if (data.gameTime) {
-    const gt = data.gameTime;
-    const hh = String(gt.hour).padStart(2, "0");
-    const mm = String(gt.minute).padStart(2, "0");
-    hudTime.textContent = `${hh}:${mm} (${gt.phase})`;
+  if (gameTime) {
+    const hh = String(gameTime.hour).padStart(2, "0");
+    const mm = String(gameTime.minute).padStart(2, "0");
+    hudTime.textContent = `${hh}:${mm} (${gameTime.phase})`;
   }
 
-  sky.update(data.gameTime);
+  sky.update(gameTime);
 
-  if (data.recentEvents) {
-    chatLog.addEvents(data.recentEvents);
-    effects.processEvents(data.recentEvents);
+  if (allEvents.length > 0) {
+    chatLog.addEvents(allEvents);
+    effects.processEvents(allEvents);
   }
 
-  effects.syncActiveEffects(data.entities);
+  effects.syncActiveEffects(merged);
 
-  // Update lock indicator — unlock if entity left zone
+  // Update lock indicator
   if (lockedEntityId) {
-    if (data.entities[lockedEntityId]) {
-      hudLock.textContent = `LOCKED: ${data.entities[lockedEntityId].name}`;
+    if (merged[lockedEntityId]) {
+      hudLock.textContent = `LOCKED: ${merged[lockedEntityId].name}`;
     } else {
       unlockCamera();
     }
   }
 
-  minimap.update(data.entities);
+  // Minimap — pass camera in server coords
+  minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -229,7 +237,7 @@ if (navigator.xr) {
             const { XRControllers } = await import("./xr/XRControllers.js");
             xrControllers = new XRControllers(
               renderer, scene,
-              terrain.group.children as THREE.Object3D[]
+              world.group.children as THREE.Object3D[]
             );
             xrControllers.onTeleport = (pos) => {
               xrSession.cameraRig.position.set(pos.x, 0, pos.z);
@@ -250,66 +258,48 @@ if (navigator.xr) {
   });
 }
 
-// ── Zone switching ──────────────────────────────────────────────────
+// ── Zone navigation bar ─────────────────────────────────────────────
 
-const ZONE_ORDER = [
-  "village-square",
-  "wild-meadow",
-  "dark-forest",
-  "auroral-plains",
-  "emerald-woods",
-  "viridian-range",
-  "moondancer-glade",
-  "felsrock-citadel",
-  "lake-lumina",
-  "azurshard-chasm",
-];
+/** All zone IDs — populated from world layout at init */
+let allZoneIds: string[] = [];
 
-function switchZone(zoneId: string) {
-  if (zoneId === currentZoneId) return;
-  currentZoneId = zoneId;
-  terrain.dispose();
-  entities.dispose();
-  effects.dispose();
-  inspector.hide();
-  unlockCamera();
-
-  // Apply zone offset so world-space entity coords become zone-local
-  const zoneInfo = worldLayout?.zones[zoneId];
-  const ox = zoneInfo?.offset.x ?? 0;
-  const oz = zoneInfo?.offset.z ?? 0;
-  entities.setZoneOffset(ox, oz);
-  effects.setZoneOffset(ox, oz);
-
-  // Center camera: zone is 64x64 in 3D units
-  controls.setTarget(32, 0, 32);
+function navigateToZone(zoneId: string) {
+  const center = world.getZoneCenter(zoneId);
+  if (!center) return;
+  controls.setTarget(center.x, 0, center.z);
   updateZoneBar();
-  loadTerrain(zoneId);
-  pollZone();
 }
 
 // Zone bar buttons
 const zoneBar = document.getElementById("zone-bar")!;
-const zoneButtons: HTMLButtonElement[] = [];
+const zoneButtons: Map<string, HTMLButtonElement> = new Map();
 
+/** Build zone bar dynamically from world layout */
 function buildZoneBar() {
-  for (let i = 0; i < ZONE_ORDER.length; i++) {
+  zoneBar.innerHTML = "";
+  zoneButtons.clear();
+  for (let i = 0; i < allZoneIds.length; i++) {
+    const id = allZoneIds[i];
     const btn = document.createElement("button");
-    const label = ZONE_ORDER[i].replace(/-/g, " ");
-    btn.textContent = `${i + 1}. ${label}`;
-    btn.addEventListener("click", () => switchZone(ZONE_ORDER[i]));
+    const label = id.replace(/-/g, " ");
+    // Number keys 1-9,0 for the first 10 main zones
+    const keyHint = i < 10 ? `${(i + 1) % 10}. ` : "";
+    btn.textContent = `${keyHint}${label}`;
+    btn.addEventListener("click", () => navigateToZone(id));
     zoneBar.appendChild(btn);
-    zoneButtons.push(btn);
+    zoneButtons.set(id, btn);
   }
 }
 
 function updateZoneBar() {
-  for (let i = 0; i < ZONE_ORDER.length; i++) {
-    zoneButtons[i].classList.toggle("active", ZONE_ORDER[i] === currentZoneId);
+  const target = controls.getTarget();
+  const nearbyIds = world.getNearbyZoneIds(target.x, target.z, 40);
+  for (const [id, btn] of zoneButtons) {
+    btn.classList.toggle("active", nearbyIds.includes(id));
   }
 }
 
-// Keyboard 1-0 + Escape to unlock
+// Keyboard 1-0 = teleport camera to first 10 zones, Escape = unlock
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     unlockCamera();
@@ -318,8 +308,8 @@ window.addEventListener("keydown", (e) => {
   }
   const key = e.key === "0" ? 10 : parseInt(e.key);
   const idx = key - 1;
-  if (idx >= 0 && idx < ZONE_ORDER.length) {
-    switchZone(ZONE_ORDER[idx]);
+  if (idx >= 0 && idx < allZoneIds.length) {
+    navigateToZone(allZoneIds[idx]);
   }
 });
 
@@ -348,16 +338,19 @@ function animate() {
       if (pos) {
         controls.setTarget(pos.x, pos.y, pos.z);
       } else {
-        // Entity left zone — unlock
         unlockCamera();
       }
     }
     controls.update(dt);
   }
 
+  // Update zone loading based on camera position
+  const target = controls.getTarget();
+  world.updateLoading(target.x, target.z);
+
   entities.update(dt, camera);
   effects.update(dt);
-  terrain.update(dt);
+  world.updateAnimations(dt);
   chatLog.update();
 
   renderer.render(scene, camera);
@@ -366,37 +359,40 @@ function animate() {
 // ── Start ───────────────────────────────────────────────────────────
 
 async function init() {
-  console.log("WoG XR Client starting...");
+  console.log("WoG XR Client starting (unified world)...");
 
-  buildZoneBar();
-
-  // Load world layout (zone offsets) + pick initial zone in parallel
+  // Load world layout + pick initial zone in parallel
   const [layout, initialZone] = await Promise.all([
     fetchWorldLayout(),
     pickInitialZone(),
   ]);
-  worldLayout = layout;
 
-  currentZoneId = initialZone;
-  console.log(`Viewing zone: ${currentZoneId}`);
+  if (!layout) {
+    throw new Error("Failed to load world layout");
+  }
+
+  world.setLayout(layout);
+
+  // Build zone bar from the layout (all zones)
+  allZoneIds = world.getZoneIds();
+  buildZoneBar();
+
+  // Center camera at the initial zone
+  const center = world.getZoneCenter(initialZone);
+  if (center) {
+    controls.setTarget(center.x, 0, center.z);
+  }
   updateZoneBar();
 
-  // Apply zone offset
-  const zoneInfo = worldLayout?.zones[currentZoneId];
-  entities.setZoneOffset(zoneInfo?.offset.x ?? 0, zoneInfo?.offset.z ?? 0);
-  effects.setZoneOffset(zoneInfo?.offset.x ?? 0, zoneInfo?.offset.z ?? 0);
-
-  // Center camera at zone center (64/2 = 32 Three.js units)
-  controls.setTarget(32, 0, 32);
-
-  // Load terrain + initial poll in parallel
-  await Promise.all([
-    loadTerrain(currentZoneId),
-    pollZone(),
-  ]);
+  // Trigger initial terrain loading + first poll
+  world.updateLoading(
+    controls.getTarget().x,
+    controls.getTarget().z
+  );
+  await pollNearbyZones();
 
   // Poll loop
-  setInterval(pollZone, POLL_INTERVAL);
+  setInterval(pollNearbyZones, POLL_INTERVAL);
 
   // Render loop
   renderer.setAnimationLoop(animate);

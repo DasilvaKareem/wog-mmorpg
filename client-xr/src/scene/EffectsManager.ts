@@ -1,8 +1,7 @@
 import * as THREE from "three";
-import type { ZoneEvent, Entity } from "../types.js";
+import type { ZoneEvent, Entity, ElevationProvider } from "../types.js";
 import type { EntityManager } from "./EntityManager.js";
 import { CLASS_COLORS } from "./EntityManager.js";
-import type { TerrainRenderer } from "./TerrainRenderer.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -60,9 +59,7 @@ export class EffectsManager {
   readonly group = new THREE.Group();
 
   private entityMgr: EntityManager;
-  private terrainRef: TerrainRenderer | null = null;
-  private zoneOffsetX = 0;
-  private zoneOffsetZ = 0;
+  private elevationProvider: ElevationProvider | null = null;
   private camera: THREE.Camera | null = null;
 
   // Particle pool
@@ -168,16 +165,15 @@ export class EffectsManager {
 
   // ── Configuration ───────────────────────────────────────────────
 
-  setTerrain(t: TerrainRenderer) { this.terrainRef = t; }
-  setZoneOffset(x: number, z: number) { this.zoneOffsetX = x; this.zoneOffsetZ = z; }
+  setElevationProvider(ep: ElevationProvider) { this.elevationProvider = ep; }
   setCamera(c: THREE.Camera) { this.camera = c; }
 
   // ── Coordinate conversion ───────────────────────────────────────
 
   private toLocal(sx: number, sz: number): THREE.Vector3 {
-    const x = (sx - this.zoneOffsetX) * COORD_SCALE;
-    const z = (sz - this.zoneOffsetZ) * COORD_SCALE;
-    const y = this.terrainRef?.getElevationAt(x, z) ?? 0;
+    const x = sx * COORD_SCALE;
+    const z = sz * COORD_SCALE;
+    const y = this.elevationProvider?.getElevationAt(x, z) ?? 0;
     return new THREE.Vector3(x, y, z);
   }
 
