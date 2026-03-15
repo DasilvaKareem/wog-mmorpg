@@ -74,9 +74,7 @@ let xrControllers: XRControllersType | null = null;
 
 // ── HUD elements ────────────────────────────────────────────────────
 
-const hudZone = document.getElementById("hud-zone")!;
 const hudEntities = document.getElementById("hud-entities")!;
-const hudTime = document.getElementById("hud-time")!;
 const hudFps = document.getElementById("hud-fps")!;
 const hudLock = document.getElementById("lock-indicator")!;
 
@@ -92,11 +90,13 @@ function lockOn(entityId: string) {
   lockedEntityId = entityId;
   hudLock.textContent = `LOCKED: ${ent.name}`;
   hudLock.style.display = "block";
+  inspector.setLocked(true);
 }
 
 function unlockCamera() {
   lockedEntityId = null;
   hudLock.style.display = "none";
+  inspector.setLocked(false);
 }
 
 // ── Find initial zone with most entities ────────────────────────────
@@ -145,13 +145,10 @@ async function pollNearbyZones() {
   entities.sync(merged);
 
   // HUD
-  hudZone.textContent = nearbyIds.join(", ");
   hudEntities.textContent = String(totalEntities);
 
   if (gameTime) {
-    const hh = String(gameTime.hour).padStart(2, "0");
-    const mm = String(gameTime.minute).padStart(2, "0");
-    hudTime.textContent = `${hh}:${mm} (${gameTime.phase})`;
+    minimap.setGameTime(gameTime);
   }
 
   sky.update(gameTime);
@@ -159,6 +156,7 @@ async function pollNearbyZones() {
   if (allEvents.length > 0) {
     chatLog.addEvents(allEvents);
     effects.processEvents(allEvents);
+    entities.processEvents(allEvents);
   }
 
   effects.syncActiveEffects(merged);
@@ -260,56 +258,13 @@ if (navigator.xr) {
 
 // ── Zone navigation bar ─────────────────────────────────────────────
 
-/** All zone IDs — populated from world layout at init */
-let allZoneIds: string[] = [];
 
-function navigateToZone(zoneId: string) {
-  const center = world.getZoneCenter(zoneId);
-  if (!center) return;
-  controls.setTarget(center.x, 0, center.z);
-  updateZoneBar();
-}
 
-// Zone bar buttons
-const zoneBar = document.getElementById("zone-bar")!;
-const zoneButtons: Map<string, HTMLButtonElement> = new Map();
-
-/** Build zone bar dynamically from world layout */
-function buildZoneBar() {
-  zoneBar.innerHTML = "";
-  zoneButtons.clear();
-  for (let i = 0; i < allZoneIds.length; i++) {
-    const id = allZoneIds[i];
-    const btn = document.createElement("button");
-    const label = id.replace(/-/g, " ");
-    // Number keys 1-9,0 for the first 10 main zones
-    const keyHint = i < 10 ? `${(i + 1) % 10}. ` : "";
-    btn.textContent = `${keyHint}${label}`;
-    btn.addEventListener("click", () => navigateToZone(id));
-    zoneBar.appendChild(btn);
-    zoneButtons.set(id, btn);
-  }
-}
-
-function updateZoneBar() {
-  const target = controls.getTarget();
-  const nearbyIds = world.getNearbyZoneIds(target.x, target.z, 40);
-  for (const [id, btn] of zoneButtons) {
-    btn.classList.toggle("active", nearbyIds.includes(id));
-  }
-}
-
-// Keyboard 1-0 = teleport camera to first 10 zones, Escape = unlock
+// Keyboard: Escape = unlock camera
 window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     unlockCamera();
     inspector.hide();
-    return;
-  }
-  const key = e.key === "0" ? 10 : parseInt(e.key);
-  const idx = key - 1;
-  if (idx >= 0 && idx < allZoneIds.length) {
-    navigateToZone(allZoneIds[idx]);
   }
 });
 
@@ -373,16 +328,11 @@ async function init() {
 
   world.setLayout(layout);
 
-  // Build zone bar from the layout (all zones)
-  allZoneIds = world.getZoneIds();
-  buildZoneBar();
-
   // Center camera at the initial zone
   const center = world.getZoneCenter(initialZone);
   if (center) {
     controls.setTarget(center.x, 0, center.z);
   }
-  updateZoneBar();
 
   // Trigger initial terrain loading + first poll
   world.updateLoading(

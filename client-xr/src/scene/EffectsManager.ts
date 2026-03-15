@@ -32,6 +32,7 @@ interface AbilityAnim {
   elapsed: number;
   duration: number;
   color: number;
+  classId: string;
   casterPos: THREE.Vector3;
   targetPos: THREE.Vector3;
   radius?: number;
@@ -111,7 +112,7 @@ export class EffectsManager {
     this.particleGeo.setAttribute("size", new THREE.BufferAttribute(this.pSizes, 1));
 
     this.particleMat = new THREE.PointsMaterial({
-      size: 0.15,
+      size: 0.25,
       vertexColors: true,
       transparent: true,
       opacity: 0.9,
@@ -124,23 +125,32 @@ export class EffectsManager {
     this.particlePoints.frustumCulled = false;
     this.group.add(this.particlePoints);
 
-    // ── Projectile orbs ────────────────────────────────────────────
-    const orbGeo = new THREE.SphereGeometry(0.15, 8, 6);
+    // ── Projectile orbs (large core + glow halo) ──────────────────
+    const orbCoreGeo = new THREE.SphereGeometry(0.35, 12, 8);
+    const orbGlowGeo = new THREE.SphereGeometry(0.7, 12, 8);
     for (let i = 0; i < PROJECTILE_POOL; i++) {
-      const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 });
-      const mesh = new THREE.Mesh(orbGeo, mat);
-      mesh.visible = false;
-      this.group.add(mesh);
-      this.projectiles.push(mesh);
+      const coreMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 });
+      const core = new THREE.Mesh(orbCoreGeo, coreMat);
+      const glowMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0.3,
+        side: THREE.BackSide, depthWrite: false, blending: THREE.AdditiveBlending,
+      });
+      const glow = new THREE.Mesh(orbGlowGeo, glowMat);
+      glow.name = "glow";
+      core.add(glow);
+      core.visible = false;
+      this.group.add(core);
+      this.projectiles.push(core);
       this.projectileUsed.push(false);
     }
 
-    // ── Area rings ─────────────────────────────────────────────────
-    const ringGeo = new THREE.RingGeometry(0.5, 0.7, 32);
+    // ── Area rings (thicker, more visible) ─────────────────────────
+    const ringGeo = new THREE.RingGeometry(0.4, 0.9, 32);
     ringGeo.rotateX(-Math.PI / 2);
     for (let i = 0; i < RING_POOL; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false,
+        color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide,
+        depthWrite: false, blending: THREE.AdditiveBlending,
       });
       const mesh = new THREE.Mesh(ringGeo, mat);
       mesh.visible = false;
@@ -310,12 +320,13 @@ export class EffectsManager {
         targetPos = casterPos.clone();
       }
 
-      // Get class color from caster entity
+      // Get class color and id from caster entity
       const casterEnt = ev.entityId ? this.entityMgr.getEntity(ev.entityId) : null;
       const color = entityColor(casterEnt);
+      const classId = casterEnt?.classId ?? "";
       const radius = (d.radius as number) ?? 3;
 
-      this.spawnAbility(ev.id, animStyle as AbilityAnim["style"], casterPos, targetPos, color, radius);
+      this.spawnAbility(ev.id, animStyle as AbilityAnim["style"], casterPos, targetPos, color, classId, radius);
     }
 
     // Prune old event IDs (keep last 200)
@@ -328,14 +339,15 @@ export class EffectsManager {
   private spawnAbility(
     id: string, style: AbilityAnim["style"],
     casterPos: THREE.Vector3, targetPos: THREE.Vector3,
-    color: number, radius: number,
+    color: number, classId: string, radius: number,
   ) {
+    const isCaster = classId === "mage" || classId === "warlock" || classId === "cleric";
     const anim: AbilityAnim = {
-      id, style, elapsed: 0, color, casterPos, targetPos, radius,
+      id, style, elapsed: 0, color, classId, casterPos, targetPos, radius,
       channelNextBurst: 0,
       duration: style === "melee" ? 0.4
-        : style === "projectile" ? 0.8
-        : style === "area" ? 0.8
+        : style === "projectile" ? (isCaster ? 1.0 : 0.8)
+        : style === "area" ? 1.0
         : 3.0,
     };
 
@@ -360,20 +372,25 @@ export class EffectsManager {
   // ── Melee start ─────────────────────────────────────────────────
 
   private startMelee(anim: AbilityAnim) {
-    // Slash arc particles at target
+    const isCaster = anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric";
     const up = new THREE.Vector3(0, 1, 0);
     const dir = new THREE.Vector3().subVectors(anim.targetPos, anim.casterPos).normalize();
     const right = new THREE.Vector3().crossVectors(dir, up).normalize();
 
-    for (let i = 0; i < 18; i++) {
-      const angle = (i / 18) * Math.PI - Math.PI / 2;
+    // Casters: burst of energy at target; melee: slash arc
+    const count = isCaster ? 30 : 18;
+    const spread = isCaster ? 1.0 : 0.6;
+    const size = isCaster ? 0.4 : 0.2;
+
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * (isCaster ? 2 : 1) - Math.PI / 2;
       const offset = new THREE.Vector3()
-        .addScaledVector(right, Math.cos(angle) * 0.6)
-        .addScaledVector(up, Math.sin(angle) * 0.6 + 1.0);
+        .addScaledVector(right, Math.cos(angle) * spread)
+        .addScaledVector(up, Math.sin(angle) * spread + 1.0);
 
       const pos = anim.targetPos.clone().add(offset);
-      const vel = offset.clone().multiplyScalar(2);
-      this.emitParticle(pos, vel, anim.color, 0.2, 0.35);
+      const vel = offset.clone().multiplyScalar(isCaster ? 3 : 2);
+      this.emitParticle(pos, vel, anim.color, size, isCaster ? 0.5 : 0.35);
     }
   }
 
@@ -388,6 +405,32 @@ export class EffectsManager {
     mesh.visible = true;
     mesh.position.copy(anim.casterPos).setY(anim.casterPos.y + 1.0);
     (mesh.material as THREE.MeshBasicMaterial).color.setHex(anim.color);
+
+    // Class-specific orb scaling and glow color
+    const glow = mesh.getObjectByName("glow") as THREE.Mesh | undefined;
+    let orbScale = 1.0;
+    if (anim.classId === "mage") {
+      orbScale = 1.4;   // big arcane bolt
+    } else if (anim.classId === "warlock") {
+      orbScale = 1.2;   // dark pulsing orb
+    } else if (anim.classId === "cleric") {
+      orbScale = 1.3;   // radiant sphere
+    }
+    mesh.scale.setScalar(orbScale);
+
+    if (glow) {
+      const glowMat = glow.material as THREE.MeshBasicMaterial;
+      glowMat.color.setHex(anim.color);
+      glowMat.opacity = 0.35;
+    }
+
+    // Initial burst at caster (cast flash)
+    if (anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric") {
+      this.emitBurst(
+        anim.casterPos.clone().setY(anim.casterPos.y + 1.0),
+        anim.color, 15, 2.0, 0.3, 0.4,
+      );
+    }
   }
 
   // ── Area start ──────────────────────────────────────────────────
@@ -566,11 +609,16 @@ export class EffectsManager {
   }
 
   private updateMelee(anim: AbilityAnim, t: number) {
+    const isCaster = anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric";
     // Impact burst at midpoint
     if (t > 0.3 && t < 0.35) {
       this.emitBurst(
         anim.targetPos.clone().setY(anim.targetPos.y + 0.8),
-        anim.color, 12, 3, 0.15, 0.3,
+        anim.color,
+        isCaster ? 35 : 12,
+        isCaster ? 4.5 : 3,
+        isCaster ? 0.35 : 0.15,
+        isCaster ? 0.5 : 0.3,
       );
     }
   }
@@ -578,6 +626,7 @@ export class EffectsManager {
   private updateProjectile(anim: AbilityAnim, t: number) {
     if (anim.projectileIdx == null) return;
     const mesh = this.projectiles[anim.projectileIdx];
+    const isCaster = anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric";
 
     // Lerp: travel over first 60% of duration, then impact
     const travelT = Math.min(t / 0.6, 1);
@@ -585,30 +634,92 @@ export class EffectsManager {
 
     const from = anim.casterPos.clone().setY(anim.casterPos.y + 1.0);
     const to = anim.targetPos.clone().setY(anim.targetPos.y + 1.0);
-    // Arc: add height parabola
-    const arcHeight = from.distanceTo(to) * 0.15;
+    const arcHeight = from.distanceTo(to) * (isCaster ? 0.25 : 0.15);
     const pos = from.clone().lerp(to, eased);
     pos.y += arcHeight * 4 * eased * (1 - eased);
 
     mesh.position.copy(pos);
-    mesh.scale.setScalar(1 - t * 0.3); // Shrink slightly on approach
 
-    // Trail particles
+    // Base scale from startProjectile; shrink on approach, but less for casters
+    const baseScale = isCaster ? (anim.classId === "mage" ? 1.4 : anim.classId === "cleric" ? 1.3 : 1.2) : 1.0;
+    mesh.scale.setScalar(baseScale * (1 - t * 0.2));
+
+    // Glow halo pulse for casters
+    if (isCaster) {
+      const glow = mesh.getObjectByName("glow") as THREE.Mesh | undefined;
+      if (glow) {
+        const pulse = 1.0 + Math.sin(anim.elapsed * 12) * 0.15;
+        glow.scale.setScalar(pulse);
+        (glow.material as THREE.MeshBasicMaterial).opacity = 0.25 + Math.sin(anim.elapsed * 8) * 0.1;
+      }
+    }
+
+    // Trail particles — casters get dense, large trails
     if (travelT < 1) {
-      const trailVel = new THREE.Vector3(
-        (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 0.5,
-        (Math.random() - 0.5) * 0.5,
-      );
-      this.emitParticle(pos.clone(), trailVel, anim.color, 0.1, 0.3);
+      const trailCount = isCaster ? 4 : 1;
+      const trailSize = isCaster ? 0.28 : 0.1;
+      const trailLife = isCaster ? 0.5 : 0.3;
+
+      for (let i = 0; i < trailCount; i++) {
+        const spread = isCaster ? 1.0 : 0.5;
+        const trailVel = new THREE.Vector3(
+          (Math.random() - 0.5) * spread,
+          (Math.random() - 0.5) * spread,
+          (Math.random() - 0.5) * spread,
+        );
+        this.emitParticle(pos.clone(), trailVel, anim.color, trailSize, trailLife);
+      }
+
+      // Class-specific trail extras
+      if (anim.classId === "mage") {
+        // Arcane sparks — bright, fast, outward spiral
+        const sparkAngle = anim.elapsed * 10 + Math.random() * Math.PI;
+        const sparkVel = new THREE.Vector3(
+          Math.cos(sparkAngle) * 2.5,
+          1.0 + Math.random(),
+          Math.sin(sparkAngle) * 2.5,
+        );
+        this.emitParticle(pos.clone(), sparkVel, 0x88bbff, 0.2, 0.3);
+      } else if (anim.classId === "warlock") {
+        // Dark wisps — slower, trailing behind, greenish-black
+        const wispVel = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.8,
+          -0.5 + Math.random() * 0.5,
+          (Math.random() - 0.5) * 0.8,
+        );
+        this.emitParticle(pos.clone(), wispVel, 0x115533, 0.35, 0.6);
+        this.emitParticle(pos.clone(), wispVel.clone().multiplyScalar(0.5), 0x22dd66, 0.15, 0.4);
+      } else if (anim.classId === "cleric") {
+        // Holy motes — gentle upward drift, warm white/gold
+        const moteVel = new THREE.Vector3(
+          (Math.random() - 0.5) * 0.6,
+          1.5 + Math.random(),
+          (Math.random() - 0.5) * 0.6,
+        );
+        const moteColor = Math.random() > 0.5 ? 0xffffcc : 0xffddaa;
+        this.emitParticle(pos.clone(), moteVel, moteColor, 0.2, 0.5);
+      }
     }
 
     // Impact burst when travel completes
     if (travelT >= 1 && t < 0.65) {
-      this.emitBurst(
-        anim.targetPos.clone().setY(anim.targetPos.y + 0.8),
-        anim.color, 20, 3.5, 0.18, 0.4,
-      );
+      const impactPos = anim.targetPos.clone().setY(anim.targetPos.y + 0.8);
+      if (isCaster) {
+        // Big dramatic impact explosion
+        this.emitBurst(impactPos, anim.color, 40, 5.0, 0.4, 0.6);
+        // Secondary ring of particles outward at ground level
+        for (let i = 0; i < 16; i++) {
+          const angle = (i / 16) * Math.PI * 2;
+          const ringVel = new THREE.Vector3(
+            Math.cos(angle) * 3.5,
+            0.5,
+            Math.sin(angle) * 3.5,
+          );
+          this.emitParticle(impactPos.clone(), ringVel, anim.color, 0.3, 0.5);
+        }
+      } else {
+        this.emitBurst(impactPos, anim.color, 20, 3.5, 0.18, 0.4);
+      }
       mesh.visible = false;
     }
   }
@@ -616,54 +727,100 @@ export class EffectsManager {
   private updateArea(anim: AbilityAnim, t: number) {
     if (anim.ringIdx == null) return;
     const mesh = this.rings[anim.ringIdx];
+    const isCaster = anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric";
 
     const radius = (anim.radius ?? 3) * COORD_SCALE;
     const scale = t * radius;
     mesh.scale.setScalar(Math.max(0.01, scale));
-    (mesh.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - t);
+    (mesh.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - t);
 
-    // Edge particles along expanding ring
-    if (Math.random() < 0.4) {
+    // Edge particles along expanding ring — denser and bigger for casters
+    const spawnChance = isCaster ? 0.8 : 0.4;
+    const particlesPerFrame = isCaster ? 3 : 1;
+    for (let p = 0; p < particlesPerFrame; p++) {
+      if (Math.random() > spawnChance) continue;
       const angle = Math.random() * Math.PI * 2;
-      const r = scale * 0.7; // inner radius of the RingGeometry
+      const r = scale * 0.65;
       const pos = new THREE.Vector3(
         anim.casterPos.x + Math.cos(angle) * r,
         anim.casterPos.y + 0.1,
         anim.casterPos.z + Math.sin(angle) * r,
       );
       const vel = new THREE.Vector3(
-        Math.cos(angle) * 1.5,
-        2 + Math.random(),
-        Math.sin(angle) * 1.5,
+        Math.cos(angle) * (isCaster ? 2.5 : 1.5),
+        (isCaster ? 3 : 2) + Math.random(),
+        Math.sin(angle) * (isCaster ? 2.5 : 1.5),
       );
-      this.emitParticle(pos, vel, anim.color, 0.12, 0.5);
+      this.emitParticle(pos, vel, anim.color, isCaster ? 0.3 : 0.12, isCaster ? 0.7 : 0.5);
+    }
+
+    // Casters: fill area with rising column particles
+    if (isCaster && Math.random() < 0.6) {
+      const fillAngle = Math.random() * Math.PI * 2;
+      const fillR = Math.random() * scale * 0.6;
+      const fillPos = new THREE.Vector3(
+        anim.casterPos.x + Math.cos(fillAngle) * fillR,
+        anim.casterPos.y + 0.05,
+        anim.casterPos.z + Math.sin(fillAngle) * fillR,
+      );
+      const fillVel = new THREE.Vector3(
+        (Math.random() - 0.5) * 0.5,
+        3 + Math.random() * 2,
+        (Math.random() - 0.5) * 0.5,
+      );
+      this.emitParticle(fillPos, fillVel, anim.color, 0.25, 0.6);
     }
   }
 
   private updateChannel(anim: AbilityAnim, t: number, dt: number) {
     anim.channelNextBurst -= dt;
+    const isCaster = anim.classId === "mage" || anim.classId === "warlock" || anim.classId === "cleric";
 
-    // Periodic upward particle bursts at caster
+    // Periodic upward particle bursts at caster — bigger for casters
     if (anim.channelNextBurst <= 0) {
-      anim.channelNextBurst = 0.5;
+      anim.channelNextBurst = isCaster ? 0.3 : 0.5;
       const burstPos = anim.casterPos.clone().setY(anim.casterPos.y + 1.0);
-      for (let i = 0; i < 8; i++) {
+      const burstCount = isCaster ? 14 : 8;
+      for (let i = 0; i < burstCount; i++) {
         const vel = new THREE.Vector3(
-          (Math.random() - 0.5) * 1.5,
-          2 + Math.random() * 2,
-          (Math.random() - 0.5) * 1.5,
+          (Math.random() - 0.5) * (isCaster ? 2.5 : 1.5),
+          2 + Math.random() * (isCaster ? 3 : 2),
+          (Math.random() - 0.5) * (isCaster ? 2.5 : 1.5),
         );
-        this.emitParticle(burstPos.clone(), vel, anim.color, 0.15, 0.6);
+        this.emitParticle(burstPos.clone(), vel, anim.color, isCaster ? 0.3 : 0.15, isCaster ? 0.8 : 0.6);
       }
     }
 
-    // Drain beam: particle stream from target → caster (for warlock-style channels)
-    const beamT = (t * 5) % 1; // cycles along beam
-    const from = anim.targetPos.clone().setY(anim.targetPos.y + 1.0);
-    const to = anim.casterPos.clone().setY(anim.casterPos.y + 1.0);
-    const beamPos = from.clone().lerp(to, beamT);
-    const drift = new THREE.Vector3((Math.random() - 0.5) * 0.3, 0.3, (Math.random() - 0.5) * 0.3);
-    this.emitParticle(beamPos, drift, anim.color, 0.1, 0.25);
+    // Beam: thick particle stream from target → caster
+    // Multiple beam particles per frame for casters to form a visible continuous stream
+    const beamCount = isCaster ? 5 : 1;
+    for (let b = 0; b < beamCount; b++) {
+      const beamT = ((t * 5) + b / beamCount * 0.2) % 1;
+      const from = anim.targetPos.clone().setY(anim.targetPos.y + 1.0);
+      const to = anim.casterPos.clone().setY(anim.casterPos.y + 1.0);
+      const beamPos = from.clone().lerp(to, beamT);
+      // Add slight helix wobble for casters
+      if (isCaster) {
+        const wobbleAngle = beamT * Math.PI * 6 + anim.elapsed * 4;
+        beamPos.x += Math.cos(wobbleAngle) * 0.15;
+        beamPos.y += Math.sin(wobbleAngle) * 0.15;
+      }
+      const drift = new THREE.Vector3(
+        (Math.random() - 0.5) * (isCaster ? 0.5 : 0.3),
+        isCaster ? 0.5 : 0.3,
+        (Math.random() - 0.5) * (isCaster ? 0.5 : 0.3),
+      );
+      this.emitParticle(beamPos, drift, anim.color, isCaster ? 0.3 : 0.1, isCaster ? 0.4 : 0.25);
+    }
+
+    // Warlock-specific: dark drain motes spiraling from target to caster
+    if (anim.classId === "warlock" && Math.random() < 0.5) {
+      const drainT = (anim.elapsed * 2) % 1;
+      const drainFrom = anim.targetPos.clone().setY(anim.targetPos.y + 1.0);
+      const drainTo = anim.casterPos.clone().setY(anim.casterPos.y + 1.0);
+      const drainPos = drainFrom.clone().lerp(drainTo, drainT);
+      this.emitParticle(drainPos, new THREE.Vector3(0, -0.5, 0), 0x115533, 0.4, 0.5);
+    }
 
     // Pulsing glow on caster body via emissive
     const casterEnt = this.findEntityNear(anim.casterPos);
@@ -673,7 +830,7 @@ export class EffectsManager {
         const mat = body.material as THREE.MeshLambertMaterial;
         if (mat.emissive) {
           mat.emissive.setHex(anim.color);
-          mat.emissiveIntensity = 0.3 + Math.sin(anim.elapsed * 6) * 0.2;
+          mat.emissiveIntensity = (isCaster ? 0.5 : 0.3) + Math.sin(anim.elapsed * 6) * 0.25;
         }
       }
     }

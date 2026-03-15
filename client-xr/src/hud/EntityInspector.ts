@@ -7,6 +7,7 @@ import type { Entity } from "../types.js";
 export class EntityInspector {
   private panel: HTMLDivElement;
   private currentEntity: Entity | null = null;
+  private _locked = false;
 
   constructor() {
     this.panel = document.createElement("div");
@@ -25,6 +26,7 @@ export class EntityInspector {
       min-width: 200px;
       max-width: 300px;
       backdrop-filter: blur(4px);
+      transition: opacity 0.3s, background 0.3s;
     `;
     document.body.appendChild(this.panel);
 
@@ -41,6 +43,12 @@ export class EntityInspector {
     this.panel.innerHTML = this.buildContent(entity);
     this.panel.style.display = "block";
 
+    if (this._locked) {
+      this.applyLockedStyle();
+    } else {
+      this.applyDefaultStyle();
+    }
+
     // Position near click, clamped to viewport
     const w = this.panel.offsetWidth;
     const h = this.panel.offsetHeight;
@@ -52,6 +60,35 @@ export class EntityInspector {
 
     this.panel.style.left = `${x}px`;
     this.panel.style.top = `${y}px`;
+  }
+
+  /** Switch to locked mode: compact, transparent, pinned to top-right corner */
+  setLocked(locked: boolean) {
+    this._locked = locked;
+    if (this.panel.style.display !== "none") {
+      if (locked) {
+        this.applyLockedStyle();
+      } else {
+        this.applyDefaultStyle();
+      }
+    }
+  }
+
+  private applyLockedStyle() {
+    this.panel.style.background = "rgba(0, 0, 0, 0.35)";
+    this.panel.style.border = "1px solid rgba(255, 255, 255, 0.08)";
+    this.panel.style.opacity = "0.6";
+    // Pin to top-right so it stays out of the way
+    this.panel.style.left = "";
+    this.panel.style.right = "12px";
+    this.panel.style.top = "12px";
+  }
+
+  private applyDefaultStyle() {
+    this.panel.style.background = "rgba(0, 0, 0, 0.85)";
+    this.panel.style.border = "1px solid rgba(255, 255, 255, 0.15)";
+    this.panel.style.opacity = "1";
+    this.panel.style.right = "";
   }
 
   hide() {
@@ -68,12 +105,17 @@ export class EntityInspector {
     const hpPct = e.maxHp > 0 ? Math.round((e.hp / e.maxHp) * 100) : 100;
     const hpColor = hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44";
 
+    const levelStr = e.level != null ? `Lv ${e.level}` : "";
+
     let html = `
-      <div style="color:${typeColor}; font-weight:bold; font-size:14px; margin-bottom:4px;">
-        ${esc(e.name)}
+      <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+        <span style="color:${typeColor}; font-weight:bold; font-size:14px;">
+          ${esc(e.name)}
+        </span>
+        ${levelStr ? `<span style="color:#aaa; font-size:12px; margin-left:8px;">${levelStr}</span>` : ""}
       </div>
       <div style="color:#888; font-size:11px; margin-bottom:6px;">
-        ${esc(e.type)}${e.level ? ` · Level ${e.level}` : ""}
+        ${esc(e.type)}${e.partyId ? ` · <span style="color:#5cf;">In Party</span>` : ""}
       </div>
     `;
 

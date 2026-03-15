@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { TerrainData } from "../types.js";
+import type { EnvironmentAssets } from "./EnvironmentAssets.js";
 
 /**
  * Tile index → terrain type mapping.
@@ -41,10 +42,31 @@ const TILE_UNIT = 1;
 
 // ── Texture loader (shared) ─────────────────────────────────────────
 const loader = new THREE.TextureLoader();
-const BASE = import.meta.env.BASE_URL + "textures/";
+// Resolve texture base to an absolute URL so Three.js can always find them
+const BASE = new URL("textures/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
+
+/** Materials waiting for their texture to finish loading */
+const pendingMaterials: Map<string, THREE.Material[]> = new Map();
 
 function loadTex(name: string, repeatX = 1, repeatY = 1): THREE.Texture {
-  const tex = loader.load(BASE + name);
+  const url = BASE + name;
+  const tex = loader.load(
+    url,
+    (t) => {
+      console.log(`[Terrain] Texture loaded: ${url} (${t.image.width}x${t.image.height})`);
+      t.needsUpdate = true;
+      // Force material update on any materials waiting for this texture
+      const waiting = pendingMaterials.get(name);
+      if (waiting) {
+        for (const mat of waiting) mat.needsUpdate = true;
+        pendingMaterials.delete(name);
+      }
+    },
+    undefined,
+    (err) => {
+      console.error(`[Terrain] Failed to load texture: ${url}`, err);
+    },
+  );
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeatX, repeatY);
@@ -52,6 +74,12 @@ function loadTex(name: string, repeatX = 1, repeatY = 1): THREE.Texture {
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
+}
+
+/** Register a material to be updated when its texture finishes loading */
+function trackMaterial(texName: string, mat: THREE.Material) {
+  if (!pendingMaterials.has(texName)) pendingMaterials.set(texName, []);
+  pendingMaterials.get(texName)!.push(mat);
 }
 
 // ── Vertex color fallback for structures ─────────────────────────────
@@ -75,6 +103,7 @@ export class TerrainRenderer {
   private elevationData: number[] = [];
   gridWidth = 0;
   gridHeight = 0;
+  private envAssets: EnvironmentAssets | null = null;
 
   // Shared textures (loaded once)
   private static textures: Record<string, THREE.Texture> | null = null;
@@ -120,8 +149,9 @@ export class TerrainRenderer {
     return g;
   })();
 
-  constructor() {
+  constructor(envAssets?: EnvironmentAssets) {
     this.group.name = "terrain";
+    this.envAssets = envAssets ?? null;
   }
 
   getElevationAt(x: number, z: number): number {
@@ -199,8 +229,8 @@ export class TerrainRenderer {
           colors.push(tint[0], tint[1], tint[2]);
         }
 
-        // Two triangles per quad
-        indices.push(vi, vi + 1, vi + 2, vi + 1, vi + 3, vi + 2);
+        // Two triangles per quad (CCW winding so normals face up toward camera)
+        indices.push(vi, vi + 2, vi + 1, vi + 1, vi + 2, vi + 3);
       }
 
       const geo = new THREE.BufferGeometry();
@@ -213,10 +243,8 @@ export class TerrainRenderer {
 
       let material: THREE.Material;
       if (type === "structure") {
-        // Structures keep vertex-colored look (no good texture for roofs/walls ground)
-        material = new THREE.MeshLambertMaterial({ vertexColors: true });
+        material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
       } else if (type === "water") {
-        // Water tiles get the water texture with transparency
         const tex = textures.water.clone();
         tex.needsUpdate = true;
         material = new THREE.MeshPhongMaterial({
@@ -226,16 +254,21 @@ export class TerrainRenderer {
           shininess: 80,
           specular: new THREE.Color(0x88bbff),
           vertexColors: true,
+          side: THREE.DoubleSide,
         });
+        trackMaterial("water.jpg", material);
       } else {
-        const tex = textures[type as keyof typeof textures];
+        const texName = type as keyof typeof textures;
+        const tex = textures[texName];
         if (tex) {
           material = new THREE.MeshLambertMaterial({
             map: tex,
             vertexColors: true,
+            side: THREE.DoubleSide,
           });
+          trackMaterial(`${texName}.jpg`, material);
         } else {
-          material = new THREE.MeshLambertMaterial({ vertexColors: true });
+          material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
         }
       }
 
@@ -247,6 +280,8 @@ export class TerrainRenderer {
     }
 
     // ── Overlay objects ──
+    const useGlb = this.envAssets?.isReady() ?? false;
+
     for (let iz = 0; iz < H; iz++) {
       for (let ix = 0; ix < W; ix++) {
         const ti = iz * W + ix;
@@ -266,6 +301,25 @@ export class TerrainRenderer {
         const ov = data.overlay[ti] ?? -1;
         if (ov < 0) continue;
 
+        // Try GLB model first
+        if (useGlb) {
+          const assetName = this.envAssets!.getAssetForTile(ov);
+          if (assetName) {
+            const obj = this.envAssets!.place(assetName, wx, elev, wz);
+            if (obj) {
+              this.group.add(obj);
+              // Track for animations if needed
+              if (BUSH_TILES.has(ov)) {
+                obj.traverse((c) => { if (c instanceof THREE.Mesh) this.bushMeshes.push(c); });
+              } else if (ov === 56 || ov === 57) {
+                obj.traverse((c) => { if (c instanceof THREE.Mesh) this.portalMeshes.push(c); });
+              }
+              continue; // GLB placed, skip primitive fallback
+            }
+          }
+        }
+
+        // Primitive fallback
         if (WALL_TILES.has(ov)) {
           const m = new THREE.Mesh(this.wallGeo, this.wallMat);
           m.position.set(wx, 1 + elev, wz);

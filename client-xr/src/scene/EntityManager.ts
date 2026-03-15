@@ -180,74 +180,72 @@ function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?
 function addArmorPieces(
   group: THREE.Group, ent: Entity, cls: { sx: number; sy: number; sz: number; color: number },
   leftArm?: THREE.Group, rightArm?: THREE.Group, leftLeg?: THREE.Mesh, rightLeg?: THREE.Mesh,
+  rig?: CharacterRig | null,
 ) {
   const eq = ent.equipment;
   if (!eq) return;
 
-  // ── Helm ──
+  // ── Helm — attach to head bone so it follows head animation ──
   if (eq.helm) {
     const mt = inferArmorMaterial(eq.helm.name ?? "");
     const mat = makeArmorMat(mt, eq.helm.quality);
+    const helmTarget = rig?.head ?? group;
 
     if (mt === "plate") {
-      // Full plate helm: dome + nasal + crest
+      // Full plate helm: dome + nasal + crest (relative to head bone center)
       const dome = new THREE.Mesh(helmDomeGeo, mat);
-      dome.position.y = 1.58; group.add(dome);
+      dome.position.y = 0.08; helmTarget.add(dome);
       const nasal = new THREE.Mesh(helmNasalGeo, mat);
-      nasal.position.set(0, 1.48, 0.2); group.add(nasal);
+      nasal.position.set(0, -0.02, 0.2); helmTarget.add(nasal);
       const crest = new THREE.Mesh(helmCrestGeo, mat);
-      crest.position.set(0, 1.74, 0); group.add(crest);
+      crest.position.set(0, 0.22, 0); helmTarget.add(crest);
     } else if (mt === "chain") {
-      // Chain coif: droopy cap covering head and neck
+      // Chain coif
       const coif = new THREE.Mesh(helmCoifGeo, mat);
-      coif.position.y = 1.56; group.add(coif);
-      // Slight neck drape
+      coif.position.y = 0.06; helmTarget.add(coif);
       const drape = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.12, 8), mat);
-      drape.position.y = 1.38; group.add(drape);
+      drape.position.y = -0.12; helmTarget.add(drape);
     } else {
       // Leather cap: low-profile skullcap + brim
       const cap = new THREE.Mesh(helmCapGeo, mat);
-      cap.position.y = 1.6; group.add(cap);
+      cap.position.y = 0.1; helmTarget.add(cap);
       const brim = new THREE.Mesh(helmBrimGeo, mat);
-      brim.position.y = 1.54; group.add(brim);
+      brim.position.y = 0.04; helmTarget.add(brim);
     }
   }
 
-  // ── Chest ──
+  // ── Chest — attach to chest bone ──
   if (eq.chest) {
     const mt = inferArmorMaterial(eq.chest.name ?? "");
+    const chestTarget = rig?.chest ?? group;
+    const chestOffY = rig ? 0 : 0.8; // bone-relative vs absolute fallback
     if (mt === "plate") {
-      // Heavy plate: thick shell, opaque
       const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.75 });
       const plate = new THREE.Mesh(chestPlateGeo, mat);
-      plate.position.y = 0.8;
+      plate.position.y = chestOffY;
       plate.scale.set(cls.sx * 1.15, cls.sy * 0.85, cls.sz * 1.1);
-      group.add(plate);
-      // Plate lines (ridges)
+      chestTarget.add(plate);
       const ridgeMat = makeArmorMat(mt, eq.chest.quality);
-      for (const ry of [0.7, 0.85]) {
+      for (const ry of [-0.1, 0.05]) {
         const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.28 * cls.sx, 0.015, 4, 10), ridgeMat);
-        ridge.position.y = ry; ridge.rotation.x = Math.PI / 2;
-        group.add(ridge);
+        ridge.position.y = chestOffY + ry; ridge.rotation.x = Math.PI / 2;
+        chestTarget.add(ridge);
       }
     } else if (mt === "chain") {
-      // Chainmail: slightly thinner, metallic look
       const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.6 });
       const shirt = new THREE.Mesh(chestVestGeo, mat);
-      shirt.position.y = 0.8;
+      shirt.position.y = chestOffY;
       shirt.scale.set(cls.sx * 1.1, cls.sy * 0.88, cls.sz * 1.06);
-      group.add(shirt);
+      chestTarget.add(shirt);
     } else {
-      // Leather vest: snug fit, warm tones
       const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.55 });
       const vest = new THREE.Mesh(chestVestGeo, mat);
-      vest.position.y = 0.8;
+      vest.position.y = chestOffY;
       vest.scale.set(cls.sx * 1.08, cls.sy * 0.82, cls.sz * 1.04);
-      group.add(vest);
-      // Stitching lines
+      chestTarget.add(vest);
       const stitchMat = new THREE.MeshLambertMaterial({ color: 0x554422 });
       const stitch = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.3, 0.01), stitchMat);
-      stitch.position.set(0, 0.8, 0.27 * cls.sz); group.add(stitch);
+      stitch.position.set(0, chestOffY, 0.27 * cls.sz); chestTarget.add(stitch);
     }
   }
 
@@ -305,15 +303,27 @@ function addArmorPieces(
   if (eq.boots) {
     const mt = inferArmorMaterial(eq.boots.name ?? "");
     const mat = makeArmorMat(mt, eq.boots.quality);
-    for (const dx of [-0.1, 0.1]) {
+    const footBones = rig ? [rig.lFoot, rig.rFoot] : [null, null];
+    for (let i = 0; i < 2; i++) {
+      const foot = footBones[i];
+      const dx = i === 0 ? -0.1 : 0.1;
       if (mt === "plate") {
         const boot = new THREE.Mesh(bootPlateGeo, mat);
-        boot.position.set(dx, 0.07, 0.03); group.add(boot);
         const cuff = new THREE.Mesh(bootCuffGeo, mat);
-        cuff.position.set(dx, 0.16, 0); group.add(cuff);
+        if (foot) {
+          boot.position.set(0, 0.03, 0.03); foot.add(boot);
+          cuff.position.set(0, 0.1, 0); foot.add(cuff);
+        } else {
+          boot.position.set(dx, 0.07, 0.03); group.add(boot);
+          cuff.position.set(dx, 0.16, 0); group.add(cuff);
+        }
       } else {
         const boot = new THREE.Mesh(bootLeatherGeo, mat);
-        boot.position.set(dx, 0.09, 0.02); group.add(boot);
+        if (foot) {
+          boot.position.set(0, 0.04, 0.02); foot.add(boot);
+        } else {
+          boot.position.set(dx, 0.09, 0.02); group.add(boot);
+        }
       }
     }
   }
@@ -344,28 +354,27 @@ function addArmorPieces(
     const mt = inferArmorMaterial(eq.belt.name ?? "");
     const mat = makeArmorMat(mt, eq.belt.quality);
 
+    const beltTarget = rig?.hip ?? group;
+    const beltOffY = rig ? 0.08 : 0.52;
     if (mt === "plate") {
-      // Thick war belt with buckle
       const ring = new THREE.Mesh(beltGeo, mat);
-      ring.position.y = 0.52; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); group.add(ring);
+      ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
+      ring.scale.set(cls.sx, cls.sz, 1); beltTarget.add(ring);
       const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, 0.52, 0.27 * cls.sz); group.add(buckle);
+      buckle.position.set(0, beltOffY, 0.27 * cls.sz); beltTarget.add(buckle);
     } else {
-      // Thin belt with pouches (leather/chain)
       const ring = new THREE.Mesh(beltThinGeo, mat);
-      ring.position.y = 0.52; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); group.add(ring);
-      // Side pouches for leather
+      ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
+      ring.scale.set(cls.sx, cls.sz, 1); beltTarget.add(ring);
       if (mt === "leather") {
         const pouchMat = new THREE.MeshLambertMaterial({ color: 0x6B5533 });
         for (const side of [-1, 1]) {
           const pouch = new THREE.Mesh(beltPouchGeo, pouchMat);
-          pouch.position.set(side * 0.22 * cls.sx, 0.48, 0.05); group.add(pouch);
+          pouch.position.set(side * 0.22 * cls.sx, beltOffY - 0.04, 0.05); beltTarget.add(pouch);
         }
       }
       const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, 0.52, 0.26 * cls.sz); group.add(buckle);
+      buckle.position.set(0, beltOffY, 0.26 * cls.sz); beltTarget.add(buckle);
     }
   }
 }
@@ -572,7 +581,35 @@ import { AnimationLibrary } from "./AnimationLibrary.js";
 
 // ── Animation types ─────────────────────────────────────────────────
 
-type AnimName = "walk" | "idle" | "attack" | "damage" | "heal" | "death" | "gather" | "craft";
+type AnimName = "walk" | "idle" | "attack"
+  | "heroicstrike" | "cleave" | "shieldwall" | "battlerage" | "intimidatingshout" | "rallyingcry" | "rendingstrike"
+  | "spellcast" | "darkcast" | "holycast"
+  | "damage" | "heal" | "death" | "gather" | "craft";
+
+/** Map technique IDs to specific animation clips (ranked versions share base clip) */
+const TECHNIQUE_ANIM: Record<string, AnimName> = {
+  warrior_heroic_strike: "heroicstrike",
+  warrior_heroic_strike_r2: "heroicstrike",
+  warrior_heroic_strike_r3: "heroicstrike",
+  warrior_cleave: "cleave",
+  warrior_cleave_r2: "cleave",
+  warrior_shield_wall: "shieldwall",
+  warrior_battle_rage: "battlerage",
+  warrior_battle_rage_r2: "battlerage",
+  warrior_intimidating_shout: "intimidatingshout",
+  warrior_rallying_cry: "rallyingcry",
+  warrior_rending_strike: "rendingstrike",
+};
+
+/** Pick the right attack animation clip based on class (fallback when no technique ID) */
+function attackAnimForClass(classId: string | undefined): AnimName {
+  switch (classId) {
+    case "mage": return "spellcast";
+    case "warlock": return "darkcast";
+    case "cleric": return "holycast";
+    default: return "attack";
+  }
+}
 
 interface FloatingText {
   sprite: THREE.Sprite;
@@ -739,9 +776,10 @@ export class EntityManager {
         obj.targetYaw = Math.atan2(dx, dz);
       }
 
-      // Smooth yaw rotation (shortest path) — skip during attack/death
+      // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
       const curAnim = obj.currentAnim;
-      if (curAnim !== "attack" && curAnim !== "death") {
+      const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
+      if (freeYaw) {
         let yawDiff = obj.targetYaw - g.rotation.y;
         while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
         while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
@@ -898,20 +936,21 @@ export class EntityManager {
     obj.group.add(ft);
     this.floatingTexts.push({ sprite: ft, elapsed: 0, startY: 2.0 });
 
-    // If attacker nearby, trigger their attack anim
+    // If attacker nearby, trigger their attack anim (class-specific)
     for (const other of this.entities.values()) {
       if (other === obj) continue;
       if (other.entity.type !== "player" && other.entity.type !== "mob" && other.entity.type !== "boss") continue;
       const dx = other.group.position.x - obj.group.position.x;
       const dz = other.group.position.z - obj.group.position.z;
       const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist < 3 && other.currentAnim !== "attack") {
+      const atkAnim = attackAnimForClass(other.entity.classId);
+      if (dist < 3 && other.currentAnim !== atkAnim) {
         // Face target then attack
         other.targetYaw = Math.atan2(
           obj.group.position.x - other.group.position.x,
           obj.group.position.z - other.group.position.z,
         );
-        this.playOneShot(other, "attack");
+        this.playOneShot(other, atkAnim);
         break;
       }
     }
@@ -945,14 +984,36 @@ export class EntityManager {
 
   private triggerDeath(obj: EntityObject) {
     this.playOneShot(obj, "death", () => {
-      // Fade out after death anim completes
+      // After death anim: fade out completely then hide (despawn)
+      const startTime = performance.now();
+      const fadeDuration = 600; // ms
+      // Make all materials transparent for fade
       obj.group.traverse((child) => {
         if ((child as THREE.Mesh).material) {
           const mat = (child as THREE.Mesh).material as THREE.Material;
           mat.transparent = true;
-          mat.opacity = 0.3;
         }
       });
+      const fadeOut = () => {
+        const elapsed = performance.now() - startTime;
+        const t = Math.min(1, elapsed / fadeDuration);
+        const opacity = 1 - t;
+        // Also sink slightly into the ground
+        obj.group.position.y -= 0.003;
+        obj.group.traverse((child) => {
+          if ((child as THREE.Mesh).material) {
+            const mat = (child as THREE.Mesh).material as THREE.Material;
+            mat.opacity = opacity;
+          }
+        });
+        if (t < 1) {
+          requestAnimationFrame(fadeOut);
+        } else {
+          // Fully despawned — hide until server removes or respawns
+          obj.group.visible = false;
+        }
+      };
+      requestAnimationFrame(fadeOut);
     });
   }
 
@@ -969,6 +1030,28 @@ export class EntityManager {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.currentAnim !== "craft") {
           this.playOneShot(obj, "craft");
+        }
+      }
+      // Ability events: play technique-specific animation on the caster
+      if (ev.type === "ability" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (!obj) continue;
+        const techniqueId = ev.data?.techniqueId as string | undefined;
+        if (techniqueId && TECHNIQUE_ANIM[techniqueId]) {
+          const anim = TECHNIQUE_ANIM[techniqueId];
+          if (obj.currentAnim !== anim) {
+            // Face target if available
+            if (ev.targetId) {
+              const target = this.entities.get(ev.targetId);
+              if (target) {
+                obj.targetYaw = Math.atan2(
+                  target.group.position.x - obj.group.position.x,
+                  target.group.position.z - obj.group.position.z,
+                );
+              }
+            }
+            this.playOneShot(obj, anim);
+          }
         }
       }
     }
@@ -1056,7 +1139,7 @@ export class EntityManager {
       const label = makeLabel(ent.name, labelColor);
       label.position.y = labelY + 0.3;
       group.add(label);
-    } else {
+    } else if (ent.type !== "corpse") {
       const label = makeLabel(ent.name, "#aaaaaa");
       label.position.y = 1.2;
       label.scale.set(1.5, 0.4, 1);
@@ -1320,7 +1403,21 @@ export class EntityManager {
         wpn.position.set(0, -0.1, -0.1);
       } else if (wType === "staff") {
         wpn.position.set(0, 0.2, 0); wpn.rotation.z = 0.05;
+      } else if (wType === "axe") {
+        // Axe: grip near bottom of handle, blade faces forward
+        wpn.position.set(0, 0.1, 0.05);
+        wpn.rotation.set(0.1, 0, -0.1);
+      } else if (wType === "mace") {
+        wpn.position.set(0, 0.05, 0);
+        wpn.rotation.z = -0.1;
+      } else if (wType === "pickaxe") {
+        wpn.position.set(0, 0.08, 0.05);
+        wpn.rotation.set(0.1, 0, -0.1);
+      } else if (wType === "dagger") {
+        wpn.position.set(0, -0.02, 0);
+        wpn.rotation.z = -0.1;
       } else {
+        // Sword and others
         wpn.position.set(0, -0.05, 0); wpn.rotation.z = -0.15;
       }
       rig.rHand.add(wpn);
@@ -1337,8 +1434,8 @@ export class EntityManager {
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
-    // Procedural armor pieces
-    addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg);
+    // Procedural armor pieces — pass rig so pieces attach to bones
+    addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig);
 
     return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }

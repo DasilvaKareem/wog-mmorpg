@@ -29,7 +29,7 @@ const API_BASE = "https://api.tripo3d.ai/v2/openapi";
 const POLL_INTERVAL = 3_000;
 const MAX_POLL_TIME = 300_000;
 const API_KEY = process.argv[2] || process.env.VITE_TRIPO_API_KEY || "";
-const OUT_DIR = path.join(ROOT, "public/models/environment");
+const OUT_DIR = path.join(ROOT, "assets-source");
 
 // ── Concurrency control ─────────────────────────────────────────────────
 const MAX_CONCURRENT = 3; // Tripo rate-limits, keep this conservative
@@ -167,8 +167,9 @@ async function pollTask(taskId: string): Promise<string> {
     const task = json.data;
 
     if (task.status === "success") {
-      const url = task.output?.model;
-      if (!url) throw new Error(`No model URL in task ${taskId}`);
+      // Tripo v2 API returns model URL under output.pbr_model (not output.model)
+      const url = task.output?.pbr_model ?? task.output?.model ?? task.output?.base_model;
+      if (!url) throw new Error(`No model URL in task ${taskId}. Output keys: ${JSON.stringify(Object.keys(task.output ?? {}))}`);
       return url;
     }
     if (task.status === "failed" || task.status === "cancelled") {

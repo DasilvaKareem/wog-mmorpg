@@ -45,7 +45,7 @@ export class SkyRenderer {
 
   private loadSkybox() {
     const loader = new THREE.CubeTextureLoader();
-    const base = import.meta.env.BASE_URL + "skybox/";
+    const base = new URL("skybox/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
     loader.setPath(base);
     loader.load(
       ["px.png", "nx.png", "py.png", "ny.png", "pz.png", "nz.png"],

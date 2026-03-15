@@ -97,7 +97,7 @@ export class TripoAssetGenerator {
     }
 
     // 4) Download + load glTF/GLB into Three.js
-    const modelUrl = result.output?.model;
+    const modelUrl = result.output?.pbr_model ?? result.output?.model;
     if (!modelUrl) throw new Error(`[Tripo] No model URL in task ${taskId}`);
 
     const group = await this.loadModel(modelUrl, prompt);
@@ -134,7 +134,7 @@ export class TripoAssetGenerator {
     });
 
     const result = await this.pollTask(taskId);
-    const modelUrl = result.output?.model;
+    const modelUrl = result.output?.pbr_model ?? result.output?.model;
     if (!modelUrl) throw new Error(`[Tripo] No model URL in task ${taskId}`);
 
     const group = await this.loadModel(modelUrl, "image-model");
@@ -224,7 +224,7 @@ export class TripoAssetGenerator {
       style: opts.stylize,
     });
     const result = await this.pollTask(styleTaskId);
-    const modelUrl = result.output?.model;
+    const modelUrl = result.output?.pbr_model ?? result.output?.model;
     if (!modelUrl) throw new Error(`[Tripo] No model URL for stylized task`);
 
     const group = await this.loadModel(modelUrl, `stylized_${opts.stylize}`);

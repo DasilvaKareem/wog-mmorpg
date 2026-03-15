@@ -22,33 +22,6 @@
     #hud .label { color: #888; font-size: 12px; }
     #hud .value { color: #4f8; }
 
-    #zone-bar {
-      position: fixed;
-      top: 12px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 4px;
-      z-index: 10;
-    }
-    #zone-bar button {
-      padding: 4px 10px;
-      background: rgba(30, 35, 50, 0.85);
-      color: #999;
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 4px;
-      font: 11px monospace;
-      cursor: pointer;
-      backdrop-filter: blur(4px);
-      transition: all 0.15s;
-    }
-    #zone-bar button:hover { color: #ddd; border-color: rgba(255,255,255,0.3); }
-    #zone-bar button.active {
-      color: #4f8;
-      border-color: #4f8;
-      background: rgba(30, 60, 40, 0.85);
-    }
-
     #controls-help {
       position: fixed;
       bottom: 12px;
@@ -95,18 +68,14 @@
 </head>
 <body>
   <div id="hud">
-    <div><span class="label">Zone:</span> <span id="hud-zone" class="value">--</span></div>
     <div><span class="label">Entities:</span> <span id="hud-entities" class="value">0</span></div>
-    <div><span class="label">Time:</span> <span id="hud-time" class="value">--</span></div>
     <div><span class="label">FPS:</span> <span id="hud-fps" class="value">--</span></div>
   </div>
-
-  <div id="zone-bar"></div>
 
   <div id="lock-indicator"></div>
 
   <div id="controls-help">
-    Right-drag: orbit | Scroll: zoom | WASD: pan | 1-0: zones | Click: lock | Esc: unlock
+    Right-drag: orbit | Scroll: zoom | WASD: pan | Click: lock | Esc: unlock
   </div>
 
   <button id="vr-button">Enter VR</button>

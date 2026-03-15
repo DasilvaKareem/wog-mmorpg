@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TerrainRenderer } from "./TerrainRenderer.js";
 import { CollisionMap } from "./CollisionMap.js";
+import { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { fetchTerrain } from "../api.js";
 import type { WorldLayout, WorldLayoutZone, ElevationProvider } from "../types.js";
 
@@ -46,11 +47,14 @@ export class WorldManager implements ElevationProvider {
   private borderGroup = new THREE.Group();
   private borderElapsed = 0;
   private borderWalls: THREE.Mesh[] = [];
+  private envAssets = new EnvironmentAssets();
 
   constructor() {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
+    // Start preloading environment GLB models in the background
+    this.envAssets.preload();
   }
 
   /** Initialize from the /world/layout response */
@@ -193,7 +197,7 @@ export class WorldManager implements ElevationProvider {
     zone.loading = false;
     if (!data) return;
 
-    const terrain = new TerrainRenderer();
+    const terrain = new TerrainRenderer(this.envAssets);
     terrain.build(data);
     // Position the terrain group at its world offset
     terrain.group.position.set(zone.worldOffset.x, 0, zone.worldOffset.y);
