@@ -9,6 +9,8 @@ pragma solidity ^0.8.20;
  *
  *         Each plot is an ERC-721 NFT minted to the owner's wallet on claim.
  *         Peer-to-peer transfers are blocked — all movements go through the server.
+ *
+ * @dev Built for OpenZeppelin Contracts v4.9.x (SKALE Base deployment).
  */
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
@@ -50,30 +52,29 @@ contract WoGLandRegistry is ERC721, Ownable {
 
     // ============ Constructor ============
 
-    constructor() ERC721("WoG Land", "WOGL") Ownable(msg.sender) {
+    constructor() ERC721("WoG Land", "WOGL") {
         nextTokenId = 1; // token 0 is reserved as "no plot"
     }
 
     // ============ Server-only mutations ============
 
     /**
-     * @notice Claim a plot for a player. Mints an NFT to `owner`.
-     *         Reverts if the player already owns a plot or the plotId is taken.
+     * @notice Claim a plot for a player. Mints an NFT to `plotOwner`.
      */
     function claimPlot(
         string calldata plotId,
         string calldata zoneId,
         uint16 x,
         uint16 y,
-        address owner
+        address plotOwner
     ) external onlyOwner returns (uint256 tokenId) {
-        require(ownerPlot[owner] == 0, "Already owns a plot");
+        require(ownerPlot[plotOwner] == 0, "Already owns a plot");
 
         bytes32 plotHash = keccak256(abi.encodePacked(plotId));
         require(plotIdToToken[plotHash] == 0, "Plot already claimed");
 
         tokenId = nextTokenId++;
-        _mint(owner, tokenId);
+        _mint(plotOwner, tokenId);
 
         plots[tokenId] = PlotInfo({
             plotId: plotId,
@@ -86,31 +87,30 @@ contract WoGLandRegistry is ERC721, Ownable {
         });
 
         plotIdToToken[plotHash] = tokenId;
-        ownerPlot[owner] = tokenId;
+        ownerPlot[plotOwner] = tokenId;
 
-        emit PlotClaimed(tokenId, plotId, zoneId, owner);
+        emit PlotClaimed(tokenId, plotId, zoneId, plotOwner);
     }
 
     /**
      * @notice Release a player's plot. Burns the NFT and clears all state.
      */
-    function releasePlot(address owner) external onlyOwner {
-        uint256 tokenId = ownerPlot[owner];
+    function releasePlot(address plotOwner) external onlyOwner {
+        uint256 tokenId = ownerPlot[plotOwner];
         require(tokenId != 0, "No plot owned");
 
         bytes32 plotHash = keccak256(abi.encodePacked(plots[tokenId].plotId));
 
-        emit PlotReleased(tokenId, plots[tokenId].plotId, owner);
+        emit PlotReleased(tokenId, plots[tokenId].plotId, plotOwner);
 
         _burn(tokenId);
         delete plotIdToToken[plotHash];
-        delete ownerPlot[owner];
+        delete ownerPlot[plotOwner];
         delete plots[tokenId];
     }
 
     /**
      * @notice Transfer a plot from one player to another.
-     *         The recipient must not already own a plot.
      */
     function transferPlot(address from, address to) external onlyOwner {
         uint256 tokenId = ownerPlot[from];
@@ -125,7 +125,7 @@ contract WoGLandRegistry is ERC721, Ownable {
     }
 
     /**
-     * @notice Update building state on a plot (type + construction stage).
+     * @notice Update building state on a plot.
      */
     function updateBuilding(
         uint256 tokenId,
@@ -140,13 +140,13 @@ contract WoGLandRegistry is ERC721, Ownable {
 
     // ============ View functions ============
 
-    function getPlotByOwner(address owner) external view returns (PlotInfo memory) {
-        uint256 tokenId = ownerPlot[owner];
+    function getPlotByOwner(address plotOwner) external view returns (PlotInfo memory) {
+        uint256 tokenId = ownerPlot[plotOwner];
         require(tokenId != 0, "No plot owned");
         return plots[tokenId];
     }
 
-    function getPlotByPlotId(string calldata plotId) external view returns (PlotInfo memory, address owner) {
+    function getPlotByPlotId(string calldata plotId) external view returns (PlotInfo memory, address plotOwner) {
         bytes32 plotHash = keccak256(abi.encodePacked(plotId));
         uint256 tokenId = plotIdToToken[plotHash];
         require(tokenId != 0, "Plot not claimed");
@@ -157,15 +157,17 @@ contract WoGLandRegistry is ERC721, Ownable {
 
     /**
      * @dev Block all transfers except those initiated by the contract owner (server).
-     *      This prevents peer-to-peer NFT transfers outside the game.
      */
-    function _update(address to, uint256 tokenId, address auth) internal override returns (address) {
-        // Allow mints (from = address(0)) and burns (to = address(0))
-        address from = _ownerOf(tokenId);
+    function _beforeTokenTransfer(
+        address from,
+        address to,
+        uint256 tokenId,
+        uint256 batchSize
+    ) internal override {
+        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+        // Allow mints (from=0) and burns (to=0); block peer-to-peer
         if (from != address(0) && to != address(0)) {
-            // Regular transfer — only owner (server wallet) can initiate
             require(msg.sender == owner(), "Transfers restricted to game server");
         }
-        return super._update(to, tokenId, auth);
     }
 }
