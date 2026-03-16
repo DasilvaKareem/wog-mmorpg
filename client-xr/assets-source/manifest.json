@@ -1,0 +1,127 @@
+[
+  {
+    "file": "oak_tree.glb",
+    "name": "oak_tree",
+    "scale": 1
+  },
+  {
+    "file": "pine_tree.glb",
+    "name": "pine_tree",
+    "scale": 1
+  },
+  {
+    "file": "dead_tree.glb",
+    "name": "dead_tree",
+    "scale": 1
+  },
+  {
+    "file": "tree_stump.glb",
+    "name": "tree_stump",
+    "scale": 0.5
+  },
+  {
+    "file": "boulder.glb",
+    "name": "boulder",
+    "scale": 1
+  },
+  {
+    "file": "rock_cluster.glb",
+    "name": "rock_cluster",
+    "scale": 0.6
+  },
+  {
+    "file": "cliff_face.glb",
+    "name": "cliff_face",
+    "scale": 1.5
+  },
+  {
+    "file": "bush.glb",
+    "name": "bush",
+    "scale": 0.5
+  },
+  {
+    "file": "tall_grass.glb",
+    "name": "tall_grass",
+    "scale": 0.4
+  },
+  {
+    "file": "flower_patch.glb",
+    "name": "flower_patch",
+    "scale": 0.4
+  },
+  {
+    "file": "reeds.glb",
+    "name": "reeds",
+    "scale": 0.5
+  },
+  {
+    "file": "stone_wall.glb",
+    "name": "stone_wall",
+    "scale": 1
+  },
+  {
+    "file": "wooden_fence.glb",
+    "name": "wooden_fence",
+    "scale": 0.8
+  },
+  {
+    "file": "wooden_door.glb",
+    "name": "wooden_door",
+    "scale": 1
+  },
+  {
+    "file": "roof_thatch.glb",
+    "name": "roof_thatch",
+    "scale": 1
+  },
+  {
+    "file": "torch.glb",
+    "name": "torch",
+    "scale": 0.4
+  },
+  {
+    "file": "well.glb",
+    "name": "well",
+    "scale": 0.7
+  },
+  {
+    "file": "crate.glb",
+    "name": "crate",
+    "scale": 0.4
+  },
+  {
+    "file": "barrel.glb",
+    "name": "barrel",
+    "scale": 0.4
+  },
+  {
+    "file": "market_stall.glb",
+    "name": "market_stall",
+    "scale": 0.8
+  },
+  {
+    "file": "bridge.glb",
+    "name": "bridge",
+    "scale": 1
+  },
+  {
+    "file": "signpost.glb",
+    "name": "signpost",
+    "scale": 0.5
+  },
+  {
+    "file": "campfire.glb",
+    "name": "campfire",
+    "scale": 0.5
+  },
+  {
+    "file": "dock.glb",
+    "name": "dock",
+    "scale": 1
+  },
+  {
+    "file": "portal_frame.glb",
+    "name": "portal_frame",
+    "scale": 1.2
+  }
+]

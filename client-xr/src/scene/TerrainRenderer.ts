@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { TerrainData } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
+import { getGradientMap } from "./ToonPipeline.js";
 
 /**
  * Tile index → terrain type mapping.
@@ -45,27 +46,13 @@ const loader = new THREE.TextureLoader();
 // Resolve texture base to an absolute URL so Three.js can always find them
 const BASE = new URL("textures/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
 
-/** Materials waiting for their texture to finish loading */
-const pendingMaterials: Map<string, THREE.Material[]> = new Map();
-
 function loadTex(name: string, repeatX = 1, repeatY = 1): THREE.Texture {
   const url = BASE + name;
   const tex = loader.load(
     url,
-    (t) => {
-      console.log(`[Terrain] Texture loaded: ${url} (${t.image.width}x${t.image.height})`);
-      t.needsUpdate = true;
-      // Force material update on any materials waiting for this texture
-      const waiting = pendingMaterials.get(name);
-      if (waiting) {
-        for (const mat of waiting) mat.needsUpdate = true;
-        pendingMaterials.delete(name);
-      }
-    },
+    () => { console.log(`[Terrain] Texture loaded: ${name}`); },
     undefined,
-    (err) => {
-      console.error(`[Terrain] Failed to load texture: ${url}`, err);
-    },
+    (err) => { console.error(`[Terrain] Failed to load texture: ${url}`, err); },
   );
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -74,12 +61,6 @@ function loadTex(name: string, repeatX = 1, repeatY = 1): THREE.Texture {
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
-}
-
-/** Register a material to be updated when its texture finishes loading */
-function trackMaterial(texName: string, mat: THREE.Material) {
-  if (!pendingMaterials.has(texName)) pendingMaterials.set(texName, []);
-  pendingMaterials.get(texName)!.push(mat);
 }
 
 // ── Vertex color fallback for structures ─────────────────────────────
@@ -122,17 +103,17 @@ export class TerrainRenderer {
     return TerrainRenderer.textures;
   }
 
-  // Shared overlay materials
-  private wallMat = new THREE.MeshLambertMaterial({ color: 0x887766 });
-  private trunkMat = new THREE.MeshLambertMaterial({ color: 0x6b4226 });
-  private canopyLightMat = new THREE.MeshLambertMaterial({ color: 0x2d6a1e });
-  private canopyDarkMat = new THREE.MeshLambertMaterial({ color: 0x1a4a0e });
-  private rockMat = new THREE.MeshLambertMaterial({ color: 0x777777 });
-  private bushMat = new THREE.MeshLambertMaterial({ color: 0x3a7a22 });
-  private fenceMat = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
+  // Shared overlay materials (toon-shaded)
+  private wallMat = new THREE.MeshToonMaterial({ color: 0x887766, gradientMap: getGradientMap() });
+  private trunkMat = new THREE.MeshToonMaterial({ color: 0x6b4226, gradientMap: getGradientMap() });
+  private canopyLightMat = new THREE.MeshToonMaterial({ color: 0x2d6a1e, gradientMap: getGradientMap() });
+  private canopyDarkMat = new THREE.MeshToonMaterial({ color: 0x1a4a0e, gradientMap: getGradientMap() });
+  private rockMat = new THREE.MeshToonMaterial({ color: 0x777777, gradientMap: getGradientMap() });
+  private bushMat = new THREE.MeshToonMaterial({ color: 0x3a7a22, gradientMap: getGradientMap() });
+  private fenceMat = new THREE.MeshToonMaterial({ color: 0x8a6a3a, gradientMap: getGradientMap() });
   private portalMat = new THREE.MeshBasicMaterial({ color: 0x9955dd, transparent: true, opacity: 0.7 });
-  private waterOverlayMat = new THREE.MeshPhongMaterial({
-    color: 0x2266aa, transparent: true, opacity: 0.6, shininess: 80, specular: 0x88bbff,
+  private waterOverlayMat = new THREE.MeshToonMaterial({
+    color: 0x2266aa, transparent: true, opacity: 0.6, gradientMap: getGradientMap(),
   });
 
   // Shared geometries
@@ -242,33 +223,28 @@ export class TerrainRenderer {
       geo.computeVertexNormals();
 
       let material: THREE.Material;
+      const gm = getGradientMap();
       if (type === "structure") {
-        material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+        material = new THREE.MeshToonMaterial({ gradientMap: gm, side: THREE.DoubleSide });
       } else if (type === "water") {
-        const tex = textures.water.clone();
-        tex.needsUpdate = true;
-        material = new THREE.MeshPhongMaterial({
-          map: tex,
+        material = new THREE.MeshToonMaterial({
+          map: textures.water,
           transparent: true,
           opacity: 0.85,
-          shininess: 80,
-          specular: new THREE.Color(0x88bbff),
-          vertexColors: true,
+          gradientMap: gm,
           side: THREE.DoubleSide,
         });
-        trackMaterial("water.jpg", material);
       } else {
         const texName = type as keyof typeof textures;
         const tex = textures[texName];
         if (tex) {
-          material = new THREE.MeshLambertMaterial({
+          material = new THREE.MeshToonMaterial({
             map: tex,
-            vertexColors: true,
+            gradientMap: gm,
             side: THREE.DoubleSide,
           });
-          trackMaterial(`${texName}.jpg`, material);
         } else {
-          material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+          material = new THREE.MeshToonMaterial({ gradientMap: gm, side: THREE.DoubleSide });
         }
       }
 
@@ -384,7 +360,7 @@ export class TerrainRenderer {
     // ── Scroll water texture UVs ──
     for (const mesh of this.groundMeshes) {
       if (mesh.name === "ground-water") {
-        const mat = mesh.material as THREE.MeshPhongMaterial;
+        const mat = mesh.material as THREE.MeshToonMaterial;
         if (mat.map) {
           mat.map.offset.x = Math.sin(t * 0.15) * 0.3;
           mat.map.offset.y = t * 0.05;

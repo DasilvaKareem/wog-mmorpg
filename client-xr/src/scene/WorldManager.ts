@@ -23,6 +23,7 @@ interface ZoneSlot {
   info: WorldLayoutZone;
   terrain: TerrainRenderer | null;
   collision: CollisionMap | null;
+  terrainData: import("../types.js").TerrainData | null;
   loading: boolean;
   /** Zone origin in 3D world units */
   worldOffset: THREE.Vector2;
@@ -48,13 +49,22 @@ export class WorldManager implements ElevationProvider {
   private borderElapsed = 0;
   private borderWalls: THREE.Mesh[] = [];
   private envAssets = new EnvironmentAssets();
+  private envAssetsReady: Promise<void>;
 
   constructor() {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
-    // Start preloading environment GLB models in the background
-    this.envAssets.preload();
+    // Start preloading environment GLB models immediately
+    this.envAssetsReady = this.envAssets.preload().then(() => {
+      // Rebuild any zones that were loaded before assets were ready
+      this.rebuildZonesWithAssets();
+    });
+  }
+
+  /** Get the shared environment assets instance */
+  getEnvironmentAssets(): EnvironmentAssets {
+    return this.envAssets;
   }
 
   /** Initialize from the /world/layout response */
@@ -70,6 +80,7 @@ export class WorldManager implements ElevationProvider {
         info: zone,
         terrain: null,
         collision: null,
+        terrainData: null,
         loading: false,
         worldOffset: new THREE.Vector2(ox, oz),
         center: new THREE.Vector2(ox + sw / 2, oz + sh / 2),
@@ -193,16 +204,22 @@ export class WorldManager implements ElevationProvider {
     if (!zone) return;
     zone.loading = true;
 
-    const data = await fetchTerrain(id);
+    // Wait for both terrain data AND environment assets in parallel
+    const [data] = await Promise.all([
+      fetchTerrain(id),
+      this.envAssetsReady,
+    ]);
     zone.loading = false;
     if (!data) return;
 
+    console.log(`[World] Building zone ${id} (envAssets ready: ${this.envAssets.isReady()}, cached: ${this.envAssets.getCacheSize()})`);
+
     const terrain = new TerrainRenderer(this.envAssets);
     terrain.build(data);
-    // Position the terrain group at its world offset
     terrain.group.position.set(zone.worldOffset.x, 0, zone.worldOffset.y);
     this.group.add(terrain.group);
     zone.terrain = terrain;
+    zone.terrainData = data;
     zone.collision = new CollisionMap(data);
   }
 
@@ -295,6 +312,22 @@ export class WorldManager implements ElevationProvider {
       const mat = this.borderWalls[0].material as THREE.ShaderMaterial;
       mat.uniforms.uTime.value = this.borderElapsed;
     }
+  }
+
+  /** Rebuild all loaded zones so they use GLB models instead of primitives */
+  private rebuildZonesWithAssets() {
+    for (const zone of this.zones.values()) {
+      if (!zone.terrain || !zone.terrainData) continue;
+      const pos = zone.terrain.group.position.clone();
+      this.group.remove(zone.terrain.group);
+      zone.terrain.dispose();
+      const terrain = new TerrainRenderer(this.envAssets);
+      terrain.build(zone.terrainData);
+      terrain.group.position.copy(pos);
+      this.group.add(terrain.group);
+      zone.terrain = terrain;
+    }
+    console.log("[World] Rebuilt zones with environment assets");
   }
 
   dispose() {

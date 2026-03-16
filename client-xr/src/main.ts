@@ -11,6 +11,7 @@ import { WorldManager } from "./scene/WorldManager.js";
 import { EntityManager } from "./scene/EntityManager.js";
 import { EffectsManager } from "./scene/EffectsManager.js";
 import { SkyRenderer } from "./scene/SkyRenderer.js";
+import { ToonPipeline } from "./scene/ToonPipeline.js";
 import { DesktopControls } from "./input/DesktopControls.js";
 import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
@@ -18,6 +19,7 @@ type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
 import { Minimap } from "./hud/Minimap.js";
 import { ChatLog } from "./hud/ChatLog.js";
+import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
 import type { Entity, ZoneResponse } from "./types.js";
 
@@ -47,6 +49,14 @@ const camera = new THREE.PerspectiveCamera(
   500
 );
 
+// ── Toon post-processing ─────────────────────────────────────────────
+
+const toonPipeline = new ToonPipeline({
+  renderer, scene, camera,
+  outlineThickness: 1.2,
+  outlineColor: 0x000000,
+});
+
 // ── Subsystems ──────────────────────────────────────────────────────
 
 const world = new WorldManager();
@@ -54,6 +64,7 @@ scene.add(world.group);
 
 const entities = new EntityManager();
 entities.setElevationProvider(world);
+entities.setEnvironmentAssets(world.getEnvironmentAssets());
 scene.add(entities.group);
 
 const effects = new EffectsManager(entities);
@@ -98,6 +109,21 @@ function unlockCamera() {
   hudLock.style.display = "none";
   inspector.setLocked(false);
 }
+
+// ── Player panel (leaderboard + zone lobby) ─────────────────────────
+
+const playerPanel = new PlayerPanel({
+  onPlayerClick: (entityId) => {
+    lockOn(entityId);
+    // Pan camera to the entity
+    const pos = entities.getEntityPosition(entityId);
+    if (pos) controls.setTarget(pos.x, pos.y, pos.z);
+  },
+  onZoneClick: (zoneId) => {
+    const center = world.getZoneCenter(zoneId);
+    if (center) controls.setTarget(center.x, 0, center.z);
+  },
+});
 
 // ── Find initial zone with most entities ────────────────────────────
 
@@ -170,6 +196,9 @@ async function pollNearbyZones() {
     }
   }
 
+  // Player panel
+  playerPanel.update(merged);
+
   // Minimap — pass camera in server coords
   minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
 }
@@ -212,6 +241,7 @@ window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  toonPipeline.setSize(window.innerWidth, window.innerHeight);
 });
 
 // ── VR button ───────────────────────────────────────────────────────
@@ -308,7 +338,7 @@ function animate() {
   world.updateAnimations(dt);
   chatLog.update();
 
-  renderer.render(scene, camera);
+  toonPipeline.render();
 }
 
 // ── Start ───────────────────────────────────────────────────────────

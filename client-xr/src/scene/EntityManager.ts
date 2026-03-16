@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import type { Entity, ElevationProvider } from "../types.js";
+import type { EnvironmentAssets } from "./EnvironmentAssets.js";
+import { getGradientMap } from "./ToonPipeline.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
 
@@ -160,7 +162,7 @@ const beltBuckleGeo = new THREE.BoxGeometry(0.06, 0.06, 0.04);
 const beltThinGeo = new THREE.TorusGeometry(0.26, 0.02, 4, 12);
 const beltPouchGeo = new THREE.BoxGeometry(0.06, 0.07, 0.05);
 
-function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?: { transparent?: boolean; opacity?: number }): THREE.MeshLambertMaterial {
+function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?: { transparent?: boolean; opacity?: number }): THREE.MeshToonMaterial {
   const q = quality ?? "common";
   // Blend quality color with material tint
   const qualCol = new THREE.Color(QUALITY_COLORS[q] ?? QUALITY_COLORS.common);
@@ -168,12 +170,13 @@ function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?
   qualCol.lerp(tintCol, 0.4); // 40% tint influence
 
   const emHex = QUALITY_EMISSIVE[q] ?? 0x000000;
-  return new THREE.MeshLambertMaterial({
+  return new THREE.MeshToonMaterial({
     color: qualCol,
     emissive: emHex,
     emissiveIntensity: emHex ? 0.25 : 0,
     transparent: opts?.transparent ?? false,
     opacity: opts?.opacity ?? 1,
+    gradientMap: getGradientMap(),
   });
 }
 
@@ -243,7 +246,7 @@ function addArmorPieces(
       vest.position.y = chestOffY;
       vest.scale.set(cls.sx * 1.08, cls.sy * 0.82, cls.sz * 1.04);
       chestTarget.add(vest);
-      const stitchMat = new THREE.MeshLambertMaterial({ color: 0x554422 });
+      const stitchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x554422 });
       const stitch = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.3, 0.01), stitchMat);
       stitch.position.set(0, chestOffY, 0.27 * cls.sz); chestTarget.add(stitch);
     }
@@ -367,7 +370,7 @@ function addArmorPieces(
       ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
       ring.scale.set(cls.sx, cls.sz, 1); beltTarget.add(ring);
       if (mt === "leather") {
-        const pouchMat = new THREE.MeshLambertMaterial({ color: 0x6B5533 });
+        const pouchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x6B5533 });
         for (const side of [-1, 1]) {
           const pouch = new THREE.Mesh(beltPouchGeo, pouchMat);
           pouch.position.set(side * 0.22 * cls.sx, beltOffY - 0.04, 0.05); beltTarget.add(pouch);
@@ -381,9 +384,9 @@ function addArmorPieces(
 
 function buildWeaponMesh(weaponType: WeaponType, metalColor: number, emissiveColor: number): THREE.Group {
   const g = new THREE.Group();
-  const metalMat = new THREE.MeshLambertMaterial({ color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.3 : 0 });
-  const handleMat = new THREE.MeshLambertMaterial({ color: 0x664422 });
-  const accentMat = new THREE.MeshLambertMaterial({ color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.5 : 0 });
+  const metalMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.3 : 0 });
+  const handleMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x664422 });
+  const accentMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: metalColor, emissive: emissiveColor, emissiveIntensity: emissiveColor ? 0.5 : 0 });
 
   switch (weaponType) {
     case "sword": {
@@ -427,7 +430,7 @@ function buildWeaponMesh(weaponType: WeaponType, metalColor: number, emissiveCol
       // Arrow nocked
       const arrowShaft = new THREE.Mesh(
         new THREE.CylinderGeometry(0.008, 0.008, 0.45, 4),
-        new THREE.MeshLambertMaterial({ color: 0x886644 }),
+        new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x886644 }),
       );
       arrowShaft.position.set(-0.16, 0.05, 0); arrowShaft.rotation.z = Math.PI / 2; g.add(arrowShaft);
       const arrowHead = new THREE.Mesh(
@@ -537,20 +540,26 @@ const hpBarFgGeo = new THREE.PlaneGeometry(0.58, 0.04);
 
 function makeLabel(text: string, color = "#ffffff"): THREE.Sprite {
   const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 64;
   const ctx = canvas.getContext("2d")!;
-  ctx.font = "bold 28px monospace";
+  const fontSize = 28;
+  ctx.font = `bold ${fontSize}px monospace`;
+  const measured = ctx.measureText(text);
+  const padding = 20;
+  canvas.width = Math.max(256, Math.ceil(measured.width) + padding * 2);
+  canvas.height = 64;
+  // Re-set font after resize (canvas reset clears it)
+  ctx.font = `bold ${fontSize}px monospace`;
   ctx.textAlign = "center";
   ctx.fillStyle = "#000000";
-  ctx.fillText(text, 129, 39);
+  ctx.fillText(text, canvas.width / 2 + 1, 39);
   ctx.fillStyle = color;
-  ctx.fillText(text, 128, 38);
+  ctx.fillText(text, canvas.width / 2, 38);
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
   const sprite = new THREE.Sprite(mat);
-  sprite.scale.set(2, 0.5, 1);
+  const aspect = canvas.width / canvas.height;
+  sprite.scale.set(aspect * 0.5, 0.5, 1);
   return sprite;
 }
 
@@ -646,6 +655,10 @@ interface EntityObject {
   rightLeg: THREE.Mesh | null;
   leftArm: THREE.Group | null;   // kept as alias → rig L_Shoulder bone
   rightArm: THREE.Group | null;  // kept as alias → rig R_Shoulder bone
+  /** True if this entity uses a GLB model instead of the procedural rig */
+  hasGlbModel: boolean;
+  /** Timer for simple GLB attack animation (lunge + pulse) */
+  glbAttackTimer: number;
 }
 
 export class EntityManager {
@@ -653,9 +666,15 @@ export class EntityManager {
   private entities = new Map<string, EntityObject>();
   private floatingTexts: FloatingText[] = [];
   private elevationProvider: ElevationProvider | null = null;
+  private envAssets: EnvironmentAssets | null = null;
 
   constructor() {
     this.group.name = "entities";
+  }
+
+  /** Link to environment assets for GLB ore/resource models */
+  setEnvironmentAssets(assets: EnvironmentAssets) {
+    this.envAssets = assets;
   }
 
   /** Link to an elevation provider (WorldManager or TerrainRenderer) */
@@ -799,6 +818,31 @@ export class EntityManager {
         obj.mixer.update(dt);
       }
 
+      // ── GLB mob attack animation (lunge + scale pulse) ──
+      if (obj.hasGlbModel && obj.glbAttackTimer > 0) {
+        obj.glbAttackTimer -= dt;
+        const t = Math.max(0, obj.glbAttackTimer);
+        const total = 0.4; // duration
+        const progress = 1 - t / total;
+        // Quick lunge forward then snap back
+        const lunge = progress < 0.4 ? progress / 0.4 : 1 - (progress - 0.4) / 0.6;
+        const glbChild = g.getObjectByName("glb_mob");
+        if (glbChild) {
+          // Lunge forward in facing direction
+          glbChild.position.z = lunge * 0.5;
+          // Scale pulse
+          const pulse = 1 + Math.sin(progress * Math.PI) * 0.15;
+          glbChild.scale.setScalar(pulse);
+        }
+        if (obj.glbAttackTimer <= 0) {
+          // Reset
+          if (glbChild) {
+            glbChild.position.z = 0;
+            glbChild.scale.setScalar(1);
+          }
+        }
+      }
+
       // Billboard HP bars toward camera
       if (camera && obj.hpBarBg) {
         obj.hpBarBg.lookAt(camera.position);
@@ -910,11 +954,35 @@ export class EntityManager {
   // ── Animation triggers ────────────────────────────────────────────
 
   private triggerDamage(obj: EntityObject, amount: number) {
+    // GLB mob damage: flash red on all meshes
+    if (obj.hasGlbModel) {
+      const glbRoot = obj.group.getObjectByName("glb_mob");
+      if (glbRoot) {
+        glbRoot.traverse((c) => {
+          if (c instanceof THREE.Mesh && c.material) {
+            const mat = c.material as THREE.MeshStandardMaterial;
+            if (mat.emissive) {
+              mat.emissive.setHex(0xff2200);
+              mat.emissiveIntensity = 0.8;
+              const start = performance.now();
+              const fade = () => {
+                const t = (performance.now() - start) / 400;
+                if (t >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+                mat.emissiveIntensity = 0.8 * (1 - t);
+                requestAnimationFrame(fade);
+              };
+              requestAnimationFrame(fade);
+            }
+          }
+        });
+      }
+    }
+
     this.playOneShot(obj, "damage");
 
     // Flash body emissive
     if (obj.bodyMesh) {
-      const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
+      const mat = obj.bodyMesh.material as THREE.MeshToonMaterial;
       if (mat.emissive) {
         mat.emissive.setHex(0xff2200);
         mat.emissiveIntensity = 0.7;
@@ -950,7 +1018,12 @@ export class EntityManager {
           obj.group.position.x - other.group.position.x,
           obj.group.position.z - other.group.position.z,
         );
-        this.playOneShot(other, atkAnim);
+        if (other.hasGlbModel) {
+          // GLB mob: simple lunge + pulse attack
+          other.glbAttackTimer = 0.4;
+        } else {
+          this.playOneShot(other, atkAnim);
+        }
         break;
       }
     }
@@ -961,7 +1034,7 @@ export class EntityManager {
 
     // Green glow
     if (obj.bodyMesh) {
-      const mat = obj.bodyMesh.material as THREE.MeshLambertMaterial;
+      const mat = obj.bodyMesh.material as THREE.MeshToonMaterial;
       if (mat.emissive) {
         mat.emissive.setHex(0x44ff66);
         mat.emissiveIntensity = 0.6;
@@ -1136,7 +1209,8 @@ export class EntityManager {
       group.add(hpBarFg);
 
       const labelColor = ent.type === "player" ? "#44ddff" : ent.type === "mob" ? "#ff6666" : ent.type === "boss" ? "#cc66ff" : "#ffcc44";
-      const label = makeLabel(ent.name, labelColor);
+      const labelText = ent.level ? `${ent.name} [Lv${ent.level}]` : ent.name;
+      const label = makeLabel(labelText, labelColor);
       label.position.y = labelY + 0.3;
       group.add(label);
     } else if (ent.type !== "corpse") {
@@ -1153,19 +1227,21 @@ export class EntityManager {
       isMoving: false, movingSmooth: 0,
       rig, mixer, actions: new Map(), currentAnim: null,
       leftLeg, rightLeg, leftArm, rightArm,
+      hasGlbModel: !!(group as any)._hasGlbModel,
+      glbAttackTimer: 0,
     };
   }
 
   // ── Hair builder (bone-relative: Y=0 is head center) ─────────────
 
-  private buildHairOnBone(bone: THREE.Bone, style: string, mat: THREE.MeshLambertMaterial) {
+  private buildHairOnBone(bone: THREE.Bone, style: string, mat: THREE.MeshToonMaterial) {
     // Offsets are relative to head bone (Y=0 at head center)
     this.buildHair(bone, style, mat, 0);
   }
 
   // ── Hair builder (all 12 styles) ─────────────────────────────────
 
-  private buildHair(group: THREE.Object3D, style: string, mat: THREE.MeshLambertMaterial, headY: number) {
+  private buildHair(group: THREE.Object3D, style: string, mat: THREE.MeshToonMaterial, headY: number) {
     switch (style) {
       case "short": {
         const h = new THREE.Mesh(hairShortGeo, mat);
@@ -1320,14 +1396,14 @@ export class EntityManager {
     // ── Attach visual meshes to bones ──
 
     // Body → Chest bone
-    const bodyMat = new THREE.MeshLambertMaterial({ color: cls.color });
+    const bodyMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: cls.color });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
     body.scale.set(cls.sx * gsx, cls.sy * gsy, cls.sz * gsz);
     body.castShadow = true;
     rig.chest.add(body);
 
     // Head → Head bone
-    const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: skinHex }));
+    const head = new THREE.Mesh(headGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex }));
     head.scale.setScalar(headScale);
     rig.head.add(head);
 
@@ -1344,12 +1420,12 @@ export class EntityManager {
     const style = ent.hairStyle ?? "short";
     if (style !== "bald") {
       const hairHex = HAIR_COLORS[style] ?? 0x4a3728;
-      const hairMat = new THREE.MeshLambertMaterial({ color: hairHex });
+      const hairMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: hairHex });
       this.buildHairOnBone(rig.head, style, hairMat);
     }
 
     // Legs → thigh on hip bones, shin on knee bones
-    const legMat = new THREE.MeshLambertMaterial({ color: skinHex });
+    const legMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
     const lThigh = new THREE.Mesh(thighGeo, legMat);
     lThigh.position.y = -0.10;
     if (isFemale) lThigh.scale.set(0.95, 1.05, 0.95);
@@ -1368,7 +1444,7 @@ export class EntityManager {
     rig.rKnee.add(rightLeg);
 
     // Arms + hands → shoulder/hand bones
-    const skinMat = new THREE.MeshLambertMaterial({ color: skinHex });
+    const skinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
 
     // Shoulder joints to bridge chest→arm gap
     const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
@@ -1425,7 +1501,7 @@ export class EntityManager {
 
     // Shield on left hand for paladin/warrior
     if (classId === "paladin" || classId === "warrior") {
-      const s = new THREE.Mesh(shieldGeo, new THREE.MeshLambertMaterial({ color: cls.color }));
+      const s = new THREE.Mesh(shieldGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: cls.color }));
       s.position.set(0, -0.05, 0.1);
       rig.lHand.add(s);
     }
@@ -1447,7 +1523,26 @@ export class EntityManager {
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
 
-    const mat = new THREE.MeshLambertMaterial({ color });
+    // Try GLB mob model first
+    if (this.envAssets?.isReady()) {
+      const assetName = this.envAssets.getAssetForMob(ent.name);
+      if (assetName) {
+        const model = this.envAssets.place(assetName, 0, 0, 0);
+        if (model) {
+          model.name = "glb_mob";
+          group.add(model);
+          // Return dummy rig refs — GLB mobs don't use the bone animation system
+          const dummyMesh = new THREE.Mesh();
+          const dummyGroup = new THREE.Group();
+          const rig = new CharacterRig({ scale: s });
+          (group as any)._hasGlbModel = true;
+          return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig };
+        }
+      }
+    }
+
+    // Primitive fallback
+    const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
 
     const rig = new CharacterRig({
       scale: s,
@@ -1520,7 +1615,7 @@ export class EntityManager {
   // ── NPC ───────────────────────────────────────────────────────────
 
   private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
-    const mat = new THREE.MeshLambertMaterial({ color });
+    const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
 
     const rig = new CharacterRig({
       shoulderWidth: 0.27,
@@ -1529,7 +1624,7 @@ export class EntityManager {
     group.add(rig.rootBone);
 
     // Legs → thigh on hip bones, shin on knee bones
-    const legMat = new THREE.MeshLambertMaterial({ color: 0x555566 });
+    const legMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x555566 });
     const lThigh = new THREE.Mesh(thighGeo, legMat);
     lThigh.position.y = -0.10;
     rig.lHip.add(lThigh);
@@ -1550,7 +1645,7 @@ export class EntityManager {
 
     // Head → Head bone
     const skinHex = ent.skinColor ? (SKIN_COLORS[ent.skinColor] ?? color) : color;
-    const skinMat = new THREE.MeshLambertMaterial({ color: skinHex });
+    const skinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
     const head = new THREE.Mesh(headGeo, skinMat);
     rig.head.add(head);
 
@@ -1564,7 +1659,7 @@ export class EntityManager {
       }
     }
     if (ent.hairStyle && ent.hairStyle !== "bald") {
-      const h = new THREE.Mesh(hairShortGeo, new THREE.MeshLambertMaterial({ color: HAIR_COLORS[ent.hairStyle] ?? 0x4a3728 }));
+      const h = new THREE.Mesh(hairShortGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: HAIR_COLORS[ent.hairStyle] ?? 0x4a3728 }));
       h.position.set(0, 0.1, 0);
       rig.head.add(h);
     }
@@ -1591,7 +1686,7 @@ export class EntityManager {
       q.position.y = 2.0; group.add(q);
     }
     if (ent.type === "merchant") {
-      const bag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.15), new THREE.MeshLambertMaterial({ color: 0xbb8833 }));
+      const bag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.15), new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0xbb8833 }));
       bag.position.set(0, -0.05, 0);
       rig.rHand.add(bag);
     }
@@ -1605,12 +1700,24 @@ export class EntityManager {
   // ── Resource node ─────────────────────────────────────────────────
 
   private buildResource(group: THREE.Group, ent: Entity, color: number) {
-    const mat = new THREE.MeshLambertMaterial({ color });
+    const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
     if (ent.type === "ore-node") {
+      // Try GLB ore model first
+      if (this.envAssets?.isReady()) {
+        const ore = this.envAssets.place("rare_ore", 0, 0, 0);
+        if (ore) { group.add(ore); return; }
+      }
+      // Primitive fallback
       const rock = new THREE.Mesh(oreGeo, mat); rock.position.y = 0.35; rock.castShadow = true; group.add(rock);
     } else {
+      // flower-node, nectar-node, crop-node — try GLB model
+      if (this.envAssets?.isReady()) {
+        const plant = this.envAssets.place("flower_patch", 0, 0, 0);
+        if (plant) { group.add(plant); return; }
+      }
+      // Primitive fallback
       const flower = new THREE.Mesh(flowerGeo, mat); flower.position.y = 0.25; group.add(flower);
-      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.3, 4), new THREE.MeshLambertMaterial({ color: 0x448833 }));
+      const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.03, 0.3, 4), new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x448833 }));
       stem.position.y = 0; group.add(stem);
     }
   }
@@ -1618,13 +1725,13 @@ export class EntityManager {
   // ── Object (crafting station, dungeon gate, etc.) ─────────────────
 
   private buildObject(group: THREE.Group, ent: Entity, color: number) {
-    const mat = new THREE.MeshLambertMaterial({ color });
+    const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
     if (ent.type === "dungeon-gate") {
       const gate = new THREE.Mesh(gateGeo, mat); gate.position.y = 0.9; gate.castShadow = true; group.add(gate);
       const glow = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.08, 8, 12), new THREE.MeshBasicMaterial({ color: 0xff6622, transparent: true, opacity: 0.5 }));
       glow.position.y = 1.4; glow.rotation.x = Math.PI / 2; group.add(glow);
     } else if (ent.type === "campfire") {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.06, 6, 8), new THREE.MeshLambertMaterial({ color: 0x666666 }));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.06, 6, 8), new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x666666 }));
       ring.position.y = 0.06; ring.rotation.x = Math.PI / 2; group.add(ring);
       const flame = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.5, 5), new THREE.MeshBasicMaterial({ color: 0xff8833 }));
       flame.position.y = 0.35; group.add(flame);
