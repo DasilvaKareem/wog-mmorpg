@@ -1610,7 +1610,7 @@ async function worldTick() {
         const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
         if (arrived) entity.order = undefined;
       } else if (entity.order.action === "attack") {
-        const target = zone.entities.get(entity.order.targetId);
+        const target = getEntity(entity.order.targetId);
         if (!target) {
           entity.order = undefined;
           continue;
@@ -1630,7 +1630,7 @@ async function worldTick() {
         const dy = target.y - entity.y;
         const dist = Math.sqrt(dx * dx + dy * dy);
         if (dist > getEntityAttackRange(entity)) {
-          moveToward(entity, target.x, target.y, zone.entities);
+          moveToward(entity, target.x, target.y, world.entities);
         } else {
           const rawDmg = computeDamage(entity, target, zone.zoneId);
           const hit = resolveHit(entity, target, rawDmg);
@@ -1855,7 +1855,7 @@ async function worldTick() {
         }
       } else if (entity.order.action === "technique") {
         // ── Technique order processing ─────────────────────────────
-        const target = zone.entities.get(entity.order.targetId);
+        const target = getEntity(entity.order.targetId);
         const technique = getTechniqueById(entity.order.techniqueId);
         if (!target || !technique) {
           entity.order = undefined;
@@ -1881,7 +1881,7 @@ async function worldTick() {
           ? Math.max(baseRange, 100)
           : baseRange;
         if (dist > techRange) {
-          moveToward(entity, target.x, target.y, zone.entities);
+          moveToward(entity, target.x, target.y, world.entities);
         } else {
           // Deduct essence
           const currentEssence = entity.essence ?? 0;
@@ -2110,13 +2110,6 @@ async function worldTick() {
             entity.order = undefined;
           }
         }
-      }
-    }
-
-    // ── Clamp mobs to zone bounds (mobs don't transition) ──────────
-    for (const entity of zone.entities.values()) {
-      if (entity.type === "mob" || entity.type === "boss") {
-        clampToZoneBounds(entity, zone.zoneId);
       }
     }
 
@@ -2387,51 +2380,58 @@ async function worldTick() {
   }
 
   // ── Automatic region recalculation (replaces zone transitions) ──────
-  // Entities move freely in world-space; region is a soft label updated here.
+  // Any movable combatant can cross zone boundaries now, so keep region
+  // membership in sync with world-space position for both players and mobs.
   for (const entity of world.entities.values()) {
-    if (entity.type !== "player") continue;
+    if (!MOVABLE_TYPES.has(entity.type)) continue;
 
     const newRegion = getRegionAtPosition(entity.x, entity.y);
+    if (!newRegion && entity.region) {
+      clampToZoneBounds(entity, entity.region);
+      continue;
+    }
     if (!newRegion || newRegion === entity.region) continue;
 
     const oldRegion = entity.region ?? "unknown";
     entity.region = newRegion;
 
-    // Keep spawn registry in sync
-    if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, newRegion);
+    if (entity.type === "player") {
+      // Keep spawn registry in sync
+      if (entity.walletAddress) updateSpawnedWalletZone(entity.walletAddress, newRegion);
 
-    // Clear travel target if we arrived at our destination region
-    if (entity.travelTargetZone === newRegion) {
-      entity.travelTargetZone = undefined;
-    }
+      // Clear travel target if we arrived at our destination region
+      if (entity.travelTargetZone === newRegion) {
+        entity.travelTargetZone = undefined;
+      }
 
-    logZoneEvent({
-      zoneId: oldRegion,
-      type: "system",
-      tick: world.tick,
-      message: `${entity.name} departed to ${newRegion}`,
-      entityId: entity.id,
-      entityName: entity.name,
-    });
-
-    logZoneEvent({
-      zoneId: newRegion,
-      type: "system",
-      tick: world.tick,
-      message: `${entity.name} arrived from ${oldRegion}`,
-      entityId: entity.id,
-      entityName: entity.name,
-    });
-
-    if (entity.walletAddress) {
-      const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, oldRegion, newRegion);
-      logDiary(entity.walletAddress, entity.name, newRegion, entity.x, entity.y, "zone_transition", headline, narrative, {
-        fromZone: oldRegion,
-        toZone: newRegion,
+      logZoneEvent({
+        zoneId: oldRegion,
+        type: "system",
+        tick: world.tick,
+        message: `${entity.name} departed to ${newRegion}`,
+        entityId: entity.id,
+        entityName: entity.name,
       });
-    }
 
-    console.log(`[region] ${entity.name} crossed from ${oldRegion} to ${newRegion} at (${Math.round(entity.x)}, ${Math.round(entity.y)})`);
+      logZoneEvent({
+        zoneId: newRegion,
+        type: "system",
+        tick: world.tick,
+        message: `${entity.name} arrived from ${oldRegion}`,
+        entityId: entity.id,
+        entityName: entity.name,
+      });
+
+      if (entity.walletAddress) {
+        const { headline, narrative } = narrativeZoneTransition(entity.name, entity.raceId, entity.classId, oldRegion, newRegion);
+        logDiary(entity.walletAddress, entity.name, newRegion, entity.x, entity.y, "zone_transition", headline, narrative, {
+          fromZone: oldRegion,
+          toZone: newRegion,
+        });
+      }
+
+      console.log(`[region] ${entity.name} crossed from ${oldRegion} to ${newRegion} at (${Math.round(entity.x)}, ${Math.round(entity.y)})`);
+    }
   }
 }
 
