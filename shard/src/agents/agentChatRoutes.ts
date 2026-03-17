@@ -1814,7 +1814,8 @@ Strategy options: aggressive, balanced, defensive`;
     Body: { code: string; tier: AgentTier; maxUses: number; goldBonus?: number; adminKey: string };
   }>("/agent/promo/create", async (request, reply) => {
     const { code, tier, maxUses, goldBonus, adminKey } = request.body;
-    if (adminKey !== process.env.ADMIN_KEY) {
+    const adminSecret = process.env.ADMIN_SECRET?.trim();
+    if (!adminSecret || adminKey !== adminSecret) {
       return reply.code(403).send({ error: "Unauthorized" });
     }
     if (!code || !tier || !maxUses) {

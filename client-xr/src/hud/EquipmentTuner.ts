@@ -25,7 +25,7 @@ const SLOTS: Record<string, TunableSlot> = {
   shoulderChain:   { label: "Shoulder (Chain)",pos: { x: 0, y: 0.03, z: 0 },       rot: { x: 0, y: 0, z: 0 } },
   beltPlate:       { label: "Belt (Plate)",   pos: { x: 0, y: 0.02, z: 0 },       rot: { x: Math.PI / 2, y: 0, z: 0 } },
   beltLeather:     { label: "Belt (Leather)", pos: { x: 0, y: 0.02, z: 0 },       rot: { x: Math.PI / 2, y: 0, z: 0 } },
-  bootPlate:       { label: "Boot (Plate)",   pos: { x: 0, y: -0.22, z: 0.02 },   rot: { x: 0, y: 0, z: 0 } },
+  bootPlate:       { label: "Boot (Plate)",   pos: { x: 0.01, y: -0.29, z: 0.07 }, rot: { x: 0.008, y: 0, z: 0 } },
   bootLeather:     { label: "Boot (Leather)", pos: { x: 0, y: -0.18, z: 0.01 },   rot: { x: 0, y: 0, z: 0 } },
 };
 

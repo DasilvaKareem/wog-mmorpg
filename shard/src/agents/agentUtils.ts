@@ -180,6 +180,7 @@ export interface AgentContext {
     command:
       | { action: "move"; x: number; y: number }
       | { action: "attack"; targetId: string }
+      | { action: "technique"; targetId: string; techniqueId: string }
       | { action: "travel"; targetZone: string },
   ): boolean;
   isInteractionOnCooldown(key: string): boolean;
@@ -298,6 +299,7 @@ export function issueAgentCommand(
   command:
     | { action: "move"; x: number; y: number }
     | { action: "attack"; targetId: string }
+    | { action: "technique"; targetId: string; techniqueId: string }
     | { action: "travel"; targetZone: string },
 ): boolean {
   const entity = getEntity(entityId);
@@ -309,6 +311,9 @@ export function issueAgentCommand(
   } else if (command.action === "attack") {
     if (!getEntity(command.targetId)) return false;
     order = { action: "attack", targetId: command.targetId };
+  } else if (command.action === "technique") {
+    if (!getEntity(command.targetId)) return false;
+    order = { action: "technique", targetId: command.targetId, techniqueId: command.techniqueId };
   } else {
     const center = getRegionCenter(command.targetZone);
     if (!center) return false;

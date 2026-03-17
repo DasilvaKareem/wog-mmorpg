@@ -1,0 +1,8 @@
+{
+  "id": "eastmarch-wastes",
+  "name": "Eastmarch Wastes",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(180,160,120,0.12)",
+  "budget": { "maxPopulation": 20, "maxThreat": 90 },
+  "pois": []
+}

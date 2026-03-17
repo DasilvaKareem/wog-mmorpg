@@ -1,0 +1,8 @@
+{
+  "id": "shattered-coast",
+  "name": "Shattered Coast",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(100,180,200,0.12)",
+  "budget": { "maxPopulation": 20, "maxThreat": 100 },
+  "pois": []
+}

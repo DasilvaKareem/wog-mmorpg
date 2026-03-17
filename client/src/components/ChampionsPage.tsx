@@ -334,7 +334,8 @@ function InventoryTab({
     setError(null);
     setNotice(null);
     try {
-      const authWallet = ownerWallet ?? wallet;
+      const authWallet = ownerWallet;
+      if (!authWallet) { setError("Wallet not connected — please reconnect"); setBusy(null); return; }
       const token = await getAuthToken(authWallet);
       if (!token) { setError("Auth failed — reconnect wallet"); return; }
       const res = await fetch(`${API_URL}/equipment/equip`, {
@@ -356,7 +357,8 @@ function InventoryTab({
     setError(null);
     setNotice(null);
     try {
-      const authWallet = ownerWallet ?? wallet;
+      const authWallet = ownerWallet;
+      if (!authWallet) { setError("Wallet not connected — please reconnect"); setBusy(null); return; }
       const token = await getAuthToken(authWallet);
       if (!token) { setError("Auth failed — reconnect wallet"); return; }
       const res = await fetch(`${API_URL}/equipment/unequip`, {
@@ -378,7 +380,8 @@ function InventoryTab({
     setError(null);
     setNotice(null);
     try {
-      const authWallet = ownerWallet ?? wallet;
+      const authWallet = ownerWallet;
+      if (!authWallet) { setError("Wallet not connected — please reconnect"); setBusy(null); return; }
       const token = await getAuthToken(authWallet);
       if (!token) { setError("Auth failed — reconnect wallet"); return; }
       const res = await fetch(`${API_URL}/shop/recycle`, {

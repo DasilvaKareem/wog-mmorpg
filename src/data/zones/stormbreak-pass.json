@@ -1,0 +1,8 @@
+{
+  "id": "stormbreak-pass",
+  "name": "Stormbreak Pass",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(120,140,180,0.12)",
+  "budget": { "maxPopulation": 20, "maxThreat": 80 },
+  "pois": []
+}

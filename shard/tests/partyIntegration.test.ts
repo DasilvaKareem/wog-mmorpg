@@ -75,6 +75,13 @@ section("MatchmakingEntry groupId field");
 // ── Test: Matchmaking balanceTeams keeps groups together ─────────────────────
 
 import { MatchmakingSystem } from "../src/combat/matchmaking.js";
+import {
+  clearPartyAutoCombatTargetLock,
+  pickAutoCombatTarget,
+  rememberPartyAutoCombatTarget,
+  type Entity,
+  type ZoneState,
+} from "../src/world/zoneRuntime.js";
 
 section("Matchmaking: group-aware team balancing");
 
@@ -212,6 +219,363 @@ section("Friendly-fire prevention logic");
   // Player attacking mob should never be blocked
   const mobTarget = entityType === "player" && "mob" === "player" && true;
   assert(!mobTarget, "Player attacking mob → never blocked");
+}
+
+// ── Test: Party same-zone target focus ──────────────────────────────────────
+
+section("Party auto-combat target focus");
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader",
+    type: "player",
+    name: "Leader",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+    order: { action: "attack", targetId: "mob-focus" },
+  };
+
+  const ally: Entity = {
+    id: "ally",
+    type: "player",
+    name: "Ally",
+    x: 120,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const focusedMob: Entity = {
+    id: "mob-focus",
+    type: "mob",
+    name: "Focused Mob",
+    x: 150,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+  };
+
+  const closerMob: Entity = {
+    id: "mob-closer",
+    type: "mob",
+    name: "Closer Mob",
+    x: 130,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(focusedMob.id, focusedMob);
+  zone.entities.set(closerMob.id, closerMob);
+
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [leader.id, ally.id]);
+  assert(chosen?.id === focusedMob.id, "Party member prefers same-zone ally target over a closer mob");
+}
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-2",
+    type: "player",
+    name: "Leader Two",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+    order: { action: "attack", targetId: "missing-cross-zone-mob" },
+  };
+
+  const ally: Entity = {
+    id: "ally-2",
+    type: "player",
+    name: "Ally Two",
+    x: 120,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const localMob: Entity = {
+    id: "mob-local",
+    type: "mob",
+    name: "Local Mob",
+    x: 135,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(localMob.id, localMob);
+
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [leader.id, ally.id]);
+  assert(chosen?.id === localMob.id, "Party focus ignores ally targets that are not present in the same zone");
+}
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-anchor",
+    type: "player",
+    name: "Leader Anchor",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+    order: { action: "attack", targetId: "mob-far-from-leader" },
+  };
+
+  const ally: Entity = {
+    id: "ally-anchor",
+    type: "player",
+    name: "Ally Anchor",
+    x: 230,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const farFocusedMob: Entity = {
+    id: "mob-far-from-leader",
+    type: "mob",
+    name: "Far Focused Mob",
+    x: 220,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const anchorMob: Entity = {
+    id: "mob-near-leader",
+    type: "mob",
+    name: "Anchor Mob",
+    x: 135,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(farFocusedMob.id, farFocusedMob);
+  zone.entities.set(anchorMob.id, anchorMob);
+
+  const chosen = pickAutoCombatTarget(ally, zone, 160, [leader.id, ally.id], undefined, leader.id);
+  assert(chosen?.id === anchorMob.id, "Party focus ignores ally targets that pull too far away from the leader anchor");
+}
+
+{
+  const partyId = "party-lock-focus";
+  clearPartyAutoCombatTargetLock(partyId);
+
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 10,
+    entities: new Map<string, Entity>(),
+  };
+
+  const ally: Entity = {
+    id: "ally-3",
+    type: "player",
+    name: "Ally Three",
+    x: 120,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const lockedMob: Entity = {
+    id: "mob-locked",
+    type: "mob",
+    name: "Locked Mob",
+    x: 155,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const closerMob: Entity = {
+    id: "mob-closer-2",
+    type: "mob",
+    name: "Closer Mob Two",
+    x: 130,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(lockedMob.id, lockedMob);
+  zone.entities.set(closerMob.id, closerMob);
+
+  rememberPartyAutoCombatTarget(ally.id, zone.zoneId, lockedMob.id, zone.tick, partyId);
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [ally.id], partyId);
+  assert(chosen?.id === lockedMob.id, "Party target lock keeps focus on the shared target even when another mob is closer");
+
+  clearPartyAutoCombatTargetLock(partyId);
+}
+
+{
+  const partyId = "party-lock-anchor";
+  clearPartyAutoCombatTargetLock(partyId);
+
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 10,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-lock-anchor",
+    type: "player",
+    name: "Leader Lock Anchor",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const ally: Entity = {
+    id: "ally-lock-anchor",
+    type: "player",
+    name: "Ally Lock Anchor",
+    x: 230,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const lockedMob: Entity = {
+    id: "mob-locked-far",
+    type: "mob",
+    name: "Locked Far Mob",
+    x: 220,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const anchorMob: Entity = {
+    id: "mob-anchor-safe",
+    type: "mob",
+    name: "Anchor Safe Mob",
+    x: 135,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(lockedMob.id, lockedMob);
+  zone.entities.set(anchorMob.id, anchorMob);
+
+  rememberPartyAutoCombatTarget(ally.id, zone.zoneId, lockedMob.id, zone.tick, partyId);
+  const chosen = pickAutoCombatTarget(ally, zone, 160, [leader.id, ally.id], partyId, leader.id);
+  assert(chosen?.id === anchorMob.id, "Party target lock is ignored when it would drag the party too far from the leader anchor");
+
+  clearPartyAutoCombatTargetLock(partyId);
+}
+
+{
+  const partyId = "party-lock-expire";
+  clearPartyAutoCombatTargetLock(partyId);
+
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 20,
+    entities: new Map<string, Entity>(),
+  };
+
+  const ally: Entity = {
+    id: "ally-4",
+    type: "player",
+    name: "Ally Four",
+    x: 120,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const expiredMob: Entity = {
+    id: "mob-expired",
+    type: "mob",
+    name: "Expired Mob",
+    x: 155,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const closerMob: Entity = {
+    id: "mob-closer-3",
+    type: "mob",
+    name: "Closer Mob Three",
+    x: 130,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(expiredMob.id, expiredMob);
+  zone.entities.set(closerMob.id, closerMob);
+
+  rememberPartyAutoCombatTarget(ally.id, zone.zoneId, expiredMob.id, zone.tick - 10, partyId);
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [ally.id], partyId);
+  assert(chosen?.id === closerMob.id, "Expired party target lock falls back to the nearest valid mob");
+
+  clearPartyAutoCombatTargetLock(partyId);
 }
 
 // ── Summary ─────────────────────────────────────────────────────────────────

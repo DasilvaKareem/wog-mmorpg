@@ -159,6 +159,47 @@ const PLOT_DEFS: PlotDefinition[] = [
   { plotId: "ct-plot-6", zoneId: "crystalbloom-terrace", x: 520, y: 320, cost: 430 },
   { plotId: "ct-plot-7", zoneId: "crystalbloom-terrace", x: 220, y: 500, cost: 470 },
   { plotId: "ct-plot-8", zoneId: "crystalbloom-terrace", x: 420, y: 500, cost: 500 },
+  // copperfield-meadow — 10 plots (cheap starter expansion)
+  { plotId: "cm-plot-1", zoneId: "copperfield-meadow", x: 100, y: 100, cost: 20 },
+  { plotId: "cm-plot-2", zoneId: "copperfield-meadow", x: 280, y: 100, cost: 25 },
+  { plotId: "cm-plot-3", zoneId: "copperfield-meadow", x: 460, y: 100, cost: 30 },
+  { plotId: "cm-plot-4", zoneId: "copperfield-meadow", x: 100, y: 280, cost: 25 },
+  { plotId: "cm-plot-5", zoneId: "copperfield-meadow", x: 280, y: 280, cost: 30 },
+  { plotId: "cm-plot-6", zoneId: "copperfield-meadow", x: 460, y: 280, cost: 35 },
+  { plotId: "cm-plot-7", zoneId: "copperfield-meadow", x: 100, y: 460, cost: 35 },
+  { plotId: "cm-plot-8", zoneId: "copperfield-meadow", x: 280, y: 460, cost: 40 },
+  { plotId: "cm-plot-9", zoneId: "copperfield-meadow", x: 460, y: 460, cost: 45 },
+  { plotId: "cm-plot-10", zoneId: "copperfield-meadow", x: 280, y: 560, cost: 50 },
+
+  // silkwood-grove — 10 plots (mid-tier)
+  { plotId: "sg-plot-1", zoneId: "silkwood-grove", x: 100, y: 120, cost: 80 },
+  { plotId: "sg-plot-2", zoneId: "silkwood-grove", x: 300, y: 120, cost: 90 },
+  { plotId: "sg-plot-3", zoneId: "silkwood-grove", x: 500, y: 120, cost: 100 },
+  { plotId: "sg-plot-4", zoneId: "silkwood-grove", x: 100, y: 300, cost: 110 },
+  { plotId: "sg-plot-5", zoneId: "silkwood-grove", x: 300, y: 300, cost: 120 },
+  { plotId: "sg-plot-6", zoneId: "silkwood-grove", x: 500, y: 300, cost: 130 },
+  { plotId: "sg-plot-7", zoneId: "silkwood-grove", x: 100, y: 480, cost: 140 },
+  { plotId: "sg-plot-8", zoneId: "silkwood-grove", x: 300, y: 480, cost: 150 },
+  { plotId: "sg-plot-9", zoneId: "silkwood-grove", x: 500, y: 480, cost: 160 },
+  { plotId: "sg-plot-10", zoneId: "silkwood-grove", x: 300, y: 560, cost: 175 },
+
+  // emberglow-estate — 8 plots (premium)
+  { plotId: "ee-plot-1", zoneId: "emberglow-estate", x: 120, y: 120, cost: 200 },
+  { plotId: "ee-plot-2", zoneId: "emberglow-estate", x: 350, y: 120, cost: 230 },
+  { plotId: "ee-plot-3", zoneId: "emberglow-estate", x: 520, y: 120, cost: 260 },
+  { plotId: "ee-plot-4", zoneId: "emberglow-estate", x: 120, y: 350, cost: 300 },
+  { plotId: "ee-plot-5", zoneId: "emberglow-estate", x: 350, y: 350, cost: 350 },
+  { plotId: "ee-plot-6", zoneId: "emberglow-estate", x: 520, y: 350, cost: 400 },
+  { plotId: "ee-plot-7", zoneId: "emberglow-estate", x: 250, y: 520, cost: 450 },
+  { plotId: "ee-plot-8", zoneId: "emberglow-estate", x: 450, y: 520, cost: 500 },
+
+  // starfall-ranch — 6 plots (luxury, most expensive land)
+  { plotId: "sr-plot-1", zoneId: "starfall-ranch", x: 150, y: 150, cost: 400 },
+  { plotId: "sr-plot-2", zoneId: "starfall-ranch", x: 400, y: 150, cost: 500 },
+  { plotId: "sr-plot-3", zoneId: "starfall-ranch", x: 150, y: 350, cost: 600 },
+  { plotId: "sr-plot-4", zoneId: "starfall-ranch", x: 400, y: 350, cost: 700 },
+  { plotId: "sr-plot-5", zoneId: "starfall-ranch", x: 250, y: 500, cost: 850 },
+  { plotId: "sr-plot-6", zoneId: "starfall-ranch", x: 450, y: 500, cost: 1000 },
 ];
 
 // ── In-memory state ──────────────────────────────────────────────────

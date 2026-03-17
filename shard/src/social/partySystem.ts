@@ -725,3 +725,12 @@ export function areInSameParty(playerId1: string, playerId2: string): boolean {
 export function getPlayerPartyId(playerId: string): string | undefined {
   return playerToParty.get(playerId);
 }
+
+// Helper to get a party leader ID (or the player themselves if solo)
+export function getPartyLeaderId(playerId: string): string | undefined {
+  const partyId = playerToParty.get(playerId);
+  if (!partyId) return playerId;
+
+  const party = parties.get(partyId);
+  return party?.leaderId ?? playerId;
+}

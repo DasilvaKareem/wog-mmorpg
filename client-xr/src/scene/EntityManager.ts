@@ -351,9 +351,9 @@ function addArmorPieces(
       for (const kneeBone of [rig.lKnee, rig.rKnee]) {
         if (mt === "plate") {
           const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.18), mat);
-          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
+          boot.position.set(0.010, -0.290, 0.070); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
           const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.08, 6), mat);
-          cuff.position.set(0, -0.14, 0); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
+          cuff.position.set(0.010, -0.200, 0.070); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
         } else {
           const boot = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.14, 4, 6), mat);
           boot.position.set(0, -0.18, 0.01); boot.userData.equipSlot = "bootLeather"; kneeBone.add(boot);
@@ -1305,26 +1305,49 @@ export class EntityManager {
           }
         }
       }
+      // Combat events: trigger attack animation on the attacker
+      if (ev.type === "combat" && ev.entityId && ev.data?.animStyle) {
+        const attacker = this.entities.get(ev.entityId);
+        if (attacker && attacker.rig) {
+          const atkAnim = attackAnimForClass(attacker.entity.classId);
+          if (attacker.currentAnim !== atkAnim) {
+            if (ev.targetId) {
+              const target = this.entities.get(ev.targetId);
+              if (target) {
+                attacker.targetYaw = Math.atan2(
+                  target.group.position.x - attacker.group.position.x,
+                  target.group.position.z - attacker.group.position.z,
+                );
+              }
+            }
+            this.playOneShot(attacker, atkAnim);
+          }
+        }
+      }
       // Ability events: play technique-specific animation on the caster
       if (ev.type === "ability" && ev.entityId) {
         const obj = this.entities.get(ev.entityId);
         if (!obj) continue;
         const techniqueId = ev.data?.techniqueId as string | undefined;
+        // Try technique-specific anim first, fall back to class default
+        let anim: AnimName | null = null;
         if (techniqueId && TECHNIQUE_ANIM[techniqueId]) {
-          const anim = TECHNIQUE_ANIM[techniqueId];
-          if (obj.currentAnim !== anim) {
-            // Face target if available
-            if (ev.targetId) {
-              const target = this.entities.get(ev.targetId);
-              if (target) {
-                obj.targetYaw = Math.atan2(
-                  target.group.position.x - obj.group.position.x,
-                  target.group.position.z - obj.group.position.z,
-                );
-              }
+          anim = TECHNIQUE_ANIM[techniqueId];
+        } else {
+          // Fallback: use class-appropriate cast/attack anim
+          anim = attackAnimForClass(obj.entity.classId);
+        }
+        if (anim && obj.rig && obj.currentAnim !== anim) {
+          if (ev.targetId) {
+            const target = this.entities.get(ev.targetId);
+            if (target) {
+              obj.targetYaw = Math.atan2(
+                target.group.position.x - obj.group.position.x,
+                target.group.position.z - obj.group.position.z,
+              );
             }
-            this.playOneShot(obj, anim);
           }
+          this.playOneShot(obj, anim);
         }
       }
     }

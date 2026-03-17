@@ -1,0 +1,8 @@
+{
+  "id": "windswept-bluffs",
+  "name": "Windswept Bluffs",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(140,170,140,0.12)",
+  "budget": { "maxPopulation": 15, "maxThreat": 60 },
+  "pois": []
+}

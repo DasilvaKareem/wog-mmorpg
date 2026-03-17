@@ -19,7 +19,17 @@
     "thornwall-ranch",
     "moonpetal-gardens",
     "ironroot-farmstead",
-    "crystalbloom-terrace"
+    "crystalbloom-terrace",
+    "stormbreak-pass",
+    "northwind-hollow",
+    "eastmarch-wastes",
+    "shattered-coast",
+    "frostfall-ridge",
+    "windswept-bluffs",
+    "copperfield-meadow",
+    "silkwood-grove",
+    "emberglow-estate",
+    "starfall-ranch"
   ],
   "connections": [
     { "from": "village-square", "to": "wild-meadow", "portal": "meadow-exit" },
@@ -42,7 +52,29 @@
     { "from": "viridian-range", "to": "thornwall-ranch", "portal": "ranch-gate" },
     { "from": "moondancer-glade", "to": "moonpetal-gardens", "portal": "gardens-gate" },
     { "from": "felsrock-citadel", "to": "ironroot-farmstead", "portal": "farmstead-gate" },
-    { "from": "lake-lumina", "to": "crystalbloom-terrace", "portal": "terrace-gate" }
+    { "from": "lake-lumina", "to": "crystalbloom-terrace", "portal": "terrace-gate" },
+    { "from": "dark-forest", "to": "stormbreak-pass", "portal": "stormbreak-gate" },
+    { "from": "stormbreak-pass", "to": "viridian-range", "portal": "range-descent" },
+    { "from": "stormbreak-pass", "to": "auroral-plains", "portal": "plains-trail" },
+    { "from": "stormbreak-pass", "to": "frostfall-ridge", "portal": "ridge-path" },
+    { "from": "village-square", "to": "northwind-hollow", "portal": "northwind-exit" },
+    { "from": "northwind-hollow", "to": "auroral-plains", "portal": "plains-approach" },
+    { "from": "northwind-hollow", "to": "windswept-bluffs", "portal": "bluffs-trail" },
+    { "from": "moondancer-glade", "to": "eastmarch-wastes", "portal": "wastes-gate" },
+    { "from": "eastmarch-wastes", "to": "lake-lumina", "portal": "lumina-approach" },
+    { "from": "eastmarch-wastes", "to": "shattered-coast", "portal": "coast-path" },
+    { "from": "shattered-coast", "to": "azurshard-chasm", "portal": "chasm-approach" },
+    { "from": "frostfall-ridge", "to": "goldenreach-grange", "portal": "grange-descent" },
+    { "from": "frostfall-ridge", "to": "thornwall-ranch", "portal": "ranch-trail" },
+    { "from": "windswept-bluffs", "to": "goldenreach-grange", "portal": "grange-approach" },
+    { "from": "sunflower-fields", "to": "copperfield-meadow", "portal": "copperfield-gate" },
+    { "from": "willowfen-pastures", "to": "copperfield-meadow", "portal": "copperfield-path" },
+    { "from": "bramblewood-homestead", "to": "silkwood-grove", "portal": "silkwood-gate" },
+    { "from": "willowfen-pastures", "to": "silkwood-grove", "portal": "silkwood-path" },
+    { "from": "dewveil-orchard", "to": "emberglow-estate", "portal": "emberglow-gate" },
+    { "from": "silkwood-grove", "to": "emberglow-estate", "portal": "emberglow-path" },
+    { "from": "moonpetal-gardens", "to": "starfall-ranch", "portal": "starfall-gate" },
+    { "from": "emberglow-estate", "to": "starfall-ranch", "portal": "starfall-path" }
   ],
   "worldOffsets": {
     "village-square": { "x": 0, "z": 0 },
@@ -64,7 +96,17 @@
     "thornwall-ranch": { "x": 1920, "z": -1280 },
     "moonpetal-gardens": { "x": 2560, "z": 640 },
     "ironroot-farmstead": { "x": 2560, "z": -1280 },
-    "crystalbloom-terrace": { "x": 3200, "z": -1280 }
+    "crystalbloom-terrace": { "x": 3200, "z": -1280 },
+    "stormbreak-pass": { "x": 1280, "z": -640 },
+    "northwind-hollow": { "x": 0, "z": -640 },
+    "eastmarch-wastes": { "x": 3200, "z": 0 },
+    "shattered-coast": { "x": 3840, "z": 0 },
+    "frostfall-ridge": { "x": 1280, "z": -1280 },
+    "windswept-bluffs": { "x": 0, "z": -1280 },
+    "copperfield-meadow": { "x": 0, "z": 1280 },
+    "silkwood-grove": { "x": 1280, "z": 1280 },
+    "emberglow-estate": { "x": 1920, "z": 1280 },
+    "starfall-ranch": { "x": 2560, "z": 1280 }
   },
   "continents": [
     {

@@ -24,10 +24,9 @@ import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
 import type { Entity, ZoneResponse } from "./types.js";
 
-// Equipment tuner — press P to toggle
+// Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
 equipTuner.setOnChange((slot, pos, rot) => {
-  // Live-update all entities with weapons/armor
   entities.applyEquipmentTuning(slot, pos, rot);
 });
 

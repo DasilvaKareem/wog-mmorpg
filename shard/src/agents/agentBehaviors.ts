@@ -5,10 +5,10 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getAllZones } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllZones, getOrCreateZone } from "../world/zoneRuntime.js";
 import { getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
-import { getClassById } from "../character/classes.js";
+import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
@@ -26,20 +26,119 @@ import {
   type AgentContext,
 } from "./agentUtils.js";
 
-const MELEE_RANGE = 40;
 const PROFESSION_HUB_ZONE = "village-square";
 const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
 const SICKLE_TOKENS: Record<number, number> = { 41: 1, 42: 2, 43: 3, 44: 4 };
 const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
 
-/** Return the attack range for an entity based on its class, with a small buffer so
- *  the entity stops just inside range rather than right at the edge. */
-function getCombatStopDist(me: any): number {
-  if (me.classId) {
-    const classDef = getClassById(me.classId);
-    if (classDef) return Math.max(MELEE_RANGE - 5, classDef.attackRange - 10);
+function getTechniqueCooldownExpiry(entity: any, techniqueId: string): number | undefined {
+  const cooldowns = entity.cooldowns;
+  if (!cooldowns) return undefined;
+  if (cooldowns instanceof Map) return cooldowns.get(techniqueId);
+  if (typeof cooldowns === "object") {
+    const raw = (cooldowns as Record<string, unknown>)[techniqueId];
+    return typeof raw === "number" ? raw : undefined;
   }
-  return MELEE_RANGE - 5;
+  return undefined;
+}
+
+function pickCombatTechnique(entity: any, target: any, zoneTick: number): TechniqueDefinition | null {
+  const learned = entity.learnedTechniques ?? [];
+  if (learned.length === 0) return null;
+
+  const currentEssence = entity.essence ?? 0;
+  const usable: TechniqueDefinition[] = [];
+  for (const techniqueId of learned) {
+    const technique = getTechniqueById(techniqueId);
+    if (!technique) continue;
+    if (technique.essenceCost > currentEssence) continue;
+    const cooldownExpiry = getTechniqueCooldownExpiry(entity, technique.id);
+    if (cooldownExpiry != null && zoneTick < cooldownExpiry) continue;
+    usable.push(technique);
+  }
+  if (usable.length === 0) return null;
+
+  const hasBuff = entity.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
+  if (!hasBuff) {
+    const buff = usable.find((technique) => technique.type === "buff" && technique.targetType === "self");
+    if (buff) return buff;
+  }
+
+  const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
+  if (hpRatio < 0.4) {
+    const heal = usable.find((technique) => technique.type === "healing");
+    if (heal) return heal;
+  }
+
+  const hasDebuff = target.activeEffects?.some(
+    (effect: any) => (effect.type === "debuff" || effect.type === "dot") && effect.casterId === entity.id,
+  );
+  if (!hasDebuff) {
+    const debuff = usable.find((technique) => technique.type === "debuff");
+    if (debuff) return debuff;
+  }
+
+  const attacks = usable
+    .filter((technique) => technique.type === "attack")
+    .sort((a, b) => (b.effects.damageMultiplier ?? 0) - (a.effects.damageMultiplier ?? 0));
+  if (attacks.length > 0) return attacks[0];
+
+  return null;
+}
+
+function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition): string {
+  if (technique.targetType === "self" || technique.targetType === "ally") return entity.id;
+  if (technique.type === "buff" || technique.type === "healing") return entity.id;
+  return target.id;
+}
+
+function getCombatOrderTarget(me: any): any | null {
+  if (!me.order) return null;
+  if (me.order.action !== "attack" && me.order.action !== "technique") return null;
+  const target = getWorldEntity(me.order.targetId);
+  if (!target) return null;
+  if (target.id === me.id) return target;
+  return target.hp > 0 ? target : null;
+}
+
+function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResult {
+  const activeTarget = getCombatOrderTarget(me);
+  if (activeTarget) {
+    if (me.order?.action === "technique") {
+      const technique = getTechniqueById(me.order.techniqueId);
+      const label = technique?.name ?? "technique";
+      return actionProgressed(`Using ${label} on ${activeTarget.name ?? "target"}`);
+    }
+    return actionProgressed(`Attacking ${activeTarget.name ?? "target"}`);
+  }
+
+  const zoneTick = getOrCreateZone(ctx.currentRegion).tick;
+  const technique = pickCombatTechnique(me, target, zoneTick);
+  if (technique) {
+    const targetId = getTechniqueTargetId(me, target, technique);
+    const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: technique.id });
+    if (!issued) {
+      return actionBlocked(`Could not use ${technique.name}`, {
+        failureKey: `combat:technique:${technique.id}`,
+        targetId,
+        targetName: target.name ?? "target",
+      });
+    }
+    const targetLabel = targetId === me.id ? "self" : (target.name ?? "target");
+    void ctx.logActivity(`Using ${technique.name} on ${targetLabel}`);
+    return actionProgressed(`Using ${technique.name} on ${targetLabel}`);
+  }
+
+  const issued = ctx.issueCommand({ action: "attack", targetId: target.id });
+  if (!issued) {
+    return actionBlocked(`Could not attack ${target.name ?? "mob"}`, {
+      failureKey: `combat:attack:${target.id}`,
+      targetId: target.id,
+      targetName: target.name ?? "mob",
+    });
+  }
+  void ctx.logActivity(`Attacking ${target.name ?? "mob"}`);
+  return actionProgressed(`Attacking ${target.name ?? "mob"}`);
 }
 
 type GatherPreference = "ore" | "herb" | "both";
@@ -233,16 +332,8 @@ export async function doCombat(
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
 
-    // Navigate toward the best target — stop at class attack range so
-    // ranged classes (ranger, mage, warlock, cleric) don't walk into melee.
-    // Once in range, the zone runtime's auto-combat AI handles technique
-    // selection and attacking automatically.
     const [, mob] = sorted[0] as [string, any];
-    const stopDist = getCombatStopDist(me);
-    const moving = await ctx.moveToEntity(me, mob, stopDist);
-    if (moving) return actionProgressed(`Closing on ${mob.name ?? "mob"}`);
-    void ctx.logActivity(`Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
-    return actionProgressed(`Fighting ${mob.name ?? "mob"}`);
+    return engageCombatTarget(ctx, me, mob);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] combat tick: ${reason.slice(0, 60)}`);
@@ -763,19 +854,16 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
       });
     }
 
-    // Set travel state directly on the entity (bypasses HTTP /command to avoid
-    // silent auth/network failures that were preventing travel from working)
     const entity = getWorldEntity(ctx.entityId);
     if (!entity) {
-      console.log(`[agent:${ctx.walletTag}] Travel failed: entity ${ctx.entityId} not found in world`);
-      return actionBlocked(`Travel failed: entity ${ctx.entityId} not found`, {
+      return actionBlocked(`Travel failed: entity not found`, {
         failureKey: `travel:entity:${ctx.entityId}`,
       });
     }
     entity.order = { action: "move", x: center.x, y: center.z };
     entity.travelTargetZone = targetZone;
     entity.gotoMode = true;
-    console.log(`[agent:${ctx.walletTag}] Traveling ${ctx.currentRegion} → ${targetZone} (order → ${center.x},${center.z})`);
+    console.log(`[agent:${ctx.walletTag}] Traveling ${ctx.currentRegion} → ${targetZone} (${center.x},${center.z})`);
     void ctx.logActivity(`Traveling ${ctx.currentRegion} → ${targetZone}`);
     return actionProgressed(`Traveling to ${targetZone}`);
   } catch (err: any) {
@@ -1160,13 +1248,13 @@ async function doQuestCombat(
 
     const [, mob] = sorted[0] as [string, any];
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
-    const stopDist = getCombatStopDist(me);
-    const moving = await ctx.moveToEntity(me, mob, stopDist);
-    if (moving) return actionProgressed(`Moving to ${mob.name ?? "mob"}`);
-    void ctx.logActivity(isQuestTarget
-      ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
-      : `Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
-    return actionProgressed(`Engaging ${mob.name ?? "mob"}`);
+    const result = engageCombatTarget(ctx, me, mob);
+    if (result.status === "progressed") {
+      void ctx.logActivity(isQuestTarget
+        ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
+        : `Fighting ${mob.name ?? "mob"} (Lv${mob.level ?? "?"})`);
+    }
+    return result;
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] quest combat tick: ${reason.slice(0, 60)}`);
@@ -1357,28 +1445,16 @@ async function doDungeonCombat(ctx: AgentContext, strategy: AgentStrategy): Prom
       return actionCompleted("Dungeon cleared — all mobs defeated");
     }
 
-    // Already attacking something? Let it play out.
-    if (me.order?.action === "attack") {
-      const target = entities[me.order.targetId];
-      if (target && (target.hp ?? 0) > 0) {
-        return actionProgressed(`Fighting ${target.name ?? "mob"} (${target.hp}/${target.maxHp} HP) — ${mobs.length} mobs remaining`);
-      }
-    }
-
     // Find closest mob
     const sorted = mobs.sort(([, a], [, b]) => {
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
-    const [mobId, mob] = sorted[0] as [string, any];
-    const stopDist = getCombatStopDist(me);
-
-    const moving = await ctx.moveToEntity(me, mob, stopDist);
-    if (moving) return actionProgressed(`Moving to ${mob.name ?? "mob"} — ${mobs.length} remain`);
-
-    // In range — attack
-    ctx.issueCommand({ action: "attack", targetId: mobId });
-    void ctx.logActivity(`Dungeon: fighting ${mob.name ?? "mob"} (${mobs.length} remain)`);
-    return actionProgressed(`Attacking ${mob.name ?? "mob"} in dungeon`);
+    const [, mob] = sorted[0] as [string, any];
+    const result = engageCombatTarget(ctx, me, mob);
+    if (result.status === "progressed") {
+      void ctx.logActivity(`Dungeon: fighting ${mob.name ?? "mob"} (${mobs.length} remain)`);
+    }
+    return result;
   } catch (err: any) {
     const reason = formatAgentError(err);
     return actionBlocked(reason, { failureKey: "dungeon:combat" });

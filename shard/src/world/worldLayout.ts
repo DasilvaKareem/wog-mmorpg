@@ -56,6 +56,13 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "felsrock-citadel": 35,
   "lake-lumina": 40,
   "azurshard-chasm": 45,
+  // Connector zones
+  "stormbreak-pass": 12,
+  "northwind-hollow": 8,
+  "eastmarch-wastes": 35,
+  "shattered-coast": 40,
+  "frostfall-ridge": 20,
+  "windswept-bluffs": 10,
   // Farmland zones — no level gate
   "sunflower-fields": 1,
   "harvest-hollow": 1,
@@ -67,6 +74,10 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "moonpetal-gardens": 1,
   "ironroot-farmstead": 1,
   "crystalbloom-terrace": 1,
+  "copperfield-meadow": 1,
+  "silkwood-grove": 1,
+  "emberglow-estate": 1,
+  "starfall-ranch": 1,
 };
 
 // ── Connection graph (loaded from world.json) ───────────────────────

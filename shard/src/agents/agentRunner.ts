@@ -219,7 +219,7 @@ export class AgentRunner {
     walletBalance: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     supervisor: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0, errors: 0 },
     actionResults: { idle: 0, progressed: 0, blocked: 0, completed: 0 },
-    commands: { total: 0, move: 0, attack: 0, travel: 0, failed: 0, lastAt: null as number | null },
+    commands: { total: 0, move: 0, attack: 0, technique: 0, travel: 0, failed: 0, lastAt: null as number | null },
     failures: {
       total: 0,
       repeated: 0,
@@ -844,6 +844,7 @@ export class AgentRunner {
     command:
       | { action: "move"; x: number; y: number }
       | { action: "attack"; targetId: string }
+      | { action: "technique"; targetId: string; techniqueId: string }
       | { action: "travel"; targetZone: string },
   ): boolean {
     if (!this.entityId) return false;
@@ -883,11 +884,7 @@ export class AgentRunner {
           origin: this.agentOrigin ?? undefined,
           classId: entity.classId ?? undefined,
         };
-        if (latest.type === "kill" && latest.entityId === this.entityId) {
-          emitAgentChat({ ...dCtx, event: "kill", detail: latest.targetName });
-        } else if (latest.type === "loot" && latest.entityId === this.entityId) {
-          emitAgentChat({ ...dCtx, event: "loot_found", detail: latest.message });
-        } else if (latest.type === "technique" && latest.entityId === this.entityId) {
+        if (latest.type === "technique" && latest.entityId === this.entityId) {
           emitAgentChat({ ...dCtx, event: "technique_learn", detail: getTechniqueDetail(latest) });
           void sendAgentPush(this.userWallet, { type: "technique_learned", agentName: entity.name, detail: getTechniqueDetail(latest) });
         } else if (latest.type === "quest") {

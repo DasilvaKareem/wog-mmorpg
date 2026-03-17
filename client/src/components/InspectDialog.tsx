@@ -6,6 +6,7 @@ import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import { WalletManager } from "@/lib/walletManager";
+import { getAuthToken } from "@/lib/agentAuth";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
 
 /* ── 8-bit retro palette ─────────────────────────────────────── */
@@ -122,17 +123,23 @@ export function InspectDialog(): React.ReactElement | null {
   const [open, setOpen] = React.useState(false);
   const [entity, setEntity] = React.useState<Entity | null>(null);
   const [tab, setTab] = React.useState<TabId>("equipment");
+  const [isSelf, setIsSelf] = React.useState(false);
+  const [inspectZoneId, setInspectZoneId] = React.useState<string | null>(null);
 
   const { getItem } = useItemCatalog();
   const { getTechnique } = useTechniques();
 
   // Listen for inspect events
   useGameBridge("entityInspect", ({ entityId, zoneId }) => {
+    setIsSelf(false);
+    setInspectZoneId(zoneId);
     void fetchEntity(entityId, zoneId);
   });
 
   // Listen for self-inspect ("I" key)
   useGameBridge("inspectSelf", ({ zoneId, walletAddress }) => {
+    setIsSelf(true);
+    setInspectZoneId(zoneId);
     void fetchSelfEntity(zoneId, walletAddress);
   });
 
@@ -291,6 +298,154 @@ export function InspectDialog(): React.ReactElement | null {
         {tab === "effects" && <EffectsTab entity={entity} getTechnique={getTechnique} />}
         {tab === "reputation" && <ReputationTab entity={entity} />}
       </div>
+
+      {/* Social actions — only for other players */}
+      {!isSelf && entity.type === "player" && entity.walletAddress && (
+        <SocialActions entity={entity} zoneId={inspectZoneId} />
+      )}
+    </div>
+  );
+}
+
+/* ── Social Actions Panel ─────────────────────────────────────── */
+
+type SocialActionId = "trade" | "friend" | "party" | "guild" | "message";
+
+interface SocialActionDef {
+  id: SocialActionId;
+  label: string;
+  icon: string;
+  color: string;
+}
+
+const SOCIAL_ACTIONS: SocialActionDef[] = [
+  { id: "trade",   label: "Trade",   icon: "$", color: "#f2c854" },
+  { id: "friend",  label: "Friend",  icon: "+", color: "#54f28b" },
+  { id: "party",   label: "Party",   icon: "P", color: "#5dadec" },
+  { id: "guild",   label: "Guild",   icon: "G", color: "#b48efa" },
+  { id: "message", label: "Message", icon: "@", color: "#ff9f43" },
+];
+
+function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | null }): React.ReactElement {
+  const [busy, setBusy] = React.useState<SocialActionId | null>(null);
+  const [result, setResult] = React.useState<{ text: string; tone: "ok" | "error" } | null>(null);
+
+  function flash(text: string, tone: "ok" | "error" = "ok") {
+    setResult({ text, tone });
+    window.setTimeout(() => setResult(null), 3500);
+  }
+
+  async function handleAction(actionId: SocialActionId) {
+    const wm = WalletManager.getInstance();
+    const myWallet = wm.custodialAddress ?? wm.address;
+    const targetWallet = entity.walletAddress;
+    if (!myWallet || !targetWallet) { flash("Wallet not ready", "error"); return; }
+
+    setBusy(actionId);
+    try {
+      switch (actionId) {
+        case "friend": {
+          const res = await fetch(`${API_URL}/friends/request`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fromWallet: myWallet, toWallet: targetWallet }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) flash(`Friend request sent to ${entity.name}`);
+          else flash(data.error ?? "Failed to send request", "error");
+          break;
+        }
+        case "party": {
+          if (!zoneId) { flash("Zone unknown — cannot invite", "error"); break; }
+          // Find our entity ID in the zone
+          const zoneRes = await fetch(`${API_URL}/zones/${zoneId}`);
+          if (!zoneRes.ok) { flash("Failed to load zone", "error"); break; }
+          const zoneData = await zoneRes.json();
+          const entities = zoneData.entities as Record<string, Entity> | undefined;
+          const myNorm = myWallet.toLowerCase();
+          const selfEntity = entities ? Object.values(entities).find(
+            (e) => e.type === "player" && e.walletAddress?.toLowerCase() === myNorm,
+          ) : undefined;
+          if (!selfEntity) { flash("Your champion not found in zone", "error"); break; }
+          const res = await fetch(`${API_URL}/party/invite-champion`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fromEntityId: selfEntity.id, fromZoneId: zoneId, toCustodialWallet: targetWallet }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) flash(`Party invite sent to ${entity.name}`);
+          else flash(data.error ?? "Failed to invite", "error");
+          break;
+        }
+        case "guild": {
+          // Need our guild info to get guildId
+          const token = await getAuthToken(wm.address ?? "");
+          if (!token) { flash("Auth required — reconnect wallet", "error"); break; }
+          const gRes = await fetch(`${API_URL}/guild/wallet/${myWallet}`);
+          if (!gRes.ok) { flash("Failed to load guild info", "error"); break; }
+          const gData = await gRes.json();
+          if (!gData.inGuild || !gData.guild) { flash("You must be in a guild first", "error"); break; }
+          const guildId = gData.guild.guildId;
+          const res = await fetch(`${API_URL}/guild/${guildId}/invite`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ memberAddress: targetWallet }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok) flash(`Guild invite sent to ${entity.name}`);
+          else flash(data.error ?? "Failed to invite to guild", "error");
+          break;
+        }
+        case "trade": {
+          flash("Trade request — coming soon", "error");
+          break;
+        }
+        case "message": {
+          flash("Private message — coming soon", "error");
+          break;
+        }
+      }
+    } catch (err) {
+      flash("Network error", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="border-t px-3 py-2" style={{ borderColor: BORDER }}>
+      <div className="flex gap-1 justify-center flex-wrap">
+        {SOCIAL_ACTIONS.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => void handleAction(a.id)}
+            disabled={busy !== null}
+            className="flex items-center gap-1 border px-2 py-1 text-[9px] font-bold uppercase"
+            style={{
+              borderColor: busy === a.id ? a.color : BORDER,
+              color: a.color,
+              background: busy === a.id ? "#1a2240" : "transparent",
+              cursor: busy ? "wait" : "pointer",
+              opacity: busy && busy !== a.id ? 0.4 : 1,
+              fontFamily: "monospace",
+            }}
+          >
+            <span className="flex h-4 w-4 items-center justify-center border text-[8px]"
+              style={{ borderColor: a.color, background: "#0d1220" }}>
+              {a.icon}
+            </span>
+            {a.label}
+          </button>
+        ))}
+      </div>
+      {result && (
+        <div className="mt-1 text-center text-[10px]" style={{
+          color: result.tone === "ok" ? "#54f28b" : "#f25454",
+          fontFamily: "monospace",
+        }}>
+          {result.text}
+        </div>
+      )}
     </div>
   );
 }

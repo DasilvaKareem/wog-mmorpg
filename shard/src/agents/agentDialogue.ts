@@ -1140,18 +1140,17 @@ export function maybeReactToChat(
   if (otherEvents.length === 0) return false;
 
   // Map zone event types to contextual reaction events
+  // Kill and loot are excluded — too spammy, every mob death triggered chat
   const reactionMap: Record<string, DialogueEvent> = {
     levelup: "react_levelup",
     death: "react_death",
     quest: "react_quest",
-    kill: "react_kill",
-    loot: "react_loot",
     technique: "react_technique",
     chat: "react_chat",
   };
 
-  // Prioritize significant events: levelup > death > technique > loot > quest > kill > chat
-  const priority = ["levelup", "death", "technique", "loot", "quest", "kill", "chat"];
+  // Prioritize significant events only: levelup > death > technique > quest > chat
+  const priority = ["levelup", "death", "technique", "quest", "chat"];
   let bestEvent: (typeof otherEvents)[0] | null = null;
   let bestReaction: DialogueEvent = "react_chat";
 

@@ -14,7 +14,7 @@ import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { randomUUID } from "crypto";
-import { getPlayerPartyId, getPartyMembers, areInSameParty } from "../social/partySystem.js";
+import { getPlayerPartyId, getPartyMembers, areInSameParty, getPartyLeaderId } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
 import {
   clampToZoneBounds,
@@ -426,6 +426,16 @@ const MOVE_SPEED = 30; // units per tick
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
+const PARTY_TARGET_LOCK_TICKS = 6;
+const PARTY_ANCHOR_PULL_RADIUS = 100;
+
+interface PartyTargetLock {
+  targetId: string;
+  zoneId: string;
+  expiresAtTick: number;
+}
+
+const partyTargetLocks = new Map<string, PartyTargetLock>();
 
 /** Return the attack range for an entity based on its class definition. */
 function getEntityAttackRange(entity: Entity): number {
@@ -1258,6 +1268,184 @@ function pickTechnique(
   return null;
 }
 
+function isAliveAutoCombatTarget(entity: Entity | undefined): entity is Entity {
+  return !!entity
+    && (entity.type === "mob" || entity.type === "boss")
+    && entity.hp > 0
+    && !entity.leashing;
+}
+
+function getPartyTargetLockKey(playerId: string, partyIdOverride?: string): string | undefined {
+  return partyIdOverride ?? getPlayerPartyId(playerId);
+}
+
+export function rememberPartyAutoCombatTarget(
+  playerId: string,
+  zoneId: string,
+  targetId: string,
+  tick: number,
+  partyIdOverride?: string,
+): void {
+  const partyId = getPartyTargetLockKey(playerId, partyIdOverride);
+  if (!partyId) return;
+  partyTargetLocks.set(partyId, {
+    targetId,
+    zoneId,
+    expiresAtTick: tick + PARTY_TARGET_LOCK_TICKS,
+  });
+}
+
+export function clearPartyAutoCombatTargetLock(partyId: string): void {
+  partyTargetLocks.delete(partyId);
+}
+
+function getDistanceBetween(a: Entity, b: Entity): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function getPartyCombatAnchor(
+  entity: Entity,
+  zone: ZoneState,
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  const leaderId = partyLeaderIdOverride ?? getPartyLeaderId(entity.id);
+  if (!leaderId) return null;
+
+  const leader = zone.entities.get(leaderId);
+  if (!leader || leader.type !== "player" || leader.hp <= 0) return null;
+
+  return leader;
+}
+
+function isTargetWithinPartyAnchorRange(
+  entity: Entity,
+  target: Entity,
+  zone: ZoneState,
+  partyLeaderIdOverride?: string,
+): boolean {
+  const anchor = getPartyCombatAnchor(entity, zone, partyLeaderIdOverride);
+  if (!anchor) return true;
+  return getDistanceBetween(anchor, target) <= PARTY_ANCHOR_PULL_RADIUS;
+}
+
+function getLockedPartyTarget(
+  entity: Entity,
+  zone: ZoneState,
+  autoCombatRange: number,
+  partyIdOverride?: string,
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  const partyId = getPartyTargetLockKey(entity.id, partyIdOverride);
+  if (!partyId) return null;
+
+  const lock = partyTargetLocks.get(partyId);
+  if (!lock) return null;
+  if (lock.expiresAtTick < zone.tick) {
+    partyTargetLocks.delete(partyId);
+    return null;
+  }
+  if (lock.zoneId !== zone.zoneId) return null;
+
+  const target = zone.entities.get(lock.targetId) ?? getEntity(lock.targetId);
+  if (!isAliveAutoCombatTarget(target) || target.region !== zone.zoneId) {
+    partyTargetLocks.delete(partyId);
+    return null;
+  }
+
+  if (getDistanceBetween(entity, target) > autoCombatRange) return null;
+  if (!isTargetWithinPartyAnchorRange(entity, target, zone, partyLeaderIdOverride)) return null;
+  return target;
+}
+
+function getPartyFocusTarget(
+  entity: Entity,
+  zone: ZoneState,
+  autoCombatRange: number,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  if (partyMemberIds.length <= 1) return null;
+
+  let focusedTarget: Entity | null = null;
+  let focusedDistance = Number.POSITIVE_INFINITY;
+
+  for (const memberId of partyMemberIds) {
+    if (memberId === entity.id) continue;
+
+    const member = zone.entities.get(memberId);
+    if (!member || member.type !== "player" || member.hp <= 0) continue;
+
+    const order = member.order;
+    if (!order || (order.action !== "attack" && order.action !== "technique")) continue;
+
+    const target = zone.entities.get(order.targetId);
+    if (!isAliveAutoCombatTarget(target)) continue;
+
+    const distance = getDistanceBetween(entity, target);
+    if (distance > autoCombatRange) continue;
+    if (!isTargetWithinPartyAnchorRange(entity, target, zone, partyLeaderIdOverride)) continue;
+
+    if (!focusedTarget || distance < focusedDistance) {
+      focusedTarget = target;
+      focusedDistance = distance;
+    }
+  }
+
+  if (focusedTarget) return focusedTarget;
+
+  const sameZonePartyMembers = new Set(partyMemberIds);
+  let taggedTarget: Entity | null = null;
+  let taggedDistance = Number.POSITIVE_INFINITY;
+
+  for (const candidate of zone.entities.values()) {
+    if (!isAliveAutoCombatTarget(candidate)) continue;
+    if (!candidate.taggedBy || !sameZonePartyMembers.has(candidate.taggedBy)) continue;
+
+    const distance = getDistanceBetween(entity, candidate);
+    if (distance > autoCombatRange) continue;
+    if (!isTargetWithinPartyAnchorRange(entity, candidate, zone, partyLeaderIdOverride)) continue;
+
+    if (!taggedTarget || distance < taggedDistance) {
+      taggedTarget = candidate;
+      taggedDistance = distance;
+    }
+  }
+
+  return taggedTarget;
+}
+
+export function pickAutoCombatTarget(
+  entity: Entity,
+  zone: ZoneState,
+  autoCombatRange: number,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+  partyIdOverride?: string,
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  const lockedTarget = getLockedPartyTarget(entity, zone, autoCombatRange, partyIdOverride, partyLeaderIdOverride);
+  if (lockedTarget) return lockedTarget;
+
+  const partyFocusTarget = getPartyFocusTarget(entity, zone, autoCombatRange, partyMemberIds, partyLeaderIdOverride);
+  if (partyFocusTarget) return partyFocusTarget;
+
+  const shouldRespectPartyAnchor = partyMemberIds.length > 1;
+  let nearestMob: Entity | null = null;
+  let nearestDist = autoCombatRange;
+  for (const other of zone.entities.values()) {
+    if (!isAliveAutoCombatTarget(other)) continue;
+    if (shouldRespectPartyAnchor && !isTargetWithinPartyAnchorRange(entity, other, zone, partyLeaderIdOverride)) continue;
+    const dist = getDistanceBetween(entity, other);
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearestMob = other;
+    }
+  }
+
+  return nearestMob;
+}
+
 /**
  * Apply technique effects during the tick loop (mirrors techniqueRoutes.applyTechniqueEffects).
  * Returns { damage } for attack techniques.
@@ -1632,6 +1820,9 @@ async function worldTick() {
         if (dist > getEntityAttackRange(entity)) {
           moveToward(entity, target.x, target.y, world.entities);
         } else {
+          if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
+            rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
+          }
           const rawDmg = computeDamage(entity, target, zone.zoneId);
           const hit = resolveHit(entity, target, rawDmg);
 
@@ -1883,6 +2074,9 @@ async function worldTick() {
         if (dist > techRange) {
           moveToward(entity, target.x, target.y, world.entities);
         } else {
+          if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
+            rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
+          }
           // Deduct essence
           const currentEssence = entity.essence ?? 0;
           entity.essence = Math.max(0, currentEssence - technique.essenceCost);
@@ -2298,28 +2492,16 @@ async function worldTick() {
       // Ranged classes scan further — auto-engage at their attack range + buffer
       const classRange = getEntityAttackRange(entity);
       const autoCombatRange = Math.max(BASE_AUTO_COMBAT_RANGE, classRange + 20);
-
-      // Find nearest mob within range
-      let nearestMob: Entity | null = null;
-      let nearestDist = autoCombatRange;
-      for (const other of zone.entities.values()) {
-        if (other.type !== "mob" && other.type !== "boss") continue;
-        if (other.hp <= 0) continue;
-        const dx = other.x - entity.x;
-        const dy = other.y - entity.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < nearestDist) {
-          nearestDist = dist;
-          nearestMob = other;
-        }
-      }
+      const nearestMob = pickAutoCombatTarget(entity, zone, autoCombatRange);
 
       if (!nearestMob) continue;
 
       // Pick the best technique from what the player has learned at trainers
       const chosenTech = pickTechnique(entity, nearestMob, zone);
       if (chosenTech) {
-        const techTarget = chosenTech.targetType === "self" ? entity.id : nearestMob.id;
+        const techTarget = (chosenTech.targetType === "self" || chosenTech.targetType === "ally")
+          ? entity.id
+          : nearestMob.id;
         entity.order = { action: "technique", targetId: techTarget, techniqueId: chosenTech.id };
       } else {
         // Fall back to basic attack
@@ -2386,6 +2568,9 @@ async function worldTick() {
     if (!MOVABLE_TYPES.has(entity.type)) continue;
 
     const newRegion = getRegionAtPosition(entity.x, entity.y);
+
+    // If an entity drifts into void space (outside all zone bounds), clamp it
+    // back inside its current zone so zone-local combat/entity queries stay valid.
     if (!newRegion && entity.region) {
       clampToZoneBounds(entity, entity.region);
       continue;

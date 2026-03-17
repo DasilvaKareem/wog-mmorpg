@@ -314,117 +314,124 @@ function createAttackClip(): THREE.AnimationClip {
 // The warrior's signature move: big, brutal, satisfying
 
 function createHeroicStrikeClip(): THREE.AnimationClip {
-  const d = 0.7;
+  // MASSIVE overhead slam — warrior jumps, weapon crashes down with full body weight
+  // 0-0.15 crouch+wind | 0.15-0.30 LEAP UP | 0.30-0.36 SLAM | 0.36-0.42 impact freeze | 0.42-0.70 recover
+  const d = 0.70;
 
   return new THREE.AnimationClip("heroicstrike", d, [
-    // Hips launch upward and forward then slam down
-    quatTrack("Hip", [0, 0.12, 0.28, 0.40, 0.55, d], [
+    // Hips: deep crouch → LAUNCH → crash forward
+    quatTrack("Hip", [0, 0.10, 0.15, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [0.15, 0.08, 0],        // coil back
-      [-0.25, -0.1, 0],       // leap forward
-      [-0.35, 0, 0],          // peak of jump, leaning in
-      [-0.1, 0, 0],           // landing
-      [0, 0, 0],
-    ]),
-    // Spine arches back for the wind-up, then snaps forward
-    quatTrack("Spine", [0, 0.12, 0.28, 0.40, d], [
-      [0, 0, 0],
-      [0.25, 0, 0],           // arch back
-      [0.35, 0, 0],           // peak arch — weapon high
-      [-0.4, 0, 0],           // snap forward on slam
+      [0.20, 0.10, 0],          // crouch loading
+      [0.25, 0.12, 0],          // deep coil
+      [-0.15, -0.08, 0],        // airborne — hips forward
+      [-0.45, 0, 0],            // CRASH DOWN — hips slam
+      [-0.35, 0, 0],            // impact freeze
       [0, 0, 0],
     ]),
-    // Chest drives the slam
-    quatTrack("Chest", [0, 0.12, 0.28, 0.40, 0.55, d], [
+    // Spine: arches HARD back then WHIPS forward
+    quatTrack("Spine", [0, 0.12, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [0.3, 0, 0],            // lean back
-      [0.45, 0, 0],           // peak — chest opens up
-      [-0.65, 0, 0],          // SLAM — chest crashes forward
-      [-0.3, 0, 0],           // impact hold
-      [0, 0, 0],
-    ]),
-    // Both arms raise high overhead then crash down together
-    quatTrack("R_Shoulder", [0, 0.12, 0.28, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [-1.8, 0, -0.2],        // arm raised high
-      [-2.6, 0, -0.15],       // peak — weapon overhead
-      [1.4, 0, 0.1],          // SLAM down past body
-      [0.8, 0, 0.05],         // impact hold
+      [0.35, 0, 0],             // arch back hard
+      [0.50, 0, 0],             // peak — fully extended
+      [-0.55, 0, 0],            // WHIP forward
+      [-0.30, 0, 0],            // hold
       [0, 0, 0],
     ]),
-    quatTrack("L_Shoulder", [0, 0.12, 0.28, 0.40, 0.55, d], [
+    // Chest: opens wide then CRASHES
+    quatTrack("Chest", [0, 0.12, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [-1.6, 0, 0.2],         // left arm follows for two-handed grip
-      [-2.4, 0, 0.15],        // peak
-      [1.2, 0, -0.1],         // SLAM
-      [0.6, 0, -0.05],        // hold
-      [0, 0, 0],
-    ]),
-    // Elbows lock straight on downswing
-    quatTrack("R_Arm", [0, 0.12, 0.28, 0.40, d], [
-      [0, 0, 0],
-      [-1.2, 0, 0],           // bent back
-      [-0.8, 0, 0],           // extending up
-      [-0.05, 0, 0],          // LOCKED straight on impact
+      [0.40, 0, 0.05],          // chest OPENS — warrior roar
+      [0.60, 0, 0.05],          // peak — max extension
+      [-0.80, 0, -0.05],        // SLAM — chest drives weapon down
+      [-0.45, 0, 0],            // impact freeze
       [0, 0, 0],
     ]),
-    quatTrack("L_Arm", [0, 0.12, 0.28, 0.40, d], [
+    // BOTH arms raise FULL overhead then CRASH down
+    quatTrack("R_Shoulder", [0, 0.10, 0.15, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [-1.0, 0, 0],
-      [-0.7, 0, 0],
-      [-0.1, 0, 0],
-      [0, 0, 0],
-    ]),
-    // Wrists snap on impact
-    quatTrack("R_Hand", [0, 0.28, 0.40, d], [
-      [0, 0, 0],
-      [-0.5, 0, -0.3],        // cocked back
-      [0.6, 0, 0.2],          // SNAP forward
+      [-1.5, 0, -0.2],          // lifting
+      [-2.0, 0, -0.2],          // rising
+      [-2.8, 0, -0.15],         // FULL OVERHEAD — weapon at zenith
+      [1.8, 0, 0.15],           // CRASH DOWN — massive overshoot
+      [1.0, 0, 0.08],           // impact hold
       [0, 0, 0],
     ]),
-    // Head tracks down to impact point
-    quatTrack("Head", [0, 0.12, 0.28, 0.40, d], [
+    quatTrack("L_Shoulder", [0, 0.10, 0.15, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [-0.15, 0, 0],          // look up at apex
-      [-0.25, 0, 0],          // peak upward gaze
-      [0.2, 0, 0],            // snap down watching impact
-      [0, 0, 0],
-    ]),
-    // Legs: crouch → launch → land heavy
-    quatTrack("L_Hip", [0, 0.12, 0.28, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [0.3, 0, 0],            // crouch
-      [-0.1, 0, 0],           // launch
-      [0.5, 0, 0],            // forward lunge landing
-      [0.2, 0, 0],
+      [-1.3, 0, 0.2],           // two-hand grip follows
+      [-1.8, 0, 0.2],
+      [-2.6, 0, 0.15],          // overhead
+      [1.5, 0, -0.12],          // CRASH
+      [0.8, 0, -0.05],
       [0, 0, 0],
     ]),
-    quatTrack("L_Knee", [0, 0.12, 0.28, 0.40, 0.55, d], [
+    // Elbows: bent → SNAP straight on slam
+    quatTrack("R_Arm", [0, 0.15, 0.30, 0.36, d], [
       [0, 0, 0],
-      [0.5, 0, 0],            // deep crouch
-      [0.1, 0, 0],            // legs extend in air
-      [0.6, 0, 0],            // HEAVY land — knee absorbs
+      [-1.3, 0, 0],             // deeply bent
+      [-0.6, 0, 0],             // extending
+      [-0.02, 0, 0],            // LOCKED STRAIGHT
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.15, 0.30, 0.36, d], [
+      [0, 0, 0],
+      [-1.1, 0, 0],
+      [-0.5, 0, 0],
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Wrists SNAP hard on impact
+    quatTrack("R_Hand", [0, 0.30, 0.34, 0.36, d], [
+      [0, 0, 0],
+      [-0.6, 0, -0.4],          // cocked
+      [-0.6, 0, -0.4],          // HOLD (micro-pause at apex)
+      [0.8, 0, 0.3],            // SNAP
+      [0, 0, 0],
+    ]),
+    // Head: looks up at weapon → SNAPS down to impact
+    quatTrack("Head", [0, 0.15, 0.30, 0.36, 0.42, d], [
+      [0, 0, 0],
+      [-0.20, 0, 0],            // look up
+      [-0.35, 0, 0],            // watching weapon at peak
+      [0.25, 0, 0],             // SNAP down — watching impact
+      [0.15, 0, 0],             // hold
+      [0, 0, 0],
+    ]),
+    // Legs: DEEP crouch → launch → HEAVY landing
+    quatTrack("L_Hip", [0, 0.15, 0.30, 0.36, 0.42, d], [
+      [0, 0, 0],
+      [0.40, 0, 0],             // deep squat
+      [-0.15, 0, 0],            // launch
+      [0.60, 0, 0],             // HEAVY forward lunge
       [0.25, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("R_Hip", [0, 0.12, 0.28, 0.40, d], [
+    quatTrack("L_Knee", [0, 0.15, 0.30, 0.36, 0.42, d], [
       [0, 0, 0],
-      [0.25, 0, 0],           // crouch
-      [-0.3, 0, 0],           // rear leg pushes off
+      [0.70, 0, 0],             // DEEP squat
+      [0.10, 0, 0],             // extend in air
+      [0.80, 0, 0],             // CRASH — knee absorbs
+      [0.30, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.15, 0.30, 0.36, d], [
+      [0, 0, 0],
+      [0.35, 0, 0],             // squat
+      [-0.35, 0, 0],            // push off HARD
       [-0.15, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("R_Knee", [0, 0.12, 0.40, d], [
+    quatTrack("R_Knee", [0, 0.15, 0.36, d], [
       [0, 0, 0],
-      [0.4, 0, 0],            // deep crouch
-      [0.15, 0, 0],           // trailing
+      [0.55, 0, 0],             // deep bend
+      [0.15, 0, 0],
       [0, 0, 0],
     ]),
-    // Front foot slams flat
-    quatTrack("L_Foot", [0, 0.40, 0.55, d], [
+    quatTrack("L_Foot", [0, 0.36, 0.42, d], [
       [0, 0, 0],
-      [-0.3, 0, 0],           // toe-first landing
-      [0, 0, 0],
+      [-0.40, 0, 0],            // toe SLAMS down
+      [-0.10, 0, 0],
       [0, 0, 0],
     ]),
   ]);
@@ -435,82 +442,101 @@ function createHeroicStrikeClip(): THREE.AnimationClip {
 // Body spins, weapon carves a full arc
 
 function createCleaveClip(): THREE.AnimationClip {
-  const d = 0.65;
+  // VIOLENT 360° spin slash — weapon arm fully extended, cuts everything around
+  // 0-0.10 wind | 0.10-0.15 COIL | 0.15-0.35 SPIN | 0.35-0.45 impact | 0.45-0.60 recover
+  const d = 0.60;
 
   return new THREE.AnimationClip("cleave", d, [
-    // Hip drives the spin — full 360° rotation via Y-axis
-    quatTrack("Hip", [0, 0.10, 0.35, 0.50, d], [
+    // Hip: EXPLOSIVE full rotation
+    quatTrack("Hip", [0, 0.08, 0.15, 0.25, 0.35, 0.45, d], [
       [0, 0, 0],
-      [0.05, 0.3, 0],         // wind up twist
-      [-0.1, -3.14, 0],       // FULL SPIN through to 180°
-      [-0.05, -6.0, 0],       // complete near-360
-      [0, -6.28, 0],          // full rotation done
+      [0.08, 0.40, 0],          // wind up twist
+      [0.10, 0.60, 0],          // deep coil
+      [-0.08, -2.00, 0],        // SPINNING — halfway
+      [-0.05, -4.50, 0],        // blast through
+      [-0.03, -6.10, 0],        // near complete
+      [0, -6.28, 0],            // full 360
     ]),
-    // Spine stays coiled — tight core
-    quatTrack("Spine", [0, 0.10, 0.35, d], [
+    // Chest: LEANS hard into the sweep
+    quatTrack("Chest", [0, 0.10, 0.15, 0.25, 0.35, d], [
       [0, 0, 0],
-      [0.1, 0.2, 0],          // wind up with hip
-      [-0.15, -0.1, 0],       // lean into the sweep
-      [0, 0, 0],
-    ]),
-    // Chest leans into the cut
-    quatTrack("Chest", [0, 0.10, 0.25, 0.40, d], [
-      [0, 0, 0],
-      [0.15, 0, 0.1],         // wind back
-      [-0.3, 0, -0.15],       // lean into sweep
-      [-0.15, 0, 0],          // follow through
+      [0.20, 0.10, 0.15],       // wind back
+      [0.25, 0.12, 0.18],       // coiled
+      [-0.40, -0.05, -0.20],    // DRIVING into spin
+      [-0.20, 0, -0.08],        // follow through
       [0, 0, 0],
     ]),
-    // Weapon arm extends fully horizontal for max arc
-    quatTrack("R_Shoulder", [0, 0.10, 0.25, 0.40, d], [
+    // Spine stays tight for power transfer
+    quatTrack("Spine", [0, 0.10, 0.25, 0.35, d], [
       [0, 0, 0],
-      [-1.0, 0, -0.8],        // weapon arm cocked back
-      [0.2, 0, -1.4],         // ARM FULLY OUT horizontal
-      [0.1, 0, -0.6],         // follow through
-      [0, 0, 0],
-    ]),
-    quatTrack("R_Arm", [0, 0.10, 0.25, d], [
-      [0, 0, 0],
-      [-0.6, 0, 0],           // bent during wind
-      [-0.05, 0, 0],          // LOCKED STRAIGHT during sweep
+      [0.12, 0.15, 0],
+      [-0.18, -0.12, 0],        // lean into sweep
+      [-0.06, -0.04, 0],
       [0, 0, 0],
     ]),
-    // Left arm counterbalances
-    quatTrack("L_Shoulder", [0, 0.10, 0.25, 0.40, d], [
+    // Weapon arm: FULLY EXTENDED horizontal — max killing arc
+    quatTrack("R_Shoulder", [0, 0.10, 0.15, 0.25, 0.35, d], [
       [0, 0, 0],
-      [0.2, 0, 0.5],          // pull back for balance
-      [-0.1, 0, 0.8],         // arm out opposite side
-      [0, 0, 0.3],
-      [0, 0, 0],
-    ]),
-    // Head stays focused forward (counters spin)
-    quatTrack("Head", [0, 0.10, 0.35, d], [
-      [0, 0, 0],
-      [0, -0.2, 0],           // counter-rotate
-      [0, 0.15, 0],
+      [-1.2, 0, -0.6],          // cocked back
+      [-1.0, 0, -1.0],          // starting to extend
+      [0.3, 0, -1.57],          // FULLY HORIZONTAL — arm straight out
+      [0.15, 0, -0.8],          // follow through
       [0, 0, 0],
     ]),
-    // Legs: wide stable stance
-    quatTrack("L_Hip", [0, 0.15, 0.35, d], [
+    quatTrack("R_Arm", [0, 0.10, 0.15, 0.25, d], [
       [0, 0, 0],
-      [0.15, 0, -0.15],       // widen stance
-      [0.1, 0, -0.1],
-      [0, 0, 0],
-    ]),
-    quatTrack("R_Hip", [0, 0.15, 0.35, d], [
-      [0, 0, 0],
-      [-0.1, 0, 0.15],        // widen stance
-      [-0.05, 0, 0.1],
+      [-0.8, 0, 0],             // bent
+      [-0.4, 0, 0],             // extending
+      [-0.02, 0, 0],            // LOCKED STRAIGHT
       [0, 0, 0],
     ]),
-    quatTrack("L_Knee", [0, 0.15, d], [
+    // Left arm: fist pulled in tight for centrifugal balance
+    quatTrack("L_Shoulder", [0, 0.10, 0.25, 0.35, d], [
       [0, 0, 0],
-      [0.3, 0, 0],            // low center of gravity
+      [0.3, 0, 0.4],            // pull in
+      [-0.2, 0, 0.9],           // arm out for balance
+      [-0.1, 0, 0.4],
       [0, 0, 0],
     ]),
-    quatTrack("R_Knee", [0, 0.15, d], [
+    quatTrack("L_Arm", [0, 0.10, 0.25, d], [
       [0, 0, 0],
-      [0.3, 0, 0],
+      [-0.9, 0, 0],             // tight fist at chest
+      [-0.4, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head: counter-rotates to stay locked on — warrior stare
+    quatTrack("Head", [0, 0.10, 0.25, 0.35, d], [
+      [0, 0, 0],
+      [0.05, -0.25, 0],         // counter-rotate
+      [-0.10, 0.20, 0],         // snap around
+      [-0.05, 0.10, 0],
+      [0, 0, 0],
+    ]),
+    // Legs: WIDE stance, low center of gravity for stability during spin
+    quatTrack("L_Hip", [0, 0.10, 0.25, 0.35, d], [
+      [0, 0, 0],
+      [0.20, 0, -0.20],         // widen
+      [0.15, 0, -0.15],         // hold wide
+      [0.08, 0, -0.08],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.10, 0.25, 0.35, d], [
+      [0, 0, 0],
+      [-0.15, 0, 0.20],         // widen opposite
+      [-0.10, 0, 0.15],
+      [-0.05, 0, 0.08],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.10, 0.25, d], [
+      [0, 0, 0],
+      [0.45, 0, 0],             // deep bend — LOW
+      [0.35, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.10, 0.25, d], [
+      [0, 0, 0],
+      [0.45, 0, 0],
+      [0.35, 0, 0],
       [0, 0, 0],
     ]),
   ]);
@@ -890,13 +916,13 @@ function createRendingStrikeClip(): THREE.AnimationClip {
   const d = 0.6;
 
   return new THREE.AnimationClip("rendingstrike", d, [
-    // Two rapid slashes — first backhand right-to-left, then forehand left-to-right
+    // Two BRUTAL slashes — backhand then forehand RIP
     quatTrack("R_Shoulder", [0, 0.08, 0.20, 0.32, 0.44, d], [
       [0, 0, 0],
-      [-0.8, 0.3, -0.5],      // wind up right
-      [0.4, -0.2, 0.3],       // SLASH 1 — backhand right to left
-      [-0.6, -0.2, -0.8],     // quick recoil left
-      [0.5, 0.3, 0.2],        // SLASH 2 — forehand left to right
+      [-1.2, 0.4, -0.7],      // wind up right — BIG
+      [0.6, -0.3, 0.5],       // SLASH 1 — violent backhand
+      [-0.9, -0.3, -1.0],     // quick recoil — cocking for second
+      [0.7, 0.4, 0.4],        // SLASH 2 — forehand RIP
       [0, 0, 0],
     ]),
     quatTrack("R_Arm", [0, 0.08, 0.20, 0.32, 0.44, d], [
