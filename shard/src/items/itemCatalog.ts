@@ -9,7 +9,9 @@ export type ArmorSlot =
   | "gloves"
   | "belt"
   | "ring"
-  | "amulet";
+  | "amulet"
+  | "shield"
+  | "cape";
 export type WeaponSlot = "weapon";
 export type EquipmentSlot = ArmorSlot | WeaponSlot;
 
@@ -125,7 +127,8 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     description: "A solid shield carved from oak wood. +6 DEF.",
     copperPrice: 80,
     category: "armor",
-    equipSlot: "weapon",
+    equipSlot: "shield",
+    armorSlot: "shield",
     statBonuses: { def: 6 },
     maxDurability: 85,
   },
@@ -1890,6 +1893,85 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 4, luck: 5 },
     maxDurability: 200,
+  },
+  // --- Shields ---
+  {
+    tokenId: 224n,
+    name: "Iron Shield",
+    description: "A sturdy iron shield. +8 DEF.",
+    copperPrice: 150,
+    category: "armor",
+    equipSlot: "shield",
+    armorSlot: "shield",
+    statBonuses: { def: 8 },
+    maxDurability: 100,
+  },
+  {
+    tokenId: 225n,
+    name: "Steel Tower Shield",
+    description: "A massive tower shield forged from steel. +12 DEF, +5 HP.",
+    copperPrice: 300,
+    category: "armor",
+    equipSlot: "shield",
+    armorSlot: "shield",
+    statBonuses: { def: 12, hp: 5 },
+    maxDurability: 130,
+  },
+  {
+    tokenId: 226n,
+    name: "Mithril Bulwark",
+    description: "A legendary mithril shield. +16 DEF, +8 HP, +2 STR.",
+    copperPrice: 500,
+    category: "armor",
+    equipSlot: "shield",
+    armorSlot: "shield",
+    statBonuses: { def: 16, hp: 8, str: 2 },
+    maxDurability: 160,
+  },
+  // --- Capes ---
+  {
+    tokenId: 227n,
+    name: "Traveler's Cloak",
+    description: "A simple traveling cloak. +2 DEF, +1 AGI.",
+    copperPrice: 60,
+    category: "armor",
+    equipSlot: "cape",
+    armorSlot: "cape",
+    statBonuses: { def: 2, agi: 1 },
+    maxDurability: 70,
+  },
+  {
+    tokenId: 228n,
+    name: "Shadow Cape",
+    description: "A dark cape woven from shadow silk. +3 DEF, +3 AGI.",
+    copperPrice: 160,
+    category: "armor",
+    equipSlot: "cape",
+    armorSlot: "cape",
+    statBonuses: { def: 3, agi: 3 },
+    maxDurability: 90,
+  },
+  {
+    tokenId: 229n,
+    name: "Dragonscale Mantle",
+    description: "A cape crafted from dragon scales. +6 DEF, +4 AGI, +3 STR.",
+    copperPrice: 400,
+    category: "armor",
+    equipSlot: "cape",
+    armorSlot: "cape",
+    statBonuses: { def: 6, agi: 4, str: 3 },
+    maxDurability: 120,
+  },
+  {
+    tokenId: 230n,
+    name: "Archmage's Mantle",
+    description: "A shimmering mantle of pure arcane energy. +4 DEF, +6 INT, +10 MP.",
+    copperPrice: 450,
+    category: "armor",
+    equipSlot: "cape",
+    armorSlot: "cape",
+    statBonuses: { def: 4, int: 6, mp: 10 },
+    maxDurability: 100,
   },
 ];
 

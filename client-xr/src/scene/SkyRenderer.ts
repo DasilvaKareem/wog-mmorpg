@@ -16,16 +16,18 @@ export class SkyRenderer {
     night: new THREE.Color(0x0a0a20),
   };
 
-  private ambientLevels = { dawn: 0.5, day: 0.8, dusk: 0.4, night: 0.15 };
-  private sunLevels = { dawn: 0.6, day: 1.0, dusk: 0.5, night: 0.05 };
+  private ambientLevels = { dawn: 1.2, day: 1.5, dusk: 1.0, night: 0.7 };
+  private sunLevels = { dawn: 1.2, day: 1.8, dusk: 1.0, night: 0.5 };
 
   private cubeTexture: THREE.CubeTexture | null = null;
 
   constructor(private scene: THREE.Scene) {
-    this.ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    this.ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
     scene.add(this.ambientLight);
 
-    this.sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    scene.add(new THREE.HemisphereLight(0x87ceeb, 0x556644, 0.6));
+
+    this.sunLight = new THREE.DirectionalLight(0xffffff, 1.0);
     this.sunLight.position.set(50, 80, 30);
     this.sunLight.castShadow = true;
     this.sunLight.shadow.mapSize.set(1024, 1024);
@@ -86,11 +88,11 @@ export class SkyRenderer {
       this.sunLight.color.lerp(new THREE.Color(0xffffff), 0.02);
     }
 
-    // Rotate sun based on hour
+    // Rotate sun based on hour — clamp above horizon
     const angle = ((gameTime.hour + gameTime.minute / 60) / 24) * Math.PI * 2 - Math.PI / 2;
     this.sunLight.position.set(
       Math.cos(angle) * 60,
-      Math.sin(angle) * 60 + 20,
+      Math.max(10, Math.sin(angle) * 60 + 20),
       30
     );
 

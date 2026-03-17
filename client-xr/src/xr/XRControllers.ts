@@ -26,26 +26,30 @@ export class XRControllers {
   private raycaster = new THREE.Raycaster();
   private tempMatrix = new THREE.Matrix4();
 
+  private rig: THREE.Object3D;
+
   constructor(
     private renderer: THREE.WebGLRenderer,
     private scene: THREE.Scene,
-    private groundObjects: THREE.Object3D[]
+    private groundObjects: THREE.Object3D[],
+    cameraRig?: THREE.Group
   ) {
+    this.rig = cameraRig ?? scene;
     const factory = new XRControllerModelFactory();
 
     // ── Left controller: teleport ──
     this.leftController = renderer.xr.getController(0);
     this.leftGrip = renderer.xr.getControllerGrip(0);
     this.leftGrip.add(factory.createControllerModel(this.leftGrip));
-    scene.add(this.leftController);
-    scene.add(this.leftGrip);
+    this.rig.add(this.leftController);
+    this.rig.add(this.leftGrip);
 
     // ── Right controller: select/interact ──
     this.rightController = renderer.xr.getController(1);
     this.rightGrip = renderer.xr.getControllerGrip(1);
     this.rightGrip.add(factory.createControllerModel(this.rightGrip));
-    scene.add(this.rightController);
-    scene.add(this.rightGrip);
+    this.rig.add(this.rightController);
+    this.rig.add(this.rightGrip);
 
     // ── Teleport arc (left controller) ──
     const teleportGeo = new THREE.BufferGeometry().setFromPoints([
@@ -141,10 +145,10 @@ export class XRControllers {
   }
 
   dispose() {
-    this.scene.remove(this.leftController);
-    this.scene.remove(this.rightController);
-    this.scene.remove(this.leftGrip);
-    this.scene.remove(this.rightGrip);
+    this.rig.remove(this.leftController);
+    this.rig.remove(this.rightController);
+    this.rig.remove(this.leftGrip);
+    this.rig.remove(this.rightGrip);
     this.scene.remove(this.teleportMarker);
   }
 }

@@ -77,7 +77,7 @@ function buildSystemPrompt(event: TriggerEvent, ctx: SupervisorContext, hasMcp: 
     ? `\n- You have MCP tools: scan_zone (zone overview), get_my_status (character snapshot), find_mobs_for_level, shop_get_catalog, items_get_inventory. Call at most 1-2 reads then IMMEDIATELY call set_script. Do NOT explore — decide fast.`
     : `\n- Call read tools only if you need more information (zone, inventory, connections, quests)`;
 
-  return `You are the strategic supervisor for ${entity.name ?? "Agent"}, a Level ${entity.level ?? 1} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"} in World of Geneva.
+  return `You are the decision engine for ${entity.name ?? "Agent"}, a Level ${entity.level ?? 1} ${entity.raceId ?? "human"} ${entity.classId ?? "warrior"} in World of Geneva. You decide what ${entity.name ?? "the character"} does next — but all output the player sees comes from the character's perspective, not yours.
 
 EVENT: ${event.detail}
 

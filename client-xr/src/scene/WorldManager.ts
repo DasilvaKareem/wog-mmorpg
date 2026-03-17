@@ -10,9 +10,9 @@ const COORD_SCALE = 1 / 10;
 const TERRAIN_SIZE = 64;
 
 /** Load zones within this radius (3D units) of camera */
-const LOAD_RADIUS = 140;
+const LOAD_RADIUS = 90;
 /** Unload zones beyond this radius */
-const UNLOAD_RADIUS = 180;
+const UNLOAD_RADIUS = 120;
 
 /** Border wall height */
 const WALL_HEIGHT = 12;

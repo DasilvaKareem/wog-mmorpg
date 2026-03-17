@@ -17,6 +17,7 @@ import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteWallet } from "./biteChain.js";
 import { ethers } from "ethers";
 import { traceTx } from "./txTracer.js";
+import { getCustodialWallet } from "./custodialWalletRedis.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
 const skaleProvider = new ethers.JsonRpcProvider("https://skale-base.skalenodes.com/v1/base");
@@ -65,8 +66,8 @@ class BalanceCache<T> {
   }
 }
 
-const goldCache = new BalanceCache<string>(10_000);     // 10s TTL
-const itemCache = new BalanceCache<bigint>(10_000);      // 10s TTL
+const goldCache = new BalanceCache<string>(60_000);     // 60s TTL (invalidated on mint/transfer/spend)
+const itemCache = new BalanceCache<bigint>(60_000);      // 60s TTL (invalidated on mint/burn)
 const characterCache = new BalanceCache<any[]>(30_000);  // 30s TTL
 const ownershipLookupWarnAt = new Map<string, number>();
 
@@ -499,27 +500,45 @@ export async function getItemBalance(
   return promise;
 }
 
-/** Burn (destroy) ERC-1155 items from a player address. */
+/** Burn (destroy) ERC-1155 items from a player address.
+ *  Signs with the player's own custodial account so the ERC-1155 contract
+ *  recognises the caller as the token owner.  Falls back to server account
+ *  for non-custodial addresses (shouldn't happen in practice). */
 export async function burnItem(
   fromAddress: string,
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  return traceTx("item-burn", "burnItem", { from: fromAddress, tokenId, quantity }, "skale", () =>
-    queueTransaction(async () => {
+  return traceTx("item-burn", "burnItem", { from: fromAddress, tokenId, quantity }, "skale", async () => {
+    // Resolve the player's custodial account so we sign as the token owner
+    let signer: Account = serverAccount;
+    try {
+      signer = await getCustodialWallet(fromAddress);
+    } catch {
+      // Not a custodial wallet — fall back to server (will fail if not approved)
+    }
+
+    // Ensure the signer has sFUEL for gas
+    if (signer !== serverAccount) {
+      try {
+        await distributeSFuel(fromAddress);
+      } catch { /* best-effort */ }
+    }
+
+    return queueTransaction(async () => {
       const tx = burn({
         contract: itemsContract,
         account: fromAddress,
         id: tokenId,
         value: quantity,
       });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
+      const receipt = await sendTransactionWithManagedGas(tx, signer);
       txStats.itemBurns++;
       recordTx("item-burn", receipt.transactionHash);
       itemCache.invalidate(fromAddress.toLowerCase());
       return receipt.transactionHash;
-    })
-  );
+    });
+  });
 }
 
 // --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---
@@ -789,6 +808,9 @@ export async function getOwnedCharacters(address: string) {
   return nfts;
 }
 
+// Dedup: track last successfully synced level per tokenId to skip redundant uploads
+const lastSyncedLevel = new Map<string, number>();
+
 /** Update on-chain NFT metadata after a level-up. Uploads new metadata to IPFS and sets token URI. */
 export async function updateCharacterMetadata(entity: {
   characterTokenId: bigint;
@@ -799,6 +821,11 @@ export async function updateCharacterMetadata(entity: {
   xp: number;
   stats: CharacterStats;
 }): Promise<string> {
+  const tokenKey = entity.characterTokenId.toString();
+  if (lastSyncedLevel.get(tokenKey) === entity.level) {
+    return "skipped-same-level";
+  }
+
   return traceTx("metadata-update", "updateCharacterMetadata", { tokenId: entity.characterTokenId, name: entity.name, level: entity.level }, "skale", async () => {
     const metadata = {
       name: entity.name,
@@ -812,7 +839,29 @@ export async function updateCharacterMetadata(entity: {
       },
     };
 
-    const uri = await upload({ client: thirdwebClient, files: [metadata] });
+    // Upload to IPFS with retry — thirdweb storage is intermittently slow from GCE
+    let uri: string | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        uri = await Promise.race([
+          upload({ client: thirdwebClient, files: [metadata] }),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
+          ),
+        ]);
+        break;
+      } catch (err: any) {
+        const msg = String(err?.message ?? "");
+        if (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET")) {
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+            continue;
+          }
+        }
+        throw err;
+      }
+    }
+    if (!uri) throw new Error("Metadata upload failed after 3 attempts");
 
     return queueTransaction(async () => {
       const tx = setTokenURI({
@@ -823,6 +872,7 @@ export async function updateCharacterMetadata(entity: {
       const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
       txStats.metadataUpdates++;
       recordTx("metadata-update", receipt.transactionHash);
+      lastSyncedLevel.set(tokenKey, entity.level);
       return receipt.transactionHash;
     });
   });

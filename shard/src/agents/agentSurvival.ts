@@ -133,23 +133,24 @@ export async function checkSelfAdaptation(
     const hasWeapon = Boolean(equipment.weapon);
     const currentFocus = state.currentFocus;
 
-    // Crafting escape hatch: stuck in gathering/crafting for 60+ ticks → return to questing
+    // Crafting escape hatch: stuck in gathering/crafting for 250+ ticks (~5 min) → return to questing
+    // This gives agents enough time to actually gather materials and craft items.
     // Skip if user has an active objective — they explicitly want this focus.
     if (
       !state.hasActiveObjective &&
       (currentFocus === "gathering" || currentFocus === "crafting") &&
-      state.ticksSinceFocusChange > 60
+      state.ticksSinceFocusChange > 250
     ) {
-      console.log(`[agent:${ctx.walletTag}] Self-adapt: stuck in ${currentFocus} for ${state.ticksSinceFocusChange} ticks, returning to questing`);
+      console.log(`[agent:${ctx.walletTag}] Self-adapt: done ${currentFocus} after ${state.ticksSinceFocusChange} ticks, returning to questing`);
       void ctx.logActivity(`Done ${currentFocus} — back to questing`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing" });
       return true;
     }
 
-    // Priority 0: Early-game bootstrap — keep killing mobs until 100 copper
+    // Priority 0: Early-game bootstrap — keep killing mobs until 50 copper
     // Skip if user has an active objective — respect their goal over gold bootstrapping.
-    if (!state.hasActiveObjective && copper < 100 && currentFocus !== "combat" && currentFocus !== "shopping") {
-      console.log(`[agent:${ctx.walletTag}] Self-adapt: only ${copper}c, need 100c — staying in combat`);
+    if (!state.hasActiveObjective && copper < 50 && currentFocus !== "combat" && currentFocus !== "shopping" && currentFocus !== "gathering") {
+      console.log(`[agent:${ctx.walletTag}] Self-adapt: only ${copper}c, need 50c — staying in combat`);
       void ctx.logActivity(`Only ${copper}c — killing mobs for starter gold`);
       await patchAgentConfig(ctx.userWallet, { focus: "combat" });
       return true;
@@ -164,7 +165,7 @@ export async function checkSelfAdaptation(
     }
 
     // Priority 1b: Missing armor pieces → go shopping (skip if objective is active)
-    const armorSlots = ["chest", "legs", "boots", "helm", "shoulders", "gloves", "belt"];
+    const armorSlots = ["chest", "legs", "boots", "helm", "shoulders", "gloves", "belt", "shield", "cape"];
     const emptyArmorSlots = armorSlots.filter((s) => !equipment[s]);
     if (!state.hasActiveObjective && emptyArmorSlots.length >= 2 && copper >= 40 && currentFocus !== "shopping") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: ${emptyArmorSlots.length} empty armor slots, going shopping`);
@@ -196,14 +197,14 @@ export async function checkSelfAdaptation(
     }
 
     // Priority 2b: Periodic gathering → crafting cycle (skip if objective is active)
+    // Triggers every ~5 min of combat/questing — professions are a key leveling path
     if (
       !state.hasActiveObjective &&
-      state.ticksSinceFocusChange > 100 &&
-      copper >= 200 &&
+      state.ticksSinceFocusChange > 250 &&
       (currentFocus === "questing" || currentFocus === "combat")
     ) {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: crafting cycle — ${state.ticksSinceFocusChange} ticks in ${currentFocus}`);
-      void ctx.logActivity("Switching to gathering & crafting for gear upgrades");
+      void ctx.logActivity("Switching to gathering & crafting for profession XP");
       await patchAgentConfig(ctx.userWallet, { focus: "gathering" });
       return true;
     }

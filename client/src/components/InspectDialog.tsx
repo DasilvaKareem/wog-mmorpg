@@ -20,10 +20,10 @@ function capitalize(s: string): string {
 }
 
 /* ── Equipment Slot UI ────────────────────────────────────────── */
-const SLOT_ORDER_LEFT = ["helm", "shoulders", "chest", "belt", "legs", "boots"] as const;
-const SLOT_ORDER_RIGHT = ["amulet", "ring", "gloves", "weapon"] as const;
+const SLOT_ORDER_LEFT = ["helm", "shoulders", "chest", "belt", "legs", "boots", "cape"] as const;
+const SLOT_ORDER_RIGHT = ["amulet", "ring", "gloves", "weapon", "shield"] as const;
 
-type SlotKey = "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "ring" | "amulet";
+type SlotKey = "weapon" | "shield" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "cape" | "ring" | "amulet";
 
 interface EquipSlotProps {
   slot: SlotKey;

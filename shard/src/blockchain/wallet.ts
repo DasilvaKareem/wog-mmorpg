@@ -288,7 +288,27 @@ export async function transferFromTreasury(
     treasuryAddressCache = stored;
   }
   const treasuryAccount = await getCustodialWallet(treasuryAddressCache);
-  return transferGoldFrom(treasuryAccount, toAddress, goldAmount);
+
+  // Retry with sFUEL top-up if treasury is out of gas
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await transferGoldFrom(treasuryAccount, toAddress, goldAmount);
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "");
+      const lowGas =
+        msg.includes("Account balance is too low") ||
+        msg.includes("insufficient funds for gas");
+      if (!lowGas || attempt === 2) throw err;
+
+      try {
+        await distributeSFuel(treasuryAddressCache);
+        console.log(`[treasury] Topped up sFUEL for treasury after attempt ${attempt + 1}`);
+      } catch {
+        // sFUEL top-up failed — next attempt will likely fail too, but try anyway
+      }
+    }
+  }
+  throw new Error("Failed to transfer from treasury");
 }
 
 /**

@@ -20,33 +20,40 @@ import { EntityInspector } from "./hud/EntityInspector.js";
 import { Minimap } from "./hud/Minimap.js";
 import { ChatLog } from "./hud/ChatLog.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
+import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
 import type { Entity, ZoneResponse } from "./types.js";
+
+// Equipment tuner — press P to toggle
+const equipTuner = getEquipmentTuner();
+equipTuner.setOnChange((slot, pos, rot) => {
+  // Live-update all entities with weapons/armor
+  entities.applyEquipmentTuning(slot, pos, rot);
+});
 
 // ── Config ──────────────────────────────────────────────────────────
 
 const POLL_INTERVAL = 1000;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
-const POLL_RADIUS = 140;
+const POLL_RADIUS = 90;
 
 // ── Renderer ────────────────────────────────────────────────────────
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = false;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x88aacc, 0.012);
+scene.fog = new THREE.FogExp2(0x88aacc, 0.018);
 
 const camera = new THREE.PerspectiveCamera(
   60,
   window.innerWidth / window.innerHeight,
-  0.1,
-  500
+  0.5,
+  200
 );
 
 // ── Toon post-processing ─────────────────────────────────────────────
@@ -79,8 +86,9 @@ const inspector = new EntityInspector();
 const minimap = new Minimap();
 const chatLog = new ChatLog();
 
-// XR
+// XR — camera must be child of cameraRig for VR locomotion
 const xrSession = new XRSessionManager(renderer, scene, camera);
+xrSession.cameraRig.add(camera);
 let xrControllers: XRControllersType | null = null;
 
 // ── HUD elements ────────────────────────────────────────────────────
@@ -265,7 +273,8 @@ if (navigator.xr) {
             const { XRControllers } = await import("./xr/XRControllers.js");
             xrControllers = new XRControllers(
               renderer, scene,
-              world.group.children as THREE.Object3D[]
+              world.group.children as THREE.Object3D[],
+              xrSession.cameraRig
             );
             xrControllers.onTeleport = (pos) => {
               xrSession.cameraRig.position.set(pos.x, 0, pos.z);
@@ -279,6 +288,8 @@ if (navigator.xr) {
             vrButton.textContent = "Enter VR";
             xrControllers?.dispose();
             xrControllers = null;
+            xrSession.cameraRig.position.set(0, 0, 0);
+            xrSession.cameraRig.rotation.set(0, 0, 0);
           },
         });
       });
@@ -338,7 +349,12 @@ function animate() {
   world.updateAnimations(dt);
   chatLog.update();
 
-  toonPipeline.render();
+  // Post-processing doesn't work with WebXR — use plain render in VR
+  if (xrSession.isPresenting) {
+    renderer.render(scene, camera);
+  } else {
+    toonPipeline.render();
+  }
 }
 
 // ── Start ───────────────────────────────────────────────────────────

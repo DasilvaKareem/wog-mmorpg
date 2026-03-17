@@ -22,6 +22,7 @@ import { saveCharacter } from "../character/characterStore.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
+  "shield",
   "chest",
   "legs",
   "boots",
@@ -29,6 +30,7 @@ const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "shoulders",
   "gloves",
   "belt",
+  "cape",
   "ring",
   "amulet",
 ];

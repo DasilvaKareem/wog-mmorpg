@@ -4,10 +4,34 @@ import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEnt
 import { mintGold, mintItem } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
-import { getAllZoneEvents } from "../world/zoneEvents.js";
+import { getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
+import { getNpcIdByName } from "../world/npcSpawner.js";
 import { logDiary, narrativeQuestComplete } from "./diary.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
+
+// ── NPC Quest Dialogue ────────────────────────────────────────────────────
+const NPC_QUEST_ACCEPT_LINES = [
+  "I need you to handle \"{quest}\" for me, {player}. Don't let me down.",
+  "Here's the job, {player} — \"{quest}\". Come back when it's done.",
+  "\"{quest}\" is yours, {player}. I'll have your reward ready when you're back.",
+  "Listen carefully, {player}. \"{quest}\" — the people are counting on you.",
+  "I've been waiting for someone capable. \"{quest}\" is all yours, {player}.",
+  "\"{quest}\"... not everyone can handle this, but I think you can, {player}.",
+];
+const NPC_QUEST_COMPLETE_LINES = [
+  "You finished \"{quest}\"! Well done, {player}. Here's your reward.",
+  "\"{quest}\" is done? Impressive work, {player}. Take this — you've earned it.",
+  "I knew you'd pull through on \"{quest}\", {player}. The realm thanks you.",
+  "\"{quest}\" complete! You really came through, {player}.",
+  "Outstanding, {player}. \"{quest}\" was no easy task. Here's your pay.",
+  "That takes care of \"{quest}\". I'll remember your name, {player}.",
+];
+function pickNpcLine(lines: string[], playerName: string, questTitle?: string): string {
+  return lines[Math.floor(Math.random() * lines.length)]
+    .replace(/\{player\}/g, playerName)
+    .replace(/\{quest\}/g, questTitle ?? "this task");
+}
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 
 // Quest definition
@@ -3432,6 +3456,24 @@ export function registerQuestRoutes(server: FastifyInstance) {
     });
 
     console.log(`[quest] ${player.name} accepted quest "${quest.title}"`);
+
+    // NPC speaks to the player (speech bubble on quest giver)
+    const zoneId = request.body.zoneId ?? player.region ?? "unknown";
+    const npcEntityId = getNpcIdByName(quest.npcId);
+    if (npcEntityId) {
+      logZoneEvent({
+        zoneId, type: "chat", tick: 0,
+        message: `${quest.npcId}: ${pickNpcLine(NPC_QUEST_ACCEPT_LINES, player.name, quest.title)}`,
+        entityId: npcEntityId, entityName: quest.npcId,
+      });
+    }
+    // Player quest accept event (for other agents to react to)
+    logZoneEvent({
+      zoneId, type: "quest", tick: 0,
+      message: `${player.name}: Accepted quest "${quest.title}"`,
+      entityId: playerId, entityName: player.name,
+    });
+
     return {
       accepted: true,
       quest: {
@@ -3555,6 +3597,22 @@ export function registerQuestRoutes(server: FastifyInstance) {
       `[quest] ${player.name} completed quest "${quest.title}" (${player.completedQuests.length} total completed)`
     );
 
+    // NPC congratulates the player (speech bubble on quest giver)
+    const completeZoneId = request.body.zoneId ?? player.region ?? "unknown";
+    if (npcId) {
+      logZoneEvent({
+        zoneId: completeZoneId, type: "chat", tick: 0,
+        message: `${quest.npcId}: ${pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title)}`,
+        entityId: npcId, entityName: quest.npcId,
+      });
+    }
+    // Player quest complete event
+    logZoneEvent({
+      zoneId: completeZoneId, type: "quest", tick: 0,
+      message: `${player.name}: Completed "${quest.title}" +${quest.rewards.xp}XP +${formatCopperString(quest.rewards.copper)}`,
+      entityId: playerId, entityName: player.name,
+    });
+
     return {
       completed: true,
       rewards: quest.rewards,
@@ -3658,6 +3716,19 @@ export function registerQuestRoutes(server: FastifyInstance) {
     console.log(
       `[quest] ${player.name} completed talk quest "${quest.title}" (${player.completedQuests.length} total completed)`
     );
+
+    // NPC speaks during the talk quest interaction
+    const talkZoneId = request.body.zoneId ?? player.region ?? "unknown";
+    logZoneEvent({
+      zoneId: talkZoneId, type: "chat", tick: 0,
+      message: `${npcName}: ${pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title)}`,
+      entityId: npcEntityId, entityName: npcName,
+    });
+    logZoneEvent({
+      zoneId: talkZoneId, type: "quest", tick: 0,
+      message: `${player.name}: Completed "${quest.title}" +${quest.rewards.xp}XP +${formatCopperString(quest.rewards.copper)}`,
+      entityId: playerId, entityName: player.name,
+    });
 
     return {
       completed: true,

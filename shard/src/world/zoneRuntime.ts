@@ -469,6 +469,8 @@ const ARMOR_SLOTS: ArmorSlot[] = [
   "shoulders",
   "gloves",
   "belt",
+  "shield",
+  "cape",
   "ring",
   "amulet",
 ];
@@ -932,6 +934,19 @@ function applyDurabilityLoss(entity: Entity, slots: EquipmentSlot[]): void {
     equipped.durability = Math.max(0, equipped.durability - 1);
     if (equipped.durability === 0) {
       equipped.broken = true;
+      // Auto-unequip broken items so they don't show as equipped
+      const brokenName = equipped.name ?? `tokenId ${equipped.tokenId}`;
+      delete entity.equipment[slot];
+      changed = true;
+      console.log(`[durability] ${entity.name}'s ${brokenName} (${slot}) broke and was unequipped`);
+      logZoneEvent({
+        zoneId: entity.region ?? "unknown",
+        type: "system",
+        tick: 0,
+        message: `${entity.name}'s ${brokenName} broke!`,
+        entityId: entity.id,
+        entityName: entity.name,
+      });
     }
     if (
       owner &&
@@ -2208,6 +2223,26 @@ async function worldTick() {
       }
     }
 
+    // ── Mob roaming: idle mobs wander near their spawn point ─────────
+    const MOB_ROAM_RADIUS = 50;
+    const BOSS_ROAM_RADIUS = 30;
+    const ROAM_CHANCE_PER_TICK = 0.03; // ~3% per tick (500ms) → wander roughly every ~17s
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "mob" && entity.type !== "boss") continue;
+      if (entity.order) continue;
+      if (entity.hp <= 0) continue;
+      if (entity.leashing) continue;
+      if (entity.spawnX == null || entity.spawnY == null) continue;
+      if (Math.random() > ROAM_CHANCE_PER_TICK) continue;
+
+      const roamRadius = entity.type === "boss" ? BOSS_ROAM_RADIUS : MOB_ROAM_RADIUS;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.random() * roamRadius;
+      const targetX = entity.spawnX + Math.cos(angle) * dist;
+      const targetY = entity.spawnY + Math.sin(angle) * dist;
+      entity.order = { action: "move", x: targetX, y: targetY };
+    }
+
     // ── Mob aggro AI: mobs attack nearby players ─────────────────────
     // Mobs proactively seek and attack players within aggro range.
     // Bosses have larger aggro range. Mobs prefer their tagged target.
@@ -2299,36 +2334,24 @@ async function worldTick() {
       }
     }
 
-    // Respawn depleted ore nodes
+    // Respawn depleted resource nodes (ore, flower, nectar) — scatter to nearby position
+    const NODE_SCATTER_RADIUS = 40;
+    const NODE_TYPES: Record<string, number> = { "ore-node": 120, "flower-node": 100, "nectar-node": 150 };
     for (const entity of zone.entities.values()) {
-      if (entity.type === "ore-node" && entity.depletedAtTick != null) {
-        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
-        if (ticksSinceDepleted >= (entity.respawnTicks ?? 120)) {
-          entity.charges = entity.maxCharges;
-          entity.depletedAtTick = undefined;
-        }
-      }
-    }
+      const defaultTicks = NODE_TYPES[entity.type];
+      if (defaultTicks == null || entity.depletedAtTick == null) continue;
+      const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
+      if (ticksSinceDepleted < (entity.respawnTicks ?? defaultTicks)) continue;
 
-    // Respawn depleted flower nodes
-    for (const entity of zone.entities.values()) {
-      if (entity.type === "flower-node" && entity.depletedAtTick != null) {
-        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
-        if (ticksSinceDepleted >= (entity.respawnTicks ?? 100)) {
-          entity.charges = entity.maxCharges;
-          entity.depletedAtTick = undefined;
-        }
-      }
-    }
+      entity.charges = entity.maxCharges;
+      entity.depletedAtTick = undefined;
 
-    // Respawn depleted nectar nodes
-    for (const entity of zone.entities.values()) {
-      if (entity.type === "nectar-node" && entity.depletedAtTick != null) {
-        const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
-        if (ticksSinceDepleted >= (entity.respawnTicks ?? 150)) {
-          entity.charges = entity.maxCharges;
-          entity.depletedAtTick = undefined;
-        }
+      // Scatter to a random position near original spawn
+      if (entity.spawnX != null && entity.spawnY != null) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.random() * NODE_SCATTER_RADIUS;
+        entity.x = entity.spawnX + Math.cos(angle) * dist;
+        entity.y = entity.spawnY + Math.sin(angle) * dist;
       }
     }
 

@@ -11,6 +11,8 @@ import { advanceGatherQuests } from "../social/questSystem.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 
 const GATHER_RANGE = 50;
+const GATHER_COOLDOWN_MS = 5_000; // 5 seconds between gathers per player
+const lastGatherTime = new Map<string, number>();
 
 // Pickaxe tier mapping (tokenId -> tier)
 const PICKAXE_TIERS: Record<number, number> = {
@@ -115,6 +117,15 @@ export function registerMiningRoutes(server: FastifyInstance) {
       return { error: "Out of range", distance: Math.round(dist), maxRange: GATHER_RANGE };
     }
 
+    // Per-player gather cooldown
+    const now = Date.now();
+    const lastGather = lastGatherTime.get(entityId);
+    if (lastGather && now - lastGather < GATHER_COOLDOWN_MS) {
+      const remaining = Math.ceil((GATHER_COOLDOWN_MS - (now - lastGather)) / 1000);
+      reply.code(429);
+      return { error: "Mining too fast", cooldownRemaining: remaining };
+    }
+
     // Check if depleted
     if (oreNode.depletedAtTick != null || (oreNode.charges ?? 0) <= 0) {
       reply.code(400);
@@ -165,6 +176,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
     weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
     if (weaponEquipped.durability === 0) {
       weaponEquipped.broken = true;
+      if (entity.equipment) delete entity.equipment.weapon;
     }
 
     // Mint ore NFT
@@ -203,6 +215,8 @@ export function registerMiningRoutes(server: FastifyInstance) {
           chargesRemaining,
         });
       }
+
+      lastGatherTime.set(entityId, Date.now());
 
       return {
         ok: true,

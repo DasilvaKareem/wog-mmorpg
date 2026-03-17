@@ -207,6 +207,7 @@ export class AgentRunner {
   private lastActionResult: ActionResult | null = null;
   private moveToStaleCount = 0;
   private moveToLastTarget = "";
+  private consecutiveIdles = 0;
   private moveToLastDistance = Number.POSITIVE_INFINITY;
   private moveToLastCommandAt = 0;
   private moveToLastLogAt = 0;
@@ -463,6 +464,17 @@ export class AgentRunner {
         this.lastActionResult = actionCompleted(`Repaired ${repaired}`);
         console.log(`[agent:${this.walletTag}] Repaired ${repaired} (cost: ${result.totalCost}g)`);
         void this.logActivity(`Repaired ${repaired} (${result.totalCost}g)`);
+        if (this.entityId) {
+          const ent = getWorldEntity(this.entityId);
+          if (ent) {
+            emitAgentChat({
+              entityId: this.entityId, entityName: ent.name,
+              zoneId: this.currentRegion, event: "npc_repair",
+              origin: this.agentOrigin ?? undefined, classId: ent.classId,
+              detail: repaired,
+            });
+          }
+        }
       }
       return true;
     } catch (err: any) {
@@ -904,16 +916,17 @@ export class AgentRunner {
           const completedIds = entity.completedQuests ?? [];
           const justCompletedFarmQuest = FARM_LAND_QUESTS.some((qid) => completedIds.includes(qid));
           if (justCompletedFarmQuest && this.custodialWallet) {
-            // Check if they already own a plot
-            const { getOwnedPlot } = await import("../farming/plotSystem.js");
-            const owned = getOwnedPlot(this.custodialWallet) ?? getOwnedPlot(this.userWallet);
-            if (!owned) {
-              void this.askSummoner(
-                `I talked to Plot Registrar Helga and there's a small plot in Sunflower Fields for just 25 gold. Should I claim it for us? We can start building a homestead there.`,
-                ["Yes, claim it!", "Not yet"],
-                { action: "claim_plot", zoneId: "sunflower-fields" },
-              );
-            }
+            // Check if they already own a plot (async in a fire-and-forget)
+            import("../farming/plotSystem.js").then(({ getOwnedPlot }) => {
+              const owned = getOwnedPlot(this.custodialWallet!) ?? getOwnedPlot(this.userWallet);
+              if (!owned) {
+                void this.askSummoner(
+                  `I talked to Plot Registrar Helga and there's a small plot in Sunflower Fields for just 25 gold. Should I claim it for us? We can start building a homestead there.`,
+                  ["Yes, claim it!", "Not yet"],
+                  { action: "claim_plot", zoneId: "sunflower-fields" },
+                );
+              }
+            }).catch(() => {});
           }
         } else if (latest.type === "quest-progress" && latest.entityId === this.entityId) {
           const milestone = getQuestProgressMilestone(latest);
@@ -1347,6 +1360,20 @@ export class AgentRunner {
     const executedScript = this.currentScript;
     const actionResult = await this.executeCurrentScript(entity, entities, strategy);
     this.handleActionResult(executedScript, actionResult);
+
+    // Idle recovery: if the script produced no useful work, force a re-evaluation
+    // so the agent doesn't sit doing nothing until the stale timer fires.
+    if (actionResult.status === "idle" && this.currentScript?.type !== "idle") {
+      this.consecutiveIdles = (this.consecutiveIdles ?? 0) + 1;
+      if (this.consecutiveIdles >= 3) {
+        console.log(`[agent:${this.walletTag}] ${this.consecutiveIdles} idle ticks — forcing re-evaluation`);
+        this.currentScript = null;
+        this.ticksSinceLastDecision = MAX_STALE_TICKS;
+        this.consecutiveIdles = 0;
+      }
+    } else {
+      this.consecutiveIdles = 0;
+    }
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -1678,6 +1705,57 @@ export class AgentRunner {
           }
           // Schedule next idle chat in 2-5 minutes (100-250 ticks at 1.2s each)
           this.nextIdleChatTick = this.ticksSinceFocusChange + 100 + Math.floor(Math.random() * 150);
+        }
+
+        // Greet nearby players periodically (every ~60 ticks = ~72s)
+        if (this.entityId && this.ticksSinceFocusChange % 60 === 30 && zs) {
+          const nearbyPlayers = Object.values(zs.entities).filter(
+            (e: any) => e.type === "player" && e.id !== this.entityId && e.hp > 0,
+          );
+          if (nearbyPlayers.length > 0) {
+            const pick = nearbyPlayers[Math.floor(Math.random() * nearbyPlayers.length)] as any;
+            emitAgentChat({
+              entityId: this.entityId,
+              entityName: entity.name,
+              zoneId: this.currentRegion,
+              origin: this.agentOrigin ?? undefined,
+              classId: entity.classId ?? undefined,
+              event: "greet_player",
+              speakerName: pick.name,
+            });
+          }
+        }
+
+        // Zone commentary (every ~120 ticks = ~2.5 min, random chance)
+        if (this.entityId && this.ticksSinceFocusChange % 120 === 60 && Math.random() < 0.4) {
+          emitAgentChat({
+            entityId: this.entityId,
+            entityName: entity.name,
+            zoneId: this.currentRegion,
+            origin: this.agentOrigin ?? undefined,
+            classId: entity.classId ?? undefined,
+            event: "zone_comment",
+            detail: this.currentRegion,
+          });
+        }
+
+        // Spot boss mobs and call them out
+        if (this.entityId && this.ticksSinceFocusChange % 20 === 10 && zs) {
+          const bosses = Object.values(zs.entities).filter(
+            (e: any) => e.type === "boss" && e.hp > 0,
+          );
+          if (bosses.length > 0) {
+            const boss = bosses[0] as any;
+            emitAgentChat({
+              entityId: this.entityId,
+              entityName: entity.name,
+              zoneId: this.currentRegion,
+              origin: this.agentOrigin ?? undefined,
+              classId: entity.classId ?? undefined,
+              event: "spot_boss",
+              detail: boss.name,
+            });
+          }
         }
 
         // Dungeon gate auto-detection — check every 10 ticks when in combat/questing

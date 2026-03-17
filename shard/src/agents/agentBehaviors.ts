@@ -11,7 +11,7 @@ import { getItemBalance } from "../blockchain/blockchain.js";
 import { getClassById } from "../character/classes.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { sendInboxMessage } from "./agentInbox.js";
-import { pickLine } from "./agentDialogue.js";
+import { pickLine, emitAgentChat } from "./agentDialogue.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
@@ -298,6 +298,12 @@ export async function doGathering(
           entityId: ctx.entityId, oreNodeId: nodeId,
         });
         void ctx.logActivity(`Mined ${nodeEntity.name ?? "ore node"}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "gathering",
+          origin: me.origin, classId: me.classId,
+          detail: nodeEntity.name,
+        });
         return actionCompleted(`Mined ${nodeEntity.name ?? "ore node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
@@ -316,6 +322,12 @@ export async function doGathering(
           entityId: ctx.entityId, flowerNodeId: nodeId,
         });
         void ctx.logActivity(`Gathered ${nodeEntity.name ?? "flower node"}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "gathering",
+          origin: me.origin, classId: me.classId,
+          detail: nodeEntity.name,
+        });
         return actionCompleted(`Gathered ${nodeEntity.name ?? "flower node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
@@ -376,6 +388,12 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Brewed ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Brewed ${recipe.name ?? recipe.recipeId}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: zs.me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "brewing",
+          origin: zs.me.origin, classId: zs.me.classId,
+          detail: recipe.name ?? recipe.recipeId,
+        });
         return actionCompleted(`Brewed ${recipe.name ?? recipe.recipeId}`);
       } catch (err: any) {
         lastError = formatAgentError(err);
@@ -433,6 +451,12 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Cooked ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Cooked ${recipe.name ?? recipe.recipeId}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: zs.me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "cooking",
+          origin: zs.me.origin, classId: zs.me.classId,
+          detail: recipe.name ?? recipe.recipeId,
+        });
         return actionCompleted(`Cooked ${recipe.name ?? recipe.recipeId}`);
       } catch (err: any) {
         lastError = formatAgentError(err);
@@ -544,6 +568,12 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
         const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
         console.log(`[agent:${ctx.walletTag}] Crafted ${craftedName}`);
         void ctx.logActivity(`Crafted ${craftedName}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "crafting",
+          origin: me.origin, classId: me.classId,
+          detail: craftedName,
+        });
 
         if (craftedItem?.equipSlot && (!me.equipment?.[craftedItem.equipSlot] || craftedItem.equipSlot === "weapon")) {
           const equipped = await ctx.equipItem(craftedTokenId, craftedInstanceId);
@@ -637,6 +667,12 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
       await ctx.equipItem(tokenId);
       console.log(`[agent:${ctx.walletTag}] Shopping: bought+equipped ${cheapest.name ?? tokenId} for slot=${slot}`);
       void ctx.logActivity(`Bought & equipped ${cheapest.name ?? `token #${tokenId}`} (${slot})`);
+      emitAgentChat({
+        entityId: ctx.entityId, entityName: zs.me.name ?? "Agent",
+        zoneId: ctx.currentRegion, event: "npc_shop",
+        origin: zs.me.origin, classId: zs.me.classId,
+        detail: cheapest.name ?? `token #${tokenId}`,
+      });
       return actionCompleted(`Bought ${cheapest.name ?? `token #${tokenId}`}`); // one purchase per tick
     }
 
@@ -1038,6 +1074,12 @@ export async function doQuesting(
             },
           });
           void ctx.logActivity(`Requesting approval for quest: "${q.title}"`);
+          // Emit in-world chat about picking up the quest
+          emitAgentChat({
+            entityId: ctx.entityId, entityName: me.name ?? "Agent",
+            zoneId: ctx.currentRegion, event: "quest_accept",
+            origin, classId, detail: q.title,
+          });
           return actionProgressed(`Awaiting summoner approval for ${q.title}`);
         } else if (currentActive === 0 && requestable.length === 0 && pendingApprovals.length === 0) {
           const myLevel = me.level ?? 1;

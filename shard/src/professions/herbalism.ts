@@ -12,6 +12,8 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
 
 const GATHER_RANGE = 50;
+const GATHER_COOLDOWN_MS = 5_000; // 5 seconds between gathers per player
+const lastGatherTime = new Map<string, number>();
 
 // Sickle tier mapping (tokenId -> tier)
 const SICKLE_TIERS: Record<number, number> = {
@@ -118,6 +120,15 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       return { error: "Out of range", distance: Math.round(dist), maxRange: GATHER_RANGE };
     }
 
+    // Per-player gather cooldown
+    const now = Date.now();
+    const lastGather = lastGatherTime.get(entityId);
+    if (lastGather && now - lastGather < GATHER_COOLDOWN_MS) {
+      const remaining = Math.ceil((GATHER_COOLDOWN_MS - (now - lastGather)) / 1000);
+      reply.code(429);
+      return { error: "Gathering too fast", cooldownRemaining: remaining };
+    }
+
     // Check if depleted
     if (flowerNode.depletedAtTick != null || (flowerNode.charges ?? 0) <= 0) {
       reply.code(400);
@@ -168,6 +179,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
     if (weaponEquipped.durability === 0) {
       weaponEquipped.broken = true;
+      if (entity.equipment) delete entity.equipment.weapon;
     }
 
     // Mint flower NFT
@@ -206,6 +218,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
           chargesRemaining,
         });
       }
+
+      lastGatherTime.set(entityId, Date.now());
 
       return {
         ok: true,
@@ -336,6 +350,15 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       return { error: "Out of range", distance: Math.round(dist), maxRange: GATHER_RANGE };
     }
 
+    // Per-player gather cooldown (shared with flower gathering)
+    const nectarNow = Date.now();
+    const nectarLastGather = lastGatherTime.get(entityId);
+    if (nectarLastGather && nectarNow - nectarLastGather < GATHER_COOLDOWN_MS) {
+      const remaining = Math.ceil((GATHER_COOLDOWN_MS - (nectarNow - nectarLastGather)) / 1000);
+      reply.code(429);
+      return { error: "Gathering too fast", cooldownRemaining: remaining };
+    }
+
     // Check if depleted
     if (nectarNode.depletedAtTick != null || (nectarNode.charges ?? 0) <= 0) {
       reply.code(400);
@@ -388,6 +411,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
     if (weaponEquipped.durability === 0) {
       weaponEquipped.broken = true;
+      if (entity.equipment) delete entity.equipment.weapon;
     }
 
     // Mint nectar NFT
@@ -415,6 +439,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
           chargesRemaining,
         });
       }
+
+      lastGatherTime.set(entityId, Date.now());
 
       return {
         ok: true,

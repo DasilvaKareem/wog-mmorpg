@@ -23,7 +23,7 @@ export interface Entity {
   xpReward?: number;
   equipment?: Partial<
     Record<
-      "weapon" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "ring" | "amulet",
+      "weapon" | "shield" | "chest" | "legs" | "boots" | "helm" | "shoulders" | "gloves" | "belt" | "cape" | "ring" | "amulet",
       { tokenId: number; name?: string; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string }
     >
   >;

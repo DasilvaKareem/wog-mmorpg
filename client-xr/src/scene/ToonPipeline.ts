@@ -18,7 +18,7 @@ import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
  * NearestFilter ensures hard cel-shading transitions.
  */
 export function createGradientMap(): THREE.DataTexture {
-  const colors = [40, 100, 160, 220]; // luminance steps
+  const colors = [140, 180, 215, 245]; // luminance steps — high shadow floor for visibility
   const size = colors.length;
   const data = new Uint8Array(size * 4);
   for (let i = 0; i < size; i++) {
@@ -179,17 +179,15 @@ export class ToonPipeline {
     const w = window.innerWidth * pr;
     const h = window.innerHeight * pr;
 
-    // Normal render target
+    // Normal + depth in one render target (depth texture attached)
     this.normalRT = new THREE.WebGLRenderTarget(w, h);
     this.normalRT.texture.minFilter = THREE.NearestFilter;
     this.normalRT.texture.magFilter = THREE.NearestFilter;
+    this.normalRT.depthTexture = new THREE.DepthTexture(w, h);
+    this.normalRT.depthTexture.type = THREE.UnsignedShortType;
 
-    // Depth render target
-    this.depthRT = new THREE.WebGLRenderTarget(w, h);
-    this.depthRT.texture.minFilter = THREE.NearestFilter;
-    this.depthRT.texture.magFilter = THREE.NearestFilter;
-    this.depthRT.depthTexture = new THREE.DepthTexture(w, h);
-    this.depthRT.depthTexture.type = THREE.UnsignedShortType;
+    // Alias for clarity — same RT
+    this.depthRT = this.normalRT;
 
     // Composer
     this.composer = new EffectComposer(renderer);
@@ -199,7 +197,7 @@ export class ToonPipeline {
     this.edgePass = new ShaderPass(EdgeDetectionShader);
     this.edgePass.uniforms.resolution.value.set(w, h);
     this.edgePass.uniforms.tNormal.value = this.normalRT.texture;
-    this.edgePass.uniforms.tDepth.value = this.depthRT.depthTexture;
+    this.edgePass.uniforms.tDepth.value = this.normalRT.depthTexture;
     this.edgePass.uniforms.outlineThickness.value = config.outlineThickness ?? 1.2;
     this.edgePass.uniforms.outlineColor.value.setHex(config.outlineColor ?? 0x000000);
     this.edgePass.uniforms.cameraNear.value = camera.near;
@@ -209,17 +207,13 @@ export class ToonPipeline {
 
   /** Call instead of renderer.render(scene, camera) */
   render() {
-    // 1. Render normals into normalRT
+    // 1. Render normals + depth in one pass (depth texture auto-filled)
     this.scene.overrideMaterial = this.normalMaterial;
     this.renderer.setRenderTarget(this.normalRT);
     this.renderer.render(this.scene, this.camera);
-
-    // 2. Render depth into depthRT
     this.scene.overrideMaterial = null;
-    this.renderer.setRenderTarget(this.depthRT);
-    this.renderer.render(this.scene, this.camera);
 
-    // 3. Composite with edge detection
+    // 2. Composite with edge detection (RenderPass does the color render)
     this.renderer.setRenderTarget(null);
     this.composer.render();
   }
@@ -232,7 +226,6 @@ export class ToonPipeline {
 
     this.composer.setSize(w, h);
     this.normalRT.setSize(rtW, rtH);
-    this.depthRT.setSize(rtW, rtH);
 
     this.edgePass.uniforms.resolution.value.set(rtW, rtH);
     this.edgePass.uniforms.cameraNear.value = this.camera.near;

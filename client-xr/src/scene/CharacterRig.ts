@@ -142,7 +142,7 @@ export class CharacterRig {
     spine.position.set(0, 0.15 * s, 0);               // spine starts just above hip
     chest.position.set(0, th * 0.5, 0);               // chest is partway up the torso
     neck.position.set(0, th * 0.35, 0);               // neck at top of chest
-    head.position.set(0, 0.15 * s, 0);                // head on top of neck
+    head.position.set(0, 0.35 * s, 0);                // head on top of neck (raised to clear body)
 
     lShoulder.position.set(-sw, th * 0.3, 0);         // left shoulder offset
     rShoulder.position.set(sw, th * 0.3, 0);          // right shoulder offset

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "webxr-dev": {
+      "source": "danielcanton/webxr-dev-skill",
+      "sourceType": "github",
+      "computedHash": "3eb62b23b8499247be50515706be41edaea5bf3639e868ae975a0493db5d040e"
+    }
+  }
+}

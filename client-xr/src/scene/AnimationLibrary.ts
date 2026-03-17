@@ -176,105 +176,128 @@ function createIdleClip(): THREE.AnimationClip {
 // Used by: warrior, paladin, monk, rogue, ranger
 
 function createAttackClip(): THREE.AnimationClip {
-  const d = 0.55;
+  // 0.60s — hip-driven slash with snap, overshoot, and impact hold
+  // 0–0.12 wind-up | 0.12–0.18 STRIKE | 0.18–0.22 impact hold | 0.22–0.40 follow-through | 0.40–0.60 recover
+  const d = 0.60;
 
   return new THREE.AnimationClip("attack", d, [
-    // Chest: lean back → whip forward → hold → return
-    quatTrack("Chest", [0, 0.10, 0.22, 0.35, d], [
+    // ── Hips lead — twist back then EXPLODE forward ──
+    quatTrack("Hip", [0, 0.06, 0.12, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [0.3, 0, 0.15],       // wind up: lean back + twist
-      [-0.55, 0, -0.2],     // lunge forward + untwist
-      [-0.35, 0, -0.05],    // impact hold
-      [0, 0, 0],
-    ]),
-    // Spine follows through
-    quatTrack("Spine", [0, 0.10, 0.22, 0.35, d], [
-      [0, 0, 0],
-      [0.1, 0.12, 0],       // twist with wind-up
-      [-0.15, -0.15, 0],    // uncoil on strike
-      [-0.08, -0.05, 0],
+      [0.08, 0.25, 0],        // hips twist back (load)
+      [0.12, 0.35, 0.05],     // fully coiled
+      [-0.15, -0.40, -0.05],  // EXPLODE forward
+      [-0.12, -0.30, 0],      // impact hold
+      [-0.05, -0.10, 0],      // follow-through
       [0, 0, 0],
     ]),
-    // Right arm: raise → slash down hard
-    quatTrack("R_Shoulder", [0, 0.10, 0.22, 0.35, d], [
+    // ── Spine follows hips with delay ──
+    quatTrack("Spine", [0, 0.08, 0.14, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [-2.2, 0.2, -0.4],    // arm raised behind head, cocked out
-      [1.3, -0.1, 0.15],    // slash down past body
-      [0.7, 0, 0.05],       // hold
+      [0.05, 0.18, 0],        // coils after hips
+      [0.10, 0.25, 0],        // fully wound
+      [-0.12, -0.25, 0],      // uncoil
+      [-0.08, -0.15, 0],      // hold
+      [-0.03, -0.05, 0],
       [0, 0, 0],
     ]),
-    quatTrack("R_Arm", [0, 0.10, 0.22, 0.35, d], [
+    // ── Chest whips last — slow wind, FAST snap ──
+    quatTrack("Chest", [0, 0.10, 0.14, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [-1.0, 0, 0],         // elbow bent back
-      [-0.15, 0, 0],        // extend on strike
+      [0.25, 0.15, 0.10],     // lean back, chest opens
+      [0.40, 0.20, 0.15],     // fully wound
+      [-0.50, -0.25, -0.15],  // SNAP forward
+      [-0.35, -0.15, -0.05],  // impact overshoot
+      [-0.10, -0.05, 0],
+      [0, 0, 0],
+    ]),
+    // ── Right arm: slow raise → FAST slash → overshoot → recoil ──
+    quatTrack("R_Shoulder", [0, 0.08, 0.14, 0.18, 0.22, 0.35, d], [
+      [0, 0, 0],
+      [-1.2, 0.15, -0.2],     // arm begins lifting
+      [-2.4, 0.25, -0.5],     // fully raised behind head
+      [1.5, -0.15, 0.20],     // SLASH — overshoot past body
+      [0.9, -0.05, 0.10],     // recoil
+      [0.3, 0, 0.05],         // settle
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.10, 0.14, 0.18, 0.22, d], [
+      [0, 0, 0],
+      [-0.6, 0, 0],           // elbow bending
+      [-1.2, 0, 0],           // fully cocked
+      [-0.1, 0, 0],           // EXTENDS on strike
+      [-0.15, 0, 0],          // slight recoil
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hand", [0, 0.14, 0.18, 0.22, d], [
+      [0, 0, 0],
+      [-0.5, 0, -0.3],        // wrist cocked
+      [0.4, 0, 0.2],          // wrist SNAP
+      [0.2, 0, 0.1],          // settle
+      [0, 0, 0],
+    ]),
+    // ── Left arm counter-balance — pulls back for torque ──
+    quatTrack("L_Shoulder", [0, 0.10, 0.18, 0.22, 0.40, d], [
+      [0, 0, 0],
+      [0.4, 0, -0.4],         // pull back
+      [-0.5, 0, -0.6],        // drive forward
+      [-0.3, 0, -0.35],       // hold
+      [-0.1, 0, -0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.10, 0.18, 0.40, d], [
+      [0, 0, 0],
+      [-0.6, 0, 0],           // guard
+      [-0.35, 0, 0],          // brace
       [-0.1, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("R_Hand", [0, 0.10, 0.22, d], [
+    // ── Head tracks target, snaps down on impact ──
+    quatTrack("Head", [0, 0.10, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [-0.4, 0, -0.2],      // wrist cocked
-      [0.3, 0, 0.1],        // wrist snap on impact
-      [0, 0, 0],
-    ]),
-    // Left arm: shield brace / counter-balance
-    quatTrack("L_Shoulder", [0, 0.10, 0.22, 0.35, d], [
-      [0, 0, 0],
-      [0.35, 0, -0.35],     // pull back
-      [-0.4, 0, -0.5],      // drive forward for balance
-      [-0.2, 0, -0.25],
+      [0.08, 0.12, 0],        // eyes up tracking
+      [-0.15, -0.10, 0],      // snap down with strike
+      [-0.10, -0.05, 0],      // aggressive hold
+      [-0.03, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("L_Arm", [0, 0.10, 0.22, d], [
+    // ── Front leg: braces for impact ──
+    quatTrack("L_Hip", [0, 0.10, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [-0.5, 0, 0],         // elbow guard
-      [-0.3, 0, 0],
-      [0, 0, 0],
-    ]),
-    // Hips drive the lunge
-    quatTrack("Hip", [0, 0.10, 0.22, 0.35, d], [
-      [0, 0, 0],
-      [0.12, 0.12, 0],      // twist back
-      [-0.18, -0.18, 0],    // drive forward
-      [-0.06, -0.05, 0],
+      [-0.15, 0, 0],          // load weight back
+      [0.50, 0, 0],           // LUNGE forward
+      [0.35, 0, 0],           // brace
+      [0.10, 0, 0],
       [0, 0, 0],
     ]),
-    // Head tracks target
-    quatTrack("Head", [0, 0.10, 0.22, d], [
+    quatTrack("L_Knee", [0, 0.12, 0.18, 0.22, 0.40, d], [
       [0, 0, 0],
-      [0.05, 0.1, 0],       // glance up at target
-      [-0.1, -0.08, 0],     // eyes follow strike
-      [0, 0, 0],
-    ]),
-    // Front leg braces, back leg pushes
-    quatTrack("L_Hip", [0, 0.10, 0.22, 0.35, d], [
-      [0, 0, 0],
-      [-0.1, 0, 0],         // load weight back
-      [0.4, 0, 0],          // lunge step
-      [0.15, 0, 0],
+      [0.1, 0, 0],
+      [0.45, 0, 0],           // deep bend on lunge
+      [0.35, 0, 0],           // brace hold
+      [0.1, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("L_Knee", [0, 0.22, 0.35, d], [
+    // ── Rear leg: pushes off ──
+    quatTrack("R_Hip", [0, 0.08, 0.18, 0.22, d], [
       [0, 0, 0],
-      [0.35, 0, 0],         // front knee bends on impact
-      [0.15, 0, 0],
+      [0.20, 0, 0],           // load
+      [-0.15, 0, 0],          // push off
+      [-0.08, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("R_Hip", [0, 0.10, 0.22, 0.35, d], [
+    quatTrack("R_Knee", [0, 0.08, 0.18, 0.22, d], [
       [0, 0, 0],
-      [0.1, 0, 0],          // rear leg loads
-      [-0.3, 0, 0],         // push off
+      [0.50, 0, 0],           // deeply bent — power loaded
+      [0.10, 0, 0],           // extends
+      [0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    // ── Front foot digs in ──
+    quatTrack("L_Foot", [0, 0.18, 0.22, d], [
+      [0, 0, 0],
+      [-0.25, 0, 0],          // toe digs in on impact
       [-0.1, 0, 0],
-      [0, 0, 0],
-    ]),
-    quatTrack("R_Knee", [0, 0.22, d], [
-      [0, 0, 0],
-      [0.2, 0, 0],          // slight bend on push
-      [0, 0, 0],
-    ]),
-    // Feet stay planted
-    quatTrack("L_Foot", [0, 0.22, d], [
-      [0, 0, 0],
-      [-0.2, 0, 0],         // toe digs in
       [0, 0, 0],
     ]),
   ]);
@@ -949,283 +972,332 @@ function createRendingStrikeClip(): THREE.AnimationClip {
 }
 
 // ── Spell Cast (mage) ───────────────────────────────────────────────
-// 0.7s one-shot — gather energy → both arms thrust forward → release
-// Used by: mage
+// ── Mage Spellcast ──────────────────────────────────────────────────
+// 0.70s — gather wide → compress inward → SNAP release → recoil
+// 0-0.18 gather | 0.18-0.30 charge | 0.30-0.36 RELEASE | 0.36-0.55 follow-through | 0.55-0.70 settle
 
 function createSpellCastClip(): THREE.AnimationClip {
-  const d = 0.7;
+  const d = 0.70;
 
   return new THREE.AnimationClip("spellcast", d, [
-    // Both arms sweep up and gather at center, then thrust forward
-    quatTrack("R_Shoulder", [0, 0.15, 0.30, 0.45, d], [
+    // Right arm: sweeps wide → pulls to center → SNAPS forward
+    quatTrack("R_Shoulder", [0, 0.10, 0.18, 0.30, 0.36, 0.55, d], [
       [0, 0, 0],
-      [-1.6, 0, 0.5],       // arm raised wide right
-      [-1.0, 0, -0.3],      // pull to center
-      [0.8, 0, -0.1],       // thrust forward
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Shoulder", [0, 0.15, 0.30, 0.45, d], [
-      [0, 0, 0],
-      [-1.6, 0, -0.5],      // arm raised wide left
-      [-1.0, 0, 0.3],       // pull to center
-      [0.8, 0, 0.1],        // thrust forward
+      [-1.2, 0, 0.6],         // arm sweeps wide right
+      [-1.6, 0, 0.4],         // peak gather
+      [-0.8, 0, -0.2],        // compress to center (energy cupped)
+      [0.9, 0, -0.15],        // SNAP forward — release
+      [0.3, 0, 0],            // recoil drift
       [0, 0, 0],
     ]),
-    // Elbows extend on thrust
-    quatTrack("R_Arm", [0, 0.15, 0.30, 0.45, d], [
+    quatTrack("L_Shoulder", [0, 0.10, 0.18, 0.30, 0.36, 0.55, d], [
       [0, 0, 0],
-      [-0.9, 0, 0],         // bent while gathering
-      [-0.7, 0, 0],         // pull in
-      [-0.1, 0, 0],         // extend on release
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Arm", [0, 0.15, 0.30, 0.45, d], [
-      [0, 0, 0],
-      [-0.9, 0, 0],
-      [-0.7, 0, 0],
-      [-0.1, 0, 0],
+      [-1.2, 0, -0.6],        // mirror wide left
+      [-1.6, 0, -0.4],
+      [-0.8, 0, 0.2],         // compress center
+      [0.5, 0, 0.1],          // stabilize (left stays back)
+      [0.15, 0, 0],
       [0, 0, 0],
     ]),
-    // Wrists flare open on release
-    quatTrack("R_Hand", [0, 0.30, 0.45, d], [
+    // Elbows: bent during gather → EXTEND on release
+    quatTrack("R_Arm", [0, 0.18, 0.30, 0.36, 0.55, d], [
       [0, 0, 0],
-      [-0.3, 0, -0.4],      // cupped
-      [0.4, 0, 0.3],        // flare open
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Hand", [0, 0.30, 0.45, d], [
-      [0, 0, 0],
-      [-0.3, 0, 0.4],
-      [0.4, 0, -0.3],
+      [-1.0, 0, 0],           // deeply bent gathering
+      [-0.8, 0, 0],           // compressed
+      [-0.05, 0, 0],          // FULLY extended — snap
+      [-0.2, 0, 0],           // settle
       [0, 0, 0],
     ]),
-    // Chest draws back then punches forward
-    quatTrack("Chest", [0, 0.15, 0.30, 0.45, d], [
+    quatTrack("L_Arm", [0, 0.18, 0.30, 0.36, d], [
       [0, 0, 0],
-      [0.2, 0, 0],          // lean back gathering
-      [0.1, 0, 0],          // hold
-      [-0.4, 0, 0],         // thrust forward on release
-      [0, 0, 0],
-    ]),
-    // Spine coils and uncoils
-    quatTrack("Spine", [0, 0.15, 0.45, d], [
-      [0, 0, 0],
-      [0.1, 0, 0],          // slight lean back
-      [-0.2, 0, 0],         // drive forward
+      [-1.0, 0, 0],
+      [-0.8, 0, 0],
+      [-0.3, 0, 0],           // left stays more bent (asymmetry)
       [0, 0, 0],
     ]),
-    // Head focuses on target
-    quatTrack("Head", [0, 0.15, 0.45, d], [
+    // Wrists: cup energy → SNAP open on release
+    quatTrack("R_Hand", [0, 0.18, 0.30, 0.34, 0.36, 0.55, d], [
       [0, 0, 0],
-      [-0.1, 0, 0],         // look up while gathering
-      [-0.15, 0, 0],        // focus forward on release
+      [-0.2, 0, -0.3],        // fingers curling
+      [-0.4, 0, -0.5],        // cupped — holding energy
+      [-0.4, 0, -0.5],        // HOLD (micro-pause before release)
+      [0.6, 0, 0.4],          // SNAP — palm bursts open
+      [0.2, 0, 0.1],          // drift
       [0, 0, 0],
     ]),
-    // Slight forward weight shift in hips
-    quatTrack("Hip", [0, 0.30, 0.45, d], [
+    quatTrack("L_Hand", [0, 0.18, 0.30, 0.36, d], [
       [0, 0, 0],
+      [-0.2, 0, 0.3],
+      [-0.4, 0, 0.5],         // cupped mirror
+      [0.3, 0, -0.2],         // open stabilize
+      [0, 0, 0],
+    ]),
+    // Chest: draws back → compresses → PUNCHES forward → recoil
+    quatTrack("Chest", [0, 0.12, 0.30, 0.36, 0.42, 0.55, d], [
+      [0, 0, 0],
+      [0.20, 0, 0],           // lean back — energy gathering
+      [0.15, 0, 0],           // compressed
+      [-0.45, 0, 0],          // THRUST forward
+      [0.08, 0, 0],           // recoil back
+      [0.02, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Spine follows chest
+    quatTrack("Spine", [0, 0.14, 0.30, 0.36, 0.55, d], [
+      [0, 0, 0],
+      [0.08, 0, 0],
       [0.05, 0, 0],
-      [-0.1, 0, 0],         // lean into cast
+      [-0.20, 0, 0],          // drive forward
+      [-0.05, 0, 0],
       [0, 0, 0],
     ]),
-    // Front knee bends on thrust
-    quatTrack("L_Hip", [0, 0.45, d], [
+    // Head: looks at hands → snaps to target on release
+    quatTrack("Head", [0, 0.18, 0.30, 0.36, 0.55, d], [
+      [0, 0, 0],
+      [-0.10, -0.08, 0],      // watching hands gather
+      [-0.05, 0, 0],          // look up at energy
+      [-0.18, 0.05, 0],       // SNAP gaze to target
+      [-0.08, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Hips: slight weight shift forward on release
+    quatTrack("Hip", [0, 0.18, 0.36, 0.55, d], [
+      [0, 0, 0],
+      [0.06, 0, 0],           // weight back
+      [-0.12, 0, 0],          // lean into cast
+      [-0.04, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Front leg braces
+    quatTrack("L_Hip", [0, 0.36, 0.55, d], [
+      [0, 0, 0],
+      [0.30, 0, 0],           // lunge
+      [0.10, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.36, 0.55, d], [
       [0, 0, 0],
       [0.25, 0, 0],
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Knee", [0, 0.45, d], [
-      [0, 0, 0],
-      [0.2, 0, 0],
+      [0.08, 0, 0],
       [0, 0, 0],
     ]),
   ]);
 }
 
 // ── Dark Cast (warlock) ─────────────────────────────────────────────
-// 0.8s one-shot — one arm reaches toward target to drain, body leans in
-// Used by: warlock
+// 0.80s — right hand claws forward to drain, left pulls energy inward
+// 0-0.15 crouch | 0.15-0.30 reach | 0.30-0.38 CLAW | 0.38-0.55 drain hold | 0.55-0.80 release
 
 function createDarkCastClip(): THREE.AnimationClip {
-  const d = 0.8;
+  const d = 0.80;
 
   return new THREE.AnimationClip("darkcast", d, [
-    // Right arm reaches forward (drain gesture), fingers spread
-    quatTrack("R_Shoulder", [0, 0.12, 0.30, 0.55, d], [
+    // Right arm: coils → CLAWS forward → holds drain
+    quatTrack("R_Shoulder", [0, 0.10, 0.15, 0.30, 0.38, 0.55, d], [
       [0, 0, 0],
-      [-0.8, 0, -0.3],      // lift arm
-      [0.6, 0, -0.2],       // thrust forward toward target
-      [0.5, 0, -0.15],      // hold drain
-      [0, 0, 0],
-    ]),
-    quatTrack("R_Arm", [0, 0.12, 0.30, 0.55, d], [
-      [0, 0, 0],
-      [-0.6, 0, 0],         // bent during lift
-      [-0.1, 0, 0],         // extend to drain
-      [-0.15, 0, 0],        // hold
+      [-0.5, 0, -0.2],        // arm tucks close
+      [-1.0, 0, -0.4],        // cocked back
+      [-0.6, 0, -0.3],        // gathering dark energy
+      [0.7, 0, -0.2],         // CLAW forward — aggressive thrust
+      [0.6, 0, -0.15],        // drain hold
       [0, 0, 0],
     ]),
-    quatTrack("R_Hand", [0, 0.30, 0.55, d], [
+    quatTrack("R_Arm", [0, 0.15, 0.30, 0.38, 0.55, d], [
       [0, 0, 0],
-      [0.5, 0, -0.3],       // fingers spread, clawing
-      [0.4, 0, -0.25],      // sustain
-      [0, 0, 0],
-    ]),
-    // Left arm pulls energy back toward body
-    quatTrack("L_Shoulder", [0, 0.20, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [-0.6, 0, -0.6],      // arm rises to side
-      [0.2, 0, -0.4],       // pull toward chest
-      [0.3, 0, -0.3],       // hold
+      [-0.8, 0, 0],           // elbow bent tight
+      [-0.5, 0, 0],           // loosening
+      [-0.08, 0, 0],          // EXTEND — reaching
+      [-0.12, 0, 0],          // hold
       [0, 0, 0],
     ]),
-    quatTrack("L_Arm", [0, 0.20, 0.40, d], [
+    // Right hand: fingers curl → spread clawing → grip drain
+    quatTrack("R_Hand", [0, 0.15, 0.30, 0.36, 0.38, 0.55, d], [
       [0, 0, 0],
-      [-0.4, 0, 0],
-      [-0.7, 0, 0],         // elbow tight to body
-      [0, 0, 0],
-    ]),
-    // Body leans forward menacingly
-    quatTrack("Chest", [0, 0.12, 0.30, 0.55, d], [
-      [0, 0, 0],
-      [0.15, 0, 0],         // slight pull back
-      [-0.35, 0, -0.08],    // lean into drain
-      [-0.3, 0, -0.05],     // hold
+      [-0.3, 0, -0.2],        // fingers closing
+      [-0.5, 0, -0.4],        // fist — compressed dark energy
+      [-0.5, 0, -0.4],        // HOLD (micro-pause)
+      [0.6, 0.2, -0.4],       // CLAW open — fingers spread wide
+      [0.5, 0.15, -0.35],     // sustain drain
       [0, 0, 0],
     ]),
-    quatTrack("Spine", [0, 0.30, 0.55, d], [
+    // Left arm: pulls energy inward toward chest
+    quatTrack("L_Shoulder", [0, 0.15, 0.30, 0.38, 0.55, d], [
       [0, 0, 0],
-      [-0.15, -0.08, 0],    // twist into drain
-      [-0.12, -0.05, 0],
-      [0, 0, 0],
-    ]),
-    // Head tilts down — sinister focus
-    quatTrack("Head", [0, 0.30, 0.55, d], [
-      [0, 0, 0],
-      [0.15, -0.1, 0],      // chin down, slight turn
-      [0.1, -0.08, 0],
+      [-0.4, 0, -0.5],        // arm rises
+      [-0.8, 0, -0.7],        // wide — channeling
+      [0.3, 0, -0.5],         // PULLS toward body
+      [0.4, 0, -0.4],         // holds at chest
       [0, 0, 0],
     ]),
-    // Hips shift weight forward
-    quatTrack("Hip", [0, 0.30, d], [
+    quatTrack("L_Arm", [0, 0.15, 0.38, 0.55, d], [
       [0, 0, 0],
-      [-0.1, -0.05, 0],
-      [0, 0, 0],
-    ]),
-    // Front leg forward, rear braces
-    quatTrack("R_Hip", [0, 0.30, d], [
-      [0, 0, 0],
-      [0.2, 0, 0],
+      [-0.5, 0, 0],
+      [-0.9, 0, 0],           // elbow tight — siphoning
+      [-0.3, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("L_Hip", [0, 0.30, d], [
+    // Body hunches forward — predatory
+    quatTrack("Chest", [0, 0.10, 0.30, 0.38, 0.55, d], [
       [0, 0, 0],
-      [-0.15, 0, 0],
+      [0.12, 0, 0.05],        // slight crouch
+      [0.18, 0, 0.08],        // coiled
+      [-0.40, 0, -0.10],      // LUNGE into drain
+      [-0.32, 0, -0.06],      // hold
       [0, 0, 0],
     ]),
-    quatTrack("R_Knee", [0, 0.30, d], [
+    quatTrack("Spine", [0, 0.12, 0.38, 0.55, d], [
       [0, 0, 0],
-      [0.25, 0, 0],
+      [0.06, -0.05, 0],
+      [-0.18, -0.10, 0],      // twist into target
+      [-0.12, -0.06, 0],
+      [0, 0, 0],
+    ]),
+    // Head: chin down, sinister focus → locks onto target
+    quatTrack("Head", [0, 0.15, 0.30, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [0.12, -0.08, 0],       // chin down — menacing
+      [0.08, -0.05, 0],       // watching energy gather
+      [0.18, -0.12, 0],       // LOCKS onto target — intense stare
+      [0.12, -0.08, 0],       // hold
+      [0, 0, 0],
+    ]),
+    // Hips: crouch → drive forward
+    quatTrack("Hip", [0, 0.15, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [0.08, -0.06, 0],       // crouch
+      [-0.12, -0.08, 0],      // drive into drain
+      [-0.05, -0.03, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.38, d], [
+      [0, 0, 0],
+      [0.25, 0, 0],           // forward step
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.38, d], [
+      [0, 0, 0],
+      [0.30, 0, 0],           // bent
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Hip", [0, 0.38, d], [
+      [0, 0, 0],
+      [-0.15, 0, 0],          // braces
       [0, 0, 0],
     ]),
   ]);
 }
 
 // ── Holy Cast (cleric) ──────────────────────────────────────────────
-// 0.75s one-shot — arms raise to sky → sweep down releasing radiance
-// Used by: cleric
+// 0.75s — arms invoke skyward → compress light → release radiance downward
+// 0-0.20 invoke | 0.20-0.35 peak gather | 0.35-0.40 RELEASE | 0.40-0.55 radiance | 0.55-0.75 settle
 
 function createHolyCastClip(): THREE.AnimationClip {
   const d = 0.75;
 
   return new THREE.AnimationClip("holycast", d, [
-    // Both arms raise high, palms up — invoking
-    quatTrack("R_Shoulder", [0, 0.20, 0.40, 0.55, d], [
+    // Arms rise invoking → gather → SWEEP down releasing light
+    quatTrack("R_Shoulder", [0, 0.12, 0.20, 0.35, 0.40, 0.55, d], [
       [0, 0, 0],
-      [-1.8, 0, 0.4],       // arm high and wide right
-      [-2.0, 0, 0.3],       // peak — reaching skyward
-      [-0.3, 0, 0.15],      // sweep down releasing
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Shoulder", [0, 0.20, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [-1.8, 0, -0.4],      // arm high and wide left
-      [-2.0, 0, -0.3],      // peak
-      [-0.3, 0, -0.15],     // sweep down
+      [-1.0, 0, 0.3],         // arms begin rising
+      [-1.8, 0, 0.5],         // wide invocation
+      [-2.2, 0, 0.35],        // peak — reaching to the heavens
+      [-0.2, 0, 0.2],         // SWEEP down — releasing light
+      [0.1, 0, 0.1],          // palms out — radiance flowing
       [0, 0, 0],
     ]),
-    // Elbows extend reaching up
-    quatTrack("R_Arm", [0, 0.20, 0.40, 0.55, d], [
+    quatTrack("L_Shoulder", [0, 0.12, 0.20, 0.35, 0.40, 0.55, d], [
       [0, 0, 0],
-      [-0.5, 0, 0],
-      [-0.2, 0, 0],         // fully extended above
-      [-0.4, 0, 0],
-      [0, 0, 0],
-    ]),
-    quatTrack("L_Arm", [0, 0.20, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [-0.5, 0, 0],
-      [-0.2, 0, 0],
-      [-0.4, 0, 0],
+      [-1.0, 0, -0.3],
+      [-1.8, 0, -0.5],
+      [-2.2, 0, -0.35],       // peak mirror
+      [-0.2, 0, -0.2],        // sweep down
+      [0.1, 0, -0.1],
       [0, 0, 0],
     ]),
-    // Palms face up then push outward
-    quatTrack("R_Hand", [0, 0.20, 0.40, 0.55, d], [
+    // Elbows: extend upward → bend on sweep
+    quatTrack("R_Arm", [0, 0.20, 0.35, 0.40, 0.55, d], [
       [0, 0, 0],
-      [-0.6, 0, 0.5],       // palm upward
-      [-0.8, 0, 0.6],       // fully open to sky
-      [0.2, 0, -0.2],       // push light outward
+      [-0.6, 0, 0],
+      [-0.15, 0, 0],          // fully extended skyward
+      [-0.3, 0, 0],           // bend on sweep
+      [-0.15, 0, 0],
       [0, 0, 0],
     ]),
-    quatTrack("L_Hand", [0, 0.20, 0.40, 0.55, d], [
+    quatTrack("L_Arm", [0, 0.20, 0.35, 0.40, 0.55, d], [
       [0, 0, 0],
-      [-0.6, 0, -0.5],
+      [-0.6, 0, 0],
+      [-0.15, 0, 0],
+      [-0.3, 0, 0],
+      [-0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Palms: face sky → HOLD → push light outward on release
+    quatTrack("R_Hand", [0, 0.20, 0.35, 0.38, 0.40, 0.55, d], [
+      [0, 0, 0],
+      [-0.5, 0, 0.4],         // palm opening upward
+      [-0.8, 0, 0.6],         // fully open to sky — receiving
+      [-0.8, 0, 0.6],         // HOLD (divine pause)
+      [0.4, 0, -0.3],         // PUSH light outward
+      [0.15, 0, -0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Hand", [0, 0.20, 0.35, 0.38, 0.40, 0.55, d], [
+      [0, 0, 0],
+      [-0.5, 0, -0.4],
       [-0.8, 0, -0.6],
-      [0.2, 0, 0.2],
+      [-0.8, 0, -0.6],        // HOLD mirror
+      [0.4, 0, 0.3],
+      [0.15, 0, 0.1],
       [0, 0, 0],
     ]),
-    // Chest lifts up during invocation, then settles
-    quatTrack("Chest", [0, 0.20, 0.40, 0.55, d], [
+    // Chest: lifts during invocation → settles on release
+    quatTrack("Chest", [0, 0.15, 0.35, 0.40, 0.55, d], [
       [0, 0, 0],
-      [-0.15, 0, 0],        // chest lifts
-      [-0.25, 0, 0],        // peak lift
-      [-0.1, 0, 0],         // settle
+      [-0.12, 0, 0],          // chest begins lifting
+      [-0.30, 0, 0],          // peak — chest open, heart forward
+      [-0.08, 0, 0],          // settles on release
+      [0.05, 0, 0],           // slight recoil
       [0, 0, 0],
     ]),
-    // Spine arches back slightly
-    quatTrack("Spine", [0, 0.20, 0.40, d], [
+    // Spine arches back gracefully
+    quatTrack("Spine", [0, 0.20, 0.35, 0.40, d], [
       [0, 0, 0],
+      [-0.08, 0, 0],
+      [-0.18, 0, 0],          // arch back
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head: gazes skyward → drops to target on release
+    quatTrack("Head", [0, 0.15, 0.35, 0.40, 0.55, d], [
+      [0, 0, 0],
+      [-0.15, 0, 0],          // look up
+      [-0.40, 0, 0],          // gaze skyward — reverent
+      [0.08, 0, 0],           // SNAP down to target
+      [0.03, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Hips: rise slightly (on toes) during invocation
+    quatTrack("Hip", [0, 0.20, 0.35, 0.40, 0.55, d], [
+      [0, 0, 0],
+      [-0.05, 0, 0],
+      [-0.12, 0, 0],          // peak rise
+      [-0.06, 0, 0],          // settle
+      [-0.02, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Feet: rise onto toes during invocation
+    quatTrack("L_Foot", [0, 0.20, 0.35, 0.55, d], [
+      [0, 0, 0],
+      [-0.25, 0, 0],
+      [-0.45, 0, 0],          // toes pointed — rising
       [-0.1, 0, 0],
-      [-0.15, 0, 0],        // slight arch
       [0, 0, 0],
     ]),
-    // Head tilts up to sky then forward to target
-    quatTrack("Head", [0, 0.20, 0.40, 0.55, d], [
+    quatTrack("R_Foot", [0, 0.20, 0.35, 0.55, d], [
       [0, 0, 0],
-      [-0.2, 0, 0],         // look up
-      [-0.35, 0, 0],        // gaze skyward
-      [0.05, 0, 0],         // look at target
-      [0, 0, 0],
-    ]),
-    // Slight rise on toes via hip tilt
-    quatTrack("Hip", [0, 0.20, 0.40, 0.55, d], [
-      [0, 0, 0],
-      [-0.06, 0, 0],        // rise
-      [-0.1, 0, 0],         // peak
-      [-0.03, 0, 0],
-      [0, 0, 0],
-    ]),
-    // Feet press — rise onto toes
-    quatTrack("L_Foot", [0, 0.20, 0.40, d], [
-      [0, 0, 0],
-      [-0.3, 0, 0],
-      [-0.4, 0, 0],         // toes pointed
-      [0, 0, 0],
-    ]),
-    quatTrack("R_Foot", [0, 0.20, 0.40, d], [
-      [0, 0, 0],
-      [-0.3, 0, 0],
-      [-0.4, 0, 0],
+      [-0.25, 0, 0],
+      [-0.45, 0, 0],
+      [-0.1, 0, 0],
       [0, 0, 0],
     ]),
   ]);
@@ -1375,6 +1447,270 @@ function createHealClip(): THREE.AnimationClip {
     quatTrack("Hip", [0, 0.25, 0.55, d], [
       [0, 0, 0],
       [-0.08, 0, 0],
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Palm Strike (monk) ──────────────────────────────────────────────
+// 0.45s — fast open-palm thrust from the core, chi-style
+// 0-0.10 chamber | 0.10-0.16 STRIKE | 0.16-0.20 impact | 0.20-0.35 retract | 0.35-0.45 settle
+
+function createPalmStrikeClip(): THREE.AnimationClip {
+  const d = 0.45;
+  return new THREE.AnimationClip("palmstrike", d, [
+    // Hips drive — sharp rotation for power
+    quatTrack("Hip", [0, 0.06, 0.10, 0.16, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.05, 0.20, 0],         // load back
+      [0.08, 0.30, 0],         // coil
+      [-0.10, -0.35, 0],       // EXPLODE forward
+      [-0.08, -0.25, 0],       // impact hold
+      [-0.03, -0.08, 0],
+      [0, 0, 0],
+    ]),
+    // Chest snaps — sharp and direct
+    quatTrack("Chest", [0, 0.10, 0.16, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.15, 0.10, 0],         // pulled back, tight
+      [-0.40, -0.15, 0],       // SNAP forward
+      [-0.30, -0.10, 0],       // hold
+      [-0.08, -0.03, 0],
+      [0, 0, 0],
+    ]),
+    // Right arm: chambers at hip → THRUSTS palm forward
+    quatTrack("R_Shoulder", [0, 0.08, 0.10, 0.16, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.3, 0, -0.3],          // arm at side
+      [0.5, 0.15, -0.4],       // chamber at hip — fist cocked
+      [0.8, -0.10, -0.1],      // THRUST forward — palm out
+      [0.6, -0.05, -0.1],      // hold
+      [0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.10, 0.16, 0.20, d], [
+      [0, 0, 0],
+      [-1.2, 0, 0],            // elbow deeply bent — chambered
+      [-0.05, 0, 0],           // EXTEND — full thrust
+      [-0.1, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Right hand: fist → OPEN palm snap
+    quatTrack("R_Hand", [0, 0.10, 0.14, 0.16, 0.20, d], [
+      [0, 0, 0],
+      [-0.5, 0, -0.3],         // closed fist
+      [-0.5, 0, -0.3],         // hold fist (micro-pause)
+      [0.6, 0, 0.4],           // PALM OPENS — chi release
+      [0.3, 0, 0.2],
+      [0, 0, 0],
+    ]),
+    // Left arm: guard position — pulls back for balance
+    quatTrack("L_Shoulder", [0, 0.10, 0.16, 0.35, d], [
+      [0, 0, 0],
+      [0.3, 0, -0.5],          // guard at side
+      [-0.2, 0, -0.6],         // pull back as right extends
+      [-0.1, 0, -0.2],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.10, 0.16, d], [
+      [0, 0, 0],
+      [-0.8, 0, 0],            // bent guard
+      [-0.5, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head snaps to target
+    quatTrack("Head", [0, 0.10, 0.16, 0.35, d], [
+      [0, 0, 0],
+      [0.05, 0.08, 0],
+      [-0.12, -0.06, 0],       // focused on target
+      [-0.03, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Front leg drives forward
+    quatTrack("L_Hip", [0, 0.10, 0.16, 0.35, d], [
+      [0, 0, 0],
+      [-0.10, 0, 0],
+      [0.40, 0, 0],            // lunge
+      [0.10, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.16, 0.35, d], [
+      [0, 0, 0],
+      [0.35, 0, 0],            // deep bend
+      [0.08, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.10, 0.16, d], [
+      [0, 0, 0],
+      [0.40, 0, 0],            // rear leg loaded
+      [0.08, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Flying Kick (monk) ──────────────────────────────────────────────
+// 0.65s — leap → airborne kick → land
+// 0-0.12 crouch | 0.12-0.22 LEAP | 0.22-0.32 kick extend | 0.32-0.45 hang | 0.45-0.65 land
+
+function createFlyingKickClip(): THREE.AnimationClip {
+  const d = 0.65;
+  return new THREE.AnimationClip("flyingkick", d, [
+    // Hips: crouch → launch upward → return
+    quatTrack("Hip", [0, 0.08, 0.12, 0.22, 0.32, 0.45, d], [
+      [0, 0, 0],
+      [0.15, 0, 0],            // crouch down
+      [0.20, 0, 0],            // deep crouch — loading
+      [-0.25, -0.15, 0],       // LAUNCH — hips drive forward
+      [-0.20, -0.10, 0],       // airborne
+      [-0.10, -0.05, 0],       // descending
+      [0, 0, 0],
+    ]),
+    // Chest: leans back in crouch → drives forward in air
+    quatTrack("Chest", [0, 0.12, 0.22, 0.32, 0.45, d], [
+      [0, 0, 0],
+      [0.20, 0, 0],            // lean back loading
+      [-0.35, 0, 0],           // thrust forward — flying
+      [-0.25, 0, 0],           // hold
+      [-0.10, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Right leg: THE KICK — extends forward
+    quatTrack("R_Hip", [0, 0.12, 0.22, 0.32, 0.45, d], [
+      [0, 0, 0],
+      [0.30, 0, 0],            // knee up — chambered
+      [-0.80, 0, 0],           // LEG THRUSTS FORWARD — kick
+      [-0.70, 0, 0],           // hold extension
+      [-0.20, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.12, 0.22, 0.32, 0.45, d], [
+      [0, 0, 0],
+      [1.20, 0, 0],            // knee deeply bent — chambered
+      [0.05, 0, 0],            // FULLY EXTENDED — straight leg kick
+      [0.08, 0, 0],            // hold
+      [0.30, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Left leg: pushes off then trails behind
+    quatTrack("L_Hip", [0, 0.12, 0.22, 0.32, d], [
+      [0, 0, 0],
+      [-0.10, 0, 0],           // plant
+      [0.40, 0, 0],            // push off — trails behind
+      [0.30, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.12, 0.22, d], [
+      [0, 0, 0],
+      [0.50, 0, 0],            // bent for launch
+      [0.60, 0, 0],            // trailing bent
+      [0, 0, 0],
+    ]),
+    // Arms: spread for balance in air
+    quatTrack("R_Shoulder", [0, 0.12, 0.22, 0.45, d], [
+      [0, 0, 0],
+      [0.3, 0, -0.3],          // guard
+      [-0.8, 0, 0.5],          // arm spread wide — airborne balance
+      [-0.3, 0, 0.2],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Shoulder", [0, 0.12, 0.22, 0.45, d], [
+      [0, 0, 0],
+      [0.3, 0, -0.5],
+      [-0.8, 0, -0.5],         // mirror spread
+      [-0.3, 0, -0.2],
+      [0, 0, 0],
+    ]),
+    // Head: tracks target throughout
+    quatTrack("Head", [0, 0.12, 0.22, 0.45, d], [
+      [0, 0, 0],
+      [0.10, 0, 0],            // look up at target
+      [-0.15, 0, 0],           // lock on during kick
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Whirlwind Kick (monk) ───────────────────────────────────────────
+// 0.70s — spinning roundhouse kick with full body rotation
+// 0-0.12 wind | 0.12-0.20 SPIN1 | 0.20-0.35 kick | 0.35-0.50 SPIN2 | 0.50-0.70 land
+
+function createWhirlwindKickClip(): THREE.AnimationClip {
+  const d = 0.70;
+  return new THREE.AnimationClip("whirlwindkick", d, [
+    // Hips: FULL ROTATION — the spin driver
+    quatTrack("Hip", [0, 0.08, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.05, 0.30, 0],          // wind up twist
+      [0.08, 0.60, 0],          // coiled
+      [-0.05, -1.20, 0],        // SPIN — fast half rotation
+      [-0.05, -2.80, 0],        // continue spin — kick lands
+      [-0.03, -3.14, 0],        // full 180° complete
+      [0, -3.14, 0],            // settle (facing opposite, will reset)
+    ]),
+    // Chest follows through spin
+    quatTrack("Chest", [0, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.10, 0.15, 0],          // coiled
+      [-0.20, -0.20, -0.10],    // lean into spin
+      [-0.15, -0.10, -0.05],    // during kick
+      [-0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Right leg: THE ROUNDHOUSE — swings out during spin
+    quatTrack("R_Hip", [0, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.20, 0, 0.15],          // chamber
+      [-0.50, 0, 0.80],         // LEG SWINGS OUT — roundhouse
+      [-0.40, 0, 0.60],         // extended through target
+      [-0.10, 0, 0.15],         // retract
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.80, 0, 0],             // chambered — bent
+      [0.10, 0, 0],             // EXTENDS on kick
+      [0.15, 0, 0],             // hold
+      [0.30, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Left leg: pivot foot — stays planted
+    quatTrack("L_Hip", [0, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.15, 0, -0.10],         // slight bend
+      [0.10, 0, -0.05],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.40, 0, 0],             // bent — low center of gravity
+      [0.25, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Arms: whip with the spin — centrifugal
+    quatTrack("R_Shoulder", [0, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.2, 0, -0.3],           // pull in
+      [-1.0, 0, 0.6],           // FLINGS out with spin
+      [-0.8, 0, 0.4],           // trailing
+      [-0.2, 0, 0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Shoulder", [0, 0.12, 0.20, 0.35, 0.50, d], [
+      [0, 0, 0],
+      [0.2, 0, -0.5],           // guard
+      [-1.0, 0, -0.6],          // flings out opposite
+      [-0.8, 0, -0.4],
+      [-0.2, 0, -0.1],
+      [0, 0, 0],
+    ]),
+    // Head stays locked on target
+    quatTrack("Head", [0, 0.12, 0.20, 0.35, d], [
+      [0, 0, 0],
+      [0.05, -0.15, 0],         // look over shoulder
+      [-0.10, 0.30, 0],         // snap around with spin
       [-0.05, 0, 0],
       [0, 0, 0],
     ]),
@@ -1592,6 +1928,9 @@ export class AnimationLibrary {
         createSpellCastClip(),
         createDarkCastClip(),
         createHolyCastClip(),
+        createPalmStrikeClip(),
+        createFlyingKickClip(),
+        createWhirlwindKickClip(),
         createDamageClip(),
         createHealClip(),
         createDeathClip(),

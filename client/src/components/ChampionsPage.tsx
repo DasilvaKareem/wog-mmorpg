@@ -269,11 +269,13 @@ function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void 
 
 const SLOT_ORDER: { slot: string; label: string; icon: string }[] = [
   { slot: "weapon",    label: "Weapon",    icon: "⚔" },
+  { slot: "shield",    label: "Shield",    icon: "🛡" },
   { slot: "helm",      label: "Helm",      icon: "🪖" },
   { slot: "shoulders", label: "Shoulders", icon: "🛡" },
   { slot: "chest",     label: "Chest",     icon: "🛡" },
   { slot: "gloves",    label: "Gloves",    icon: "🧤" },
   { slot: "belt",      label: "Belt",      icon: "📿" },
+  { slot: "cape",      label: "Cape",      icon: "🧣" },
   { slot: "legs",      label: "Legs",      icon: "🦿" },
   { slot: "boots",     label: "Boots",     icon: "🥾" },
   { slot: "ring",      label: "Ring",      icon: "💍" },
@@ -386,7 +388,7 @@ function InventoryTab({
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? "Recycle failed"); return; }
-      setNotice(`Recycled ${quantity}x ${item.name} for ${formatCopperString(data.totalPayoutCopper ?? 0)}.`);
+      setNotice(`Sold ${quantity}x ${item.name} for ${formatCopperString(data.totalPayoutCopper ?? 0)}.`);
       onRefresh();
     } catch {
       setError("Network error");
@@ -566,7 +568,7 @@ function InventoryTab({
                       </span>
 
                       <span className="text-[10px] text-[#54f28b]">
-                        <span className="text-[#596a8a]">RECYCLE</span>{" "}
+                        <span className="text-[#596a8a]">SELL</span>{" "}
                         <span className="font-bold">{formatCopperString(item.recycleCopperValue)}</span>
                       </span>
 
@@ -610,7 +612,7 @@ function InventoryTab({
                         )}
                         {canRecycle && (
                           <span className="text-[#54f28b]">
-                            Recyclable: <span className="font-bold">{item.recyclableQuantity}</span>
+                            Sellable: <span className="font-bold">{item.recyclableQuantity}</span>
                             {" "}for {formatCopperString(recycleValueTotal)}
                           </span>
                         )}
@@ -645,7 +647,7 @@ function InventoryTab({
                               disabled={busy !== null}
                               className="border-2 border-[#54f28b44] bg-[#09160d] px-3 py-1 text-[10px] uppercase tracking-wide text-[#54f28b] hover:bg-[#54f28b22] transition disabled:opacity-40"
                             >
-                              {busy === item.tokenId ? "RECYCLING..." : `RECYCLE 1 · ${formatCopperString(item.recycleCopperValue)}`}
+                              {busy === item.tokenId ? "SELLING..." : `SELL 1 · ${formatCopperString(item.recycleCopperValue)}`}
                             </button>
                             {item.recyclableQuantity > 1 && (
                               <button
@@ -653,7 +655,7 @@ function InventoryTab({
                                 disabled={busy !== null}
                                 className="border-2 border-[#54f28b22] bg-[#08110b] px-3 py-1 text-[10px] uppercase tracking-wide text-[#8af7b0] hover:bg-[#54f28b18] transition disabled:opacity-40"
                               >
-                                {busy === item.tokenId ? "RECYCLING..." : `RECYCLE ALL · ${formatCopperString(recycleValueTotal)}`}
+                                {busy === item.tokenId ? "SELLING..." : `SELL ALL · ${formatCopperString(recycleValueTotal)}`}
                               </button>
                             )}
                           </>

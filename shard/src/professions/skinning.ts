@@ -161,6 +161,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
     if (weaponEquipped.durability === 0) {
       weaponEquipped.broken = true;
+      if (entity.equipment) delete entity.equipment.weapon;
     }
 
     // Mint skinning materials

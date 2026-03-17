@@ -240,12 +240,15 @@ export function spawnFlowerNodes(): void {
     const flowerProps = FLOWER_CATALOG[def.flowerType];
     const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
 
+    const worldX = def.x + offset.x;
+    const worldY = def.y + offset.z;
+
     const entity: Entity = {
       id: randomUUID(),
       type: "flower-node",
       name: flowerProps.label,
-      x: def.x + offset.x,
-      y: def.y + offset.z,
+      x: worldX,
+      y: worldY,
       hp: 9999,
       maxHp: 9999,
       region: def.zoneId,
@@ -255,6 +258,8 @@ export function spawnFlowerNodes(): void {
       maxCharges: flowerProps.maxCharges,
       depletedAtTick: undefined,
       respawnTicks: flowerProps.respawnTicks,
+      spawnX: worldX,
+      spawnY: worldY,
     };
 
     zone.entities.set(entity.id, entity);

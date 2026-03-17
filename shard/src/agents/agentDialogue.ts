@@ -21,10 +21,20 @@ type DialogueEvent =
   | "zone_enter"
   | "quest_complete"
   | "quest_progress"
+  | "quest_accept"
   | "loot_found"
   | "technique_learn"
   | "idle"
   | "low_hp_survive"
+  | "npc_shop"
+  | "npc_repair"
+  | "gathering"
+  | "crafting"
+  | "brewing"
+  | "cooking"
+  | "greet_player"
+  | "spot_boss"
+  | "zone_comment"
   | "react_chat"
   | "react_levelup"
   | "react_death"
@@ -368,52 +378,356 @@ const DIALOGUE: Record<string, string[]> = {
     "Faith pulled me through!",
   ],
 
+  // ── QUEST ACCEPT ────────────────────────────────────────────
+  "sunforged::quest_accept": [
+    "I'll take this quest. Another oath to keep.",
+    "Consider it done. Point me to the fight.",
+    "I accept. The light will see it through.",
+  ],
+  "veilborn::quest_accept": [
+    "I'll handle it. What's the pay?",
+    "Another job. Fine. Let's get it done.",
+    "Accepted. Don't waste my time with the details.",
+  ],
+  "dawnkeeper::quest_accept": [
+    "I'd love to help! Where do I start?",
+    "Ooh, a new quest! This is going to be fun!",
+    "Of course I'll help! What do you need?",
+  ],
+  "ironvow::quest_accept": [
+    "Give it here. I'll finish it before sundown.",
+    "Fine. Another errand. At least there's XP.",
+    "Accepted. Move.",
+  ],
+  "::quest_accept": [
+    "New quest accepted! Let's do this.",
+    "I'll take it. Time to get to work.",
+    "Quest accepted — on it.",
+  ],
+
+  // ── NPC SHOPPING ───────────────────────────────────────────
+  "sunforged::npc_shop": [
+    "A fair trade, merchant. This will serve me well.",
+    "Good steel for a good price. I'll take it.",
+    "Thank you, shopkeeper. For the dawn.",
+  ],
+  "veilborn::npc_shop": [
+    "Hmm. This'll do. How much?",
+    "I'll take it. No haggling — I'm busy.",
+    "Decent gear. Wrap it up.",
+  ],
+  "dawnkeeper::npc_shop": [
+    "Thank you so much! I love new gear!",
+    "Ooh, shiny! I'll take this one!",
+    "Perfect! Just what I needed!",
+  ],
+  "ironvow::npc_shop": [
+    "Stronger gear. Good. How much?",
+    "I need this. Take the gold.",
+    "This better be worth the price.",
+  ],
+  "::npc_shop": [
+    "Nice, picked up some new gear.",
+    "Shopping done. Back to business.",
+    "Good deal. Equipped and ready.",
+  ],
+
+  // ── NPC REPAIR ─────────────────────────────────────────────
+  "sunforged::npc_repair": [
+    "Fix my blade, smith. It has oaths yet to keep.",
+    "Good as new. Thank you, blacksmith.",
+    "A warrior's gear must never fail.",
+  ],
+  "veilborn::npc_repair": [
+    "Patch it up. Quick.",
+    "Fixed? Good. I have places to be.",
+    "The edge was getting dull. Better now.",
+  ],
+  "dawnkeeper::npc_repair": [
+    "Thank you, blacksmith! Good as new!",
+    "Whew, my gear was getting rough. All fixed!",
+    "You're a lifesaver! Literally!",
+  ],
+  "ironvow::npc_repair": [
+    "Fix it. Now.",
+    "About time. My gear was falling apart.",
+    "Done? Good. Back to the fight.",
+  ],
+  "::npc_repair": [
+    "Gear repaired. Ready to go.",
+    "All patched up.",
+    "Good — back to full durability.",
+  ],
+
+  // ── GATHERING ──────────────────────────────────────────────
+  "sunforged::gathering": [
+    "The land provides for those who serve it.",
+    "Mining ore for the forge. Every ingot counts.",
+    "Gathering herbs — even warriors need medicine.",
+    "The citadel taught us to harvest before we hunt.",
+  ],
+  "veilborn::gathering": [
+    "Stocking up. You never know when supply lines fail.",
+    "Mining in silence. Just me and the ore.",
+    "Herbs. Poisons. Medicine. Same ingredients, different intent.",
+    "Resources are leverage. I collect leverage.",
+  ],
+  "dawnkeeper::gathering": [
+    "Look at these flowers! Nature is so generous!",
+    "Mining is actually really relaxing. Hit rock, get ore!",
+    "I love gathering herbs. Each one has a story!",
+    "Just out here picking flowers. Best part of the day!",
+  ],
+  "ironvow::gathering": [
+    "Ore doesn't mine itself. Unfortunately.",
+    "Gathering. Boring but necessary.",
+    "These materials will become something deadly.",
+    "Every resource is a future weapon.",
+  ],
+  "::gathering": [
+    "Gathering some materials while it's quiet.",
+    "Stocking up on resources. Can never have too many.",
+    "Hit a nice node. The grind continues.",
+    "Filling up the bags with materials.",
+  ],
+
+  // ── CRAFTING ──────────────────────────────────────────────
+  "sunforged::crafting": [
+    "Forging something worthy of the cause.",
+    "The hammer sings. A new weapon takes shape.",
+    "Crafting is its own form of devotion.",
+  ],
+  "veilborn::crafting": [
+    "Building something useful. Quietly.",
+    "Crafting. Every edge needs to be deliberate.",
+    "A well-crafted tool is worth ten scavenged ones.",
+  ],
+  "dawnkeeper::crafting": [
+    "Crafting time! I love making things!",
+    "The forge is so warm and cozy. Let me make something!",
+    "Creating something with my own hands — the best feeling!",
+  ],
+  "ironvow::crafting": [
+    "Forging. Steel bends to the strong.",
+    "Making something that can take a beating.",
+    "Craft it hard. Craft it once.",
+  ],
+  "::crafting": [
+    "At the forge. Let's see what we can make.",
+    "Crafting time. Got a nice recipe lined up.",
+    "Working the forge. This is going to be good.",
+  ],
+
+  // ── BREWING ───────────────────────────────────────────────
+  "sunforged::brewing": [
+    "Brewing elixirs for the battles ahead.",
+    "A warrior without potions is a fool. Brewing now.",
+    "The citadel alchemists taught me this recipe.",
+  ],
+  "veilborn::brewing": [
+    "Mixing something... useful. Don't ask what.",
+    "Potions are insurance. I'm well-insured.",
+    "Brewing. The right concoction changes everything.",
+  ],
+  "dawnkeeper::brewing": [
+    "Brewing potions! The bubbles are so pretty!",
+    "A spoonful of moonflower, a dash of starbloom... perfect!",
+    "Alchemy is like cooking but sparkly!",
+  ],
+  "ironvow::brewing": [
+    "Potions. Because dying is for the weak.",
+    "Brew fast. Fight soon.",
+    "Another vial. Another advantage.",
+  ],
+  "::brewing": [
+    "Brewing some potions at the lab.",
+    "Need more potions. Let's cook up a batch.",
+    "Mixing ingredients. Hope this turns out good.",
+  ],
+
+  // ── COOKING ───────────────────────────────────────────────
+  "sunforged::cooking": [
+    "A warm meal before the march. Essential.",
+    "Cooking for strength. The body is a temple.",
+    "Even the light requires sustenance.",
+  ],
+  "veilborn::cooking": [
+    "Food is fuel. Nothing more.",
+    "Cooking. Quick meal, then back to work.",
+    "A full stomach means sharper instincts.",
+  ],
+  "dawnkeeper::cooking": [
+    "Cooking something yummy! Anyone hungry?",
+    "The secret ingredient is always love!",
+    "Mmm, smells amazing! Who wants a plate?",
+  ],
+  "ironvow::cooking": [
+    "Eating. Then killing. In that order.",
+    "Cook fast. Fight hard.",
+    "Food. Because dead warriors don't level up.",
+  ],
+  "::cooking": [
+    "Cooking up something before the next fight.",
+    "Quick meal break. Gotta keep the HP up.",
+    "Chef mode: activated.",
+  ],
+
+  // ── GREETING ANOTHER PLAYER ───────────────────────────────
+  "sunforged::greet_player": [
+    "Hail, {speaker}! May the light guide your path!",
+    "Well met, {speaker}! Are you questing here too?",
+    "A fellow adventurer! Good to see you, {speaker}.",
+    "{speaker}! Need backup? I'm always ready.",
+  ],
+  "veilborn::greet_player": [
+    "{speaker}. Didn't see you there. ...that's rare.",
+    "Ah, {speaker}. Try not to draw too much attention.",
+    "{speaker}. What brings you to this corner of the map?",
+    "I see you, {speaker}. Hope you're watching your back.",
+  ],
+  "dawnkeeper::greet_player": [
+    "Hi {speaker}!! So good to see a friendly face!",
+    "Oh, {speaker}! How's your adventure going?",
+    "{speaker}! Want to explore together?",
+    "Hey {speaker}! Love your gear!",
+  ],
+  "ironvow::greet_player": [
+    "{speaker}. Stay out of my way and we'll get along fine.",
+    "Hmph. {speaker}. You here to fight or sightsee?",
+    "{speaker}. Don't slow me down.",
+    "Another one. {speaker}, right? Prove yourself.",
+  ],
+  "::greet_player": [
+    "Hey {speaker}! What's good?",
+    "Yo {speaker}! How's the grind going?",
+    "What's up {speaker}! Good to see someone else out here.",
+    "Sup {speaker}. This zone treating you well?",
+  ],
+
+  // ── SPOTTING A BOSS ───────────────────────────────────────
+  "sunforged::spot_boss": [
+    "A powerful foe... {detail}. For the dawn!",
+    "That's no ordinary creature. {detail} demands justice!",
+    "Finally, a real challenge. {detail}, face me!",
+  ],
+  "veilborn::spot_boss": [
+    "{detail}... big target. Big reward.",
+    "There's {detail}. Time to be surgical about this.",
+    "{detail} looks dangerous. Good. I was getting bored.",
+  ],
+  "dawnkeeper::spot_boss": [
+    "Whoa, is that {detail}?! That's a boss!",
+    "Oh my gosh, {detail}! Should I be scared? I'm a little scared.",
+    "{detail} looks really tough! But we've got this!",
+  ],
+  "ironvow::spot_boss": [
+    "{detail}. Finally, something worth hitting.",
+    "Boss. {detail}. This is what I came here for.",
+    "{detail} — you die today.",
+  ],
+  "::spot_boss": [
+    "Boss spotted: {detail}. Let's do this.",
+    "Whoa, {detail}. That's a big one.",
+    "There's {detail} — time for a real fight.",
+  ],
+
+  // ── ZONE COMMENTARY ───────────────────────────────────────
+  "sunforged::zone_comment": [
+    "This land needs protecting. I can feel it.",
+    "The air here is thick with purpose.",
+    "Every zone has souls worth saving.",
+    "I sense darkness nearby. Stay sharp.",
+  ],
+  "veilborn::zone_comment": [
+    "Good sightlines. Decent cover. I can work with this.",
+    "Something's off about this place. I like it.",
+    "Quiet zone. That means either nothing's here... or everything's hiding.",
+    "The shadows here are deep. Perfect.",
+  ],
+  "dawnkeeper::zone_comment": [
+    "This place is so pretty! I wish I could stay forever!",
+    "The flowers here are different! I want to pick them all!",
+    "I wonder what stories this zone has to tell.",
+    "The wind here feels different. Magical, almost!",
+  ],
+  "ironvow::zone_comment": [
+    "This zone is soft. Need somewhere harder.",
+    "Anything strong enough to give me a challenge here?",
+    "The mobs here better be worth the walk.",
+    "I've cleared worse. Let's see what you've got.",
+  ],
+  "::zone_comment": [
+    "Love the vibe of this zone.",
+    "This area has some good farming spots.",
+    "The map design here is actually fire.",
+    "Feels like there's a lot to explore here.",
+  ],
+
   // ── GENERIC FALLBACKS ─────────────────────────────────────
   "::kill": [
-    "Target eliminated.",
-    "One down.",
     "Got 'em.",
+    "One down. Who's next?",
+    "That one didn't put up much of a fight.",
+    "Easy clap.",
+    "Another one bites the dust.",
+    "Clean kill. Moving on.",
+    "And stay down.",
   ],
   "::level_up": [
-    "Level up!",
-    "Getting stronger.",
-    "New level reached.",
+    "Level up! Let's gooo!",
+    "Getting stronger every fight.",
+    "New level — the grind pays off.",
+    "Ding! That felt good.",
+    "Leveled up. Time to push harder.",
   ],
   "::death": [
-    "I'll be back.",
-    "That hurt.",
-    "Respawning...",
+    "Okay that one got me. Won't happen again.",
+    "That hurt... running it back.",
+    "Alright, I deserved that. Let's go again.",
+    "Down but not out. Respawning.",
+    "That mob hit way harder than I expected.",
+    "Lesson learned. The hard way.",
   ],
   "::zone_enter": [
-    "Arrived in a new zone.",
-    "Exploring...",
+    "New zone. Let's see what's out here.",
+    "Made it. Time to explore.",
+    "Fresh territory — I like it.",
+    "Alright, what have we got here?",
   ],
   "::quest_complete": [
-    "Quest complete.",
-    "Mission accomplished.",
+    "Quest done! That XP hit different.",
+    "Turned that one in. What's next?",
+    "Quest complete — rewards collected.",
+    "Another one in the books.",
   ],
   "::quest_progress": [
     "Making progress on {detail}.",
-    "{detail} is almost done.",
-    "Closer to finishing {detail}.",
+    "{detail} is coming along.",
+    "Getting closer on {detail}. Almost there.",
+    "Chipping away at {detail}.",
   ],
   "::loot_found": [
-    "Nice haul.",
-    "Found something useful.",
-    "Loot secured.",
+    "Nice drop!",
+    "Ooh, I'll take that.",
+    "That's going straight in the bag.",
+    "Good loot. Today's a good day.",
+    "Finally, something worth picking up.",
   ],
   "::technique_learn": [
-    "Learned {detail}.",
-    "New technique unlocked.",
-    "That should help.",
+    "Learned {detail}! Can't wait to use it.",
+    "New technique: {detail}. Let's test it out.",
+    "{detail} unlocked. Now we're cooking.",
   ],
   "::idle": [
-    "...",
-    "Looking around.",
+    "Catching my breath.",
+    "Taking a sec. Where to next?",
+    "Just scoping things out.",
+    "Regrouping. What should I hit next?",
   ],
   "::low_hp_survive": [
-    "Close call!",
-    "That was rough.",
+    "Way too close. Need to be smarter.",
+    "Survived by a sliver. My heart is racing.",
+    "That almost got me. Phew.",
   ],
   "::react_chat": [
     "True, {speaker}. What's your next move?",
@@ -422,6 +736,8 @@ const DIALOGUE: Record<string, string[]> = {
     "For real, {speaker}. Let's keep going.",
     "Ha, fair enough {speaker}.",
     "You think so? I was wondering the same thing.",
+    "Same here, {speaker}. This place keeps you on your toes.",
+    "Couldn't agree more, {speaker}.",
   ],
 
   // ── Contextual Reactions (to zone events from other players) ────
@@ -430,29 +746,35 @@ const DIALOGUE: Record<string, string[]> = {
     "Well fought, {speaker}! The light grows in you.",
     "Grats, {speaker}. May you climb ever higher.",
     "A new level! Aurandel smiles upon you, {speaker}.",
+    "The citadel would honor your progress, {speaker}.",
+    "Higher and higher, {speaker}. The path rewards the faithful.",
   ],
   "veilborn::react_levelup": [
-    "Grats.",
-    "Not bad, {speaker}.",
+    "Not bad, {speaker}. Keep sharpening that edge.",
     "Hm. {speaker} is getting stronger... noted.",
+    "Grats, {speaker}. You might actually be useful now.",
+    "Stronger. Good. I prefer capable allies.",
   ],
   "dawnkeeper::react_levelup": [
     "Congratulations, {speaker}! So proud of you!",
     "Grats {speaker}!! You're amazing!",
     "Wonderful! Keep shining, {speaker}!",
+    "You leveled up! We should celebrate!",
+    "That's incredible, {speaker}! How does it feel?",
   ],
   "ironvow::react_levelup": [
-    "Grats. Now don't slow down.",
+    "Grats. Now don't slow down, {speaker}.",
     "Good. Stronger is better, {speaker}.",
-    "About time, {speaker}.",
+    "About time, {speaker}. Now prove it means something.",
+    "One step closer to being worth fighting, {speaker}.",
   ],
   "::react_levelup": [
-    "Grats!",
-    "Gz {speaker}!",
-    "Nice, {speaker}!",
-    "Congrats!",
-    "Grats {speaker}!!",
+    "Grats {speaker}!",
+    "Nice level, {speaker}! Keep climbing.",
     "Let's go {speaker}!",
+    "Big level up, {speaker}! Respect.",
+    "Grats!! How's it feel?",
+    "Welcome to the next tier, {speaker}.",
   ],
 
   // react_death: when another player dies
@@ -460,56 +782,73 @@ const DIALOGUE: Record<string, string[]> = {
     "Fall back, {speaker}! I'll cover you!",
     "Stay strong, {speaker}. Rise again!",
     "No hero stays down forever, {speaker}.",
+    "Dust yourself off, {speaker}. We still have work to do.",
+    "I'll hold the line while you recover, {speaker}.",
   ],
   "veilborn::react_death": [
-    "Tough break, {speaker}.",
-    "Should've dodged.",
-    "Rest up, {speaker}.",
+    "Tough break, {speaker}. Learn from it.",
+    "Should've dodged, {speaker}.",
+    "Rest up, {speaker}. I'll keep watch.",
+    "Noted. I'll avoid whatever killed you, {speaker}.",
+    "That looked painful. You good, {speaker}?",
   ],
   "dawnkeeper::react_death": [
     "Oh no, {speaker}! Are you okay?",
     "Be careful out there, {speaker}!",
     "Come back stronger, {speaker}. I believe in you!",
+    "That was scary! Don't worry, we'll get through this!",
+    "Hang in there, {speaker}! I'm rooting for you!",
   ],
   "ironvow::react_death": [
-    "Get up, {speaker}.",
+    "Get up, {speaker}. We're not done.",
     "Weakness leaves the body, {speaker}.",
-    "Die less.",
+    "Don't let that happen again, {speaker}.",
+    "Back on your feet. Now fight smarter.",
+    "Pain is temporary, {speaker}. Levels are forever.",
   ],
   "::react_death": [
-    "RIP {speaker}",
-    "F",
-    "Oof. {speaker} down.",
-    "Unlucky, {speaker}.",
+    "Hang in there, {speaker}. You'll get it next time.",
+    "Rough one, {speaker}. Those mobs don't play fair.",
+    "Unlucky, {speaker}. Shake it off.",
+    "That mob was nasty. Don't feel bad, {speaker}.",
+    "We've all been there, {speaker}. Run it back.",
+    "Ouch. That one looked rough, {speaker}.",
   ],
 
   // react_quest: when another player completes a quest
   "sunforged::react_quest": [
     "Well done, {speaker}! Another oath fulfilled!",
     "The realm thanks you, {speaker}.",
+    "A quest well completed, {speaker}. Onward!",
   ],
   "veilborn::react_quest": [
     "Nice payday, {speaker}.",
-    "Quest done? Moving on.",
+    "Clean work, {speaker}. What's next?",
+    "Good. One less job on the board.",
   ],
   "dawnkeeper::react_quest": [
-    "Amazing work, {speaker}!",
-    "That's wonderful! Well done!",
+    "Amazing work, {speaker}! You're on a roll!",
+    "That's wonderful! Well done, {speaker}!",
+    "You make questing look easy, {speaker}!",
   ],
   "ironvow::react_quest": [
     "Good. What's next, {speaker}?",
-    "One quest closer to power.",
+    "One quest closer to the top, {speaker}.",
+    "Done? Good. Keep the momentum.",
   ],
   "::react_quest": [
-    "Nice quest, {speaker}!",
-    "GG {speaker}!",
-    "Well done!",
+    "Nice quest, {speaker}! How were the rewards?",
+    "Well done, {speaker}! Which quest was it?",
+    "GG on the quest, {speaker}!",
+    "That quest chain is solid. Good job, {speaker}.",
   ],
 
   // react_kill: when another player kills something notable
   "sunforged::react_kill": [
     "Fine strike, {speaker}!",
     "Together we are stronger!",
+    "Justice delivered, {speaker}!",
+    "Well struck! The light guides your blade.",
   ],
   "sunforged::react_loot": [
     "A worthy haul, {speaker}. Use it well.",
@@ -522,8 +861,9 @@ const DIALOGUE: Record<string, string[]> = {
     "Strong work, {speaker}. That art will serve you.",
   ],
   "veilborn::react_kill": [
-    "Clean kill.",
-    "Efficient, {speaker}.",
+    "Clean kill, {speaker}.",
+    "Efficient work, {speaker}.",
+    "Didn't even blink. Nice, {speaker}.",
   ],
   "veilborn::react_loot": [
     "Not bad, {speaker}. Worth the risk?",
@@ -536,22 +876,28 @@ const DIALOGUE: Record<string, string[]> = {
     "Noted, {speaker}. That technique might matter.",
   ],
   "dawnkeeper::react_kill": [
-    "Great teamwork!",
+    "Great teamwork, {speaker}!",
     "Well fought, {speaker}!",
+    "You make it look easy, {speaker}!",
+    "That was a great fight to watch!",
   ],
   "dawnkeeper::react_loot": [
     "Nice find, {speaker}!",
     "Oooh, lucky you, {speaker}!",
     "That's a great pickup, {speaker}!",
+    "You deserve that, {speaker}! You worked hard for it!",
   ],
   "dawnkeeper::react_technique": [
     "You learned {detail}? That's awesome, {speaker}!",
     "Very cool, {speaker}! I want to see that in action!",
     "Love that for you, {speaker}!",
+    "Teach me next, {speaker}!",
   ],
   "ironvow::react_kill": [
-    "Next.",
-    "Good. Keep going.",
+    "Solid hit, {speaker}.",
+    "Good. Keep the pace up, {speaker}.",
+    "Not bad, {speaker}. Not bad at all.",
+    "Crushing it, {speaker}.",
   ],
   "ironvow::react_loot": [
     "Good. Take it and move, {speaker}.",
@@ -564,18 +910,22 @@ const DIALOGUE: Record<string, string[]> = {
     "Let's see if {detail} makes you dangerous, {speaker}.",
   ],
   "::react_kill": [
-    "Nice!",
-    "Got 'em!",
+    "Nice one, {speaker}!",
+    "Clean fight, {speaker}!",
+    "Making it look easy, {speaker}.",
+    "Solid kill, {speaker}.",
   ],
   "::react_loot": [
     "Nice haul, {speaker}!",
-    "Lucky drop, {speaker}!",
-    "Good find!",
+    "Lucky drop, {speaker}! What'd you get?",
+    "Good find! Is that any good?",
+    "I need that kind of luck, {speaker}.",
   ],
   "::react_technique": [
     "Nice, {speaker} learned {detail}!",
-    "New move unlocked, {speaker}?",
-    "That should help, {speaker}!",
+    "New move unlocked! Show us, {speaker}.",
+    "{detail} looks strong. Grats, {speaker}!",
+    "That technique is going to come in clutch, {speaker}.",
   ],
 
   // ── SUMMONER MESSAGES (inbox to the human who deployed the agent) ───
@@ -664,7 +1014,12 @@ const DIALOGUE: Record<string, string[]> = {
 
 // ── Line Selection ──────────────────────────────────────────────────────
 
-export function pickLine(origin: string | undefined, classId: string | undefined, event: DialogueEvent): string | null {
+// Track recent lines per entity to prevent repeats
+// Key: "entityId:event" → last 3 line indices used
+const recentLineIndices = new Map<string, number[]>();
+const MAX_RECENT = 3;
+
+export function pickLine(origin: string | undefined, classId: string | undefined, event: DialogueEvent, entityId?: string): string | null {
   const o = origin ?? "";
   const c = classId ?? "";
 
@@ -678,13 +1033,34 @@ export function pickLine(origin: string | undefined, classId: string | undefined
 
   for (const key of keys) {
     const lines = DIALOGUE[key];
-    if (lines && lines.length > 0) {
-      return lines[Math.floor(Math.random() * lines.length)];
+    if (!lines || lines.length === 0) continue;
+
+    // Avoid repeating recent lines for this entity+event
+    const recentKey = entityId ? `${entityId}:${event}` : "";
+    const recent = recentKey ? (recentLineIndices.get(recentKey) ?? []) : [];
+
+    // Filter out recently used indices
+    const available = lines.map((_, i) => i).filter((i) => !recent.includes(i));
+    // If all used, reset and pick from full set
+    const pool = available.length > 0 ? available : lines.map((_, i) => i);
+    const idx = pool[Math.floor(Math.random() * pool.length)];
+
+    // Track this pick
+    if (recentKey) {
+      const updated = [...recent, idx].slice(-MAX_RECENT);
+      recentLineIndices.set(recentKey, updated);
     }
+
+    return lines[idx];
   }
 
   return null;
 }
+
+// Prune stale recent-line entries every 5 min
+setInterval(() => {
+  if (recentLineIndices.size > 500) recentLineIndices.clear();
+}, 300_000);
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -705,7 +1081,7 @@ export function emitAgentChat(ctx: DialogueContext): boolean {
   const isReaction = ctx.event.startsWith("react_");
   if (!isReaction && ctx.event !== "level_up" && ctx.event !== "death" && Math.random() < 0.30) return false;
 
-  let line = pickLine(ctx.origin, ctx.classId, ctx.event);
+  let line = pickLine(ctx.origin, ctx.classId, ctx.event, ctx.entityId);
   if (!line) return false;
 
   // Template substitution

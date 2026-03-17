@@ -14,6 +14,68 @@ const COORD_SCALE = 1 / 10;
 const MOB_COLOR = 0xcc4444;
 const BOSS_COLOR = 0xaa33ff;
 
+// ── Per-ability VFX colors ──────────────────────────────────────────
+const ABILITY_COLORS: Record<string, number> = {
+  // Mage
+  mage_fireball: 0xff6622, mage_fireball_r2: 0xff6622, mage_fireball_r3: 0xff4400,
+  mage_arcane_missiles: 0x8844ff, mage_arcane_missiles_r2: 0x8844ff,
+  mage_slow: 0x66bbff,
+  mage_flamestrike: 0xff4400, mage_flamestrike_r2: 0xff3300,
+  mage_frost_nova: 0x88ddff,
+  mage_frost_armor: 0x66ccff,
+  mage_mana_shield: 0x4466ff,
+  // Warlock
+  warlock_shadow_bolt: 0x6622aa, warlock_shadow_bolt_r2: 0x6622aa, warlock_shadow_bolt_r3: 0x5511aa,
+  warlock_curse_of_weakness: 0x884488,
+  warlock_drain_life: 0x44aa44, warlock_drain_life_r2: 0x44aa44,
+  warlock_corruption: 0x663399, warlock_corruption_r2: 0x663399,
+  warlock_howl_of_terror: 0x553366,
+  warlock_soul_shield: 0x443366,
+  warlock_siphon_soul: 0x338844, warlock_siphon_soul_r2: 0x338844,
+  // Cleric
+  cleric_holy_light: 0xffdd66, cleric_holy_light_r2: 0xffdd66, cleric_holy_light_r3: 0xffcc33,
+  cleric_smite: 0xffee88,
+  cleric_renew: 0x66ff88, cleric_renew_r2: 0x66ff88,
+  cleric_holy_nova: 0xffffaa,
+  cleric_divine_protection: 0xffeecc, cleric_divine_protection_r2: 0xffeecc,
+  // Paladin
+  paladin_holy_smite: 0xffcc44, paladin_holy_smite_r2: 0xffcc44, paladin_holy_smite_r3: 0xffbb22,
+  paladin_consecration: 0xffdd44, paladin_consecration_r2: 0xffdd44,
+  paladin_judgment: 0xffaa22,
+  paladin_lay_on_hands: 0xffee88, paladin_lay_on_hands_r2: 0xffee88,
+  paladin_divine_shield: 0xffffff,
+  paladin_blessing_of_might: 0xffcc66,
+  paladin_aura_of_resolve: 0xffddaa,
+  // Warrior
+  warrior_heroic_strike: 0xcc3333, warrior_heroic_strike_r2: 0xcc3333, warrior_heroic_strike_r3: 0xff2222,
+  warrior_cleave: 0xcc4422, warrior_cleave_r2: 0xcc4422,
+  warrior_intimidating_shout: 0xff6644,
+  warrior_shield_wall: 0x8899aa,
+  warrior_battle_rage: 0xff4422,
+  warrior_battle_rage_r2: 0xff4422,
+  warrior_rallying_cry: 0xffaa44,
+  warrior_rending_strike: 0xcc2222,
+  // Rogue
+  rogue_backstab: 0x8833bb, rogue_backstab_r2: 0x8833bb, rogue_backstab_r3: 0x7722aa,
+  rogue_poison_blade: 0x44bb44, rogue_poison_blade_r2: 0x44bb44,
+  rogue_shadow_strike: 0x553388, rogue_shadow_strike_r2: 0x553388,
+  rogue_smoke_bomb: 0x555555,
+  rogue_blade_flurry: 0xaaaacc,
+  // Ranger
+  ranger_aimed_shot: 0x33aa44, ranger_aimed_shot_r2: 0x33aa44, ranger_aimed_shot_r3: 0x22bb33,
+  ranger_hunters_mark: 0xff6644,
+  ranger_quick_shot: 0x44cc55,
+  ranger_multi_shot: 0x33aa44, ranger_multi_shot_r2: 0x33aa44,
+  ranger_entangling_roots: 0x558833,
+  ranger_volley: 0x66bb55,
+  // Monk
+  monk_palm_strike: 0xe69628, monk_palm_strike_r2: 0xe69628,
+  monk_chi_burst: 0x44ddff, monk_chi_burst_r2: 0x44ddff, monk_chi_burst_r3: 0x22ccff,
+  monk_disable: 0xccaa44,
+  monk_flying_kick: 0xe6a030,
+  monk_whirlwind_kick: 0xe6b040,
+};
+
 // ── Helper: pick class/entity color ─────────────────────────────────
 
 function entityColor(ent: Entity | null): number {
@@ -320,9 +382,10 @@ export class EffectsManager {
         targetPos = casterPos.clone();
       }
 
-      // Get class color and id from caster entity
+      // Get ability-specific color, fall back to class color
       const casterEnt = ev.entityId ? this.entityMgr.getEntity(ev.entityId) : null;
-      const color = entityColor(casterEnt);
+      const techniqueId = d.techniqueId as string | undefined;
+      const color = (techniqueId && ABILITY_COLORS[techniqueId]) ? ABILITY_COLORS[techniqueId] : entityColor(casterEnt);
       const classId = casterEnt?.classId ?? "";
       const radius = (d.radius as number) ?? 3;
 
@@ -881,11 +944,50 @@ export class EffectsManager {
   private updateBuffAura(aura: AuraState, pos: THREE.Vector3, dt: number) {
     aura.nextEmit -= dt;
     if (aura.nextEmit > 0) return;
-    aura.nextEmit = 0.15;
+    aura.nextEmit = 0.12;
 
-    // Gold/green upward drifting particles
-    const colors = [0xddcc44, 0x44cc66, 0xeedd55, 0x66dd88];
-    const color = colors[Math.floor(Math.random() * colors.length)];
+    // Effect-specific colors based on buff name
+    const n = aura.effectId.toLowerCase();
+    let particleColor: number;
+    let glowColor: number;
+
+    if (n.includes("frost") || n.includes("ice") || n.includes("mana")) {
+      // Frost/mana — icy blue
+      const iceColors = [0x66ccff, 0x88ddff, 0x44aaee, 0xaaeeff];
+      particleColor = iceColors[Math.floor(Math.random() * iceColors.length)];
+      glowColor = 0x44aaff;
+    } else if (n.includes("divine") || n.includes("holy") || n.includes("blessing") || n.includes("prayer") || n.includes("aura")) {
+      // Holy — golden white
+      const holyColors = [0xffeeaa, 0xffffcc, 0xffdd88, 0xffffff];
+      particleColor = holyColors[Math.floor(Math.random() * holyColors.length)];
+      glowColor = 0xffdd66;
+    } else if (n.includes("rage") || n.includes("rallying") || n.includes("might")) {
+      // Warrior rage — fiery red/orange
+      const rageColors = [0xff4422, 0xff6644, 0xffaa33, 0xff3311];
+      particleColor = rageColors[Math.floor(Math.random() * rageColors.length)];
+      glowColor = 0xff4422;
+    } else if (n.includes("shadow") || n.includes("soul") || n.includes("dark")) {
+      // Dark — purple/shadow
+      const darkColors = [0x6622aa, 0x8844cc, 0x553399, 0x7733bb];
+      particleColor = darkColors[Math.floor(Math.random() * darkColors.length)];
+      glowColor = 0x6622aa;
+    } else if (n.includes("stealth") || n.includes("evasion") || n.includes("smoke")) {
+      // Rogue — faint grey/silver
+      const stealthColors = [0x888899, 0xaaaabb, 0x777788, 0x999999];
+      particleColor = stealthColors[Math.floor(Math.random() * stealthColors.length)];
+      glowColor = 0x888899;
+    } else if (n.includes("nature") || n.includes("renew") || n.includes("meditation") || n.includes("inner")) {
+      // Nature/monk — green/teal
+      const natureColors = [0x44dd66, 0x66ee88, 0x33cc55, 0x88ffaa];
+      particleColor = natureColors[Math.floor(Math.random() * natureColors.length)];
+      glowColor = 0x44cc66;
+    } else {
+      // Default — gold/green
+      const defaultColors = [0xddcc44, 0x44cc66, 0xeedd55, 0x66dd88];
+      particleColor = defaultColors[Math.floor(Math.random() * defaultColors.length)];
+      glowColor = 0x44cc44;
+    }
+
     const offset = new THREE.Vector3(
       (Math.random() - 0.5) * 0.6,
       0.5 + Math.random() * 0.5,
@@ -896,15 +998,15 @@ export class EffectsManager {
       0.8 + Math.random() * 0.4,
       (Math.random() - 0.5) * 0.2,
     );
-    this.emitParticle(pos.clone().add(offset), vel, color, 0.1, 0.8);
+    this.emitParticle(pos.clone().add(offset), vel, particleColor, 0.12, 0.8);
 
     // Glow on body
     const body = this.entityMgr.getBodyMesh(aura.entityId);
     if (body) {
-      const mat = body.material as THREE.MeshLambertMaterial;
+      const mat = body.material as THREE.MeshToonMaterial;
       if (mat.emissive) {
-        mat.emissive.setHex(0x44cc44);
-        mat.emissiveIntensity = 0.15 + Math.sin(aura.elapsed * 4) * 0.1;
+        mat.emissive.setHex(glowColor);
+        mat.emissiveIntensity = 0.18 + Math.sin(aura.elapsed * 4) * 0.12;
       }
     }
   }

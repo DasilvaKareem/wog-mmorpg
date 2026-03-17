@@ -116,11 +116,24 @@ function inferArmorMaterial(name: string): ArmorMaterial {
   return "plate";
 }
 
-// Base color tints per armor material (combined with quality color)
+// Base color tints per armor material — strong distinction
 const ARMOR_MAT_TINT: Record<ArmorMaterial, number> = {
-  leather: 0x8B6B42, // warm brown
-  chain: 0x889999, // blue-steel
-  plate: 0xBBBBCC, // bright silver
+  leather: 0x7A5533, // rich warm brown
+  chain: 0x778899, // steel blue-grey
+  plate: 0xCCCCDD, // bright polished silver
+};
+
+// Quality-specific tint overrides per material type
+const ARMOR_QUALITY_TINT: Record<ArmorMaterial, Record<string, number>> = {
+  leather: {
+    common: 0x7A5533, uncommon: 0x5A7A33, rare: 0x4A6655, epic: 0x6A3366, legendary: 0x8B6B22,
+  },
+  chain: {
+    common: 0x778899, uncommon: 0x669977, rare: 0x5577AA, epic: 0x7755AA, legendary: 0xAA8844,
+  },
+  plate: {
+    common: 0xBBBBCC, uncommon: 0x88BB88, rare: 0x6699DD, epic: 0x9966CC, legendary: 0xDDAA44,
+  },
 };
 
 // ── Shared armor geometries ─────────────────────────────────────────
@@ -157,23 +170,33 @@ const gauntletCuffGeo = new THREE.CylinderGeometry(0.06, 0.055, 0.05, 6);
 const gloveLeatherGeo = new THREE.SphereGeometry(0.065, 5, 4);
 
 // Belt
-const beltGeo = new THREE.TorusGeometry(0.27, 0.03, 4, 12);
-const beltBuckleGeo = new THREE.BoxGeometry(0.06, 0.06, 0.04);
-const beltThinGeo = new THREE.TorusGeometry(0.26, 0.02, 4, 12);
+const beltGeo = new THREE.TorusGeometry(0.20, 0.02, 4, 12);
+const beltBuckleGeo = new THREE.BoxGeometry(0.04, 0.04, 0.03);
+const beltThinGeo = new THREE.TorusGeometry(0.19, 0.015, 4, 12);
 const beltPouchGeo = new THREE.BoxGeometry(0.06, 0.07, 0.05);
 
 function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?: { transparent?: boolean; opacity?: number }): THREE.MeshToonMaterial {
   const q = quality ?? "common";
-  // Blend quality color with material tint
-  const qualCol = new THREE.Color(QUALITY_COLORS[q] ?? QUALITY_COLORS.common);
-  const tintCol = new THREE.Color(ARMOR_MAT_TINT[matType]);
-  qualCol.lerp(tintCol, 0.4); // 40% tint influence
+
+  // Use quality+material specific color, or blend as fallback
+  const specificTint = ARMOR_QUALITY_TINT[matType]?.[q];
+  let finalColor: THREE.Color;
+  if (specificTint) {
+    finalColor = new THREE.Color(specificTint);
+  } else {
+    const qualCol = new THREE.Color(QUALITY_COLORS[q] ?? QUALITY_COLORS.common);
+    const tintCol = new THREE.Color(ARMOR_MAT_TINT[matType]);
+    finalColor = qualCol.lerp(tintCol, 0.6); // 60% material influence
+  }
 
   const emHex = QUALITY_EMISSIVE[q] ?? 0x000000;
+  // Leather is matte (low emissive), plate is shiny (higher emissive)
+  const matEmissiveBoost = matType === "plate" ? 1.5 : matType === "chain" ? 1.2 : 0.8;
+
   return new THREE.MeshToonMaterial({
-    color: qualCol,
+    color: finalColor,
     emissive: emHex,
-    emissiveIntensity: emHex ? 0.25 : 0,
+    emissiveIntensity: emHex ? 0.25 * matEmissiveBoost : 0,
     transparent: opts?.transparent ?? false,
     opacity: opts?.opacity ?? 1,
     gradientMap: getGradientMap(),
@@ -183,7 +206,7 @@ function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?
 function addArmorPieces(
   group: THREE.Group, ent: Entity, cls: { sx: number; sy: number; sz: number; color: number },
   leftArm?: THREE.Group, rightArm?: THREE.Group, leftLeg?: THREE.Mesh, rightLeg?: THREE.Mesh,
-  rig?: CharacterRig | null,
+  rig?: CharacterRig | null, bodyMesh?: THREE.Mesh | null,
 ) {
   const eq = ent.equipment;
   if (!eq) return;
@@ -217,35 +240,38 @@ function addArmorPieces(
     }
   }
 
-  // ── Chest — attach to chest bone ──
+  // ── Chest — recolor body mesh to armor color + add small detail accents ──
   if (eq.chest) {
     const mt = inferArmorMaterial(eq.chest.name ?? "");
+    const armorMat = makeArmorMat(mt, eq.chest.quality);
     const chestTarget = rig?.chest ?? group;
-    const chestOffY = rig ? 0 : 0.8; // bone-relative vs absolute fallback
+    const chestOffY = rig ? 0 : 0.8;
+
+    // Recolor body mesh directly — no transparent overlay
+    if (bodyMesh) {
+      const bm = bodyMesh.material as THREE.MeshToonMaterial;
+      bm.color.copy(armorMat.color);
+      if (bm.emissive && armorMat.emissive) {
+        bm.emissive.copy(armorMat.emissive);
+        bm.emissiveIntensity = armorMat.emissiveIntensity;
+      }
+    }
+
+    // Small accent details per armor type (not full overlays)
     if (mt === "plate") {
-      const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.75 });
-      const plate = new THREE.Mesh(chestPlateGeo, mat);
-      plate.position.y = chestOffY;
-      plate.scale.set(cls.sx * 1.15, cls.sy * 0.85, cls.sz * 1.1);
-      chestTarget.add(plate);
-      const ridgeMat = makeArmorMat(mt, eq.chest.quality);
+      // Belt ridges
       for (const ry of [-0.1, 0.05]) {
-        const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.28 * cls.sx, 0.015, 4, 10), ridgeMat);
+        const ridge = new THREE.Mesh(new THREE.TorusGeometry(0.28 * cls.sx, 0.018, 4, 10), armorMat);
         ridge.position.y = chestOffY + ry; ridge.rotation.x = Math.PI / 2;
         chestTarget.add(ridge);
       }
     } else if (mt === "chain") {
-      const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.6 });
-      const shirt = new THREE.Mesh(chestVestGeo, mat);
-      shirt.position.y = chestOffY;
-      shirt.scale.set(cls.sx * 1.1, cls.sy * 0.88, cls.sz * 1.06);
-      chestTarget.add(shirt);
+      // Collar ring
+      const collar = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.02, 4, 8), armorMat);
+      collar.position.y = chestOffY + 0.25; collar.rotation.x = Math.PI / 2;
+      chestTarget.add(collar);
     } else {
-      const mat = makeArmorMat(mt, eq.chest.quality, { transparent: true, opacity: 0.55 });
-      const vest = new THREE.Mesh(chestVestGeo, mat);
-      vest.position.y = chestOffY;
-      vest.scale.set(cls.sx * 1.08, cls.sy * 0.82, cls.sz * 1.04);
-      chestTarget.add(vest);
+      // Leather stitching line
       const stitchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x554422 });
       const stitch = new THREE.Mesh(new THREE.BoxGeometry(0.005, 0.3, 0.01), stitchMat);
       stitch.position.set(0, chestOffY, 0.27 * cls.sz); chestTarget.add(stitch);
@@ -280,53 +306,64 @@ function addArmorPieces(
     }
   }
 
-  // ── Legs — child of leg meshes so they swing with walk ──
+  // ── Legs — recolor thigh+shin meshes to armor color ──
   if (eq.legs) {
     const mt = inferArmorMaterial(eq.legs.name ?? "");
-    const legRefs = [leftLeg, rightLeg];
-    for (let i = 0; i < 2; i++) {
-      const leg = legRefs[i];
+    const legMat = makeArmorMat(mt, eq.legs.quality);
+    // Recolor all leg meshes on hip and knee bones
+    if (rig) {
+      for (const bone of [rig.lHip, rig.rHip, rig.lKnee, rig.rKnee]) {
+        bone.traverse((child) => {
+          if (child instanceof THREE.Mesh && child.material) {
+            const m = child.material as THREE.MeshToonMaterial;
+            m.color.copy(legMat.color);
+            if (m.emissive && legMat.emissive) {
+              m.emissive.copy(legMat.emissive);
+              m.emissiveIntensity = legMat.emissiveIntensity;
+            }
+          }
+        });
+      }
+      // Plate: add knee cap accents
       if (mt === "plate") {
-        const mat = makeArmorMat(mt, eq.legs.quality, { transparent: true, opacity: 0.75 });
-        const greave = new THREE.Mesh(greaveGeo, mat);
         const kneeMat = makeArmorMat(mt, eq.legs.quality);
-        const knee = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), kneeMat);
-        if (leg) { greave.position.set(0, 0, 0.02); leg.add(greave); knee.position.set(0, 0.1, 0.08); leg.add(knee); }
-        else { const dx = i === 0 ? -0.1 : 0.1; greave.position.set(dx, 0.35, 0.02); group.add(greave); knee.position.set(dx, 0.45, 0.1); group.add(knee); }
-      } else {
-        const mat = makeArmorMat(mt, eq.legs.quality, { transparent: true, opacity: 0.65 });
-        const pant = new THREE.Mesh(leatherPantsGeo, mat);
-        if (leg) { pant.position.set(0, 0, 0.01); leg.add(pant); }
-        else { const dx = i === 0 ? -0.1 : 0.1; pant.position.set(dx, 0.35, 0.01); group.add(pant); }
+        for (const kneeBone of [rig.lKnee, rig.rKnee]) {
+          const kneeCap = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), kneeMat);
+          kneeCap.position.set(0, 0.02, 0.06);
+          kneeBone.add(kneeCap);
+        }
+      }
+    } else {
+      // Fallback: recolor leg mesh refs directly
+      for (const leg of [leftLeg, rightLeg]) {
+        if (leg?.material) {
+          (leg.material as THREE.MeshToonMaterial).color.copy(legMat.color);
+        }
       }
     }
   }
 
-  // ── Boots ──
+  // ── Boots — wrap around lower shin + foot area ──
   if (eq.boots) {
     const mt = inferArmorMaterial(eq.boots.name ?? "");
     const mat = makeArmorMat(mt, eq.boots.quality);
-    const footBones = rig ? [rig.lFoot, rig.rFoot] : [null, null];
-    for (let i = 0; i < 2; i++) {
-      const foot = footBones[i];
-      const dx = i === 0 ? -0.1 : 0.1;
-      if (mt === "plate") {
-        const boot = new THREE.Mesh(bootPlateGeo, mat);
-        const cuff = new THREE.Mesh(bootCuffGeo, mat);
-        if (foot) {
-          boot.position.set(0, 0.03, 0.03); foot.add(boot);
-          cuff.position.set(0, 0.1, 0); foot.add(cuff);
+    if (rig) {
+      for (const kneeBone of [rig.lKnee, rig.rKnee]) {
+        if (mt === "plate") {
+          const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.18), mat);
+          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
+          const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.08, 6), mat);
+          cuff.position.set(0, -0.14, 0); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
         } else {
-          boot.position.set(dx, 0.07, 0.03); group.add(boot);
-          cuff.position.set(dx, 0.16, 0); group.add(cuff);
+          const boot = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.14, 4, 6), mat);
+          boot.position.set(0, -0.18, 0.01); boot.userData.equipSlot = "bootLeather"; kneeBone.add(boot);
         }
-      } else {
-        const boot = new THREE.Mesh(bootLeatherGeo, mat);
-        if (foot) {
-          boot.position.set(0, 0.04, 0.02); foot.add(boot);
-        } else {
-          boot.position.set(dx, 0.09, 0.02); group.add(boot);
-        }
+      }
+    } else {
+      // Fallback: absolute position
+      for (const dx of [-0.1, 0.1]) {
+        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.18), mat);
+        boot.position.set(dx, 0.06, 0.02); group.add(boot);
       }
     }
   }
@@ -357,18 +394,18 @@ function addArmorPieces(
     const mt = inferArmorMaterial(eq.belt.name ?? "");
     const mat = makeArmorMat(mt, eq.belt.quality);
 
-    const beltTarget = rig?.hip ?? group;
-    const beltOffY = rig ? 0.08 : 0.52;
+    const beltTarget = rig?.spine ?? group;
+    const beltOffY = rig ? 0.02 : 0.52;
     if (mt === "plate") {
       const ring = new THREE.Mesh(beltGeo, mat);
       ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); beltTarget.add(ring);
+      ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltPlate"; beltTarget.add(ring);
       const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, beltOffY, 0.27 * cls.sz); beltTarget.add(buckle);
+      buckle.position.set(0, beltOffY, 0.27 * cls.sz); buckle.userData.equipSlot = "beltPlate"; beltTarget.add(buckle);
     } else {
       const ring = new THREE.Mesh(beltThinGeo, mat);
       ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
-      ring.scale.set(cls.sx, cls.sz, 1); beltTarget.add(ring);
+      ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltLeather"; beltTarget.add(ring);
       if (mt === "leather") {
         const pouchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x6B5533 });
         for (const side of [-1, 1]) {
@@ -563,6 +600,79 @@ function makeLabel(text: string, color = "#ffffff"): THREE.Sprite {
   return sprite;
 }
 
+// ── Speech bubble ──────────────────────────────────────────────────
+
+function makeSpeechBubble(text: string): THREE.Sprite {
+  const maxChars = 32;
+  // Word-wrap text
+  const words = text.split(" ");
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    if ((line + " " + word).trim().length > maxChars) {
+      if (line) lines.push(line);
+      line = word;
+    } else {
+      line = line ? line + " " + word : word;
+    }
+  }
+  if (line) lines.push(line);
+  if (lines.length > 3) lines.length = 3; // max 3 lines
+
+  const lineHeight = 28;
+  const padding = 12;
+  const canvasW = 512;
+  const canvasH = padding * 2 + lines.length * lineHeight + 16;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext("2d")!;
+
+  // Bubble background
+  ctx.fillStyle = "rgba(0, 0, 0, 0.75)";
+  const r = 12;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(canvasW - r, 0);
+  ctx.quadraticCurveTo(canvasW, 0, canvasW, r);
+  ctx.lineTo(canvasW, canvasH - r);
+  ctx.quadraticCurveTo(canvasW, canvasH, canvasW - r, canvasH);
+  ctx.lineTo(r, canvasH);
+  ctx.quadraticCurveTo(0, canvasH, 0, canvasH - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.fill();
+
+  // Border
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.3)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Text
+  ctx.font = "22px monospace";
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffffff";
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], canvasW / 2, padding + 22 + i * lineHeight);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  const aspect = canvasW / canvasH;
+  const scaleH = 0.6 + lines.length * 0.2;
+  sprite.scale.set(scaleH * aspect, scaleH, 1);
+  return sprite;
+}
+
+interface SpeechBubble {
+  sprite: THREE.Sprite;
+  entityId: string;
+  elapsed: number;
+  duration: number;
+}
+
 // ── Floating combat text ────────────────────────────────────────────
 
 function makeFloatingText(text: string, color: string): THREE.Sprite {
@@ -593,6 +703,7 @@ import { AnimationLibrary } from "./AnimationLibrary.js";
 type AnimName = "walk" | "idle" | "attack"
   | "heroicstrike" | "cleave" | "shieldwall" | "battlerage" | "intimidatingshout" | "rallyingcry" | "rendingstrike"
   | "spellcast" | "darkcast" | "holycast"
+  | "palmstrike" | "flyingkick" | "whirlwindkick"
   | "damage" | "heal" | "death" | "gather" | "craft";
 
 /** Map technique IDs to specific animation clips (ranked versions share base clip) */
@@ -608,6 +719,62 @@ const TECHNIQUE_ANIM: Record<string, AnimName> = {
   warrior_intimidating_shout: "intimidatingshout",
   warrior_rallying_cry: "rallyingcry",
   warrior_rending_strike: "rendingstrike",
+  // Paladin
+  paladin_holy_smite: "attack", paladin_holy_smite_r2: "attack", paladin_holy_smite_r3: "attack",
+  paladin_consecration: "holycast", paladin_consecration_r2: "holycast",
+  paladin_judgment: "holycast",
+  paladin_lay_on_hands: "holycast", paladin_lay_on_hands_r2: "holycast",
+  paladin_divine_shield: "shieldwall",
+  paladin_blessing_of_might: "holycast",
+  paladin_aura_of_resolve: "holycast",
+  // Rogue
+  rogue_backstab: "attack", rogue_backstab_r2: "attack", rogue_backstab_r3: "attack",
+  rogue_poison_blade: "attack", rogue_poison_blade_r2: "attack",
+  rogue_shadow_strike: "attack", rogue_shadow_strike_r2: "attack",
+  rogue_smoke_bomb: "attack",
+  rogue_blade_flurry: "cleave",
+  rogue_stealth: "idle",
+  rogue_evasion: "idle",
+  // Ranger
+  ranger_aimed_shot: "attack", ranger_aimed_shot_r2: "attack", ranger_aimed_shot_r3: "attack",
+  ranger_hunters_mark: "attack", ranger_hunters_mark_r2: "attack",
+  ranger_quick_shot: "attack",
+  ranger_multi_shot: "cleave", ranger_multi_shot_r2: "cleave",
+  ranger_entangling_roots: "spellcast",
+  ranger_volley: "spellcast",
+  ranger_natures_blessing: "holycast",
+  // Mage
+  mage_fireball: "spellcast", mage_fireball_r2: "spellcast", mage_fireball_r3: "spellcast",
+  mage_arcane_missiles: "spellcast", mage_arcane_missiles_r2: "spellcast",
+  mage_slow: "spellcast",
+  mage_flamestrike: "spellcast", mage_flamestrike_r2: "spellcast",
+  mage_frost_nova: "spellcast",
+  mage_frost_armor: "spellcast",
+  mage_mana_shield: "spellcast",
+  // Cleric
+  cleric_holy_light: "holycast", cleric_holy_light_r2: "holycast", cleric_holy_light_r3: "holycast",
+  cleric_smite: "holycast",
+  cleric_renew: "holycast", cleric_renew_r2: "holycast",
+  cleric_holy_nova: "holycast",
+  cleric_divine_protection: "holycast", cleric_divine_protection_r2: "holycast",
+  cleric_prayer_of_fortitude: "holycast",
+  cleric_spirit_of_redemption: "holycast",
+  // Warlock
+  warlock_shadow_bolt: "darkcast", warlock_shadow_bolt_r2: "darkcast", warlock_shadow_bolt_r3: "darkcast",
+  warlock_curse_of_weakness: "darkcast",
+  warlock_drain_life: "darkcast", warlock_drain_life_r2: "darkcast",
+  warlock_corruption: "darkcast", warlock_corruption_r2: "darkcast",
+  warlock_howl_of_terror: "darkcast",
+  warlock_soul_shield: "darkcast",
+  warlock_siphon_soul: "darkcast", warlock_siphon_soul_r2: "darkcast",
+  // Monk
+  monk_palm_strike: "palmstrike", monk_palm_strike_r2: "palmstrike",
+  monk_disable: "palmstrike",
+  monk_chi_burst: "spellcast", monk_chi_burst_r2: "spellcast", monk_chi_burst_r3: "spellcast",
+  monk_flying_kick: "flyingkick",
+  monk_whirlwind_kick: "whirlwindkick",
+  monk_meditation: "holycast", monk_meditation_r2: "holycast",
+  monk_inner_focus: "holycast",
 };
 
 /** Pick the right attack animation clip based on class (fallback when no technique ID) */
@@ -616,6 +783,7 @@ function attackAnimForClass(classId: string | undefined): AnimName {
     case "mage": return "spellcast";
     case "warlock": return "darkcast";
     case "cleric": return "holycast";
+    case "monk": return "palmstrike";
     default: return "attack";
   }
 }
@@ -665,6 +833,7 @@ export class EntityManager {
   readonly group = new THREE.Group();
   private entities = new Map<string, EntityObject>();
   private floatingTexts: FloatingText[] = [];
+  private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
 
@@ -818,28 +987,19 @@ export class EntityManager {
         obj.mixer.update(dt);
       }
 
-      // ── GLB mob attack animation (lunge + scale pulse) ──
+      // ── GLB mob attack animation (lunge only, no scale change) ──
       if (obj.hasGlbModel && obj.glbAttackTimer > 0) {
         obj.glbAttackTimer -= dt;
         const t = Math.max(0, obj.glbAttackTimer);
-        const total = 0.4; // duration
+        const total = 0.4;
         const progress = 1 - t / total;
-        // Quick lunge forward then snap back
         const lunge = progress < 0.4 ? progress / 0.4 : 1 - (progress - 0.4) / 0.6;
         const glbChild = g.getObjectByName("glb_mob");
         if (glbChild) {
-          // Lunge forward in facing direction
           glbChild.position.z = lunge * 0.5;
-          // Scale pulse
-          const pulse = 1 + Math.sin(progress * Math.PI) * 0.15;
-          glbChild.scale.setScalar(pulse);
         }
-        if (obj.glbAttackTimer <= 0) {
-          // Reset
-          if (glbChild) {
-            glbChild.position.z = 0;
-            glbChild.scale.setScalar(1);
-          }
+        if (obj.glbAttackTimer <= 0 && glbChild) {
+          glbChild.position.z = 0;
         }
       }
 
@@ -885,6 +1045,31 @@ export class EntityManager {
       if (t >= 1) {
         ft.sprite.parent?.remove(ft.sprite);
         this.floatingTexts.splice(i, 1);
+      }
+    }
+
+    // Update speech bubbles
+    for (let i = this.speechBubbles.length - 1; i >= 0; i--) {
+      const sb = this.speechBubbles[i];
+      sb.elapsed += dt;
+      // Fade out in last 1 second
+      const fadeStart = sb.duration - 1;
+      if (sb.elapsed > fadeStart) {
+        const fadeT = (sb.elapsed - fadeStart) / 1;
+        (sb.sprite.material as THREE.SpriteMaterial).opacity = 1 - fadeT;
+      }
+      if (sb.elapsed >= sb.duration) {
+        sb.sprite.parent?.remove(sb.sprite);
+        this.speechBubbles.splice(i, 1);
+      }
+    }
+  }
+
+  private removeSpeechBubble(entityId: string) {
+    for (let i = this.speechBubbles.length - 1; i >= 0; i--) {
+      if (this.speechBubbles[i].entityId === entityId) {
+        this.speechBubbles[i].sprite.parent?.remove(this.speechBubbles[i].sprite);
+        this.speechBubbles.splice(i, 1);
       }
     }
   }
@@ -1103,6 +1288,21 @@ export class EntityManager {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.currentAnim !== "craft") {
           this.playOneShot(obj, "craft");
+        }
+      }
+      // Chat events: show speech bubble above entity
+      if (ev.type === "chat" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj) {
+          const chatText = (ev.data?.text as string) ?? ev.message ?? "";
+          if (chatText) {
+            // Remove existing bubble for this entity
+            this.removeSpeechBubble(ev.entityId);
+            const sprite = makeSpeechBubble(chatText);
+            sprite.position.y = 2.5;
+            obj.group.add(sprite);
+            this.speechBubbles.push({ sprite, entityId: ev.entityId, elapsed: 0, duration: Math.min(4 + chatText.length * 0.05, 8) });
+          }
         }
       }
       // Ability events: play technique-specific animation on the caster
@@ -1377,18 +1577,27 @@ export class EntityManager {
     const classId = ent.classId ?? "warrior";
     const cls = CLASS_BODY[classId] ?? CLASS_BODY.warrior;
     const isFemale = ent.gender === "female";
+    const race = (ent.raceId ?? "human").toLowerCase();
+    const isElf = race === "elf";
+    const isDwarf = race === "dwarf";
+
+    // Race body modifiers
+    const raceScale = isDwarf ? 0.78 : isElf ? 1.12 : 1.0;
+    const raceWidthX = isDwarf ? 1.25 : isElf ? 0.9 : 1.0;
+    const raceWidthZ = isDwarf ? 1.15 : isElf ? 0.9 : 1.0;
 
     // Gender body modifiers
-    const gsx = isFemale ? 0.88 : 1.0;
-    const gsy = isFemale ? 0.95 : 1.0;
-    const gsz = isFemale ? 0.92 : 1.0;
-    const armScale = isFemale ? 0.9 : 1.0;
-    const headScale = isFemale ? 0.95 : 1.0;
+    const gsx = (isFemale ? 0.88 : 1.0) * raceWidthX;
+    const gsy = (isFemale ? 0.95 : 1.0) * raceScale;
+    const gsz = (isFemale ? 0.92 : 1.0) * raceWidthZ;
+    const armScale = (isFemale ? 0.9 : 1.0) * raceScale;
+    const headScale = isFemale ? 0.95 : isDwarf ? 1.05 : 1.0;
 
     // ── Build skeleton ──
     const rig = new CharacterRig({
+      scale: raceScale,
       shoulderWidth: 0.3 * cls.sx * gsx,
-      hipWidth: isFemale ? 0.12 : 0.1,
+      hipWidth: (isFemale ? 0.12 : 0.1) * raceWidthX,
       isFemale,
     });
     group.add(rig.rootBone);
@@ -1422,6 +1631,31 @@ export class EntityManager {
       const hairHex = HAIR_COLORS[style] ?? 0x4a3728;
       const hairMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: hairHex });
       this.buildHairOnBone(rig.head, style, hairMat);
+    }
+
+    // Race-specific ear features → Head bone
+    const earSkinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
+    if (isElf) {
+      // Pointed elf ears — long cones angled outward
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.18, 4), earSkinMat);
+        ear.position.set(side * 0.17, 0.02, 0.04);
+        ear.rotation.z = side * -0.9;
+        ear.rotation.x = -0.15;
+        rig.head.add(ear);
+      }
+    } else if (isDwarf) {
+      // Dwarves — round stout ears + bushy eyebrow ridge
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.SphereGeometry(0.04, 5, 4), earSkinMat);
+        ear.position.set(side * 0.16, 0.0, 0.04);
+        rig.head.add(ear);
+      }
+      // Brow ridge
+      const browMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: new THREE.Color(skinHex).multiplyScalar(0.7).getHex() });
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.06), browMat);
+      brow.position.set(0, 0.1, 0.14);
+      rig.head.add(brow);
     }
 
     // Legs → thigh on hip bones, shin on knee bones
@@ -1475,34 +1709,42 @@ export class EntityManager {
       const emHex = QUALITY_EMISSIVE[quality] ?? 0x000000;
       const wpn = buildWeaponMesh(wType, metalHex, emHex);
 
+      // Position weapons outside body — Z pushes forward, X pushes outward from hip
       if (wType === "bow") {
-        wpn.position.set(0, -0.1, -0.1);
+        wpn.position.set(0.05, -0.1, 0.15);
+        wpn.rotation.set(0, 0.3, 0);
       } else if (wType === "staff") {
-        wpn.position.set(0, 0.2, 0); wpn.rotation.z = 0.05;
+        wpn.position.set(0.05, 0.15, 0.12);
+        wpn.rotation.set(0.05, 0, 0.05);
       } else if (wType === "axe") {
-        // Axe: grip near bottom of handle, blade faces forward
-        wpn.position.set(0, 0.1, 0.05);
-        wpn.rotation.set(0.1, 0, -0.1);
+        wpn.position.set(-0.020, 0.140, 0.190);
+        wpn.rotation.set(0.808, -1.342, -0.142);
       } else if (wType === "mace") {
-        wpn.position.set(0, 0.05, 0);
-        wpn.rotation.z = -0.1;
-      } else if (wType === "pickaxe") {
-        wpn.position.set(0, 0.08, 0.05);
+        wpn.position.set(0.05, 0, 0.12);
         wpn.rotation.set(0.1, 0, -0.1);
+      } else if (wType === "pickaxe") {
+        wpn.position.set(0.05, 0.05, 0.12);
+        wpn.rotation.set(0.15, 0, -0.1);
       } else if (wType === "dagger") {
-        wpn.position.set(0, -0.02, 0);
-        wpn.rotation.z = -0.1;
+        wpn.position.set(0.03, -0.05, 0.1);
+        wpn.rotation.set(0.1, 0, -0.1);
       } else {
-        // Sword and others
-        wpn.position.set(0, -0.05, 0); wpn.rotation.z = -0.15;
+        // Sword — tuned via Equipment Tuner
+        wpn.position.set(0.000, 0.000, 0.100);
+        wpn.rotation.set(1.408, -0.192, 0.158);
       }
+      wpn.userData.equipSlot = wType;
       rig.rHand.add(wpn);
     }
 
-    // Shield on left hand for paladin/warrior
-    if (classId === "paladin" || classId === "warrior") {
-      const s = new THREE.Mesh(shieldGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: cls.color }));
-      s.position.set(0, -0.05, 0.1);
+    // Shield — only if equipped (no default)
+    if (ent.equipment?.offhand) {
+      const shieldQuality = ent.equipment.offhand.quality ?? "common";
+      const shieldColor = QUALITY_COLORS[shieldQuality] ?? cls.color;
+      const s = new THREE.Mesh(shieldGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: shieldColor }));
+      s.position.set(-0.05, -0.05, 0.18);
+      s.rotation.y = 0.3;
+      s.userData.equipSlot = "shield";
       rig.lHand.add(s);
     }
 
@@ -1511,7 +1753,7 @@ export class EntityManager {
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
     // Procedural armor pieces — pass rig so pieces attach to bones
-    addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig);
+    addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig, body);
 
     return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
@@ -1759,6 +2001,18 @@ export class EntityManager {
     return this.entities.get(entityId)?.bodyMesh ?? null;
   }
 
+  /** Live-update equipment positions from the tuner panel */
+  applyEquipmentTuning(slot: string, pos: { x: number; y: number; z: number }, rot: { x: number; y: number; z: number }) {
+    for (const obj of this.entities.values()) {
+      obj.group.traverse((child) => {
+        if (child.userData.equipSlot === slot) {
+          child.position.set(pos.x, pos.y, pos.z);
+          child.rotation.set(rot.x, rot.y, rot.z);
+        }
+      });
+    }
+  }
+
   dispose() {
     for (const obj of this.entities.values()) {
       obj.mixer?.stopAllAction();
@@ -1768,5 +2022,7 @@ export class EntityManager {
     }
     this.entities.clear();
     this.floatingTexts = [];
+    for (const sb of this.speechBubbles) sb.sprite.parent?.remove(sb.sprite);
+    this.speechBubbles = [];
   }
 }

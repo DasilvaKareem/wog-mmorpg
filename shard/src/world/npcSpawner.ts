@@ -132,8 +132,8 @@ export const NPC_DEFS: NpcDef[] = [
     x: 180,
     y: 260,
     hp: 999,
-    // Sells potions, starter weapons, starter armor, Stone Pickaxe, Basic Sickle, Rusty Skinning Knife
-    shopItems: [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76],
+    // Sells potions, starter weapons, starter armor, Stone Pickaxe, Basic Sickle, Rusty Skinning Knife, Traveler's Cloak
+    shopItems: [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76, 227],
   },
   {
     zoneId: "village-square",
@@ -143,7 +143,7 @@ export const NPC_DEFS: NpcDef[] = [
     y: 260,
     hp: 999,
     // Sells advanced weapons, heavy armor, pickaxes, sickles, skinning knives, disenchanting scroll
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -155,7 +155,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 160,
     y: 60,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
   {
     zoneId: "dark-forest",
@@ -164,7 +164,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 160,
     y: 60,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   {
@@ -1220,7 +1220,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -1474,7 +1474,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -1728,7 +1728,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -1972,7 +1972,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -2216,7 +2216,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -2468,7 +2468,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -2712,7 +2712,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115],
+    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
   },
 
   // Auctioneer
@@ -4554,6 +4554,7 @@ const spawnedNpcIds = new Map<NpcDef, string>();
 // Respawn delay tracking: NpcDef → timestamp when death was first detected
 const pendingRespawns = new Map<NpcDef, number>();
 const MOB_RESPAWN_DELAY_MS = 20_000; // 20 seconds
+const MOB_RESPAWN_SCATTER_RADIUS = 40; // random offset from original spawn on respawn
 
 // Track spawned NPCs by name for quest system
 const npcIdsByName = new Map<string, string>();
@@ -4572,15 +4573,23 @@ export function spawnNpcs(): void {
   }
 }
 
-function spawnSingleNpc(def: NpcDef): void {
+function spawnSingleNpc(def: NpcDef, scatter = false): void {
   const zone = getOrCreateZone(def.zoneId);
 
   // Offset local coords to world-space
   const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
-  const worldX = def.x + offset.x;
-  const worldY = def.y + offset.z;
+  let worldX = def.x + offset.x;
+  let worldY = def.y + offset.z;
 
   const isCombatant = def.type === "mob" || def.type === "boss";
+
+  // On respawn, scatter mob to a random nearby position
+  if (scatter && isCombatant) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * MOB_RESPAWN_SCATTER_RADIUS;
+    worldX += Math.cos(angle) * dist;
+    worldY += Math.sin(angle) * dist;
+  }
 
   // Assign layered-sprite appearance to humanoid NPCs
   const appearance = HUMANOID_NPC_TYPES.has(def.type)
@@ -4667,7 +4676,7 @@ export function tickMobRespawner(): void {
     const deathTime = pendingRespawns.get(def)!;
     if (now - deathTime >= MOB_RESPAWN_DELAY_MS) {
       console.log(`[respawn] Respawning ${def.name} in ${def.zoneId} (after ${((now - deathTime) / 1000).toFixed(1)}s)`);
-      spawnSingleNpc(def);
+      spawnSingleNpc(def, true);
       pendingRespawns.delete(def);
     }
   }

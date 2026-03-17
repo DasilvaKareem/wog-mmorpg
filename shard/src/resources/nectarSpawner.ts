@@ -70,12 +70,15 @@ export function spawnNectarNodes(): void {
     const nectarProps = NECTAR_CATALOG[def.nectarType];
     const offset = getZoneOffset(def.zoneId) ?? { x: 0, z: 0 };
 
+    const worldX = def.x + offset.x;
+    const worldY = def.y + offset.z;
+
     const entity: Entity = {
       id: randomUUID(),
       type: "nectar-node",
       name: nectarProps.label,
-      x: def.x + offset.x,
-      y: def.y + offset.z,
+      x: worldX,
+      y: worldY,
       hp: 9999,
       maxHp: 9999,
       region: def.zoneId,
@@ -85,6 +88,8 @@ export function spawnNectarNodes(): void {
       maxCharges: nectarProps.maxCharges,
       depletedAtTick: undefined,
       respawnTicks: nectarProps.respawnTicks,
+      spawnX: worldX,
+      spawnY: worldY,
     };
 
     zone.entities.set(entity.id, entity);
