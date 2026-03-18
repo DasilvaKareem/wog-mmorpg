@@ -208,7 +208,8 @@ const itemsContract = getContract({
 });
 
 // Default dust amount for gas funding. Override via SFUEL_DISTRIBUTION_AMOUNT if needed.
-const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.001";
+// 0.001 sFUEL is no longer enough for some SKALE ERC-20 transfers at current gas prices.
+const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.01";
 const TX_GAS_PRICE_CACHE_MS = 5_000;
 let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
 
