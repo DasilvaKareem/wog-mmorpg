@@ -44,12 +44,6 @@ interface WalletContextValue {
 
 const WalletContext = React.createContext<WalletContextValue | null>(null);
 
-// Matches shard/src/leveling.ts statScale() — quadratic growth
-function statScale(level: number): number {
-  const l = Math.max(1, level) - 1;
-  return 1 + l * 0.04 + l * l * 0.001;
-}
-
 function pickPrimaryCharacterProgress(
   characters: OwnedCharacter[]
 ): WalletCharacterProgress | null {
@@ -65,15 +59,13 @@ function pickPrimaryCharacterProgress(
     return Number(left.tokenId) - Number(right.tokenId);
   });
 
-  const level = primary.properties.level ?? 1;
-  // NFT stats.hp is the level-1 base — scale to current level using quadratic formula
-  const maxHp = Math.max(1, Math.round((primary.properties.stats.hp ?? 1) * statScale(level)));
+  const maxHp = Math.max(1, primary.properties.stats.hp ?? 1);
 
   return {
     name: primary.name,
-    level,
+    level: primary.properties.level ?? 1,
     xp: primary.properties.xp ?? 0,
-    hp: maxHp, // NFT characters have no live HP — show as full (max)
+    hp: maxHp, // NFT fallback has no live HP — show as full (max)
     maxHp,
     source: "nft",
   };
@@ -194,6 +186,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   // When selection changes, re-derive characterProgress from cached characters
   React.useEffect(() => {
     if (characters.length === 0) return;
+    if (characterProgress?.source === "live") return;
 
     if (selectedCharacterTokenId) {
       const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
