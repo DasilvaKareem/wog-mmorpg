@@ -101,6 +101,157 @@ function getCombatOrderTarget(me: any): any | null {
   return target.hp > 0 ? target : null;
 }
 
+function getCombatStats(entity: any): Record<string, number> {
+  return entity?.effectiveStats ?? entity?.stats ?? {};
+}
+
+function estimateAttackPower(entity: any): number {
+  const stats = getCombatStats(entity);
+  const classId = String(entity?.classId ?? "");
+  const isCaster = ["mage", "warlock", "cleric"].includes(classId);
+  const str = Number(stats.str ?? 0);
+  const int = Number(stats.int ?? 0);
+  const agi = Number(stats.agi ?? 0);
+  const faith = Number(stats.faith ?? 0);
+  const primary = isCaster
+    ? int * 0.45 + str * 0.08
+    : str * 0.32 + int * 0.12;
+  return Math.max(5, Math.round(primary + agi * 0.1 + faith * 0.08));
+}
+
+function estimateDefensePower(entity: any): number {
+  const stats = getCombatStats(entity);
+  const def = Number(stats.def ?? 0);
+  const agi = Number(stats.agi ?? 0);
+  return Math.max(0, Math.round(def * 0.45 + agi * 0.06));
+}
+
+function estimateDamage(attacker: any, defender: any): number {
+  return Math.max(3, Math.round(estimateAttackPower(attacker) - estimateDefensePower(defender) * 0.5));
+}
+
+function estimateTimeToKill(attacker: any, defender: any): number {
+  const hp = Math.max(1, Number(defender?.hp ?? defender?.maxHp ?? 1));
+  return hp / estimateDamage(attacker, defender);
+}
+
+function isBossTarget(target: any): boolean {
+  return target?.type === "boss";
+}
+
+function isCombatTargetAllowed(
+  me: any,
+  target: any,
+  strategy: AgentStrategy,
+  questPriority = false,
+): boolean {
+  const myLevel = Number(me?.level ?? 1);
+  const targetLevel = Number(target?.level ?? 1);
+  const hpPct = (Number(me?.hp ?? 0) / Math.max(1, Number(me?.maxHp ?? 1)));
+  const targetHpPct = (Number(target?.hp ?? 0) / Math.max(1, Number(target?.maxHp ?? 1)));
+  const isBoss = isBossTarget(target);
+
+  if (strategy !== "aggressive" && isBoss) return false;
+
+  const damageToTarget = estimateDamage(me, target);
+  const damageToMe = estimateDamage(target, me);
+  const targetTtk = Math.max(1, Number(target?.hp ?? target?.maxHp ?? 1)) / damageToTarget;
+  const myTtk = Math.max(1, Number(me?.hp ?? me?.maxHp ?? 1)) / damageToMe;
+  const ttkRatio = targetTtk / Math.max(0.5, myTtk);
+
+  if (strategy === "defensive") {
+    if (targetLevel > myLevel) return false;
+    if (hpPct < 0.7) return false;
+    if (ttkRatio > 0.65) return false;
+    return true;
+  }
+
+  if (strategy === "balanced") {
+    if (targetLevel > myLevel + 1) return false;
+    if (hpPct < 0.55) return false;
+    if (ttkRatio > (questPriority ? 0.9 : 0.8)) return false;
+    return true;
+  }
+
+  // Aggressive still needs a winnable-looking fight, especially on bosses.
+  if (isBoss) {
+    if (targetLevel > myLevel + 1) return false;
+    if (hpPct < 0.8) return false;
+    if (targetHpPct > 0.75 && ttkRatio > 1.05) return false;
+  } else {
+    if (targetLevel > myLevel + 3) return false;
+    if (ttkRatio > 1.25) return false;
+  }
+
+  return true;
+}
+
+function scoreCombatTarget(
+  me: any,
+  target: any,
+  strategy: AgentStrategy,
+  questPriority = false,
+): number {
+  const myLevel = Number(me?.level ?? 1);
+  const targetLevel = Number(target?.level ?? 1);
+  const distance = Math.hypot(Number(target?.x ?? 0) - Number(me?.x ?? 0), Number(target?.y ?? 0) - Number(me?.y ?? 0));
+  const targetHpPct = Number(target?.hp ?? 0) / Math.max(1, Number(target?.maxHp ?? 1));
+  const targetTtk = estimateTimeToKill(me, target);
+  const myTtk = estimateTimeToKill(target, me);
+  const ttkRatio = targetTtk / Math.max(0.5, myTtk);
+  const isBoss = isBossTarget(target);
+
+  let score = distance / 50 + targetTtk;
+
+  if (strategy === "aggressive") {
+    score += Math.max(0, myLevel - targetLevel) * 1.5;
+    score -= Math.max(0, targetLevel - myLevel) * 1.2;
+  } else if (strategy === "balanced") {
+    score += Math.abs(targetLevel - myLevel) * 2.2;
+  } else {
+    score += Math.max(0, targetLevel - myLevel) * 4;
+    score += Math.max(0, targetLevel - (myLevel - 1)) * 1.5;
+  }
+
+  score += ttkRatio * (strategy === "defensive" ? 14 : strategy === "balanced" ? 10 : 6);
+  score += targetHpPct * (strategy === "aggressive" ? 2 : 4);
+
+  if (questPriority) score -= 8;
+  if (isBoss) score += strategy === "aggressive" ? 8 : 100;
+
+  // Small jitter prevents deterministic corpse-runs on the same exact target.
+  score += Math.random() * 1.5;
+  return score;
+}
+
+function pickCombatTarget(
+  me: any,
+  candidates: Array<[string, any]>,
+  strategy: AgentStrategy,
+  options?: { questMobNames?: Set<string> },
+): any | null {
+  const questMobNames = options?.questMobNames;
+  const scored = candidates
+    .map((entry) => {
+      const [, target] = entry;
+      const questPriority = !!questMobNames?.has(String(target?.name ?? "").toLowerCase());
+      if (!isCombatTargetAllowed(me, target, strategy, questPriority)) return null;
+      return {
+        target,
+        questPriority,
+        score: scoreCombatTarget(me, target, strategy, questPriority),
+      };
+    })
+    .filter((value): value is { target: any; questPriority: boolean; score: number } => value !== null)
+    .sort((a, b) => a.score - b.score);
+
+  if (scored.length === 0) return null;
+
+  const shortlistSize = strategy === "aggressive" ? 3 : 2;
+  const shortlist = scored.slice(0, Math.min(shortlistSize, scored.length));
+  return shortlist[Math.floor(Math.random() * shortlist.length)]?.target ?? scored[0].target;
+}
+
 function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResult {
   const activeTarget = getCombatOrderTarget(me);
   if (activeTarget) {
@@ -324,15 +475,28 @@ export async function doCombat(
       });
     }
 
-    const sorted = eligible.sort(([, a]: any, [, b]: any) => {
-      if (strategy === "aggressive") {
-        const levelDiff = (b.level ?? 1) - (a.level ?? 1);
-        if (levelDiff !== 0) return levelDiff;
-      }
-      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
-    });
+    const activeTarget = getCombatOrderTarget(me);
+    if (activeTarget && isCombatTargetAllowed(me, activeTarget, strategy)) {
+      return engageCombatTarget(ctx, me, activeTarget);
+    }
 
-    const [, mob] = sorted[0] as [string, any];
+    if (activeTarget) {
+      const fallback = getRegionCenter(ctx.currentRegion);
+      if (fallback) {
+        ctx.issueCommand({ action: "move", x: fallback.x, y: fallback.z });
+      }
+      void ctx.logActivity(`Disengaging from ${activeTarget.name ?? "target"} — too dangerous for ${strategy} strategy`);
+      return actionProgressed(`Disengaging from ${activeTarget.name ?? "target"}`);
+    }
+
+    const mob = pickCombatTarget(me, eligible, strategy);
+    if (!mob) {
+      return actionBlocked("No safe combat targets for current strategy", {
+        failureKey: `combat:no-safe-targets:${ctx.currentRegion}:${strategy}`,
+        targetName: ctx.currentRegion,
+        category: "strategic",
+      });
+    }
     return engageCombatTarget(ctx, me, mob);
   } catch (err: any) {
     const reason = formatAgentError(err);
@@ -1238,15 +1402,14 @@ async function doQuestCombat(
       });
     }
 
-    // Sort: quest mobs first, then by distance
-    const sorted = eligible.sort(([, a]: any, [, b]: any) => {
-      const aIsQuest = questMobNames.has((a.name ?? "").toLowerCase()) ? 0 : 1;
-      const bIsQuest = questMobNames.has((b.name ?? "").toLowerCase()) ? 0 : 1;
-      if (aIsQuest !== bIsQuest) return aIsQuest - bIsQuest;
-      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
-    });
-
-    const [, mob] = sorted[0] as [string, any];
+    const mob = pickCombatTarget(me, eligible, strategy, { questMobNames });
+    if (!mob) {
+      return actionBlocked("Quest targets are too dangerous for current strategy", {
+        failureKey: `quest-combat:no-safe-targets:${ctx.currentRegion}:${strategy}`,
+        targetName: ctx.currentRegion,
+        category: "strategic",
+      });
+    }
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
     const result = engageCombatTarget(ctx, me, mob);
     if (result.status === "progressed") {
