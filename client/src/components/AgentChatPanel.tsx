@@ -13,10 +13,38 @@ import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
 import { ChatLog } from "@/components/ChatLog";
 
+interface InboxMessage {
+  id: string;
+  from: string;
+  fromName: string;
+  to: string;
+  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "quest-approval" | "system";
+  body: string;
+  data?: Record<string, unknown>;
+  ts: number;
+}
+
 interface ChatMessage {
+  key: string;
   role: "user" | "agent" | "activity" | "system";
   text: string;
   ts: number;
+}
+
+interface InboxConsoleMessage {
+  key: string;
+  role: "inbox" | "inbox-out";
+  text: string;
+  ts: number;
+  inbox: InboxMessage | null;
+  replyTo?: { wallet: string; name: string };
+}
+
+type ConsoleMessage = ChatMessage | InboxConsoleMessage;
+
+interface InboxReplyTarget {
+  wallet: string;
+  name: string;
 }
 
 interface AgentStatusData {
@@ -26,7 +54,7 @@ interface AgentStatusData {
     focus: string;
     strategy: string;
     targetZone?: string;
-    chatHistory: { role: "user" | "agent" | "activity"; text: string; ts: number }[];
+    chatHistory: { role: "user" | "agent" | "activity" | "system" | "question"; text: string; ts: number }[];
   } | null;
   entityId: string | null;
   zoneId: string | null;
@@ -48,6 +76,8 @@ interface AgentStatusData {
     lastLoopAt: number | null;
   } | null;
 }
+
+type AgentHistoryEntry = NonNullable<AgentStatusData["config"]>["chatHistory"][number];
 
 const FOCUS_COLORS: Record<string, string> = {
   questing: "#5dadec",
@@ -89,6 +119,22 @@ const SLASH_COMMANDS = [
 ];
 
 const CMD_COLOR = "#c792ea";
+const INBOX_TYPE_LABELS: Record<InboxMessage["type"], string> = {
+  direct: "MSG",
+  "trade-request": "TRADE",
+  "party-invite": "PARTY",
+  broadcast: "ZONE",
+  "quest-approval": "QUEST",
+  system: "EVENT",
+};
+const INBOX_TYPE_COLORS: Record<InboxMessage["type"], string> = {
+  direct: "#54f28b",
+  "trade-request": "#ffcc00",
+  "party-invite": "#6ea8fe",
+  broadcast: "#c084fc",
+  "quest-approval": "#e0af68",
+  system: "#ff9f43",
+};
 
 /** Highlight /commands in message text */
 function renderWithCommands(text: string): React.ReactNode {
@@ -103,6 +149,75 @@ function renderWithCommands(text: string): React.ReactNode {
   );
 }
 
+function timeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return `${Math.floor(diff / 86_400_000)}d ago`;
+}
+
+function activityLooksLikeInbox(text: string): boolean {
+  return /^\[(MSG|BROADCAST)\]\s/i.test(text);
+}
+
+function toChatMessage(
+  role: ChatMessage["role"],
+  text: string,
+  ts: number,
+): ChatMessage {
+  return {
+    key: `chat:${role}:${ts}:${text}`,
+    role,
+    text,
+    ts,
+  };
+}
+
+function toInboxMessage(msg: InboxMessage): InboxConsoleMessage {
+  return {
+    key: `inbox:${msg.id}`,
+    role: "inbox",
+    text: msg.body,
+    ts: msg.ts,
+    inbox: msg,
+  };
+}
+
+function toInboxOutMessage(
+  text: string,
+  ts: number,
+  replyTo: { wallet: string; name: string },
+): InboxConsoleMessage {
+  return {
+    key: `inbox-out:${replyTo.wallet}:${ts}:${text}`,
+    role: "inbox-out",
+    text,
+    ts,
+    inbox: null,
+    replyTo,
+  };
+}
+
+function mergeConsoleMessages(prev: ConsoleMessage[], next: ConsoleMessage[]): ConsoleMessage[] {
+  if (next.length === 0) return prev;
+  const merged = new Map<string, ConsoleMessage>();
+  for (const message of prev) merged.set(message.key, message);
+  for (const message of next) merged.set(message.key, message);
+  return Array.from(merged.values()).sort((a, b) => {
+    if (a.ts !== b.ts) return a.ts - b.ts;
+    return a.key.localeCompare(b.key);
+  });
+}
+
+function mapServerHistoryEntry(
+  entry: AgentHistoryEntry,
+): ChatMessage | null {
+  if (!["user", "agent", "activity", "system"].includes(entry.role)) return null;
+  if (entry.role === "activity" && activityLooksLikeInbox(entry.text)) return null;
+  return toChatMessage(entry.role as ChatMessage["role"], entry.text, entry.ts);
+}
+
 // ── Component ─────────────────────────────────────────────────────────────
 
 interface AgentChatPanelProps {
@@ -113,7 +228,7 @@ interface AgentChatPanelProps {
 
 export function AgentChatPanel({ walletAddress, currentZone, className = "" }: AgentChatPanelProps): React.ReactElement {
   const { characters, selectedCharacterTokenId } = useWalletContext();
-  const [messages, setMessages] = React.useState<ChatMessage[]>([]);
+  const [messages, setMessages] = React.useState<ConsoleMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [deploying, setDeploying] = React.useState(false);
@@ -128,13 +243,30 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string } | null>(null);
   const [cmdSuggestions, setCmdSuggestions] = React.useState<typeof SLASH_COMMANDS>([]);
   const [selectedSuggestion, setSelectedSuggestion] = React.useState(0);
+  const [replyTarget, setReplyTarget] = React.useState<InboxReplyTarget | null>(null);
+  const [questResponses, setQuestResponses] = React.useState<Record<string, "accepted" | "denied">>({});
   const scrollRef = React.useRef<HTMLDivElement>(null);
-  const lastSyncTs = React.useRef(0);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const inboxMessageIds = React.useRef<Set<string>>(new Set());
+  const seededServerHistory = React.useRef(false);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
+
+  React.useEffect(() => {
+    setMessages([]);
+    setInput("");
+    setReplyTarget(null);
+    setQuestResponses({});
+    inboxMessageIds.current = new Set();
+    seededServerHistory.current = false;
+  }, [walletAddress]);
+
+  React.useEffect(() => {
+    if (replyTarget) inputRef.current?.focus();
+  }, [replyTarget]);
 
   // Get auth token once
   React.useEffect(() => {
@@ -181,23 +313,21 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           }
 
           const serverHistory = data.config?.chatHistory ?? [];
-          if (serverHistory.length > 0) {
+          const mappedHistory = serverHistory
+            .map((entry) => mapServerHistoryEntry(entry))
+            .filter((entry): entry is ChatMessage => entry != null);
+          if (mappedHistory.length > 0) {
             setMessages((prev) => {
-              if (prev.length === 0) {
-                lastSyncTs.current = serverHistory[serverHistory.length - 1].ts;
-                return serverHistory.map((m) => ({ role: m.role, text: m.text, ts: m.ts }));
+              const hasConsoleChat = prev.some((message) => message.role !== "inbox" && message.role !== "inbox-out");
+              if (!seededServerHistory.current && !hasConsoleChat) {
+                seededServerHistory.current = true;
+                return mergeConsoleMessages(prev, mappedHistory);
               }
-              const newActivities = serverHistory.filter(
-                (m) => m.role === "activity" && m.ts > lastSyncTs.current
+              seededServerHistory.current = true;
+              return mergeConsoleMessages(
+                prev,
+                mappedHistory.filter((message) => message.role === "activity" || message.role === "system"),
               );
-              if (newActivities.length > 0) {
-                lastSyncTs.current = newActivities[newActivities.length - 1].ts;
-                return [
-                  ...prev,
-                  ...newActivities.map((m) => ({ role: m.role as ChatMessage["role"], text: m.text, ts: m.ts })),
-                ];
-              }
-              return prev;
             });
           }
         } else if (res.status === 401) {
@@ -210,6 +340,44 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     const id = setInterval(pollStatus, 3000);
     return () => { cancelled = true; clearInterval(id); };
   }, [token, walletAddress]);
+
+  // Poll inbox history so direct messages surface in the console even when the agent loop is idle.
+  React.useEffect(() => {
+    if (!walletAddress) return;
+    let cancelled = false;
+
+    async function pollInbox() {
+      try {
+        const res = await fetch(`${API_URL}/inbox/${walletAddress}/history?limit=50`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const history = Array.isArray(data.messages) ? data.messages as InboxMessage[] : [];
+        const newConsoleMessages: InboxConsoleMessage[] = [];
+
+        for (const msg of history) {
+          if (inboxMessageIds.current.has(msg.id)) continue;
+          inboxMessageIds.current.add(msg.id);
+          newConsoleMessages.push(toInboxMessage(msg));
+        }
+
+        if (!cancelled && newConsoleMessages.length > 0) {
+          setMessages((prev) => mergeConsoleMessages(prev, newConsoleMessages));
+        }
+      } catch {
+        // silent
+      }
+    }
+
+    void pollInbox();
+    const id = setInterval(() => {
+      void pollInbox();
+    }, 3000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [walletAddress]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
 
@@ -274,7 +442,33 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
     setInput("");
     setSending(true);
-    setMessages((prev) => [...prev, { role: "user", text: msg, ts: Date.now() }]);
+    const ts = Date.now();
+
+    if (replyTarget) {
+      try {
+        const res = await fetch(`${API_URL}/inbox/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ to: replyTarget.wallet, type: "direct", body: msg }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setMessages((prev) => mergeConsoleMessages(prev, [
+            toInboxOutMessage(msg, ts, { wallet: replyTarget.wallet, name: replyTarget.name }),
+          ]));
+          setReplyTarget(null);
+        } else {
+          addSystemMsg(`[ERR] ${data.error ?? "Reply failed"}`);
+        }
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    setMessages((prev) => mergeConsoleMessages(prev, [toChatMessage("user", msg, ts)]));
 
     try {
       const res = await fetch(`${API_URL}/agent/chat`, {
@@ -291,10 +485,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
       const data = await res.json();
       if (res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          { role: "agent", text: data.response, ts: Date.now() },
-        ]);
+        setMessages((prev) => mergeConsoleMessages(prev, [
+          toChatMessage("agent", data.response, Date.now()),
+        ]));
       } else {
         addSystemMsg(`[ERR] ${data.error ?? "Chat failed"}`);
       }
@@ -306,7 +499,40 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   }
 
   function addSystemMsg(text: string) {
-    setMessages((prev) => [...prev, { role: "system", text, ts: Date.now() }]);
+    setMessages((prev) => mergeConsoleMessages(prev, [toChatMessage("system", text, Date.now())]));
+  }
+
+  async function handleQuestApproval(msg: InboxMessage, approved: boolean) {
+    if (!token || sending) return;
+    const questId = msg.data?.questId as string | undefined;
+    if (!questId) return;
+
+    setSending(true);
+    try {
+      const res = await fetch(`${API_URL}/inbox/quest-approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ questId, approved }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setQuestResponses((prev) => ({ ...prev, [msg.id]: approved ? "accepted" : "denied" }));
+        addSystemMsg(approved ? "Quest approved." : "Quest denied.");
+      } else {
+        addSystemMsg(`[ERR] ${data.error ?? "Quest response failed"}`);
+      }
+    } catch (err: any) {
+      addSystemMsg(`[ERR] ${err.message}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function startReply(msg: InboxMessage) {
+    setReplyTarget({
+      wallet: msg.from,
+      name: msg.fromName || msg.from.slice(0, 8),
+    });
   }
 
   // Listen for NPC clicks — show a confirmation prompt, don't auto-redirect
@@ -510,8 +736,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         )}
 
         {/* Messages */}
-        {messages.map((m, i) => (
-          <div key={i} className="text-[12px] leading-relaxed">
+        {messages.map((m) => (
+          <div key={m.key} className="text-[12px] leading-relaxed">
             {m.role === "user" && (
               <div className="flex gap-1">
                 <span className="text-[#ffcc00] shrink-0">[You]</span>
@@ -535,16 +761,88 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
             {m.role === "system" && (
               <span className="text-[#7a84ad] italic">{renderWithCommands(m.text)}</span>
             )}
+            {m.role === "inbox" && m.inbox && (
+              <div
+                className="border px-2 py-1.5 space-y-1"
+                style={{
+                  borderColor: `${INBOX_TYPE_COLORS[m.inbox.type]}44`,
+                  backgroundColor: "#0b1120",
+                }}
+              >
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span
+                    className="text-[9px] font-bold uppercase px-1 py-[1px] border"
+                    style={{
+                      color: INBOX_TYPE_COLORS[m.inbox.type],
+                      borderColor: `${INBOX_TYPE_COLORS[m.inbox.type]}55`,
+                    }}
+                  >
+                    {INBOX_TYPE_LABELS[m.inbox.type]}
+                  </span>
+                  <span className="text-[#7dcfff]">[{m.inbox.fromName || m.inbox.from.slice(0, 8)}]</span>
+                  <span className="text-[10px] text-[#5f6b8f]">{timeAgo(m.inbox.ts)}</span>
+                  {m.inbox.type !== "broadcast" && m.inbox.type !== "system" && m.inbox.type !== "quest-approval" && (
+                    <button
+                      type="button"
+                      onClick={() => startReply(m.inbox!)}
+                      className="ml-auto text-[10px] uppercase tracking-widest text-[#6ea8fe] hover:text-[#9ec5fe]"
+                    >
+                      [reply]
+                    </button>
+                  )}
+                </div>
+                <div className="text-[#d6deff] whitespace-pre-wrap break-words">
+                  {renderWithCommands(m.inbox.body)}
+                </div>
+                {m.inbox.type === "quest-approval" && (
+                  <div className="flex items-center gap-2 pt-1">
+                    {questResponses[m.inbox.id] ? (
+                      <span
+                        className="text-[10px] uppercase tracking-widest"
+                        style={{ color: questResponses[m.inbox.id] === "accepted" ? "#54f28b" : "#f25454" }}
+                      >
+                        [{questResponses[m.inbox.id]}]
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void handleQuestApproval(m.inbox!, true)}
+                          disabled={sending}
+                          className="border border-[#54f28b] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[#54f28b] hover:bg-[#0f2115] disabled:opacity-40"
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleQuestApproval(m.inbox!, false)}
+                          disabled={sending}
+                          className="border border-[#f25454] px-2 py-0.5 text-[10px] uppercase tracking-widest text-[#f25454] hover:bg-[#220d12] disabled:opacity-40"
+                        >
+                          Deny
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {m.role === "inbox-out" && m.replyTo && (
+              <div className="flex gap-1">
+                <span className="text-[#6ea8fe] shrink-0">[To {m.replyTo.name}]</span>
+                <span className="text-[#d6deff]">{renderWithCommands(m.text)}</span>
+              </div>
+            )}
           </div>
         ))}
         {sending && (
-          <div className="text-[12px] text-[#6b7394] animate-pulse">Agent thinking...</div>
+          <div className="text-[12px] text-[#6b7394] animate-pulse">Working...</div>
         )}
       </div>
       )}
 
       {/* ── Quick suggestions ──────────────────────────────────────── */}
-      {viewMode === "chat" && isDeployed && !sending && messages.length < 3 && (
+      {viewMode === "chat" && isDeployed && !sending && !replyTarget && messages.length < 3 && (
         <div className="flex gap-1 px-3 py-1.5 overflow-x-auto border-t border-[#1a2a18]" style={{ scrollbarWidth: "none" }}>
           {QUICK_SUGGESTIONS.map((s) => (
             <button
@@ -562,6 +860,20 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {/* ── Chat input ─────────────────────────────────────────────── */}
       {isDeployed && viewMode === "chat" && (
         <div className="border-t-2 border-[#1a2a18] bg-[#080f0a] p-2">
+          {replyTarget && (
+            <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-[#9ec5fe]">
+              <span className="truncate">
+                Replying to <span className="text-[#6ea8fe]">{replyTarget.name}</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setReplyTarget(null)}
+                className="text-[#6b7394] hover:text-[#9aa7cc] uppercase tracking-widest"
+              >
+                [cancel]
+              </button>
+            </div>
+          )}
           <div className="flex gap-1 relative">
             {/* Autocomplete dropdown */}
             {cmdSuggestions.length > 0 && (
@@ -587,13 +899,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               </div>
             )}
             <input
+              ref={inputRef}
               type="text"
               value={input}
               onChange={(e) => {
                 const val = e.target.value;
                 setInput(val);
                 // Update autocomplete suggestions
-                if (val.startsWith("/") && !val.includes(" ")) {
+                if (!replyTarget && val.startsWith("/") && !val.includes(" ")) {
                   const q = val.toLowerCase();
                   const matches = SLASH_COMMANDS.filter((c) => c.cmd.startsWith(q));
                   setCmdSuggestions(matches);
@@ -604,7 +917,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               }}
               onKeyDown={(e) => {
                 e.stopPropagation();
-                if (cmdSuggestions.length > 0) {
+                if (!replyTarget && cmdSuggestions.length > 0) {
                   if (e.key === "Tab" || e.key === "ArrowRight") {
                     e.preventDefault();
                     const pick = cmdSuggestions[selectedSuggestion];
@@ -641,7 +954,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
                 if (e.key === "Enter") void handleSend();
               }}
               onBlur={() => { setTimeout(() => setCmdSuggestions([]), 150); }}
-              placeholder="Tell your agent what to do... (/ for commands)"
+              placeholder={replyTarget ? `Reply to ${replyTarget.name}...` : "Tell your agent what to do... (/ for commands)"}
               disabled={!token || sending || authLoading}
               className="flex-1 border border-[#2a3450] bg-[#0b1020] px-2 py-1 text-[12px] text-[#d6deff] placeholder-[#6b7394] outline-none focus:border-[#54f28b] disabled:opacity-40"
             />
@@ -650,7 +963,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               disabled={!input.trim() || !token || sending || authLoading}
               className="border border-[#54f28b] bg-[#0a1a0e] px-2 py-1 text-[12px] text-[#54f28b] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              [→]
+              {replyTarget ? "[DM]" : "[→]"}
             </button>
           </div>
         </div>
