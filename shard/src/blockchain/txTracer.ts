@@ -66,7 +66,17 @@ function classifyError(err: any): { code?: number | string; reason?: string; ret
     return { code, reason, retryable: true };
   }
   // RPC transient — retryable
-  if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("ETIMEDOUT") || msg.includes("ECONNRESET") || msg.includes("502") || msg.includes("503")) {
+  if (
+    msg.includes("zero data") ||
+    msg.includes("AbiDecoding") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("fetch failed") ||
+    msg.includes("UND_ERR_SOCKET") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    code === "UND_ERR_SOCKET"
+  ) {
     return { code, reason, retryable: true };
   }
   // Gas / balance — retryable after funding

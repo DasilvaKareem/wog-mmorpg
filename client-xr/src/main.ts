@@ -21,8 +21,8 @@ import { Minimap } from "./hud/Minimap.js";
 import { ChatLog } from "./hud/ChatLog.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
-import { fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
-import type { Entity, ZoneResponse } from "./types.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
+import type { ActivePlayer, Entity, ZoneResponse } from "./types.js";
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
@@ -99,6 +99,8 @@ const hudLock = document.getElementById("lock-indicator")!;
 // ── State ───────────────────────────────────────────────────────────
 
 let lockedEntityId: string | null = null;
+let pendingTrackedPlayerId: string | null = null;
+let pendingTrackedPlayerName: string | null = null;
 
 // ── Lock-on mode ────────────────────────────────────────────────────
 
@@ -106,6 +108,8 @@ function lockOn(entityId: string) {
   const ent = entities.getEntity(entityId);
   if (!ent) return;
   lockedEntityId = entityId;
+  pendingTrackedPlayerId = null;
+  pendingTrackedPlayerName = null;
   hudLock.textContent = `LOCKED: ${ent.name}`;
   hudLock.style.display = "block";
   inspector.setLocked(true);
@@ -113,18 +117,33 @@ function lockOn(entityId: string) {
 
 function unlockCamera() {
   lockedEntityId = null;
+  pendingTrackedPlayerId = null;
+  pendingTrackedPlayerName = null;
   hudLock.style.display = "none";
   inspector.setLocked(false);
+}
+
+function trackPlayer(player: ActivePlayer) {
+  const pos = entities.getEntityPosition(player.id);
+  if (pos) {
+    lockOn(player.id);
+    controls.setTarget(pos.x, pos.y, pos.z);
+    return;
+  }
+
+  pendingTrackedPlayerId = player.id;
+  pendingTrackedPlayerName = player.name;
+  hudLock.textContent = `TRACKING: ${player.name}`;
+  hudLock.style.display = "block";
+  inspector.setLocked(true);
+  controls.setTarget(player.x * COORD_SCALE, 0, player.y * COORD_SCALE);
 }
 
 // ── Player panel (leaderboard + zone lobby) ─────────────────────────
 
 const playerPanel = new PlayerPanel({
-  onPlayerClick: (entityId) => {
-    lockOn(entityId);
-    // Pan camera to the entity
-    const pos = entities.getEntityPosition(entityId);
-    if (pos) controls.setTarget(pos.x, pos.y, pos.z);
+  onPlayerClick: (player) => {
+    trackPlayer(player);
   },
   onZoneClick: (zoneId) => {
     const center = world.getZoneCenter(zoneId);
@@ -194,6 +213,13 @@ async function pollNearbyZones() {
 
   effects.syncActiveEffects(merged);
 
+  if (pendingTrackedPlayerId && merged[pendingTrackedPlayerId]) {
+    const entityId = pendingTrackedPlayerId;
+    pendingTrackedPlayerId = null;
+    pendingTrackedPlayerName = null;
+    lockOn(entityId);
+  }
+
   // Update lock indicator
   if (lockedEntityId) {
     if (merged[lockedEntityId]) {
@@ -201,13 +227,19 @@ async function pollNearbyZones() {
     } else {
       unlockCamera();
     }
+  } else if (pendingTrackedPlayerId) {
+    hudLock.textContent = `TRACKING: ${pendingTrackedPlayerName ?? "Player"}`;
+    hudLock.style.display = "block";
   }
-
-  // Player panel
-  playerPanel.update(merged);
 
   // Minimap — pass camera in server coords
   minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+}
+
+async function pollActivePlayers() {
+  const data = await fetchActivePlayers();
+  if (!data) return;
+  playerPanel.update(data.players);
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -385,9 +417,11 @@ async function init() {
     controls.getTarget().z
   );
   await pollNearbyZones();
+  await pollActivePlayers();
 
   // Poll loop
   setInterval(pollNearbyZones, POLL_INTERVAL);
+  setInterval(pollActivePlayers, POLL_INTERVAL);
 
   // Render loop
   renderer.setAnimationLoop(animate);

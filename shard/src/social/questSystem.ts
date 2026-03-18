@@ -1982,7 +1982,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Sylva kneels beside a trail of shed scales. 'Emerald Serpents nest in the hollow logs. Their venom can fell an ox in seconds. Slay four before the next clutch hatches.'",
     npcId: "Verdant Warden Sylva",
-    prerequisiteQuestId: "emerald_treant_menace",
+    prerequisiteQuestId: "emerald_wardens_call",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2018,7 +2018,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Howls echo through the woods at night. 'Feral Worgs — larger and meaner than any wolf. They hunt in packs and drag their prey into burrows. Kill three before they establish a den.'",
     npcId: "Verdant Warden Sylva",
-    prerequisiteQuestId: "emerald_rare_bloom",
+    prerequisiteQuestId: "emerald_serpent_strike",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2131,7 +2131,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Barak holds up a petrified bird. 'Rock Basilisks — one look and you turn to stone. Four of them nest along the ridge. Don't stare too long.'",
     npcId: "Gemloch Overseer Barak",
-    prerequisiteQuestId: "viridian_yeti_cull",
+    prerequisiteQuestId: "viridian_overseers_task",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2149,7 +2149,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Barak runs his thumb along a gold nugget. 'The Range is rich in gold, but miners won't go near the upper veins. Bring me five Gold Ore and I'll make it worth your while.'",
     npcId: "Gemloch Overseer Barak",
-    prerequisiteQuestId: "viridian_basilisk_eyes",
+    prerequisiteQuestId: "viridian_overseers_task",
     objective: {
       type: "gather",
       targetItemName: "Gold Ore",
@@ -2167,7 +2167,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "A massive shadow passes overhead. 'Storm Condors — wingspan wider than a house. They snatch miners right off the cliffs. Bring down three.'",
     npcId: "Gemloch Overseer Barak",
-    prerequisiteQuestId: "viridian_ore_expedition",
+    prerequisiteQuestId: "viridian_yeti_cull",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2186,7 +2186,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Barak cracks his knuckles. 'Gemloch Golems — animated from the very ore we mine. They guard the deep tunnels and crush trespassers. Smash three apart.'",
     npcId: "Gemloch Overseer Barak",
-    prerequisiteQuestId: "viridian_condor_nests",
+    prerequisiteQuestId: "viridian_yeti_cull",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2281,7 +2281,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Tiny lights dart angrily through the trees. 'The Fae Guardians have turned against us. Once allies, now they attack anyone who enters their groves. Put down four of them — gently, if you can.'",
     npcId: "Elder Druid Moonwhisper",
-    prerequisiteQuestId: "moondancer_stalker_shadows",
+    prerequisiteQuestId: "moondancer_elder_wisdom",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2317,7 +2317,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Thorny vines creep across the path. 'Twilight Dryads weave walls of thorns to trap travelers. They were gentle once. Now they must be stopped — kill three before the Glade is sealed off entirely.'",
     npcId: "Elder Druid Moonwhisper",
-    prerequisiteQuestId: "moondancer_moonflower_rite",
+    prerequisiteQuestId: "moondancer_stalker_shadows",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2431,7 +2431,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Heat shimmers in the air. 'Molten Forgebound — they crawled out of the great furnace itself. Living metal and slag, burning everything they touch. Destroy four.'",
     npcId: "Forgeguard Captain Haldor",
-    prerequisiteQuestId: "felsrock_automaton_sweep",
+    prerequisiteQuestId: "felsrock_captains_orders",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2467,7 +2467,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "A rumble shakes the floor. 'Deep Dwellers burrow up from below — eyeless things with razor claws. They collapsed the east wing last week. Kill three before they undermine the whole citadel.'",
     npcId: "Forgeguard Captain Haldor",
-    prerequisiteQuestId: "felsrock_deep_salvage",
+    prerequisiteQuestId: "felsrock_automaton_sweep",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2581,7 +2581,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Aurelia points to towering shapes along the shore. 'Crystal Golems — they grew from the Lake's mineral deposits. Beautiful, but deadly. Shatter four of them before they seal the waterways.'",
     npcId: "Lumen Priestess Aurelia",
-    prerequisiteQuestId: "lumina_wraith_light",
+    prerequisiteQuestId: "lumina_priestess_plea",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2617,7 +2617,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Aurelia bows her head in sorrow. 'Drowned Knights — temple guardians who fell when the darkness came. They still patrol their posts, attacking anything that moves. Grant three of them peace.'",
     npcId: "Lumen Priestess Aurelia",
-    prerequisiteQuestId: "lumina_sunken_relics",
+    prerequisiteQuestId: "lumina_wraith_light",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2731,7 +2731,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Reality warps at the edges of the Chasm. 'Void Weavers slip through tears in the fabric of space. They unravel anything they touch — flesh, stone, even magic. Seal four of them.'",
     npcId: "Dragonkin Watcher Azael",
-    prerequisiteQuestId: "azurshard_dragonkin_clash",
+    prerequisiteQuestId: "azurshard_watchers_warning",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2767,7 +2767,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Crystalline giants block the descent. 'Shard Sentinels — living crystal, harder than diamond. They form an impassable wall at the mid-chasm. Shatter three to open the path.'",
     npcId: "Dragonkin Watcher Azael",
-    prerequisiteQuestId: "azurshard_shard_harvest",
+    prerequisiteQuestId: "azurshard_dragonkin_clash",
     objective: {
       type: "kill",
       targetMobType: "mob",
@@ -2836,6 +2836,255 @@ export const QUEST_CATALOG: Quest[] = [
       xp: 5500,
       items: [{ tokenId: 54, quantity: 2 }],
     },
+  },
+
+  // === SECONDARY QUEST CHAINS — Profession/Exploration NPCs (4 quests each, branching) ===
+  // These run parallel to the main combat chain, giving 2-3 more active quests per zone.
+
+  // -- Emerald Woods: Herbalist Fern (gathering + crafting focus) --
+  {
+    id: "emerald_fern_intro",
+    title: "The Herbalist's Request",
+    description:
+      "Herbalist Fern crouches beside a glowing mushroom. 'These woods are a treasure trove of rare plants — but the corruption is killing them. Help me preserve what remains.'",
+    npcId: "Herbalist Fern",
+    objective: { type: "talk", targetNpcName: "Herbalist Fern", count: 1 },
+    rewards: { copper: 200, xp: 800 },
+  },
+  {
+    id: "emerald_fern_gather",
+    title: "Roots of Renewal",
+    description:
+      "Fern opens her satchel. 'I need Silverleaf — it only grows where ancient roots drink deep. Gather four bundles from the herb patches in the older groves.'",
+    npcId: "Herbalist Fern",
+    prerequisiteQuestId: "emerald_fern_intro",
+    objective: { type: "gather", targetItemName: "Silverleaf", count: 4 },
+    rewards: { copper: 400, xp: 1000, items: [{ tokenId: 72, quantity: 2 }] },
+  },
+  {
+    id: "emerald_fern_brew",
+    title: "Antidote Brewing",
+    description:
+      "Fern grinds herbs with practiced hands. 'The corruption sickness spreads through the wildlife. Brew two Healing Potions at the alchemy station — I'll distribute them to the wardens.'",
+    npcId: "Herbalist Fern",
+    prerequisiteQuestId: "emerald_fern_intro",
+    objective: { type: "craft", targetItemName: "Healing Potion", count: 2 },
+    rewards: { copper: 450, xp: 1100 },
+  },
+  {
+    id: "emerald_fern_guardian",
+    title: "The Ancient Grove",
+    description:
+      "Fern packs her finished medicines. 'One last thing — a Thorned Treant blocks the path to the deepest grove where the rarest herbs grow. Clear it and the grove is open to all gatherers.'",
+    npcId: "Herbalist Fern",
+    prerequisiteQuestId: "emerald_fern_gather",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Thorned Treant", count: 2 },
+    rewards: { copper: 500, xp: 1300, items: [{ tokenId: 118, quantity: 1 }] },
+  },
+
+  // -- Viridian Range: Prospector Helga (mining + exploration focus) --
+  {
+    id: "viridian_helga_intro",
+    title: "The Prospector's Gambit",
+    description:
+      "Prospector Helga hammers a stake into the rock face. 'These mountains are lousy with ore, but the beasts won't let us mine in peace. Interested in a partnership?'",
+    npcId: "Prospector Helga",
+    objective: { type: "talk", targetNpcName: "Prospector Helga", count: 1 },
+    rewards: { copper: 250, xp: 1000 },
+  },
+  {
+    id: "viridian_helga_ore",
+    title: "Vein Tapping",
+    description:
+      "Helga points to the glittering cliff face. 'Iron Ore — the backbone of every army. Mine five from the upper veins. I'll split the profits.'",
+    npcId: "Prospector Helga",
+    prerequisiteQuestId: "viridian_helga_intro",
+    objective: { type: "gather", targetItemName: "Iron Ore", count: 5 },
+    rewards: { copper: 500, xp: 1200, items: [{ tokenId: 73, quantity: 2 }] },
+  },
+  {
+    id: "viridian_helga_clear",
+    title: "Claim Jumpers",
+    description:
+      "Helga scowls at claw marks on her equipment. 'Mountain Yetis wrecked my last two mining camps. Teach three of them a lesson so we can work in peace.'",
+    npcId: "Prospector Helga",
+    prerequisiteQuestId: "viridian_helga_intro",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Mountain Yeti", count: 3 },
+    rewards: { copper: 450, xp: 1300, items: [{ tokenId: 55, quantity: 1 }] },
+  },
+  {
+    id: "viridian_helga_forge",
+    title: "Mountain Steel",
+    description:
+      "Helga holds up a crude ingot. 'Good ore is nothing without good steel. Forge two Steel Alloys at the smithing station and I'll pay double. Quality work only.'",
+    npcId: "Prospector Helga",
+    prerequisiteQuestId: "viridian_helga_ore",
+    objective: { type: "craft", targetItemName: "Steel Alloy", count: 2 },
+    rewards: { copper: 600, xp: 1500, items: [{ tokenId: 89, quantity: 1 }] },
+  },
+
+  // -- Moondancer Glade: Moonherb Gatherer Lirien (herbalism + alchemy) --
+  {
+    id: "moondancer_lirien_intro",
+    title: "The Moonherb Gatherer",
+    description:
+      "Moonherb Gatherer Lirien tends a small garden of luminous plants. 'The Glade's essence makes herbs grow with extraordinary potency — but the corruption twists them. Help me salvage what I can.'",
+    npcId: "Moonherb Gatherer Lirien",
+    objective: { type: "talk", targetNpcName: "Moonherb Gatherer Lirien", count: 1 },
+    rewards: { copper: 300, xp: 1200 },
+  },
+  {
+    id: "moondancer_lirien_gather",
+    title: "Moonpetal Harvest",
+    description:
+      "Lirien's eyes glow silver. 'Moonpetal blooms only in clearings touched by both moons. Gather four — and be quick, they wilt at dawn.'",
+    npcId: "Moonherb Gatherer Lirien",
+    prerequisiteQuestId: "moondancer_lirien_intro",
+    objective: { type: "gather", targetItemName: "Moonpetal", count: 4 },
+    rewards: { copper: 600, xp: 1400, items: [{ tokenId: 120, quantity: 1 }] },
+  },
+  {
+    id: "moondancer_lirien_defend",
+    title: "Garden Defense",
+    description:
+      "Lirien clutches her pruning shears. 'Fae Guardians keep raiding my garden — they think the cultivated herbs are stolen from the wild. Drive off three so I can finish my harvest.'",
+    npcId: "Moonherb Gatherer Lirien",
+    prerequisiteQuestId: "moondancer_lirien_intro",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Fae Guardian", count: 3 },
+    rewards: { copper: 550, xp: 1500 },
+  },
+  {
+    id: "moondancer_lirien_elixir",
+    title: "Elixir of Clarity",
+    description:
+      "Lirien arranges ingredients on a stone slab. 'With Moonpetals I can brew an Elixir of Clarity — it lets druids see through the corruption. Brew two at the alchemy station and I will restore the ley line sight.'",
+    npcId: "Moonherb Gatherer Lirien",
+    prerequisiteQuestId: "moondancer_lirien_gather",
+    objective: { type: "craft", targetItemName: "Elixir", count: 2 },
+    rewards: { copper: 700, xp: 1700, items: [{ tokenId: 58, quantity: 1 }] },
+  },
+
+  // -- Felsrock Citadel: Runesmith Korra (crafting + salvage) --
+  {
+    id: "felsrock_korra_intro",
+    title: "The Runesmith's Burden",
+    description:
+      "Runesmith Korra sits amid scattered blueprints, her forge cold. 'The Citadel's master forge went dark when the Forgemaster turned. I need someone to help me rebuild — from scratch if necessary.'",
+    npcId: "Runesmith Korra",
+    objective: { type: "talk", targetNpcName: "Runesmith Korra", count: 1 },
+    rewards: { copper: 350, xp: 1400 },
+  },
+  {
+    id: "felsrock_korra_salvage",
+    title: "Salvage Run",
+    description:
+      "Korra sketches furiously. 'The old armory has Mithril Ore sealed behind collapsed walls. Mine four chunks — I need them for rune-forging.'",
+    npcId: "Runesmith Korra",
+    prerequisiteQuestId: "felsrock_korra_intro",
+    objective: { type: "gather", targetItemName: "Mithril Ore", count: 4 },
+    rewards: { copper: 750, xp: 1700, items: [{ tokenId: 74, quantity: 2 }] },
+  },
+  {
+    id: "felsrock_korra_clear",
+    title: "Forge Floor Clearing",
+    description:
+      "Korra grabs a wrench. 'Iron Automatons patrol the forge floor. I can't light the furnace while they're smashing everything. Disable three.'",
+    npcId: "Runesmith Korra",
+    prerequisiteQuestId: "felsrock_korra_intro",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Iron Automaton", count: 3 },
+    rewards: { copper: 700, xp: 1800, items: [{ tokenId: 61, quantity: 1 }] },
+  },
+  {
+    id: "felsrock_korra_reforge",
+    title: "Reforging the Runeblade",
+    description:
+      "Korra stokes a makeshift forge. 'With the Mithril and a clear forge, I can restart production. Craft two Reinforced Plates to prove you can handle master-grade work.'",
+    npcId: "Runesmith Korra",
+    prerequisiteQuestId: "felsrock_korra_salvage",
+    objective: { type: "craft", targetItemName: "Reinforced", count: 2 },
+    rewards: { copper: 900, xp: 2000, items: [{ tokenId: 121, quantity: 1 }] },
+  },
+
+  // -- Lake Lumina: Tide Alchemist Nereus (alchemy + gathering) --
+  {
+    id: "lumina_nereus_intro",
+    title: "The Tide Alchemist",
+    description:
+      "Tide Alchemist Nereus examines a vial of luminous water. 'The Lake's waters once healed any wound. Now they corrode flesh. I'm trying to purify them — but I need help.'",
+    npcId: "Tide Alchemist Nereus",
+    objective: { type: "talk", targetNpcName: "Tide Alchemist Nereus", count: 1 },
+    rewards: { copper: 400, xp: 1600 },
+  },
+  {
+    id: "lumina_nereus_gather",
+    title: "Luminous Samples",
+    description:
+      "Nereus holds out empty vials. 'Arcane Crystals from the lakebed hold purified essence. Retrieve four — the deeper you go, the purer they are.'",
+    npcId: "Tide Alchemist Nereus",
+    prerequisiteQuestId: "lumina_nereus_intro",
+    objective: { type: "gather", targetItemName: "Arcane Crystal", count: 4 },
+    rewards: { copper: 850, xp: 1900, items: [{ tokenId: 122, quantity: 1 }] },
+  },
+  {
+    id: "lumina_nereus_serpents",
+    title: "Serpent Scales",
+    description:
+      "Nereus taps a recipe scroll. 'Lumen Serpent scales are essential reagents — they absorb and redirect light magic. Slay two serpents and bring me what sheds.'",
+    npcId: "Tide Alchemist Nereus",
+    prerequisiteQuestId: "lumina_nereus_intro",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Lumen Serpent", count: 2 },
+    rewards: { copper: 800, xp: 2000 },
+  },
+  {
+    id: "lumina_nereus_purify",
+    title: "Purification Draught",
+    description:
+      "Nereus arranges ingredients in a precise circle. 'With crystals and scales, I can create a Purification Draught. Brew two — one for the Lake, one for proof.'",
+    npcId: "Tide Alchemist Nereus",
+    prerequisiteQuestId: "lumina_nereus_gather",
+    objective: { type: "craft", targetItemName: "Potion", count: 2 },
+    rewards: { copper: 1000, xp: 2200, items: [{ tokenId: 119, quantity: 2 }] },
+  },
+
+  // -- Azurshard Chasm: Crystal Sage Velara (mining + enchanting) --
+  {
+    id: "azurshard_velara_intro",
+    title: "The Crystal Sage",
+    description:
+      "Crystal Sage Velara meditates within a ring of humming crystals. 'The Chasm's crystals sing to me. They hold power beyond measure — but dark resonance corrupts the harmonics. Will you help restore the song?'",
+    npcId: "Crystal Sage Velara",
+    objective: { type: "talk", targetNpcName: "Crystal Sage Velara", count: 1 },
+    rewards: { copper: 500, xp: 1800 },
+  },
+  {
+    id: "azurshard_velara_crystals",
+    title: "Crystal Tuning",
+    description:
+      "Velara runs her fingers along a fractured pillar. 'Arcane Crystals from the deep veins still resonate true. Mine five — I'll tune them to counter the corruption.'",
+    npcId: "Crystal Sage Velara",
+    prerequisiteQuestId: "azurshard_velara_intro",
+    objective: { type: "gather", targetItemName: "Arcane Crystal", count: 5 },
+    rewards: { copper: 1000, xp: 2200, items: [{ tokenId: 122, quantity: 2 }] },
+  },
+  {
+    id: "azurshard_velara_shatter",
+    title: "Dissonant Shards",
+    description:
+      "Velara covers her ears. 'Shard Sentinels have absorbed the dark resonance — they broadcast corruption through the crystal network. Destroy two to silence the noise.'",
+    npcId: "Crystal Sage Velara",
+    prerequisiteQuestId: "azurshard_velara_intro",
+    objective: { type: "kill", targetMobType: "mob", targetMobName: "Shard Sentinel", count: 2 },
+    rewards: { copper: 1100, xp: 2400, items: [{ tokenId: 75, quantity: 1 }] },
+  },
+  {
+    id: "azurshard_velara_resonance",
+    title: "Harmonic Restoration",
+    description:
+      "Velara places tuned crystals in a precise pattern. 'Forge two enchanted items at the station — the act of creation channels essence through the crystals and restores their harmonic frequency.'",
+    npcId: "Crystal Sage Velara",
+    prerequisiteQuestId: "azurshard_velara_crystals",
+    objective: { type: "craft", targetItemName: "Enchanted", count: 2 },
+    rewards: { copper: 1300, xp: 2800, items: [{ tokenId: 54, quantity: 1 }] },
   },
 
   // === PROFESSION FARMSTEAD QUESTS — sunflower-fields (16 quests, 2 per profession) ===
@@ -3448,6 +3697,26 @@ export function registerQuestRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check range — player must be within 100 units of the quest NPC
+    const npcId = getNpcIdByName(quest.npcId);
+    if (npcId) {
+      const npc = getEntity(npcId);
+      if (npc) {
+        const dx = npc.x - player.x;
+        const dy = (npc.y ?? 0) - (player.y ?? 0);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 100) {
+          reply.code(400);
+          return {
+            error: "Too far from quest giver",
+            npcName: quest.npcId,
+            distance: Math.round(dist),
+            maxRange: 100,
+          };
+        }
+      }
+    }
+
     // Add quest to player
     player.activeQuests.push({
       questId,
@@ -3559,6 +3828,20 @@ export function registerQuestRoutes(server: FastifyInstance) {
     if (!npc || quest.npcId !== npc.name) {
       reply.code(400);
       return { error: "This NPC does not offer this quest" };
+    }
+
+    // Check range — player must be within 100 units of the quest NPC
+    const dxc = npc.x - player.x;
+    const dyc = (npc.y ?? 0) - (player.y ?? 0);
+    const distc = Math.sqrt(dxc * dxc + dyc * dyc);
+    if (distc > 100) {
+      reply.code(400);
+      return {
+        error: "Too far from quest giver",
+        npcName: quest.npcId,
+        distance: Math.round(distc),
+        maxRange: 100,
+      };
     }
 
     // Check if quest is active
@@ -3845,6 +4128,8 @@ export function registerQuestRoutes(server: FastifyInstance) {
       return {
         entityId: player.id,
         playerName: player.name,
+        classId: player.classId,
+        origin: player.origin,
         zoneId: playerZoneId,
         activeQuests: activeQuestsWithNpc,
         completedQuests,

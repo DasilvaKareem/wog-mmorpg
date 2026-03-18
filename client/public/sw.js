@@ -8,7 +8,7 @@
  *  4. Handle notification clicks (focus/open app)
  */
 
-const CACHE_NAME = "wog-1773517873";
+const CACHE_NAME = "wog-1773810901";
 const APP_SHELL = [
   "/",
   "/favicon.ico",

@@ -95,6 +95,26 @@ export interface WorldLayout {
   zones: Record<string, WorldLayoutZone>;
 }
 
+export interface ActivePlayer {
+  id: string;
+  name: string;
+  level: number;
+  hp: number;
+  maxHp: number;
+  classId?: string;
+  raceId?: string;
+  walletAddress?: string | null;
+  zoneId: string;
+  x: number;
+  y: number;
+}
+
+export interface ActivePlayersResponse {
+  tick: number;
+  count: number;
+  players: ActivePlayer[];
+}
+
 /** Anything that can answer elevation queries in world 3D coords */
 export interface ElevationProvider {
   getElevationAt(x: number, z: number): number;

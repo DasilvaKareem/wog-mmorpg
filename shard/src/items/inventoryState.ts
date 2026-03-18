@@ -16,6 +16,16 @@ function incrementEquippedCounts(
   }
 }
 
+function collectEquippedInstanceIds(
+  equipment: Record<string, unknown> | undefined,
+  ids: Set<string>
+): void {
+  for (const equipped of Object.values(equipment ?? {})) {
+    const instanceId = String((equipped as { instanceId?: string })?.instanceId ?? "").trim();
+    if (instanceId) ids.add(instanceId);
+  }
+}
+
 export async function getEquippedItemCounts(walletAddress: string): Promise<Map<number, number>> {
   const counts = new Map<number, number>();
   const lowerWallet = walletAddress.toLowerCase();
@@ -35,6 +45,27 @@ export async function getEquippedItemCounts(walletAddress: string): Promise<Map<
   }
 
   return counts;
+}
+
+export async function getEquippedInstanceIds(walletAddress: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const lowerWallet = walletAddress.toLowerCase();
+  const liveCharacterNames = new Set<string>();
+
+  for (const entity of getAllEntities().values()) {
+    if (entity.type !== "player") continue;
+    if (entity.walletAddress?.toLowerCase() !== lowerWallet) continue;
+    liveCharacterNames.add(normalizeCharacterName(entity.name));
+    collectEquippedInstanceIds(entity.equipment as Record<string, unknown> | undefined, ids);
+  }
+
+  const savedCharacters = await loadAllCharactersForWallet(walletAddress);
+  for (const saved of savedCharacters) {
+    if (liveCharacterNames.has(normalizeCharacterName(saved.name))) continue;
+    collectEquippedInstanceIds(saved.equipment, ids);
+  }
+
+  return ids;
 }
 
 export function getRecyclableQuantity(

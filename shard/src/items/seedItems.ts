@@ -23,6 +23,15 @@ const itemsContract = getContract({
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
 
+function isNonceConflict(err: any): boolean {
+  const msg = String(err?.message ?? err ?? "").toLowerCase();
+  return msg.includes("same nonce") || msg.includes("invalid transaction nonce");
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function main() {
   const serverAddress = serverAccount.address;
   const itemsInChainOrder = await getCatalogItemsInChainOrder();
@@ -47,18 +56,54 @@ async function main() {
     console.log(
       `Seeding game tokenId ${gameTokenId.toString()} (${item.name}) as chain tokenId ${chainTokenId.toString()}...`
     );
-    const tx = mintTo({
-      contract: itemsContract,
-      to: serverAddress,
-      supply: 1n,
-      nft: {
-        name: item.name,
-        description: item.description,
-      },
-    });
-    const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
-    console.log(`  tx: ${receipt.transactionHash}`);
-    nextChainTokenId += 1n;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const currentNextChainTokenId = await nextTokenIdToMint({ contract: itemsContract });
+      if (currentNextChainTokenId > chainTokenId) {
+        console.log(
+          `  chain tokenId ${chainTokenId.toString()} already exists after retry; continuing`
+        );
+        nextChainTokenId = currentNextChainTokenId;
+        break;
+      }
+      if (currentNextChainTokenId < chainTokenId) {
+        if (attempt === 9) {
+          throw new Error(
+            `Contract nextTokenIdToMint remained at ${currentNextChainTokenId.toString()} while waiting to seed expected chain tokenId ${chainTokenId.toString()}`
+          );
+        }
+        const delayMs = 3000 * (attempt + 1);
+        console.warn(
+          `  waiting for chain tokenId ${chainTokenId.toString()} to become available (currently ${currentNextChainTokenId.toString()}), retrying in ${delayMs}ms`
+        );
+        await sleep(delayMs);
+        continue;
+      }
+
+      try {
+        const tx = mintTo({
+          contract: itemsContract,
+          to: serverAddress,
+          supply: 1n,
+          nft: {
+            name: item.name,
+            description: item.description,
+          },
+        });
+        const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+        console.log(`  tx: ${receipt.transactionHash}`);
+        nextChainTokenId = chainTokenId + 1n;
+        break;
+      } catch (err: any) {
+        if (!isNonceConflict(err) || attempt === 9) {
+          throw err;
+        }
+        const delayMs = 3000 * (attempt + 1);
+        console.warn(
+          `  nonce conflict while seeding chain tokenId ${chainTokenId.toString()}, retrying in ${delayMs}ms`
+        );
+        await sleep(delayMs);
+      }
+    }
   }
 
   console.log("\nAll items seeded!");

@@ -2,6 +2,7 @@ import * as React from "react";
 import { useQuestLog, type ActiveQuestEntry, type AvailableQuestEntry, type CompletedQuestEntry, type ActivityEntry } from "@/hooks/useQuestLog";
 import { getAuthToken } from "@/lib/agentAuth";
 import { API_URL } from "@/config";
+import { gameBus } from "@/lib/eventBus";
 import { formatCopperString } from "@/lib/currency";
 
 /* ── 8-bit retro palette (matches InspectDialog) ──────────── */
@@ -101,7 +102,7 @@ function AvailableTab({
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] font-bold" style={{ color: TEXT }}>{q.title}</span>
             <ActionBtn
-              label="Accept"
+              label="Send Agent"
               color={ACCENT}
               loading={loadingId === q.questId}
               onClick={() => onAccept(q)}
@@ -148,7 +149,7 @@ function ActiveTab({
             </span>
             {q.complete && q.npcEntityId && (
               <ActionBtn
-                label="Turn In"
+                label="Send to Turn In"
                 color="#f2c854"
                 loading={loadingId === q.questId}
                 onClick={() => onTurnIn(q)}
@@ -269,63 +270,41 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
     setTimeout(() => setFeedback(null), 3500);
   }
 
-  async function handleAccept(q: AvailableQuestEntry) {
-    if (!walletAddress || !data?.entityId || !data?.zoneId) return;
-    setActionLoading(q.questId);
-    try {
-      const token = await getAuthToken(walletAddress);
-      if (!token) { showFeedback("Not authenticated", false); return; }
+  function handleAccept(q: AvailableQuestEntry) {
+    if (!data?.zoneId) return;
 
-      const res = await fetch(`${API_URL}/quests/accept`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ zoneId: data.zoneId, playerId: data.entityId, questId: q.questId }),
-      });
-      const json = await res.json() as any;
-      if (res.ok) {
-        showFeedback(`Accepted: ${q.title}`, true);
-        refresh();
-        setAvailable((prev) => prev.filter((a) => a.questId !== q.questId));
-        setTab("active");
-      } else {
-        showFeedback(json.error ?? "Failed to accept quest", false);
-      }
-    } catch {
-      showFeedback("Network error", false);
-    } finally {
-      setActionLoading(null);
-    }
+    // Send through agent confirmation flow instead of direct accept
+    gameBus.emit("agentGoToNpc", {
+      entityId: q.npcEntityId,
+      zoneId: data.zoneId,
+      name: q.npcName,
+      type: "quest-giver",
+      action: "accept-quest",
+      questId: q.questId,
+      questTitle: q.title,
+    });
+
+    showFeedback(`Sending agent to accept "${q.title}"`, true);
   }
 
-  async function handleTurnIn(q: ActiveQuestEntry) {
-    if (!walletAddress || !data?.entityId || !data?.zoneId || !q.npcEntityId) return;
-    setActionLoading(q.questId);
-    try {
-      const token = await getAuthToken(walletAddress);
-      if (!token) { showFeedback("Not authenticated", false); return; }
+  function handleTurnIn(q: ActiveQuestEntry) {
+    if (!data?.zoneId || !q.npcEntityId) return;
 
-      const res = await fetch(`${API_URL}/quests/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          zoneId: data.zoneId,
-          playerId: data.entityId,
-          questId: q.questId,
-          npcId: q.npcEntityId,
-        }),
-      });
-      const json = await res.json() as any;
-      if (res.ok) {
-        showFeedback(`Quest complete! +${json.rewards?.xp ?? 0} XP, +${formatCopperString(json.rewards?.copper ?? 0)}`, true);
-        refresh();
-      } else {
-        showFeedback(json.error ?? "Failed to turn in quest", false);
-      }
-    } catch {
-      showFeedback("Network error", false);
-    } finally {
-      setActionLoading(null);
-    }
+    // Find NPC name from quest title (the NPC entity name comes from quest catalog)
+    const npcName = q.title; // fallback — the confirmation shows the quest title
+
+    // Send agent to NPC for turn-in through confirmation flow
+    gameBus.emit("agentGoToNpc", {
+      entityId: q.npcEntityId,
+      zoneId: data.zoneId,
+      name: npcName,
+      type: "quest-giver",
+      action: "complete-quest",
+      questId: q.questId,
+      questTitle: q.title,
+    });
+
+    showFeedback(`Sending agent to turn in "${q.title}"`, true);
   }
 
   if (!open) return null;

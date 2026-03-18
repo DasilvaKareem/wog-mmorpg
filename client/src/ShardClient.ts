@@ -289,9 +289,17 @@ export interface ProfessionInfo {
   cost: number;
 }
 
+export interface ProfessionSkillDetail {
+  level: number;
+  xp: number;
+  actions: number;
+  progress: number; // 0-100 pct toward next level
+}
+
 export interface ProfessionsResponse {
   learned: string[];
   available: ProfessionInfo[];
+  skills: Record<string, ProfessionSkillDetail>;
 }
 
 // ── Diary ─────────────────────────────────────────────────────────
@@ -331,13 +339,14 @@ export async function fetchProfessions(
 ): Promise<ProfessionsResponse> {
   try {
     const res = await fetch(`${API_URL}/professions/${walletAddress}`);
-    if (!res.ok) return { learned: [], available: [] };
+    if (!res.ok) return { learned: [], available: [], skills: {} };
     const data = await res.json();
     return {
       learned: data.professions || [],
       available: data.available || [],
+      skills: data.skills || {},
     };
   } catch {
-    return { learned: [], available: []};
+    return { learned: [], available: [], skills: {} };
   }
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { mintItem } from "../blockchain/blockchain.js";
 import { recordGoldSpend, unreserveGold } from "../blockchain/goldLedger.js";
+import { assignItemInstanceOwner, getAuctionEscrowInstance } from "../items/itemRng.js";
 import {
   getNextAuctionId,
   getAuctionFromChain,
@@ -64,17 +65,20 @@ async function auctionTick(server: FastifyInstance) {
             throw endErr;
           }
 
-          // If there was a winner, mint item and settle payment
+          // If there was a winner, release the escrowed item and settle payment.
           if (
             auction.highBidder !== "0x0000000000000000000000000000000000000000" &&
             auction.highBid > 0
           ) {
-            // Mint item to winner
             const mintTx = await mintItem(
               auction.highBidder,
               BigInt(auction.tokenId),
               BigInt(auction.quantity)
             );
+            const escrowedInstance = getAuctionEscrowInstance(i);
+            if (escrowedInstance) {
+              await assignItemInstanceOwner(escrowedInstance.instanceId, auction.highBidder);
+            }
 
             // Record gold spend (deduct from available)
             recordGoldSpend(auction.highBidder, auction.highBid);
@@ -87,8 +91,17 @@ async function auctionTick(server: FastifyInstance) {
               `Auction ${i} settled: Winner ${auction.highBidder} paid ${auction.highBid} gold. Item minted: ${mintTx}`
             );
           } else {
+            const restoreTx = await mintItem(
+              auction.seller,
+              BigInt(auction.tokenId),
+              BigInt(auction.quantity)
+            );
+            const escrowedInstance = getAuctionEscrowInstance(i);
+            if (escrowedInstance) {
+              await assignItemInstanceOwner(escrowedInstance.instanceId, auction.seller);
+            }
             server.log.info(
-              `Auction ${i} ended with no bids. Item returned to seller.`
+              `Auction ${i} ended with no bids. Escrow returned to seller ${auction.seller} via ${restoreTx}.`
             );
           }
         }

@@ -11,6 +11,7 @@ import { randomUUID } from "crypto";
 import { saveCharacter } from "../character/characterStore.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
+import { getPartyMembers } from "../social/partySystem.js";
 
 export function registerTechniqueRoutes(server: FastifyInstance): void {
   // Get all techniques for a class
@@ -329,7 +330,39 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
     caster.cooldowns.set(techniqueId, cooldownExpiresAtTick);
 
-    // Apply technique effects
+    // Party-targeted techniques: apply to all party members
+    if (technique.targetType === "party") {
+      const result = applyPartyTechniqueEffects(caster, technique, zone);
+
+      logZoneEvent({
+        zoneId,
+        type: "ability",
+        tick: zone.tick,
+        message: `${caster.name} uses ${technique.name} on the party!`,
+        entityId: caster.id,
+        entityName: caster.name,
+        data: {
+          techniqueId: technique.id,
+          techniqueName: technique.name,
+          techniqueType: technique.type,
+          animStyle: technique.animStyle,
+          isPartyBuff: true,
+          affectedCount: result.affected.length,
+          casterX: caster.x,
+          casterZ: caster.y,
+        },
+      });
+
+      return reply.send({
+        success: true,
+        technique: technique.name,
+        casterEssence: caster.essence,
+        cooldownExpiresAtTick,
+        result,
+      });
+    }
+
+    // Apply technique effects (single-target / self / area)
     const result = applyTechniqueEffects(caster, target, technique, zone);
 
     // Log ability event for VFX pipeline
@@ -694,4 +727,97 @@ function findNearbyEnemies(origin: Entity, zone: ZoneState, maxTargets: number, 
   }
 
   return enemies;
+}
+
+/**
+ * Apply a party-targeted technique to all party members.
+ * Handles buffs (stat bonuses, shields) and heals (instant + HoT).
+ * Falls back to self-only if not in a party.
+ */
+function applyPartyTechniqueEffects(
+  caster: Entity,
+  technique: TechniqueDefinition,
+  zone: ZoneState,
+): any {
+  const { effects, type } = technique;
+  const memberIds = getPartyMembers(caster.id);
+  const affected: any[] = [];
+
+  for (const memberId of memberIds) {
+    const member = getEntity(memberId);
+    if (!member || member.hp <= 0) continue;
+
+    const memberResult: any = { id: member.id, name: member.name };
+
+    // Stat buff
+    if (effects.statBonus && effects.duration) {
+      const buffEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: technique.id,
+        name: technique.name,
+        type: "buff",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        statModifiers: effects.statBonus,
+      };
+      addActiveEffect(member, buffEffect);
+      recalculateEntityVitals(member);
+      memberResult.buffs = effects.statBonus;
+      memberResult.duration = effects.duration;
+    }
+
+    // Shield
+    if (effects.shield && effects.duration) {
+      const shieldHp = Math.floor(member.maxHp * (effects.shield / 100));
+      const shieldEffect: ActiveEffect = {
+        id: randomUUID(),
+        techniqueId: `${technique.id}_shield`,
+        name: `${technique.name} Shield`,
+        type: "shield",
+        casterId: caster.id,
+        appliedAtTick: zone.tick,
+        durationTicks: effects.duration,
+        remainingTicks: effects.duration,
+        shieldHp,
+        shieldMaxHp: shieldHp,
+      };
+      addActiveEffect(member, shieldEffect);
+      memberResult.shield = shieldHp;
+    }
+
+    // Healing — instant or HoT
+    if (effects.healAmount) {
+      if (effects.duration && effects.duration > 0 && (type === "healing" || (type === "buff" && effects.statBonus))) {
+        // HoT for party healing spells and buff+heal hybrids
+        const totalHeal = Math.floor(member.maxHp * (effects.healAmount / 100));
+        const healPerTick = Math.max(1, Math.floor(totalHeal / effects.duration));
+        const hotEffect: ActiveEffect = {
+          id: randomUUID(),
+          techniqueId: `${technique.id}_hot`,
+          name: `${technique.name} HoT`,
+          type: "hot",
+          casterId: caster.id,
+          appliedAtTick: zone.tick,
+          durationTicks: effects.duration,
+          remainingTicks: effects.duration,
+          hotHealPerTick: healPerTick,
+        };
+        addActiveEffect(member, hotEffect);
+        memberResult.hotApplied = true;
+        memberResult.healPerTick = healPerTick;
+      } else {
+        // Instant heal
+        const healAmount = Math.floor(member.maxHp * (effects.healAmount / 100));
+        const actualHeal = Math.min(healAmount, member.maxHp - member.hp);
+        member.hp = Math.min(member.maxHp, member.hp + actualHeal);
+        memberResult.healing = actualHeal;
+      }
+    }
+
+    affected.push(memberResult);
+  }
+
+  return { affected, partySize: memberIds.length };
 }

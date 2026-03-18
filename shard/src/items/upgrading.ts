@@ -2,9 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "../professions/professions.js";
-import { mintItem, burnItem } from "../blockchain/blockchain.js";
+import { mintItem, burnItem, getItemBalance } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
-import { rollCraftedItem } from "./itemRng.js";
+import { consumeOwnedItemInstances, rollCraftedItem } from "./itemRng.js";
+import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 
 export interface UpgradeRecipe {
@@ -211,11 +212,34 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
     // Burn input weapon + additional materials
     const burnedItems: Array<{ tokenId: string; quantity: number; tx: string }> = [];
     try {
+      const inputWeaponBalance = await getItemBalance(walletAddress, recipe.inputWeaponTokenId);
+      const ownedInputWeapons = Number(inputWeaponBalance);
+      const equippedCounts = await getEquippedItemCounts(walletAddress);
+      const equippedInputWeapons = equippedCounts.get(Number(recipe.inputWeaponTokenId)) ?? 0;
+      const upgradableQuantity = getRecyclableQuantity(ownedInputWeapons, equippedInputWeapons);
+      if (upgradableQuantity < 1) {
+        reply.code(400);
+        return {
+          error: equippedInputWeapons > 0
+            ? "That weapon is equipped on one of your characters. Unequip it before upgrading."
+            : "You need the base weapon in your wallet to upgrade it.",
+          ownedQuantity: ownedInputWeapons,
+          equippedCount: equippedInputWeapons,
+        };
+      }
+
       // Burn the input weapon
       const weaponBurnTx = await burnItem(
         walletAddress,
         recipe.inputWeaponTokenId,
         1n
+      );
+      const equippedInstanceIds = await getEquippedInstanceIds(walletAddress);
+      await consumeOwnedItemInstances(
+        walletAddress,
+        Number(recipe.inputWeaponTokenId),
+        1,
+        equippedInstanceIds,
       );
       burnedItems.push({
         tokenId: recipe.inputWeaponTokenId.toString(),

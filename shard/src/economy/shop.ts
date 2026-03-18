@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance, mintGold, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemRecycleCopperValue, getItemsByTokenIds } from "../items/itemCatalog.js";
-import { getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
+import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
+import { consumeOwnedItemInstances } from "../items/itemRng.js";
 import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
@@ -308,8 +309,26 @@ export function registerShopRoutes(server: FastifyInstance) {
         return { error: "You don't have enough of this item", balance: sellerBalance.toString() };
       }
 
+      const ownedQuantity = Number(sellerBalance);
+      const equippedCounts = await getEquippedItemCounts(sellerAddress);
+      const equippedCount = equippedCounts.get(tokenId) ?? 0;
+      const sellableQuantity = getRecyclableQuantity(ownedQuantity, equippedCount);
+      if (quantity > sellableQuantity) {
+        reply.code(400);
+        return {
+          error: equippedCount > 0
+            ? "That item is equipped on one of your characters. Unequip it or sell only extra copies."
+            : "You can't sell more than you own.",
+          ownedQuantity,
+          equippedCount,
+          sellableQuantity,
+        };
+      }
+
       // Burn items from seller
       await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+      const equippedInstanceIds = await getEquippedInstanceIds(sellerAddress);
+      await consumeOwnedItemInstances(sellerAddress, tokenId, quantity, equippedInstanceIds);
 
       // Transfer gold from merchant's custodial wallet to seller (no new gold minted)
       const merchantAccount = await getCustodialWallet(merchantState.walletAddress);
@@ -436,6 +455,8 @@ export function registerShopRoutes(server: FastifyInstance) {
       }
 
       const burnTx = await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+      const equippedInstanceIds = await getEquippedInstanceIds(sellerAddress);
+      await consumeOwnedItemInstances(sellerAddress, tokenId, quantity, equippedInstanceIds);
       const goldTx = await mintGold(sellerAddress, goldPayout.toString());
 
       server.log.info(

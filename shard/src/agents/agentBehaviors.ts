@@ -8,6 +8,7 @@ import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIR
 import { getEntity as getWorldEntity, getAllZones, getOrCreateZone } from "../world/zoneRuntime.js";
 import { getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
+import { copperToGold } from "../blockchain/currency.js";
 import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { sendInboxMessage } from "./agentInbox.js";
@@ -24,12 +25,71 @@ import {
   formatAgentError,
   type ActionResult,
   type AgentContext,
+  type LiquidationInventoryItem,
 } from "./agentUtils.js";
 
 const PROFESSION_HUB_ZONE = "village-square";
 const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
 const SICKLE_TOKENS: Record<number, number> = { 41: 1, 42: 2, 43: 3, 44: 4 };
 const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
+const AUCTION_LISTING_FEE_COPPER = 50;
+const AUCTION_RELIST_COOLDOWN_MS = 10 * 60_000;
+const MIN_AUCTION_VALUE_COPPER = 150;
+
+interface AuctionListingPlan {
+  tokenId: number;
+  itemName: string;
+  quantity: number;
+  startPrice: number;
+  buyoutPrice: number;
+  durationMinutes: number;
+  estimatedCopperValue: number;
+}
+
+function toGoldAmount(copper: number): number {
+  return Number(copperToGold(Math.max(0, Math.floor(copper))).toFixed(4));
+}
+
+function buildAuctionListingPlan(item: LiquidationInventoryItem): AuctionListingPlan | null {
+  const tokenId = Number(item.tokenId);
+  const recyclableQuantity = Math.max(0, Number(item.recyclableQuantity ?? 0));
+  const recycleCopperValue = Math.max(0, Number(item.recycleCopperValue ?? 0));
+  const category = String(item.category ?? "");
+  const isEquipment = category === "weapon" || category === "armor" || !!item.equipSlot || !!item.armorSlot;
+  const isTradeGood = category === "material" || category === "consumable" || category === "tool";
+
+  if (!Number.isFinite(tokenId) || tokenId <= 0 || recyclableQuantity <= 0) return null;
+  if (!isEquipment && !isTradeGood) return null;
+
+  const quantity = isEquipment
+    ? 1
+    : Math.max(1, Math.min(recyclableQuantity, category === "material" ? 5 : 3));
+  const baseCopperValue = Math.max(recycleCopperValue * quantity, isEquipment ? 200 : 80);
+
+  if (baseCopperValue < MIN_AUCTION_VALUE_COPPER) return null;
+
+  const multiplier = isEquipment ? 2.4 : category === "material" ? 2 : 1.7;
+  const startCopper = Math.max(MIN_AUCTION_VALUE_COPPER, Math.round(baseCopperValue * multiplier));
+  const buyoutCopper = Math.max(startCopper + 75, Math.round(startCopper * 1.35));
+
+  return {
+    tokenId,
+    itemName: item.name,
+    quantity,
+    startPrice: toGoldAmount(startCopper),
+    buyoutPrice: toGoldAmount(buyoutCopper),
+    durationMinutes: isEquipment ? 240 : 120,
+    estimatedCopperValue: baseCopperValue,
+  };
+}
+
+function pickAuctionListingCandidate(items: LiquidationInventoryItem[]): AuctionListingPlan | null {
+  return items
+    .map(buildAuctionListingPlan)
+    .filter((plan): plan is AuctionListingPlan => plan !== null)
+    .sort((a, b) => b.estimatedCopperValue - a.estimatedCopperValue)
+    [0] ?? null;
+}
 
 function getTechniqueCooldownExpiry(entity: any, techniqueId: string): number | undefined {
   const cooldowns = entity.cooldowns;
@@ -944,6 +1004,77 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
 export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const inventory = await ctx.getLiquidationInventory();
+
+    if (ctx.currentCaps.marketTradingEnabled && inventory.copper >= AUCTION_LISTING_FEE_COPPER) {
+      const listing = pickAuctionListingCandidate(inventory.items);
+      if (listing) {
+        const cooldownKey = `auction:list:${ctx.currentRegion}:${listing.tokenId}`;
+        if (!ctx.isInteractionOnCooldown(cooldownKey)) {
+          try {
+            const zs = await ctx.getZoneState();
+            if (zs) {
+              const { entities, me } = zs;
+              const auctioneer = ctx.findNearestEntity(entities, me, (e) => e.type === "auctioneer");
+              if (auctioneer) {
+                const activeListingsRes = await ctx.api("GET", `/marketplace/my-listings/${ctx.custodialWallet}`);
+                const activeListings = Array.isArray(activeListingsRes?.listings) ? activeListingsRes.listings : [];
+                const alreadyListed = activeListings.some((entry: any) =>
+                  entry?.status === "active"
+                  && String(entry?.zoneId ?? "") === ctx.currentRegion
+                  && Number(entry?.tokenId ?? -1) === listing.tokenId
+                );
+
+                if (alreadyListed) {
+                  ctx.setInteractionCooldown(cooldownKey, AUCTION_RELIST_COOLDOWN_MS);
+                } else {
+                  const [, auctioneerEntity] = auctioneer;
+                  const moving = await ctx.moveToEntity(me, auctioneerEntity);
+                  if (moving) return actionProgressed(`Moving to ${auctioneerEntity.name ?? "auctioneer"}`);
+
+                  try {
+                    await ctx.api("POST", `/auctionhouse/${ctx.currentRegion}/create`, {
+                      sellerAddress: ctx.custodialWallet,
+                      tokenId: listing.tokenId,
+                      quantity: listing.quantity,
+                      startPrice: listing.startPrice,
+                      durationMinutes: listing.durationMinutes,
+                      buyoutPrice: listing.buyoutPrice,
+                    });
+                    ctx.setInteractionCooldown(cooldownKey, AUCTION_RELIST_COOLDOWN_MS);
+                    void ctx.logActivity(
+                      `Listed ${listing.quantity}x ${listing.itemName} on the auction house`
+                    );
+                    emitAgentChat({
+                      entityId: ctx.entityId,
+                      entityName: me.name ?? "Agent",
+                      zoneId: ctx.currentRegion,
+                      event: "npc_shop",
+                      origin: me.origin,
+                      classId: me.classId,
+                      detail: `Listed ${listing.quantity}x ${listing.itemName} for auction`,
+                    });
+                    return actionCompleted(`Listed ${listing.quantity}x ${listing.itemName} on the auction house`);
+                  } catch (err: any) {
+                    const reason = formatAgentError(err);
+                    console.debug(`[agent:${ctx.walletTag}] auction listing skipped: ${reason.slice(0, 80)}`);
+                    if (
+                      reason.includes("Insufficient gold for listing fee")
+                      || reason.includes("Insufficient item balance")
+                    ) {
+                      ctx.setInteractionCooldown(cooldownKey, AUCTION_RELIST_COOLDOWN_MS);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (err: any) {
+            const reason = formatAgentError(err);
+            console.debug(`[agent:${ctx.walletTag}] auction lookup skipped: ${reason.slice(0, 80)}`);
+          }
+        }
+      }
+    }
+
     const candidates = inventory.items
       .filter((item: any) => item.recyclableQuantity > 0)
       .filter((item: any) => (
@@ -1147,6 +1278,47 @@ export async function doGotoNpc(
         return actionBlocked(reason, {
           failureKey: `goto:learn-technique:${(target as any).techniqueId}:${targetEntityId}`,
           endpoint: "/techniques/learn",
+          targetId: targetEntityId,
+          targetName,
+        });
+      }
+    } else if (arrivalAction === "accept-quest" && (target as any).questId && ctx.custodialWallet) {
+      try {
+        await ctx.api("POST", "/quests/accept", {
+          zoneId: ctx.currentRegion,
+          entityId: ctx.entityId,
+          questId: (target as any).questId,
+        });
+        void ctx.logActivity(`Accepted quest: ${(target as any).questId}`);
+        console.log(`[agent:${ctx.walletTag}] Accepted quest ${(target as any).questId} (user-initiated)`);
+      } catch (questErr: any) {
+        const reason = formatAgentError(questErr);
+        void ctx.logActivity(`Could not accept quest: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:accept-quest:${(target as any).questId}:${targetEntityId}`,
+          endpoint: "/quests/accept",
+          targetId: targetEntityId,
+          targetName,
+        });
+      }
+    } else if (arrivalAction === "complete-quest" && (target as any).questId && ctx.custodialWallet) {
+      try {
+        await ctx.api("POST", "/quests/complete", {
+          zoneId: ctx.currentRegion,
+          playerId: ctx.entityId,
+          questId: (target as any).questId,
+          npcId: targetEntityId,
+        });
+        void ctx.logActivity(`Turned in quest: ${(target as any).questId}`);
+        console.log(`[agent:${ctx.walletTag}] Completed quest ${(target as any).questId} (user-initiated)`);
+      } catch (questErr: any) {
+        const reason = formatAgentError(questErr);
+        void ctx.logActivity(`Could not turn in quest: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:complete-quest:${(target as any).questId}:${targetEntityId}`,
+          endpoint: "/quests/complete",
           targetId: targetEntityId,
           targetName,
         });

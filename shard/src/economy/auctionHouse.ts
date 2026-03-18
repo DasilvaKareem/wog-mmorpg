@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
+import { burnItem, getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
 import {
   formatGold,
   getAvailableGold,
@@ -8,6 +8,7 @@ import {
   unreserveGold,
 } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
+import { assignItemInstanceOwner, getAuctionEscrowInstance, getWalletInstanceByToken } from "../items/itemRng.js";
 import {
   createAuctionOnChain,
   placeBidOnChain,
@@ -20,6 +21,7 @@ import {
 import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { copperToGold } from "../blockchain/currency.js";
+import { getEquippedInstanceIds, getEquippedItemCounts } from "../items/inventoryState.js";
 
 const AUCTION_LISTING_FEE = copperToGold(50); // 50 copper = 0.005 GOLD
 const AUCTION_CANCEL_FEE = copperToGold(25);  // 25 copper = 0.0025 GOLD
@@ -28,13 +30,15 @@ const STATUS_NAMES = ["active", "ended", "cancelled"];
 
 function formatAuctionForResponse(auction: AuctionData) {
   const item = getItemByTokenId(BigInt(auction.tokenId));
+  const instance = getAuctionEscrowInstance(auction.auctionId);
 
   return {
     auctionId: auction.auctionId,
     zoneId: auction.zoneId,
     seller: auction.seller,
     tokenId: auction.tokenId,
-    itemName: item?.name ?? "Unknown Item",
+    instanceId: instance?.instanceId ?? null,
+    itemName: instance?.displayName ?? item?.name ?? "Unknown Item",
     quantity: auction.quantity,
     startPrice: auction.startPrice,
     buyoutPrice: auction.buyoutPrice > 0 ? auction.buyoutPrice : null,
@@ -46,6 +50,11 @@ function formatAuctionForResponse(auction: AuctionData) {
     highBid: auction.highBid > 0 ? auction.highBid : null,
     status: STATUS_NAMES[auction.status] || "unknown",
     extensionCount: auction.extensionCount,
+    quality: instance?.quality?.tier ?? null,
+    rolledStats: instance?.rolledStats ?? {},
+    bonusAffix: instance?.bonusAffix ?? null,
+    maxDurability: instance?.currentMaxDurability ?? item?.maxDurability ?? null,
+    durability: instance?.currentDurability ?? null,
   };
 }
 
@@ -114,12 +123,13 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       startPrice: number;
       durationMinutes: number;
       buyoutPrice?: number;
+      instanceId?: string;
     };
   }>("/auctionhouse/:zoneId/create", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const { zoneId } = request.params;
-    const { sellerAddress, tokenId, quantity, startPrice, durationMinutes, buyoutPrice } = request.body;
+    const { sellerAddress, tokenId, quantity, startPrice, durationMinutes, buyoutPrice, instanceId } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     if (!sellerAddress || !/^0x[a-fA-F0-9]{40}$/.test(sellerAddress)) {
@@ -153,7 +163,23 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       return { error: "Buyout price must be greater than start price" };
     }
 
+    if (instanceId && quantity !== 1) {
+      reply.code(400);
+      return { error: "Instance auctions must have quantity 1" };
+    }
+
+    let escrowBurnTx: string | null = null;
+    let auctionCreated = false;
+    let createdAuctionId: number | null = null;
+    let escrowedInstanceId: string | null = null;
+
     try {
+      const item = getItemByTokenId(BigInt(tokenId));
+      if (!item) {
+        reply.code(400);
+        return { error: "Unknown item tokenId" };
+      }
+
       // Verify seller owns the item on the main SKALE chain
       const balance = await getItemBalance(sellerAddress, BigInt(tokenId));
       if (balance < BigInt(quantity)) {
@@ -165,7 +191,32 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         };
       }
 
-      // Charge listing fee (50 copper = 0.005 GOLD)
+      // Prevent auctioning items that are currently equipped on any of the wallet's characters.
+      const equippedCounts = await getEquippedItemCounts(sellerAddress);
+      const equippedCount = equippedCounts.get(tokenId) ?? 0;
+      const auctionableQuantity = Number(balance) - equippedCount;
+      if (auctionableQuantity < quantity) {
+        reply.code(400);
+        return {
+          error: "Cannot auction equipped items",
+          required: quantity,
+          available: Math.max(0, auctionableQuantity),
+          equipped: equippedCount,
+        };
+      }
+
+      const equippedInstanceIds = quantity === 1
+        ? await getEquippedInstanceIds(sellerAddress)
+        : undefined;
+      const selectedInstance = quantity === 1
+        ? getWalletInstanceByToken(sellerAddress, tokenId, instanceId, equippedInstanceIds)
+        : undefined;
+      if (instanceId && !selectedInstance) {
+        reply.code(400);
+        return { error: "Item instance not found for this wallet" };
+      }
+
+      // Ensure seller can pay the listing fee.
       const onChainGold = parseFloat(await getGoldBalance(sellerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
       const availableGold = getAvailableGold(sellerAddress, safeOnChainGold);
@@ -178,11 +229,12 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
           message: `Listing fee is ${formatGold(AUCTION_LISTING_FEE)} (50 copper)`,
         };
       }
-      await recordGoldSpend(sellerAddress, AUCTION_LISTING_FEE);
-      server.log.info(`Listing fee of ${formatGold(AUCTION_LISTING_FEE)} charged to ${sellerAddress}`);
 
       const durationSeconds = durationMinutes * 60;
       const finalBuyoutPrice = buyoutPrice && buyoutPrice > 0 ? buyoutPrice : 0;
+
+      // Burn the item into server-managed escrow before exposing the auction on-chain.
+      escrowBurnTx = await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
 
       // Create auction on BITE v2 chain
       const { auctionId, txHash } = await createAuctionOnChain(
@@ -194,9 +246,20 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         durationSeconds,
         finalBuyoutPrice
       );
+      auctionCreated = true;
+      createdAuctionId = auctionId;
 
+      if (selectedInstance) {
+        const escrowed = await assignItemInstanceOwner(selectedInstance.instanceId, `auction:${auctionId}`);
+        if (!escrowed) {
+          throw new Error(`Failed to move instance ${selectedInstance.instanceId} into auction escrow`);
+        }
+        escrowedInstanceId = escrowed.instanceId;
+      }
+
+      recordGoldSpend(sellerAddress, AUCTION_LISTING_FEE);
       server.log.info(
-        `Auction ${auctionId} created in ${zoneId} by ${sellerAddress}: tokenId=${tokenId} qty=${quantity}`
+        `Auction ${auctionId} created in ${zoneId} by ${sellerAddress}: tokenId=${tokenId} qty=${quantity} escrowTx=${escrowBurnTx}${escrowedInstanceId ? ` instance=${escrowedInstanceId}` : ""}`
       );
 
       return {
@@ -204,9 +267,53 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         auctionId,
         zoneId,
         endTime: Math.floor(Date.now() / 1000) + durationSeconds,
+        escrowTx: escrowBurnTx,
+        instanceId: escrowedInstanceId,
         txHash,
       };
     } catch (err) {
+      if (createdAuctionId != null) {
+        try {
+          await cancelAuctionOnChain(createdAuctionId);
+        } catch (cancelErr) {
+          server.log.error(cancelErr, `CRITICAL: failed to cancel partially-created auction ${createdAuctionId}`);
+        }
+      }
+      if (escrowBurnTx && !auctionCreated) {
+        try {
+          const restoreTx = await mintItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+          server.log.warn(
+            `Auction creation failed after escrow burn; restored ${quantity}x token ${tokenId} to ${sellerAddress} via ${restoreTx}`
+          );
+        } catch (restoreErr) {
+          server.log.error(
+            restoreErr,
+            `CRITICAL: failed to restore escrowed auction item tokenId=${tokenId} qty=${quantity} seller=${sellerAddress}`
+          );
+        }
+      } else if (escrowBurnTx && createdAuctionId != null) {
+        try {
+          const restoreTx = await mintItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+          server.log.warn(
+            `Auction ${createdAuctionId} rolled back after partial creation; restored ${quantity}x token ${tokenId} to ${sellerAddress} via ${restoreTx}`
+          );
+        } catch (restoreErr) {
+          server.log.error(
+            restoreErr,
+            `CRITICAL: failed to restore rolled-back auction item tokenId=${tokenId} qty=${quantity} seller=${sellerAddress}`
+          );
+        }
+      }
+      if (escrowedInstanceId) {
+        try {
+          await assignItemInstanceOwner(escrowedInstanceId, sellerAddress);
+        } catch (instanceErr) {
+          server.log.error(
+            instanceErr,
+            `CRITICAL: failed to restore rolled-back auction instance ${escrowedInstanceId} to ${sellerAddress}`
+          );
+        }
+      }
       server.log.error(err, "Failed to create auction");
       reply.code(500);
       return { error: "Failed to create auction" };
@@ -387,12 +494,16 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       // Execute buyout on-chain
       const { txHash } = await buyoutAuctionOnChain(auctionId, buyerAddress);
 
-      // Mint item immediately
+      // Release the escrowed item to the buyer.
       const mintTx = await mintItem(
         buyerAddress,
         BigInt(auction.tokenId),
         BigInt(auction.quantity)
       );
+      const escrowedInstance = getAuctionEscrowInstance(auctionId);
+      if (escrowedInstance) {
+        await assignItemInstanceOwner(escrowedInstance.instanceId, buyerAddress);
+      }
 
       // Record gold spend
       recordGoldSpend(buyerAddress, auction.buyoutPrice);
@@ -449,6 +560,11 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         return { error: "Auction is not active" };
       }
 
+      if (auction.seller.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+        reply.code(403);
+        return { error: "Only the seller can cancel this auction" };
+      }
+
       if (auction.highBidder !== "0x0000000000000000000000000000000000000000") {
         reply.code(400);
         return { error: "Cannot cancel auction with bids" };
@@ -467,13 +583,22 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
           message: "Cancellation fee is 25 copper (0.0025 GOLD)",
         };
       }
-      recordGoldSpend(authenticatedWallet, AUCTION_CANCEL_FEE);
 
       const txHash = await cancelAuctionOnChain(auctionId);
+      const restoreTx = await mintItem(
+        authenticatedWallet,
+        BigInt(auction.tokenId),
+        BigInt(auction.quantity)
+      );
+      const escrowedInstance = getAuctionEscrowInstance(auctionId);
+      if (escrowedInstance) {
+        await assignItemInstanceOwner(escrowedInstance.instanceId, authenticatedWallet);
+      }
+      recordGoldSpend(authenticatedWallet, AUCTION_CANCEL_FEE);
 
-      server.log.info(`Auction ${auctionId} cancelled`);
+      server.log.info(`Auction ${auctionId} cancelled and escrow returned via ${restoreTx}`);
 
-      return { ok: true, auctionId, txHash };
+      return { ok: true, auctionId, txHash, restoreTx };
     } catch (err) {
       server.log.error(err, `Failed to cancel auction ${auctionId}`);
       reply.code(500);

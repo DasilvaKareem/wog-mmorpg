@@ -16,7 +16,7 @@ import {
 } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
-import { getItemInstance, upsertItemInstanceFromEquipment } from "./itemRng.js";
+import { getItemInstance, isItemInstanceOwnedBy, upsertItemInstanceFromEquipment } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
 
@@ -289,7 +289,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       reply.code(400);
       return { error: "Instance tokenId mismatch" };
     }
-    if (itemInstance && itemInstance.craftedBy !== (owner ?? "").toLowerCase()) {
+    if (itemInstance && !isItemInstanceOwnedBy(itemInstance, owner ?? "")) {
       reply.code(400);
       return { error: "Instance does not belong to this wallet" };
     }

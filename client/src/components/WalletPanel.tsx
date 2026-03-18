@@ -244,12 +244,21 @@ export function WalletPanel(): React.ReactElement {
           selectCharacter={selectCharacter}
           walletAddress={address!}
         />
-        <Link
-          to="/champions"
-          className="flex w-full items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
-        >
-          View Champion
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            to="/champions"
+            className="flex flex-1 items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+          >
+            View Champion
+          </Link>
+          <button
+            type="button"
+            onClick={() => gameBus.emit("inventoryOpen", undefined as never)}
+            className="flex-1 border-2 border-[#b48efa]/40 bg-[#1a1028] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#b48efa] transition hover:bg-[#251840]"
+          >
+            Bag
+          </button>
+        </div>
         <div className="flex gap-2">
           <button
             type="button"

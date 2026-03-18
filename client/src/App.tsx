@@ -8,6 +8,7 @@ import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
+import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
 
 
 import { WalletManager } from "@/lib/walletManager";
@@ -236,6 +237,8 @@ function GameWorld(): React.ReactElement {
         setRanksVisible((v) => !(v ?? !isCompactWorldUI));
       } else if (key === "w") {
         setWalletVisible((v) => !(v ?? !isCompactWorldUI));
+      } else if (key === "b") {
+        gameBus.emit("inventoryOpen", undefined as never);
       } else if (key === "p") {
         setProfessionsVisible((v) => !v);
       } else if (key === "n") {
@@ -376,8 +379,24 @@ function GameWorld(): React.ReactElement {
         {onboardingOpen && (
           <OnboardingFlow
             initialMode={onboardingMode}
-            onClose={() => setOnboardingOpen(false)}
+            onClose={() => {
+              setOnboardingOpen(false);
+              if (consumeTutorialMasterIntro()) {
+                setTutorialMasterOpen(true);
+              }
+            }}
           />
+        )}
+        {tutorialMasterOpen && (
+          <React.Suspense fallback={null}>
+            <TutorialMasterModal
+              open={tutorialMasterOpen}
+              onClose={() => setTutorialMasterOpen(false)}
+              onShowChat={() => setChatVisible(true)}
+              onShowRanks={() => setRanksVisible(true)}
+              onShowWallet={() => setWalletVisible(true)}
+            />
+          </React.Suspense>
         )}
         {settingsOpen && <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
         {inboxOpen && <InboxDialog open={inboxOpen} onClose={() => setInboxOpen(false)} />}

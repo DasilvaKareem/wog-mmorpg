@@ -164,6 +164,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedSkinColor != null && { skinColor: resolvedSkinColor }),
       ...(resolvedHairStyle != null && { hairStyle: resolvedHairStyle }),
       ...(resolvedEyeColor != null && { eyeColor: resolvedEyeColor }),
+      ...(resolvedOrigin != null && { origin: resolvedOrigin }),
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
       completedQuests: saved?.completedQuests ?? [],

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGold } from "../blockchain/goldLedger.js";
 import { getItemByTokenId, ITEM_CATALOG } from "../items/itemCatalog.js";
+import { getAuctionEscrowInstance } from "../items/itemRng.js";
 import {
   getAllAuctionsFromCache,
   getAuctionFromChain,
@@ -10,18 +11,23 @@ import {
 
 function formatAuction(auction: AuctionData) {
   const item = getItemByTokenId(BigInt(auction.tokenId));
+  const instance = getAuctionEscrowInstance(auction.auctionId);
   return {
     auctionId: auction.auctionId,
     zoneId: auction.zoneId,
     seller: auction.seller,
     tokenId: auction.tokenId,
-    itemName: item?.name ?? "Unknown Item",
+    instanceId: instance?.instanceId ?? null,
+    itemName: instance?.displayName ?? item?.name ?? "Unknown Item",
     itemDescription: item?.description ?? "",
     itemCategory: item?.category ?? "unknown",
     equipSlot: item?.equipSlot ?? null,
     armorSlot: item?.armorSlot ?? null,
-    statBonuses: item?.statBonuses ?? {},
-    maxDurability: item?.maxDurability ?? null,
+    statBonuses: instance?.rolledStats ?? item?.statBonuses ?? {},
+    bonusAffix: instance?.bonusAffix ?? null,
+    quality: instance?.quality?.tier ?? null,
+    durability: instance?.currentDurability ?? null,
+    maxDurability: instance?.currentMaxDurability ?? item?.maxDurability ?? null,
     quantity: auction.quantity,
     startPrice: auction.startPrice,
     buyoutPrice: auction.buyoutPrice > 0 ? auction.buyoutPrice : null,

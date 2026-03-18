@@ -1455,13 +1455,21 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === EMERALD WOODS ZONE (L20-25) ===
 
-  // Quest Giver
+  // Quest Givers
   {
     zoneId: "emerald-woods",
     type: "quest-giver",
     name: "Verdant Warden Sylva",
     x: 320,
     y: 280,
+    hp: 999,
+  },
+  {
+    zoneId: "emerald-woods",
+    type: "quest-giver",
+    name: "Herbalist Fern",
+    x: 380,
+    y: 320,
     hp: 999,
   },
 
@@ -1709,13 +1717,21 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === VIRIDIAN RANGE ZONE (L25-30) ===
 
-  // Quest Giver
+  // Quest Givers
   {
     zoneId: "viridian-range",
     type: "quest-giver",
     name: "Gemloch Overseer Barak",
     x: 320,
     y: 220,
+    hp: 999,
+  },
+  {
+    zoneId: "viridian-range",
+    type: "quest-giver",
+    name: "Prospector Helga",
+    x: 250,
+    y: 260,
     hp: 999,
   },
 
@@ -1953,13 +1969,39 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === MOONDANCER GLADE ZONE (L30-35) ===
 
-  // Quest Giver
+  // Class Trainers (L30 R4 + new abilities)
+  { zoneId: "moondancer-glade", type: "trainer", name: "Moonblade Warchief Gorak - Warrior Trainer",
+    x: 60, y: 300, hp: 999, teachesClass: "warrior" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Lunaris Templar Soren - Paladin Trainer",
+    x: 200, y: 300, hp: 999, teachesClass: "paladin" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Nightbloom Assassin Yara - Rogue Trainer",
+    x: 340, y: 300, hp: 999, teachesClass: "rogue" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Moonbow Sentinel Caelum - Ranger Trainer",
+    x: 480, y: 300, hp: 999, teachesClass: "ranger" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Starweaver Illythia - Mage Trainer",
+    x: 60, y: 360, hp: 999, teachesClass: "mage" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Moon Priestess Elyria - Cleric Trainer",
+    x: 200, y: 360, hp: 999, teachesClass: "cleric" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Eclipse Herald Morrigan - Warlock Trainer",
+    x: 340, y: 360, hp: 999, teachesClass: "warlock" },
+  { zoneId: "moondancer-glade", type: "trainer", name: "Lunar Sage Hiroshi - Monk Trainer",
+    x: 480, y: 360, hp: 999, teachesClass: "monk" },
+
+  // Quest Givers
   {
     zoneId: "moondancer-glade",
     type: "quest-giver",
     name: "Elder Druid Moonwhisper",
     x: 170,
     y: 220,
+    hp: 999,
+  },
+  {
+    zoneId: "moondancer-glade",
+    type: "quest-giver",
+    name: "Moonherb Gatherer Lirien",
+    x: 230,
+    y: 260,
     hp: 999,
   },
 
@@ -2197,13 +2239,39 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === FELSROCK CITADEL ZONE (L35-40) ===
 
-  // Quest Giver
+  // Class Trainers (L35 new abilities — gap closers, stuns, invulnerability)
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Ironbreaker General Thrain - Warrior Trainer",
+    x: 60, y: 300, hp: 999, teachesClass: "warrior" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Forgeguard Paladin Aric - Paladin Trainer",
+    x: 200, y: 300, hp: 999, teachesClass: "paladin" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Obsidian Fang Nyx - Rogue Trainer",
+    x: 340, y: 300, hp: 999, teachesClass: "rogue" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Stone Eagle Marksman Vex - Ranger Trainer",
+    x: 480, y: 300, hp: 999, teachesClass: "ranger" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Runeforge Archmage Zael - Mage Trainer",
+    x: 60, y: 360, hp: 999, teachesClass: "mage" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Anvil Priestess Diona - Cleric Trainer",
+    x: 200, y: 360, hp: 999, teachesClass: "cleric" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Pit Lord Malachar - Warlock Trainer",
+    x: 340, y: 360, hp: 999, teachesClass: "warlock" },
+  { zoneId: "felsrock-citadel", type: "trainer", name: "Iron Fist Master Zan - Monk Trainer",
+    x: 480, y: 360, hp: 999, teachesClass: "monk" },
+
+  // Quest Givers
   {
     zoneId: "felsrock-citadel",
     type: "quest-giver",
     name: "Forgeguard Captain Haldor",
     x: 280,
     y: 370,
+    hp: 999,
+  },
+  {
+    zoneId: "felsrock-citadel",
+    type: "quest-giver",
+    name: "Runesmith Korra",
+    x: 340,
+    y: 400,
     hp: 999,
   },
 
@@ -2449,13 +2517,39 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === LAKE LUMINA ZONE (L40-45) ===
 
-  // Quest Giver
+  // Class Trainers (L40 ULTIMATE abilities — the endgame)
+  { zoneId: "lake-lumina", type: "trainer", name: "Tidecrusher Warlord Korrin - Warrior Trainer",
+    x: 60, y: 260, hp: 999, teachesClass: "warrior" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Luminarch Crusader Vesper - Paladin Trainer",
+    x: 200, y: 260, hp: 999, teachesClass: "paladin" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Depthwalker Shade Revyn - Rogue Trainer",
+    x: 340, y: 260, hp: 999, teachesClass: "rogue" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Stormtide Archer Ondine - Ranger Trainer",
+    x: 480, y: 260, hp: 999, teachesClass: "ranger" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Abyssal Archmage Nethys - Mage Trainer",
+    x: 60, y: 320, hp: 999, teachesClass: "mage" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Radiant Oracle Solara - Cleric Trainer",
+    x: 200, y: 320, hp: 999, teachesClass: "cleric" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Void Sovereign Xalith - Warlock Trainer",
+    x: 340, y: 320, hp: 999, teachesClass: "warlock" },
+  { zoneId: "lake-lumina", type: "trainer", name: "Grandmaster of the Abyss Ryu - Monk Trainer",
+    x: 480, y: 320, hp: 999, teachesClass: "monk" },
+
+  // Quest Givers
   {
     zoneId: "lake-lumina",
     type: "quest-giver",
     name: "Lumen Priestess Aurelia",
     x: 280,
     y: 320,
+    hp: 999,
+  },
+  {
+    zoneId: "lake-lumina",
+    type: "quest-giver",
+    name: "Tide Alchemist Nereus",
+    x: 340,
+    y: 350,
     hp: 999,
   },
 
@@ -2693,13 +2787,21 @@ export const NPC_DEFS: NpcDef[] = [
 
   // === AZURSHARD CHASM ZONE (L45-50) ===
 
-  // Quest Giver
+  // Quest Givers
   {
     zoneId: "azurshard-chasm",
     type: "quest-giver",
     name: "Dragonkin Watcher Azael",
     x: 220,
     y: 420,
+    hp: 999,
+  },
+  {
+    zoneId: "azurshard-chasm",
+    type: "quest-giver",
+    name: "Crystal Sage Velara",
+    x: 280,
+    y: 450,
     hp: 999,
   },
 

@@ -3,6 +3,7 @@ import type { CharacterStats } from "../character/classes.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { generateWeaponName, type GeneratedWeaponName } from "./weaponNameGenerator.js";
 import { randomUUID } from "crypto";
+import { getRedis } from "../redis.js";
 
 // ── Quality Tiers ──────────────────────────────────────────────────────
 
@@ -145,6 +146,7 @@ export interface CraftedItemInstance {
   };
   rolledMaxDurability: number;
   craftedBy: string; // wallet address
+  ownerWallet: string; // current owner wallet or auction:<id> escrow key
   craftedAt: number; // timestamp
   recipeId: string;
   displayName: string;
@@ -170,6 +172,103 @@ export interface CraftedItemInstance {
 
 const instanceRegistry = new Map<string, CraftedItemInstance>();
 const walletIndex = new Map<string, string[]>(); // wallet → instanceId[]
+const INSTANCE_IDS_KEY = "itemrng:instances";
+const INSTANCE_KEY_PREFIX = "itemrng:instance:";
+const OWNER_KEY_PREFIX = "itemrng:owner:";
+
+function normalizeOwnerKey(owner: string | undefined): string {
+  return (owner ?? "").trim().toLowerCase();
+}
+
+function addInstanceToOwnerIndex(owner: string | undefined, instanceId: string): void {
+  const key = normalizeOwnerKey(owner);
+  if (!key) return;
+  const ids = walletIndex.get(key) ?? [];
+  if (!ids.includes(instanceId)) ids.push(instanceId);
+  walletIndex.set(key, ids);
+}
+
+function removeInstanceFromOwnerIndex(owner: string | undefined, instanceId: string): void {
+  const key = normalizeOwnerKey(owner);
+  if (!key) return;
+  const ids = walletIndex.get(key) ?? [];
+  const next = ids.filter((id) => id !== instanceId);
+  if (next.length > 0) walletIndex.set(key, next);
+  else walletIndex.delete(key);
+}
+
+function hydrateInstance(raw: CraftedItemInstance): CraftedItemInstance {
+  return {
+    ...raw,
+    craftedBy: normalizeOwnerKey(raw.craftedBy),
+    ownerWallet: normalizeOwnerKey(raw.ownerWallet || raw.craftedBy),
+  };
+}
+
+async function persistInstanceToRedis(instance: CraftedItemInstance, previousOwner?: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+
+  const ownerKey = normalizeOwnerKey(instance.ownerWallet);
+  const prevKey = normalizeOwnerKey(previousOwner);
+  const payload = JSON.stringify(instance);
+  const tx = redis.multi();
+  tx.sadd(INSTANCE_IDS_KEY, instance.instanceId);
+  tx.set(`${INSTANCE_KEY_PREFIX}${instance.instanceId}`, payload);
+  if (ownerKey) tx.sadd(`${OWNER_KEY_PREFIX}${ownerKey}`, instance.instanceId);
+  if (prevKey && prevKey !== ownerKey) tx.srem(`${OWNER_KEY_PREFIX}${prevKey}`, instance.instanceId);
+  await tx.exec();
+}
+
+async function removeInstanceFromRedis(instance: CraftedItemInstance): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+
+  const ownerKey = normalizeOwnerKey(instance.ownerWallet);
+  const tx = redis.multi();
+  tx.del(`${INSTANCE_KEY_PREFIX}${instance.instanceId}`);
+  tx.srem(INSTANCE_IDS_KEY, instance.instanceId);
+  if (ownerKey) tx.srem(`${OWNER_KEY_PREFIX}${ownerKey}`, instance.instanceId);
+  await tx.exec();
+}
+
+function persistInstanceEventually(instance: CraftedItemInstance, previousOwner?: string): void {
+  void persistInstanceToRedis(instance, previousOwner).catch((err) => {
+    console.warn(`[itemRng] Failed to persist instance ${instance.instanceId}:`, err);
+  });
+}
+
+function removeInstanceEventually(instance: CraftedItemInstance): void {
+  void removeInstanceFromRedis(instance).catch((err) => {
+    console.warn(`[itemRng] Failed to remove instance ${instance.instanceId}:`, err);
+  });
+}
+
+async function restoreInstancesFromRedis(): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+
+  try {
+    const ids = await redis.smembers(INSTANCE_IDS_KEY);
+    if (!Array.isArray(ids) || ids.length === 0) return;
+    const keys = ids.map((id: string) => `${INSTANCE_KEY_PREFIX}${id}`);
+    const payloads = await redis.mget(keys);
+
+    for (let i = 0; i < ids.length; i++) {
+      const raw = payloads?.[i];
+      if (!raw) continue;
+      try {
+        const parsed = hydrateInstance(JSON.parse(raw) as CraftedItemInstance);
+        instanceRegistry.set(parsed.instanceId, parsed);
+        addInstanceToOwnerIndex(parsed.ownerWallet, parsed.instanceId);
+      } catch (err) {
+        console.warn(`[itemRng] Failed to restore instance ${ids[i]}:`, err);
+      }
+    }
+  } catch (err) {
+    console.warn("[itemRng] Failed to restore instances from Redis:", err);
+  }
+}
 
 function qualityRollFromTier(tier?: string): QualityRoll {
   switch (tier) {
@@ -238,6 +337,7 @@ export function rollCraftedItem(params: {
       : undefined,
     rolledMaxDurability,
     craftedBy: params.craftedBy.toLowerCase(),
+    ownerWallet: params.craftedBy.toLowerCase(),
     craftedAt: Date.now(),
     recipeId: params.recipeId,
     displayName,
@@ -250,10 +350,8 @@ export function rollCraftedItem(params: {
   instanceRegistry.set(instance.instanceId, instance);
 
   // Index by wallet
-  const wallet = params.craftedBy.toLowerCase();
-  const existing = walletIndex.get(wallet) ?? [];
-  existing.push(instance.instanceId);
-  walletIndex.set(wallet, existing);
+  addInstanceToOwnerIndex(instance.ownerWallet, instance.instanceId);
+  persistInstanceEventually(instance);
 
   return instance;
 }
@@ -265,13 +363,82 @@ export function getItemInstance(instanceId: string): CraftedItemInstance | undef
 }
 
 export function getWalletInstances(wallet: string): CraftedItemInstance[] {
-  const ids = walletIndex.get(wallet.toLowerCase()) ?? [];
+  const ids = walletIndex.get(normalizeOwnerKey(wallet)) ?? [];
   const instances: CraftedItemInstance[] = [];
   for (const id of ids) {
     const inst = instanceRegistry.get(id);
     if (inst) instances.push(inst);
   }
   return instances;
+}
+
+export function getAuctionEscrowInstance(auctionId: number): CraftedItemInstance | undefined {
+  const ids = walletIndex.get(`auction:${auctionId}`) ?? [];
+  for (const id of ids) {
+    const inst = instanceRegistry.get(id);
+    if (inst) return inst;
+  }
+  return undefined;
+}
+
+export function getWalletInstanceByToken(
+  wallet: string,
+  tokenId: number,
+  instanceId?: string,
+  excludedInstanceIds?: Set<string>,
+): CraftedItemInstance | undefined {
+  const matches = getWalletInstances(wallet)
+    .filter((instance) => instance.baseTokenId === tokenId)
+    .filter((instance) => instance.currentDurability > 0)
+    .filter((instance) => !excludedInstanceIds?.has(instance.instanceId));
+  if (instanceId) return matches.find((instance) => instance.instanceId === instanceId);
+  return matches[0];
+}
+
+export function isItemInstanceOwnedBy(instance: CraftedItemInstance, wallet: string): boolean {
+  return normalizeOwnerKey(instance.ownerWallet || instance.craftedBy) === normalizeOwnerKey(wallet);
+}
+
+export async function assignItemInstanceOwner(instanceId: string, ownerWallet: string): Promise<CraftedItemInstance | undefined> {
+  const instance = instanceRegistry.get(instanceId);
+  if (!instance) return undefined;
+  const previousOwner = instance.ownerWallet;
+  removeInstanceFromOwnerIndex(previousOwner, instanceId);
+  instance.ownerWallet = normalizeOwnerKey(ownerWallet);
+  addInstanceToOwnerIndex(instance.ownerWallet, instanceId);
+  await persistInstanceToRedis(instance, previousOwner);
+  return instance;
+}
+
+export async function deleteItemInstance(instanceId: string): Promise<boolean> {
+  const instance = instanceRegistry.get(instanceId);
+  if (!instance) return false;
+  instanceRegistry.delete(instanceId);
+  removeInstanceFromOwnerIndex(instance.ownerWallet, instanceId);
+  await removeInstanceFromRedis(instance);
+  return true;
+}
+
+export async function consumeOwnedItemInstances(
+  wallet: string,
+  tokenId: number,
+  quantity: number,
+  excludedInstanceIds?: Set<string>,
+): Promise<string[]> {
+  if (!Number.isFinite(quantity) || quantity <= 0) return [];
+
+  const ownerKey = normalizeOwnerKey(wallet);
+  const candidates = getWalletInstances(ownerKey)
+    .filter((instance) => instance.baseTokenId === tokenId)
+    .filter((instance) => !excludedInstanceIds?.has(instance.instanceId))
+    .sort((a, b) => a.craftedAt - b.craftedAt);
+
+  const consumed: string[] = [];
+  for (const instance of candidates.slice(0, Math.max(0, Math.floor(quantity)))) {
+    const deleted = await deleteItemInstance(instance.instanceId);
+    if (deleted) consumed.push(instance.instanceId);
+  }
+  return consumed;
 }
 
 export function upsertItemInstanceFromEquipment(params: {
@@ -292,9 +459,11 @@ export function upsertItemInstanceFromEquipment(params: {
 }): CraftedItemInstance {
   const existing = params.instanceId ? instanceRegistry.get(params.instanceId) : undefined;
   if (existing) {
+    const previousOwner = existing.ownerWallet;
     existing.currentDurability = params.durability;
     existing.currentMaxDurability = params.maxDurability;
     existing.rolledMaxDurability = params.maxDurability;
+    existing.ownerWallet = params.walletAddress.toLowerCase();
     existing.enchantments = params.enchantments ? [...params.enchantments] : undefined;
     if (params.rolledStats) existing.rolledStats = { ...params.rolledStats };
     if (params.bonusAffix) {
@@ -306,6 +475,11 @@ export function upsertItemInstanceFromEquipment(params: {
       };
     }
     if (params.name && !existing.displayName) existing.displayName = params.name;
+    if (previousOwner !== existing.ownerWallet) {
+      removeInstanceFromOwnerIndex(previousOwner, existing.instanceId);
+      addInstanceToOwnerIndex(existing.ownerWallet, existing.instanceId);
+    }
+    persistInstanceEventually(existing, previousOwner);
     return existing;
   }
 
@@ -324,6 +498,7 @@ export function upsertItemInstanceFromEquipment(params: {
       : undefined,
     rolledMaxDurability: params.maxDurability,
     craftedBy: params.walletAddress.toLowerCase(),
+    ownerWallet: params.walletAddress.toLowerCase(),
     craftedAt: Date.now(),
     recipeId: "runtime-instance",
     displayName: params.name ?? getItemByTokenId(BigInt(params.tokenId))?.name ?? "Unknown Item",
@@ -333,10 +508,8 @@ export function upsertItemInstanceFromEquipment(params: {
   };
 
   instanceRegistry.set(instance.instanceId, instance);
-  const wallet = params.walletAddress.toLowerCase();
-  const existingIds = walletIndex.get(wallet) ?? [];
-  existingIds.push(instance.instanceId);
-  walletIndex.set(wallet, existingIds);
+  addInstanceToOwnerIndex(instance.ownerWallet, instance.instanceId);
+  persistInstanceEventually(instance);
   return instance;
 }
 
@@ -375,3 +548,5 @@ export function registerItemRngRoutes(server: FastifyInstance) {
     }
   );
 }
+
+await restoreInstancesFromRedis();

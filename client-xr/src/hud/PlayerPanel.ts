@@ -1,9 +1,9 @@
-import type { Entity } from "../types.js";
+import type { ActivePlayer } from "../types.js";
 
 type SortBy = "level" | "name" | "hp";
 
 interface PanelCallbacks {
-  onPlayerClick: (entityId: string) => void;
+  onPlayerClick: (player: ActivePlayer) => void;
   onZoneClick: (zoneId: string) => void;
 }
 
@@ -17,8 +17,9 @@ export class PlayerPanel {
   private tabBar: HTMLDivElement;
   private activeTab: "lobby" | "ranks" = "lobby";
   private sortBy: SortBy = "level";
-  private entities: Record<string, Entity> = {};
-  private zoneEntities: Map<string, Entity[]> = new Map();
+  private players: ActivePlayer[] = [];
+  private playersById = new Map<string, ActivePlayer>();
+  private zonePlayers: Map<string, ActivePlayer[]> = new Map();
   private callbacks: PanelCallbacks;
   private visible = true;
   private toggleBtn: HTMLButtonElement;
@@ -90,16 +91,17 @@ export class PlayerPanel {
     this.toggleBtn.classList.toggle("collapsed", !this.visible);
   }
 
-  /** Call every poll with merged entity data */
-  update(allEntities: Record<string, Entity>) {
-    this.entities = allEntities;
+  /** Call every poll with the global active player list */
+  update(players: ActivePlayer[]) {
+    this.players = players;
+    this.playersById.clear();
+    this.zonePlayers.clear();
 
-    // Group by zone
-    this.zoneEntities.clear();
-    for (const ent of Object.values(allEntities)) {
-      const zone = ent.zoneId ?? "unknown";
-      if (!this.zoneEntities.has(zone)) this.zoneEntities.set(zone, []);
-      this.zoneEntities.get(zone)!.push(ent);
+    for (const player of players) {
+      this.playersById.set(player.id, player);
+      const zoneId = player.zoneId || "unknown";
+      if (!this.zonePlayers.has(zoneId)) this.zonePlayers.set(zoneId, []);
+      this.zonePlayers.get(zoneId)!.push(player);
     }
 
     this.render();
@@ -119,35 +121,26 @@ export class PlayerPanel {
   private renderLobby() {
     let html = "";
 
-    // Sort zones by player count desc
-    const zones = Array.from(this.zoneEntities.entries())
-      .sort((a, b) => {
-        const aPlayers = a[1].filter((e) => e.type === "player").length;
-        const bPlayers = b[1].filter((e) => e.type === "player").length;
-        return bPlayers - aPlayers;
-      });
+    const zones = Array.from(this.zonePlayers.entries())
+      .sort((a, b) => b[1].length - a[1].length);
 
-    for (const [zoneId, ents] of zones) {
-      const players = ents.filter((e) => e.type === "player" || e.type === "npc")
-        .sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
-      const mobs = ents.filter((e) => e.type === "mob" || e.type === "boss");
+    for (const [zoneId, players] of zones) {
+      players.sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
       const label = zoneId.replace(/-/g, " ");
 
       html += `<div class="pp-zone">`;
       html += `<div class="pp-zone-header" data-zone="${zoneId}">`;
       html += `<span class="pp-zone-name">${label}</span>`;
-      html += `<span class="pp-zone-count">${players.length}P / ${mobs.length}M</span>`;
+      html += `<span class="pp-zone-count">${players.length} online</span>`;
       html += `</div>`;
 
-      for (const ent of players) {
-        const lvl = ent.level ?? 1;
-        const hpPct = ent.maxHp > 0 ? Math.round((ent.hp / ent.maxHp) * 100) : 100;
-        const typeIcon = ent.type === "player" ? "&#9679;" : "&#9670;";
-        const typeColor = ent.type === "player" ? "#44ddff" : "#ffcc44";
-        const cls = ent.classId ? ` [${ent.classId}]` : "";
-        html += `<div class="pp-row" data-eid="${ent.id}">`;
-        html += `<span class="pp-icon" style="color:${typeColor}">${typeIcon}</span>`;
-        html += `<span class="pp-name">${ent.name}${cls}</span>`;
+      for (const player of players) {
+        const lvl = player.level ?? 1;
+        const hpPct = player.maxHp > 0 ? Math.round((player.hp / player.maxHp) * 100) : 100;
+        const cls = player.classId ? ` [${player.classId}]` : "";
+        html += `<div class="pp-row" data-eid="${player.id}">`;
+        html += `<span class="pp-icon" style="color:#44ddff">&#9679;</span>`;
+        html += `<span class="pp-name">${player.name}${cls}</span>`;
         html += `<span class="pp-lvl">Lv${lvl}</span>`;
         html += `<span class="pp-hp" style="color:${hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44"}">${hpPct}%</span>`;
         html += `</div>`;
@@ -156,14 +149,12 @@ export class PlayerPanel {
       html += `</div>`;
     }
 
-    if (!html) html = `<div class="pp-empty">No entities nearby</div>`;
+    if (!html) html = `<div class="pp-empty">No players online</div>`;
     this.listEl.innerHTML = html;
   }
 
   private renderRanks() {
-    // Collect all players/NPCs
-    let ranked = Object.values(this.entities)
-      .filter((e) => e.type === "player" || e.type === "npc");
+    const ranked = [...this.players];
 
     // Sort
     if (this.sortBy === "level") {
@@ -191,7 +182,7 @@ export class PlayerPanel {
       html += `</div>`;
     }
 
-    if (!html) html = `<div class="pp-empty">No players nearby</div>`;
+    if (!html) html = `<div class="pp-empty">No players online</div>`;
     this.listEl.innerHTML = html;
   }
 
@@ -312,7 +303,8 @@ export class PlayerPanel {
     this.listEl.addEventListener("click", (e) => {
       const row = (e.target as HTMLElement).closest(".pp-row") as HTMLElement;
       if (row?.dataset.eid) {
-        this.callbacks.onPlayerClick(row.dataset.eid);
+        const player = this.playersById.get(row.dataset.eid);
+        if (player) this.callbacks.onPlayerClick(player);
         return;
       }
       const zone = (e.target as HTMLElement).closest(".pp-zone-header") as HTMLElement;

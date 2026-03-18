@@ -1,7 +1,7 @@
 /**
  * Profession XP System
  * Awards character XP for gathering, crafting, cooking, brewing, skinning, etc.
- * Also tracks quest progress for "gather" and "craft" quest types.
+ * Also tracks per-profession skill XP/levels and quest progress.
  */
 
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
@@ -10,6 +10,95 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { logDiary, narrativeLevelUp } from "../social/diary.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
+import type { ProfessionType } from "./professions.js";
+
+// ── Per-profession skill tracking ───────────────────────────────────
+
+export const PROFESSION_SKILL_MAX = 300;
+
+/** XP thresholds for each skill level (1-300). Level N requires SKILL_XP_TABLE[N] cumulative XP. */
+function skillXpForLevel(level: number): number {
+  // Quadratic curve: level 1=0, level 50≈2500, level 100≈10000, level 200≈40000, level 300≈90000
+  if (level <= 1) return 0;
+  return Math.floor((level - 1) * (level - 1));
+}
+
+export function skillLevelFromXp(xp: number): number {
+  // Inverse of quadratic: level = floor(sqrt(xp)) + 1, capped at 300
+  const level = Math.floor(Math.sqrt(xp)) + 1;
+  return Math.min(level, PROFESSION_SKILL_MAX);
+}
+
+export interface ProfessionSkillData {
+  xp: number;
+  level: number;
+  actions: number; // total gather/craft/brew/etc. actions
+}
+
+// walletAddress (lowercase) -> professionId -> skill data
+const professionSkills = new Map<string, Map<string, ProfessionSkillData>>();
+
+/** Map actionLabel from awardProfessionXp to a ProfessionType */
+const ACTION_TO_PROFESSION: Record<string, ProfessionType> = {
+  mining: "mining",
+  herbalism: "herbalism",
+  skinning: "skinning",
+  crafting: "blacksmithing",
+  blacksmithing: "blacksmithing",
+  alchemy: "alchemy",
+  cooking: "cooking",
+  leatherworking: "leatherworking",
+  jewelcrafting: "jewelcrafting",
+};
+
+function getOrCreateSkill(wallet: string, profession: string): ProfessionSkillData {
+  const key = wallet.toLowerCase();
+  if (!professionSkills.has(key)) professionSkills.set(key, new Map());
+  const map = professionSkills.get(key)!;
+  if (!map.has(profession)) map.set(profession, { xp: 0, level: 1, actions: 0 });
+  return map.get(profession)!;
+}
+
+/** Award per-profession skill XP (called alongside character XP award) */
+function awardSkillXp(wallet: string, actionLabel: string, xpAmount: number): void {
+  const profId = ACTION_TO_PROFESSION[actionLabel];
+  if (!profId) return;
+  const skill = getOrCreateSkill(wallet, profId);
+  skill.xp += xpAmount;
+  skill.actions += 1;
+  skill.level = skillLevelFromXp(skill.xp);
+}
+
+/** Get all profession skill data for a wallet */
+export function getProfessionSkills(walletAddress: string): Record<string, ProfessionSkillData> {
+  const map = professionSkills.get(walletAddress.toLowerCase());
+  if (!map) return {};
+  const result: Record<string, ProfessionSkillData> = {};
+  for (const [prof, data] of map) {
+    result[prof] = { ...data };
+  }
+  return result;
+}
+
+/** Restore profession skills from persisted data (called on spawn/login) */
+export function restoreProfessionSkills(walletAddress: string, skills: Record<string, ProfessionSkillData>): void {
+  const key = walletAddress.toLowerCase();
+  if (!professionSkills.has(key)) professionSkills.set(key, new Map());
+  const map = professionSkills.get(key)!;
+  for (const [prof, data] of Object.entries(skills)) {
+    map.set(prof, { xp: data.xp ?? 0, level: data.level ?? 1, actions: data.actions ?? 0 });
+  }
+}
+
+/** Get XP needed for next skill level */
+export function skillXpProgress(skill: ProfessionSkillData): { current: number; needed: number; pct: number } {
+  if (skill.level >= PROFESSION_SKILL_MAX) return { current: 0, needed: 0, pct: 100 };
+  const currentLevelXp = skillXpForLevel(skill.level);
+  const nextLevelXp = skillXpForLevel(skill.level + 1);
+  const needed = nextLevelXp - currentLevelXp;
+  const current = skill.xp - currentLevelXp;
+  return { current, needed, pct: needed > 0 ? Math.floor((current / needed) * 100) : 100 };
+}
 
 // XP constants by profession action
 export const PROFESSION_XP = {
@@ -67,6 +156,11 @@ export function awardProfessionXp(
   gatheredItemName?: string,
 ): ProfessionXpResult {
   if (xpAmount <= 0) return { xpAwarded: 0, totalXp: entity.xp ?? 0, leveledUp: false };
+
+  // Track per-profession skill XP
+  if (entity.walletAddress) {
+    awardSkillXp(entity.walletAddress, actionLabel, xpAmount);
+  }
 
   // Ensure level and xp are proper numbers (safety fix)
   if (typeof entity.level !== "number") entity.level = Number(entity.level) || 1;

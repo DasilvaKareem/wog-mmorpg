@@ -13,9 +13,11 @@ export interface GameEventMap {
   /** Pan + lock camera to any entity by its zone entity ID */
   focusEntity: { entityId: string };
   /** User clicked an NPC to send the agent there */
-  agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string; teachesProfession?: string };
+  agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string; teachesProfession?: string; action?: string; questId?: string; questTitle?: string };
   /** User clicked an NPC that has no dedicated dialog — show info panel */
   npcInfoClick: Entity;
+  /** User clicked a quest-giver NPC — open dialogue overlay */
+  questNpcClick: Entity;
   /** Open the inbox panel */
   inboxOpen: void;
   /** Open the settings dialog */
@@ -26,6 +28,8 @@ export interface GameEventMap {
   mapOpen: void;
   /** Open the quest log */
   questLogOpen: void;
+  /** Open the in-game inventory dialog */
+  inventoryOpen: void;
 }
 
 type GameEventKey = keyof GameEventMap;

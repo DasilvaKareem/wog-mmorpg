@@ -5,7 +5,9 @@ import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GuildDialog } from "@/components/GuildDialog";
 import { InspectDialog } from "@/components/InspectDialog";
 import { NpcInfoDialog } from "@/components/NpcInfoDialog";
+import { NpcDialogueOverlay } from "@/components/NpcDialogueOverlay";
 import { ShopDialog } from "@/components/ShopDialog";
+import { InventoryDialog } from "@/components/InventoryDialog";
 
 export function DeferredWorldDialogs(): React.ReactElement {
   return (
@@ -16,6 +18,8 @@ export function DeferredWorldDialogs(): React.ReactElement {
       <ColiseumDialog />
       <InspectDialog />
       <NpcInfoDialog />
+      <NpcDialogueOverlay />
+      <InventoryDialog />
     </>
   );
 }

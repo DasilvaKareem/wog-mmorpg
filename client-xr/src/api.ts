@@ -1,4 +1,5 @@
 import type {
+  ActivePlayersResponse,
   ZoneResponse,
   TerrainData,
   WorldLayout,
@@ -43,6 +44,16 @@ export async function fetchWorldLayout(): Promise<WorldLayout | null> {
     const res = await fetch(`${BASE}/world/layout`);
     if (!res.ok) return null;
     return (await res.json()) as WorldLayout;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchActivePlayers(): Promise<ActivePlayersResponse | null> {
+  try {
+    const res = await fetch(`${BASE}/players/active`);
+    if (!res.ok) return null;
+    return (await res.json()) as ActivePlayersResponse;
   } catch {
     return null;
   }

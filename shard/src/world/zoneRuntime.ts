@@ -13,7 +13,7 @@ import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
-import { randomUUID } from "crypto";
+import { randomInt, randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty, getPartyLeaderId } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
 import {
@@ -27,8 +27,9 @@ import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSyst
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "../social/diary.js";
 import { getGameTime, checkPhaseTransition, formatGameTime } from "./worldClock.js";
 import { recordGoldSpend } from "../blockchain/goldLedger.js";
-import { copperToGold } from "../blockchain/currency.js";
-import { upsertItemInstanceFromEquipment } from "../items/itemRng.js";
+import { copperToGold, formatCopperString } from "../blockchain/currency.js";
+import { transferFromTreasury } from "../blockchain/wallet.js";
+import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -117,6 +118,8 @@ export interface Entity {
   classId?: string;
   /** Character calling — adventurer, farmer, merchant, craftsman (players only). */
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
+  /** Character origin — sunforged, veilborn, dawnkeeper, ironvow (players only). */
+  origin?: string;
   /** Character gender (players only). */
   gender?: "male" | "female";
   /** Character appearance (players only). */
@@ -715,6 +718,29 @@ function getLevelGapMultiplier(playerLevel: number, mobLevel: number): number {
   return Math.max(0, 1.0 - (gap - 5) * 0.2);
 }
 
+const MOB_GOLD_DISABLE_LEVEL_GAP = 15;
+
+function rollMobCopperReward(mob: Entity): number {
+  const level = Math.max(1, mob.level ?? 1);
+
+  if (mob.type === "boss") {
+    const minCopper = Math.max(12, Math.floor(level * 3));
+    const maxCopper = Math.max(minCopper, Math.floor(level * 4.5));
+    return randomInt(minCopper, maxCopper + 1);
+  }
+
+  const minCopper = Math.max(1, Math.floor(level * 1.2));
+  const maxCopper = Math.max(minCopper, Math.floor(level * 2));
+  return randomInt(minCopper, maxCopper + 1);
+}
+
+function shouldSuppressMobGold(killer: Entity, mob: Entity): boolean {
+  if (killer.type !== "player") return true;
+  if (!killer.walletAddress) return true;
+  if (killer.level == null || mob.level == null) return false;
+  return killer.level - mob.level >= MOB_GOLD_DISABLE_LEVEL_GAP;
+}
+
 /**
  * Award XP to the tagger's party (or solo). All same-zone, alive party members
  * share XP with a party-size bonus: 1.0 + (memberCount - 1) * 0.1.
@@ -1078,9 +1104,14 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
       const equipped = player.equipment[slot];
       if (equipped && (equipped.durability <= 0 || equipped.broken)) {
         burnedSlots.push(slot);
-        const { tokenId } = equipped;
+        const { tokenId, instanceId } = equipped;
         delete player.equipment[slot];
         burnItem(player.walletAddress, BigInt(tokenId), 1n)
+          .then(async () => {
+            if (instanceId) {
+              await deleteItemInstance(instanceId);
+            }
+          })
           .catch((err) => console.error(`[death] burn failed for ${player.name} slot=${slot} tokenId=${tokenId}:`, err));
       }
     }
@@ -1144,6 +1175,7 @@ async function handleMobDeath(
   zone: ZoneState
 ): Promise<void> {
   const lootTable = getLootTable(mob.name);
+  const copperReward = rollMobCopperReward(mob);
 
   // Auto-loot: mint recyclable item drops to killer's wallet
   if (!killer) {
@@ -1170,6 +1202,51 @@ async function handleMobDeath(
         `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${autoDrops.length} recyclable item drops from ${mob.name}`
       );
     }
+  }
+
+  if (!killer) {
+    console.warn(`[loot] ${mob.name} died with no killer — gold skipped`);
+  } else if (shouldSuppressMobGold(killer, mob)) {
+    if (killer.type === "player" && killer.level != null && mob.level != null) {
+      const levelGap = killer.level - mob.level;
+      if (levelGap >= MOB_GOLD_DISABLE_LEVEL_GAP) {
+        console.log(
+          `[loot] ${killer.name} (L${killer.level}) killed ${mob.name} (L${mob.level}) — gold suppressed by ${levelGap}-level gap`
+        );
+      }
+    }
+  } else if (copperReward > 0 && killer.walletAddress) {
+    const goldReward = copperToGold(copperReward);
+    void transferFromTreasury(killer.walletAddress, goldReward.toString())
+      .then((txHash) => {
+        const rewardLabel = formatCopperString(copperReward);
+        console.log(
+          `[loot] ${killer.name} received ${rewardLabel} from ${mob.name} tx=${txHash}`
+        );
+        logZoneEvent({
+          zoneId: zone.zoneId,
+          type: "loot",
+          tick: zone.tick,
+          message: `${killer.name} looted ${rewardLabel} from ${mob.name}.`,
+          entityId: killer.id,
+          entityName: killer.name,
+          targetId: mob.id,
+          targetName: mob.name,
+          data: {
+            copperReward,
+            goldReward,
+            mobLevel: mob.level ?? null,
+            playerLevel: killer.level ?? null,
+            txHash,
+          },
+        });
+      })
+      .catch((err) => {
+        console.error(
+          `[loot] Failed to transfer ${copperReward} copper from treasury to ${killer.walletAddress}:`,
+          err
+        );
+      });
   }
 
   // Create corpse entity for skinning (if mob has skinning drops)
@@ -2680,6 +2757,35 @@ export function registerZoneRuntime(server: FastifyInstance) {
       result[id] = { entityCount: zone.entities.size, tick: zone.tick };
     }
     return result;
+  });
+
+  server.get("/players/active", async () => {
+    const players = Array.from(getAllEntities().entries())
+      .filter(([, entity]) => entity.type === "player")
+      .map(([id, entity]) => ({
+        id,
+        name: entity.name,
+        level: entity.level ?? 1,
+        hp: entity.hp,
+        maxHp: entity.maxHp,
+        classId: entity.classId,
+        raceId: entity.raceId,
+        walletAddress: entity.walletAddress ?? null,
+        zoneId: entity.region ?? "unknown",
+        x: entity.x,
+        y: entity.y,
+      }))
+      .sort((a, b) => {
+        const levelDiff = (b.level ?? 0) - (a.level ?? 0);
+        if (levelDiff !== 0) return levelDiff;
+        return a.name.localeCompare(b.name);
+      });
+
+    return {
+      tick: world.tick,
+      count: players.length,
+      players,
+    };
   });
 
   server.get<{ Params: { zoneId: string } }>(

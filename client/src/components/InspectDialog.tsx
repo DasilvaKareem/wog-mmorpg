@@ -5,6 +5,7 @@ import { useItemCatalog, type CatalogItem } from "@/hooks/useItemCatalog";
 import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
+import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
 import { getAuthToken } from "@/lib/agentAuth";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
@@ -309,7 +310,7 @@ export function InspectDialog(): React.ReactElement | null {
 
 /* ── Social Actions Panel ─────────────────────────────────────── */
 
-type SocialActionId = "trade" | "friend" | "party" | "guild" | "message";
+type SocialActionId = "friend" | "party" | "guild" | "trade" | "duel";
 
 interface SocialActionDef {
   id: SocialActionId;
@@ -319,12 +320,38 @@ interface SocialActionDef {
 }
 
 const SOCIAL_ACTIONS: SocialActionDef[] = [
-  { id: "trade",   label: "Trade",   icon: "$", color: "#f2c854" },
   { id: "friend",  label: "Friend",  icon: "+", color: "#54f28b" },
   { id: "party",   label: "Party",   icon: "P", color: "#5dadec" },
   { id: "guild",   label: "Guild",   icon: "G", color: "#b48efa" },
-  { id: "message", label: "Message", icon: "@", color: "#ff9f43" },
+  { id: "trade",   label: "Trade",   icon: "$", color: "#f2c854" },
+  { id: "duel",    label: "Duel",    icon: "!", color: "#f25454" },
 ];
+
+/**
+ * Resolve the owner (signer) wallet and custodial (in-game) wallet.
+ * Auth tokens are always signed by the owner wallet.
+ * API bodies use the custodial wallet (the entity's on-chain wallet).
+ */
+async function resolveWallets(): Promise<{ owner: string; custodial: string } | null> {
+  const wm = WalletManager.getInstance();
+  const owner = wm.address;
+  if (!owner) return null;
+
+  // Try cached custodial first
+  let custodial = wm.custodialAddress;
+  if (!custodial) {
+    try {
+      const res = await fetch(`${API_URL}/agent/wallet/${owner}`);
+      if (res.ok) {
+        const data = await res.json();
+        custodial = data.custodialWallet ?? null;
+        if (custodial) wm.setCustodialAddress(custodial);
+      }
+    } catch { /* ignore */ }
+  }
+
+  return { owner, custodial: custodial ?? owner };
+}
 
 function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | null }): React.ReactElement {
   const [busy, setBusy] = React.useState<SocialActionId | null>(null);
@@ -336,10 +363,17 @@ function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | nu
   }
 
   async function handleAction(actionId: SocialActionId) {
-    const wm = WalletManager.getInstance();
-    const myWallet = wm.custodialAddress ?? wm.address;
+    const wallets = await resolveWallets();
+    if (!wallets) { flash("Wallet not connected — sign in first", "error"); return; }
+    const { owner, custodial } = wallets;
+
     const targetWallet = entity.walletAddress;
-    if (!myWallet || !targetWallet) { flash("Wallet not ready", "error"); return; }
+    if (!targetWallet) { flash("Target has no wallet", "error"); return; }
+
+    const token = await getAuthToken(owner);
+    if (!token) { flash("Auth failed — reconnect wallet", "error"); return; }
+
+    const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
     setBusy(actionId);
     try {
@@ -347,48 +381,46 @@ function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | nu
         case "friend": {
           const res = await fetch(`${API_URL}/friends/request`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fromWallet: myWallet, toWallet: targetWallet }),
+            headers: authHeaders,
+            body: JSON.stringify({ fromWallet: custodial, toWallet: targetWallet }),
           });
           const data = await res.json();
-          if (res.ok && data.ok) flash(`Friend request sent to ${entity.name}`);
+          if (res.ok && data.success) flash(`Friend request sent to ${entity.name}`);
           else flash(data.error ?? "Failed to send request", "error");
           break;
         }
         case "party": {
           if (!zoneId) { flash("Zone unknown — cannot invite", "error"); break; }
-          // Find our entity ID in the zone
+          // Find our entity in the zone by custodial wallet
           const zoneRes = await fetch(`${API_URL}/zones/${zoneId}`);
           if (!zoneRes.ok) { flash("Failed to load zone", "error"); break; }
           const zoneData = await zoneRes.json();
           const entities = zoneData.entities as Record<string, Entity> | undefined;
-          const myNorm = myWallet.toLowerCase();
+          const custodialNorm = custodial.toLowerCase();
           const selfEntity = entities ? Object.values(entities).find(
-            (e) => e.type === "player" && e.walletAddress?.toLowerCase() === myNorm,
+            (e) => e.type === "player" && e.walletAddress?.toLowerCase() === custodialNorm,
           ) : undefined;
           if (!selfEntity) { flash("Your champion not found in zone", "error"); break; }
           const res = await fetch(`${API_URL}/party/invite-champion`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: authHeaders,
             body: JSON.stringify({ fromEntityId: selfEntity.id, fromZoneId: zoneId, toCustodialWallet: targetWallet }),
           });
           const data = await res.json();
-          if (res.ok && data.ok) flash(`Party invite sent to ${entity.name}`);
+          if (res.ok && data.success) flash(`Party invite sent to ${entity.name}`);
           else flash(data.error ?? "Failed to invite", "error");
           break;
         }
         case "guild": {
-          // Need our guild info to get guildId
-          const token = await getAuthToken(wm.address ?? "");
-          if (!token) { flash("Auth required — reconnect wallet", "error"); break; }
-          const gRes = await fetch(`${API_URL}/guild/wallet/${myWallet}`);
+          // Look up our guild via custodial wallet
+          const gRes = await fetch(`${API_URL}/guild/wallet/${custodial}`);
           if (!gRes.ok) { flash("Failed to load guild info", "error"); break; }
           const gData = await gRes.json();
           if (!gData.inGuild || !gData.guild) { flash("You must be in a guild first", "error"); break; }
           const guildId = gData.guild.guildId;
           const res = await fetch(`${API_URL}/guild/${guildId}/invite`, {
             method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            headers: authHeaders,
             body: JSON.stringify({ memberAddress: targetWallet }),
           });
           const data = await res.json();
@@ -397,15 +429,51 @@ function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | nu
           break;
         }
         case "trade": {
-          flash("Trade request — coming soon", "error");
+          // The trade system uses async listings — open inventory to manage items
+          gameBus.emit("inventoryOpen", undefined as never);
+          flash(`Open your inventory to list items for trade`);
           break;
         }
-        case "message": {
-          flash("Private message — coming soon", "error");
+        case "duel": {
+          if (!zoneId) { flash("Zone unknown — cannot duel", "error"); break; }
+          // Find our entity in the zone to get required fields
+          const zoneRes2 = await fetch(`${API_URL}/zones/${zoneId}`);
+          if (!zoneRes2.ok) { flash("Failed to load zone", "error"); break; }
+          const zoneData2 = await zoneRes2.json();
+          const entities2 = zoneData2.entities as Record<string, Entity> | undefined;
+          const custodialNorm2 = custodial.toLowerCase();
+          const selfEntity2 = entities2 ? Object.values(entities2).find(
+            (e) => e.type === "player" && e.walletAddress?.toLowerCase() === custodialNorm2,
+          ) : undefined;
+          if (!selfEntity2) { flash("Your champion not found in zone", "error"); break; }
+          // Resolve characterTokenId from /character endpoint
+          let charTokenId = "0";
+          try {
+            const charRes = await fetch(`${API_URL}/character/${owner}`);
+            if (charRes.ok) {
+              const charData = await charRes.json();
+              const chars = charData.characters ?? [];
+              if (chars.length > 0) charTokenId = chars[0].tokenId ?? "0";
+            }
+          } catch { /* use fallback */ }
+          const res = await fetch(`${API_URL}/api/pvp/queue/join`, {
+            method: "POST",
+            headers: authHeaders,
+            body: JSON.stringify({
+              agentId: selfEntity2.id,
+              walletAddress: custodial,
+              characterTokenId: charTokenId,
+              level: selfEntity2.level ?? 1,
+              format: "1v1",
+            }),
+          });
+          const data = await res.json();
+          if (res.ok) flash(`Queued for 1v1 duel — waiting for opponent`);
+          else flash(data.error ?? "Failed to queue for duel", "error");
           break;
         }
       }
-    } catch (err) {
+    } catch {
       flash("Network error", "error");
     } finally {
       setBusy(null);

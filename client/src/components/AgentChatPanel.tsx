@@ -47,6 +47,11 @@ interface InboxReplyTarget {
   name: string;
 }
 
+interface InboxReadMarker {
+  ts: number;
+  idsAtTs: string[];
+}
+
 interface AgentStatusData {
   running: boolean;
   config: {
@@ -199,6 +204,50 @@ function toInboxOutMessage(
   };
 }
 
+function inboxReadKey(walletAddress: string): string {
+  return `wog:inbox-read:${walletAddress.toLowerCase()}`;
+}
+
+function loadInboxReadMarker(walletAddress: string): InboxReadMarker | null {
+  try {
+    const raw = localStorage.getItem(inboxReadKey(walletAddress));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<InboxReadMarker>;
+    if (!Number.isFinite(parsed.ts)) return null;
+    return {
+      ts: Number(parsed.ts),
+      idsAtTs: Array.isArray(parsed.idsAtTs) ? parsed.idsAtTs.map(String) : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveInboxReadMarker(walletAddress: string, marker: InboxReadMarker): void {
+  try {
+    localStorage.setItem(inboxReadKey(walletAddress), JSON.stringify(marker));
+  } catch {
+    // Ignore persistence failures; session-level dedupe still applies.
+  }
+}
+
+function buildInboxReadMarker(messages: InboxMessage[]): InboxReadMarker | null {
+  if (messages.length === 0) return null;
+  let latestTs = -1;
+  for (const message of messages) latestTs = Math.max(latestTs, message.ts);
+  return {
+    ts: latestTs,
+    idsAtTs: messages.filter((message) => message.ts === latestTs).map((message) => message.id),
+  };
+}
+
+function isInboxMessageAfterMarker(message: InboxMessage, marker: InboxReadMarker | null): boolean {
+  if (!marker) return false;
+  if (message.ts > marker.ts) return true;
+  if (message.ts < marker.ts) return false;
+  return !marker.idsAtTs.includes(message.id);
+}
+
 function mergeConsoleMessages(prev: ConsoleMessage[], next: ConsoleMessage[]): ConsoleMessage[] {
   if (next.length === 0) return prev;
   const merged = new Map<string, ConsoleMessage>();
@@ -240,7 +289,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<"chat" | "zonelog">("chat");
-  const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string } | null>(null);
+  const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string; action?: string; questId?: string; questTitle?: string } | null>(null);
   const [cmdSuggestions, setCmdSuggestions] = React.useState<typeof SLASH_COMMANDS>([]);
   const [selectedSuggestion, setSelectedSuggestion] = React.useState(0);
   const [replyTarget, setReplyTarget] = React.useState<InboxReplyTarget | null>(null);
@@ -248,6 +297,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const inboxMessageIds = React.useRef<Set<string>>(new Set());
+  const inboxReadMarker = React.useRef<InboxReadMarker | null>(null);
   const seededServerHistory = React.useRef(false);
 
   // Auto-scroll on new messages
@@ -261,6 +311,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setReplyTarget(null);
     setQuestResponses({});
     inboxMessageIds.current = new Set();
+    inboxReadMarker.current = loadInboxReadMarker(walletAddress);
     seededServerHistory.current = false;
   }, [walletAddress]);
 
@@ -352,12 +403,30 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const history = Array.isArray(data.messages) ? data.messages as InboxMessage[] : [];
+        const latestMarker = buildInboxReadMarker(history);
+
+        // First load establishes the read baseline for this wallet so historical
+        // inbox items do not replay into the console every time the user logs in.
+        if (!inboxReadMarker.current) {
+          if (latestMarker) {
+            inboxReadMarker.current = latestMarker;
+            saveInboxReadMarker(walletAddress, latestMarker);
+          }
+          return;
+        }
+
         const newConsoleMessages: InboxConsoleMessage[] = [];
 
         for (const msg of history) {
+          if (!isInboxMessageAfterMarker(msg, inboxReadMarker.current)) continue;
           if (inboxMessageIds.current.has(msg.id)) continue;
           inboxMessageIds.current.add(msg.id);
           newConsoleMessages.push(toInboxMessage(msg));
+        }
+
+        if (latestMarker) {
+          inboxReadMarker.current = latestMarker;
+          saveInboxReadMarker(walletAddress, latestMarker);
         }
 
         if (!cancelled && newConsoleMessages.length > 0) {
@@ -537,24 +606,36 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
 
   // Listen for NPC clicks — show a confirmation prompt, don't auto-redirect
   React.useEffect(() => {
-    return gameBus.on("agentGoToNpc", ({ entityId, zoneId, name, teachesProfession }) => {
-      setPendingGoto({ entityId, zoneId, name, teachesProfession });
+    return gameBus.on("agentGoToNpc", ({ entityId, zoneId, name, teachesProfession, action, questId, questTitle }) => {
+      setPendingGoto({ entityId, zoneId, name, teachesProfession, action, questId, questTitle });
     });
   }, []);
 
-  async function confirmGoto(action?: "learn-profession") {
+  async function confirmGoto(actionOverride?: string) {
     if (!pendingGoto || !token) return;
-    const { entityId, zoneId, name, teachesProfession } = pendingGoto;
+    const { entityId, zoneId, name, teachesProfession, action: pendingAction, questId, questTitle } = pendingGoto;
     setPendingGoto(null);
+    const action = actionOverride ?? pendingAction;
+
     const label = action === "learn-profession" && teachesProfession
-      ? `Learning ${teachesProfession} from ${name}…`
-      : `Sending agent to ${name}…`;
+      ? `Learning ${teachesProfession} from ${name}...`
+      : action === "accept-quest" && questTitle
+      ? `Sending agent to accept "${questTitle}" from ${name}...`
+      : action === "complete-quest" && questTitle
+      ? `Sending agent to turn in "${questTitle}"...`
+      : `Sending agent to ${name}...`;
     addSystemMsg(label);
     try {
       const body: Record<string, string> = { entityId, zoneId, name };
       if (action === "learn-profession" && teachesProfession) {
         body.action = "learn-profession";
         body.profession = teachesProfession;
+      } else if (action === "accept-quest" && questId) {
+        body.action = "accept-quest";
+        body.questId = questId;
+      } else if (action === "complete-quest" && questId) {
+        body.action = "complete-quest";
+        body.questId = questId;
       }
       const res = await fetch(`${API_URL}/agent/goto-npc`, {
         method: "POST",
@@ -974,12 +1055,34 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {pendingGoto && (
         <div className="absolute bottom-[56px] left-0 right-0 z-40 border-t border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono flex items-center justify-between gap-2">
           <span className="text-[11px] text-[#e0af68] truncate">
-            {pendingGoto.teachesProfession
+            {pendingGoto.action === "accept-quest" && pendingGoto.questTitle
+              ? <>Accept <span className="text-[#ffcc00]">"{pendingGoto.questTitle}"</span> from {pendingGoto.name}?</>
+              : pendingGoto.action === "complete-quest" && pendingGoto.questTitle
+              ? <>Turn in <span className="text-[#ffcc00]">"{pendingGoto.questTitle}"</span>?</>
+              : pendingGoto.teachesProfession
               ? <>Learn <span className="text-[#ffcc00]">{pendingGoto.teachesProfession}</span> from {pendingGoto.name}?</>
               : <>→ Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?</>
             }
           </span>
           <div className="flex gap-2 shrink-0">
+            {pendingGoto.action === "accept-quest" && (
+              <button
+                onClick={() => void confirmGoto("accept-quest")}
+                disabled={!token || !isRunning}
+                className="border border-[#54f28b] px-2 py-0.5 text-[10px] text-[#54f28b] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+              >
+                Accept Quest
+              </button>
+            )}
+            {pendingGoto.action === "complete-quest" && (
+              <button
+                onClick={() => void confirmGoto("complete-quest")}
+                disabled={!token || !isRunning}
+                className="border border-[#f2c854] px-2 py-0.5 text-[10px] text-[#f2c854] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+              >
+                Turn In
+              </button>
+            )}
             {pendingGoto.teachesProfession && (
               <button
                 onClick={() => void confirmGoto("learn-profession")}
@@ -989,13 +1092,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
                 Learn
               </button>
             )}
-            <button
-              onClick={() => void confirmGoto()}
-              disabled={!token || !isRunning}
-              className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
-            >
-              Go
-            </button>
+            {!pendingGoto.action && (
+              <button
+                onClick={() => void confirmGoto()}
+                disabled={!token || !isRunning}
+                className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+              >
+                Go
+              </button>
+            )}
             <button
               onClick={() => setPendingGoto(null)}
               className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"

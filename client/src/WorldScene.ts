@@ -167,9 +167,14 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
+      // Quest givers get the dialogue overlay instead of generic NPC info
+      if (entity.type === "quest-giver") {
+        gameBus.emit("questNpcClick", entity);
+      }
+
       // NPC info panel for NPCs without dedicated dialogs
       const NPC_INFO_TYPES = new Set([
-        "quest-giver", "trainer", "profession-trainer", "lore-npc",
+        "trainer", "profession-trainer", "lore-npc",
         "crafting-master", "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);

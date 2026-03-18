@@ -1,5 +1,5 @@
 export type TechniqueType = "attack" | "buff" | "debuff" | "healing";
-export type TargetType = "self" | "enemy" | "ally" | "area";
+export type TargetType = "self" | "enemy" | "ally" | "area" | "party";
 
 export interface TechniqueEffect {
   damageMultiplier?: number; // For attacks
@@ -516,23 +516,578 @@ export const TECHNIQUES: TechniqueDefinition[] = [
     className: "monk", levelRequired: 22, copperCost: 500, essenceCost: 35, cooldown: 14,
     type: "attack", targetType: "area", animStyle: "melee",
     effects: { damageMultiplier: 1.4, maxTargets: 4, knockback: 10 } },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // HIGH-LEVEL TECHNIQUES — L30-40 (Moondancer Glade / Felsrock Citadel / Lake Lumina)
+  // Gap closers, stuns, invulnerability, and absolute madness
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ══════════════════════════════════════════════════════════════
+  // MOONDANCER GLADE (L30) — R4 upgrades + 1 new ability per class
+  // ══════════════════════════════════════════════════════════════
+
+  // ── WARRIOR L30 ──
+  { id: "warrior_heroic_strike_r4", name: "Heroic Strike R4",
+    description: "Earth-shattering strike dealing 370% damage, lunging forward and sending the target flying",
+    className: "warrior", levelRequired: 30, copperCost: 1800, essenceCost: 30, cooldown: 4,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 3.7, knockback: 16, lunge: 14 } },
+  { id: "warrior_titans_charge", name: "Titan's Charge",
+    description: "Hurtle across the battlefield and slam into the target, dealing 220% damage and crippling their agility by 90% for 6s",
+    className: "warrior", levelRequired: 30, copperCost: 2200, essenceCost: 50, cooldown: 25,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 2.2, lunge: 28, knockback: 18, statReduction: { agi: 90 }, duration: 6 } },
+
+  // ── PALADIN L30 ──
+  { id: "paladin_holy_smite_r4", name: "Holy Smite R4",
+    description: "Divine wrath dealing 320% damage with holy fire DoT burning 18 damage over 8s",
+    className: "paladin", levelRequired: 30, copperCost: 1800, essenceCost: 32, cooldown: 3.5,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 3.2, dotDamage: 18, duration: 8, knockback: 14 } },
+  { id: "paladin_divine_bulwark", name: "Divine Bulwark",
+    description: "Become an immovable fortress — absorb shield equal to 100% max HP and +100% DEF for 8s. NOTHING gets through.",
+    className: "paladin", levelRequired: 30, copperCost: 2500, essenceCost: 60, cooldown: 90,
+    type: "buff", targetType: "self",
+    effects: { shield: 100, statBonus: { def: 100 }, duration: 8 } },
+
+  // ── ROGUE L30 ──
+  { id: "rogue_backstab_r4", name: "Backstab R4",
+    description: "Lethal precision strike dealing a devastating 480% damage with a vicious lunge",
+    className: "rogue", levelRequired: 30, copperCost: 1900, essenceCost: 35, cooldown: 6,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 4.8, lunge: 18 } },
+  { id: "rogue_shadowstep_ambush", name: "Shadowstep Ambush",
+    description: "Teleport through the shadows to your target, striking for 260% damage and crippling them — -70% AGI for 8s",
+    className: "rogue", levelRequired: 30, copperCost: 2200, essenceCost: 50, cooldown: 22,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 2.6, lunge: 32, statReduction: { agi: 70 }, duration: 8 } },
+
+  // ── RANGER L30 ──
+  { id: "ranger_aimed_shot_r4", name: "Aimed Shot R4",
+    description: "Master marksman's shot dealing 385% damage with devastating knockback",
+    className: "ranger", levelRequired: 30, copperCost: 1800, essenceCost: 30, cooldown: 4.5,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 3.85, knockback: 20 } },
+  { id: "ranger_sky_piercer", name: "Sky Piercer",
+    description: "Channel the heavens into a single arrow — 300% damage and shred -55% DEF for 12s",
+    className: "ranger", levelRequired: 30, copperCost: 2200, essenceCost: 45, cooldown: 20,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 3.0, statReduction: { def: 55 }, duration: 12 } },
+
+  // ── MAGE L30 ──
+  { id: "mage_fireball_r4", name: "Fireball R4",
+    description: "Inferno-class fireball dealing 340% damage, setting the target ablaze for 20 DoT over 8s",
+    className: "mage", levelRequired: 30, copperCost: 1800, essenceCost: 35, cooldown: 3,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 3.4, dotDamage: 20, duration: 8, knockback: 14 } },
+  { id: "mage_glacial_prison", name: "Glacial Prison",
+    description: "Encase all enemies in ice — AoE radius 10, -95% AGI and -60% STR for 10s. They're NOT moving.",
+    className: "mage", levelRequired: 30, copperCost: 2400, essenceCost: 55, cooldown: 35,
+    type: "debuff", targetType: "area", animStyle: "area",
+    effects: { statReduction: { agi: 95, str: 60 }, duration: 10, areaRadius: 10 } },
+
+  // ── CLERIC L30 ──
+  { id: "cleric_holy_light_r4", name: "Holy Light R4",
+    description: "Blinding divine radiance restoring 92% max HP in an instant",
+    className: "cleric", levelRequired: 30, copperCost: 1800, essenceCost: 40, cooldown: 3.5,
+    type: "healing", targetType: "ally", animStyle: "projectile",
+    effects: { healAmount: 92 } },
+  { id: "cleric_guardian_angel", name: "Guardian Angel",
+    description: "Summon a guardian angel — shield absorbing 80% max HP + 55% DEF boost for 15s",
+    className: "cleric", levelRequired: 30, copperCost: 2400, essenceCost: 55, cooldown: 50,
+    type: "buff", targetType: "self",
+    effects: { shield: 80, statBonus: { def: 55 }, duration: 15 } },
+
+  // ── WARLOCK L30 ──
+  { id: "warlock_shadow_bolt_r4", name: "Shadow Bolt R4",
+    description: "Abyssal bolt dealing 330% damage, corroding -30% DEF for 8s",
+    className: "warlock", levelRequired: 30, copperCost: 1800, essenceCost: 32, cooldown: 3,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 3.3, statReduction: { def: 30 }, duration: 8, knockback: 12 } },
+  { id: "warlock_demonic_grasp", name: "Demonic Grasp",
+    description: "Dark tendrils seize the target — 200% damage, 35 DoT over 12s, and -50% AGI. There is no escape.",
+    className: "warlock", levelRequired: 30, copperCost: 2300, essenceCost: 55, cooldown: 28,
+    type: "attack", targetType: "enemy", animStyle: "channel",
+    effects: { damageMultiplier: 2.0, dotDamage: 35, duration: 12, statReduction: { agi: 50 } } },
+
+  // ── MONK L30 ──
+  { id: "monk_chi_burst_r4", name: "Chi Burst R4",
+    description: "Concentrated ki explosion dealing 410% damage with devastating knockback",
+    className: "monk", levelRequired: 30, copperCost: 1900, essenceCost: 45, cooldown: 7,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 4.1, knockback: 16 } },
+  { id: "monk_hundred_fists", name: "Hundred Fists",
+    description: "Unleash a flurry of 100 rapid punches — lunge 22 units, 360% damage, shred -55% DEF for 8s",
+    className: "monk", levelRequired: 30, copperCost: 2200, essenceCost: 50, cooldown: 22,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 3.6, lunge: 22, statReduction: { def: 55 }, duration: 8 } },
+
+  // ══════════════════════════════════════════════════════════════
+  // FELSROCK CITADEL (L35) — 2 new abilities per class
+  // These are the turning point — fights get REAL
+  // ══════════════════════════════════════════════════════════════
+
+  // ── WARRIOR L35 ──
+  { id: "warrior_earthquake_slam", name: "Earthquake Slam",
+    description: "Slam the ground so hard the earth splits — AoE radius 12, 240% damage to 6 targets, -100% AGI for 6s (STUNNED), knockback 20",
+    className: "warrior", levelRequired: 35, copperCost: 3200, essenceCost: 60, cooldown: 35,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 2.4, maxTargets: 6, areaRadius: 12, statReduction: { agi: 100 }, duration: 6, knockback: 20 } },
+  { id: "warrior_undying_rage", name: "Undying Rage",
+    description: "Enter an unstoppable berserker state — +85% STR, shield absorbing 65% max HP for 15s. CANNOT. BE. STOPPED.",
+    className: "warrior", levelRequired: 35, copperCost: 3500, essenceCost: 55, cooldown: 60,
+    type: "buff", targetType: "self",
+    effects: { statBonus: { str: 85 }, shield: 65, duration: 15 } },
+
+  // ── PALADIN L35 ──
+  { id: "paladin_hammer_of_justice", name: "Hammer of Justice",
+    description: "Hurl a divine hammer — 200% damage, -95% AGI and -95% STR for 6s. Target is COMPLETELY locked down.",
+    className: "paladin", levelRequired: 35, copperCost: 3000, essenceCost: 55, cooldown: 30,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 2.0, statReduction: { agi: 95, str: 95 }, duration: 6, knockback: 16 } },
+  { id: "paladin_wings_of_valor", name: "Wings of Valor",
+    description: "Manifest golden wings — shield 120% max HP, +70% DEF, +45% STR for 10s. You ARE the raid boss now.",
+    className: "paladin", levelRequired: 35, copperCost: 3800, essenceCost: 70, cooldown: 75,
+    type: "buff", targetType: "self",
+    effects: { shield: 120, statBonus: { def: 70, str: 45 }, duration: 10 } },
+
+  // ── ROGUE L35 ──
+  { id: "rogue_death_mark", name: "Death Mark",
+    description: "Mark the target for death — lunge 24, 420% damage, poison DoT 40 over 10s. They're already dead.",
+    className: "rogue", levelRequired: 35, copperCost: 3200, essenceCost: 55, cooldown: 25,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 4.2, lunge: 24, dotDamage: 40, duration: 10 } },
+  { id: "rogue_phantom_strike", name: "Phantom Strike",
+    description: "Phase through reality to reach your target — lunge 38 units(!), 320% damage, -75% DEF for 8s",
+    className: "rogue", levelRequired: 35, copperCost: 3500, essenceCost: 60, cooldown: 30,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 3.2, lunge: 38, statReduction: { def: 75 }, duration: 8 } },
+
+  // ── RANGER L35 ──
+  { id: "ranger_storm_of_arrows", name: "Storm of Arrows",
+    description: "Darken the sky with arrows — AoE radius 14, 220% damage to 10 targets, knockback 14",
+    className: "ranger", levelRequired: 35, copperCost: 3200, essenceCost: 55, cooldown: 28,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 2.2, areaRadius: 14, maxTargets: 10, knockback: 14 } },
+  { id: "ranger_falcon_dive", name: "Falcon Dive",
+    description: "Dive from the sky like a bird of prey — lunge 30, 270% damage, knockback 18. The ultimate gap closer.",
+    className: "ranger", levelRequired: 35, copperCost: 3000, essenceCost: 50, cooldown: 22,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 2.7, lunge: 30, knockback: 18 } },
+
+  // ── MAGE L35 ──
+  { id: "mage_meteor_strike", name: "Meteor Strike",
+    description: "Call down a METEOR — AoE radius 15, 320% damage to 8 targets, 22 DoT over 6s, knockback 22",
+    className: "mage", levelRequired: 35, copperCost: 3800, essenceCost: 65, cooldown: 40,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 3.2, areaRadius: 15, maxTargets: 8, dotDamage: 22, duration: 6, knockback: 22 } },
+  { id: "mage_time_warp", name: "Time Warp",
+    description: "Bend time itself — +100% AGI and +65% INT for 12s. Everything moves in slow motion except you.",
+    className: "mage", levelRequired: 35, copperCost: 3000, essenceCost: 50, cooldown: 55,
+    type: "buff", targetType: "self",
+    effects: { statBonus: { agi: 100, int: 65 }, duration: 12 } },
+
+  // ── CLERIC L35 ──
+  { id: "cleric_divine_hymn", name: "Divine Hymn",
+    description: "Sing the song of creation — full 100% HP heal + shield absorbing 45% max HP for 20s",
+    className: "cleric", levelRequired: 35, copperCost: 3500, essenceCost: 60, cooldown: 60,
+    type: "buff", targetType: "self",
+    effects: { healAmount: 100, shield: 45, duration: 20 } },
+  { id: "cleric_wrath_of_heaven", name: "Wrath of Heaven",
+    description: "Call down divine judgment — AoE 10, 220% damage to 6 targets, heal self 35%, knockback 16",
+    className: "cleric", levelRequired: 35, copperCost: 3200, essenceCost: 55, cooldown: 30,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 2.2, maxTargets: 6, areaRadius: 10, healAmount: 35, knockback: 16 } },
+
+  // ── WARLOCK L35 ──
+  { id: "warlock_soul_rend", name: "Soul Rend",
+    description: "Rip the souls from nearby enemies — AoE 8, 270% damage to 5 targets, heal 45% of damage dealt",
+    className: "warlock", levelRequired: 35, copperCost: 3200, essenceCost: 55, cooldown: 28,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 2.7, maxTargets: 5, areaRadius: 8, healAmount: 45 } },
+  { id: "warlock_nether_gate", name: "Nether Gate",
+    description: "Open a portal beneath your target — lunge 28, 200% damage, -85% STR and -85% AGI for 8s. Welcome to the void.",
+    className: "warlock", levelRequired: 35, copperCost: 3500, essenceCost: 60, cooldown: 32,
+    type: "attack", targetType: "enemy", animStyle: "channel",
+    effects: { damageMultiplier: 2.0, lunge: 28, statReduction: { str: 85, agi: 85 }, duration: 8 } },
+
+  // ── MONK L35 ──
+  { id: "monk_dragon_strike", name: "Dragon Strike",
+    description: "Channel the spirit of the dragon — 520% damage, lunge 24, knockback 20. One punch is all you need.",
+    className: "monk", levelRequired: 35, copperCost: 3500, essenceCost: 55, cooldown: 25,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 5.2, lunge: 24, knockback: 20 } },
+  { id: "monk_inner_peace", name: "Inner Peace",
+    description: "Achieve transcendence — shield 85% max HP, heal 65%, +55% DEF for 10s. Untouchable serenity.",
+    className: "monk", levelRequired: 35, copperCost: 3200, essenceCost: 50, cooldown: 55,
+    type: "buff", targetType: "self",
+    effects: { shield: 85, healAmount: 65, statBonus: { def: 55 }, duration: 10 } },
+
+  // ══════════════════════════════════════════════════════════════
+  // LAKE LUMINA (L40) — ULTIMATE ABILITIES
+  // The absolute pinnacle. These define endgame.
+  // ══════════════════════════════════════════════════════════════
+
+  // ── WARRIOR L40 ──
+  { id: "warrior_colossus_smash", name: "Colossus Smash",
+    description: "Strike with the force of a god — 620% damage, lunge 22, obliterate -100% DEF for 10s, knockback 25. Armor is a suggestion.",
+    className: "warrior", levelRequired: 40, copperCost: 5000, essenceCost: 70, cooldown: 35,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 6.2, lunge: 22, statReduction: { def: 100 }, duration: 10, knockback: 25 } },
+  { id: "warrior_avatar_of_war", name: "Avatar of War",
+    description: "Become War incarnate — +100% STR, +100% DEF, shield 85% max HP for 12s. You ARE the final boss.",
+    className: "warrior", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 90,
+    type: "buff", targetType: "self",
+    effects: { statBonus: { str: 100, def: 100 }, shield: 85, duration: 12 } },
+
+  // ── PALADIN L40 ──
+  { id: "paladin_wrath_of_the_righteous", name: "Wrath of the Righteous",
+    description: "Unleash divine apocalypse — AoE 12, 420% damage to 8 targets, knockback 22, +55% DEF self for 10s",
+    className: "paladin", levelRequired: 40, copperCost: 5500, essenceCost: 70, cooldown: 45,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 4.2, maxTargets: 8, areaRadius: 12, knockback: 22 } },
+  { id: "paladin_hand_of_god", name: "Hand of God",
+    description: "God reaches down and says NO — shield 150% max HP, +100% DEF, heal 60%, 10s. ABSOLUTE INVULNERABILITY.",
+    className: "paladin", levelRequired: 40, copperCost: 6000, essenceCost: 80, cooldown: 120,
+    type: "buff", targetType: "self",
+    effects: { shield: 150, statBonus: { def: 100 }, healAmount: 60, duration: 10 } },
+
+  // ── ROGUE L40 ──
+  { id: "rogue_deathblow", name: "Deathblow",
+    description: "The killing blow — lunge 30, 720% damage. The single hardest-hitting rogue ability in existence.",
+    className: "rogue", levelRequired: 40, copperCost: 5500, essenceCost: 70, cooldown: 30,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 7.2, lunge: 30 } },
+  { id: "rogue_living_shadow", name: "Living Shadow",
+    description: "Become one with shadow — lunge 42, 420% damage, -100% AGI and -100% STR for 8s, DoT 45 over 10s. Total annihilation.",
+    className: "rogue", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 45,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 4.2, lunge: 42, statReduction: { agi: 100, str: 100 }, duration: 8, dotDamage: 45 } },
+
+  // ── RANGER L40 ──
+  { id: "ranger_arrow_of_judgment", name: "Arrow of Judgment",
+    description: "A single arrow that decides fate — 560% damage, -85% DEF for 15s, knockback 28",
+    className: "ranger", levelRequired: 40, copperCost: 5000, essenceCost: 65, cooldown: 30,
+    type: "attack", targetType: "enemy", animStyle: "projectile",
+    effects: { damageMultiplier: 5.6, statReduction: { def: 85 }, duration: 15, knockback: 28 } },
+  { id: "ranger_heavens_volley", name: "Heaven's Volley",
+    description: "Blot out the sun — AoE radius 20, 260% damage to 12 targets, knockback 20. The sky falls.",
+    className: "ranger", levelRequired: 40, copperCost: 5500, essenceCost: 70, cooldown: 40,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 2.6, areaRadius: 20, maxTargets: 12, knockback: 20 } },
+
+  // ── MAGE L40 ──
+  { id: "mage_arcane_cataclysm", name: "Arcane Cataclysm",
+    description: "Tear reality apart — AoE radius 20, 370% damage to 10 targets, 28 DoT over 8s, knockback 25. Everything dies.",
+    className: "mage", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 50,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 3.7, areaRadius: 20, maxTargets: 10, dotDamage: 28, duration: 8, knockback: 25 } },
+  { id: "mage_absolute_zero", name: "Absolute Zero",
+    description: "Freeze the world — AoE 12, -100% AGI, -100% STR, -80% DEF for 8s. Time stops for your enemies.",
+    className: "mage", levelRequired: 40, copperCost: 5000, essenceCost: 70, cooldown: 55,
+    type: "debuff", targetType: "area", animStyle: "area",
+    effects: { statReduction: { agi: 100, str: 100, def: 80 }, duration: 8, areaRadius: 12 } },
+
+  // ── CLERIC L40 ──
+  { id: "cleric_divine_intervention", name: "Divine Intervention",
+    description: "The divine refuses to let you die — heal 100% HP, shield 100% max HP, +100% DEF for 15s. Immortality.",
+    className: "cleric", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 90,
+    type: "buff", targetType: "self",
+    effects: { healAmount: 100, shield: 100, statBonus: { def: 100 }, duration: 15 } },
+  { id: "cleric_wrath_of_the_divine", name: "Wrath of the Divine",
+    description: "Heaven's fury made manifest — AoE 14, 320% damage to 8 targets, heal self 50%, knockback 22",
+    className: "cleric", levelRequired: 40, copperCost: 5000, essenceCost: 65, cooldown: 40,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 3.2, maxTargets: 8, areaRadius: 14, healAmount: 50, knockback: 22 } },
+
+  // ── WARLOCK L40 ──
+  { id: "warlock_doom", name: "Doom",
+    description: "Seal their fate — DoT 55 over 20s, -65% STR, -65% AGI, -65% DEF for 20s. The longest, most devastating curse.",
+    className: "warlock", levelRequired: 40, copperCost: 5000, essenceCost: 65, cooldown: 50,
+    type: "debuff", targetType: "enemy", animStyle: "projectile",
+    effects: { dotDamage: 55, duration: 20, statReduction: { str: 65, agi: 65, def: 65 } } },
+  { id: "warlock_soul_harvest", name: "Soul Harvest",
+    description: "Reap every soul nearby — AoE 10, 310% damage to 6 targets, heal 50% of damage dealt, DoT 35 over 10s",
+    className: "warlock", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 45,
+    type: "attack", targetType: "area", animStyle: "area",
+    effects: { damageMultiplier: 3.1, maxTargets: 6, areaRadius: 10, healAmount: 50, dotDamage: 35, duration: 10 } },
+
+  // ── MONK L40 ──
+  { id: "monk_one_thousand_palms", name: "One Thousand Palms",
+    description: "The ultimate technique — 850% damage, lunge 28. The single highest damage ability in the game. OMAE WA MOU SHINDEIRU.",
+    className: "monk", levelRequired: 40, copperCost: 6000, essenceCost: 80, cooldown: 40,
+    type: "attack", targetType: "enemy", animStyle: "melee",
+    effects: { damageMultiplier: 8.5, lunge: 28 } },
+  { id: "monk_perfect_balance", name: "Perfect Balance",
+    description: "Achieve absolute harmony — shield 100% max HP, heal 80%, +80% STR, +80% DEF, +80% AGI for 10s. Perfection.",
+    className: "monk", levelRequired: 40, copperCost: 5500, essenceCost: 75, cooldown: 80,
+    type: "buff", targetType: "self",
+    effects: { shield: 100, healAmount: 80, statBonus: { str: 80, def: 80, agi: 80 }, duration: 10 } },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PARTY BUFFS — targetType "party", affects all party members
+  // These are the glue that makes group play worth it.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ── WARRIOR PARTY BUFFS ──
+  { id: "warrior_battle_standard", name: "Battle Standard",
+    description: "Plant a war banner — all party members gain +20% STR for 20s",
+    className: "warrior", levelRequired: 15, copperCost: 350, essenceCost: 35, cooldown: 45,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { str: 20 }, duration: 20 } },
+  { id: "warrior_war_cry", name: "War Cry",
+    description: "Roar of defiance — all party members gain +25% DEF and +15% STR for 15s",
+    className: "warrior", levelRequired: 28, copperCost: 1200, essenceCost: 45, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { def: 25, str: 15 }, duration: 15 } },
+  { id: "warrior_iron_will", name: "Iron Will",
+    description: "Steely resolve — all party members gain +30% DEF and shield absorbing 15% max HP for 18s",
+    className: "warrior", levelRequired: 38, copperCost: 4000, essenceCost: 55, cooldown: 70,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { def: 30 }, shield: 15, duration: 18 } },
+
+  // ── PALADIN PARTY BUFFS ──
+  { id: "paladin_blessing_of_kings", name: "Blessing of Kings",
+    description: "Divine blessing — all party members gain +15% STR, DEF, AGI, and INT for 30s",
+    className: "paladin", levelRequired: 15, copperCost: 350, essenceCost: 40, cooldown: 60,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { str: 15, def: 15, agi: 15, int: 15 }, duration: 30 } },
+  { id: "paladin_aura_of_devotion", name: "Aura of Devotion",
+    description: "Holy aura — all party members gain +25% DEF and +20% FAITH for 25s",
+    className: "paladin", levelRequired: 28, copperCost: 1200, essenceCost: 50, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { def: 25, faith: 20 }, duration: 25 } },
+  { id: "paladin_divine_aegis", name: "Divine Aegis",
+    description: "Shield of the divine — all party members gain shield absorbing 25% max HP and +20% DEF for 20s",
+    className: "paladin", levelRequired: 38, copperCost: 4500, essenceCost: 65, cooldown: 75,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { shield: 25, statBonus: { def: 20 }, duration: 20 } },
+
+  // ── ROGUE PARTY BUFFS ──
+  { id: "rogue_tricks_of_the_trade", name: "Tricks of the Trade",
+    description: "Share combat secrets — all party members gain +20% AGI for 15s",
+    className: "rogue", levelRequired: 15, copperCost: 350, essenceCost: 30, cooldown: 40,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { agi: 20 }, duration: 15 } },
+  { id: "rogue_shadow_veil", name: "Shadow Veil",
+    description: "Cloak the party in shadow — all party members gain +25% LUCK and +20% AGI for 18s",
+    className: "rogue", levelRequired: 28, copperCost: 1200, essenceCost: 40, cooldown: 50,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { luck: 25, agi: 20 }, duration: 18 } },
+  { id: "rogue_assassins_mark", name: "Assassin's Mark",
+    description: "Mark targets for death — all party members gain +30% LUCK and +15% STR for 15s",
+    className: "rogue", levelRequired: 38, copperCost: 4000, essenceCost: 50, cooldown: 60,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { luck: 30, str: 15 }, duration: 15 } },
+
+  // ── RANGER PARTY BUFFS ──
+  { id: "ranger_pack_tactics", name: "Pack Tactics",
+    description: "Coordinate the hunt — all party members gain +15% AGI and +15% LUCK for 20s",
+    className: "ranger", levelRequired: 15, copperCost: 350, essenceCost: 30, cooldown: 45,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { agi: 15, luck: 15 }, duration: 20 } },
+  { id: "ranger_natures_vigil", name: "Nature's Vigil",
+    description: "Nature mends all wounds — all party members heal 25% HP over 15s",
+    className: "ranger", levelRequired: 28, copperCost: 1200, essenceCost: 45, cooldown: 55,
+    type: "healing", targetType: "party", animStyle: "area",
+    effects: { healAmount: 25, duration: 15 } },
+  { id: "ranger_predators_instinct", name: "Predator's Instinct",
+    description: "Sharpen the pack's senses — all party members gain +30% AGI and +20% STR for 18s",
+    className: "ranger", levelRequired: 38, copperCost: 4000, essenceCost: 55, cooldown: 65,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { agi: 30, str: 20 }, duration: 18 } },
+
+  // ── MAGE PARTY BUFFS ──
+  { id: "mage_arcane_brilliance", name: "Arcane Brilliance",
+    description: "Infuse the party with arcane energy — all party members gain +25% INT for 25s",
+    className: "mage", levelRequired: 15, copperCost: 350, essenceCost: 35, cooldown: 50,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { int: 25 }, duration: 25 } },
+  { id: "mage_temporal_shift", name: "Temporal Shift",
+    description: "Bend time for your allies — all party members gain +25% AGI and +15% INT for 15s",
+    className: "mage", levelRequired: 28, copperCost: 1200, essenceCost: 50, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { agi: 25, int: 15 }, duration: 15 } },
+  { id: "mage_arcane_empowerment", name: "Arcane Empowerment",
+    description: "Massive arcane surge — all party members gain +35% INT and +20% LUCK for 20s",
+    className: "mage", levelRequired: 38, copperCost: 4500, essenceCost: 60, cooldown: 70,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { int: 35, luck: 20 }, duration: 20 } },
+
+  // ── CLERIC PARTY BUFFS ──
+  { id: "cleric_prayer_of_healing", name: "Prayer of Healing",
+    description: "Mass heal — all party members healed for 30% max HP",
+    className: "cleric", levelRequired: 15, copperCost: 350, essenceCost: 40, cooldown: 30,
+    type: "healing", targetType: "party", animStyle: "area",
+    effects: { healAmount: 30 } },
+  { id: "cleric_sanctuary", name: "Sanctuary",
+    description: "Holy ground protects — all party members gain shield absorbing 25% max HP for 20s",
+    className: "cleric", levelRequired: 28, copperCost: 1200, essenceCost: 55, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { shield: 25, duration: 20 } },
+  { id: "cleric_divine_chorus", name: "Divine Chorus",
+    description: "Hymn of the heavens — all party members heal 40% HP over 15s and gain +25% DEF",
+    className: "cleric", levelRequired: 38, copperCost: 4500, essenceCost: 65, cooldown: 70,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { healAmount: 40, statBonus: { def: 25 }, duration: 15 } },
+
+  // ── WARLOCK PARTY BUFFS ──
+  { id: "warlock_dark_pact", name: "Dark Pact",
+    description: "Share forbidden power — all party members gain +20% INT for 20s",
+    className: "warlock", levelRequired: 15, copperCost: 350, essenceCost: 35, cooldown: 45,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { int: 20 }, duration: 20 } },
+  { id: "warlock_soul_link", name: "Soul Link",
+    description: "Link souls — all party members gain +20% HP and +15% DEF for 25s",
+    className: "warlock", levelRequired: 28, copperCost: 1200, essenceCost: 50, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { hp: 20, def: 15 }, duration: 25 } },
+  { id: "warlock_demonic_empowerment", name: "Demonic Empowerment",
+    description: "Channel demonic might — all party members gain +25% STR and +25% INT for 18s",
+    className: "warlock", levelRequired: 38, copperCost: 4500, essenceCost: 60, cooldown: 65,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { str: 25, int: 25 }, duration: 18 } },
+
+  // ── MONK PARTY BUFFS ──
+  { id: "monk_windwalkers_grace", name: "Windwalker's Grace",
+    description: "Share inner harmony — all party members gain +20% AGI for 20s",
+    className: "monk", levelRequired: 15, copperCost: 350, essenceCost: 30, cooldown: 45,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { agi: 20 }, duration: 20 } },
+  { id: "monk_zen_meditation", name: "Zen Meditation",
+    description: "Group meditation — all party members gain +15% STR, DEF, and AGI for 18s",
+    className: "monk", levelRequired: 28, copperCost: 1200, essenceCost: 45, cooldown: 55,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { str: 15, def: 15, agi: 15 }, duration: 18 } },
+  { id: "monk_transcendence", name: "Transcendence",
+    description: "Enlightenment flows — all party members gain +25% all stats and heal 20% HP over 15s",
+    className: "monk", levelRequired: 38, copperCost: 4500, essenceCost: 60, cooldown: 70,
+    type: "buff", targetType: "party", animStyle: "area",
+    effects: { statBonus: { str: 25, def: 25, agi: 25, int: 25, luck: 25 }, healAmount: 20, duration: 15 } },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // ALLY BUFFS — targetType "ally", long-duration single-target buffs
+  // Cast on a friendly player. These last a LONG time (60-120s).
+  // ═══════════════════════════════════════════════════════════════════
+
+  // ── WARRIOR ALLY BUFFS ──
+  { id: "warrior_rallying_banner", name: "Rallying Banner",
+    description: "Inspire an ally with a war banner — +30% STR for 60s",
+    className: "warrior", levelRequired: 18, copperCost: 500, essenceCost: 30, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { str: 30 }, duration: 60 } },
+  { id: "warrior_champions_resolve", name: "Champion's Resolve",
+    description: "Grant an ally the resolve of a champion — +25% STR, +25% DEF for 90s",
+    className: "warrior", levelRequired: 32, copperCost: 2500, essenceCost: 45, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { str: 25, def: 25 }, duration: 90 } },
+
+  // ── PALADIN ALLY BUFFS ──
+  { id: "paladin_blessing_of_protection", name: "Blessing of Protection",
+    description: "Shield an ally with divine light — shield 25% max HP + 25% DEF for 45s",
+    className: "paladin", levelRequired: 18, copperCost: 500, essenceCost: 35, cooldown: 60,
+    type: "buff", targetType: "ally",
+    effects: { shield: 25, statBonus: { def: 25 }, duration: 45 } },
+  { id: "paladin_blessing_of_sanctuary", name: "Blessing of Sanctuary",
+    description: "Full divine protection — +30% DEF, +20% HP, shield 20% max HP for 90s",
+    className: "paladin", levelRequired: 32, copperCost: 2500, essenceCost: 50, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { def: 30, hp: 20 }, shield: 20, duration: 90 } },
+
+  // ── ROGUE ALLY BUFFS ──
+  { id: "rogue_sharpen_blade", name: "Sharpen Blade",
+    description: "Hone an ally's weapon — +30% LUCK for 60s",
+    className: "rogue", levelRequired: 18, copperCost: 500, essenceCost: 25, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { luck: 30 }, duration: 60 } },
+  { id: "rogue_shadow_infusion", name: "Shadow Infusion",
+    description: "Infuse an ally with shadow — +25% AGI, +25% LUCK for 90s",
+    className: "rogue", levelRequired: 32, copperCost: 2500, essenceCost: 40, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { agi: 25, luck: 25 }, duration: 90 } },
+
+  // ── RANGER ALLY BUFFS ──
+  { id: "ranger_eagle_eye", name: "Eagle Eye",
+    description: "Grant an ally the sight of the eagle — +30% AGI for 60s",
+    className: "ranger", levelRequired: 18, copperCost: 500, essenceCost: 25, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { agi: 30 }, duration: 60 } },
+  { id: "ranger_bond_of_the_wild", name: "Bond of the Wild",
+    description: "Nature's full blessing on an ally — +25% AGI, +20% STR, heal 20% HP over 30s",
+    className: "ranger", levelRequired: 32, copperCost: 2500, essenceCost: 45, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { agi: 25, str: 20 }, healAmount: 20, duration: 90 } },
+
+  // ── MAGE ALLY BUFFS ──
+  { id: "mage_arcane_infusion", name: "Arcane Infusion",
+    description: "Infuse an ally with arcane power — +30% INT for 60s",
+    className: "mage", levelRequired: 18, copperCost: 500, essenceCost: 30, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { int: 30 }, duration: 60 } },
+  { id: "mage_chrono_blessing", name: "Chrono Blessing",
+    description: "Bend time around an ally — +25% INT, +25% AGI for 90s",
+    className: "mage", levelRequired: 32, copperCost: 2500, essenceCost: 45, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { int: 25, agi: 25 }, duration: 90 } },
+
+  // ── CLERIC ALLY BUFFS ──
+  { id: "cleric_greater_renew", name: "Greater Renew",
+    description: "Powerful sustained heal on an ally — heal 60% HP over 30s",
+    className: "cleric", levelRequired: 18, copperCost: 500, essenceCost: 35, cooldown: 45,
+    type: "healing", targetType: "ally", animStyle: "projectile",
+    effects: { healAmount: 60, duration: 30 } },
+  { id: "cleric_blessing_of_light", name: "Blessing of Light",
+    description: "Sustained divine blessing — +30% FAITH, +25% DEF, heal 30% over 45s for 90s",
+    className: "cleric", levelRequired: 32, copperCost: 2500, essenceCost: 50, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { faith: 30, def: 25 }, healAmount: 30, duration: 90 } },
+
+  // ── WARLOCK ALLY BUFFS ──
+  { id: "warlock_dark_empowerment", name: "Dark Empowerment",
+    description: "Infuse an ally with dark energy — +25% STR, +25% INT for 60s",
+    className: "warlock", levelRequired: 18, copperCost: 500, essenceCost: 30, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { str: 25, int: 25 }, duration: 60 } },
+  { id: "warlock_soul_covenant", name: "Soul Covenant",
+    description: "Bind your soul to an ally — +30% INT, +20% HP, shield 15% max HP for 90s",
+    className: "warlock", levelRequired: 32, copperCost: 2500, essenceCost: 45, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { int: 30, hp: 20 }, shield: 15, duration: 90 } },
+
+  // ── MONK ALLY BUFFS ──
+  { id: "monk_chi_attunement", name: "Chi Attunement",
+    description: "Harmonize an ally's chi — +20% STR, +20% AGI, +20% DEF for 60s",
+    className: "monk", levelRequired: 18, copperCost: 500, essenceCost: 30, cooldown: 70,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { str: 20, agi: 20, def: 20 }, duration: 60 } },
+  { id: "monk_spirit_bond", name: "Spirit Bond",
+    description: "Deep spiritual connection — +25% all stats for 90s. The ultimate ally buff.",
+    className: "monk", levelRequired: 32, copperCost: 2500, essenceCost: 50, cooldown: 100,
+    type: "buff", targetType: "ally",
+    effects: { statBonus: { str: 25, def: 25, agi: 25, int: 25, luck: 25, faith: 25 }, duration: 90 } },
 ];
 
-// Fallback lookup for dynamically generated techniques (e.g. essence techniques)
-let fallbackLookup: ((id: string) => TechniqueDefinition | undefined) | null = null;
+// Fallback lookups for dynamically generated techniques (essence + forged)
+const fallbackLookups: Array<(id: string) => TechniqueDefinition | undefined> = [];
 
 /**
  * Register a fallback lookup function for techniques not in the static catalog.
- * Used by essenceTechniqueGenerator to make procedural techniques work with combat.
+ * Multiple lookups can be registered and are tried in order.
  */
 export function registerTechniqueFallbackLookup(
   fn: (id: string) => TechniqueDefinition | undefined,
 ): void {
-  fallbackLookup = fn;
+  fallbackLookups.push(fn);
 }
 
 export function getTechniqueById(id: string): TechniqueDefinition | undefined {
-  return TECHNIQUES.find((t) => t.id === id) ?? fallbackLookup?.(id);
+  const static_ = TECHNIQUES.find((t) => t.id === id);
+  if (static_) return static_;
+  for (const lookup of fallbackLookups) {
+    const result = lookup(id);
+    if (result) return result;
+  }
+  return undefined;
 }
 
 export function getTechniquesByClass(className: string): TechniqueDefinition[] {
@@ -549,6 +1104,9 @@ export function getLearnedTechniques(className: string, level: number): Techniqu
  * Returns null for base (R1) techniques or non-ranked abilities.
  */
 export function getRequiredPreviousRank(techniqueId: string): string | null {
+  const r4Match = techniqueId.match(/^(.+)_r4$/);
+  if (r4Match) return `${r4Match[1]}_r3`;
+
   const r3Match = techniqueId.match(/^(.+)_r3$/);
   if (r3Match) return `${r3Match[1]}_r2`;
 

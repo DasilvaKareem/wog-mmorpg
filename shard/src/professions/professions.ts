@@ -6,6 +6,7 @@ import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/gol
 import { saveCharacter, getProfessionsForWallet } from "../character/characterStore.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold } from "../blockchain/currency.js";
+import { getProfessionSkills, skillXpProgress } from "./professionXp.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
@@ -141,9 +142,19 @@ export function registerProfessionRoutes(server: FastifyInstance) {
         }
       }
 
+      // Build per-profession skill details
+      const skills = getProfessionSkills(walletAddress);
+      const details: Record<string, { level: number; xp: number; actions: number; progress: number }> = {};
+      for (const prof of learned) {
+        const skill = skills[prof] ?? { xp: 0, level: 1, actions: 0 };
+        const prog = skillXpProgress(skill);
+        details[prof] = { level: skill.level, xp: skill.xp, actions: skill.actions, progress: prog.pct };
+      }
+
       return {
         walletAddress,
         professions: learned,
+        skills: details,
       };
     }
   );

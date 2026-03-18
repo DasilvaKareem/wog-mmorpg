@@ -1818,15 +1818,15 @@ function createGatherClip(): THREE.AnimationClip {
     // Spine bends forward
     quatTrack("Spine", [0, 0.55, 0.90, 1.25, d], [
       [0, 0, 0],
-      [-0.6, 0, 0],        // bending
-      [-0.65, 0, 0],       // hold with wobble
-      [-0.6, 0, 0],
+      [0.6, 0, 0],         // bending forward
+      [0.65, 0, 0],        // hold with wobble
+      [0.6, 0, 0],
       [0, 0, 0],           // stand up
     ]),
     quatTrack("Chest", [0, 0.55, 0.90, d], [
       [0, 0, 0],
-      [-0.35, 0, 0],
-      [-0.3, 0, 0],
+      [0.35, 0, 0],
+      [0.3, 0, 0],
       [0, 0, 0],
     ]),
     // Right arm reaches down

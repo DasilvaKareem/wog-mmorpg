@@ -156,6 +156,21 @@ let txChain: Promise<void> = Promise.resolve();
 const NONCE_ERROR_CODES = [-32004, -32000, -32603]; // common nonce / replacement error codes
 const MAX_RETRIES = 3;
 
+function isTransientRpcSendError(err: any): boolean {
+  const msg = String(err?.message ?? err ?? "");
+  const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("UND_ERR_SOCKET") ||
+    msg.includes("ECONNRESET") ||
+    msg.includes("ETIMEDOUT") ||
+    msg.includes("socket hang up") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    code === "UND_ERR_SOCKET"
+  );
+}
+
 async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
   let resolve!: (v: void) => void;
   const gate = new Promise<void>((r) => { resolve = r; });
@@ -178,11 +193,12 @@ async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
         NONCE_ERROR_CODES.includes(code) ||
         msg.includes("nonce") ||
         msg.includes("replacement transaction");
+      const isTransientRpcError = isTransientRpcSendError(err);
 
-      if (isNonceError && attempt < MAX_RETRIES) {
+      if ((isNonceError || isTransientRpcError) && attempt < MAX_RETRIES) {
         const delay = 1000 * 2 ** attempt; // 1s, 2s, 4s
         console.warn(
-          `[blockchain] Nonce error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
+          `[blockchain] ${isNonceError ? "Nonce" : "RPC transport"} error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
         );
         await new Promise((r) => setTimeout(r, delay));
         continue;
@@ -328,15 +344,32 @@ async function sendTransactionWithManagedGas(
   transaction: any,
   account: Account
 ): Promise<Awaited<ReturnType<typeof sendTransaction>>> {
-  const gasPrice = await resolveManagedGasPrice();
-  const tx = {
-    ...transaction,
-    gasPrice,
-    maxFeePerGas: undefined,
-    maxPriorityFeePerGas: undefined,
-    type: "legacy" as const,
-  };
-  return sendTransaction({ transaction: tx, account });
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const gasPrice = await resolveManagedGasPrice();
+      const tx = {
+        ...transaction,
+        gasPrice,
+        maxFeePerGas: undefined,
+        maxPriorityFeePerGas: undefined,
+        type: "legacy" as const,
+      };
+      return await sendTransaction({ transaction: tx, account });
+    } catch (err: any) {
+      lastError = err;
+      if (!isTransientRpcSendError(err) || attempt >= MAX_RETRIES) {
+        throw err;
+      }
+      cachedGasPrice = null;
+      const delay = 1000 * 2 ** attempt; // 1s, 2s, 4s
+      console.warn(
+        `[blockchain] sendTransaction transport error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastError;
 }
 
 /**

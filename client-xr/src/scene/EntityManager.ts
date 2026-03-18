@@ -164,10 +164,10 @@ const bootPlateGeo = new THREE.BoxGeometry(0.12, 0.15, 0.2);
 const bootCuffGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.06, 6);
 const bootLeatherGeo = new THREE.CapsuleGeometry(0.06, 0.12, 3, 6);
 
-// Gloves
-const gauntletGeo = new THREE.BoxGeometry(0.1, 0.12, 0.08);
-const gauntletCuffGeo = new THREE.CylinderGeometry(0.06, 0.055, 0.05, 6);
-const gloveLeatherGeo = new THREE.SphereGeometry(0.065, 5, 4);
+// Gloves (full arm coverage — must fully enclose armGeo 0.055r × 0.3h + handGeo 0.06r)
+const gauntletGeo = new THREE.CapsuleGeometry(0.09, 0.40, 4, 6);
+const gauntletCuffGeo = new THREE.CylinderGeometry(0.11, 0.09, 0.07, 6);
+const gloveLeatherGeo = new THREE.CapsuleGeometry(0.08, 0.36, 4, 6);
 
 // Belt
 const beltGeo = new THREE.TorusGeometry(0.20, 0.02, 4, 12);
@@ -379,11 +379,11 @@ function addArmorPieces(
       if (mt === "plate") {
         const gaunt = new THREE.Mesh(gauntletGeo, mat);
         const cuff = new THREE.Mesh(gauntletCuffGeo, mat);
-        if (arm) { gaunt.position.set(0, -0.38, 0); arm.add(gaunt); cuff.position.set(0, -0.3, 0); arm.add(cuff); }
+        if (arm) { gaunt.position.set(0, -0.28, 0); arm.add(gaunt); cuff.position.set(0, -0.06, 0); arm.add(cuff); }
         else { gaunt.position.set(dx * 0.38, 0.62, 0); group.add(gaunt); cuff.position.set(dx * 0.38, 0.7, 0); group.add(cuff); }
       } else {
         const glove = new THREE.Mesh(gloveLeatherGeo, mat);
-        if (arm) { glove.position.set(0, -0.4, 0); arm.add(glove); }
+        if (arm) { glove.position.set(0, -0.26, 0); arm.add(glove); }
         else { glove.position.set(dx * 0.38, 0.62, 0); group.add(glove); }
       }
     }

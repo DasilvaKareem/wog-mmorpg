@@ -53,6 +53,7 @@ import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./age
 import { getAgentOrigin } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
+import { QUEST_CATALOG } from "../social/questSystem.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -89,6 +90,19 @@ function sanitizeAgentHistoryText(text: string): string {
     .replace(/\s*(\[[^\]]+\])+\s*$/g, "")
     .replace(/\s{2,}/g, " ")
     .trim();
+}
+
+function normalizeRecommendationText(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function recommendationMentionsBlockedQuest(
+  recommendation: { title: string; description: string; focus: string },
+  blockedQuestTitles: string[]
+): boolean {
+  if (blockedQuestTitles.length === 0) return false;
+  const haystack = normalizeRecommendationText(`${recommendation.title} ${recommendation.description}`);
+  return blockedQuestTitles.some((title) => title.length >= 4 && haystack.includes(title));
 }
 
 async function getTierCapsForWallet(userWallet: string) {
@@ -633,17 +647,26 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     // Available quests
     const completedQuestIds = entity.completedQuests ?? [];
     const activeQuestIds = (entity.activeQuests ?? []).map((q: any) => q.questId);
+    const questTitleById = new Map(QUEST_CATALOG.map((quest) => [quest.id, quest.title]));
+    const completedQuestTitles = completedQuestIds
+      .map((questId: string) => questTitleById.get(questId) ?? questId)
+      .map(normalizeRecommendationText);
+    const activeQuestTitles = activeQuestIds
+      .map((questId: string) => questTitleById.get(questId) ?? questId)
+      .map(normalizeRecommendationText);
+    const blockedQuestTitles = [...new Set([...completedQuestTitles, ...activeQuestTitles])];
     const activeQuestDescs = (entity.activeQuests ?? [])
-      .map((q: any) => `${q.questId} (progress: ${q.progress})`)
+      .map((q: any) => `${questTitleById.get(q.questId) ?? q.questId} (progress: ${q.progress})`)
       .join(", ") || "none";
-    const availableQuests: string[] = [];
+    const availableQuestOptions: Array<{ id: string; title: string; npcName: string }> = [];
     for (const zoneEntity of getEntitiesInRegion(region)) {
       if (!isQuestNpc(zoneEntity)) continue;
       const quests = getAvailableQuestsForPlayer(zoneEntity.name, completedQuestIds, activeQuestIds);
       for (const q of quests) {
-        availableQuests.push(`"${q.title}" from ${zoneEntity.name}`);
+        availableQuestOptions.push({ id: q.id, title: q.title, npcName: zoneEntity.name });
       }
     }
+    const availableQuests = availableQuestOptions.map((q) => `"${q.title}" from ${q.npcName}`);
 
     // Professions
     let professions = "none";
@@ -759,8 +782,81 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
         icon: String(rec.icon ?? "").slice(0, 4),
       }));
 
+      const seenRecommendationKeys = new Set<string>();
+      const filteredRecommendations = recommendations.filter((rec: any) => {
+        const key = `${normalizeRecommendationText(rec.title)}|${rec.focus}|${rec.targetZone ?? ""}`;
+        if (!rec.title || seenRecommendationKeys.has(key)) return false;
+        seenRecommendationKeys.add(key);
+        if (rec.focus === "questing" && availableQuestOptions.length === 0) return false;
+        return !recommendationMentionsBlockedQuest(rec, blockedQuestTitles);
+      });
+
+      const fallbackRecommendations = [
+        ...(availableQuestOptions.length > 0
+          ? [{
+              title: `Quest: ${availableQuestOptions[0]!.title}`,
+              description: `${availableQuestOptions[0]!.npcName} has a quest you have not started yet.`,
+              focus: "questing",
+              strategy: "balanced",
+              targetZone: null,
+              priority: "high",
+              icon: "!",
+            }]
+          : []),
+        {
+          title: "Clear Nearby Mobs",
+          description: nearbyMobs !== "none"
+            ? "There is immediate combat XP nearby, and it keeps your momentum up."
+            : "A short combat run is a reliable way to keep progression moving.",
+          focus: "combat",
+          strategy: hpPct < 45 ? "defensive" : "balanced",
+          targetZone: null,
+          priority: "medium",
+          icon: "⚔",
+        },
+        {
+          title: "Gather Fresh Materials",
+          description: nearbyNodes !== "none"
+            ? "There are resource nodes nearby, so this is an efficient gathering window."
+            : "Gathering is a safe way to build crafting stock and future upgrades.",
+          focus: "gathering",
+          strategy: "balanced",
+          targetZone: null,
+          priority: "medium",
+          icon: "⛏",
+        },
+        {
+          title: "Shop For Upgrades",
+          description: "Checking merchants can turn your current gold into a real power spike.",
+          focus: "shopping",
+          strategy: "balanced",
+          targetZone: null,
+          priority: goldCopper > 0 ? "medium" : "low",
+          icon: "$",
+        },
+        {
+          title: "Push Into A New Zone",
+          description: "Exploring an unlocked region opens better mobs, quests, and progression routes.",
+          focus: "traveling",
+          strategy: "balanced",
+          targetZone: getZoneConnections(region).find((z) => myLevel >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1)) ?? null,
+          priority: "low",
+          icon: ">",
+        },
+      ];
+
+      for (const fallback of fallbackRecommendations) {
+        if (filteredRecommendations.length >= 3) break;
+        const key = `${normalizeRecommendationText(fallback.title)}|${fallback.focus}|${fallback.targetZone ?? ""}`;
+        if (seenRecommendationKeys.has(key)) continue;
+        if (fallback.focus === "questing" && availableQuestOptions.length === 0) continue;
+        if (recommendationMentionsBlockedQuest(fallback, blockedQuestTitles)) continue;
+        seenRecommendationKeys.add(key);
+        filteredRecommendations.push(fallback);
+      }
+
       return reply.send({
-        recommendations,
+        recommendations: filteredRecommendations.slice(0, 3),
         context: {
           level: myLevel,
           region,
@@ -1000,14 +1096,18 @@ Strategy options: aggressive, balanced, defensive`;
       },
       {
         name: "take_action",
-        description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith, and recycle_item to turn loot into gold.",
+        description: "Execute an immediate in-game action. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or visit a trainer. Use forge_technique when the user wants to CREATE/FORGE/DESIGN a custom ability — they describe what it should do and the trainer forges it (requires L30+). Use learn_profession to pick up a gathering/crafting profession. Use buy_item/equip_item for gear, repair_gear at a blacksmith, and recycle_item to turn loot into gold.",
         parameters: {
           type: "OBJECT" as Type,
           properties: {
             action: {
               type: "STRING" as Type,
-              enum: ["learn_profession", "learn_technique", "buy_item", "equip_item", "repair_gear", "recycle_item"],
-              description: "The action type. Use learn_technique when the user asks to learn skills, spells, abilities, techniques, moves, or go to a trainer.",
+              enum: ["learn_profession", "learn_technique", "forge_technique", "buy_item", "equip_item", "repair_gear", "recycle_item"],
+              description: "The action type. Use learn_technique to learn existing techniques. Use forge_technique when the user wants to CREATE/DESIGN a custom ability by describing it (L30+ only). Use learn_profession to pick up a profession.",
+            },
+            abilityDescription: {
+              type: "STRING" as Type,
+              description: "For forge_technique: the player's description of the custom ability they want to create. Capture their exact fantasy.",
             },
             professionId: {
               type: "STRING" as Type,
@@ -1377,6 +1477,7 @@ Strategy options: aggressive, balanced, defensive`;
               professionId?: string;
               tokenId?: number;
               quantity?: number;
+              abilityDescription?: string;
             };
             if (input.action === "learn_profession" && input.professionId) {
               const runner = agentManager.getRunner(authWallet);
@@ -1458,6 +1559,68 @@ Strategy options: aggressive, balanced, defensive`;
                       configUpdated = true;
                       actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
                       server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
+                    }
+                  }
+                }
+              }
+            } else if (input.action === "forge_technique") {
+              const runner = agentManager.getRunner(authWallet);
+              if (!runner) {
+                actionsTaken.push("[agent not running]");
+              } else {
+                const techRef = await getAgentEntityRef(authWallet);
+                const techEntity = techRef?.entityId ? getWorldEntity(techRef.entityId) as any : null;
+                const techClassId = (techEntity?.classId ?? "").toLowerCase();
+                const playerLevel = techEntity?.level ?? 1;
+
+                if (!techClassId) {
+                  actionsTaken.push("[no class found]");
+                } else if (playerLevel < 30) {
+                  actionsTaken.push(`[must be level 30+ to forge custom techniques, currently level ${playerLevel}]`);
+                } else if (!input.abilityDescription) {
+                  actionsTaken.push("[describe the ability you want to forge]");
+                } else {
+                  // Find the class trainer nearby
+                  let trainerId: string | null = null;
+                  let trainerName: string | null = null;
+                  if (techEntity) {
+                    for (const e of getEntitiesNear(techEntity.x, techEntity.y, 500)) {
+                      if ((e as any).type === "trainer") {
+                        const teaches = ((e as any).teachesClass ?? "").toLowerCase();
+                        if (teaches === techClassId || new RegExp(`${techClassId}\\s+trainer`, "i").test(String(e.name ?? ""))) {
+                          trainerId = e.id;
+                          trainerName = e.name ?? "class trainer";
+                          break;
+                        }
+                      }
+                    }
+                  }
+
+                  if (!trainerId) {
+                    actionsTaken.push(`[no ${techClassId} trainer nearby — travel to a L30+ zone with a class trainer]`);
+                  } else {
+                    // Call forge directly (server-side)
+                    try {
+                      const { forgeCustomTechnique } = await import("../combat/forgedTechniqueGenerator.js");
+                      const technique = await forgeCustomTechnique(
+                        techEntity.walletAddress,
+                        techClassId,
+                        playerLevel >= 40 ? "legendary" : playerLevel >= 35 ? "master" : "adept",
+                        input.abilityDescription!,
+                      );
+                      // Add to learned techniques
+                      if (!techEntity.learnedTechniques) techEntity.learnedTechniques = [];
+                      if (!techEntity.learnedTechniques.includes(technique.id)) {
+                        techEntity.learnedTechniques.push(technique.id);
+                      }
+                      const { saveCharacter: saveCh } = await import("../character/characterStore.js");
+                      saveCh(techEntity.walletAddress, techEntity.name, {
+                        learnedTechniques: techEntity.learnedTechniques,
+                      } as any).catch(() => {});
+                      actionsTaken.push(`[forged custom technique: "${technique.name}" — ${technique.description}]`);
+                      server.log.info(`[agent/chat] forge_technique: ${technique.name}`);
+                    } catch (forgeErr: any) {
+                      actionsTaken.push(`[forge failed: ${forgeErr.message ?? "unknown error"}]`);
                     }
                   }
                 }
@@ -1674,12 +1837,12 @@ Strategy options: aggressive, balanced, defensive`;
 
   // ── POST /agent/goto-npc — Send agent to a specific NPC (UI click) ─────────
   server.post<{
-    Body: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string };
+    Body: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string; questId?: string };
   }>("/agent/goto-npc", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const authWallet = (request as any).walletAddress as string;
-    const { entityId, zoneId, name, action, profession } = request.body ?? {};
+    const { entityId, zoneId, name, action, profession, questId } = request.body ?? {};
 
     if (!entityId || !zoneId) {
       return reply.code(400).send({ error: "entityId and zoneId are required" });
@@ -1687,11 +1850,15 @@ Strategy options: aggressive, balanced, defensive`;
 
     await patchAgentConfig(authWallet, {
       focus: "goto",
-      gotoTarget: { entityId, zoneId, name, action, profession },
+      gotoTarget: { entityId, zoneId, name, action, profession, questId },
     });
 
     const logText = action === "learn-profession" && profession
       ? `[LEARN] Sending agent to learn ${profession} from ${name ?? entityId}`
+      : action === "accept-quest" && questId
+      ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}`
+      : action === "complete-quest" && questId
+      ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}`
       : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
 
     await appendChatMessage(authWallet, {
@@ -1705,7 +1872,7 @@ Strategy options: aggressive, balanced, defensive`;
       runner.setGotoTarget(entityId, zoneId, name, action, profession);
     }
 
-    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession } });
+    return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
   });
 
   // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────
