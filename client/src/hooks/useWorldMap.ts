@@ -67,8 +67,17 @@ export function useWorldMap(enabled: boolean, pollInterval = 3000) {
     if (!meta) return;
 
     try {
+      let activeZoneIds: Set<string> | null = null;
+      const zonesRes = await fetch(`${API_URL}/zones`);
+      if (zonesRes.ok) {
+        const zones = await zonesRes.json() as Record<string, unknown>;
+        activeZoneIds = new Set(Object.keys(zones));
+      }
+
       const results = await Promise.all(
-        meta.zones.map(async (zone) => {
+        meta.zones
+          .filter((zone) => !activeZoneIds || activeZoneIds.has(zone.id))
+          .map(async (zone) => {
           const res = await fetch(`${API_URL}/zones/${zone.id}`);
           if (!res.ok) return { zoneId: zone.id, entities: [] as Entity[] };
           const json = await res.json();
@@ -76,12 +85,14 @@ export function useWorldMap(enabled: boolean, pollInterval = 3000) {
             zoneId: zone.id,
             entities: Object.values(json.entities || {}) as Entity[],
           };
-        })
+          })
       );
 
       if (!mountedRef.current) return;
 
-      const map: WorldMapEntities = {};
+      const map: WorldMapEntities = Object.fromEntries(
+        meta.zones.map((zone) => [zone.id, [] as Entity[]])
+      );
       for (const r of results) {
         map[r.zoneId] = r.entities;
       }
