@@ -243,7 +243,8 @@ export function getRegionAtPosition(worldX: number, worldZ: number): string | nu
   for (const zone of Object.values(layout.zones)) {
     const localX = worldX - zone.offset.x;
     const localZ = worldZ - zone.offset.z;
-    if (localX >= 0 && localX <= zone.size.width && localZ >= 0 && localZ <= zone.size.height) {
+    // Use half-open bounds so a shared edge belongs to exactly one zone.
+    if (localX >= 0 && localX < zone.size.width && localZ >= 0 && localZ < zone.size.height) {
       return zone.id;
     }
   }
