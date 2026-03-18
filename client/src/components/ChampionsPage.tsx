@@ -1262,6 +1262,19 @@ function FriendsTab({
     window.setTimeout(() => setActionMsg(null), timeoutMs);
   }
 
+  async function getOwnerAuthHeaders(): Promise<Record<string, string> | null> {
+    if (!ownerWallet) {
+      showAction("Wallet not connected — reconnect and try again.", "error");
+      return null;
+    }
+    const token = await getAuthToken(ownerWallet);
+    if (!token) {
+      showAction("Auth failed. Reconnect wallet and try again.", "error");
+      return null;
+    }
+    return { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+  }
+
   async function refreshTransferState() {
     if (!custodialWallet) return;
     try {
@@ -1348,9 +1361,11 @@ function FriendsTab({
   async function sendFriendRequest(target: SearchResult) {
     if (!custodialWallet || !target.walletAddress) return;
     try {
+      const headers = await getOwnerAuthHeaders();
+      if (!headers) return;
       const res = await fetch(`${API_URL}/friends/request`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ fromWallet: custodialWallet, toWallet: target.walletAddress }),
       });
       const d = await res.json();
@@ -1363,9 +1378,11 @@ function FriendsTab({
     if (!custodialWallet || !wogNameInput.trim()) return;
     setWogSending(true);
     try {
+      const headers = await getOwnerAuthHeaders();
+      if (!headers) return;
       const res = await fetch(`${API_URL}/friends/request-by-name`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ fromWallet: custodialWallet, toName: wogNameInput.trim() }),
       });
       const d = await res.json();
@@ -1378,9 +1395,11 @@ function FriendsTab({
   async function acceptRequest(req: FriendRequestInfo) {
     if (!custodialWallet) return;
     try {
+      const headers = await getOwnerAuthHeaders();
+      if (!headers) return;
       const res = await fetch(`${API_URL}/friends/accept`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ wallet: custodialWallet, requestId: req.id }),
       });
       const d = await res.json();
@@ -1393,35 +1412,51 @@ function FriendsTab({
 
   async function declineRequest(req: FriendRequestInfo) {
     if (!custodialWallet) return;
-    await fetch(`${API_URL}/friends/decline`, {
+    const headers = await getOwnerAuthHeaders();
+    if (!headers) return;
+    const res = await fetch(`${API_URL}/friends/decline`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ wallet: custodialWallet, requestId: req.id }),
     });
-    setRequests((prev) => prev.filter((r) => r.id !== req.id));
+    if (res.ok) {
+      setRequests((prev) => prev.filter((r) => r.id !== req.id));
+    } else {
+      const d = await res.json().catch(() => ({}));
+      showAction(`Error: ${d.error ?? "Failed to decline request"}`, "error");
+    }
   }
 
   async function removeFriend(f: FriendInfo) {
     if (!custodialWallet) return;
-    await fetch(`${API_URL}/friends/remove`, {
+    const headers = await getOwnerAuthHeaders();
+    if (!headers) return;
+    const res = await fetch(`${API_URL}/friends/remove`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ wallet: custodialWallet, targetWallet: f.wallet }),
     });
-    setFriends((prev) => prev.filter((x) => x.wallet !== f.wallet));
-    if (transferTargetWallet === f.wallet) {
-      setTransferTargetWallet(null);
-      setTransferAmount(0);
+    if (res.ok) {
+      setFriends((prev) => prev.filter((x) => x.wallet !== f.wallet));
+      if (transferTargetWallet === f.wallet) {
+        setTransferTargetWallet(null);
+        setTransferAmount(0);
+      }
+      showAction("Friend removed.", "ok", 3000);
+    } else {
+      const d = await res.json().catch(() => ({}));
+      showAction(`Error: ${d.error ?? "Failed to remove friend"}`, "error");
     }
-    showAction("Friend removed.", "ok", 3000);
   }
 
   async function inviteFriend(f: FriendInfo) {
     if (!entityId || !entityZoneId || !f.wallet) return;
     try {
+      const headers = await getOwnerAuthHeaders();
+      if (!headers) return;
       const res = await fetch(`${API_URL}/party/invite-champion`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ fromEntityId: entityId, fromZoneId: entityZoneId, toCustodialWallet: f.wallet }),
       });
       const d = await res.json();
@@ -1448,15 +1483,12 @@ function FriendsTab({
 
     setSendingGold(true);
     try {
-      const token = await getAuthToken(ownerWallet);
-      if (!token) {
-        showAction("Auth failed. Reconnect wallet and try again.", "error");
-        return;
-      }
+      const headers = await getOwnerAuthHeaders();
+      if (!headers) return;
 
       const res = await fetch(`${API_URL}/gold/transfer`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers,
         body: JSON.stringify({ toWallet: friend.wallet, amount: normalizedAmount }),
       });
       const data = await res.json();

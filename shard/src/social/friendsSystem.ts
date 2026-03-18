@@ -9,6 +9,7 @@
 import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getRedis } from "../redis.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -48,6 +49,15 @@ function norm(wallet: string): string {
 
 function getFriends(wallet: string): Friend[] {
   return friendsStore.get(norm(wallet)) ?? [];
+}
+
+async function controlsWallet(authenticatedWallet: string, targetWallet: string | undefined): Promise<boolean> {
+  if (!targetWallet) return false;
+  const authLower = norm(authenticatedWallet);
+  const targetLower = norm(targetWallet);
+  if (authLower === targetLower) return true;
+  const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+  return custodialWallet?.toLowerCase() === targetLower;
 }
 
 export async function areFriends(walletA: string, walletB: string): Promise<boolean> {
@@ -219,7 +229,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const from = norm(req.body.fromWallet);
     const to = norm(req.body.toWallet);
 
-    if (from !== authenticatedWallet) {
+    if (!(await controlsWallet(authenticatedWallet, from))) {
       return reply.code(403).send({ error: "Not authorized to send requests for this wallet" });
     }
 
@@ -285,7 +295,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const wallet = norm(req.body.wallet);
     const { requestId } = req.body;
 
-    if (wallet !== authenticatedWallet) {
+    if (!(await controlsWallet(authenticatedWallet, wallet))) {
       return reply.code(403).send({ error: "Not authorized to accept requests for this wallet" });
     }
 
@@ -331,7 +341,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const wallet = norm(req.body.wallet);
     const { requestId } = req.body;
 
-    if (wallet !== authenticatedWallet) {
+    if (!(await controlsWallet(authenticatedWallet, wallet))) {
       return reply.code(403).send({ error: "Not authorized to decline requests for this wallet" });
     }
 
@@ -357,7 +367,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const wallet = norm(req.body.wallet);
     const target = norm(req.body.targetWallet);
 
-    if (wallet !== authenticatedWallet) {
+    if (!(await controlsWallet(authenticatedWallet, wallet))) {
       return reply.code(403).send({ error: "Not authorized to remove friends for this wallet" });
     }
 
@@ -383,7 +393,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const from = norm(req.body.fromWallet);
     const rawName = (req.body.toName ?? "").replace(/\.wog$/i, "").trim();
 
-    if (from !== authenticatedWallet) {
+    if (!(await controlsWallet(authenticatedWallet, from))) {
       return reply.code(403).send({ error: "Not authorized to send requests for this wallet" });
     }
 
