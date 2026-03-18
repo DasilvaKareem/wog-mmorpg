@@ -109,6 +109,9 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
   { key: "character-create", methods: ["POST"], exact: "/character/create", max: 10, windowMs: 60_000 },
   { key: "x402-deploy", methods: ["POST"], exact: "/x402/deploy", max: 6, windowMs: 60_000 },
   { key: "admin", methods: ["POST"], prefix: "/admin/", max: 5, windowMs: 60_000 },
+  // Agent console messages should not get blocked by unrelated gameplay POSTs from the same IP.
+  { key: "agent-post", methods: ["POST"], prefix: "/agent/", max: 180, windowMs: 60_000 },
+  { key: "inbox-post", methods: ["POST"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
   { key: "mutating", methods: ["POST", "PUT", "PATCH", "DELETE"], max: 120, windowMs: 60_000 },
 ];
 
