@@ -190,8 +190,8 @@ function loadLayout(): WorldLayout {
 
   for (const zoneId of zoneIds) {
     const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
-    let width = 300;
-    let height = 300;
+    let width = 640;
+    let height = 640;
     try {
       const zoneData = JSON.parse(readFileSync(zonePath, "utf-8"));
       if (zoneData.bounds) {
@@ -199,7 +199,7 @@ function loadLayout(): WorldLayout {
         height = zoneData.bounds.max.z - zoneData.bounds.min.z;
       }
     } catch {
-      console.warn(`[worldLayout] Could not read zone file for ${zoneId}, using default 300x300`);
+      console.warn(`[worldLayout] Could not read zone file for ${zoneId}, using default 640x640`);
     }
 
     const offset = offsets[zoneId] ?? { x: 0, z: 0 };
