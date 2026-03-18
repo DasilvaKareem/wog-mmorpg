@@ -83,17 +83,27 @@ function randomNpcAppearance(name: string) {
 
 // ── Mob combat stats ────────────────────────────────────────────────
 // Base stats for mobs (L1). Scaled by statScale(level) like player stats.
-// Mobs are individually weaker than players but dangerous in groups.
+// Regular mobs are intentionally weaker than same-level players so solo
+// progression stays viable; bosses retain a stronger multiplier.
 const MOB_BASE_STATS = { str: 55, def: 40, agi: 30, int: 25, faith: 15, luck: 20 };
-const BOSS_STAT_MULT = 1.4; // Bosses hit 40% harder and are 40% tankier
+const REGULAR_MOB_STAT_MULT = 0.82;
+const REGULAR_MOB_HP_MULT = 0.55;
+const BOSS_STAT_MULT = 1.4;
+const BOSS_HP_MULT = 0.75;
+
+function getSpawnMobHp(baseHp: number, isBoss: boolean): number {
+  const mult = isBoss ? BOSS_HP_MULT : REGULAR_MOB_HP_MULT;
+  return Math.max(1, Math.round(baseHp * mult));
+}
 
 export function computeMobStats(level: number, hp: number, isBoss: boolean): CharacterStats {
   const scale = statScale(level);
-  const mult = isBoss ? BOSS_STAT_MULT : 1;
+  const mult = isBoss ? BOSS_STAT_MULT : REGULAR_MOB_STAT_MULT;
+  const scaledHp = getSpawnMobHp(hp, isBoss);
   return {
     str:     Math.round(MOB_BASE_STATS.str * scale * mult),
     def:     Math.round(MOB_BASE_STATS.def * scale * mult),
-    hp,      // Keep hand-tuned HP from NPC_DEFS
+    hp:      scaledHp,
     agi:     Math.round(MOB_BASE_STATS.agi * scale * mult),
     int:     Math.round(MOB_BASE_STATS.int * scale * mult),
     mp:      0,
@@ -4582,6 +4592,7 @@ function spawnSingleNpc(def: NpcDef, scatter = false): void {
   let worldY = def.y + offset.z;
 
   const isCombatant = def.type === "mob" || def.type === "boss";
+  const spawnHp = isCombatant ? getSpawnMobHp(def.hp, def.type === "boss") : def.hp;
 
   // On respawn, scatter mob to a random nearby position
   if (scatter && isCombatant) {
@@ -4602,8 +4613,8 @@ function spawnSingleNpc(def: NpcDef, scatter = false): void {
     name: def.name,
     x: worldX,
     y: worldY,
-    hp: def.hp,
-    maxHp: def.hp,
+    hp: spawnHp,
+    maxHp: spawnHp,
     region: def.zoneId,
     createdAt: Date.now(),
     shopItems: def.shopItems,
