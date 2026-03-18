@@ -10,7 +10,10 @@ import { balanceOf as balanceOfERC1155, burn } from "thirdweb/extensions/erc1155
 import { mintTo as mintERC721, setTokenURI } from "thirdweb/extensions/erc721";
 import { getOwnedNFTs } from "thirdweb/extensions/erc721";
 import type { CharacterStats } from "../character/classes.js";
-import { ITEM_CATALOG } from "../items/itemCatalog.js";
+import {
+  getCatalogItemsInChainOrder,
+  getChainTokenIdForGameTokenId,
+} from "../items/itemTokenMapping.js";
 import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
@@ -209,7 +212,6 @@ const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.00
 const TX_GAS_PRICE_CACHE_MS = 5_000;
 let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
 
-const itemByTokenId = new Map(ITEM_CATALOG.map((item) => [item.tokenId, item]));
 let seedingPromise: Promise<void> | null = null;
 
 /** Read nextTokenIdToMint with retry for transient RPC errors (SKALE 0x). */
@@ -232,14 +234,17 @@ async function safeNextTokenIdToMint(retries = 5): Promise<bigint> {
   throw new Error("safeNextTokenIdToMint: exhausted retries");
 }
 
-async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
+async function ensureItemTokenIdExists(targetChainTokenId: bigint): Promise<void> {
   const seedTask = async () => {
+    const itemByChainTokenId = new Map(
+      (await getCatalogItemsInChainOrder()).map(({ item, chainTokenId }) => [chainTokenId, item])
+    );
     let nextId = await safeNextTokenIdToMint();
-    while (nextId <= targetTokenId) {
-      const item = itemByTokenId.get(nextId);
+    while (nextId <= targetChainTokenId) {
+      const item = itemByChainTokenId.get(nextId);
       if (!item) {
         throw new Error(
-          `No catalog entry found for tokenId ${nextId.toString()}`
+          `No catalog entry found for chain tokenId ${nextId.toString()}`
         );
       }
 
@@ -258,7 +263,7 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
       txStats.itemSeeds++;
       recordTx("item-seed", receipt.transactionHash);
       console.log(
-        `[items] Seeded tokenId ${item.tokenId.toString()} (${item.name}): ${receipt.transactionHash}`
+        `[items] Seeded game tokenId ${item.tokenId.toString()} as chain tokenId ${nextId.toString()} (${item.name}): ${receipt.transactionHash}`
       );
       nextId += 1n;
     }
@@ -274,7 +279,7 @@ async function ensureItemTokenIdExists(targetTokenId: bigint): Promise<void> {
     await seedingPromise;
 
     const nextId = await safeNextTokenIdToMint();
-    if (nextId > targetTokenId) return;
+    if (nextId > targetChainTokenId) return;
   }
 }
 
@@ -443,19 +448,20 @@ export async function transferGoldFrom(
   });
 }
 
-/** Mint an ERC-1155 item to a player address (existing tokenId). */
+/** Mint an ERC-1155 item to a player address using the catalog/game tokenId. */
 export async function mintItem(
   toAddress: string,
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
   return traceTx("item-mint", "mintItem", { to: toAddress, tokenId, quantity }, "skale", async () => {
-    await ensureItemTokenIdExists(tokenId);
+    const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
+    await ensureItemTokenIdExists(chainTokenId);
     return queueTransaction(async () => {
       const tx = mintAdditionalSupplyTo({
         contract: itemsContract,
         to: toAddress,
-        tokenId,
+        tokenId: chainTokenId,
         supply: quantity,
       });
       const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
@@ -467,7 +473,7 @@ export async function mintItem(
   });
 }
 
-/** Get item balance for a specific tokenId. Cached 10s. */
+/** Get item balance for a catalog/game tokenId. Cached 10s. */
 export async function getItemBalance(
   address: string,
   tokenId: bigint
@@ -482,7 +488,12 @@ export async function getItemBalance(
 
   const promise = (async (): Promise<bigint> => {
     try {
-      const balance = await balanceOfERC1155({ contract: itemsContract, owner: address, tokenId });
+      const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
+      const balance = await balanceOfERC1155({
+        contract: itemsContract,
+        owner: address,
+        tokenId: chainTokenId,
+      });
       itemCache.set(cacheKey, balance);
       return balance;
     } catch (err: any) {
@@ -503,7 +514,8 @@ export async function getItemBalance(
 /** Burn (destroy) ERC-1155 items from a player address.
  *  Signs with the player's own custodial account so the ERC-1155 contract
  *  recognises the caller as the token owner.  Falls back to server account
- *  for non-custodial addresses (shouldn't happen in practice). */
+ *  for non-custodial addresses (shouldn't happen in practice).
+ *  `tokenId` is the catalog/game tokenId. */
 export async function burnItem(
   fromAddress: string,
   tokenId: bigint,
@@ -526,10 +538,11 @@ export async function burnItem(
     }
 
     return queueTransaction(async () => {
+      const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
       const tx = burn({
         contract: itemsContract,
         account: fromAddress,
-        id: tokenId,
+        id: chainTokenId,
         value: quantity,
       });
       const receipt = await sendTransactionWithManagedGas(tx, signer);

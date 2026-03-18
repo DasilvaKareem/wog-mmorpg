@@ -1,15 +1,16 @@
 /**
- * One-time script to create the initial token IDs on the ERC-1155 contract.
+ * Seeder for ERC-1155 item definitions.
  * Run: npx tsx src/seedItems.ts
  *
- * This mints 0 supply of each item to register its tokenId + metadata on-chain.
+ * Game tokenIds are catalog IDs. Chain tokenIds are dense, append-only IDs
+ * managed by itemTokenMapping.ts and seeded in that order.
  */
 import "dotenv/config";
 import { getContract, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
-import { mintTo } from "thirdweb/extensions/erc1155";
+import { mintTo, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
 import { thirdwebClient, skaleBase } from "../blockchain/chain.js";
-import { ITEM_CATALOG } from "./itemCatalog.js";
+import { getCatalogItemsInChainOrder } from "./itemTokenMapping.js";
 
 const serverAccount = privateKeyToAccount({
   client: thirdwebClient,
@@ -24,11 +25,28 @@ const itemsContract = getContract({
 
 async function main() {
   const serverAddress = serverAccount.address;
+  const itemsInChainOrder = await getCatalogItemsInChainOrder();
+  let nextChainTokenId = await nextTokenIdToMint({ contract: itemsContract });
 
-  // Each call to the high-level mintTo creates the next tokenId (0, 1, 2, ...)
-  // Mint 1 to the server wallet to register metadata on-chain.
-  for (const item of ITEM_CATALOG) {
-    console.log(`Seeding tokenId ${item.tokenId}: ${item.name}...`);
+  // Each mintTo call creates the next dense chain tokenId. Seed only the
+  // missing definitions so the script is safe to re-run.
+  for (const { item, gameTokenId, chainTokenId } of itemsInChainOrder) {
+    if (chainTokenId < nextChainTokenId) {
+      console.log(
+        `Skipping game tokenId ${gameTokenId.toString()} (${item.name}) -> chain tokenId ${chainTokenId.toString()} [already seeded]`
+      );
+      continue;
+    }
+
+    if (chainTokenId > nextChainTokenId) {
+      throw new Error(
+        `Contract nextTokenIdToMint is ${nextChainTokenId.toString()}, but mapping expects chain tokenId ${chainTokenId.toString()} for game tokenId ${gameTokenId.toString()}`
+      );
+    }
+
+    console.log(
+      `Seeding game tokenId ${gameTokenId.toString()} (${item.name}) as chain tokenId ${chainTokenId.toString()}...`
+    );
     const tx = mintTo({
       contract: itemsContract,
       to: serverAddress,
@@ -40,6 +58,7 @@ async function main() {
     });
     const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
     console.log(`  tx: ${receipt.transactionHash}`);
+    nextChainTokenId += 1n;
   }
 
   console.log("\nAll items seeded!");

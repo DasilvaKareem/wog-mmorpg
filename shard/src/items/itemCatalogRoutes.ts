@@ -1,12 +1,19 @@
 import type { FastifyInstance } from "fastify";
 import { ITEM_CATALOG, getItemRarity } from "./itemCatalog.js";
+import { getItemTokenMappingSnapshot } from "./itemTokenMapping.js";
 import { TECHNIQUES } from "../combat/techniques.js";
 
 export function registerItemCatalogRoutes(server: FastifyInstance): void {
   server.get("/items/catalog", async () => {
+    const mapping = await getItemTokenMappingSnapshot();
+    const chainTokenIdByGameTokenId = new Map(
+      mapping.map(({ gameTokenId, chainTokenId }) => [gameTokenId, chainTokenId])
+    );
+
     return ITEM_CATALOG.map((item) => ({
       ...item,
       tokenId: Number(item.tokenId),
+      chainTokenId: chainTokenIdByGameTokenId.get(Number(item.tokenId)) ?? null,
       rarity: getItemRarity(item.copperPrice),
     }));
   });
