@@ -125,10 +125,22 @@ function buildWorldMapData(): WorldMapData {
   const worldPath = join(DATA_DIR, "world.json");
   const world = JSON.parse(readFileSync(worldPath, "utf-8"));
 
-  const zoneIds: string[] = world.zones ?? [];
-  const connections: [string, string][] = (world.connections ?? []).map(
-    (c: any) => [c.from, c.to] as [string, string]
-  );
+  const configuredZoneIds: string[] = world.zones ?? [];
+  const zoneIds = configuredZoneIds.filter((zoneId) => {
+    const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);
+    const exists = existsSync(zonePath);
+    if (!exists) {
+      console.warn(`[worldMapStore] Skipping world map zone without data file: ${zoneId}`);
+    }
+    return exists;
+  });
+  const zoneSet = new Set(zoneIds);
+  const connections: [string, string][] = (world.connections ?? [])
+    .map((c: any) => [c.from, c.to] as [string, string])
+    .filter((connection: [string, string]) => {
+      const [from, to] = connection;
+      return zoneSet.has(from) && zoneSet.has(to);
+    });
 
   const zones: ZoneMapInfo[] = zoneIds.map((zoneId, idx) => {
     const zonePath = join(DATA_DIR, `zones/${zoneId}.json`);

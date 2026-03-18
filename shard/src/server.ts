@@ -97,6 +97,7 @@ type RateLimitRule = {
   methods?: string[];
   exact?: string;
   prefix?: string;
+  bucketByPath?: boolean;
   max: number;
   windowMs: number;
 };
@@ -112,7 +113,8 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
   // Agent console messages should not get blocked by unrelated gameplay POSTs from the same IP.
   { key: "agent-post", methods: ["POST"], prefix: "/agent/", max: 180, windowMs: 60_000 },
   { key: "inbox-post", methods: ["POST"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
-  { key: "mutating", methods: ["POST", "PUT", "PATCH", "DELETE"], max: 120, windowMs: 60_000 },
+  // Keep generic gameplay writes separated by endpoint so equip/sell/chat do not starve each other.
+  { key: "mutating", methods: ["POST", "PUT", "PATCH", "DELETE"], bucketByPath: true, max: 120, windowMs: 60_000 },
 ];
 
 const rateLimitHits = new Map<string, number[]>();
@@ -127,7 +129,7 @@ function getAllowedCorsOrigins(): Set<string> {
 }
 
 function getRateLimitRule(method: string, url: string): RateLimitRule | null {
-  const path = url.split("?", 1)[0] || url;
+  const path = getRequestPath(url);
 
   for (const rule of RATE_LIMIT_RULES) {
     if (rule.methods && !rule.methods.includes(method)) continue;
@@ -139,9 +141,15 @@ function getRateLimitRule(method: string, url: string): RateLimitRule | null {
   return null;
 }
 
-function enforceRateLimit(ip: string, rule: RateLimitRule): { ok: boolean; retryAfterSeconds: number } {
+function getRequestPath(url: string): string {
+  return url.split("?", 1)[0] || url;
+}
+
+function enforceRateLimit(ip: string, path: string, rule: RateLimitRule): { ok: boolean; retryAfterSeconds: number } {
   const now = Date.now();
-  const bucketKey = `${rule.key}:${ip}`;
+  const bucketKey = rule.bucketByPath
+    ? `${rule.key}:${path}:${ip}`
+    : `${rule.key}:${ip}`;
   const existing = rateLimitHits.get(bucketKey) ?? [];
   const recent = existing.filter((ts) => now - ts < rule.windowMs);
 
@@ -618,18 +626,6 @@ server.post<{
   };
 });
 
-// Register subsystems
-server.addHook("onRequest", async (request, reply) => {
-  const rule = getRateLimitRule(request.method, request.url);
-  if (!rule) return;
-
-  const verdict = enforceRateLimit(request.ip, rule);
-  if (verdict.ok) return;
-
-  reply.header("Retry-After", verdict.retryAfterSeconds.toString());
-  reply.code(429).send({ error: "Rate limit exceeded" });
-});
-
 const allowedCorsOrigins = getAllowedCorsOrigins();
 server.register(cors, {
   origin(origin, cb) {
@@ -639,6 +635,19 @@ server.register(cors, {
     }
     cb(null, false);
   },
+});
+
+// Register subsystems
+server.addHook("onRequest", async (request, reply) => {
+  const rule = getRateLimitRule(request.method, request.url);
+  if (!rule) return;
+
+  const path = getRequestPath(request.url);
+  const verdict = enforceRateLimit(request.ip, path, rule);
+  if (verdict.ok) return;
+
+  reply.header("Retry-After", verdict.retryAfterSeconds.toString());
+  reply.code(429).send({ error: "Rate limit exceeded" });
 });
 registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);

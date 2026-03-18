@@ -1087,6 +1087,11 @@ export class EntityRenderer {
 
   /** Sync party ring and label color when partyId changes. */
   private syncPartyRing(visual: EntityVisual, entity: Entity): void {
+    if (!this.scene.sys.isActive() || !visual.label?.active) return;
+    if (visual.partyRing && !visual.partyRing.active) {
+      visual.partyRing = null;
+    }
+
     if (entity.partyId) {
       const color = partyColor(entity.partyId);
       if (!visual.partyRing) {

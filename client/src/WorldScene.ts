@@ -741,6 +741,8 @@ export class WorldScene extends Phaser.Scene {
    * Safe to call every poll cycle — silently does nothing if entity not found.
    */
   lockToPlayerWallet(walletAddress: string): void {
+    const camera = this.cameras?.main;
+    if (!camera) return;
     const normalized = walletAddress.toLowerCase();
     for (const [id, entity] of this.entityRenderer.getEntities()) {
       if (entity.walletAddress?.toLowerCase() === normalized) {
@@ -748,7 +750,7 @@ export class WorldScene extends Phaser.Scene {
         this.isDragging = false;
         const spritePos = this.entityRenderer.getSpritePosition(id);
         if (spritePos) {
-          this.cameras.main.centerOn(spritePos.x, spritePos.y);
+          camera.centerOn(spritePos.x, spritePos.y);
         }
         return;
       }
