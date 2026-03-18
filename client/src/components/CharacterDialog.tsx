@@ -11,6 +11,7 @@ import { WalletManager } from "@/lib/walletManager";
 import { gameBus } from "@/lib/eventBus";
 import { API_URL } from "@/config";
 import { fetchDiary, type DiaryEntry } from "@/ShardClient";
+import { trackViewCharacter, trackAgentTaskStarted, trackAgentTaskCompleted } from "@/lib/analytics";
 
 type View = "list" | "detail";
 
@@ -142,6 +143,7 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
       });
 
       // Deploy the selected character
+      trackAgentTaskStarted({ walletAddress: address, characterName: character.name, zoneId: undefined });
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -157,6 +159,7 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
         if (data.custodialWallet) {
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
+        trackAgentTaskCompleted({ walletAddress: address, entityId: data.entityId, zoneId: data.zoneId });
         setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
         if (data.zoneId) {
           gameBus.emit("switchZone", { zoneId: data.zoneId });
@@ -225,6 +228,12 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
                             onClick={() => {
                               setSelectedCharacter(character);
                               setView("detail");
+                              trackViewCharacter({
+                                characterName: character.name,
+                                level: character.properties.level,
+                                race: character.properties.race,
+                                class: character.properties.class,
+                              });
                             }}
                             type="button"
                             variant="secondary"

@@ -1,9 +1,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { ThirdwebProvider } from "thirdweb/react";
+import { PostHogProvider } from "@posthog/react";
 
 import App from "@/App";
 import "@/index.css";
+
+const posthogOptions = {
+  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+  defaults: "2026-01-30",
+} as const;
 
 const CHUNK_RELOAD_KEY = "wog:chunk-reload-at";
 
@@ -91,8 +97,10 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ThirdwebProvider>
-      <App />
-    </ThirdwebProvider>
+    <PostHogProvider apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_KEY} options={posthogOptions}>
+      <ThirdwebProvider>
+        <App />
+      </ThirdwebProvider>
+    </PostHogProvider>
   </StrictMode>
 );

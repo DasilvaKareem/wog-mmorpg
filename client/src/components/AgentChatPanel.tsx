@@ -12,6 +12,7 @@ import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
 import { ChatLog } from "@/components/ChatLog";
+import { trackGiveInstruction, trackAgentTaskStarted, trackAgentTaskCompleted, trackAgentProgressTick } from "@/lib/analytics";
 
 interface InboxMessage {
   id: string;
@@ -299,6 +300,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const inboxMessageIds = React.useRef<Set<string>>(new Set());
   const inboxReadMarker = React.useRef<InboxReadMarker | null>(null);
   const seededServerHistory = React.useRef(false);
+  const lastProgressTickRef = React.useRef(0);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
@@ -357,6 +359,20 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         if (res.ok && !cancelled) {
           const data: AgentStatusData = await res.json();
           setStatus(data);
+
+          // Track agent progress at most once per 60s
+          if (data.running && data.entity) {
+            const now = Date.now();
+            if (now - lastProgressTickRef.current >= 60_000) {
+              lastProgressTickRef.current = now;
+              trackAgentProgressTick({
+                walletAddress,
+                focus: data.config?.focus,
+                level: data.entity.level,
+                zoneId: data.zoneId,
+              });
+            }
+          }
 
           // Sync custodial wallet so balance queries hit the right address
           if (data.custodialWallet) {
@@ -465,6 +481,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         deployBody.raceId = primary.properties.race;
         deployBody.classId = primary.properties.class;
       }
+      trackAgentTaskStarted({ walletAddress, characterName: primary?.name });
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -475,6 +492,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         if (data.custodialWallet) {
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
+        trackAgentTaskCompleted({ walletAddress, entityId: data.entityId, zoneId: data.zoneId });
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
         if (data.zoneId) {
           gameBus.emit("switchZone", { zoneId: data.zoneId });
@@ -538,6 +556,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     }
 
     setMessages((prev) => mergeConsoleMessages(prev, [toChatMessage("user", msg, ts)]));
+    trackGiveInstruction({ walletAddress, message: msg });
 
     try {
       const res = await fetch(`${API_URL}/agent/chat`, {

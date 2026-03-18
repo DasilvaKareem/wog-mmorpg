@@ -14,6 +14,12 @@ import {
   queueTutorialMasterIntro,
   warmTutorialMasterPortraitCache,
 } from "@/lib/tutorialMaster";
+import {
+  trackUserSignedUp,
+  trackCharacterCreated,
+  trackAgentTaskStarted,
+  trackAgentTaskCompleted,
+} from "@/lib/analytics";
 import { PaymentGate } from "@/components/PaymentGate";
 import type { RaceInfo, ClassInfo, CharacterStats } from "@/types";
 import { CharacterPreview } from "@/components/CharacterPreview";
@@ -379,6 +385,7 @@ export function OnboardingFlow({
 
   async function handleAuthSuccess(nextAddress: string, options?: { skipSync?: boolean }) {
     setConnectedAddress(nextAddress);
+    trackUserSignedUp("onboarding", nextAddress);
     if (!options?.skipSync) {
       await syncAddress(nextAddress);
     }
@@ -471,6 +478,13 @@ export function OnboardingFlow({
         txHash: result.txHash,
         agentDeploying: true,
       };
+      trackCharacterCreated({
+        name: charName.trim(),
+        race: selectedRace?.name ?? raceId,
+        class: selectedClass?.name ?? classId,
+        origin,
+        walletAddress: targetAddress!,
+      });
       queueTutorialMasterIntro();
       void warmTutorialMasterPortraitCache();
       setSuccessData(successBase);
@@ -487,6 +501,7 @@ export function OnboardingFlow({
       }
 
       try {
+        trackAgentTaskStarted({ walletAddress: targetAddress!, characterName: charName.trim() });
         const deployRes = await fetch(`${API_URL}/agent/deploy`, {
           method: "POST",
           headers: {
@@ -506,6 +521,7 @@ export function OnboardingFlow({
           if (deployData.custodialWallet) {
             WalletManager.getInstance().setCustodialAddress(deployData.custodialWallet);
           }
+          trackAgentTaskCompleted({ walletAddress: targetAddress!, entityId: deployData.entityId, zoneId: deployData.zoneId });
           setSuccessData({
             ...successBase,
             agentDeploying: false,

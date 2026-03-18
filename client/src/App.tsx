@@ -13,6 +13,7 @@ import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
 
 import { WalletManager } from "@/lib/walletManager";
 import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
+import { trackOpenGame } from "@/lib/analytics";
 
 const AuctionHouseDialog = React.lazy(() =>
   import("@/components/AuctionHouseDialog").then((mod) => ({ default: mod.AuctionHouseDialog }))
@@ -330,6 +331,12 @@ function GameWorld(): React.ReactElement {
       focusOwnedCharacter();
     }
   }, [address, focusOwnedCharacter]);
+
+  // Track open_game once per mount
+  React.useEffect(() => {
+    trackOpenGame(address);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Background music (low volume, looping)
   useBackgroundMusic("world-theme");

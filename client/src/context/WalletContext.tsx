@@ -12,6 +12,7 @@ import { gameBus } from "@/lib/eventBus";
 import { WalletManager, type EquipmentSlot, type WalletBalance, type ExternalWalletType } from "@/lib/walletManager";
 import { skaleChain, thirdwebClient, sharedInAppWallet } from "@/lib/inAppWalletClient";
 import { clearCachedToken } from "@/lib/agentAuth";
+import { trackSessionStarted } from "@/lib/analytics";
 import type { OwnedCharacter } from "@/types";
 
 interface WalletContextValue {
@@ -321,6 +322,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
         if (cancelled) return;
         setAddress(walletManager.address);
         setBalance(walletManager.balance);
+        trackSessionStarted(account.address);
       } catch {
         // No saved session or timeout — stay disconnected, which is fine
       } finally {
