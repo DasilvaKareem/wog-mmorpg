@@ -11,6 +11,7 @@ import {
   renewRentalGrant,
   expireRentalGrants,
   enrichRentalListing,
+  enrichRentalGrant,
 } from "./rentService.js";
 import { canListItem } from "./assetPortability.js";
 import {
@@ -244,7 +245,7 @@ export function registerRentalRoutes(server: FastifyInstance) {
       if (!wallet) return reply.code(401).send({ error: "Not authenticated" });
 
       const grants = await getActiveGrantsForRenter(wallet);
-      return { total: grants.length, grants };
+      return { total: grants.length, grants: grants.map(enrichRentalGrant) };
     }
   );
 

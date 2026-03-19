@@ -19,6 +19,7 @@ import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfi
 import { getItemInstance, isItemInstanceOwnedBy, upsertItemInstanceFromEquipment } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
+import { hasActiveRentalRight } from "../marketplace/rentService.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -275,9 +276,15 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     }
 
     const balance = await getItemBalance(owner, item.tokenId);
+    let isRented = false;
     if (balance < 1n) {
-      reply.code(400);
-      return { error: "Wallet does not own this item" };
+      // Check for active rental grant before rejecting
+      const rentalGrant = await hasActiveRentalRight(owner, Number(item.tokenId));
+      if (!rentalGrant) {
+        reply.code(400);
+        return { error: "Wallet does not own this item" };
+      }
+      isRented = true;
     }
 
     const itemInstance = instanceId ? getItemInstance(instanceId) : undefined;
@@ -289,7 +296,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       reply.code(400);
       return { error: "Instance tokenId mismatch" };
     }
-    if (itemInstance && !isItemInstanceOwnedBy(itemInstance, owner ?? "")) {
+    if (itemInstance && !isRented && !isItemInstanceOwnedBy(itemInstance, owner ?? "")) {
       reply.code(400);
       return { error: "Instance does not belong to this wallet" };
     }

@@ -14,6 +14,8 @@
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
+import { getAllEntities, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { saveCharacter } from "../character/characterStore.js";
 
 // ── Interfaces ──────────────────────────────────────────────────────
 
@@ -331,6 +333,9 @@ export async function expireRentalGrants(): Promise<string[]> {
     pipeline.zrem(KEY_GRANTS_ACTIVE, grantId);
     await pipeline.exec();
 
+    // Force-unequip the rented item from any live entity using it
+    forceUnequipRentedItem(grant.renterWallet, grant.tokenId);
+
     // Decrement active rentals on listing
     const listing = await getRentalListing(grant.rentalId);
     if (listing && listing.activeRentals > 0) {
@@ -344,6 +349,36 @@ export async function expireRentalGrants(): Promise<string[]> {
   return expired;
 }
 
+// ── Force Unequip on Expiry ──────────────────────────────────────────
+
+/**
+ * Remove a rented item from all live entities belonging to the renter.
+ * Called when a rental grant expires.
+ */
+function forceUnequipRentedItem(renterWallet: string, tokenId: number): void {
+  const wallet = renterWallet.toLowerCase();
+  for (const entity of getAllEntities().values()) {
+    if (entity.walletAddress?.toLowerCase() !== wallet) continue;
+    if (!entity.equipment) continue;
+
+    let changed = false;
+    for (const [slot, equipped] of Object.entries(entity.equipment)) {
+      if (equipped && (equipped as any).tokenId === tokenId) {
+        delete (entity.equipment as any)[slot];
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      recalculateEntityVitals(entity);
+      // Persist the unequip
+      saveCharacter(entity.walletAddress, entity.name, {
+        equipment: entity.equipment ?? {},
+      }).catch(() => {});
+    }
+  }
+}
+
 // ── Enrichment ──────────────────────────────────────────────────────
 
 export function enrichRentalListing(listing: RentalListing) {
@@ -355,5 +390,31 @@ export function enrichRentalListing(listing: RentalListing) {
     itemCategory: item?.category ?? "unknown",
     priceUsd: listing.priceUsdCents,
     durationHours: Math.round(listing.durationSeconds / 3600),
+  };
+}
+
+export function enrichRentalGrant(grant: RentalGrant) {
+  const item = getItemByTokenId(BigInt(grant.tokenId));
+  const now = Date.now();
+  const timeLeftMs = Math.max(0, grant.endsAt - now);
+  const timeLeftSeconds = Math.floor(timeLeftMs / 1000);
+  const timeLeftMinutes = Math.floor(timeLeftSeconds / 60);
+  const timeLeftHours = Math.floor(timeLeftMinutes / 60);
+
+  let timeLeftDisplay: string;
+  if (timeLeftSeconds <= 0) timeLeftDisplay = "Expired";
+  else if (timeLeftHours > 24) timeLeftDisplay = `${Math.floor(timeLeftHours / 24)}d ${timeLeftHours % 24}h`;
+  else if (timeLeftHours > 0) timeLeftDisplay = `${timeLeftHours}h ${timeLeftMinutes % 60}m`;
+  else if (timeLeftMinutes > 0) timeLeftDisplay = `${timeLeftMinutes}m`;
+  else timeLeftDisplay = `${timeLeftSeconds}s`;
+
+  return {
+    ...grant,
+    itemName: item?.name ?? "Unknown",
+    itemCategory: item?.category ?? "unknown",
+    timeLeftMs,
+    timeLeftSeconds,
+    timeLeftDisplay,
+    isExpiringSoon: timeLeftMs > 0 && timeLeftMs < 30 * 60 * 1000, // < 30 min
   };
 }
