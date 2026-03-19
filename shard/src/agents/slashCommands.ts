@@ -5,7 +5,16 @@
  * Returns null if the message is not a slash command (pass through to LLM).
  */
 
-import { getAllEntities, getEntitiesInRegion, getEntitiesNear, getEntity, type Entity } from "../world/zoneRuntime.js";
+import {
+  getAllEntities,
+  getEntitiesInRegion,
+  getEntitiesNear,
+  getEntity,
+  getOrCreateZone,
+  getWorldTick,
+  rememberPartyAutoCombatTarget,
+  type Entity,
+} from "../world/zoneRuntime.js";
 import { getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getWorldLayout } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
@@ -405,6 +414,58 @@ cmd({
     });
 
     return { response: `Party (${members.length}):\n${lines.join("\n")}` };
+  },
+});
+
+// ── /target (/focus-mob, /attack) ────────────────────────────────────────────
+
+cmd({
+  aliases: ["target", "attack"],
+  usage: "/target <mob name>",
+  description: "Focus a mob by name — you and your party will attack it",
+  handler: (_args, ctx) => {
+    if (!_args) return { response: "Usage: /target <mob name>\nExample: /target Azushard Dragon" };
+    if (!ctx.entity) return { response: "No character in world." };
+    if (!ctx.entityId) return { response: "No character in world." };
+    if (ctx.entity.hp <= 0) return { response: "You are dead." };
+
+    const region = ctx.entity.region;
+    if (!region) return { response: "Not in a region." };
+
+    const query = _args.toLowerCase();
+    const zone = getOrCreateZone(region);
+
+    // Find nearest matching mob/boss
+    let bestMob: Entity | null = null;
+    let bestDist = Infinity;
+    for (const other of zone.entities.values()) {
+      if (other.type !== "mob" && other.type !== "boss") continue;
+      if (other.hp <= 0) continue;
+      if (!other.name.toLowerCase().includes(query)) continue;
+      const dx = other.x - ctx.entity.x;
+      const dy = other.y - ctx.entity.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestMob = other;
+      }
+    }
+
+    if (!bestMob) return { response: `No mob matching "${_args}" found nearby.` };
+
+    // Set attack order on the player's entity
+    ctx.entity.order = { action: "attack", targetId: bestMob.id };
+
+    // Set party target lock so party members (including rentals) focus the same target
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (partyId) {
+      rememberPartyAutoCombatTarget(ctx.entityId, region, bestMob.id, getWorldTick());
+    }
+
+    const dist = Math.round(bestDist);
+    return {
+      response: `Targeting ${bestMob.name} (L${bestMob.level ?? "?"}, ${bestMob.hp}/${bestMob.maxHp} HP) — ${dist}m away${partyId ? ". Party will focus this target." : ""}`,
+    };
   },
 });
 

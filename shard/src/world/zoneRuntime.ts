@@ -188,6 +188,8 @@ export interface Entity {
   gotoMode?: boolean;
   /** Quest IDs awaiting summoner approval (players only). */
   pendingQuestApprovals?: string[];
+  /** Entity ID of party leader to follow when idle (rented characters). */
+  followLeaderId?: string;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -2551,6 +2553,44 @@ async function worldTick() {
 
       if (!target) continue;
       entity.order = { action: "attack", targetId: target.id };
+    }
+
+    // ── Rental follow-leader AI ──────────────────────────────────────
+    // Rented characters follow their party leader when idle. Runs BEFORE
+    // auto-combat so: far from leader → follow order → auto-combat skips;
+    // near leader + mob nearby → no follow → auto-combat engages.
+    const FOLLOW_DISTANCE = 60;
+    const FOLLOW_STOP_DISTANCE = 30;
+    for (const entity of zone.entities.values()) {
+      if (!entity.followLeaderId) continue;
+      if (entity.order) continue;
+      if (entity.hp <= 0) continue;
+      if (entity.travelTargetZone) continue;
+
+      const leader = getEntity(entity.followLeaderId);
+      if (!leader) continue;
+
+      // Zone follow: leader moved to a different region
+      if (leader.region && leader.region !== entity.region) {
+        entity.travelTargetZone = leader.region;
+        // Move toward zone edge to trigger transition
+        entity.order = { action: "move", x: leader.x, y: leader.y };
+        continue;
+      }
+
+      // Position follow: stay close to leader within same zone
+      const dx = leader.x - entity.x;
+      const dy = leader.y - entity.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > FOLLOW_DISTANCE) {
+        // Move toward leader but stop at FOLLOW_STOP_DISTANCE
+        const ratio = (dist - FOLLOW_STOP_DISTANCE) / dist;
+        entity.order = {
+          action: "move",
+          x: entity.x + dx * ratio,
+          y: entity.y + dy * ratio,
+        };
+      }
     }
 
     // ── Player auto-combat AI: players pick techniques or basic attack ──

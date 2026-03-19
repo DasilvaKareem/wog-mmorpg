@@ -125,6 +125,7 @@ async function activateWithSave(
     completedQuests: saved.completedQuests ?? [],
     learnedTechniques: saved.learnedTechniques ?? [],
     equipment: saved.equipment as any,
+    followLeaderId: renterEntityId,
   };
 
   recalculateEntityVitals(entity);
@@ -183,6 +184,9 @@ export async function deactivateCharacterRental(grantId: string): Promise<boolea
   const entity = getEntity(record.entityId);
 
   if (entity) {
+    // Clear follow-leader before despawning (defensive cleanup)
+    entity.followLeaderId = undefined;
+
     // Save XP and kills back to the owner's character
     await saveCharacter(record.ownerWallet, record.characterName, {
       xp: entity.xp ?? 0,
