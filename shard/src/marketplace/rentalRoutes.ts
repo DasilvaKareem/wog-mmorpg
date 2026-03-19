@@ -57,7 +57,7 @@ export function registerRentalRoutes(server: FastifyInstance) {
         return reply.code(403).send({ error: "Wallet mismatch" });
       }
 
-      if (!tokenId || !durationSeconds || durationSeconds <= 0 || !priceUsdCents || priceUsdCents <= 0) {
+      if (tokenId == null || !durationSeconds || durationSeconds <= 0 || !priceUsdCents || priceUsdCents <= 0) {
         return reply.code(400).send({ error: "tokenId, durationSeconds, and priceUsdCents required" });
       }
 

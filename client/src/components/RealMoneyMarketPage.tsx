@@ -402,7 +402,7 @@ export function RealMoneyMarketPage(): React.ReactElement {
           {/* ═══ ITEMS TAB ═══ */}
           <TabsContent value="items">
             <div className="mb-4 flex flex-wrap items-center gap-3">
-              <Input type="text" placeholder="Search items..." value={usdSearch} onChange={(e) => setUsdSearch(e.target.value)} className="h-8 w-56 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]" />
+              <Input type="text" placeholder="Search items..." value={usdSearch} onChange={(e) => setUsdSearch(e.target.value)} className="h-8 w-56 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff] focus:bg-[#0a0f1a] focus:text-[#f1f5ff]" />
               <div className="flex gap-1">
                 {CATEGORIES.map((cat) => (
                   <button key={cat.value} className={`border-2 border-black px-2 py-1 text-[8px] uppercase tracking-wide transition ${usdCategory === cat.value ? "bg-[#54f28b] text-black shadow-[2px_2px_0_0_#000]" : "bg-[#2b3656] text-[#d6deff] hover:bg-[#33426b]"}`} onClick={() => setUsdCategory(cat.value)}>
@@ -475,10 +475,10 @@ export function RealMoneyMarketPage(): React.ReactElement {
                         ))}
                       </div>
                     )}
-                    <Input type="number" value={usdSellQuantity} onChange={(e) => setUsdSellQuantity(e.target.value)} min="1" placeholder="Qty" className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]" />
+                    <Input type="number" value={usdSellQuantity} onChange={(e) => setUsdSellQuantity(e.target.value)} min="1" placeholder="Qty" className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff] focus:bg-[#0a0f1a] focus:text-[#f1f5ff]" />
                     <div className="relative">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-[#54f28b]">$</span>
-                      <Input type="number" step="0.01" min="0.01" placeholder="0.00" value={usdSellPrice} onChange={(e) => setUsdSellPrice(e.target.value)} className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] pl-6 text-[9px] text-[#f1f5ff]" />
+                      <Input type="number" step="0.01" min="0.01" placeholder="0.00" value={usdSellPrice} onChange={(e) => setUsdSellPrice(e.target.value)} className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] pl-6 text-[9px] text-[#f1f5ff] focus:bg-[#0a0f1a] focus:text-[#f1f5ff]" />
                     </div>
                     <Button className="h-8 w-full text-[9px] font-bold uppercase" onClick={handleUsdSell} disabled={usdSelling || !usdSellTokenId || !usdSellPrice}>{usdSelling ? "Listing..." : "List for USD"}</Button>
                   </CardContent></Card>
@@ -586,7 +586,7 @@ export function RealMoneyMarketPage(): React.ReactElement {
                     </div>
                     <div className="relative">
                       <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-[#54f28b]">$</span>
-                      <Input type="number" step="0.01" min="0.01" placeholder="Rental price" value={rentPrice} onChange={(e) => setRentPrice(e.target.value)} className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] pl-6 text-[9px] text-[#f1f5ff]" />
+                      <Input type="number" step="0.01" min="0.01" placeholder="Rental price" value={rentPrice} onChange={(e) => setRentPrice(e.target.value)} className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] pl-6 text-[9px] text-[#f1f5ff] focus:bg-[#0a0f1a] focus:text-[#f1f5ff]" />
                     </div>
                     <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-2 text-[7px] text-[#565f89]">
                       Your character fights alongside the renter. XP and kills earned persist to your save. You cannot control the character during the rental.
