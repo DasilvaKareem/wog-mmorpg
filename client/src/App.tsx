@@ -87,6 +87,9 @@ const LeaderboardPage = React.lazy(() =>
 const MarketplacePage = React.lazy(() =>
   import("@/components/MarketplacePage").then((mod) => ({ default: mod.MarketplacePage }))
 );
+const RealMoneyMarketPage = React.lazy(() =>
+  import("@/components/RealMoneyMarketPage").then((mod) => ({ default: mod.RealMoneyMarketPage }))
+);
 const MediaPage = React.lazy(() =>
   import("@/components/MediaPage").then((mod) => ({ default: mod.MediaPage }))
 );
@@ -475,6 +478,7 @@ function AppShell(): React.ReactElement {
             <Routes>
               <Route path="/" element={<LandingPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
+              <Route path="/market" element={<RealMoneyMarketPage />} />
               <Route path="/x402" element={<X402AgentPage />} />
               <Route path="/races" element={<RacesClassesPage />} />
               <Route path="/story" element={<StoryPage />} />
