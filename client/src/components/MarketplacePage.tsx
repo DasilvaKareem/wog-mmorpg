@@ -1227,11 +1227,14 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
 
           {/* ════════════════════ REAL MONEY TAB ════════════════════ */}
           <TabsContent value="real-money">
-            <div className="mb-4 border-2 border-[#29334d] bg-[#0d1526] p-3">
+            {/* Wallet Balance + Info Bar */}
+            <div className="mb-4 flex items-center justify-between border-2 border-[#29334d] bg-[#0d1526] p-3">
               <p className="text-[9px] text-[#9aa7cc]">
                 Buy and sell items for <span className="font-bold text-[#54f28b]">real USD</span> via Tempo payments.
-                Items are escrowed on-chain — sellers get paid when the buyer completes payment.
               </p>
+              {isConnected && (
+                <UsdcWalletBalance address={address!} />
+              )}
             </div>
 
             {/* USD Filters */}
@@ -1459,6 +1462,40 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
 }
 
 // ── Sub-components ──
+
+function UsdcWalletBalance({ address }: { address: string }): React.ReactElement {
+  const [bal, setBal] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const usdcContract = import.meta.env.VITE_MPP_CURRENCY_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+    const rpcUrl = import.meta.env.VITE_MPP_RPC_URL || "https://sepolia.base.org";
+    const data = "0x70a08231" + address.slice(2).padStart(64, "0");
+    fetch(rpcUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: usdcContract, data }, "latest"] }),
+    })
+      .then((r) => r.json())
+      .then((res) => {
+        if (res.result && res.result !== "0x") {
+          setBal((Number(BigInt(res.result)) / 1e6).toFixed(2));
+        } else {
+          setBal("0.00");
+        }
+      })
+      .catch(() => setBal(null));
+  }, [address]);
+
+  if (bal === null) return <></>;
+
+  return (
+    <div className="border-2 border-[#54f28b] bg-[#0a1a0d] px-3 py-1 shadow-[2px_2px_0_0_#000]">
+      <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Wallet </span>
+      <span className="text-[10px] font-bold text-[#54f28b]">${bal}</span>
+      <span className="text-[8px] text-[#9aa7cc]"> USDC</span>
+    </div>
+  );
+}
 
 function ListingCard({
   listing,
