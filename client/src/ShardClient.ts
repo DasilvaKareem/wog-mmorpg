@@ -121,14 +121,20 @@ export async function fetchCharactersWithLive(
       deployedCharacterName?: string | null;
     } = await res.json();
 
-    const characters = data.characters.map((character) => ({
+    const characters = data.characters.map((character) => {
+      // NFT properties.level is always 1 (never updated on-chain).
+      // The real level is in the description (e.g. "Level 22 elf warlock").
+      const descMatch = character.description?.match(/Level (\d+)/i);
+      const realLevel = descMatch ? parseInt(descMatch[1]) : (character.properties?.level ?? 1);
+
+      return {
       tokenId: character.tokenId ?? "unknown",
       name: character.name ?? "Unnamed Character",
       description: character.description ?? "",
       properties: {
         race: character.properties?.race ?? "unknown",
         class: character.properties?.class ?? "unknown",
-        level: character.properties?.level ?? 1,
+        level: realLevel,
         xp: character.properties?.xp ?? 0,
         stats: {
           str: character.properties?.stats?.str ?? 0,
@@ -141,7 +147,8 @@ export async function fetchCharactersWithLive(
           luck: character.properties?.stats?.luck ?? 0,
         },
       },
-    }));
+    };
+    });
 
     let liveEntity: WalletCharacterProgress | null = null;
     if (data.liveEntity) {
