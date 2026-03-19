@@ -21,6 +21,7 @@ import { useToast } from "@/components/ui/toast";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
 import { getAuthToken } from "@/lib/agentAuth";
+import { mppFetch } from "@/lib/mppClient";
 
 // ── Types ──
 
@@ -298,15 +299,14 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
     try {
       const token = await getAuthToken(address);
       if (!token) { notify("Authentication failed", "error"); return; }
-      const res = await fetch(`${API_URL}/marketplace/direct/listings/${listing.listingId}/buy`, {
+      // mppFetch auto-handles the 402 Tempo challenge:
+      // 1st call → 402 → mppx signs USDC payment from wallet → replays with credential
+      // 2nd call → 200 → purchase settled
+      const res = await mppFetch(`${API_URL}/marketplace/direct/listings/${listing.listingId}/buy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ wallet: address }),
       });
-      if (res.status === 402) {
-        notify("Payment required — connect Tempo wallet", "error");
-        return;
-      }
       if (res.ok) {
         const data = await res.json();
         if (data.status === "sold") notify("Purchase complete!", "success");
@@ -314,10 +314,20 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
         void fetchUsdListings();
         void refreshBalance();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({ error: "Purchase failed" }));
         notify(err.error || "Purchase failed", "error");
       }
-    } catch { notify("Purchase failed", "error"); }
+    } catch (e: any) {
+      // mppx throws if user rejects payment or insufficient USDC
+      const msg = e?.message ?? "Purchase failed";
+      if (msg.includes("rejected") || msg.includes("denied")) {
+        notify("Payment cancelled", "error");
+      } else if (msg.includes("insufficient") || msg.includes("balance")) {
+        notify("Insufficient USDC balance — fund your wallet first", "error");
+      } else {
+        notify(msg, "error");
+      }
+    }
     finally { setUsdProcessingId(null); }
   };
 
