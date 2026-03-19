@@ -9,19 +9,22 @@ echo "=== WoG MMORPG Deploy to GCE ==="
 
 # Build TypeScript locally (ignore type errors, JS still emits)
 echo "[1/5] Building TypeScript..."
-(cd shard && npm run build 2>/dev/null) || true
-(cd mcp && npm install --ignore-scripts 2>/dev/null && npx tsc 2>/dev/null) || true
+cd shard
+npx tsc 2>/dev/null || true
+cd ../mcp
+npx tsc 2>/dev/null || true
+cd ..
 
 # Create shard tarball
 echo "[2/5] Packing shard..."
 tar czf /tmp/wog-shard.tar.gz --exclude='node_modules' --exclude='.env' --exclude='.env.production' --exclude='.git' --exclude='._*' \
-  -C shard dist src package.json pnpm-lock.yaml tsconfig.json \
-  -C .. world
+  -C shard dist src data package.json pnpm-lock.yaml tsconfig.json \
+  -C .. world src/data
 
 # Create MCP tarball (separate so it installs into mcp/ subdir on VM)
 echo "[2/5] Packing MCP server..."
 tar czf /tmp/wog-mcp.tar.gz --exclude='node_modules' --exclude='.env' --exclude='.env.production' --exclude='.git' --exclude='._*' \
-  -C mcp dist src package.json tsconfig.json 2>/dev/null || true
+  -C mcp dist src package.json pnpm-lock.yaml tsconfig.json
 
 echo "[3/5] Uploading..."
 gcloud compute scp --zone=$ZONE /tmp/wog-shard.tar.gz $INSTANCE:/tmp/wog-shard.tar.gz
@@ -31,11 +34,11 @@ gcloud compute scp --zone=$ZONE /tmp/wog-mcp.tar.gz $INSTANCE:/tmp/wog-mcp.tar.g
 echo "[4/5] Extracting and installing deps..."
 gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
   cd $REMOTE_DIR && \
-  sudo tar xzf /tmp/wog-shard.tar.gz --overwrite && \
-  sudo mkdir -p mcp && cd mcp && sudo tar xzf /tmp/wog-mcp.tar.gz --overwrite && cd .. && \
+  tar xzf /tmp/wog-shard.tar.gz --no-same-owner --no-same-permissions 2>/dev/null && \
+  mkdir -p mcp && cd mcp && tar xzf /tmp/wog-mcp.tar.gz --no-same-owner --no-same-permissions 2>/dev/null && cd .. && \
   rm /tmp/wog-shard.tar.gz /tmp/wog-mcp.tar.gz && \
-  npm install --omit=dev 2>/dev/null; \
-  cd mcp && npm install --omit=dev 2>/dev/null && cd .."
+  pnpm install --frozen-lockfile --prod && \
+  cd mcp && pnpm install --frozen-lockfile --prod && cd .."
 
 # Restart PM2
 echo "[5/5] Restarting PM2..."
