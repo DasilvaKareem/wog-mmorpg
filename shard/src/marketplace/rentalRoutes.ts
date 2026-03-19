@@ -20,6 +20,9 @@ import {
   OperationStatus,
 } from "./operationRegistry.js";
 import { handleMppCharge } from "./marketplacePayments.js";
+import { activateCharacterRental, getRentalEntityRecord } from "./characterRentalService.js";
+import { addEntityToParty } from "../social/partySystem.js";
+import { isWalletSpawned } from "../world/zoneRuntime.js";
 
 // ── Constants ───────────────────────────────────────────────────────
 
@@ -180,6 +183,84 @@ export function registerRentalRoutes(server: FastifyInstance) {
         startsAt: grant.startsAt,
         endsAt: grant.endsAt,
       });
+    }
+  );
+
+  // ── POST /rentals/grants/:grantId/activate ─────────────────────────
+  // Spawn the rented character into the renter's zone and add to party
+  server.post<{
+    Params: { grantId: string };
+    Body: { wallet: string; entityId: string; zoneId: string };
+  }>(
+    "/rentals/grants/:grantId/activate",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = getAuthenticatedWallet(request);
+      const { wallet, entityId, zoneId } = request.body;
+      const { grantId } = request.params;
+
+      if (!authWallet || authWallet.toLowerCase() !== wallet?.toLowerCase()) {
+        return reply.code(403).send({ error: "Wallet mismatch" });
+      }
+
+      const grant = await getRentalGrant(grantId);
+      if (!grant) return reply.code(404).send({ error: "Grant not found" });
+      if (grant.renterWallet !== wallet.toLowerCase()) {
+        return reply.code(403).send({ error: "Not your rental" });
+      }
+      if (grant.status !== "active") {
+        return reply.code(400).send({ error: `Grant is ${grant.status}` });
+      }
+      if (grant.assetType !== "character") {
+        return reply.code(400).send({ error: "This grant is not for a character" });
+      }
+
+      // Check if already activated
+      const existing = await getRentalEntityRecord(grantId);
+      if (existing) {
+        return reply.send({
+          ok: true,
+          alreadyActive: true,
+          entityId: existing.entityId,
+          zoneId: existing.zoneId,
+        });
+      }
+
+      // Get the rental listing for character name
+      const listing = await getRentalListing(grant.rentalId);
+      if (!listing) return reply.code(404).send({ error: "Rental listing not found" });
+
+      // We need the character name — stored as part of the listing metadata
+      // For characters, instanceId holds the character name
+      const characterName = listing.instanceId;
+      if (!characterName) {
+        return reply.code(400).send({ error: "Character name not found in rental listing" });
+      }
+
+      try {
+        const record = await activateCharacterRental({
+          grantId,
+          ownerWallet: grant.ownerWallet,
+          renterWallet: wallet,
+          characterName,
+          renterEntityId: entityId,
+          renterZoneId: zoneId,
+        });
+
+        // Auto-add to renter's party
+        const partyId = addEntityToParty(entityId, record.entityId, zoneId);
+
+        return reply.send({
+          ok: true,
+          entityId: record.entityId,
+          zoneId: record.zoneId,
+          characterName: record.characterName,
+          partyId,
+        });
+      } catch (err: any) {
+        server.log.error(err, `Failed to activate character rental ${grantId}`);
+        return reply.code(500).send({ error: err.message });
+      }
     }
   );
 

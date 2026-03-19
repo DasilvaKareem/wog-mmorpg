@@ -333,8 +333,14 @@ export async function expireRentalGrants(): Promise<string[]> {
     pipeline.zrem(KEY_GRANTS_ACTIVE, grantId);
     await pipeline.exec();
 
-    // Force-unequip the rented item from any live entity using it
-    forceUnequipRentedItem(grant.renterWallet, grant.tokenId);
+    if (grant.assetType === "character") {
+      // Deactivate character rental: save progress, despawn, remove from party
+      const { deactivateCharacterRental } = await import("./characterRentalService.js");
+      await deactivateCharacterRental(grantId);
+    } else {
+      // Force-unequip the rented item from any live entity using it
+      forceUnequipRentedItem(grant.renterWallet, grant.tokenId);
+    }
 
     // Decrement active rentals on listing
     const listing = await getRentalListing(grant.rentalId);

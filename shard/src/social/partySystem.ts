@@ -734,3 +734,65 @@ export function getPartyLeaderId(playerId: string): string | undefined {
   const party = parties.get(partyId);
   return party?.leaderId ?? playerId;
 }
+
+/**
+ * Programmatically add an entity to a player's party (e.g. rented characters).
+ * If the player has no party, creates one with them as leader.
+ * Returns the partyId or null on failure.
+ */
+export function addEntityToParty(leaderEntityId: string, newEntityId: string, zoneId: string): string | null {
+  let partyId = playerToParty.get(leaderEntityId);
+
+  if (!partyId) {
+    // Create a party for the leader
+    partyId = `party_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    const party: Party = {
+      id: partyId,
+      leaderId: leaderEntityId,
+      memberIds: [leaderEntityId],
+      zoneId,
+      createdAt: Date.now(),
+      shareXp: true,
+      shareGold: true,
+    };
+    parties.set(partyId, party);
+    playerToParty.set(leaderEntityId, partyId);
+  }
+
+  const party = parties.get(partyId);
+  if (!party) return null;
+  if (party.memberIds.length >= 5) return null;
+  if (party.memberIds.includes(newEntityId)) return partyId;
+
+  party.memberIds.push(newEntityId);
+  playerToParty.set(newEntityId, partyId);
+  persistParty(party);
+  return partyId;
+}
+
+/**
+ * Programmatically remove an entity from its party (e.g. rental expiry).
+ */
+export function removeEntityFromParty(entityId: string): void {
+  const partyId = playerToParty.get(entityId);
+  if (!partyId) return;
+
+  const party = parties.get(partyId);
+  if (!party) {
+    playerToParty.delete(entityId);
+    return;
+  }
+
+  party.memberIds = party.memberIds.filter(id => id !== entityId);
+  playerToParty.delete(entityId);
+
+  // Disband if empty or leader left
+  if (party.memberIds.length === 0 || entityId === party.leaderId) {
+    const wallets = getPartyWallets(party);
+    party.memberIds.forEach(id => playerToParty.delete(id));
+    parties.delete(partyId);
+    unpersistParty(partyId, wallets);
+  } else {
+    persistParty(party);
+  }
+}
