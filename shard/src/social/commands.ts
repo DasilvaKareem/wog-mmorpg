@@ -35,6 +35,14 @@ export function registerCommands(server: FastifyInstance) {
       return { error: "Entity not found" };
     }
 
+    // Check if entity is rented out — block owner commands during rental
+    const { isEntityRentalBlocked } = await import("../marketplace/characterRentalService.js");
+    const rentalBlock = await isEntityRentalBlocked(entity.id);
+    if (rentalBlock) {
+      reply.code(403);
+      return { error: "Character is currently rented out" };
+    }
+
     // Verify the authenticated user owns this entity
     const entityWallet = entity.walletAddress?.toLowerCase();
     const authWallet = authenticatedWallet.toLowerCase();

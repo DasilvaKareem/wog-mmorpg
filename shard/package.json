@@ -20,6 +20,7 @@
     "fastify": "^5.2.1",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
+    "mppx": "^0.4.7",
     "thirdweb": "^5.118.1",
     "viem": "^2.45.3",
     "web-push": "^3.6.7"
