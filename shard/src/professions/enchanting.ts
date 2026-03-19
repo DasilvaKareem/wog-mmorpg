@@ -256,7 +256,9 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
         saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
       }
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);
+      }
       server.log.info(
         `[enchanting] ${entity.name} enchanted ${itemInfo.name} with ${enchantment.name} → ${burnTx}`
       );

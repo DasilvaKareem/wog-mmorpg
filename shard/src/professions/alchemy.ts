@@ -624,7 +624,9 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${outputItem?.name ?? recipeId}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 2, `Crafted: ${outputItem?.name ?? recipeId}`);
+      }
       server.log.info(
         `[alchemy] ${entity.name} brewed ${outputItem?.name} at ${alchemyLab.name} → ${potionTx}`
       );

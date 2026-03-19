@@ -36,24 +36,22 @@ await registerReputationRoutes(app);
 
 ### 3. Integrate with Character Minting
 
-When a player mints a character, create their identity:
+When a player mints a character, register the ERC-8004 identity and persist the returned `agentId`:
 
 ```typescript
+import { mintCharacterWithIdentity } from './blockchain.js';
 import { reputationManager } from './reputationManager.js';
 
 // In your character minting function
 async function mintCharacter(owner, name, class, level) {
-  // 1. Mint character NFT (your existing code)
-  const characterTokenId = await characterNFT.mint(owner, ...);
-
-  // 2. Create ERC-8004 identity
-  const identityId = await reputationManager.createCharacterIdentity(
-    characterTokenId,
+  const mintResult = await mintCharacterWithIdentity(
     owner,
-    { name, class, level }
+    name,
+    { class, level }
   );
 
-  console.log(`Created identity ${identityId} for character ${characterTokenId}`);
+  await reputationManager.ensureInitialized(mintResult.identity.agentId);
+  console.log(`Registered agent ${mintResult.identity.agentId} for character ${mintResult.tokenId}`);
 }
 ```
 
@@ -85,12 +83,12 @@ Display reputation in character profiles:
 ```tsx
 import { ReputationPanel } from './components/ReputationPanel';
 
-function CharacterProfile({ characterId }) {
+function CharacterProfile({ agentId }) {
   return (
     <div>
       {/* Your existing profile UI */}
 
-      <ReputationPanel characterTokenId={characterId} />
+      <ReputationPanel agentId={agentId} />
     </div>
   );
 }
@@ -110,27 +108,27 @@ curl http://localhost:3000/api/reputation/ranks
 # { "ranks": [{ "score": 900, "name": "Legendary Hero", ... }] }
 ```
 
-### 2. Create Test Identity
+### 2. Get Identity
 
 ```bash
-curl -X POST http://localhost:3000/api/reputation/create-identity \
-  -H "Content-Type: application/json" \
-  -d '{
-    "characterTokenId": "1",
-    "characterOwner": "0x...",
-    "characterName": "Test Hero",
-    "characterClass": "Warrior",
-    "level": 1
-  }'
+curl http://localhost:3000/api/agents/1/identity
 
 # Expected response:
-# { "success": true, "identityId": "1" }
+# {
+#   "identity": {
+#     "agentId": "1",
+#     "ownerWallet": "0x...",
+#     "characterTokenId": "1",
+#     "name": "Test Hero",
+#     "onChainRegistered": true
+#   }
+# }
 ```
 
 ### 3. Get Reputation
 
 ```bash
-curl http://localhost:3000/api/reputation/1
+curl http://localhost:3000/api/agents/1/reputation
 
 # Expected response:
 # {
@@ -149,10 +147,9 @@ curl http://localhost:3000/api/reputation/1
 ### 4. Submit Feedback
 
 ```bash
-curl -X POST http://localhost:3000/api/reputation/feedback \
+curl -X POST http://localhost:3000/api/agents/1/reputation/feedback \
   -H "Content-Type: application/json" \
   -d '{
-    "characterTokenId": "1",
     "category": "combat",
     "delta": 20,
     "reason": "Won epic PvP battle"
@@ -165,7 +162,7 @@ curl -X POST http://localhost:3000/api/reputation/feedback \
 ### 5. Verify Update
 
 ```bash
-curl http://localhost:3000/api/reputation/1
+curl http://localhost:3000/api/agents/1/reputation
 
 # Expected response (combat should be 520 now):
 # {
@@ -235,7 +232,7 @@ Once integrated, the system automatically tracks:
 
 **Problem**: API returns "Reputation not found"
 
-**Solution**: Character identity not created. Make sure you call `createCharacterIdentity()` during minting.
+**Solution**: Character identity not created. Make sure you call `mintCharacterWithIdentity()` or otherwise persist a real ERC-8004 `agentId` during character creation.
 
 ---
 

@@ -6,8 +6,9 @@
 import {
   initReputationOnChain,
   submitFeedbackOnChain,
-} from "./reputationChain.js";
+} from "../erc8004/reputation.js";
 import { getRedis } from "../redis.js";
+import { normalizeAgentId } from "../erc8004/agentResolution.js";
 
 export enum ReputationCategory {
   Combat = 0,
@@ -29,7 +30,7 @@ export interface ReputationScore {
 
 export interface ReputationFeedback {
   submitter: string;
-  walletAddress: string;
+  agentId: string;
   category: ReputationCategory;
   delta: number;
   reason: string;
@@ -58,11 +59,56 @@ function clamp(value: number): number {
 export class ReputationManager {
   private scores: Map<string, ReputationScore> = new Map();
   private feedbackLog: ReputationFeedback[] = [];
+  private chainInitSucceeded: Set<string> = new Set();
+  private chainInitInFlight: Set<string> = new Set();
+  private chainInitRetryAttempts: Map<string, number> = new Map();
+  private chainInitRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 
-  /** Ensure a wallet has a reputation entry (idempotent) */
-  ensureInitialized(walletAddress: string): void {
-    const key = walletAddress.toLowerCase();
-    if (this.scores.has(key)) return;
+  private scheduleChainInit(agentId: string, reason: string): void {
+    if (this.chainInitSucceeded.has(agentId) || this.chainInitInFlight.has(agentId)) {
+      return;
+    }
+
+    const existingTimer = this.chainInitRetryTimers.get(agentId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.chainInitRetryTimers.delete(agentId);
+    }
+
+    this.chainInitInFlight.add(agentId);
+    void initReputationOnChain(agentId)
+      .then((ok) => {
+        this.chainInitInFlight.delete(agentId);
+        if (ok) {
+          this.chainInitSucceeded.add(agentId);
+          this.chainInitRetryAttempts.delete(agentId);
+          return;
+        }
+
+        const attempts = (this.chainInitRetryAttempts.get(agentId) ?? 0) + 1;
+        this.chainInitRetryAttempts.set(agentId, attempts);
+        const delayMs = Math.min(5 * 60_000, 15_000 * 2 ** (attempts - 1));
+        const timer = setTimeout(() => {
+          this.chainInitRetryTimers.delete(agentId);
+          this.scheduleChainInit(agentId, "retry");
+        }, delayMs);
+        this.chainInitRetryTimers.set(agentId, timer);
+        console.warn(
+          `[reputation] on-chain init pending for ${agentId}; retrying in ${Math.round(delayMs / 1000)}s (${reason})`
+        );
+      })
+      .catch(() => {
+        this.chainInitInFlight.delete(agentId);
+      });
+  }
+
+  /** Ensure an agent has a reputation entry (idempotent) */
+  ensureInitialized(agentId: string | bigint): void {
+    const key = normalizeAgentId(agentId);
+    if (this.scores.has(key)) {
+      this.scheduleChainInit(key, "ensureInitialized-existing");
+      return;
+    }
     // Set defaults synchronously so scores are always available
     this.scores.set(key, {
       combat: DEFAULT_SCORE,
@@ -76,7 +122,7 @@ export class ReputationManager {
     // Fire-and-forget Redis restore — overwrites defaults if persisted data exists
     const redis = getRedis();
     if (redis) {
-      redis.hgetall(`reputation:${key}`).then((stored: Record<string, string> | null) => {
+      redis.hgetall(`reputation:agent:${key}`).then((stored: Record<string, string> | null) => {
         if (stored && stored.overall) {
           this.scores.set(key, {
             combat: parseInt(stored.combat ?? String(DEFAULT_SCORE), 10),
@@ -87,18 +133,19 @@ export class ReputationManager {
             overall: parseInt(stored.overall, 10),
             lastUpdated: parseInt(stored.lastUpdated ?? String(Date.now()), 10),
           });
-        } else {
-          initReputationOnChain(key).catch(() => {});
         }
-      }).catch(() => {});
+        this.scheduleChainInit(key, stored && stored.overall ? "redis-restore" : "fresh-init");
+      }).catch(() => {
+        this.scheduleChainInit(key, "redis-read-failed");
+      });
     } else {
-      initReputationOnChain(key).catch(() => {});
+      this.scheduleChainInit(key, "fresh-init");
     }
   }
 
-  /** Get reputation scores for a wallet */
-  getReputation(walletAddress: string): ReputationScore | null {
-    const key = walletAddress.toLowerCase();
+  /** Get reputation scores for an agent */
+  getReputation(agentId: string | bigint): ReputationScore | null {
+    const key = normalizeAgentId(agentId);
     return this.scores.get(key) ?? null;
   }
 
@@ -112,13 +159,13 @@ export class ReputationManager {
 
   /** Submit feedback for a single category */
   submitFeedback(
-    walletAddress: string,
+    agentId: string | bigint,
     category: ReputationCategory,
     delta: number,
     reason: string,
     submitter: string = "system"
   ): void {
-    const key = walletAddress.toLowerCase();
+    const key = normalizeAgentId(agentId);
     this.ensureInitialized(key);
     const rep = this.scores.get(key)!;
 
@@ -134,7 +181,7 @@ export class ReputationManager {
 
     this.feedbackLog.push({
       submitter,
-      walletAddress: key,
+      agentId: key,
       category,
       delta,
       reason,
@@ -146,12 +193,13 @@ export class ReputationManager {
       this.feedbackLog = this.feedbackLog.slice(-2500);
     }
 
+    this.scheduleChainInit(key, "submitFeedback");
     submitFeedbackOnChain(key, category, delta, reason).catch(() => {});
 
     // Persist to Redis (fire-and-forget)
     const redis = getRedis();
     if (redis) {
-      redis.hset(`reputation:${key}`, {
+      redis.hset(`reputation:agent:${key}`, {
         combat: String(rep.combat),
         economic: String(rep.economic),
         social: String(rep.social),
@@ -167,15 +215,15 @@ export class ReputationManager {
         crafting: rep.crafting, agent: rep.agent, overall: rep.overall,
         category: ReputationCategory[category], delta, reason,
       });
-      redis.zadd(`reputation:history:${key}`, Date.now(), snap).catch(() => {});
+      redis.zadd(`reputation:history:agent:${key}`, Date.now(), snap).catch(() => {});
       // Trim to last 500 snapshots
-      redis.zremrangebyrank(`reputation:history:${key}`, 0, -501).catch(() => {});
+      redis.zremrangebyrank(`reputation:history:agent:${key}`, 0, -501).catch(() => {});
     }
   }
 
   /** Batch update multiple categories at once */
   batchUpdateReputation(
-    walletAddress: string,
+    agentId: string | bigint,
     deltas: {
       combat?: number;
       economic?: number;
@@ -186,29 +234,29 @@ export class ReputationManager {
     reason: string,
     submitter: string = "system"
   ): void {
-    if (deltas.combat) this.submitFeedback(walletAddress, ReputationCategory.Combat, deltas.combat, reason, submitter);
-    if (deltas.economic) this.submitFeedback(walletAddress, ReputationCategory.Economic, deltas.economic, reason, submitter);
-    if (deltas.social) this.submitFeedback(walletAddress, ReputationCategory.Social, deltas.social, reason, submitter);
-    if (deltas.crafting) this.submitFeedback(walletAddress, ReputationCategory.Crafting, deltas.crafting, reason, submitter);
-    if (deltas.agent) this.submitFeedback(walletAddress, ReputationCategory.Agent, deltas.agent, reason, submitter);
+    if (deltas.combat) this.submitFeedback(agentId, ReputationCategory.Combat, deltas.combat, reason, submitter);
+    if (deltas.economic) this.submitFeedback(agentId, ReputationCategory.Economic, deltas.economic, reason, submitter);
+    if (deltas.social) this.submitFeedback(agentId, ReputationCategory.Social, deltas.social, reason, submitter);
+    if (deltas.crafting) this.submitFeedback(agentId, ReputationCategory.Crafting, deltas.crafting, reason, submitter);
+    if (deltas.agent) this.submitFeedback(agentId, ReputationCategory.Agent, deltas.agent, reason, submitter);
   }
 
-  /** Get feedback history for a wallet */
-  getFeedbackHistory(walletAddress: string, limit: number = 20): ReputationFeedback[] {
-    const key = walletAddress.toLowerCase();
+  /** Get feedback history for an agent */
+  getFeedbackHistory(agentId: string | bigint, limit: number = 20): ReputationFeedback[] {
+    const key = normalizeAgentId(agentId);
     return this.feedbackLog
-      .filter((f) => f.walletAddress === key)
+      .filter((f) => f.agentId === key)
       .slice(-limit)
       .reverse();
   }
 
   /** Get reputation timeline snapshots from Redis */
-  async getTimeline(walletAddress: string, limit: number = 100): Promise<Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }>> {
-    const key = walletAddress.toLowerCase();
+  async getTimeline(agentId: string | bigint, limit: number = 100): Promise<Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }>> {
+    const key = normalizeAgentId(agentId);
     const redis = getRedis();
     if (!redis) return [];
     try {
-      const raw = await redis.zrangebyscore(`reputation:history:${key}`, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, limit);
+      const raw = await redis.zrangebyscore(`reputation:history:agent:${key}`, "-inf", "+inf", "WITHSCORES", "LIMIT", 0, limit);
       const result: Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }> = [];
       for (let i = 0; i < raw.length; i += 2) {
         const snap = JSON.parse(raw[i]);
@@ -221,7 +269,7 @@ export class ReputationManager {
 
   /** Update combat reputation based on PvP results */
   updateCombatReputation(
-    walletAddress: string,
+    agentId: string | bigint,
     won: boolean,
     performanceScore: number
   ): void {
@@ -232,7 +280,7 @@ export class ReputationManager {
       delta = Math.floor(-2 - (performanceScore / 100) * 3);
     }
     this.submitFeedback(
-      walletAddress,
+      agentId,
       ReputationCategory.Combat,
       delta,
       won ? `Won PvP battle (performance: ${performanceScore})` : "Lost PvP battle"
@@ -241,7 +289,7 @@ export class ReputationManager {
 
   /** Update economic reputation based on trade */
   updateEconomicReputation(
-    walletAddress: string,
+    agentId: string | bigint,
     tradeCompleted: boolean,
     fairPrice: boolean
   ): void {
@@ -254,7 +302,7 @@ export class ReputationManager {
       delta = -10;
     }
     this.submitFeedback(
-      walletAddress,
+      agentId,
       ReputationCategory.Economic,
       delta,
       tradeCompleted

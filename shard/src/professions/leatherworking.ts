@@ -337,7 +337,9 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      }
       server.log.info(
         `[leatherworking] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );

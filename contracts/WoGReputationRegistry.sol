@@ -45,6 +45,8 @@ contract WoGReputationRegistry is Ownable {
 
     // identityId => ReputationScore
     mapping(uint256 => ReputationScore) public reputations;
+    uint256[] private _knownIdentityIds;
+    mapping(uint256 => bool) private _knownIdentitySet;
 
     // Feedback history
     ReputationFeedback[] public feedbackHistory;
@@ -82,6 +84,7 @@ contract WoGReputationRegistry is Ownable {
 
     event ReporterAuthorized(address indexed reporter);
     event ReporterRevoked(address indexed reporter);
+    event ReputationInitialized(uint256 indexed identityId);
 
     // ============ Errors ============
 
@@ -114,6 +117,7 @@ contract WoGReputationRegistry is Ownable {
 
         // Only initialize if not already initialized
         if (reputations[identityId].lastUpdated == 0) {
+            _trackIdentity(identityId);
             reputations[identityId] = ReputationScore({
                 combat: DEFAULT_SCORE,
                 economic: DEFAULT_SCORE,
@@ -123,6 +127,7 @@ contract WoGReputationRegistry is Ownable {
                 overall: DEFAULT_SCORE,
                 lastUpdated: block.timestamp
             });
+            emit ReputationInitialized(identityId);
         }
     }
 
@@ -140,6 +145,7 @@ contract WoGReputationRegistry is Ownable {
         string memory reason
     ) external {
         if (!authorizedReporters[msg.sender]) revert Unauthorized();
+        _trackIdentity(identityId);
 
         // Create feedback record
         uint256 feedbackId = feedbackHistory.length;
@@ -175,6 +181,7 @@ contract WoGReputationRegistry is Ownable {
         string memory reason
     ) external {
         if (!authorizedReporters[msg.sender]) revert Unauthorized();
+        _trackIdentity(identityId);
 
         for (uint256 i = 0; i < 5; i++) {
             if (deltas[i] != 0) {
@@ -195,8 +202,47 @@ contract WoGReputationRegistry is Ownable {
                     })
                 );
                 identityFeedback[identityId].push(feedbackId);
+                emit FeedbackSubmitted(feedbackId, identityId, msg.sender, category, deltas[i]);
             }
         }
+    }
+
+    /**
+     * @notice Generic ERC-8004-style interaction alias.
+     * @dev Success maps to positive agent reputation, failure to negative agent reputation.
+     */
+    function recordInteraction(
+        uint256 identityId,
+        bool success,
+        uint256 weight
+    ) external {
+        if (!authorizedReporters[msg.sender]) revert Unauthorized();
+        _trackIdentity(identityId);
+
+        int256 delta = success ? int256(weight) : -int256(weight);
+        uint256 feedbackId = feedbackHistory.length;
+        feedbackHistory.push(
+            ReputationFeedback({
+                submitter: msg.sender,
+                identityId: identityId,
+                category: ReputationCategory.Agent,
+                delta: delta,
+                reason: success ? "interaction-success" : "interaction-failure",
+                timestamp: block.timestamp,
+                validated: true
+            })
+        );
+
+        identityFeedback[identityId].push(feedbackId);
+        _updateReputationScore(identityId, ReputationCategory.Agent, delta);
+
+        emit FeedbackSubmitted(
+            feedbackId,
+            identityId,
+            msg.sender,
+            ReputationCategory.Agent,
+            delta
+        );
     }
 
     /**
@@ -345,6 +391,51 @@ contract WoGReputationRegistry is Ownable {
         return feedbackHistory[feedbackId];
     }
 
+    function getFeedbackCount() external view returns (uint256) {
+        return feedbackHistory.length;
+    }
+
+    /**
+     * @notice Return top identities ordered by overall score.
+     * @dev Intended for small registry sizes; O(n^2) insertion sort in memory.
+     */
+    function getTopAgents(uint256 limit)
+        external
+        view
+        returns (uint256[] memory agentIds, ReputationScore[] memory scores)
+    {
+        uint256 count = _knownIdentityIds.length;
+        if (limit > count) {
+            limit = count;
+        }
+
+        uint256[] memory sortedIds = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            sortedIds[i] = _knownIdentityIds[i];
+        }
+
+        for (uint256 i = 1; i < count; i++) {
+            uint256 currentId = sortedIds[i];
+            uint256 currentScore = reputations[currentId].overall;
+            uint256 j = i;
+
+            while (j > 0 && reputations[sortedIds[j - 1]].overall < currentScore) {
+                sortedIds[j] = sortedIds[j - 1];
+                unchecked {
+                    j--;
+                }
+            }
+            sortedIds[j] = currentId;
+        }
+
+        agentIds = new uint256[](limit);
+        scores = new ReputationScore[](limit);
+        for (uint256 i = 0; i < limit; i++) {
+            agentIds[i] = sortedIds[i];
+            scores[i] = reputations[sortedIds[i]];
+        }
+    }
+
     /**
      * @notice Get reputation rank name
      * @param score Overall score
@@ -391,5 +482,11 @@ contract WoGReputationRegistry is Ownable {
         onlyOwner
     {
         categoryWeights[category] = weight;
+    }
+
+    function _trackIdentity(uint256 identityId) internal {
+        if (_knownIdentitySet[identityId]) return;
+        _knownIdentitySet[identityId] = true;
+        _knownIdentityIds.push(identityId);
     }
 }

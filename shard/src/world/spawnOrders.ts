@@ -32,6 +32,7 @@ interface SpawnOrderBody {
   xp?: number;
   xpReward?: number;
   characterTokenId?: string;
+  agentId?: string;
   raceId?: string;
   classId?: string;
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
@@ -43,6 +44,17 @@ interface SpawnOrderBody {
 }
 
 function parseOnChainTokenId(value: string | undefined): bigint | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  try {
+    return BigInt(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function parseAgentId(value: string | undefined): bigint | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return undefined;
@@ -68,7 +80,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const {
       zoneId, type, name, x = 0, y = 0, hp,
       walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, calling, gender,
-      skinColor, hairStyle, eyeColor, origin,
+      skinColor, hairStyle, eyeColor, origin, agentId,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
@@ -125,7 +137,8 @@ export function registerSpawnOrders(server: FastifyInstance) {
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
         : undefined;
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
-    const resolvedTokenId = parseOnChainTokenId(characterTokenId);
+    const resolvedTokenId = parseOnChainTokenId(saved?.characterTokenId ?? characterTokenId);
+    const resolvedAgentId = parseAgentId(saved?.agentId ?? agentId);
 
     // Saved coords may be raw world-space, normalized-world from the bad layout shift,
     // or legacy zone-local values. Prefer an explicit in-zone world-space match first.
@@ -157,6 +170,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       xp: saved?.xp ?? xp ?? 0,
       ...(xpReward != null && { xpReward }),
       ...(resolvedTokenId != null && { characterTokenId: resolvedTokenId }),
+      ...(resolvedAgentId != null && { agentId: resolvedAgentId }),
       ...(resolvedRaceId != null && { raceId: resolvedRaceId }),
       ...(resolvedClassId != null && { classId: resolvedClassId }),
       ...(resolvedCalling != null && { calling: resolvedCalling }),
@@ -196,6 +210,8 @@ export function registerSpawnOrders(server: FastifyInstance) {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,
+        ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
+        ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
         raceId: resolvedRaceId ?? "human",
         classId: resolvedClassId ?? "warrior",
         calling: resolvedCalling,
@@ -236,9 +252,9 @@ export function registerSpawnOrders(server: FastifyInstance) {
       });
     }
 
-    // Initialize reputation for player wallets
-    if (type === "player" && walletAddress) {
-      reputationManager.ensureInitialized(walletAddress);
+    // Initialize reputation for player agents when identity is available
+    if (type === "player" && entity.agentId != null) {
+      reputationManager.ensureInitialized(entity.agentId);
     }
 
     server.log.info(
@@ -250,6 +266,9 @@ export function registerSpawnOrders(server: FastifyInstance) {
         ...entity,
         ...(entity.characterTokenId != null && {
           characterTokenId: entity.characterTokenId.toString(),
+        }),
+        ...(entity.agentId != null && {
+          agentId: entity.agentId.toString(),
         }),
       },
       restored,

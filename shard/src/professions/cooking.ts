@@ -209,7 +209,9 @@ export function registerCookingRoutes(server: FastifyInstance) {
 
       advanceGatherQuests(entity, recipe.name);
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 1, `Crafted: ${recipe.name}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 1, `Crafted: ${recipe.name}`);
+      }
       server.log.info(
         `[cooking] ${entity.name} cooked ${recipe.name} at ${campfire.name} → ${cookTx}`
       );

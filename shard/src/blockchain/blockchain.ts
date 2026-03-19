@@ -616,17 +616,24 @@ if (identityRegistryAddress) {
   console.warn("[blockchain] IDENTITY_REGISTRY_ADDRESS not set — identity registration disabled");
 }
 
+export interface IdentityRegistrationResult {
+  agentId: bigint | null;
+  txHash: string | null;
+  agentUri: string | null;
+}
+
 /**
  * Register an agent identity on the ERC-8004 IdentityRegistryUpgradeable.
  * Mints to the server wallet, then transfers to the agent's wallet.
- * Fire-and-forget safe — logs errors but never throws.
  */
 export async function registerIdentity(
   characterTokenId: bigint,
   ownerAddress: string,
   metadataURI: string
-): Promise<string | null> {
-  if (!identityRegistryContract || !biteWallet) return null;
+): Promise<IdentityRegistrationResult> {
+  if (!identityRegistryContract || !biteWallet) {
+    return { agentId: null, txHash: null, agentUri: null };
+  }
 
   try {
     const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
@@ -646,7 +653,7 @@ export async function registerIdentity(
 
     if (!agentId) {
       console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
-      return receipt.hash;
+      return { agentId: null, txHash: receipt.hash, agentUri: agentURI };
     }
 
     console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} → tx ${receipt.hash}`);
@@ -665,10 +672,10 @@ export async function registerIdentity(
         .catch((err: any) => console.warn(`[identity] Transfer to ${ownerAddress} failed: ${err.message?.slice(0, 80)}`));
     }
 
-    return receipt.hash;
+    return { agentId: BigInt(agentId), txHash: receipt.hash, agentUri: agentURI };
   } catch (err: any) {
     console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);
-    return null;
+    return { agentId: null, txHash: null, agentUri: null };
   }
 }
 
@@ -775,12 +782,17 @@ async function getOwnedCharacterTokenIdsFromTransfers(owner: string): Promise<bi
   return Array.from(owned).map((id) => BigInt(id));
 }
 
-/** Mint a character NFT (ERC-721) to a player address. Returns tx hash.
- *  Also registers an ERC-8004 identity in the background if the registry is configured. */
-export async function mintCharacter(
+export interface MintCharacterResult {
+  txHash: string;
+  tokenId: bigint | null;
+  identity: IdentityRegistrationResult | null;
+}
+
+/** Mint a character NFT (ERC-721) to a player address and return mint + identity details. */
+export async function mintCharacterWithIdentity(
   toAddress: string,
   nft: { name: string; description: string; properties: Record<string, unknown> }
-): Promise<string> {
+): Promise<MintCharacterResult> {
   return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", () =>
     queueTransaction(async () => {
       const tx = mintERC721({
@@ -792,28 +804,37 @@ export async function mintCharacter(
       txStats.characterMints++;
       recordTx("character-mint", receipt.transactionHash);
       characterCache.invalidate(toAddress.toLowerCase());
+      const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
+      const transferLog = fullReceipt?.logs.find(
+        (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
+      );
+      const tokenId = transferLog?.topics[3] ? BigInt(transferLog.topics[3]) : null;
+      let identity: IdentityRegistrationResult | null = null;
 
-      // Extract tokenId from the ERC-721 Transfer event and register identity
-      if (identityRegistryContract) {
-        void (async () => {
-          try {
-            const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
-            const transferLog = fullReceipt?.logs.find(
-              (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
-            );
-            if (transferLog?.topics[3]) {
-              const tokenId = BigInt(transferLog.topics[3]);
-              await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
-            }
-          } catch (err: any) {
-            console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
-          }
-        })();
+      if (identityRegistryContract && tokenId != null) {
+        try {
+          identity = await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
+        } catch (err: any) {
+          console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
+        }
       }
 
-      return receipt.transactionHash;
+      return {
+        txHash: receipt.transactionHash,
+        tokenId,
+        identity,
+      };
     })
   );
+}
+
+/** Compatibility wrapper kept while call sites are cut over to structured mint results. */
+export async function mintCharacter(
+  toAddress: string,
+  nft: { name: string; description: string; properties: Record<string, unknown> }
+): Promise<string> {
+  const result = await mintCharacterWithIdentity(toAddress, nft);
+  return result.txHash;
 }
 
 /** Get all character NFTs owned by a wallet address. Cached 30s (empty results not cached). */

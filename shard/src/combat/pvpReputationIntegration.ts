@@ -24,9 +24,9 @@ export class PvPReputationIntegration {
           isMVP
         );
 
-        // Update combat reputation using wallet address
+        // Update combat reputation using ERC-8004 agent identity
         await reputationManager.updateCombatReputation(
-          player.walletAddress,
+          player.agentId,
           won,
           performanceScore
         );
@@ -34,7 +34,7 @@ export class PvPReputationIntegration {
         // MVP bonus
         if (isMVP) {
           await reputationManager.submitFeedback(
-            player.walletAddress,
+            player.agentId,
             ReputationCategory.Combat,
             25,
             "Awarded MVP in PvP battle"
@@ -54,14 +54,14 @@ export class PvPReputationIntegration {
         );
 
         await reputationManager.updateCombatReputation(
-          player.walletAddress,
+          player.agentId,
           won,
           performanceScore
         );
 
         if (isMVP) {
           await reputationManager.submitFeedback(
-            player.walletAddress,
+            player.agentId,
             ReputationCategory.Combat,
             25,
             "Awarded MVP in PvP battle"
@@ -116,14 +116,14 @@ export class PvPReputationIntegration {
    * Update reputation for honorable/dishonorable behavior
    */
   async reportBehavior(
-    walletAddress: string,
+    agentId: string,
     honorable: boolean,
     reason: string
   ): Promise<void> {
     const delta = honorable ? 10 : -20;
 
     await reputationManager.submitFeedback(
-      walletAddress,
+      agentId,
       ReputationCategory.Combat,
       delta,
       reason
@@ -134,7 +134,7 @@ export class PvPReputationIntegration {
    * Batch update reputation for tournament results
    */
   async updateTournamentReputation(
-    winners: Array<{ walletAddress: string; placement: number }>,
+    winners: Array<{ agentId: string; placement: number }>,
     tournamentName: string
   ): Promise<void> {
     for (const winner of winners) {
@@ -156,7 +156,7 @@ export class PvPReputationIntegration {
       }
 
       await reputationManager.submitFeedback(
-        winner.walletAddress,
+        winner.agentId,
         ReputationCategory.Combat,
         delta,
         `Placed ${this.getOrdinal(winner.placement)} in ${tournamentName}`

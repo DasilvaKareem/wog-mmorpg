@@ -15,6 +15,8 @@ export interface CharacterSaveData {
   name: string;
   level: number;
   xp: number;
+  characterTokenId?: string;
+  agentId?: string;
   raceId: string;
   classId: string;
   calling?: CharacterCalling;
@@ -98,6 +100,8 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     name: raw.name ?? "Unknown",
     level: parseInt(raw.level ?? "1", 10) || 1,
     xp: parseInt(raw.xp ?? "0", 10) || 0,
+    characterTokenId: raw.characterTokenId || undefined,
+    agentId: raw.agentId || undefined,
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
     gender: raw.gender,

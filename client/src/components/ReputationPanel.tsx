@@ -9,7 +9,7 @@ import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 
 interface ReputationPanelProps {
-  characterTokenId: string;
+  agentId: string | null;
 }
 
 interface ReputationData {
@@ -31,7 +31,7 @@ interface FeedbackItem {
   validated: boolean;
 }
 
-export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
+export function ReputationPanel({ agentId }: ReputationPanelProps) {
   const [reputation, setReputation] = useState<ReputationData | null>(null);
   const [history, setHistory] = useState<FeedbackItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,15 +40,21 @@ export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
 
   useEffect(() => {
     fetchReputation();
-  }, [characterTokenId]);
+  }, [agentId]);
 
   const fetchReputation = async () => {
     setLoading(true);
     setError(null);
 
+    if (!agentId) {
+      setError("Identity registration pending");
+      setLoading(false);
+      return;
+    }
+
     try {
       // Fetch reputation
-      const repResponse = await fetch(`${API_URL}/api/reputation/${characterTokenId}`);
+      const repResponse = await fetch(`${API_URL}/api/agents/${agentId}/reputation`);
       if (!repResponse.ok) {
         throw new Error("Reputation not found");
       }
@@ -57,7 +63,7 @@ export function ReputationPanel({ characterTokenId }: ReputationPanelProps) {
 
       // Fetch history
       const historyResponse = await fetch(
-        `${API_URL}/api/reputation/${characterTokenId}/history?limit=10`
+        `${API_URL}/api/agents/${agentId}/reputation/history?limit=10`
       );
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();

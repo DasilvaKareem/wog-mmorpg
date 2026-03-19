@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { createCustodialWallet } from "../blockchain/custodialWallet.js";
-import { mintCharacter, mintGold, distributeSFuel } from "../blockchain/blockchain.js";
+import { mintCharacterWithIdentity, mintGold, distributeSFuel } from "../blockchain/blockchain.js";
 import { generateAuthToken } from "../auth/auth.js";
 import { computeCharacter, validateCharacterInput } from "../character/characterCreate.js";
 import { getOrCreateZone, recalculateEntityVitals, isWalletSpawned, registerSpawnedWallet, type Entity } from "../world/zoneRuntime.js";
@@ -8,6 +8,7 @@ import { processPayment, getPricingTier, type PaymentMethod } from "./x402Paymen
 import { saveCharacter, loadCharacter } from "../character/characterStore.js";
 import { reputationManager } from "./reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
+import { publishValidationClaim } from "../erc8004/validation.js";
 
 export interface DeploymentRequest {
   agentName: string;
@@ -214,10 +215,11 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       walletAddress: wallet.address,
       level: existingSave?.level ?? 1,
       xp: existingSave?.xp ?? 0,
+      ...(existingSave?.characterTokenId && { characterTokenId: BigInt(existingSave.characterTokenId) }),
+      ...(existingSave?.agentId && { agentId: BigInt(existingSave.agentId) }),
       raceId: request.character.race,
       classId: request.character.class,
       stats: characterData.stats,
-      characterTokenId: BigInt(0),
       kills: existingSave?.kills ?? 0,
       completedQuests: existingSave?.completedQuests ?? [],
       learnedTechniques: existingSave?.learnedTechniques ?? [],
@@ -261,8 +263,10 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
       professions: existingSave?.professions ?? [],
     });
 
-    // 9. Initialize reputation
-    reputationManager.ensureInitialized(wallet.address);
+    // 9. Initialize reputation if the character already has an ERC-8004 identity
+    if (entity.agentId != null) {
+      reputationManager.ensureInitialized(entity.agentId);
+    }
 
     // 10. Log diary entry
     const isRestored = !!existingSave;
@@ -302,8 +306,27 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
             stats: characterData.stats,
           },
         };
-        mintTxHash = await mintCharacter(wallet.address, nftMetadata);
-        console.log(`[x402] ${deploymentId}: NFT minted: ${mintTxHash}`);
+        const mintResult = await mintCharacterWithIdentity(wallet.address, nftMetadata);
+        mintTxHash = mintResult.txHash;
+        if (mintResult.tokenId != null) {
+          entity.characterTokenId = mintResult.tokenId;
+        }
+        if (mintResult.identity?.agentId != null) {
+          entity.agentId = mintResult.identity.agentId;
+        }
+        await saveCharacter(wallet.address, request.character.name, {
+          ...(mintResult.tokenId != null && { characterTokenId: mintResult.tokenId.toString() }),
+          ...(mintResult.identity?.agentId != null && { agentId: mintResult.identity.agentId.toString() }),
+        });
+        if (mintResult.identity?.agentId != null) {
+          reputationManager.ensureInitialized(mintResult.identity.agentId);
+          const validUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+          void publishValidationClaim(mintResult.identity.agentId, "wog:a2a-enabled", validUntil);
+          void publishValidationClaim(mintResult.identity.agentId, "wog:x402-enabled", validUntil);
+        }
+        console.log(
+          `[x402] ${deploymentId}: NFT minted: ${mintTxHash}${mintResult.identity?.agentId != null ? ` agentId=${mintResult.identity.agentId}` : ""}`
+        );
       } catch (err) {
         console.error(`[x402] ${deploymentId}: NFT mint failed (non-fatal):`, err instanceof Error ? err.message : err);
       }

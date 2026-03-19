@@ -367,9 +367,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               lastProgressTickRef.current = now;
               trackAgentProgressTick({
                 walletAddress,
-                focus: data.config?.focus,
+                focus: data.config?.focus ?? undefined,
                 level: data.entity.level,
-                zoneId: data.zoneId,
+                zoneId: data.zoneId ?? undefined,
               });
             }
           }

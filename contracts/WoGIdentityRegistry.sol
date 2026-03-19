@@ -1,91 +1,71 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
 /**
  * @title WoGIdentityRegistry
- * @notice ERC-8004 compliant Identity Registry for WoG MMORPG characters
- * @dev Each character gets a unique on-chain identity token when minted
+ * @notice ERC-8004-style identity registry used by WoG agents and characters
+ * @dev Exposes the runtime-facing ABI currently used by the shard, while
+ *      keeping WoG-specific helpers for direct character registration.
  */
-contract WoGIdentityRegistry is ERC721, Ownable {
-    using Counters for Counters.Counter;
-
-    Counters.Counter private _identityIds;
-
-    // ============ Structs ============
-
+contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
     struct Identity {
         uint256 characterTokenId;
         address characterOwner;
         string metadataURI;
-        string agentEndpoint;   // A2A service endpoint URL (ERC-8004)
+        string agentURI;
         uint256 createdAt;
         bool active;
     }
 
-    // ============ State ============
+    uint256 private _nextAgentId = 1;
 
-    // identityId => Identity
     mapping(uint256 => Identity) public identities;
-
-    // characterTokenId => identityId
     mapping(uint256 => uint256) public characterToIdentity;
+    mapping(uint256 => mapping(string => bytes)) private _metadata;
 
-    // owner address => identityIds[]
-    mapping(address => uint256[]) public ownerIdentities;
-
-    // Authorized contracts that can mint identities
     mapping(address => bool) public authorizedMinters;
 
-    // ============ Events ============
-
+    event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
     event IdentityCreated(
         uint256 indexed identityId,
         uint256 indexed characterTokenId,
         address indexed owner,
         string metadataURI
     );
-
-    event IdentityUpdated(
-        uint256 indexed identityId,
-        string newMetadataURI
-    );
-
-    event AgentEndpointUpdated(
-        uint256 indexed identityId,
-        string endpoint
-    );
-
+    event IdentityUpdated(uint256 indexed identityId, string newMetadataURI);
+    event AgentEndpointUpdated(uint256 indexed identityId, string endpoint);
+    event AgentWalletUpdated(uint256 indexed identityId, address indexed newWallet);
+    event MetadataUpdated(uint256 indexed identityId, string indexed metadataKey, bytes metadataValue);
     event IdentityDeactivated(uint256 indexed identityId);
-
     event MinterAuthorized(address indexed minter);
     event MinterRevoked(address indexed minter);
-
-    // ============ Errors ============
 
     error IdentityAlreadyExists();
     error IdentityNotFound();
     error Unauthorized();
     error IdentityInactive();
-
-    // ============ Constructor ============
+    error InvalidAgentId();
+    error InvalidWallet();
+    error SignatureExpired();
 
     constructor() ERC721("WoG Character Identity", "WOGID") {
-        // Owner is authorized by default
         authorizedMinters[msg.sender] = true;
     }
 
-    // ============ Core Functions ============
+    /**
+     * @notice Runtime-facing ERC-8004 registration path.
+     * @dev Mints the new agent identity to msg.sender and sets its discoverable URI.
+     */
+    function register(string memory agentURI) external returns (uint256 agentId) {
+        agentId = _mintIdentity(msg.sender, 0, msg.sender, "", agentURI, false);
+        emit Registered(agentId, agentURI, msg.sender);
+    }
 
     /**
-     * @notice Create a new identity for a character
-     * @param characterTokenId The character NFT token ID
-     * @param characterOwner Owner of the character
-     * @param metadataURI URI pointing to identity metadata
-     * @return identityId The new identity token ID
+     * @notice WoG helper path for registering a character-bound identity.
      */
     function createIdentity(
         uint256 characterTokenId,
@@ -96,201 +76,256 @@ contract WoGIdentityRegistry is ERC721, Ownable {
     }
 
     /**
-     * @notice Create a new identity with an A2A service endpoint
-     * @param characterTokenId The character NFT token ID
-     * @param characterOwner Owner of the character
-     * @param metadataURI URI pointing to identity metadata
-     * @param agentEndpoint A2A service endpoint URL
-     * @return identityId The new identity token ID
+     * @notice WoG helper path for registering a character-bound identity with endpoint.
      */
     function createIdentityWithEndpoint(
         uint256 characterTokenId,
         address characterOwner,
         string memory metadataURI,
         string memory agentEndpoint
-    ) public returns (uint256) {
+    ) public returns (uint256 identityId) {
         if (!authorizedMinters[msg.sender]) revert Unauthorized();
         if (characterToIdentity[characterTokenId] != 0) revert IdentityAlreadyExists();
 
-        _identityIds.increment();
-        uint256 identityId = _identityIds.current();
+        identityId = _mintIdentity(
+            characterOwner,
+            characterTokenId,
+            characterOwner,
+            metadataURI,
+            agentEndpoint,
+            true
+        );
 
-        identities[identityId] = Identity({
-            characterTokenId: characterTokenId,
-            characterOwner: characterOwner,
-            metadataURI: metadataURI,
-            agentEndpoint: agentEndpoint,
-            createdAt: block.timestamp,
-            active: true
-        });
-
-        characterToIdentity[characterTokenId] = identityId;
-        ownerIdentities[characterOwner].push(identityId);
-
-        // Mint ERC-721 identity token
-        _mint(characterOwner, identityId);
-
-        emit IdentityCreated(identityId, characterTokenId, characterOwner, metadataURI);
-        if (bytes(agentEndpoint).length > 0) {
-            emit AgentEndpointUpdated(identityId, agentEndpoint);
-        }
-
-        return identityId;
+        emit Registered(identityId, agentEndpoint, characterOwner);
     }
 
-    /**
-     * @notice Update identity metadata URI
-     * @param identityId Identity to update
-     * @param newMetadataURI New metadata URI
-     */
-    function updateIdentity(
-        uint256 identityId,
-        string memory newMetadataURI
-    ) external {
-        Identity storage identity = identities[identityId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-        if (ownerOf(identityId) != msg.sender && !authorizedMinters[msg.sender]) {
+    function updateIdentity(uint256 identityId, string memory newMetadataURI) external {
+        Identity storage identity = _requireIdentity(identityId);
+        if (!_isAuthorizedOrOwner(msg.sender, identityId) && !authorizedMinters[msg.sender]) {
             revert Unauthorized();
         }
 
         identity.metadataURI = newMetadataURI;
-
         emit IdentityUpdated(identityId, newMetadataURI);
     }
 
-    /**
-     * @notice Deactivate an identity (character deleted/burned)
-     * @param identityId Identity to deactivate
-     */
     function deactivateIdentity(uint256 identityId) external {
         if (!authorizedMinters[msg.sender]) revert Unauthorized();
 
-        Identity storage identity = identities[identityId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-
+        Identity storage identity = _requireIdentity(identityId);
         identity.active = false;
-
         emit IdentityDeactivated(identityId);
     }
 
-    /**
-     * @notice Set or update the A2A service endpoint for an identity
-     * @param identityId Identity to update
-     * @param endpoint A2A endpoint URL (e.g. https://host/a2a/0x...)
-     */
     function setAgentEndpoint(uint256 identityId, string memory endpoint) external {
-        Identity storage identity = identities[identityId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-        if (ownerOf(identityId) != msg.sender && !authorizedMinters[msg.sender]) {
+        setAgentURI(identityId, endpoint);
+    }
+
+    function getAgentEndpoint(uint256 identityId) external view returns (string memory) {
+        return tokenURI(identityId);
+    }
+
+    function setAgentURI(uint256 agentId, string memory newURI) public {
+        Identity storage identity = _requireIdentity(agentId);
+        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
             revert Unauthorized();
         }
         if (!identity.active) revert IdentityInactive();
 
-        identity.agentEndpoint = endpoint;
-        emit AgentEndpointUpdated(identityId, endpoint);
+        identity.agentURI = newURI;
+        emit AgentEndpointUpdated(agentId, newURI);
     }
 
     /**
-     * @notice Get the A2A service endpoint for an identity
-     * @param identityId Identity to query
-     * @return endpoint The A2A endpoint URL
+     * @notice Compatibility surface expected by the shard runtime.
+     * @dev Signature is currently trusted by authorization rather than verified cryptographically.
      */
-    function getAgentEndpoint(uint256 identityId) external view returns (string memory) {
-        Identity memory identity = identities[identityId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-        return identity.agentEndpoint;
+    function setAgentWallet(
+        uint256 agentId,
+        address newWallet,
+        uint256 deadline,
+        bytes calldata
+    ) external {
+        if (deadline < block.timestamp) revert SignatureExpired();
+        if (newWallet == address(0)) revert InvalidWallet();
+        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
+            revert Unauthorized();
+        }
+
+        address currentOwner = ownerOf(agentId);
+        _transfer(currentOwner, newWallet, agentId);
     }
 
-    /**
-     * @notice Get identity by character token ID
-     * @param characterTokenId The character NFT token ID
-     * @return identity The identity struct
-     */
-    function getIdentityByCharacter(uint256 characterTokenId)
-        external
-        view
-        returns (Identity memory)
-    {
+    function setMetadata(
+        uint256 agentId,
+        string memory metadataKey,
+        bytes memory metadataValue
+    ) external {
+        Identity storage identity = _requireIdentity(agentId);
+        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
+            revert Unauthorized();
+        }
+        if (!identity.active) revert IdentityInactive();
+
+        _metadata[agentId][metadataKey] = metadataValue;
+
+        if (_equals(metadataKey, "characterTokenId")) {
+            uint256 nextCharacterTokenId = abi.decode(metadataValue, (uint256));
+            uint256 previousCharacterTokenId = identity.characterTokenId;
+            uint256 boundIdentityId = characterToIdentity[nextCharacterTokenId];
+            if (boundIdentityId != 0 && boundIdentityId != agentId) {
+                revert IdentityAlreadyExists();
+            }
+            if (
+                previousCharacterTokenId != 0 &&
+                previousCharacterTokenId != nextCharacterTokenId &&
+                characterToIdentity[previousCharacterTokenId] == agentId
+            ) {
+                delete characterToIdentity[previousCharacterTokenId];
+            }
+            identity.characterTokenId = nextCharacterTokenId;
+            if (nextCharacterTokenId != 0) {
+                characterToIdentity[nextCharacterTokenId] = agentId;
+            }
+        } else if (_equals(metadataKey, "metadataURI")) {
+            identity.metadataURI = abi.decode(metadataValue, (string));
+            emit IdentityUpdated(agentId, identity.metadataURI);
+        }
+
+        emit MetadataUpdated(agentId, metadataKey, metadataValue);
+    }
+
+    function getMetadata(
+        uint256 agentId,
+        string memory metadataKey
+    ) external view returns (bytes memory) {
+        _requireExistingAgent(agentId);
+        return _metadata[agentId][metadataKey];
+    }
+
+    function getAgentWallet(uint256 agentId) external view returns (address) {
+        return ownerOf(agentId);
+    }
+
+    function getIdentityByCharacter(uint256 characterTokenId) external view returns (Identity memory) {
         uint256 identityId = characterToIdentity[characterTokenId];
         if (identityId == 0) revert IdentityNotFound();
         return identities[identityId];
     }
 
-    /**
-     * @notice Get all identities for an owner
-     * @param owner Address to query
-     * @return Array of identity IDs
-     */
-    function getOwnerIdentities(address owner)
-        external
-        view
-        returns (uint256[] memory)
-    {
-        return ownerIdentities[owner];
+    function getOwnerIdentities(address owner) external view returns (uint256[] memory) {
+        return getAgentsByOwner(owner);
     }
 
-    /**
-     * @notice Check if identity is active
-     * @param identityId Identity to check
-     * @return bool Active status
-     */
+    function getAgentsByOwner(address owner) public view returns (uint256[] memory identityIds) {
+        uint256 count = balanceOf(owner);
+        identityIds = new uint256[](count);
+        for (uint256 i = 0; i < count; i++) {
+            identityIds[i] = tokenOfOwnerByIndex(owner, i);
+        }
+    }
+
     function isActive(uint256 identityId) external view returns (bool) {
         return identities[identityId].active;
     }
 
-    // ============ Admin Functions ============
+    function isAuthorizedOrOwner(address spender, uint256 agentId) external view returns (bool) {
+        return _isAuthorizedOrOwner(spender, agentId);
+    }
 
-    /**
-     * @notice Authorize a contract to mint identities
-     * @param minter Address to authorize
-     */
+    function tokenURI(uint256 tokenId) public view override returns (string memory) {
+        _requireExistingAgent(tokenId);
+        return identities[tokenId].agentURI;
+    }
+
     function authorizeMinter(address minter) external onlyOwner {
         authorizedMinters[minter] = true;
         emit MinterAuthorized(minter);
     }
 
-    /**
-     * @notice Revoke minting authorization
-     * @param minter Address to revoke
-     */
     function revokeMinter(address minter) external onlyOwner {
         authorizedMinters[minter] = false;
         emit MinterRevoked(minter);
     }
 
-    // ============ ERC-721 Overrides ============
+    function _mintIdentity(
+        address mintTo,
+        uint256 characterTokenId,
+        address characterOwner,
+        string memory metadataURI,
+        string memory agentURI,
+        bool linkCharacter
+    ) internal returns (uint256 agentId) {
+        if (mintTo == address(0) || characterOwner == address(0)) revert InvalidWallet();
+        if (linkCharacter && characterTokenId != 0 && characterToIdentity[characterTokenId] != 0) {
+            revert IdentityAlreadyExists();
+        }
 
-    /**
-     * @notice Get token URI (ERC-8004 metadata)
-     * @param tokenId Identity token ID
-     * @return string Metadata URI
-     */
-    function tokenURI(uint256 tokenId)
-        public
-        view
-        override
-        returns (string memory)
-    {
-        Identity memory identity = identities[tokenId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-        return identity.metadataURI;
+        agentId = _nextAgentId++;
+
+        identities[agentId] = Identity({
+            characterTokenId: characterTokenId,
+            characterOwner: characterOwner,
+            metadataURI: metadataURI,
+            agentURI: agentURI,
+            createdAt: block.timestamp,
+            active: true
+        });
+
+        if (linkCharacter && characterTokenId != 0) {
+            characterToIdentity[characterTokenId] = agentId;
+            _metadata[agentId]["characterTokenId"] = abi.encode(characterTokenId);
+        }
+
+        if (bytes(metadataURI).length > 0) {
+            _metadata[agentId]["metadataURI"] = abi.encode(metadataURI);
+        }
+
+        _safeMint(mintTo, agentId);
+
+        emit IdentityCreated(agentId, characterTokenId, characterOwner, metadataURI);
+        if (bytes(agentURI).length > 0) {
+            emit AgentEndpointUpdated(agentId, agentURI);
+        }
     }
 
-    /**
-     * @notice Prevent transfers (soul-bound to character)
-     * @dev Identities are tied to characters, not transferable
-     */
+    function _requireIdentity(uint256 identityId) internal view returns (Identity storage identity) {
+        identity = identities[identityId];
+        if (identity.createdAt == 0) revert IdentityNotFound();
+    }
+
+    function _requireExistingAgent(uint256 agentId) internal view {
+        if (!_exists(agentId)) revert InvalidAgentId();
+    }
+
+    function _isAuthorizedOrOwner(address spender, uint256 agentId) internal view returns (bool) {
+        if (!_exists(agentId)) return false;
+        return _isApprovedOrOwner(spender, agentId);
+    }
+
     function _beforeTokenTransfer(
         address from,
         address to,
-        uint256 tokenId,
+        uint256 firstTokenId,
         uint256 batchSize
-    ) internal virtual override {
-        // Allow minting (from == address(0))
-        // Block all other transfers
-        if (from != address(0)) {
-            revert("WoGIdentity: Identity tokens are soul-bound");
+    ) internal override(ERC721Enumerable) {
+        super._beforeTokenTransfer(from, to, firstTokenId, batchSize);
+        if (from != address(0) && to != address(0) && batchSize == 1) {
+            identities[firstTokenId].characterOwner = to;
+            emit AgentWalletUpdated(firstTokenId, to);
         }
-        super._beforeTokenTransfer(from, to, tokenId, batchSize);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721Enumerable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function _equals(string memory a, string memory b) internal pure returns (bool) {
+        return keccak256(bytes(a)) == keccak256(bytes(b));
     }
 }

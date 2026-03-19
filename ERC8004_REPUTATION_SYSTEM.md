@@ -13,7 +13,7 @@ The WoG MMORPG implements **ERC-8004: Trustless Agents** standard to provide on-
 
 ### 📋 What is ERC-8004?
 
-[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is an Ethereum standard (live on mainnet since **January 29, 2026**) that gives AI software agents and characters persistent on-chain identities through three core registries:
+[ERC-8004](https://eips.ethereum.org/EIPS/eip-8004) is an Ethereum agent trust standard that gives AI software agents and characters persistent on-chain identities through three core registries:
 
 1. **Identity Registry** - ERC-721-style tokens for unique on-chain identifiers
 2. **Reputation Registry** - Structured feedback and performance scoring
@@ -35,9 +35,10 @@ contracts/
 
 ```
 shard/src/
-├── reputationManager.ts          # Core reputation logic
-├── reputationRoutes.ts           # API endpoints
-└── pvpReputationIntegration.ts   # PvP battle integration
+├── economy/reputationManager.ts  # Core reputation logic
+├── economy/reputationRoutes.ts   # API endpoints
+├── combat/pvpReputationIntegration.ts
+└── erc8004/                      # Identity, reputation, validation adapters
 ```
 
 #### Frontend Components
@@ -56,22 +57,16 @@ client/src/components/
 When a player mints a character NFT, the system automatically:
 
 ```typescript
-// Create ERC-8004 identity
-const identityId = await createCharacterIdentity(
-  characterTokenId,
+const mintResult = await mintCharacterWithIdentity(
   playerWallet,
-  {
-    name: "Sir Lancelot",
-    class: "Warrior",
-    level: 1
-  }
+  "Sir Lancelot",
+  { class: "Warrior", level: 1 }
 );
 
-// Initialize reputation (all categories start at 500)
-await initializeReputation(identityId);
+await reputationManager.ensureInitialized(mintResult.identity.agentId);
 ```
 
-**Result**: Character gets a soul-bound identity token with default 500 reputation.
+**Result**: Character gets a real `agentId` and default 500 reputation.
 
 ---
 
@@ -116,7 +111,7 @@ The system **automatically** updates reputation for:
 ```typescript
 // After battle completes
 await updateCombatReputation(
-  characterTokenId,
+  agentId,
   won: true,
   performanceScore: 85  // Based on ELO change, MVP status
 );
@@ -127,7 +122,7 @@ await updateCombatReputation(
 ```typescript
 // If player is MVP
 await submitFeedback(
-  characterTokenId,
+  agentId,
   ReputationCategory.Combat,
   +25,
   "Awarded MVP in PvP battle"
@@ -138,7 +133,7 @@ await submitFeedback(
 ```typescript
 // When trade completes
 await updateEconomicReputation(
-  characterTokenId,
+  agentId,
   tradeCompleted: true,
   fairPrice: true
 );
@@ -154,7 +149,7 @@ Players can report good/bad behavior:
 ```typescript
 // Report honorable opponent
 await reportBehavior(
-  opponentTokenId,
+  opponentAgentId,
   honorable: true,
   "Didn't exploit bug, played fair"
 );
@@ -162,7 +157,7 @@ await reportBehavior(
 
 // Report scammer
 await reportBehavior(
-  scammerTokenId,
+  scammerAgentId,
   honorable: false,
   "Took items and didn't pay"
 );
@@ -176,7 +171,7 @@ await reportBehavior(
 #### Get Reputation
 
 ```bash
-GET /api/reputation/:characterTokenId
+GET /api/agents/:agentId/reputation
 ```
 
 **Response**:
@@ -198,27 +193,50 @@ GET /api/reputation/:characterTokenId
 #### Get Identity
 
 ```bash
-GET /api/reputation/:characterTokenId/identity
+GET /api/agents/:agentId/identity
 ```
 
 **Response**:
 ```json
 {
   "identity": {
-    "identityId": "42",
+    "agentId": "42",
     "characterTokenId": "1234",
-    "characterOwner": "0x...",
-    "metadataURI": "data:application/json;base64,...",
-    "createdAt": 1704100000,
-    "active": true
+    "ownerWallet": "0x...",
+    "endpoint": "https://...",
+    "name": "Sir Lancelot",
+    "classId": "warrior",
+    "raceId": "human",
+    "level": 23,
+    "zone": "dark-forest",
+    "onChainRegistered": true
   }
+}
+```
+
+#### Get Validations
+
+```bash
+GET /api/agents/:agentId/validations
+```
+
+**Response**:
+```json
+{
+  "validations": [
+    {
+      "verifier": "0x...",
+      "claim": "wog:a2a-enabled",
+      "validUntil": 1767225600
+    }
+  ]
 }
 ```
 
 #### Get Feedback History
 
 ```bash
-GET /api/reputation/:characterTokenId/history?limit=10
+GET /api/agents/:agentId/reputation/history?limit=10
 ```
 
 **Response**:
@@ -243,36 +261,103 @@ GET /api/reputation/:characterTokenId/history?limit=10
 }
 ```
 
-#### Create Identity (System Only)
+---
 
-```bash
-POST /api/reputation/create-identity
-```
+### ⛓️ Blockchain Call Behavior
 
-**Request**:
-```json
-{
-  "characterTokenId": "1234",
-  "characterOwner": "0x...",
-  "characterName": "Sir Lancelot",
-  "characterClass": "Warrior",
-  "level": 1
-}
-```
+Not every blockchain interaction in WoG is treated the same way.
+
+There are two runtime modes:
+
+- **Blocking / authoritative**
+  - The request or gameplay action depends on the contract call succeeding.
+  - If the chain transaction fails, the action fails.
+
+- **Best-effort / fire-and-forget**
+  - The game proceeds locally first.
+  - Chain sync is attempted in the background.
+  - If the chain write fails, gameplay continues and the system retries or degrades gracefully.
+
+#### Blocking / authoritative calls
+
+These are part of core asset or economy state and are not optional:
+
+| System | Behavior on failure |
+|--------|---------------------|
+| Character NFT mint | Character mint step fails |
+| GOLD mint / transfer | Economy action fails |
+| Item mint / burn | Auction/trade/item action fails |
+| Auction create / bid / buyout / cancel / settle | Auction action fails |
+| Trade contract actions | Trade action fails |
+| Guild / guild vault writes | Guild action fails |
+| Prediction market writes | Bet/settlement action fails |
+
+#### Best-effort / fire-and-forget calls
+
+These are part of trust sync, metadata sync, or auxiliary chain state:
+
+| System | Behavior on failure |
+|--------|---------------------|
+| ERC-8004 identity bootstrap during onboarding | Character can still exist in app state; `agentId` may be missing until recovered |
+| ERC-8004 reputation initialization | Local reputation still works; chain init retries automatically |
+| ERC-8004 reputation writes | Local score updates immediately; failed chain batches are re-queued |
+| ERC-8004 validation claim publishing | Claim may be missing on-chain; gameplay continues |
+| A2A endpoint update | Endpoint update may be missing on-chain; agent still exists locally |
+| `.wog` name auto-registration | Character still works; name may be missing |
+| Plot / land ownership sync | Local plot state continues; chain proof may lag |
+| x402 deployment extras like starter gold, sFUEL, validation publishing | Deployment can still succeed; extras may be missing |
+
+#### Practical rule
+
+- **Assets, ownership, auctions, trades, tokens, vaults**: mostly blocking
+- **Trust layer, metadata, validations, onboarding extras**: mostly best-effort
+
+This is intentional:
+
+- gameplay should stay responsive if ERC-8004 sync is temporarily degraded
+- but economic and ownership-critical state should not pretend success when chain writes fail
+
+#### Current ERC-8004 recovery behavior
+
+For reputation specifically:
+
+- local reputation is initialized immediately in memory
+- on-chain `initializeReputation(agentId)` is attempted in the background
+- if it fails, the system now retries automatically with backoff
+- later reputation writes can also trigger recovery
+- failed batch writes are re-queued instead of being dropped
+
+So the trust layer is **local-first with chain recovery**, not chain-blocking.
 
 #### Submit Feedback (Admin Only)
 
 ```bash
-POST /api/reputation/feedback
+POST /api/agents/:agentId/reputation/feedback
 ```
 
 **Request**:
 ```json
 {
-  "characterTokenId": "1234",
   "category": "combat",
   "delta": 10,
   "reason": "Helped defend village from raid"
+}
+```
+
+#### Batch Update Reputation (Admin Only)
+
+```bash
+POST /api/agents/:agentId/reputation/batch-update
+```
+
+**Request**:
+```json
+{
+  "deltas": {
+    "combat": 10,
+    "social": 5
+  },
+  "reason": "Major faction event reward"
 }
 ```
 
@@ -285,7 +370,7 @@ POST /api/reputation/feedback
 ```tsx
 import { ReputationPanel } from "./components/ReputationPanel";
 
-<ReputationPanel characterTokenId="1234" />
+<ReputationPanel agentId="1234" />
 ```
 
 **Displays**:
@@ -392,7 +477,7 @@ curl http://localhost:3000/api/reputation/ranks
 ```typescript
 // Prove achievement without revealing strategy
 const proof = await generateZkMLProof(battleLog);
-await submitValidation(identityId, proof);
+await submitValidation(agentId, proof);
 // Result: +50 Combat Reputation (verified achievement)
 ```
 
@@ -401,7 +486,7 @@ await submitValidation(identityId, proof);
 // Verify trade fairness via Trusted Execution Environment
 const teeProof = await verifyTradePrice(itemId, price);
 if (teeProof.fair) {
-  await submitFeedback(identityId, ReputationCategory.Economic, +10, "TEE verified fair trade");
+  await submitFeedback(agentId, ReputationCategory.Economic, +10, "TEE verified fair trade");
 }
 ```
 
@@ -409,7 +494,7 @@ if (teeProof.fair) {
 ```typescript
 // Community validates claims
 await requestValidation({
-  identityId,
+  agentId,
   claim: "First to solo Gold Dragon",
   requiredStake: 100 // GOLD
 });
@@ -422,7 +507,7 @@ await validateClaim(claimId, isValid: true, stake: 100);
 
 ```typescript
 // Export reputation to other ERC-8004 compatible games
-const portableRep = await exportReputation(identityId);
+const portableRep = await exportReputation(agentId);
 
 // Import to new game
 await otherGame.importReputation(portableRep);
@@ -522,7 +607,7 @@ A: Check that:
 A: Character identity must be created during minting:
 ```typescript
 // In character minting flow
-await reputationManager.createCharacterIdentity(...);
+await mintCharacterWithIdentity(...);
 ```
 
 **Q: Transactions failing with "Unauthorized"**

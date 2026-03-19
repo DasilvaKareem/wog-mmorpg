@@ -784,10 +784,15 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!entity.walletAddress) return;
+    if (!entity.agentId) {
+      setRep(null);
+      setLoading(false);
+      setError(entity.walletAddress ? "Identity registration pending" : "NPCs don't have reputation");
+      return;
+    }
     setLoading(true);
     setError(null);
-    fetch(`${API_URL}/api/reputation/${entity.walletAddress}`)
+    fetch(`${API_URL}/api/agents/${entity.agentId}/reputation`)
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
         return res.json();
@@ -795,10 +800,10 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
       .then((data) => setRep(data.reputation))
       .catch(() => setError("No reputation data"))
       .finally(() => setLoading(false));
-  }, [entity.walletAddress]);
+  }, [entity.agentId]);
 
-  if (!entity.walletAddress) {
-    return <div className="text-[11px]" style={{ color: DIM }}>NPCs don't have reputation</div>;
+  if (!entity.agentId) {
+    return <div className="text-[11px]" style={{ color: DIM }}>{error ?? "Identity registration pending"}</div>;
   }
   if (loading) {
     return <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>;

@@ -3590,7 +3590,9 @@ export async function awardQuestRewards(
       copperReward: quest.rewards.copper,
       goldReward: quest.rewards.copper, // legacy field for older clients
     });
-    reputationManager.submitFeedback(player.walletAddress, ReputationCategory.Social, 5, `Completed quest: ${quest.title}`);
+    if (player.agentId != null) {
+      reputationManager.submitFeedback(player.agentId, ReputationCategory.Social, 5, `Completed quest: ${quest.title}`);
+    }
   }
 
   console.log(

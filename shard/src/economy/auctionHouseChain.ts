@@ -43,6 +43,7 @@ export interface AuctionData {
   buyoutPrice: number;
   endTime: number;
   highBidder: string;
+  highBidderAgentId?: string | null;
   highBid: number;
   status: number; // 0 = Active, 1 = Ended, 2 = Cancelled
   extensionCount: number;
@@ -105,6 +106,7 @@ export async function createAuctionOnChain(
             buyoutPrice,
             endTime: Number(parsed.args.endTime),
             highBidder: ethers.ZeroAddress,
+            highBidderAgentId: null,
             highBid: 0,
             status: 0, // Active
             extensionCount: 0,
@@ -127,7 +129,8 @@ export async function createAuctionOnChain(
 export async function placeBidOnChain(
   auctionId: number,
   bidder: string,
-  bidAmount: number
+  bidAmount: number,
+  bidderAgentId?: string | null
 ): Promise<{ txHash: string; previousBidder: string; previousBid: number }> {
   return traceTx("auction-bid", "placeBidOnChain", { auctionId, bidder, bidAmount }, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
@@ -148,6 +151,7 @@ export async function placeBidOnChain(
           const cached = auctionCache.get(auctionId);
           if (cached) {
             cached.highBidder = bidder;
+            cached.highBidderAgentId = bidderAgentId ?? null;
             cached.highBid = bidAmount;
             cached.endTime = Number(parsed.args.newEndTime);
             if (parsed.args.extended) cached.extensionCount++;
@@ -327,6 +331,7 @@ export async function rebuildAuctionCache(): Promise<void> {
         buyoutPrice: parseFloat(ethers.formatUnits(parsed.args.buyoutPrice, 18)),
         endTime: Number(parsed.args.endTime),
         highBidder: ethers.ZeroAddress,
+        highBidderAgentId: null,
         highBid: 0,
         status: 0, // Assume active; updated below
         extensionCount: 0,

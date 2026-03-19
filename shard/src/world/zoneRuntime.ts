@@ -112,6 +112,8 @@ export interface Entity {
   xpReward?: number;
   /** ERC-721 token ID (players only). */
   characterTokenId?: bigint;
+  /** ERC-8004 agent identity ID (players/agents only). */
+  agentId?: bigint;
   /** Race identifier for stat recalc on level-up. */
   raceId?: string;
   /** Class identifier for stat recalc on level-up. */
@@ -203,6 +205,9 @@ function toSerializableEntity(entity: Entity): Record<string, unknown> {
     ...(guildName && { guildName }),
     ...(entity.characterTokenId != null && {
       characterTokenId: entity.characterTokenId.toString(),
+    }),
+    ...(entity.agentId != null && {
+      agentId: entity.agentId.toString(),
     }),
     ...(entity.cooldowns && {
       cooldowns: Object.fromEntries(entity.cooldowns),

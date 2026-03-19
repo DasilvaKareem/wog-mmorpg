@@ -8,7 +8,7 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { getA2AEndpoint, getAgentWallet } from "../blockchain/blockchain.js";
+import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 
@@ -191,8 +191,8 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Invalid agentId — must be a number" });
     }
 
-    const endpoint = await getA2AEndpoint(id);
-    const wallet = await getAgentWallet(id);
+    const endpoint = await getAgentEndpoint(id);
+    const wallet = await getAgentOwnerWallet(id);
 
     if (!endpoint && !wallet) {
       return reply.status(404).send({ error: "Agent identity not found" });
