@@ -646,6 +646,9 @@ export function RealMoneyMarketPage(): React.ReactElement {
 
 function UsdcWalletBalance({ address }: { address: string }): React.ReactElement {
   const [bal, setBal] = React.useState<string | null>(null);
+  const [showFund, setShowFund] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+
   React.useEffect(() => {
     const usdcContract = import.meta.env.VITE_MPP_CURRENCY_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
     const rpcUrl = import.meta.env.VITE_MPP_RPC_URL || "https://sepolia.base.org";
@@ -655,12 +658,111 @@ function UsdcWalletBalance({ address }: { address: string }): React.ReactElement
       .then((res) => { setBal(res.result && res.result !== "0x" ? (Number(BigInt(res.result)) / 1e6).toFixed(2) : "0.00"); })
       .catch(() => setBal(null));
   }, [address]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(address).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  const handleAddTempoNetwork = () => {
+    const w = window as any;
+    if (!w.ethereum) return;
+    w.ethereum.request({
+      method: "wallet_addEthereumChain",
+      params: [{
+        chainId: "0x1079", // 4217
+        chainName: "Tempo Mainnet",
+        nativeCurrency: { name: "USD", symbol: "USD", decimals: 18 },
+        rpcUrls: ["https://rpc.tempo.xyz"],
+        blockExplorerUrls: ["https://explore.tempo.xyz"],
+      }],
+    }).catch(() => {});
+  };
+
   if (bal === null) return <></>;
+
   return (
-    <div className="border-2 border-[#54f28b] bg-[#0a1a0d] px-3 py-1 shadow-[2px_2px_0_0_#000]">
-      <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Wallet </span>
-      <span className="text-[10px] font-bold text-[#54f28b]">${bal}</span>
-      <span className="text-[8px] text-[#9aa7cc]"> USDC</span>
-    </div>
+    <>
+      <button
+        onClick={() => setShowFund(true)}
+        className="border-2 border-[#54f28b] bg-[#0a1a0d] px-3 py-1 shadow-[2px_2px_0_0_#000] transition hover:bg-[#1a2a1a] cursor-pointer"
+      >
+        <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Wallet </span>
+        <span className="text-[10px] font-bold text-[#54f28b]">${bal}</span>
+        <span className="text-[8px] text-[#9aa7cc]"> USDC</span>
+      </button>
+
+      {showFund && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button className="absolute inset-0 bg-black/70" onClick={() => setShowFund(false)} type="button" aria-label="Close" />
+          <div className="relative z-10 w-full max-w-md border-4 border-black bg-[#11182b] p-0 text-[#f1f5ff] shadow-[8px_8px_0_0_#000]">
+            <div className="border-b-2 border-[#29334d] bg-[#1a2340] p-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-[12px] uppercase tracking-wide text-[#54f28b]" style={{ textShadow: "2px 2px 0 #000" }}>
+                  Add Funds
+                </h2>
+                <button onClick={() => setShowFund(false)} className="border-2 border-[#6b7394] bg-[#1b2236] px-2 py-1 text-[8px] text-[#e8eeff] hover:bg-[#252d45]">X</button>
+              </div>
+            </div>
+
+            <div className="space-y-4 p-4">
+              {/* Current balance */}
+              <div className="border-2 border-[#54f28b] bg-[#0a1a0d] p-3 text-center">
+                <p className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Current Balance</p>
+                <p className="text-[16px] font-bold text-[#54f28b]" style={{ textShadow: "2px 2px 0 #000" }}>${bal} USDC</p>
+              </div>
+
+              {/* Your address */}
+              <div className="space-y-1">
+                <p className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Your Wallet Address</p>
+                <div className="flex items-center gap-1">
+                  <div className="flex-1 border-2 border-[#29334d] bg-[#0a0f1a] p-2 font-mono text-[8px] text-[#f1f5ff] break-all">
+                    {address}
+                  </div>
+                  <button onClick={handleCopy} className="border-2 border-[#29334d] bg-[#1a2340] px-2 py-2 text-[8px] text-[#9aa7cc] hover:bg-[#252d45]">
+                    {copied ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Instructions */}
+              <div className="space-y-2">
+                <p className="text-[9px] font-bold text-[#ffcc00]">How to add funds:</p>
+                <div className="space-y-1 text-[8px] text-[#9aa7cc]">
+                  <p>1. Open your Tempo wallet or any EVM wallet</p>
+                  <p>2. Add the Tempo network (button below)</p>
+                  <p>3. Send USDC to the address above</p>
+                  <p>4. Funds appear instantly for marketplace purchases</p>
+                </div>
+              </div>
+
+              {/* Actions */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleAddTempoNetwork}
+                  className="border-2 border-black bg-[#54f28b] p-2 text-[9px] font-bold text-black shadow-[2px_2px_0_0_#000] transition hover:bg-[#6fff9e]"
+                >
+                  Add Tempo Network
+                </button>
+                <a
+                  href="https://tempo.xyz"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="border-2 border-black bg-[#2b3656] p-2 text-center text-[9px] font-bold text-[#f1f5ff] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3a4870]"
+                >
+                  Get Tempo Wallet
+                </a>
+              </div>
+
+              <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-2 text-[7px] text-[#565f89]">
+                Tempo uses USDC for all payments. Your game wallet address works on both SKALE (for gameplay) and Tempo (for marketplace purchases).
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
