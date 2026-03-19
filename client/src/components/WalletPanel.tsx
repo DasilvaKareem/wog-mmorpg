@@ -176,34 +176,6 @@ export function WalletPanel(): React.ReactElement {
     fetch(`${API_URL}/agent/tier/${address}`).then(r => r.json()).then(d => setTier(d.tier ?? "free")).catch(() => setTier(null));
   }, [address]);
 
-  // USDC balance on Base (for Tempo/MPP payments)
-  const [usdcBalance, setUsdcBalance] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (!address) { setUsdcBalance(null); return; }
-    // Fetch USDC balance from Base chain (or Base Sepolia for testnet)
-    const usdcContract = import.meta.env.VITE_MPP_CURRENCY_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-    const rpcUrl = import.meta.env.VITE_MPP_RPC_URL || "https://sepolia.base.org";
-    // ERC-20 balanceOf(address) call
-    const data = "0x70a08231" + address.slice(2).padStart(64, "0");
-    fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: usdcContract, data }, "latest"] }),
-    })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.result && res.result !== "0x") {
-          const raw = BigInt(res.result);
-          // USDC has 6 decimals
-          const dollars = Number(raw) / 1e6;
-          setUsdcBalance(dollars.toFixed(2));
-        } else {
-          setUsdcBalance("0.00");
-        }
-      })
-      .catch(() => setUsdcBalance(null));
-  }, [address]);
-
   // Don't render the panel at all when not connected — the Navbar handles sign-in
   if (!isConnected) return <></>;
 
@@ -251,14 +223,6 @@ export function WalletPanel(): React.ReactElement {
             )}
           </div>
         </div>
-        {usdcBalance !== null && (
-          <div className="flex items-center justify-between">
-            <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">USDC</span>
-            <div className="bg-[#0a1a2a] border-2 border-[#5dadec] px-1.5 py-0.5 shadow-[2px_2px_0_0_#000]">
-              <span className="text-[9px] font-bold text-[#5dadec]">${usdcBalance}</span>
-            </div>
-          </div>
-        )}
         {tier && (
           <div className="flex items-center justify-between">
             <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Plan</span>

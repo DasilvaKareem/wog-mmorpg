@@ -221,29 +221,6 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   // Detail view
   const [selectedListing, setSelectedListing] = React.useState<MarketListing | null>(null);
 
-  // USDC balance
-  const [usdcDisplay, setUsdcDisplay] = React.useState<string | null>(null);
-  React.useEffect(() => {
-    if (!address) { setUsdcDisplay(null); return; }
-    const usdcContract = import.meta.env.VITE_MPP_CURRENCY_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-    const rpcUrl = import.meta.env.VITE_MPP_RPC_URL || "https://sepolia.base.org";
-    const data = "0x70a08231" + address.slice(2).padStart(64, "0");
-    fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: usdcContract, data }, "latest"] }),
-    })
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.result && res.result !== "0x") {
-          setUsdcDisplay((Number(BigInt(res.result)) / 1e6).toFixed(2));
-        } else {
-          setUsdcDisplay("0.00");
-        }
-      })
-      .catch(() => setUsdcDisplay(null));
-  }, [address]);
-
   // ── Data fetching ──
 
   const fetchListings = React.useCallback(async () => {
@@ -630,15 +607,8 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
           </p>
         </div>
         {isConnected && balance && (
-          <div className="ml-auto flex items-center gap-2">
-            <div className="border-2 border-[#29334d] bg-[#0a0f1a] px-3 py-1.5 text-[9px]">
-              <CurrencyDisplay amount={balance.gold} size="sm" />
-            </div>
-            {usdcDisplay !== null && (
-              <div className="border-2 border-[#5dadec] bg-[#0a1a2a] px-3 py-1.5 text-[9px]">
-                <span className="font-bold text-[#5dadec]">${usdcDisplay} USDC</span>
-              </div>
-            )}
+          <div className="ml-auto border-2 border-[#29334d] bg-[#0a0f1a] px-3 py-1.5 text-[9px]">
+            <CurrencyDisplay amount={balance.gold} size="sm" />
           </div>
         )}
       </div>
