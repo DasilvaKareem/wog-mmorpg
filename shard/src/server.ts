@@ -50,6 +50,9 @@ import { registerA2ARoutes } from "./agents/a2aRoutes.js";
 import { agentManager } from "./agents/agentManager.js";
 import { registerItemRngRoutes } from "./items/itemRng.js";
 import { registerMarketplaceRoutes } from "./economy/marketplace.js";
+import { registerDirectBuyRoutes } from "./marketplace/directBuyRoutes.js";
+import { registerMarketplaceAdminRoutes } from "./marketplace/adminRoutes.js";
+import { registerRentalRoutes } from "./marketplace/rentalRoutes.js";
 import { registerItemCatalogRoutes } from "./items/itemCatalogRoutes.js";
 import { registerReputationRoutes } from "./economy/reputationRoutes.js";
 import { registerNameServiceRoutes } from "./blockchain/nameServiceRoutes.js";
@@ -114,6 +117,8 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
   // Agent console messages should not get blocked by unrelated gameplay POSTs from the same IP.
   { key: "agent-post", methods: ["POST"], prefix: "/agent/", max: 180, windowMs: 60_000 },
   { key: "inbox-post", methods: ["POST"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
+  { key: "marketplace-direct", methods: ["POST"], prefix: "/marketplace/direct/", bucketByPath: true, max: 30, windowMs: 60_000 },
+  { key: "rentals", methods: ["POST"], prefix: "/rentals/", bucketByPath: true, max: 30, windowMs: 60_000 },
   // Keep generic gameplay writes separated by endpoint so equip/sell/chat do not starve each other.
   { key: "mutating", methods: ["POST", "PUT", "PATCH", "DELETE"], bucketByPath: true, max: 120, windowMs: 60_000 },
 ];
@@ -694,6 +699,9 @@ registerA2ARoutes(server);
 registerGoldPurchaseRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
+registerDirectBuyRoutes(server);
+registerRentalRoutes(server);
+registerMarketplaceAdminRoutes(server);
 registerItemCatalogRoutes(server);
 registerReputationRoutes(server);
 registerNameServiceRoutes(server);

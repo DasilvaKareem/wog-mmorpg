@@ -20,6 +20,7 @@ import {
 import { useToast } from "@/components/ui/toast";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
+import { getAuthToken } from "@/lib/agentAuth";
 
 // ── Types ──
 
@@ -52,6 +53,27 @@ interface MarketStats {
   totalVolume: string;
   uniqueSellers: number;
   uniqueBidders: number;
+}
+
+interface DirectListing {
+  listingId: string;
+  sellerWallet: string;
+  tokenId: number;
+  quantity: number;
+  instanceId?: string;
+  priceUsd: number;
+  priceGold?: number;
+  status: string;
+  createdAt: number;
+  expiresAt: number;
+  itemName?: string;
+  itemDescription?: string;
+  itemCategory?: string;
+  quality?: string | null;
+  bonusAffix?: string | null;
+  statBonuses?: Record<string, number>;
+  durability?: number | null;
+  maxDurability?: number | null;
 }
 
 interface OwnedItem {
@@ -94,7 +116,29 @@ const CATEGORY_ICONS: Record<string, string> = {
   all: "##",
 };
 
+const RARITY_COLORS: Record<string, string> = {
+  common: "#9aa7cc",
+  uncommon: "#54f28b",
+  rare: "#5dadec",
+  epic: "#b48efa",
+  legendary: "#ffcc00",
+};
+
 // ── Helpers ──
+
+function formatUsd(cents: number): string {
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+function formatTimeLeft(expiresAt: number): string {
+  const ms = expiresAt - Date.now();
+  if (ms <= 0) return "Expired";
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.floor((ms % 3_600_000) / 60_000);
+  if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 function formatTimeRemaining(endsAt: number): string {
   const seconds = Math.max(0, Math.floor(endsAt - Date.now() / 1000));
@@ -131,9 +175,27 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   const [stats, setStats] = React.useState<MarketStats | null>(null);
   const [loadingListings, setLoadingListings] = React.useState(false);
 
+  // ── USD Direct Market state ──
+  const [usdListings, setUsdListings] = React.useState<DirectListing[]>([]);
+  const [loadingUsd, setLoadingUsd] = React.useState(false);
+  const [usdProcessingId, setUsdProcessingId] = React.useState<string | null>(null);
+  const [usdCategory, setUsdCategory] = React.useState("all");
+  const [usdSearch, setUsdSearch] = React.useState("");
+
+  // USD sell form
+  const [usdSellTokenId, setUsdSellTokenId] = React.useState("");
+  const [usdSellQuantity, setUsdSellQuantity] = React.useState("1");
+  const [usdSellPrice, setUsdSellPrice] = React.useState("");
+  const [usdSelling, setUsdSelling] = React.useState(false);
+
   const sellerAddresses = React.useMemo(
-    () => [...listings, ...myListings, ...myBids].map((l) => l.seller),
-    [listings, myListings, myBids]
+    () => [
+      ...listings.map((l) => l.seller),
+      ...myListings.map((l) => l.seller),
+      ...myBids.map((l) => l.seller),
+      ...usdListings.map((l) => l.sellerWallet),
+    ],
+    [listings, myListings, myBids, usdListings]
   );
   const { dn } = useWogNames(sellerAddresses);
 
@@ -211,6 +273,106 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
     } catch {}
   }, []);
 
+  // ── USD Direct Market data fetching ──
+
+  const fetchUsdListings = React.useCallback(async () => {
+    setLoadingUsd(true);
+    try {
+      const params = new URLSearchParams();
+      if (usdCategory !== "all") params.set("category", usdCategory);
+      if (usdSearch) params.set("search", usdSearch);
+      params.set("sort", "newest");
+      const res = await fetch(`${API_URL}/marketplace/direct/listings?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setUsdListings(data.listings ?? []);
+      }
+    } catch {} finally {
+      setLoadingUsd(false);
+    }
+  }, [usdCategory, usdSearch]);
+
+  const handleUsdBuy = async (listing: DirectListing) => {
+    if (!address || !isConnected) return;
+    setUsdProcessingId(listing.listingId);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) { notify("Authentication failed", "error"); return; }
+      const res = await fetch(`${API_URL}/marketplace/direct/listings/${listing.listingId}/buy`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ wallet: address }),
+      });
+      if (res.status === 402) {
+        notify("Payment required — connect Tempo wallet", "error");
+        return;
+      }
+      if (res.ok) {
+        const data = await res.json();
+        if (data.status === "sold") notify("Purchase complete!", "success");
+        else notify("Purchase initiated", "success");
+        void fetchUsdListings();
+        void refreshBalance();
+      } else {
+        const err = await res.json();
+        notify(err.error || "Purchase failed", "error");
+      }
+    } catch { notify("Purchase failed", "error"); }
+    finally { setUsdProcessingId(null); }
+  };
+
+  const handleUsdSell = async () => {
+    if (!address || !usdSellTokenId || !usdSellPrice) return;
+    const priceUsdCents = Math.round(parseFloat(usdSellPrice) * 100);
+    if (priceUsdCents <= 0) { notify("Price must be > $0", "error"); return; }
+    setUsdSelling(true);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) { notify("Authentication failed", "error"); return; }
+      const res = await fetch(`${API_URL}/marketplace/direct/listings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          wallet: address,
+          tokenId: parseInt(usdSellTokenId),
+          quantity: parseInt(usdSellQuantity) || 1,
+          priceUsd: priceUsdCents,
+        }),
+      });
+      if (res.ok) {
+        notify("Listed for sale! Item escrowed.", "success");
+        setUsdSellTokenId(""); setUsdSellQuantity("1"); setUsdSellPrice("");
+        void fetchUsdListings();
+      } else {
+        const err = await res.json();
+        notify(err.error || "Listing failed", "error");
+      }
+    } catch { notify("Listing failed", "error"); }
+    finally { setUsdSelling(false); }
+  };
+
+  const handleUsdCancel = async (listingId: string) => {
+    if (!address) return;
+    setUsdProcessingId(listingId);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) { notify("Authentication failed", "error"); return; }
+      const res = await fetch(`${API_URL}/marketplace/direct/listings/${listingId}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ wallet: address }),
+      });
+      if (res.ok) {
+        notify("Listing cancelled, items returned", "success");
+        void fetchUsdListings();
+      } else {
+        const err = await res.json();
+        notify(err.error || "Cancel failed", "error");
+      }
+    } catch { notify("Cancel failed", "error"); }
+    finally { setUsdProcessingId(null); }
+  };
+
   // Fetch balance on mount so wallet header shows correctly
   React.useEffect(() => {
     if (address) void refreshBalance();
@@ -221,7 +383,8 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   React.useEffect(() => {
     void fetchListings();
     void fetchStats();
-  }, [fetchListings, fetchStats]);
+    void fetchUsdListings();
+  }, [fetchListings, fetchStats, fetchUsdListings]);
 
   React.useEffect(() => {
     if (address) {
@@ -234,13 +397,14 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   React.useEffect(() => {
     const interval = setInterval(() => {
       void fetchListings();
+      void fetchUsdListings();
       if (address) {
         void fetchMyListings();
         void fetchMyBids();
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [fetchListings, fetchMyListings, fetchMyBids, address]);
+  }, [fetchListings, fetchUsdListings, fetchMyListings, fetchMyBids, address]);
 
   // Timer tick
   const [, setTick] = React.useState(0);
@@ -387,9 +551,9 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
   // ── Owned items for sell tab ──
   const ownedItems: OwnedItem[] = balance?.items ?? [];
 
-  // Refresh balance when entering sell tab
+  // Refresh balance when entering sell or real-money tab
   React.useEffect(() => {
-    if (activeTab === "sell" && address) {
+    if ((activeTab === "sell" || activeTab === "real-money") && address) {
       void refreshBalance();
     }
   }, [activeTab, address, refreshBalance]);
@@ -468,7 +632,7 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
       {/* ── MAIN CONTENT ── */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="mb-6 grid w-full grid-cols-4 bg-[#1a2340]">
+          <TabsList className="mb-6 grid w-full grid-cols-5 bg-[#1a2340]">
             <TabsTrigger value="browse">Browse Market</TabsTrigger>
             <TabsTrigger value="sell">
               Sell Item
@@ -478,6 +642,9 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
             </TabsTrigger>
             <TabsTrigger value="my-bids">
               My Bids {myBids.length > 0 && `(${myBids.length})`}
+            </TabsTrigger>
+            <TabsTrigger value="real-money" className="text-[#54f28b]">
+              $ Real Money
             </TabsTrigger>
           </TabsList>
 
@@ -1046,6 +1213,227 @@ export function MarketplacePage({ onBack }: MarketplacePageProps): React.ReactEl
                 </TableBody>
               </Table>
             )}
+          </TabsContent>
+
+          {/* ════════════════════ REAL MONEY TAB ════════════════════ */}
+          <TabsContent value="real-money">
+            <div className="mb-4 border-2 border-[#29334d] bg-[#0d1526] p-3">
+              <p className="text-[9px] text-[#9aa7cc]">
+                Buy and sell items for <span className="font-bold text-[#54f28b]">real USD</span> via Tempo payments.
+                Items are escrowed on-chain — sellers get paid when the buyer completes payment.
+              </p>
+            </div>
+
+            {/* USD Filters */}
+            <div className="mb-4 flex flex-wrap items-center gap-3">
+              <Input
+                type="text"
+                placeholder="Search items..."
+                value={usdSearch}
+                onChange={(e) => setUsdSearch(e.target.value)}
+                className="h-8 w-56 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
+              />
+              <div className="flex gap-1">
+                {CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.value}
+                    className={`border-2 border-black px-2 py-1 text-[8px] uppercase tracking-wide transition ${
+                      usdCategory === cat.value
+                        ? "bg-[#54f28b] text-black shadow-[2px_2px_0_0_#000]"
+                        : "bg-[#2b3656] text-[#d6deff] hover:bg-[#33426b]"
+                    }`}
+                    onClick={() => setUsdCategory(cat.value)}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid gap-6 lg:grid-cols-3">
+              {/* USD Listings (2 cols) */}
+              <div className="lg:col-span-2">
+                <h3
+                  className="mb-3 text-[11px] uppercase tracking-wide text-[#ffcc00]"
+                  style={{ textShadow: "2px 2px 0 #000" }}
+                >
+                  Items for Sale (USD)
+                </h3>
+                {loadingUsd && usdListings.length === 0 ? (
+                  <div className="text-center text-[9px] text-[#9aa7cc]">Loading...</div>
+                ) : usdListings.length === 0 ? (
+                  <div className="border-4 border-black bg-[#11192d] p-8 text-center shadow-[6px_6px_0_0_#000]">
+                    <p className="text-[10px] text-[#9aa7cc]">No USD listings yet</p>
+                    <p className="mt-1 text-[8px] text-[#565f89]">
+                      List an item from your inventory to sell for real money
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {usdListings.map((listing) => {
+                      const isMine = address && listing.sellerWallet.toLowerCase() === address.toLowerCase();
+                      return (
+                        <Card key={listing.listingId}>
+                          <CardHeader className="pb-2">
+                            <div className="flex items-center justify-between">
+                              <CardTitle
+                                className="text-[10px]"
+                                style={{
+                                  color: listing.quality
+                                    ? RARITY_COLORS[listing.quality] ?? "#00ff88"
+                                    : "#00ff88",
+                                }}
+                              >
+                                {listing.itemName || `Token #${listing.tokenId}`}
+                              </CardTitle>
+                              {listing.itemCategory && (
+                                <Badge variant="secondary">{listing.itemCategory}</Badge>
+                              )}
+                            </div>
+                            <p className="text-[8px] text-[#9aa7cc]">
+                              Qty: {listing.quantity}
+                              {listing.bonusAffix && ` | ${listing.bonusAffix}`}
+                              {listing.statBonuses && Object.keys(listing.statBonuses).length > 0 &&
+                                ` | ${formatStatBonuses(listing.statBonuses)}`}
+                            </p>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="mb-2 flex items-center justify-between">
+                              <div>
+                                <p className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Price</p>
+                                <p className="text-[12px] font-bold text-[#54f28b]" style={{ textShadow: "1px 1px 0 #000" }}>
+                                  {formatUsd(listing.priceUsd)}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Expires</p>
+                                <p className="text-[9px] text-[#f1f5ff]">{formatTimeLeft(listing.expiresAt)}</p>
+                              </div>
+                            </div>
+                            <div className="mb-2 flex items-center gap-2">
+                              <span className="font-mono text-[7px] text-[#565f89]">
+                                {dn(listing.sellerWallet)}
+                              </span>
+                              {isMine && <Badge variant="success" className="text-[6px]">You</Badge>}
+                            </div>
+                            {isMine ? (
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                className="h-7 w-full text-[8px]"
+                                onClick={() => handleUsdCancel(listing.listingId)}
+                                disabled={usdProcessingId === listing.listingId}
+                              >
+                                {usdProcessingId === listing.listingId ? "Cancelling..." : "Cancel Listing"}
+                              </Button>
+                            ) : isConnected ? (
+                              <Button
+                                size="sm"
+                                className="h-7 w-full text-[9px] font-bold"
+                                onClick={() => handleUsdBuy(listing)}
+                                disabled={usdProcessingId === listing.listingId}
+                              >
+                                {usdProcessingId === listing.listingId
+                                  ? "Processing..."
+                                  : `Buy for ${formatUsd(listing.priceUsd)}`}
+                              </Button>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* USD Sell Form (1 col) */}
+              <div>
+                <h3
+                  className="mb-3 text-[11px] uppercase tracking-wide text-[#ffcc00]"
+                  style={{ textShadow: "2px 2px 0 #000" }}
+                >
+                  Sell for USD
+                </h3>
+                {!isConnected ? (
+                  <Card>
+                    <CardContent className="py-6 text-center">
+                      <p className="text-[9px] text-[#9aa7cc]">Connect wallet to sell items</p>
+                      <Button className="mt-3" size="sm" onClick={() => void connect()} disabled={walletLoading}>
+                        Connect Wallet
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card>
+                    <CardContent className="space-y-3 pt-4">
+                      {/* Item picker */}
+                      {ownedItems.length > 0 && (
+                        <div className="space-y-1">
+                          <label className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Select Item</label>
+                          <div className="max-h-36 overflow-y-auto">
+                            {ownedItems
+                              .filter((i) => parseInt(i.balance) > 0)
+                              .map((item) => (
+                                <button
+                                  key={item.tokenId}
+                                  className={`mb-1 w-full border-2 p-1.5 text-left text-[8px] transition ${
+                                    usdSellTokenId === item.tokenId
+                                      ? "border-[#54f28b] bg-[#0a1a0d]"
+                                      : "border-[#29334d] bg-[#0a0f1a] hover:bg-[#1a2340]"
+                                  }`}
+                                  onClick={() => { setUsdSellTokenId(item.tokenId); setUsdSellQuantity("1"); }}
+                                >
+                                  <span className="font-semibold text-[#00ff88]">{item.name}</span>
+                                  <span className="ml-2 text-[#9aa7cc]">x{item.balance}</span>
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-1">
+                        <label className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Quantity</label>
+                        <Input
+                          type="number"
+                          value={usdSellQuantity}
+                          onChange={(e) => setUsdSellQuantity(e.target.value)}
+                          min="1"
+                          className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[7px] uppercase tracking-wide text-[#9aa7cc]">Price (USD)</label>
+                        <div className="relative">
+                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[9px] text-[#54f28b]">$</span>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            placeholder="0.00"
+                            value={usdSellPrice}
+                            onChange={(e) => setUsdSellPrice(e.target.value)}
+                            className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] pl-6 text-[9px] text-[#f1f5ff]"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-2 text-[7px] text-[#565f89]">
+                        Items are burned into escrow. Unsold items return after 7 days.
+                      </div>
+
+                      <Button
+                        className="h-8 w-full text-[9px] font-bold uppercase"
+                        onClick={handleUsdSell}
+                        disabled={usdSelling || !usdSellTokenId || !usdSellPrice}
+                      >
+                        {usdSelling ? "Listing..." : "List for USD"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
