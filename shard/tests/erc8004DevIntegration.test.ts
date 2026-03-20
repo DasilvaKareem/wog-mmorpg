@@ -1,14 +1,16 @@
 /**
- * DEV=true ERC-8004 end-to-end integration test.
+ * ERC-8004 end-to-end integration test.
  *
- * Requires:
- * - local Hardhat node running on 127.0.0.1:8545
- * - local shard running on 127.0.0.1:3000 with DEV=true
+ * Supports both:
+ * - local DEV mode via the Hardhat deployment manifest fallback
+ * - non-DEV mode via explicit RPC + contract address environment variables
  *
  * Run with:
- *   npm run test:erc8004:dev
+ *   npm run test:erc8004
  * or
  *   DEV=true JWT_SECRET=test npx tsx tests/erc8004DevIntegration.test.ts
+ * or
+ *   JWT_SECRET=test SKALE_BASE_RPC_URL=... IDENTITY_REGISTRY_ADDRESS=... ... npx tsx tests/erc8004DevIntegration.test.ts
  */
 
 import fs from "node:fs";
@@ -18,7 +20,7 @@ import { ethers } from "ethers";
 type JsonResult = { status: number; body: any };
 
 const SHARD_URL = process.env.SHARD_URL || "http://127.0.0.1:3000";
-const HARDHAT_RPC_URL = process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
+const DEFAULT_LOCAL_RPC_URL = "http://127.0.0.1:8545";
 const MANIFEST_PATH =
   process.env.HARDHAT_MANIFEST_PATH ||
   path.resolve(process.cwd(), "../hardhat/deployments/localhost.json");
@@ -68,21 +70,57 @@ async function json(method: string, pathName: string, body?: unknown, token?: st
   return { status: res.status, body: parsed };
 }
 
-async function main() {
-  requireOk(fs.existsSync(MANIFEST_PATH), `Hardhat manifest not found at ${MANIFEST_PATH}`);
+function readManifest():
+  | {
+      chainId?: number;
+      environment?: Record<string, string>;
+    }
+  | null {
+  if (!fs.existsSync(MANIFEST_PATH)) return null;
+  return JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8")) as {
+    chainId?: number;
+    environment?: Record<string, string>;
+  };
+}
 
-  const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, "utf8")) as {
-    chainId: number;
-    environment: Record<string, string>;
+function getConfigValue(
+  key: string,
+  manifestEnv?: Record<string, string>
+): string | undefined {
+  return process.env[key] || manifestEnv?.[key];
+}
+
+async function main() {
+  const manifest = readManifest();
+  const manifestEnv = manifest?.environment;
+  const rpcUrl =
+    process.env.SKALE_BASE_RPC_URL ||
+    process.env.HARDHAT_RPC_URL ||
+    process.env.RPC_URL ||
+    DEFAULT_LOCAL_RPC_URL;
+  const expectedChainId = Number(
+    process.env.EXPECTED_CHAIN_ID || process.env.SKALE_BASE_CHAIN_ID || manifest?.chainId || 0
+  );
+  const environment = {
+    GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv),
+    ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv),
+    CHARACTER_CONTRACT_ADDRESS: getConfigValue("CHARACTER_CONTRACT_ADDRESS", manifestEnv),
+    IDENTITY_REGISTRY_ADDRESS: getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv),
+    REPUTATION_REGISTRY_ADDRESS: getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv),
+    VALIDATION_REGISTRY_ADDRESS: getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv),
   };
 
-  const provider = new ethers.JsonRpcProvider(HARDHAT_RPC_URL);
+  for (const [key, value] of Object.entries(environment)) {
+    requireOk(Boolean(value), `Missing required test config: ${key}`);
+  }
+
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = ethers.Wallet.createRandom();
   const walletAddress = await wallet.getAddress();
   const characterName = `Dev${Math.random().toString(36).slice(2, 8)}`;
 
   const identity = new ethers.Contract(
-    manifest.environment.IDENTITY_REGISTRY_ADDRESS,
+    environment.IDENTITY_REGISTRY_ADDRESS!,
     [
       "function ownerOf(uint256 tokenId) view returns (address)",
       "function getAgentWallet(uint256 agentId) view returns (address)",
@@ -92,7 +130,7 @@ async function main() {
     provider
   );
   const validation = new ethers.Contract(
-    manifest.environment.VALIDATION_REGISTRY_ADDRESS,
+    environment.VALIDATION_REGISTRY_ADDRESS!,
     [
       "function getVerifications(uint256 agentId) view returns (tuple(address verifier, string claim, uint256 validUntil)[])",
       "function isVerified(uint256 agentId, string claim) view returns (bool)",
@@ -100,14 +138,14 @@ async function main() {
     provider
   );
   const reputation = new ethers.Contract(
-    manifest.environment.REPUTATION_REGISTRY_ADDRESS,
+    environment.REPUTATION_REGISTRY_ADDRESS!,
     [
       "function getReputation(uint256 identityId) view returns (tuple(uint256,uint256,uint256,uint256,uint256,uint256,uint256))",
     ],
     provider
   );
   const gold = new ethers.Contract(
-    manifest.environment.GOLD_CONTRACT_ADDRESS,
+    environment.GOLD_CONTRACT_ADDRESS!,
     ["function balanceOf(address owner) view returns (uint256)"],
     provider
   );
@@ -120,7 +158,11 @@ async function main() {
     provider.send("eth_chainId", []),
   ]);
   assert(health.status === 200 && health.body?.ok === true, "Shard health endpoint is up", health.body);
-  assert(Number(BigInt(chainIdResponse)) === 31337, "Hardhat RPC chainId is 31337", chainIdResponse);
+  if (expectedChainId > 0) {
+    assert(Number(BigInt(chainIdResponse)) === expectedChainId, `RPC chainId matches ${expectedChainId}`, chainIdResponse);
+  } else {
+    assert(Boolean(chainIdResponse), "RPC returned a chainId", chainIdResponse);
+  }
 
   section("Auth + Wallet");
   const challenge = await json("GET", `/auth/challenge?wallet=${walletAddress}`);
@@ -161,12 +203,14 @@ async function main() {
     const [identityLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup] = await Promise.all([
       provider.getLogs({
         address: manifest.environment.IDENTITY_REGISTRY_ADDRESS,
+        address: environment.IDENTITY_REGISTRY_ADDRESS!,
         fromBlock: startBlock,
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
       }),
       provider.getLogs({
         address: manifest.environment.CHARACTER_CONTRACT_ADDRESS,
+        address: environment.CHARACTER_CONTRACT_ADDRESS!,
         fromBlock: startBlock,
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
@@ -236,7 +280,11 @@ async function main() {
   assert(goldBalance === ethers.parseEther("0.02"), "On-chain GOLD balance is 0.02");
   assert(identityOwner === walletAddress, "Identity NFT owner matches player wallet", identityOwner);
   assert(agentWallet === walletAddress, "Identity agent wallet matches player wallet", agentWallet);
-  assert(agentUri === `${SHARD_URL}/a2a/${walletAddress}`, "Identity tokenURI points at local A2A endpoint", agentUri);
+  assert(
+    agentUri === identityApi!.body.identity.endpoint,
+    "Identity tokenURI matches the identity endpoint exposed by the API",
+    { agentUri, apiEndpoint: identityApi!.body.identity.endpoint }
+  );
   assert(decodedCharacterTokenId === BigInt(characterTokenId), "Identity metadata stores the character tokenId");
   assert(chainClaims.length > 0, "Validation registry has at least one claim");
   assert(a2aResolved.status === 200 && a2aResolved.body?.walletAddress === walletAddress, "A2A resolve returns the owner wallet", a2aResolved.body);
