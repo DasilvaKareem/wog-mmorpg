@@ -25,6 +25,14 @@ function section(name: string): void {
   console.log(`\n── ${name} ──`);
 }
 
+function shouldFriendlyFireBeBlocked(
+  entityType: "player" | "mob",
+  targetType: "player" | "mob",
+  inParty: boolean
+): boolean {
+  return entityType === "player" && targetType === "player" && inParty;
+}
+
 // ── Test: Party system helpers ──────────────────────────────────────────────
 
 import { getPartyMembers, areInSameParty, getPlayerPartyId } from "../src/social/partySystem.js";
@@ -259,19 +267,15 @@ section("Friendly-fire prevention logic");
   assert(!areInSameParty("p1", "p2"), "Unrelated players → no friendly-fire block");
 
   // The guard logic: if both players and in same party, cancel attack
-  const entityType = "player";
-  const targetType = "player";
-  const inParty = false; // simulate areInSameParty result
-
-  const shouldBlock = entityType === "player" && targetType === "player" && inParty;
+  const shouldBlock = shouldFriendlyFireBeBlocked("player", "player", false);
   assert(!shouldBlock, "Different-party players can attack each other");
 
   // If they WERE in same party
-  const shouldBlockParty = entityType === "player" && targetType === "player" && true;
+  const shouldBlockParty = shouldFriendlyFireBeBlocked("player", "player", true);
   assert(shouldBlockParty, "Same-party players → attack blocked");
 
   // Player attacking mob should never be blocked
-  const mobTarget = entityType === "player" && "mob" === "player" && true;
+  const mobTarget = shouldFriendlyFireBeBlocked("player", "mob", true);
   assert(!mobTarget, "Player attacking mob → never blocked");
 }
 

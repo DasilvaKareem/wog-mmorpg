@@ -11,7 +11,7 @@ It explains:
 - how reputation consistency works
 - which tests exist and what each one is meant to validate
 
-This is an implementation document, not a roadmap. For the broader target-state plan, see [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md).
+This is an implementation document, not a roadmap. For the broader target-state plan, see [ERC8004_FULL_INTEGRATION_PLAN.md](../ERC8004_FULL_INTEGRATION_PLAN.md).
 
 ## Core Model
 
@@ -43,9 +43,9 @@ The bootstrap flow now expects:
 
 Primary files:
 
-- [characterRoutes.ts](shard/src/character/characterRoutes.ts)
-- [blockchain.ts](shard/src/blockchain/blockchain.ts)
-- [identity.ts](shard/src/erc8004/identity.ts)
+- [characterRoutes.ts](../../shard/src/character/characterRoutes.ts)
+- [blockchain.ts](../../shard/src/blockchain/blockchain.ts)
+- [identity.ts](../../shard/src/erc8004/identity.ts)
 
 ### Reputation is now agent keyed
 
@@ -53,10 +53,10 @@ The old wallet-keyed reputation assumptions have been replaced in the active run
 
 Primary files:
 
-- [reputationManager.ts](shard/src/economy/reputationManager.ts)
-- [reputationChain.ts](shard/src/economy/reputationChain.ts)
-- [reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
-- [reputation.ts](shard/src/erc8004/reputation.ts)
+- [reputationManager.ts](../../shard/src/economy/reputationManager.ts)
+- [reputationChain.ts](../../shard/src/economy/reputationChain.ts)
+- [reputationRoutes.ts](../../shard/src/economy/reputationRoutes.ts)
+- [reputation.ts](../../shard/src/erc8004/reputation.ts)
 
 ### Validation is now a real runtime surface
 
@@ -64,8 +64,8 @@ Validation is no longer just conceptual contract support. The app can publish an
 
 Primary files:
 
-- [validation.ts](shard/src/erc8004/validation.ts)
-- [reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
+- [validation.ts](../../shard/src/erc8004/validation.ts)
+- [reputationRoutes.ts](../../shard/src/economy/reputationRoutes.ts)
 
 ### Client trust views now consume agent APIs
 
@@ -73,9 +73,9 @@ The client reputation views now read the agent-based endpoints and surface more 
 
 Primary files:
 
-- [ChampionsPage.tsx](client/src/components/ChampionsPage.tsx)
-- [ReputationPanel.tsx](client/src/components/ReputationPanel.tsx)
-- [InspectDialog.tsx](client/src/components/InspectDialog.tsx)
+- [ChampionsPage.tsx](../../client/src/components/ChampionsPage.tsx)
+- [ReputationPanel.tsx](../../client/src/components/ReputationPanel.tsx)
+- [InspectDialog.tsx](../../client/src/components/InspectDialog.tsx)
 
 ### PvP matchmaking no longer fabricates identity
 
@@ -89,39 +89,39 @@ The queue UI now resolves the real live player entity and uses the actual:
 
 Primary file:
 
-- [MatchmakingQueue.tsx](client/src/components/MatchmakingQueue.tsx)
+- [MatchmakingQueue.tsx](../../client/src/components/MatchmakingQueue.tsx)
 
 ## Contract Layer
 
 The trust-related contracts are:
 
-- [WoGIdentityRegistry.sol](contracts/WoGIdentityRegistry.sol)
-- [WoGReputationRegistry.sol](contracts/WoGReputationRegistry.sol)
-- [WoGValidationRegistry.sol](contracts/WoGValidationRegistry.sol)
+- [WoGIdentityRegistry.sol](../../contracts/WoGIdentityRegistry.sol)
+- [WoGReputationRegistry.sol](../../contracts/WoGReputationRegistry.sol)
+- [WoGValidationRegistry.sol](../../contracts/WoGValidationRegistry.sol)
 
-There is also a local Hardhat copy set under [hardhat/contracts](hardhat/contracts) used for local deployment and integration tests.
+There is also a local Hardhat copy set under [hardhat/contracts](../../hardhat/contracts) used for local deployment and integration tests.
 
 For local full-stack testing, the Hardhat workspace also includes mock prerequisite asset contracts:
 
-- [WoGMockGold.sol](hardhat/contracts/WoGMockGold.sol)
-- [WoGMockItems.sol](hardhat/contracts/WoGMockItems.sol)
-- [WoGMockCharacters.sol](hardhat/contracts/WoGMockCharacters.sol)
+- [WoGMockGold.sol](../../hardhat/contracts/WoGMockGold.sol)
+- [WoGMockItems.sol](../../hardhat/contracts/WoGMockItems.sol)
+- [WoGMockCharacters.sol](../../hardhat/contracts/WoGMockCharacters.sol)
 
 These mocks matter because the game cannot complete normal character onboarding if the prerequisite asset contracts are missing locally.
 
 ## Shard Integration Layer
 
-The shard-side ERC-8004 boundary is under [shard/src/erc8004](shard/src/erc8004).
+The shard-side ERC-8004 boundary is under [shard/src/erc8004](../../shard/src/erc8004).
 
 The current modules are:
 
-- [identity.ts](shard/src/erc8004/identity.ts)
+- [identity.ts](../../shard/src/erc8004/identity.ts)
   - identity read and write helpers
-- [reputation.ts](shard/src/erc8004/reputation.ts)
+- [reputation.ts](../../shard/src/erc8004/reputation.ts)
   - thin bridge exports for the reputation runtime
-- [validation.ts](shard/src/erc8004/validation.ts)
+- [validation.ts](../../shard/src/erc8004/validation.ts)
   - validation write and read helpers
-- [agentResolution.ts](shard/src/erc8004/agentResolution.ts)
+- [agentResolution.ts](../../shard/src/erc8004/agentResolution.ts)
   - runtime normalization and lookup helpers
 
 This directory is the intended home for trust-specific behavior. Some identity orchestration still remains in more generic blockchain modules, but the repo is much closer to a clean boundary than before.
@@ -141,7 +141,7 @@ The primary trust endpoints are:
 
 Primary route file:
 
-- [reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
+- [reputationRoutes.ts](../../shard/src/economy/reputationRoutes.ts)
 
 ## Local Dev Architecture
 
@@ -163,9 +163,9 @@ Hardhat now owns the local deployment source of truth.
 
 Primary files:
 
-- [deploy.ts](hardhat/scripts/deploy.ts)
-- [localhost.json](hardhat/deployments/localhost.json)
-- [devLocalContracts.ts](shard/src/config/devLocalContracts.ts)
+- [deploy.ts](../../hardhat/scripts/deploy.ts)
+- [localhost.json](../../hardhat/deployments/localhost.json)
+- [devLocalContracts.ts](../../shard/src/config/devLocalContracts.ts)
 
 When `DEV=true`:
 
@@ -217,7 +217,7 @@ The modules affected included:
 
 A shared serialized queue now sits in:
 
-- [biteTxQueue.ts](shard/src/blockchain/biteTxQueue.ts)
+- [biteTxQueue.ts](../../shard/src/blockchain/biteTxQueue.ts)
 
 All relevant BITE-side write paths were routed through it.
 
@@ -241,8 +241,8 @@ The current reputation model is:
 
 Primary files:
 
-- [reputationManager.ts](shard/src/economy/reputationManager.ts)
-- [reputationChain.ts](shard/src/economy/reputationChain.ts)
+- [reputationManager.ts](../../shard/src/economy/reputationManager.ts)
+- [reputationChain.ts](../../shard/src/economy/reputationChain.ts)
 
 ### Practical meaning
 
@@ -262,11 +262,11 @@ There are now different test layers, each serving a different purpose.
 
 ### 1. Contract integration tests
 
-These live under [hardhat/test](hardhat/test).
+These live under [hardhat/test](../../hardhat/test).
 
 Primary file:
 
-- [ERC8004Registries.ts](hardhat/test/ERC8004Registries.ts)
+- [ERC8004Registries.ts](../../hardhat/test/ERC8004Registries.ts)
 
 This suite is for:
 
@@ -289,7 +289,7 @@ npm test
 
 Primary file:
 
-- [erc8004DevIntegration.test.ts](shard/tests/erc8004DevIntegration.test.ts)
+- [erc8004DevIntegration.test.ts](../../shard/tests/erc8004DevIntegration.test.ts)
 
 This test validates the actual server integration path, not just contract behavior.
 
@@ -327,8 +327,8 @@ npm run test:erc8004
 
 Primary files:
 
-- [partyIntegration.test.ts](shard/tests/partyIntegration.test.ts)
-- [reputation.test.ts](shard/tests/reputation.test.ts)
+- [partyIntegration.test.ts](../../shard/tests/partyIntegration.test.ts)
+- [reputation.test.ts](../../shard/tests/reputation.test.ts)
 
 These are not the same as the Hardhat contract suite.
 
@@ -364,9 +364,9 @@ The client now reads the agent-based reputation APIs in the main trust views.
 
 Primary files:
 
-- [ChampionsPage.tsx](client/src/components/ChampionsPage.tsx)
-- [ReputationPanel.tsx](client/src/components/ReputationPanel.tsx)
-- [InspectDialog.tsx](client/src/components/InspectDialog.tsx)
+- [ChampionsPage.tsx](../../client/src/components/ChampionsPage.tsx)
+- [ReputationPanel.tsx](../../client/src/components/ReputationPanel.tsx)
+- [InspectDialog.tsx](../../client/src/components/InspectDialog.tsx)
 
 ### Identity and validation surfacing
 
@@ -384,32 +384,32 @@ If you are trying to understand where to make changes, this is the practical map
 
 ### Contracts
 
-- [contracts/WoGIdentityRegistry.sol](contracts/WoGIdentityRegistry.sol)
-- [contracts/WoGReputationRegistry.sol](contracts/WoGReputationRegistry.sol)
-- [contracts/WoGValidationRegistry.sol](contracts/WoGValidationRegistry.sol)
+- [contracts/WoGIdentityRegistry.sol](../../contracts/WoGIdentityRegistry.sol)
+- [contracts/WoGReputationRegistry.sol](../../contracts/WoGReputationRegistry.sol)
+- [contracts/WoGValidationRegistry.sol](../../contracts/WoGValidationRegistry.sol)
 
 ### Local Hardhat workspace
 
-- [hardhat/contracts](hardhat/contracts)
-- [hardhat/test/ERC8004Registries.ts](hardhat/test/ERC8004Registries.ts)
-- [hardhat/scripts/deploy.ts](hardhat/scripts/deploy.ts)
+- [hardhat/contracts](../../hardhat/contracts)
+- [hardhat/test/ERC8004Registries.ts](../../hardhat/test/ERC8004Registries.ts)
+- [hardhat/scripts/deploy.ts](../../hardhat/scripts/deploy.ts)
 
 ### Shard runtime
 
-- [shard/src/erc8004](shard/src/erc8004)
-- [shard/src/economy/reputationManager.ts](shard/src/economy/reputationManager.ts)
-- [shard/src/economy/reputationChain.ts](shard/src/economy/reputationChain.ts)
-- [shard/src/economy/reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
-- [shard/src/character/characterRoutes.ts](shard/src/character/characterRoutes.ts)
-- [shard/src/blockchain/biteTxQueue.ts](shard/src/blockchain/biteTxQueue.ts)
-- [shard/src/config/devLocalContracts.ts](shard/src/config/devLocalContracts.ts)
+- [shard/src/erc8004](../../shard/src/erc8004)
+- [shard/src/economy/reputationManager.ts](../../shard/src/economy/reputationManager.ts)
+- [shard/src/economy/reputationChain.ts](../../shard/src/economy/reputationChain.ts)
+- [shard/src/economy/reputationRoutes.ts](../../shard/src/economy/reputationRoutes.ts)
+- [shard/src/character/characterRoutes.ts](../../shard/src/character/characterRoutes.ts)
+- [shard/src/blockchain/biteTxQueue.ts](../../shard/src/blockchain/biteTxQueue.ts)
+- [shard/src/config/devLocalContracts.ts](../../shard/src/config/devLocalContracts.ts)
 
 ### Client
 
-- [client/src/components/ChampionsPage.tsx](client/src/components/ChampionsPage.tsx)
-- [client/src/components/ReputationPanel.tsx](client/src/components/ReputationPanel.tsx)
-- [client/src/components/InspectDialog.tsx](client/src/components/InspectDialog.tsx)
-- [client/src/components/MatchmakingQueue.tsx](client/src/components/MatchmakingQueue.tsx)
+- [client/src/components/ChampionsPage.tsx](../../client/src/components/ChampionsPage.tsx)
+- [client/src/components/ReputationPanel.tsx](../../client/src/components/ReputationPanel.tsx)
+- [client/src/components/InspectDialog.tsx](../../client/src/components/InspectDialog.tsx)
+- [client/src/components/MatchmakingQueue.tsx](../../client/src/components/MatchmakingQueue.tsx)
 
 ## Remaining Gaps
 

@@ -37,7 +37,7 @@ Important paths:
 - [server.ts](shard/src/server.ts)
 - [devLocalContracts.ts](shard/src/config/devLocalContracts.ts)
 - [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
-- [hardhat/README.md](hardhat/README.md)
+- [docs/agents/README.md](docs/agents/README.md)
 
 ## Install
 
@@ -120,7 +120,7 @@ Notes:
 
 ### Hardhat
 
-See [hardhat/README.md](hardhat/README.md).
+See [HARDHAT_WORKSPACE_README.md](docs/agents/HARDHAT_WORKSPACE_README.md).
 
 The local workspace contains:
 - local copies of the WoG contracts
@@ -230,7 +230,7 @@ What is not fully complete yet:
 ## Additional Docs
 
 - [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
-- [hardhat/README.md](hardhat/README.md)
+- [docs/agents/README.md](docs/agents/README.md)
 
 ## License
 
