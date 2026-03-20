@@ -3,6 +3,7 @@ import Phaser from "phaser";
 
 import { useGameContext } from "@/context/GameContext";
 import { WorldScene } from "@/WorldScene";
+import { BattleScene } from "@/BattleScene";
 
 export function GameCanvas(): React.ReactElement {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
@@ -31,7 +32,7 @@ export function GameCanvas(): React.ReactElement {
         target: isLowPowerDevice ? 40 : 60,
         forceSetTimeOut: true,
       },
-      scene: [WorldScene],
+      scene: [WorldScene, BattleScene],
       scale: {
         mode: Phaser.Scale.RESIZE,
         width: "100%",

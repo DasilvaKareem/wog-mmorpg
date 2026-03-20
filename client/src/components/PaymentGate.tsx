@@ -11,17 +11,6 @@ import { thirdwebClient } from "@/lib/inAppWalletClient";
 // Server wallet that receives all fees
 const SERVER_WALLET = "0x8cFd0a555dD865B2b63a391AF2B14517C0389808";
 
-// Base mainnet (chain 8453) — broadest crypto support for checkout
-// PayEmbed handles cross-chain bridging automatically
-const baseMainnet = defineChain(8453);
-
-// USDC on Base mainnet
-const USDC_BASE = getContract({
-  client: thirdwebClient,
-  chain: baseMainnet,
-  address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-});
-
 const wogTheme = darkTheme({
   colors: {
     modalBg: "#060d12",
@@ -39,12 +28,37 @@ interface PaymentGateProps {
   /** Amount in USD */
   amount: string;
   /** Called when payment is confirmed */
-  onSuccess: () => void;
+  onSuccess: (transactionHash?: string) => void;
   /** Called when user cancels */
   onCancel: () => void;
+  /** Wallet that receives the payment */
+  sellerAddress?: string;
+  /** Payment chain id */
+  chainId?: number;
+  /** Token contract on the payment chain */
+  tokenAddress?: string;
 }
 
-export function PaymentGate({ label, amount, onSuccess, onCancel }: PaymentGateProps): React.ReactElement {
+export function PaymentGate({
+  label,
+  amount,
+  onSuccess,
+  onCancel,
+  sellerAddress = SERVER_WALLET,
+  chainId = 8453,
+  tokenAddress = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+}: PaymentGateProps): React.ReactElement {
+  const paymentChain = React.useMemo(() => defineChain(chainId), [chainId]);
+  const paymentToken = React.useMemo(
+    () =>
+      getContract({
+        client: thirdwebClient,
+        chain: paymentChain,
+        address: tokenAddress,
+      }),
+    [paymentChain, tokenAddress]
+  );
+
   return (
     <div className="flex flex-col gap-3">
       <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[10px] text-[#8b95c2]">
@@ -60,17 +74,16 @@ export function PaymentGate({ label, amount, onSuccess, onCancel }: PaymentGateP
           payOptions={{
             mode: "direct_payment",
             paymentInfo: {
-              sellerAddress: SERVER_WALLET,
-              chain: baseMainnet,
+              sellerAddress: sellerAddress as `0x${string}`,
               amount,
-              token: USDC_BASE,
+              token: paymentToken,
             },
             metadata: {
               name: label,
               image: "https://worldofgeneva.com/favicon.ico",
             },
-            onPurchaseSuccess: () => {
-              onSuccess();
+            onPurchaseSuccess: (info) => {
+              onSuccess(info?.type === "transaction" ? info.transactionHash : undefined);
             },
           }}
         />

@@ -33,7 +33,7 @@ export type OperationType =
   | "mirror_burn"
   | "repair";
 
-export type PaymentRail = "tempo_mpp" | "none" | "opensea_external";
+export type PaymentRail = "base_usdc" | "none" | "opensea_external";
 
 // ── Operation Interface ─────────────────────────────────────────────
 

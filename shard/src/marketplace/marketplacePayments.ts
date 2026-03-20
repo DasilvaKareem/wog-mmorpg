@@ -1,35 +1,51 @@
 import { randomUUID } from "crypto";
-import { Mppx, tempo } from "mppx/server";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { getRedis } from "../redis.js";
 import {
   getOperation,
   updateOperationStatus,
   OperationStatus,
 } from "./operationRegistry.js";
 
-// ── MPP Configuration ───────────────────────────────────────────────
+const DEFAULT_RECIPIENT = "0x8cFd0a555dD865B2b63a391AF2B14517C0389808";
+const DEFAULT_USDC_BASE = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
-const MPP_RECIPIENT = process.env.MPP_RECIPIENT_ADDRESS ?? "";
-const MPP_CURRENCY = process.env.MPP_CURRENCY_ADDRESS ?? "";
-const MPP_TESTNET = process.env.MPP_TESTNET !== "false";
-const MPP_SECRET_KEY = process.env.MPP_SECRET_KEY;
+const MARKETPLACE_PAYMENT_RECIPIENT =
+  process.env.MARKETPLACE_PAYMENT_RECIPIENT_ADDRESS ??
+  process.env.MPP_RECIPIENT_ADDRESS ??
+  DEFAULT_RECIPIENT;
+const MARKETPLACE_PAYMENT_CURRENCY =
+  process.env.MARKETPLACE_PAYMENT_CURRENCY_ADDRESS ??
+  process.env.MPP_CURRENCY_ADDRESS ??
+  DEFAULT_USDC_BASE;
+const MARKETPLACE_PAYMENT_CHAIN_ID = Number(
+  process.env.MARKETPLACE_PAYMENT_CHAIN_ID ?? "8453"
+);
+const PAYMENT_TTL_SECONDS = Number(
+  process.env.MARKETPLACE_PAYMENT_TTL_SECONDS ?? "1800"
+);
 
-/**
- * Server-side mppx instance configured with Tempo charge method.
- * The charge handler is called per-route with the specific amount.
- */
-const mppx = Mppx.create({
-  methods: [
-    tempo({
-      testnet: MPP_TESTNET,
-      currency: MPP_CURRENCY || undefined,
-      recipient: (MPP_RECIPIENT || undefined) as `0x${string}` | undefined,
-    }),
-  ],
-  secretKey: MPP_SECRET_KEY,
-});
+export const MARKETPLACE_PAYMENT_RAIL = "base_usdc";
 
-// ── Interfaces ──────────────────────────────────────────────────────
+const KEY_PAYMENT = (paymentId: string) => `mktplace:payment:${paymentId}`;
+
+interface PendingMarketplacePayment {
+  paymentId: string;
+  wallet: string;
+  amountCents: number;
+  description?: string;
+  createdAt: number;
+}
+
+export interface MarketplacePaymentIntent {
+  paymentId: string;
+  amountCents: number;
+  amountUsd: string;
+  payment: {
+    chainId: number;
+    currency: string;
+    recipientWallet: string;
+  };
+}
 
 export interface PaymentReceipt {
   receiptId: string;
@@ -40,76 +56,94 @@ export interface PaymentReceipt {
   confirmedAt: number;
 }
 
-// ── MPP Charge Handler ──────────────────────────────────────────────
-
-/**
- * Run the MPP 402 charge flow against a raw Node.js request.
- *
- * - If the request has no payment credential → returns `{ status: 402, challenge }`
- *   and writes the 402 response (WWW-Authenticate headers) to `res`.
- * - If the request carries a valid credential → returns `{ status: 200, receipt }`.
- *
- * The caller (route handler) decides what to do in each case.
- */
-export async function handleMppCharge(params: {
-  req: IncomingMessage;
-  res: ServerResponse;
-  amountCents: number;
-  operationId: string;
-  description?: string;
-}): Promise<
-  | { status: 402 }
-  | { status: 200; receipt: PaymentReceipt }
-> {
-  const { req, res, amountCents, operationId, description } = params;
-
-  // Convert cents to token-denominated amount string.
-  // Tempo amounts are in token units (e.g. USDC with 6 decimals).
-  // $1.00 = 100 cents → "1.00" in dollar terms.
-  const amountStr = (amountCents / 100).toFixed(2);
-
-  const handler = Mppx.toNodeListener(
-    mppx.charge({
-      amount: amountStr,
-      description: description ?? `WoG Marketplace purchase (op:${operationId})`,
-      meta: { operationId },
-    })
-  );
-
-  const result = await handler(req, res);
-
-  if (result.status === 402) {
-    // 402 challenge has already been written to `res` by toNodeListener
-    return { status: 402 };
-  }
-
-  // Payment verified by mppx — build our receipt
-  const receipt: PaymentReceipt = {
-    receiptId: randomUUID(),
-    operationId,
-    amountCents,
-    paymentRail: "tempo_mpp",
-    confirmedAt: Date.now(),
-  };
-
-  return { status: 200, receipt };
+function formatUsdAmount(amountCents: number): string {
+  return (amountCents / 100).toFixed(2);
 }
 
-// ── Operation Status Helpers ────────────────────────────────────────
+async function getPendingMarketplacePayment(
+  paymentId: string
+): Promise<PendingMarketplacePayment | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+
+  const raw = await redis.get(KEY_PAYMENT(paymentId));
+  return raw ? (JSON.parse(raw) as PendingMarketplacePayment) : null;
+}
+
+export async function createMarketplacePaymentIntent(params: {
+  wallet: string;
+  amountCents: number;
+  description?: string;
+}): Promise<MarketplacePaymentIntent> {
+  const redis = getRedis();
+  if (!redis) throw new Error("Redis unavailable – cannot create payment");
+
+  const paymentId = randomUUID();
+  const pending: PendingMarketplacePayment = {
+    paymentId,
+    wallet: params.wallet.toLowerCase(),
+    amountCents: params.amountCents,
+    description: params.description,
+    createdAt: Date.now(),
+  };
+
+  await redis.set(
+    KEY_PAYMENT(paymentId),
+    JSON.stringify(pending),
+    "EX",
+    PAYMENT_TTL_SECONDS
+  );
+
+  return {
+    paymentId,
+    amountCents: params.amountCents,
+    amountUsd: formatUsdAmount(params.amountCents),
+    payment: {
+      chainId: MARKETPLACE_PAYMENT_CHAIN_ID,
+      currency: MARKETPLACE_PAYMENT_CURRENCY,
+      recipientWallet: MARKETPLACE_PAYMENT_RECIPIENT,
+    },
+  };
+}
+
+export async function validateMarketplacePayment(params: {
+  paymentId: string;
+  wallet: string;
+  transactionHash?: string;
+}): Promise<PaymentReceipt> {
+  const pending = await getPendingMarketplacePayment(params.paymentId);
+  if (!pending) {
+    throw new Error("Payment not found or expired");
+  }
+  if (pending.wallet !== params.wallet.toLowerCase()) {
+    throw new Error("Payment belongs to a different wallet");
+  }
+
+  return {
+    receiptId: pending.paymentId,
+    operationId: pending.paymentId,
+    amountCents: pending.amountCents,
+    paymentRail: MARKETPLACE_PAYMENT_RAIL,
+    transactionHash: params.transactionHash,
+    confirmedAt: Date.now(),
+  };
+}
+
+export async function deleteMarketplacePayment(paymentId: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  await redis.del(KEY_PAYMENT(paymentId));
+}
 
 export async function markPaymentConfirmed(
   operationId: string,
   receipt: PaymentReceipt
 ): Promise<void> {
   await updateOperationStatus(operationId, OperationStatus.PAYMENT_CONFIRMED, {
-    paymentReference: receipt.receiptId,
+    paymentReference: receipt.transactionHash ?? receipt.receiptId,
   });
 }
 
-/**
- * Idempotency guard: returns true if the operation is already in a
- * terminal settled state (SOLD, REIMPORTED, etc.), preventing double-mint.
- */
 export async function ensureIdempotentSettlement(
   operationId: string
 ): Promise<boolean> {
@@ -119,6 +153,7 @@ export async function ensureIdempotentSettlement(
   return (
     op.status === OperationStatus.SOLD ||
     op.status === OperationStatus.MINTED_ON_TARGET ||
-    op.status === OperationStatus.REIMPORTED
+    op.status === OperationStatus.REIMPORTED ||
+    op.status === OperationStatus.RENTAL_ACTIVE
   );
 }

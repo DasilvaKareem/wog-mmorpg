@@ -15,6 +15,7 @@ import type { Entity } from "@/types";
 import { ColiseumViewer } from "./ColiseumViewer";
 import { MatchmakingQueue } from "./MatchmakingQueue";
 
+
 interface ActiveBattle {
   battleId: string;
   status: string;
@@ -91,6 +92,11 @@ export function ColiseumDialog(): React.ReactElement {
     const interval = setInterval(fetchBattlesAndLeaderboard, 3000);
     return () => clearInterval(interval);
   }, [open, selectedBattleId, fetchBattlesAndLeaderboard]);
+
+  // Auto-close dialog when a match is found (player transitions to BattleScene)
+  useGameBridge("matchFound", () => {
+    setOpen(false);
+  });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

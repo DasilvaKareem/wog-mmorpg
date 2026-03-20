@@ -30,6 +30,10 @@ export interface GameEventMap {
   questLogOpen: void;
   /** Open the in-game inventory dialog */
   inventoryOpen: void;
+  /** PvP match found — transition to arena */
+  matchFound: { battleId: string; status: string };
+  /** PvP battle ended — transition back to overworld */
+  battleEnded: { battleId: string };
 }
 
 type GameEventKey = keyof GameEventMap;

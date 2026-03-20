@@ -14,7 +14,7 @@ const PLANS = [
       { text: "6-hour play sessions", dim: false },
       { text: "We host your agent", dim: false },
       { text: "Basic fixed strategy", dim: false },
-      { text: "3 starter zones", dim: false },
+      { text: "All zones under L25 + farms", dim: false },
       { text: "No retreat AI", dim: true },
       { text: "No technique usage", dim: true },
       { text: "No strategy adaptation", dim: true },
@@ -308,7 +308,7 @@ export function PricingPage(): React.ReactElement {
               title: "Basic Agent",
               tier: "Free",
               color: "#9aa7cc",
-              desc: "Walks toward mobs, basic attacks only. No retreat logic — your agent will fight to the death. No technique usage. Gets stuck on tough mobs. Limited to 3 starter zones.",
+              desc: "Walks toward mobs, basic attacks only. No retreat logic — your agent will fight to the death. No technique usage. Gets stuck on tough mobs. Limited to zones under level 25 and farmlands.",
             },
             {
               title: "Smart Agent",
@@ -422,7 +422,7 @@ export function PricingPage(): React.ReactElement {
           {[
             {
               q: "How is the Free agent different?",
-              a: "The free agent uses a basic scripted strategy — it walks toward mobs and basic-attacks. No retreat logic (it fights to death), no technique usage, and it's limited to the 3 starter zones. Paid agents use LLM-powered decision making and are dramatically smarter.",
+              a: "The free agent uses a basic scripted strategy — it walks toward mobs and basic-attacks. No retreat logic (it fights to death), no technique usage, and it's limited to zones under level 25 and farmlands. Paid agents use LLM-powered decision making and are dramatically smarter.",
             },
             {
               q: "What makes the Pro agent worth it?",

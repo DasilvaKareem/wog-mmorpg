@@ -48,7 +48,7 @@ interface EntityVisual {
 const SPRITE_SIZE = 16;
 const HP_BAR_W = 24;
 const HP_BAR_H = 3;
-const TWEEN_DURATION = 500; // ms — matches poll interval
+const TWEEN_DURATION = 950; // ms — nearly fills the 1000ms poll interval for continuous walking
 const VISUAL_SEPARATION_RADIUS = 20; // pixels — minimum visual distance between sprites
 const COMBAT_LINGER_MS = 5000; // combat state persists after last combat event
 const DISABLE_ENTITY_VIEWPORT_CULLING = true; // keep characters renderable even when viewport math is wrong

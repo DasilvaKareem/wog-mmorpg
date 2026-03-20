@@ -300,8 +300,12 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       const config = (await getAgentConfig(authWallet)) ?? defaultConfig();
       config.enabled = true;
       config.lastUpdated = Date.now();
-      const tier = request.body.tier ?? "free";
-      config.tier = tier;
+      // Preserve existing tier from Redis (source of truth) unless explicitly upgrading
+      if (request.body.tier) {
+        config.tier = request.body.tier;
+      } else if (!config.tier) {
+        config.tier = "free";
+      }
       config.sessionStartedAt = Date.now();
       await setAgentConfig(authWallet, config);
 

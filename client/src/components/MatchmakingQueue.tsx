@@ -4,7 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWallet } from "@/hooks/useWallet";
+import { useGameContext } from "@/context/GameContext";
 import { getAuthToken } from "@/lib/agentAuth";
+import { gameBus } from "@/lib/eventBus";
 import { API_URL } from "../config.js";
 
 interface QueueStatus {
@@ -38,7 +40,9 @@ export function MatchmakingQueue(): React.ReactElement {
   const [selectedFormat, setSelectedFormat] = React.useState<string>("1v1");
   const [inQueue, setInQueue] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [queuedAgentId, setQueuedAgentId] = React.useState<string | null>(null);
   const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
+  const { gameRef } = useGameContext();
   const { notify } = useToast();
 
   React.useEffect(() => {
@@ -46,6 +50,49 @@ export function MatchmakingQueue(): React.ReactElement {
     const interval = setInterval(fetchQueues, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll for match when in queue
+  React.useEffect(() => {
+    if (!inQueue || !queuedAgentId) return;
+
+    const pollForMatch = async () => {
+      try {
+        const response = await fetch(
+          `${API_URL}/api/pvp/player/${encodeURIComponent(queuedAgentId)}/current-battle`,
+        );
+        if (!response.ok) return;
+        const data = await response.json();
+
+        if (data.inBattle && data.battleId) {
+          // Match found! Transition to battle arena
+          setInQueue(false);
+          setQueuedAgentId(null);
+          notify("Match found! Entering arena...", "success");
+
+          // Emit event for any listeners
+          gameBus.emit("matchFound", {
+            battleId: data.battleId,
+            status: data.status,
+          });
+
+          // Switch Phaser scene: sleep WorldScene, start BattleScene
+          const game = gameRef.current;
+          if (game) {
+            game.scene.sleep("WorldScene");
+            game.scene.start("BattleScene", { battleId: data.battleId });
+          }
+        }
+      } catch (error) {
+        console.error("Failed to poll for match:", error);
+      }
+    };
+
+    const interval = setInterval(pollForMatch, 2000);
+    // Also poll immediately
+    void pollForMatch();
+
+    return () => clearInterval(interval);
+  }, [inQueue, queuedAgentId, gameRef, notify]);
 
   const fetchQueues = async () => {
     try {
@@ -132,6 +179,7 @@ export function MatchmakingQueue(): React.ReactElement {
 
       if (response.ok) {
         setInQueue(true);
+        setQueuedAgentId(queueIdentity.agentId);
         notify(`Joined ${selectedFormat} queue`, "success");
       } else {
         const error = await response.json();
@@ -170,6 +218,7 @@ export function MatchmakingQueue(): React.ReactElement {
 
       if (response.ok) {
         setInQueue(false);
+        setQueuedAgentId(null);
         notify("Left queue", "info");
       }
     } catch (error) {
@@ -260,8 +309,9 @@ export function MatchmakingQueue(): React.ReactElement {
         </Button>
       ) : (
         <div className="space-y-2">
-          <div className="text-center text-[9px] font-semibold text-[#54f28b]">
-            In Queue - Waiting...
+          <div className="flex items-center justify-center gap-2 text-[9px] font-semibold text-[#54f28b]">
+            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[#54f28b]" />
+            Searching for match...
           </div>
           <Button
             variant="danger"

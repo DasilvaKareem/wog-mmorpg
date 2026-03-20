@@ -15,6 +15,7 @@ import type {
 } from "../types/pvp.js";
 import type { BattleAction } from "../types/battle.js";
 import { randomUUID } from "crypto";
+import { pvpReputationIntegration } from "./pvpReputationIntegration.js";
 
 export interface PvPDatabase {
   // Player stats
@@ -190,6 +191,9 @@ export class PvPBattleManager {
 
     // Update player stats
     this.updatePlayerStats(result);
+
+    // Update on-chain reputation via ERC-8004
+    void pvpReputationIntegration.updateReputationFromBattle(result);
 
     // Store match history
     this.database.matchHistory.push({
@@ -397,14 +401,21 @@ export class PvPBattleManager {
    * Check if a player is currently in an active (non-completed) battle
    */
   isInActiveBattle(agentId: string): boolean {
-    for (const battle of this.activeBattles.values()) {
+    return this.getActiveBattleForPlayer(agentId) !== null;
+  }
+
+  /**
+   * Get the active battle a player is in (if any)
+   */
+  getActiveBattleForPlayer(agentId: string): { battleId: string; status: string } | null {
+    for (const [battleId, battle] of this.activeBattles.entries()) {
       const state = battle.getState();
       if (state.status === "completed" || state.status === "cancelled") continue;
       const inRed = state.config.teamRed.some((c) => c.agentId === agentId);
       const inBlue = state.config.teamBlue.some((c) => c.agentId === agentId);
-      if (inRed || inBlue) return true;
+      if (inRed || inBlue) return { battleId, status: state.status };
     }
-    return false;
+    return null;
   }
 
   /**

@@ -121,7 +121,7 @@ function pickCombatTechnique(entity: any, target: any, zoneTick: number): Techni
 
   const hasBuff = entity.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
   if (!hasBuff) {
-    const buff = usable.find((technique) => technique.type === "buff" && technique.targetType === "self");
+    const buff = usable.find((technique) => technique.type === "buff" && (technique.targetType === "self" || technique.targetType === "party"));
     if (buff) return buff;
   }
 

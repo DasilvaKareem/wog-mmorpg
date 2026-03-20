@@ -6,12 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PaymentGate } from "@/components/PaymentGate";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/toast";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
 import { getAuthToken } from "@/lib/agentAuth";
-import { mppFetch } from "@/lib/mppClient";
 
 // ── Types ──
 
@@ -75,6 +75,18 @@ interface OwnedItem {
   category?: string;
 }
 
+interface PendingMarketplacePayment {
+  kind: "buy" | "rent";
+  paymentId: string;
+  amountUsd: string;
+  label: string;
+  recipientWallet: string;
+  chainId: number;
+  currency: string;
+  confirmUrl: string;
+  body: Record<string, unknown>;
+}
+
 // ── Constants ──
 
 const CATEGORIES = [
@@ -124,6 +136,8 @@ export function RealMoneyMarketPage(): React.ReactElement {
   const { notify } = useToast();
 
   const [activeTab, setActiveTab] = React.useState("items");
+  const [pendingPayment, setPendingPayment] = React.useState<PendingMarketplacePayment | null>(null);
+  const [confirmingPayment, setConfirmingPayment] = React.useState(false);
 
   // ── Items state ──
   const [usdListings, setUsdListings] = React.useState<DirectListing[]>([]);
@@ -220,6 +234,53 @@ export function RealMoneyMarketPage(): React.ReactElement {
     return () => clearInterval(interval);
   }, []);
 
+  const confirmPendingPayment = React.useCallback(async (transactionHash?: string) => {
+    if (!address || !pendingPayment) return;
+    setConfirmingPayment(true);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) {
+        notify("Authentication failed", "error");
+        return;
+      }
+
+      const res = await fetch(pendingPayment.confirmUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          ...pendingPayment.body,
+          wallet: address,
+          paymentId: pendingPayment.paymentId,
+          transactionHash: transactionHash ?? "thirdweb-pay-confirmed",
+        }),
+      });
+
+      const data = await res.json().catch(() => ({ error: "Payment confirmation failed" }));
+      if (!res.ok) {
+        throw new Error(data.error || "Payment confirmation failed");
+      }
+
+      if (pendingPayment.kind === "buy") {
+        notify(data.status === "sold" ? "Purchase complete!" : "Purchase confirmed", "success");
+        void fetchUsdListings();
+        void refreshBalance();
+      } else {
+        notify("Character rented! Go to your party to activate.", "success");
+        void fetchRentalListings();
+        void fetchMyGrants();
+      }
+
+      setPendingPayment(null);
+    } catch (err: any) {
+      notify(err?.message ?? "Payment confirmation failed", "error");
+    } finally {
+      setConfirmingPayment(false);
+    }
+  }, [address, pendingPayment, notify, fetchUsdListings, refreshBalance, fetchRentalListings, fetchMyGrants]);
+
   // ── Item actions ──
 
   const handleUsdBuy = async (listing: DirectListing) => {
@@ -228,24 +289,36 @@ export function RealMoneyMarketPage(): React.ReactElement {
     try {
       const token = await getAuthToken(address);
       if (!token) { notify("Authentication failed", "error"); return; }
-      const res = await mppFetch(`${API_URL}/marketplace/direct/listings/${listing.listingId}/buy`, {
+      const res = await fetch(`${API_URL}/marketplace/direct/listings/${listing.listingId}/buy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ wallet: address }),
       });
+      const data = await res.json().catch(() => ({ error: "Purchase failed" }));
       if (res.ok) {
-        const data = await res.json();
-        notify(data.status === "sold" ? "Purchase complete!" : "Purchase initiated", "success");
-        void fetchUsdListings(); void refreshBalance();
+        if (data.status === "sold") {
+          notify("Purchase complete!", "success");
+          void fetchUsdListings();
+          void refreshBalance();
+        } else {
+          setPendingPayment({
+            kind: "buy",
+            paymentId: data.paymentId,
+            amountUsd: data.amountUsd,
+            label: `${listing.itemName || `Token #${listing.tokenId}`} — ${formatUsd(listing.priceUsd)}`,
+            recipientWallet: data.payment.recipientWallet,
+            chainId: data.payment.chainId,
+            currency: data.payment.currency,
+            confirmUrl: `${API_URL}/marketplace/direct/listings/${listing.listingId}/buy/confirm`,
+            body: {},
+          });
+        }
       } else {
-        const err = await res.json().catch(() => ({ error: "Purchase failed" }));
-        notify(err.error || "Purchase failed", "error");
+        notify(data.error || "Purchase failed", "error");
       }
     } catch (e: any) {
       const msg = e?.message ?? "Purchase failed";
-      if (msg.includes("rejected") || msg.includes("denied")) notify("Payment cancelled", "error");
-      else if (msg.includes("insufficient") || msg.includes("balance")) notify("Insufficient USDC balance", "error");
-      else notify(msg, "error");
+      notify(msg, "error");
     } finally { setUsdProcessingId(null); }
   };
 
@@ -294,17 +367,26 @@ export function RealMoneyMarketPage(): React.ReactElement {
     try {
       const token = await getAuthToken(address);
       if (!token) { notify("Auth failed", "error"); return; }
-      const res = await mppFetch(`${API_URL}/rentals/listings/${rental.rentalId}/rent`, {
+      const res = await fetch(`${API_URL}/rentals/listings/${rental.rentalId}/rent`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ wallet: address, usageMode: "full" }),
       });
+      const data = await res.json().catch(() => ({ error: "Rental failed" }));
       if (res.ok) {
-        notify("Character rented! Go to your party to activate.", "success");
-        void fetchRentalListings(); void fetchMyGrants();
+        setPendingPayment({
+          kind: "rent",
+          paymentId: data.paymentId,
+          amountUsd: data.amountUsd,
+          label: `${rental.instanceId || rental.itemName || "Champion"} — ${formatUsd(rental.priceUsd ?? rental.priceUsdCents)}`,
+          recipientWallet: data.payment.recipientWallet,
+          chainId: data.payment.chainId,
+          currency: data.payment.currency,
+          confirmUrl: `${API_URL}/rentals/listings/${rental.rentalId}/rent/confirm`,
+          body: { usageMode: "full" },
+        });
       } else {
-        const err = await res.json().catch(() => ({ error: "Rental failed" }));
-        notify(err.error || "Rental failed", "error");
+        notify(data.error || "Rental failed", "error");
       }
     } catch (e: any) { notify(e?.message ?? "Rental failed", "error"); }
     finally { setRentalProcessingId(null); }
@@ -378,7 +460,7 @@ export function RealMoneyMarketPage(): React.ReactElement {
           <h1 className="text-[14px] uppercase tracking-widest text-[#54f28b]" style={{ textShadow: "3px 3px 0 #000" }}>
             Real Money Market
           </h1>
-          <p className="text-[8px] text-[#9aa7cc]">Buy, sell, and rent with USD via Tempo payments</p>
+          <p className="text-[8px] text-[#9aa7cc]">Buy, sell, and rent with Base USDC payments</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => navigate("/marketplace")} className="border-2 border-[#ffcc00]/40 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]">
@@ -387,6 +469,37 @@ export function RealMoneyMarketPage(): React.ReactElement {
           {isConnected && <UsdcWalletBalance address={address!} />}
         </div>
       </div>
+
+      {pendingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            className="absolute inset-0 bg-black/80"
+            onClick={() => !confirmingPayment && setPendingPayment(null)}
+            type="button"
+            aria-label="Close payment"
+          />
+          <div className="relative z-10 w-full max-w-md border-4 border-black bg-[#11182b] p-4 shadow-[8px_8px_0_0_#000]">
+            <PaymentGate
+              label={pendingPayment.label}
+              amount={pendingPayment.amountUsd}
+              sellerAddress={pendingPayment.recipientWallet}
+              chainId={pendingPayment.chainId}
+              tokenAddress={pendingPayment.currency}
+              onSuccess={(txHash) => {
+                void confirmPendingPayment(txHash);
+              }}
+              onCancel={() => {
+                if (!confirmingPayment) setPendingPayment(null);
+              }}
+            />
+            {confirmingPayment && (
+              <p className="mt-3 text-center text-[10px] text-[#ffcc00]">
+                Confirming purchase on the server...
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main */}
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -636,7 +749,7 @@ export function RealMoneyMarketPage(): React.ReactElement {
       </main>
 
       <footer className="border-t-4 border-black bg-[#0d1526] px-4 py-4 text-center">
-        <p className="text-[8px] text-[#565f89]">World of Geneva Real Money Market -- Powered by Tempo/MPP -- USD Payments</p>
+        <p className="text-[8px] text-[#565f89]">World of Geneva Real Money Market -- Powered by Base USDC -- USD Payments</p>
       </footer>
     </div>
   );
@@ -650,8 +763,14 @@ function UsdcWalletBalance({ address }: { address: string }): React.ReactElement
   const [copied, setCopied] = React.useState(false);
 
   React.useEffect(() => {
-    const usdcContract = import.meta.env.VITE_MPP_CURRENCY_ADDRESS || "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
-    const rpcUrl = import.meta.env.VITE_MPP_RPC_URL || "https://sepolia.base.org";
+    const usdcContract =
+      import.meta.env.VITE_MARKETPLACE_PAYMENT_CURRENCY_ADDRESS ||
+      import.meta.env.VITE_MPP_CURRENCY_ADDRESS ||
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+    const rpcUrl =
+      import.meta.env.VITE_MARKETPLACE_PAYMENT_RPC_URL ||
+      import.meta.env.VITE_MPP_RPC_URL ||
+      "https://mainnet.base.org";
     const data = "0x70a08231" + address.slice(2).padStart(64, "0");
     fetch(rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_call", params: [{ to: usdcContract, data }, "latest"] }) })
       .then((r) => r.json())
@@ -666,17 +785,17 @@ function UsdcWalletBalance({ address }: { address: string }): React.ReactElement
     });
   };
 
-  const handleAddTempoNetwork = () => {
+  const handleAddBaseNetwork = () => {
     const w = window as any;
     if (!w.ethereum) return;
     w.ethereum.request({
       method: "wallet_addEthereumChain",
       params: [{
-        chainId: "0x1079", // 4217
-        chainName: "Tempo Mainnet",
-        nativeCurrency: { name: "USD", symbol: "USD", decimals: 18 },
-        rpcUrls: ["https://rpc.tempo.xyz"],
-        blockExplorerUrls: ["https://explore.tempo.xyz"],
+        chainId: "0x2105",
+        chainName: "Base",
+        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+        rpcUrls: ["https://mainnet.base.org"],
+        blockExplorerUrls: ["https://basescan.org"],
       }],
     }).catch(() => {});
   };
@@ -731,8 +850,8 @@ function UsdcWalletBalance({ address }: { address: string }): React.ReactElement
               <div className="space-y-2">
                 <p className="text-[9px] font-bold text-[#ffcc00]">How to add funds:</p>
                 <div className="space-y-1 text-[8px] text-[#9aa7cc]">
-                  <p>1. Open your Tempo wallet or any EVM wallet</p>
-                  <p>2. Add the Tempo network (button below)</p>
+                  <p>1. Open your Base wallet or any EVM wallet</p>
+                  <p>2. Add the Base network (button below)</p>
                   <p>3. Send USDC to the address above</p>
                   <p>4. Funds appear instantly for marketplace purchases</p>
                 </div>
@@ -741,23 +860,23 @@ function UsdcWalletBalance({ address }: { address: string }): React.ReactElement
               {/* Actions */}
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={handleAddTempoNetwork}
+                  onClick={handleAddBaseNetwork}
                   className="border-2 border-black bg-[#54f28b] p-2 text-[9px] font-bold text-black shadow-[2px_2px_0_0_#000] transition hover:bg-[#6fff9e]"
                 >
-                  Add Tempo Network
+                  Add Base Network
                 </button>
                 <a
-                  href="https://tempo.xyz"
+                  href="https://base.org"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="border-2 border-black bg-[#2b3656] p-2 text-center text-[9px] font-bold text-[#f1f5ff] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3a4870]"
                 >
-                  Get Tempo Wallet
+                  Get Base Wallet
                 </a>
               </div>
 
               <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-2 text-[7px] text-[#565f89]">
-                Tempo uses USDC for all payments. Your game wallet address works on both SKALE (for gameplay) and Tempo (for marketplace purchases).
+                Marketplace payments use USDC on Base. Your gameplay assets remain on SKALE.
               </div>
             </div>
           </div>
