@@ -1,208 +1,162 @@
 /**
  * Reputation System Tests
- * Tests for ERC-8004 reputation functionality
+ * Run with: npx tsx tests/reputation.test.ts
+ *
+ * Covers the current agent-keyed reputation manager behavior without Jest.
+ * If chain config is present, also checks eventual consistency against the
+ * on-chain reputation registry.
  */
 
-import { describe, it, expect, beforeAll } from "@jest/globals";
-import { reputationManager, ReputationCategory } from "../src/reputationManager";
+import { reputationManager, ReputationCategory } from "../src/economy/reputationManager.js";
+import { getReputationOnChain } from "../src/economy/reputationChain.js";
+import { biteWallet } from "../src/blockchain/biteChain.js";
 
-describe("Reputation System", () => {
-  const testCharacterId = BigInt(999);
-  const testWallet = "0x" + "1".repeat(40);
+let passed = 0;
+let failed = 0;
 
-  describe("Character Identity", () => {
-    it("should create a character identity", async () => {
-      // Skip if contracts not deployed
-      if (!process.env.IDENTITY_REGISTRY_ADDRESS) {
-        console.log("Skipping: IDENTITY_REGISTRY_ADDRESS not set");
-        return;
-      }
+function assert(condition: boolean, label: string, details?: unknown): void {
+  if (condition) {
+    console.log(`  ✓ ${label}`);
+    passed++;
+  } else {
+    console.error(`  ✗ ${label}`);
+    if (details !== undefined) {
+      console.error(`    ${typeof details === "string" ? details : JSON.stringify(details)}`);
+    }
+    failed++;
+  }
+}
 
-      const identityId = await reputationManager.createCharacterIdentity(
-        testCharacterId,
-        testWallet,
-        {
-          name: "Test Hero",
-          class: "Warrior",
-          level: 10,
-        }
-      );
+function section(name: string): void {
+  console.log(`\n── ${name} ──`);
+}
 
-      expect(identityId).toBeDefined();
-      expect(identityId).toBeGreaterThan(BigInt(0));
-    });
+async function waitFor(
+  fn: () => Promise<boolean>,
+  timeoutMs: number,
+  intervalMs: number
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (await fn()) return true;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
 
-    it("should retrieve character identity", async () => {
-      if (!process.env.IDENTITY_REGISTRY_ADDRESS) {
-        console.log("Skipping: IDENTITY_REGISTRY_ADDRESS not set");
-        return;
-      }
+function snapshot(agentId: string) {
+  const rep = reputationManager.getReputation(agentId);
+  return rep ? { ...rep } : null;
+}
 
-      const identity = await reputationManager.getCharacterIdentity(testCharacterId);
+const agentA = `rep-agent-a-${Date.now()}`;
+const agentB = `rep-agent-b-${Date.now()}`;
 
-      expect(identity).toBeDefined();
-      expect(identity?.characterTokenId).toBe(testCharacterId);
-      expect(identity?.characterOwner).toBe(testWallet);
-      expect(identity?.active).toBe(true);
-    });
-  });
+section("Initialization");
 
-  describe("Reputation Scores", () => {
-    it("should get initial reputation (default 500)", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
+reputationManager.ensureInitialized(agentA);
+const initialA = snapshot(agentA);
+assert(initialA !== null, "ensureInitialized creates a reputation entry");
+assert(initialA?.combat === 500, "Initial combat reputation is 500", initialA);
+assert(initialA?.economic === 500, "Initial economic reputation is 500", initialA);
+assert(initialA?.social === 500, "Initial social reputation is 500", initialA);
+assert(initialA?.overall === 500, "Initial overall reputation is 500", initialA);
 
-      const reputation = await reputationManager.getReputation(testCharacterId);
+section("Agent-Keyed Updates");
 
-      expect(reputation).toBeDefined();
-      expect(reputation?.combat).toBe(500);
-      expect(reputation?.economic).toBe(500);
-      expect(reputation?.social).toBe(500);
-      expect(reputation?.overall).toBe(500);
-    });
+reputationManager.submitFeedback(agentA, ReputationCategory.Social, 10, "Helped a new player");
+const afterSocial = reputationManager.getReputation(agentA);
+assert(afterSocial?.social === 510, "submitFeedback updates the targeted category", afterSocial);
+assert(afterSocial?.overall === 502, "submitFeedback recalculates overall score", afterSocial);
 
-    it("should update combat reputation for PvP win", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
+reputationManager.batchUpdateReputation(
+  agentA,
+  { combat: 5, economic: 3, social: 2 },
+  "Tournament participation"
+);
+const afterBatch = snapshot(agentA);
+assert(afterBatch?.combat === 505, "batchUpdateReputation updates combat", afterBatch);
+assert(afterBatch?.economic === 503, "batchUpdateReputation updates economic", afterBatch);
+assert(afterBatch?.social === 512, "batchUpdateReputation updates social cumulatively", afterBatch);
+assert(afterBatch?.overall === 504, "batchUpdateReputation updates overall", afterBatch);
 
-      await reputationManager.updateCombatReputation(
-        testCharacterId,
-        true, // won
-        80 // performance score
-      );
+section("Isolation");
 
-      const reputation = await reputationManager.getReputation(testCharacterId);
+reputationManager.ensureInitialized(agentB);
+const isolatedB = reputationManager.getReputation(agentB);
+assert(isolatedB?.overall === 500, "A second agent starts from its own default reputation", isolatedB);
+assert(
+  isolatedB?.social === 500 && afterBatch?.social === 512,
+  "Distinct agentIds do not leak reputation into each other",
+  { agentA: afterBatch, agentB: isolatedB }
+);
 
-      expect(reputation).toBeDefined();
-      expect(reputation!.combat).toBeGreaterThan(500);
-    });
+section("Feedback History + Ranks");
 
-    it("should get correct reputation rank", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
+const historyA = reputationManager.getFeedbackHistory(agentA, 10);
+assert(Array.isArray(historyA), "Feedback history returns an array");
+assert(historyA.length >= 2, "Feedback history captures submitted updates", historyA);
+assert(historyA[0]?.agentId === agentA, "Feedback history remains keyed by agentId", historyA[0]);
 
-      const rank500 = await reputationManager.getReputationRank(500);
-      expect(rank500).toBe("Average Citizen");
+assert(reputationManager.getReputationRank(500) === "Average Citizen", "Rank 500 maps to Average Citizen");
+assert(reputationManager.getReputationRank(800) === "Renowned Champion", "Rank 800 maps to Renowned Champion");
+assert(reputationManager.getReputationRank(950) === "Legendary Hero", "Rank 950 maps to Legendary Hero");
 
-      const rank800 = await reputationManager.getReputationRank(800);
-      expect(rank800).toBe("Renowned Champion");
+section("Economic Helpers");
 
-      const rank950 = await reputationManager.getReputationRank(950);
-      expect(rank950).toBe("Legendary Hero");
-    });
-  });
+const beforeEconomic = snapshot(agentB);
+reputationManager.updateEconomicReputation(agentB, true, true);
+const afterEconomicWin = snapshot(agentB);
+assert(
+  (afterEconomicWin?.economic ?? 0) > (beforeEconomic?.economic ?? 0),
+  "updateEconomicReputation rewards fair completed trades",
+  { beforeEconomic, afterEconomicWin }
+);
 
-  describe("Reputation Feedback", () => {
-    it("should submit feedback and update score", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
+reputationManager.updateEconomicReputation(agentB, false, false);
+const afterEconomicLoss = snapshot(agentB);
+assert(
+  (afterEconomicLoss?.economic ?? 0) < (afterEconomicWin?.economic ?? 0),
+  "updateEconomicReputation penalizes failed trades",
+  { afterEconomicWin, afterEconomicLoss }
+);
 
-      const beforeRep = await reputationManager.getReputation(testCharacterId);
+section("Optional Chain Convergence");
 
-      await reputationManager.submitFeedback(
-        testCharacterId,
-        ReputationCategory.Social,
-        10,
-        "Helped a new player"
-      );
+if (process.env.REPUTATION_REGISTRY_ADDRESS && process.env.SKALE_BASE_RPC_URL && biteWallet) {
+  const chainAgentId = `rep-chain-${Date.now()}`;
+  reputationManager.ensureInitialized(chainAgentId);
+  reputationManager.submitFeedback(
+    chainAgentId,
+    ReputationCategory.Social,
+    7,
+    "eventual-consistency-test"
+  );
 
-      const afterRep = await reputationManager.getReputation(testCharacterId);
+  const converged = await waitFor(async () => {
+    const [apiScore, chainScore] = await Promise.all([
+      reputationManager.getEventuallyConsistentReputation(chainAgentId),
+      getReputationOnChain(chainAgentId),
+    ]);
+    if (!apiScore || !chainScore) return false;
+    return apiScore.social === chainScore.social && apiScore.overall === chainScore.overall;
+  }, 40_000, 5_000);
 
-      expect(afterRep!.social).toBe(beforeRep!.social + 10);
-    });
+  const [finalLocal, finalChain] = await Promise.all([
+    reputationManager.getEventuallyConsistentReputation(chainAgentId),
+    getReputationOnChain(chainAgentId),
+  ]);
+  assert(
+    converged,
+    "Eventually-consistent reputation converges to the on-chain score when chain config is present",
+    { finalLocal, finalChain }
+  );
+} else {
+  console.log("  · Skipped on-chain convergence check (reputation registry RPC or signer not fully configured)");
+}
 
-    it("should batch update multiple categories", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
+console.log("\n==================================================");
+console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+console.log("==================================================");
 
-      await reputationManager.batchUpdateReputation(
-        testCharacterId,
-        {
-          combat: 5,
-          economic: 3,
-          social: 2,
-        },
-        "Tournament participation"
-      );
-
-      const reputation = await reputationManager.getReputation(testCharacterId);
-
-      expect(reputation).toBeDefined();
-    });
-
-    it("should retrieve feedback history", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
-
-      const history = await reputationManager.getFeedbackHistory(
-        testCharacterId,
-        5
-      );
-
-      expect(history).toBeDefined();
-      expect(Array.isArray(history)).toBe(true);
-    });
-  });
-
-  describe("Economic Reputation", () => {
-    it("should update economic reputation for fair trade", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
-
-      const beforeRep = await reputationManager.getReputation(testCharacterId);
-
-      await reputationManager.updateEconomicReputation(
-        testCharacterId,
-        true, // trade completed
-        true // fair price
-      );
-
-      const afterRep = await reputationManager.getReputation(testCharacterId);
-
-      expect(afterRep!.economic).toBeGreaterThan(beforeRep!.economic);
-    });
-
-    it("should penalize for failed trade", async () => {
-      if (!process.env.REPUTATION_REGISTRY_ADDRESS) {
-        console.log("Skipping: REPUTATION_REGISTRY_ADDRESS not set");
-        return;
-      }
-
-      const beforeRep = await reputationManager.getReputation(testCharacterId);
-
-      await reputationManager.updateEconomicReputation(
-        testCharacterId,
-        false, // trade failed
-        false
-      );
-
-      const afterRep = await reputationManager.getReputation(testCharacterId);
-
-      expect(afterRep!.economic).toBeLessThan(beforeRep!.economic);
-    });
-  });
-});
-
-describe("Reputation API", () => {
-  it("should return reputation via API endpoint", async () => {
-    // This would test the actual API endpoint
-    // Requires server to be running
-    console.log("API tests require running server - implement in e2e tests");
-  });
-});
-
-export {};
+process.exit(failed > 0 ? 1 : 0);
