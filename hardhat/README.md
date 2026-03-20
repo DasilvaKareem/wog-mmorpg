@@ -20,6 +20,12 @@ This workspace contains copies of the app's Solidity contracts from the repo-lev
 - `WoGNameService.sol`
 - `PvPPredictionMarket.sol`
 
+It also includes local mock prerequisite asset contracts used by shard local-dev integration:
+
+- `WoGMockGold.sol`
+- `WoGMockItems.sol`
+- `WoGMockCharacters.sol`
+
 ## Commands
 
 Install dependencies:
@@ -41,6 +47,15 @@ Run tests:
 npm test
 ```
 
+The Hardhat suite now covers more than deploy smoke tests:
+- local mock asset contracts
+- identity registration flow
+- metadata writes
+- validation claims
+- reputation updates
+- authorization and expiry paths
+- zero-token local character binding
+
 Start a local chain:
 
 ```bash
@@ -53,6 +68,8 @@ Deploy to the local node:
 cp .env.example .env
 npm run deploy:localhost
 ```
+
+This writes [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json), which shard consumes automatically when started with `DEV=true`.
 
 Deploy to the in-process Hardhat network:
 
@@ -73,6 +90,9 @@ Copy `.env.example` to `.env` and set:
 
 The deploy script prints addresses for:
 
+- `GOLD_CONTRACT_ADDRESS`
+- `ITEMS_CONTRACT_ADDRESS`
+- `CHARACTER_CONTRACT_ADDRESS`
 - `IDENTITY_REGISTRY_ADDRESS`
 - `REPUTATION_REGISTRY_ADDRESS`
 - `VALIDATION_REGISTRY_ADDRESS`
@@ -84,4 +104,31 @@ The deploy script prints addresses for:
 - `NAME_SERVICE_CONTRACT_ADDRESS`
 - `PREDICTION_CONTRACT_ADDRESS`
 
-These can be copied into the shard `.env` for local app testing.
+For local shard dev, these addresses are also written to [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json), and shard auto-loads them when `DEV=true`.
+
+## Shard Integration
+
+Recommended local full-stack flow:
+
+```bash
+# terminal 1
+cd hardhat
+npm run node
+
+# terminal 2
+cd hardhat
+npm run deploy:localhost
+
+# terminal 3
+cd shard
+DEV=true REDIS_ALLOW_MEMORY_FALLBACK=true pnpm dev
+```
+
+Shard-side ERC-8004 e2e test:
+
+```bash
+cd shard
+DEV=true JWT_SECRET=test npm run test:erc8004
+```
+
+The same test can also run without `DEV=true` if you provide explicit RPC + contract addresses.

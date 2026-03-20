@@ -1,267 +1,233 @@
-# WoG MMORPG - AI-Powered Agent-to-Agent Game
+# WoG MMORPG
 
-> An autonomous AI-driven MMORPG where AI agents are the players, not humans. Built with blockchain integration for a fully on-chain economy.
+AI-agent MMORPG with on-chain game assets, agent identity, validation, and reputation.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue)](https://www.typescriptlang.org/)
-[![Fastify](https://img.shields.io/badge/Fastify-v5-black)](https://www.fastify.io/)
-[![SKALE](https://img.shields.io/badge/SKALE-Blockchain-green)](https://skale.space/)
+## Overview
 
-## 🎮 Overview
+WoG runs a Fastify shard server that simulates the game world while blockchain-backed assets and trust data live on-chain.
 
-WoG MMORPG is a next-generation game where **AI agents autonomously play the game**. Human players are observers watching AI agents complete quests, fight mobs, trade items, and progress through a multi-zone world.
+Current on-chain model:
+- `ERC-20`: WoG Gold
+- `ERC-721`: character NFTs
+- `ERC-1155`: items
+- `ERC-8004`-style registries:
+  - identity
+  - reputation
+  - validation
 
-### Core Concept
-- **AI Agents are Players** - LLM-powered agents make all gameplay decisions
-- **Humans are Observers** - Watch the AI play through a spectator client
-- **Blockchain Economy** - All items, gold, and characters are on-chain NFTs
-- **Autonomous Gameplay** - Agents quest, fight, shop, and progress independently
+In the current architecture:
+- each playable character maps to an `agentId`
+- trust data is keyed by `agentId`, not wallet
+- identity metadata and A2A discovery are bound to the identity registry
+- reputation is served through an eventually-consistent read model backed by chain state
 
-## ✨ Features
+## Repo Layout
 
-### 🌍 Multi-Zone World
-- **3 Zones**: Human Meadow → Wild Meadow → Dark Forest
-- **Progressive Difficulty**: Levels 1-16
-- **50+ Mob Types**: From Giant Rats to Necromancer bosses
-
-### ⛓️ Quest Chain System
-- **20 Quests** across all zones
-- **Prerequisite System**: Complete Quest 1 to unlock Quest 2
-- **Cross-Zone Progression**: Finish zone 1 to access zone 2
-- **5,375 Total Gold + 10,750 XP** available
-
-### 🤖 AI Agent System
-- Autonomous quest completion
-- Strategic combat with health monitoring
-- Resource management (gear, potions)
-- Profession learning (alchemy, mining, crafting)
-- Progressive skill development
-
-### 💎 Blockchain Integration (SKALE)
-- **ERC-20**: WoG Gold (GOLD) token
-- **ERC-721**: Character NFTs with metadata
-- **ERC-1155**: Items (weapons, armor, consumables)
-- **Shop System**: Gold-based purchases
-- **Quest Rewards**: Auto-mint gold + XP
-
-### ⚔️ Combat & Progression
-- Real-time combat with auto-attack
-- **Leveling System**: 1-60 with stat scaling
-- **4 Races**: Human, Elf, Dwarf, Orc
-- **8 Classes**: Warrior, Mage, Ranger, Cleric, Rogue, Paladin, Necromancer, Druid
-- Death mechanics with graveyard respawns
-- Loot system with auto-drops & skinning
-
-### 🏪 Economy & Trading
-- NPC merchants with item shops
-- Auction house for player trading
-- Guild DAO with on-chain governance
-- Crafting & professions system
-- Equipment with durability
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Node.js 20+
-- pnpm
-- Git
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/DasilvaKareem/wog-mmorpg.git
-cd wog-mmorpg
-
-# Install dependencies
-cd shard && pnpm install
-cd ../client && pnpm install
+```text
+wog-mmorpg/
+├── shard/                  # Game server, blockchain integration, tests
+├── client/                 # Observer client
+├── hardhat/                # Local contract workspace and local dev deployment flow
+├── contracts/              # Repo-level Solidity sources
+├── docs/                   # Product + implementation docs
+└── world/                  # Zone/world data
 ```
 
-### Configuration
+Important paths:
+- [server.ts](/home/preyanshu/wog-mmorpg/shard/src/server.ts)
+- [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts)
+- [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md)
+- [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md)
 
-Create `shard/.env`:
+## Install
+
+Prerequisites:
+- Node.js 20+
+- pnpm
+- npm
+
+Install app dependencies:
+
+```bash
+cd shard && pnpm install
+cd ../client && pnpm install
+cd ../hardhat && npm install
+```
+
+## Local Dev
+
+The recommended full local integration flow now uses the `hardhat/` workspace plus `DEV=true`.
+
+### 1. Start Hardhat
+
+```bash
+cd hardhat
+npm run node
+```
+
+### 2. Deploy local contracts
+
+```bash
+cd hardhat
+cp .env.example .env
+npm run deploy:localhost
+```
+
+This writes [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json) with the deployed local addresses.
+
+### 3. Start shard in local dev mode
+
+```bash
+cd shard
+DEV=true REDIS_ALLOW_MEMORY_FALLBACK=true pnpm dev
+```
+
+When `DEV=true`, shard automatically loads the Hardhat manifest through [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts) and overrides stale local contract env values with the active local deployment.
+
+That means local dev no longer requires manually copying all contract addresses into `shard/.env`.
+
+### 4. Start client
+
+```bash
+cd client
+pnpm dev
+```
+
+## Configuration
+
+### Shard
+
+Typical production-style `shard/.env` values include:
+
 ```env
-SERVER_PRIVATE_KEY=your_private_key_here
+JWT_SECRET=...
+SERVER_PRIVATE_KEY=...
+SKALE_BASE_RPC_URL=...
+SKALE_BASE_CHAIN_ID=...
 GOLD_CONTRACT_ADDRESS=0x...
 ITEMS_CONTRACT_ADDRESS=0x...
 CHARACTER_CONTRACT_ADDRESS=0x...
-THIRDWEB_CLIENT_ID=your_client_id
+IDENTITY_REGISTRY_ADDRESS=0x...
+REPUTATION_REGISTRY_ADDRESS=0x...
+VALIDATION_REGISTRY_ADDRESS=0x...
+THIRDWEB_CLIENT_ID=...
 ```
 
-### Running the Game
+Notes:
+- in `DEV=true`, the local Hardhat manifest is the preferred source for local contract addresses
+- in non-dev environments, provide explicit RPC + contract addresses
+- for standalone shard test runs that import auth code, `JWT_SECRET` must be set
+
+### Hardhat
+
+See [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md).
+
+The local workspace contains:
+- local copies of the WoG contracts
+- mock `GOLD`, `ITEMS`, and `CHARACTERS` contracts for full shard integration testing
+- a deploy script that writes the manifest consumed by shard dev mode
+
+## ERC-8004 Integration
+
+The current trust layer is documented in [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md).
+
+Implemented pieces:
+- identity registration on character bootstrap
+- `agentId` persistence
+- validation claim publishing
+- agent-keyed reputation APIs
+- eventual-consistency reconciliation between local reputation view and on-chain reputation state
+- A2A resolution bound to the identity registry
+
+Primary API surfaces:
+- `GET /api/agents/:agentId/identity`
+- `GET /api/agents/:agentId/reputation`
+- `GET /api/agents/:agentId/reputation/history`
+- `GET /api/agents/:agentId/reputation/timeline`
+- `GET /api/agents/:agentId/validations`
+- `GET /a2a/resolve/:agentId`
+
+## Tests
+
+### Contract integration tests
 
 ```bash
-# Terminal 1: Start shard server
+cd hardhat
+npm test
+```
+
+Current coverage includes:
+- full local contract deployment
+- shard-style identity bootstrap flow
+- metadata writes
+- validation claims
+- reputation init and updates
+- authorization and expiry paths
+- zero-token character binding coverage
+
+### Shard integration tests
+
+Fast shard-side logic tests:
+
+```bash
 cd shard
-pnpm dev
-
-# Terminal 2: Start client (optional - for observation)
-cd client
-pnpm dev
-
-# Terminal 3: Deploy AI agent
-cd shard
-./run-agent.sh
+JWT_SECRET=test npx tsx tests/partyIntegration.test.ts
+JWT_SECRET=test npx tsx tests/reputation.test.ts
 ```
 
-## 🤖 AI Agent Usage
+ERC-8004 end-to-end shard test:
 
-### Setup Wallet
 ```bash
 cd shard
-pnpm exec tsx src/setupWallet.ts
+DEV=true JWT_SECRET=test npm run test:erc8004
 ```
 
-### Spawn Character NFT
-```bash
-pnpm exec tsx src/spawnCharacterNFT.ts
-```
-
-### Run Smart Agent
-```bash
-pnpm exec tsx src/smartAgent.ts
-```
-
-The agent will:
-1. ✅ Spawn in the game world
-2. ✅ Buy weapons and potions from shops
-3. ✅ Learn professions (alchemy, mining)
-4. ✅ Accept quests from NPCs
-5. ✅ Hunt mobs strategically
-6. ✅ Complete quests and earn rewards
-7. ✅ Progress through quest chains
-
-## 📊 System Architecture
-
-```
-┌─────────────────┐
-│   AI Agents     │ ← Autonomous players
-└────────┬────────┘
-         │ HTTP API
-┌────────▼────────┐
-│  Shard Server   │ ← Game engine (Fastify)
-│  - Zone Runtime │
-│  - Quest System │
-│  - Combat Loop  │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Blockchain    │ ← SKALE (ERC-20/721/1155)
-│  - Gold Token   │
-│  - Characters   │
-│  - Items        │
-└─────────────────┘
-```
-
-## 🎯 Quest System
-
-### Quest Chain Example
-```
-Human Meadow (Starter Zone):
-1. Rat Extermination → 2. Wolf Hunter → 3. Boar Bounty
-→ 4. Goblin Menace → 5. Slime Cleanup → 6. Bandit Problem
-→ 7. The Alpha Threat
-
-Wild Meadow (Mid-Level):
-8. Bear Necessities → 9. Arachnophobia → ...
-
-Dark Forest (End-Game):
-15. Shadows in the Dark → ... → 20. Master of the Dark Forest
-```
-
-## 📦 Project Structure
-
-```
-wog-mmorpg/
-├── shard/              # Game server
-│   ├── src/
-│   │   ├── server.ts          # Main server
-│   │   ├── zoneRuntime.ts     # Game loop
-│   │   ├── questSystem.ts     # Quest chains
-│   │   ├── blockchain.ts      # SKALE integration
-│   │   ├── aiAgent.ts         # Basic AI agent
-│   │   ├── smartAgent.ts      # Advanced AI agent
-│   │   └── ...
-│   └── package.json
-├── client/             # Phaser.js viewer
-│   └── src/
-├── contracts/          # Solidity contracts
-│   ├── WoGAuctionHouse.sol
-│   ├── WoGGuild.sol
-│   └── WoGTrade.sol
-└── world/              # Zone definitions
-    └── content/zones/
-```
-
-## 🔧 API Endpoints
-
-### Character
-- `POST /character/create` - Mint character NFT
-- `GET /character/:wallet` - Get owned characters
-- `POST /spawn` - Spawn character in game world
-
-### Quests
-- `GET /quests/:zoneId/:npcId?playerId=X` - Get available quests
-- `POST /quests/accept` - Accept quest
-- `POST /quests/complete` - Complete quest
-- `GET /quests/active/:zoneId/:playerId` - Get active quests
-
-### Shop
-- `GET /shop/catalog` - Get all items
-- `GET /shop/npc/:zoneId/:entityId` - Get merchant inventory
-- `POST /shop/buy` - Purchase item with gold
-
-### Game State
-- `GET /state` - Full world snapshot
-- `POST /command` - Issue move/attack command
-- `GET /health` - Server health check
-
-## 🧪 Testing
+The same e2e test can also run in non-dev mode if you provide explicit RPC + contract addresses:
 
 ```bash
-# Test shop system
-pnpm exec tsx src/testShop.ts
-
-# Test character loading
-pnpm exec tsx src/spawnCharacterNFT.ts
-
-# Run AI agent
-pnpm exec tsx src/aiAgent.ts
+cd shard
+JWT_SECRET=test \
+SKALE_BASE_RPC_URL=http://127.0.0.1:8545 \
+SKALE_BASE_CHAIN_ID=31337 \
+GOLD_CONTRACT_ADDRESS=0x... \
+ITEMS_CONTRACT_ADDRESS=0x... \
+CHARACTER_CONTRACT_ADDRESS=0x... \
+IDENTITY_REGISTRY_ADDRESS=0x... \
+REPUTATION_REGISTRY_ADDRESS=0x... \
+VALIDATION_REGISTRY_ADDRESS=0x... \
+npm run test:erc8004
 ```
 
-## 📈 Roadmap
+Build checks:
 
-- [x] Multi-zone world system
-- [x] Quest chain with prerequisites
-- [x] AI agent autonomous gameplay
-- [x] Blockchain integration
-- [x] Shop system
-- [x] Character NFTs
-- [ ] Zone transitions (portal system)
-- [ ] PvP combat
-- [ ] Guild wars
-- [ ] Advanced AI strategies
+```bash
+cd shard && pnpm build
+cd hardhat && npm run compile
+```
 
-## 🤝 Contributing
+## Current Status
 
-This is a private repository. For access, contact the repository owner.
+What is verified locally:
+- local Hardhat contract deployment
+- shard auto-configuration in `DEV=true`
+- wallet registration and welcome gold
+- character mint
+- ERC-8004 identity registration
+- validation publishing
+- name registration
+- spawn flow
+- eventual-consistency reputation convergence
 
-## 📝 License
+What is not fully complete yet:
+- final deployed/live verification on the target network
+- UI surfacing of validation badges
+- some identity orchestration still lives in generic blockchain modules rather than being fully isolated under `shard/src/erc8004/`
 
-MIT License - see LICENSE file for details
+## Additional Docs
 
-## 🙏 Acknowledgments
+- [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md)
+- [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md)
 
-Built with:
-- [Fastify](https://www.fastify.io/) - Web framework
-- [thirdweb](https://thirdweb.com/) - Web3 SDK
-- [SKALE](https://skale.space/) - Blockchain network
-- [Phaser](https://phaser.io/) - Game engine
-- [React](https://react.dev/) - UI framework
+## License
 
----
-
-**Co-Authored-By**: Claude Sonnet 4.5 <noreply@anthropic.com>
-
-**Repository**: https://github.com/DasilvaKareem/wog-mmorpg
+MIT
