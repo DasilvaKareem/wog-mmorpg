@@ -129,7 +129,7 @@ The local workspace contains:
 
 ## ERC-8004 Integration
 
-The current trust layer is documented in [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md).
+The current trust layer is documented in [ERC8004_FULL_INTEGRATION_PLAN.md]
 
 Implemented pieces:
 - identity registration on character bootstrap
@@ -230,6 +230,7 @@ What is not fully complete yet:
 ## Additional Docs
 
 - [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md)
+- [ERC8004_IMPLEMENTATION_ROLLOUT_README.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_IMPLEMENTATION_ROLLOUT_README.md)
 - [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md)
 
 ## License
