@@ -11,6 +11,7 @@ import { getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
+import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
 import { isQuestNpc } from "../social/questSystem.js";
@@ -1381,11 +1382,14 @@ export async function doQuesting(
             });
             if (completeRes?.completed) {
               void ctx.logActivity(`Quest complete: "${aq.quest?.title}" +${completeRes.rewards?.xp ?? 0}XP +${completeRes.rewards?.copper ?? 0}c`);
-              reputationManager.submitFeedback(
-                ctx.userWallet, ReputationCategory.Agent,
-                Math.max(1, Math.floor((completeRes.rewards?.xp ?? 50) / 50)),
-                `Agent completed quest: ${aq.quest?.title ?? "unknown"}`,
-              );
+              const agentId = me.agentId != null ? me.agentId.toString() : resolveLiveAgentIdForWallet(ctx.userWallet);
+              if (agentId) {
+                reputationManager.submitFeedback(
+                  agentId, ReputationCategory.Agent,
+                  Math.max(1, Math.floor((completeRes.rewards?.xp ?? 50) / 50)),
+                  `Agent completed quest: ${aq.quest?.title ?? "unknown"}`,
+                );
+              }
               ctx.clearInteractionCooldown(cooldownKey);
               return actionCompleted(`Completed quest ${aq.quest?.title ?? aq.questId}`);
             }

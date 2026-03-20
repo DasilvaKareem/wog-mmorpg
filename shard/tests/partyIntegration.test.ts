@@ -25,6 +25,14 @@ function section(name: string): void {
   console.log(`\n── ${name} ──`);
 }
 
+function shouldFriendlyFireBeBlocked(
+  entityType: "player" | "mob",
+  targetType: "player" | "mob",
+  inParty: boolean
+): boolean {
+  return entityType === "player" && targetType === "player" && inParty;
+}
+
 // ── Test: Party system helpers ──────────────────────────────────────────────
 
 import { getPartyMembers, areInSameParty, getPlayerPartyId } from "../src/social/partySystem.js";
@@ -136,6 +144,60 @@ section("Matchmaking: group-aware team balancing");
   }
 }
 
+section("Matchmaking: same wallet, distinct agent identities");
+
+{
+  const mm = new MatchmakingSystem();
+  const now = Date.now();
+  const sharedWallet = "0xshared";
+
+  mm.addToQueue({
+    agentId: "agent-alpha",
+    walletAddress: sharedWallet,
+    characterTokenId: 10n,
+    level: 20,
+    elo: 1020,
+    format: "2v2",
+    queuedAt: now - 4000,
+  });
+  mm.addToQueue({
+    agentId: "agent-beta",
+    walletAddress: sharedWallet,
+    characterTokenId: 11n,
+    level: 20,
+    elo: 1010,
+    format: "2v2",
+    queuedAt: now - 3000,
+  });
+  mm.addToQueue({
+    agentId: "agent-gamma",
+    walletAddress: "0xother1",
+    characterTokenId: 12n,
+    level: 20,
+    elo: 1030,
+    format: "2v2",
+    queuedAt: now - 2000,
+  });
+  mm.addToQueue({
+    agentId: "agent-delta",
+    walletAddress: "0xother2",
+    characterTokenId: 13n,
+    level: 20,
+    elo: 1005,
+    format: "2v2",
+    queuedAt: now - 1000,
+  });
+
+  const match = mm.tryCreateMatch("2v2");
+  assert(match !== null, "Matchmaking accepts distinct agentIds even when walletAddress is shared");
+
+  if (match) {
+    const allIds = [...match.teamRed, ...match.teamBlue].map((entry) => entry.agentId);
+    assert(allIds.includes("agent-alpha"), "First shared-wallet agent is included in the match");
+    assert(allIds.includes("agent-beta"), "Second shared-wallet agent is included in the match");
+  }
+}
+
 // ── Test: PvPBattleManager.isInActiveBattle ─────────────────────────────────
 
 import { PvPBattleManager } from "../src/combat/pvpBattleManager.js";
@@ -205,19 +267,15 @@ section("Friendly-fire prevention logic");
   assert(!areInSameParty("p1", "p2"), "Unrelated players → no friendly-fire block");
 
   // The guard logic: if both players and in same party, cancel attack
-  const entityType = "player";
-  const targetType = "player";
-  const inParty = false; // simulate areInSameParty result
-
-  const shouldBlock = entityType === "player" && targetType === "player" && inParty;
+  const shouldBlock = shouldFriendlyFireBeBlocked("player", "player", false);
   assert(!shouldBlock, "Different-party players can attack each other");
 
   // If they WERE in same party
-  const shouldBlockParty = entityType === "player" && targetType === "player" && true;
+  const shouldBlockParty = shouldFriendlyFireBeBlocked("player", "player", true);
   assert(shouldBlockParty, "Same-party players → attack blocked");
 
   // Player attacking mob should never be blocked
-  const mobTarget = entityType === "player" && "mob" === "player" && true;
+  const mobTarget = shouldFriendlyFireBeBlocked("player", "mob", true);
   assert(!mobTarget, "Player attacking mob → never blocked");
 }
 

@@ -9,6 +9,7 @@ export interface Entity {
   createdAt: number;
   shopItems?: number[];
   walletAddress?: string;
+  agentId?: string;
   level?: number;
   xp?: number;
   raceId?: string;

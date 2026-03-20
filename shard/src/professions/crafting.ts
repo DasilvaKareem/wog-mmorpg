@@ -639,7 +639,9 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 2, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      }
       server.log.info(
         `[crafting] ${entity.name} forged ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${forge.name} → ${craftTx}`
       );

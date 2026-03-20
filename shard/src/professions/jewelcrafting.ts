@@ -241,7 +241,9 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
-      reputationManager.submitFeedback(walletAddress, ReputationCategory.Crafting, 3, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      if (entity.agentId != null) {
+        reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 3, `Crafted: ${instance?.displayName ?? outputItem?.name ?? recipeId}`);
+      }
       server.log.info(
         `[jewelcrafting] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );

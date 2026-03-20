@@ -1,8 +1,9 @@
+import "../config/devLocalContracts.js";
 import { ethers } from "ethers";
 import { BITE } from "@skalenetwork/bite";
 
 /** SKALE Base Mainnet (ID 1187947933) — BITE V2 encryption */
-export const SKALE_BASE_CHAIN_ID = 1187947933;
+export const SKALE_BASE_CHAIN_ID = Number(process.env.SKALE_BASE_CHAIN_ID || 1187947933);
 
 const SKALE_BASE_RPC =
   process.env.SKALE_BASE_RPC_URL ||

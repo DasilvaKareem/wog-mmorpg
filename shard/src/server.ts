@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "./config/devLocalContracts.js";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { registerZoneRuntime } from "./world/zoneRuntime.js";
@@ -172,12 +173,12 @@ function enforceRateLimit(ip: string, path: string, rule: RateLimitRule): { ok: 
   return { ok: true, retryAfterSeconds: 0 };
 }
 
-async function assertMainnetRpc(): Promise<void> {
+async function assertConfiguredRpc(): Promise<void> {
   const network = await biteProvider.getNetwork();
   const chainId = Number(network.chainId);
   if (chainId !== SKALE_BASE_CHAIN_ID) {
     throw new Error(
-      `RPC chainId mismatch: expected ${SKALE_BASE_CHAIN_ID} (SKALE Base mainnet), got ${chainId}`
+      `RPC chainId mismatch: expected ${SKALE_BASE_CHAIN_ID}, got ${chainId}`
     );
   }
 }
@@ -794,8 +795,8 @@ const start = async () => {
     server.log.warn(`[worldMapStore] Init failed (non-fatal): ${err.message}`);
   });
 
-  await assertMainnetRpc();
-  server.log.info(`[chain] Verified SKALE Base mainnet (chainId=${SKALE_BASE_CHAIN_ID})`);
+  await assertConfiguredRpc();
+  server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";

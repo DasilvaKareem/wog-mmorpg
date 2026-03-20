@@ -5,15 +5,14 @@
  *
  * All functions silently swallow errors — chain failures never break gameplay.
  *
- * Key insight: every Ethereum address is a uint160 that fits in uint256,
- * so walletAddress → identityId is deterministic with no separate registry.
- *
  * submitFeedbackOnChain() now queues deltas and flushes every 15s via
  * batchUpdateReputationOnChain() to reduce individual RPC transactions.
  */
 
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import { normalizeAgentId } from "../erc8004/agentResolution.js";
 
 const REPUTATION_CONTRACT_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS;
 
@@ -38,26 +37,31 @@ if (!reputationContract) {
   }
 }
 
-/** Convert a wallet address to its uint256 identity ID (address is uint160, fits in uint256) */
-function walletToIdentityId(walletAddress: string): bigint {
-  return BigInt(walletAddress.toLowerCase());
+function toIdentityId(agentId: string | bigint): bigint {
+  return BigInt(normalizeAgentId(agentId));
 }
 
 /**
- * Initialize reputation on-chain for a new wallet (fire-and-forget).
+ * Initialize reputation on-chain for a new agent (fire-and-forget).
  * Idempotent — the contract skips if already initialized.
  */
 export async function initReputationOnChain(
-  walletAddress: string
-): Promise<void> {
-  if (!reputationContract) return;
+  agentId: string | bigint
+): Promise<boolean> {
+  if (!reputationContract) return false;
   try {
-    const identityId = walletToIdentityId(walletAddress);
-    const tx = await reputationContract.initializeReputation(identityId);
-    await tx.wait();
-    console.log(`[reputationChain] init ${walletAddress} (id=${identityId})`);
+    const normalizedAgentId = normalizeAgentId(agentId);
+    const identityId = toIdentityId(agentId);
+    await queueBiteTransaction(`reputation-init:${normalizedAgentId}`, async () => {
+      const tx = await reputationContract.initializeReputation(identityId);
+      await tx.wait();
+    });
+    notifyChainUpdate(normalizedAgentId, "init");
+    console.log(`[reputationChain] init ${normalizedAgentId} (id=${identityId})`);
+    return true;
   } catch (err) {
-    console.warn(`[reputationChain] init failed for ${walletAddress}:`, err);
+    console.warn(`[reputationChain] init failed for ${normalizeAgentId(agentId)}:`, err);
+    return false;
   }
 }
 
@@ -67,8 +71,73 @@ export async function initReputationOnChain(
 
 const FLUSH_INTERVAL_MS = 15_000;
 
-/** Pending deltas per wallet: [combat, economic, social, crafting, agent] */
+/** Pending deltas per agent: [combat, economic, social, crafting, agent] */
 const pendingFeedback = new Map<string, [number, number, number, number, number]>();
+const chainUpdateListeners = new Set<(agentId: string, reason: string) => void>();
+
+export interface OnChainReputationScore {
+  combat: number;
+  economic: number;
+  social: number;
+  crafting: number;
+  agent: number;
+  overall: number;
+  lastUpdated: number;
+}
+
+function parseOnChainReputation(raw: any): OnChainReputationScore {
+  const values = Array.from(raw ?? []);
+  return {
+    combat: Number(values[0] ?? 0),
+    economic: Number(values[1] ?? 0),
+    social: Number(values[2] ?? 0),
+    crafting: Number(values[3] ?? 0),
+    agent: Number(values[4] ?? 0),
+    overall: Number(values[5] ?? 0),
+    lastUpdated: Number(values[6] ?? 0) * 1000,
+  };
+}
+
+function notifyChainUpdate(agentId: string, reason: string): void {
+  for (const listener of chainUpdateListeners) {
+    try {
+      listener(agentId, reason);
+    } catch (err) {
+      console.warn(`[reputationChain] chain update listener failed for ${agentId}:`, err);
+    }
+  }
+}
+
+export function registerReputationChainListener(
+  listener: (agentId: string, reason: string) => void
+): () => void {
+  chainUpdateListeners.add(listener);
+  return () => chainUpdateListeners.delete(listener);
+}
+
+export async function getReputationOnChain(
+  agentId: string | bigint
+): Promise<OnChainReputationScore | null> {
+  if (!reputationContract) return null;
+  try {
+    const raw = await reputationContract.getReputation(toIdentityId(agentId));
+    return parseOnChainReputation(raw);
+  } catch (err) {
+    console.warn(`[reputationChain] getReputation failed for ${normalizeAgentId(agentId)}:`, err);
+    return null;
+  }
+}
+
+function mergePendingFeedback(
+  agentId: string,
+  deltas: [number, number, number, number, number]
+): void {
+  const existing = pendingFeedback.get(agentId) ?? [0, 0, 0, 0, 0];
+  for (let i = 0; i < 5; i++) {
+    existing[i] += deltas[i];
+  }
+  pendingFeedback.set(agentId, existing);
+}
 
 /**
  * Submit feedback on-chain for a single category.
@@ -76,7 +145,7 @@ const pendingFeedback = new Map<string, [number, number, number, number, number]
  * and flushed every 15s via batchUpdateReputationOnChain().
  */
 export async function submitFeedbackOnChain(
-  walletAddress: string,
+  agentId: string | bigint,
   category: number,
   delta: number,
   _reason: string
@@ -84,7 +153,7 @@ export async function submitFeedbackOnChain(
   if (!reputationContract) return;
   if (category < 0 || category > 4) return;
 
-  const key = walletAddress.toLowerCase();
+  const key = normalizeAgentId(agentId);
   let deltas = pendingFeedback.get(key);
   if (!deltas) {
     deltas = [0, 0, 0, 0, 0];
@@ -101,14 +170,18 @@ async function flushPendingFeedback(): Promise<void> {
   const batch = new Map(pendingFeedback);
   pendingFeedback.clear();
 
-  for (const [wallet, deltas] of batch) {
+  for (const [agentId, deltas] of batch) {
     // Skip wallets with all-zero deltas
     if (deltas.every((d) => d === 0)) continue;
 
     try {
-      await batchUpdateReputationOnChain(wallet, deltas, "batched-feedback");
+      const ok = await batchUpdateReputationOnChain(agentId, deltas, "batched-feedback");
+      if (!ok) {
+        mergePendingFeedback(agentId, deltas);
+      }
     } catch (err) {
-      console.warn(`[reputationChain] flush failed for ${wallet}:`, err);
+      console.warn(`[reputationChain] flush failed for ${agentId}:`, err);
+      mergePendingFeedback(agentId, deltas);
     }
   }
 }
@@ -125,13 +198,14 @@ setInterval(() => {
  * deltas is [combat, economic, social, crafting, agent] indexed by category enum.
  */
 export async function batchUpdateReputationOnChain(
-  walletAddress: string,
+  agentId: string | bigint,
   deltas: [number, number, number, number, number],
   reason: string
-): Promise<void> {
-  if (!reputationContract) return;
+): Promise<boolean> {
+  if (!reputationContract) return false;
   try {
-    const identityId = walletToIdentityId(walletAddress);
+    const normalizedAgentId = normalizeAgentId(agentId);
+    const identityId = toIdentityId(agentId);
     const bigDeltas = deltas.map(BigInt) as [
       bigint,
       bigint,
@@ -139,16 +213,21 @@ export async function batchUpdateReputationOnChain(
       bigint,
       bigint,
     ];
-    const tx = await reputationContract.batchUpdateReputation(
-      identityId,
-      bigDeltas,
-      reason
-    );
-    await tx.wait();
+    await queueBiteTransaction(`reputation-batch:${normalizedAgentId}`, async () => {
+      const tx = await reputationContract.batchUpdateReputation(
+        identityId,
+        bigDeltas,
+        reason
+      );
+      await tx.wait();
+    });
+    notifyChainUpdate(normalizedAgentId, "batch-update");
+    return true;
   } catch (err) {
     console.warn(
-      `[reputationChain] batchUpdate failed for ${walletAddress}:`,
+      `[reputationChain] batchUpdate failed for ${normalizeAgentId(agentId)}:`,
       err
     );
+    return false;
   }
 }

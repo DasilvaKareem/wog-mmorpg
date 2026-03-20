@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { biteWallet, biteProvider } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import { traceTx } from "../blockchain/txTracer.js";
 
 const AUCTION_HOUSE_CONTRACT_ADDRESS = process.env.AUCTION_HOUSE_CONTRACT_ADDRESS;
@@ -43,6 +44,7 @@ export interface AuctionData {
   buyoutPrice: number;
   endTime: number;
   highBidder: string;
+  highBidderAgentId?: string | null;
   highBid: number;
   status: number; // 0 = Active, 1 = Ended, 2 = Cancelled
   extensionCount: number;
@@ -78,16 +80,18 @@ export async function createAuctionOnChain(
     const startPriceWei = ethers.parseUnits(startPrice.toString(), 18);
     const buyoutPriceWei = buyoutPrice > 0 ? ethers.parseUnits(buyoutPrice.toString(), 18) : 0;
 
-    const tx = await contract.createAuction(
-      zoneId,
-      seller,
-      tokenId,
-      quantity,
-      startPriceWei,
-      durationSeconds,
-      buyoutPriceWei
-    );
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`auction-create:${seller}:${tokenId}`, async () => {
+      const tx = await contract.createAuction(
+        zoneId,
+        seller,
+        tokenId,
+        quantity,
+        startPriceWei,
+        durationSeconds,
+        buyoutPriceWei
+      );
+      return tx.wait();
+    });
 
     // Parse AuctionCreated event to extract auctionId and cache the auction
     for (const log of receipt.logs) {
@@ -105,6 +109,7 @@ export async function createAuctionOnChain(
             buyoutPrice,
             endTime: Number(parsed.args.endTime),
             highBidder: ethers.ZeroAddress,
+            highBidderAgentId: null,
             highBid: 0,
             status: 0, // Active
             extensionCount: 0,
@@ -127,18 +132,21 @@ export async function createAuctionOnChain(
 export async function placeBidOnChain(
   auctionId: number,
   bidder: string,
-  bidAmount: number
+  bidAmount: number,
+  bidderAgentId?: string | null
 ): Promise<{ txHash: string; previousBidder: string; previousBid: number }> {
   return traceTx("auction-bid", "placeBidOnChain", { auctionId, bidder, bidAmount }, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
     const bidAmountWei = ethers.parseUnits(bidAmount.toString(), 18);
 
-    const tx = await contract.placeBid(
-      auctionId,
-      bidder,
-      bidAmountWei
-    );
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`auction-bid:${auctionId}:${bidder}`, async () => {
+      const tx = await contract.placeBid(
+        auctionId,
+        bidder,
+        bidAmountWei
+      );
+      return tx.wait();
+    });
 
     // Parse BidPlaced event to get previous bidder and update cache
     for (const log of receipt.logs) {
@@ -148,6 +156,7 @@ export async function placeBidOnChain(
           const cached = auctionCache.get(auctionId);
           if (cached) {
             cached.highBidder = bidder;
+            cached.highBidderAgentId = bidderAgentId ?? null;
             cached.highBid = bidAmount;
             cached.endTime = Number(parsed.args.newEndTime);
             if (parsed.args.extended) cached.extensionCount++;
@@ -176,8 +185,10 @@ export async function buyoutAuctionOnChain(
 ): Promise<{ txHash: string }> {
   return traceTx("auction-buyout", "buyoutAuctionOnChain", { auctionId, buyer }, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const tx = await contract.buyout(auctionId, buyer);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`auction-buyout:${auctionId}:${buyer}`, async () => {
+      const tx = await contract.buyout(auctionId, buyer);
+      return tx.wait();
+    });
     return { txHash: receipt.hash };
   });
 }
@@ -188,8 +199,10 @@ export async function buyoutAuctionOnChain(
 export async function endAuctionOnChain(auctionId: number): Promise<string> {
   return traceTx("auction-end", "endAuctionOnChain", { auctionId }, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const tx = await contract.endAuction(auctionId);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`auction-end:${auctionId}`, async () => {
+      const tx = await contract.endAuction(auctionId);
+      return tx.wait();
+    });
     const cached = auctionCache.get(auctionId);
     if (cached) cached.status = 1; // Ended
     return receipt.hash;
@@ -202,8 +215,10 @@ export async function endAuctionOnChain(auctionId: number): Promise<string> {
 export async function cancelAuctionOnChain(auctionId: number): Promise<string> {
   return traceTx("auction-cancel", "cancelAuctionOnChain", { auctionId }, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const tx = await contract.cancelAuction(auctionId);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`auction-cancel:${auctionId}`, async () => {
+      const tx = await contract.cancelAuction(auctionId);
+      return tx.wait();
+    });
     const cached = auctionCache.get(auctionId);
     if (cached) cached.status = 2; // Cancelled
     return receipt.hash;
@@ -327,6 +342,7 @@ export async function rebuildAuctionCache(): Promise<void> {
         buyoutPrice: parseFloat(ethers.formatUnits(parsed.args.buyoutPrice, 18)),
         endTime: Number(parsed.args.endTime),
         highBidder: ethers.ZeroAddress,
+        highBidderAgentId: null,
         highBid: 0,
         status: 0, // Assume active; updated below
         extensionCount: 0,

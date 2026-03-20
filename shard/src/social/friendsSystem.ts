@@ -14,6 +14,7 @@ import { getRedis } from "../redis.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { reverseLookupOnChain, resolveNameOnChain } from "../blockchain/nameServiceChain.js";
+import { resolvePreferredAgentIdForWallet } from "../erc8004/agentResolution.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -192,7 +193,8 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       const result = await Promise.all(
         friends.map(async (f) => {
           const online = findOnlinePlayer(f.wallet);
-          const rep = reputationManager.getReputation(f.wallet);
+          const friendAgentId = await resolvePreferredAgentIdForWallet(f.wallet);
+          const rep = friendAgentId ? reputationManager.getReputation(friendAgentId) : null;
           const overall = rep?.overall ?? 500;
           // Resolve .wog name — gives offline friends an identity too
           const wogName = await reverseLookupOnChain(f.wallet).catch(() => null);

@@ -8,6 +8,7 @@ import {
   endAuctionOnChain,
 } from "./auctionHouseChain.js";
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
+import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
 
 const TICK_INTERVAL_MS = 5000; // 5 seconds
 const NEXT_ID_REFRESH_MS = 60_000; // only re-fetch nextAuctionId every 60s
@@ -86,7 +87,10 @@ async function auctionTick(server: FastifyInstance) {
             // Unreserve the gold (since it's now spent)
             unreserveGold(auction.highBidder, auction.highBid);
 
-            reputationManager.submitFeedback(auction.highBidder, ReputationCategory.Economic, 3, `Won auction for item ${auction.tokenId}`);
+            const winnerAgentId = auction.highBidderAgentId ?? resolveLiveAgentIdForWallet(auction.highBidder);
+            if (winnerAgentId) {
+              reputationManager.submitFeedback(winnerAgentId, ReputationCategory.Economic, 3, `Won auction for item ${auction.tokenId}`);
+            }
             server.log.info(
               `Auction ${i} settled: Winner ${auction.highBidder} paid ${auction.highBid} gold. Item minted: ${mintTx}`
             );

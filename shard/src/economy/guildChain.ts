@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 
 const GUILD_CONTRACT_ADDRESS = process.env.GUILD_CONTRACT_ADDRESS;
 
@@ -116,8 +117,10 @@ export async function createGuildOnChain(
   const depositWei = ethers.parseUnits(initialDeposit.toString(), 18);
   const feeWei = ethers.parseUnits(creationFee.toString(), 18);
 
-  const tx = await guildContract.createGuild(name, description, founder, depositWei, feeWei);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-create:${founder}:${name}`, async () => {
+    const tx = await guildContract.createGuild(name, description, founder, depositWei, feeWei);
+    return tx.wait();
+  });
 
   // Parse GuildCreated event
   for (const log of receipt.logs) {
@@ -143,8 +146,10 @@ export async function createGuildOnChain(
 export async function inviteMemberOnChain(guildId: number, member: string): Promise<string> {
   if (!guildContract) throw new Error("Guild contract not initialized");
 
-  const tx = await guildContract.inviteMember(guildId, member);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-invite:${guildId}:${member}`, async () => {
+    const tx = await guildContract.inviteMember(guildId, member);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -154,8 +159,10 @@ export async function inviteMemberOnChain(guildId: number, member: string): Prom
 export async function joinGuildOnChain(guildId: number, member: string): Promise<string> {
   if (!guildContract) throw new Error("Guild contract not initialized");
 
-  const tx = await guildContract.joinGuild(guildId, member);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-join:${guildId}:${member}`, async () => {
+    const tx = await guildContract.joinGuild(guildId, member);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -165,8 +172,10 @@ export async function joinGuildOnChain(guildId: number, member: string): Promise
 export async function leaveGuildOnChain(guildId: number, member: string): Promise<string> {
   if (!guildContract) throw new Error("Guild contract not initialized");
 
-  const tx = await guildContract.leaveGuild(guildId, member);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-leave:${guildId}:${member}`, async () => {
+    const tx = await guildContract.leaveGuild(guildId, member);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -182,8 +191,10 @@ export async function depositGoldOnChain(
 
   const amountWei = ethers.parseUnits(amount.toString(), 18);
 
-  const tx = await guildContract.depositGold(guildId, member, amountWei);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-deposit:${guildId}:${member}`, async () => {
+    const tx = await guildContract.depositGold(guildId, member, amountWei);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -202,15 +213,17 @@ export async function createProposalOnChain(
 
   const amountWei = ethers.parseUnits(targetAmount.toString(), 18);
 
-  const tx = await guildContract.createProposal(
-    guildId,
-    proposer,
-    proposalType,
-    description,
-    targetAddress,
-    amountWei
-  );
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-proposal:${guildId}:${proposer}`, async () => {
+    const tx = await guildContract.createProposal(
+      guildId,
+      proposer,
+      proposalType,
+      description,
+      targetAddress,
+      amountWei
+    );
+    return tx.wait();
+  });
 
   // Parse ProposalCreated event
   for (const log of receipt.logs) {
@@ -240,8 +253,10 @@ export async function voteOnProposalOnChain(
 ): Promise<string> {
   if (!guildContract) throw new Error("Guild contract not initialized");
 
-  const tx = await guildContract.vote(proposalId, voter, voteYes);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-vote:${proposalId}:${voter}`, async () => {
+    const tx = await guildContract.vote(proposalId, voter, voteYes);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -251,8 +266,10 @@ export async function voteOnProposalOnChain(
 export async function executeProposalOnChain(proposalId: number): Promise<string> {
   if (!guildContract) throw new Error("Guild contract not initialized");
 
-  const tx = await guildContract.executeProposal(proposalId);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-execute:${proposalId}`, async () => {
+    const tx = await guildContract.executeProposal(proposalId);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 

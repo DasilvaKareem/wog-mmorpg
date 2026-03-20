@@ -19,6 +19,7 @@ interface LiveEntity {
   xp: number;
   hp: number;
   maxHp: number;
+  agentId?: string;
   raceId?: string;
   classId?: string;
   kills?: number;
@@ -2176,6 +2177,17 @@ interface RepTimelinePoint {
   category?: string; delta?: number; reason?: string;
 }
 
+interface AgentIdentitySurface {
+  ownerWallet: string | null;
+  endpoint: string | null;
+  characterTokenId: string | null;
+  onChainRegistered: boolean;
+}
+
+interface AgentValidation {
+  claimType?: string;
+}
+
 const REP_CATEGORIES = [
   { key: "combat" as const,   label: "Combat",   color: "#ff6b6b" },
   { key: "economic" as const, label: "Economic", color: "#ffcc00" },
@@ -2250,28 +2262,40 @@ function ReputationGraph({ timeline, width, height }: { timeline: RepTimelinePoi
   );
 }
 
-function ReputationTab({ custodialWallet }: { custodialWallet: string | null }) {
+function ReputationTab({ agentId }: { agentId: string | null }) {
   const [rep, setRep] = React.useState<RepScore | null>(null);
   const [timeline, setTimeline] = React.useState<RepTimelinePoint[]>([]);
   const [history, setHistory] = React.useState<Array<{ category: string; delta: number; reason: string; timestamp: number }>>([]);
+  const [identity, setIdentity] = React.useState<AgentIdentitySurface | null>(null);
+  const [validations, setValidations] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
 
   React.useEffect(() => {
-    if (!custodialWallet) return;
+    if (!agentId) return;
     setLoading(true);
     Promise.all([
-      fetch(`${API_URL}/api/reputation/${custodialWallet}`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/reputation/${custodialWallet}/timeline?limit=200`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/reputation/${custodialWallet}/history?limit=50`).then(r => r.ok ? r.json() : null),
-    ]).then(([repData, tlData, histData]) => {
+      fetch(`${API_URL}/api/agents/${agentId}/reputation`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${agentId}/reputation/timeline?limit=200`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${agentId}/reputation/history?limit=50`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${agentId}/identity`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${agentId}/validations`).then(r => r.ok ? r.json() : null),
+    ]).then(([repData, tlData, histData, identityData, validationsData]) => {
       if (repData?.reputation) setRep(repData.reputation);
       if (tlData?.timeline) setTimeline(tlData.timeline);
       if (histData?.history) setHistory(histData.history);
+      setIdentity(identityData?.identity ?? null);
+      setValidations(
+        Array.isArray(validationsData?.validations)
+          ? validationsData.validations
+              .map((claim: AgentValidation) => claim.claimType ?? "")
+              .filter(Boolean)
+          : []
+      );
     }).catch(() => {}).finally(() => setLoading(false));
-  }, [custodialWallet]);
+  }, [agentId]);
 
-  if (!custodialWallet) {
-    return <p className="text-[12px] text-[#7a84a8] py-8 text-center">Deploy a champion to view reputation.</p>;
+  if (!agentId) {
+    return <p className="text-[12px] text-[#7a84a8] py-8 text-center">Identity registration pending. Reputation will appear once the agent is registered on-chain.</p>;
   }
 
   if (loading) {
@@ -2286,6 +2310,41 @@ function ReputationTab({ custodialWallet }: { custodialWallet: string | null }) 
 
   return (
     <div className="space-y-4">
+      {(identity || validations.length > 0) && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
+            <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Identity</p>
+            <p className="mt-1 text-[12px] font-bold text-[#d6deff]">
+              {identity?.onChainRegistered ? "Registered On-Chain" : "Pending Registration"}
+            </p>
+            {identity?.characterTokenId && (
+              <p className="mt-1 text-[10px] text-[#9aa7cc]">Character Token #{identity.characterTokenId}</p>
+            )}
+            {identity?.endpoint && (
+              <p className="mt-1 truncate text-[9px] text-[#5dadec]">{identity.endpoint}</p>
+            )}
+          </div>
+          <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
+            <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Validations</p>
+            {validations.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {validations.map((claimType) => (
+                  <span
+                    key={claimType}
+                    className="border px-2 py-1 text-[9px] font-bold uppercase tracking-wide"
+                    style={{ borderColor: "#54f28b55", color: "#54f28b", backgroundColor: "#54f28b11" }}
+                  >
+                    {claimType}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-1 text-[10px] text-[#9aa7cc]">No validation claims published yet.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header: Overall + Rank */}
       <div className="flex items-center justify-between border-b border-[#2a3450] pb-3">
         <div>
@@ -2857,7 +2916,7 @@ export function ChampionsPage(): React.ReactElement {
             if (e.walletAddress?.toLowerCase() !== searchWallet) continue;
             // If a specific character is selected, filter by name
             if (selectedCharName && !e.name?.toLowerCase().startsWith(selectedCharName.toLowerCase())) continue;
-            setEntity({ name: e.name, level: e.level ?? 1, xp: e.xp ?? 0, hp: e.hp ?? 0, maxHp: e.maxHp ?? 100, raceId: e.raceId, classId: e.classId, kills: e.kills ?? 0, completedQuests: e.completedQuests ?? [], walletAddress: e.walletAddress, zoneId: zId });
+            setEntity({ name: e.name, level: e.level ?? 1, xp: e.xp ?? 0, hp: e.hp ?? 0, maxHp: e.maxHp ?? 100, agentId: e.agentId, raceId: e.raceId, classId: e.classId, kills: e.kills ?? 0, completedQuests: e.completedQuests ?? [], walletAddress: e.walletAddress, zoneId: zId });
             setZoneId(zId);
             return;
           }
@@ -2967,7 +3026,7 @@ export function ChampionsPage(): React.ReactElement {
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
               {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "friends"     && <FriendsTab ownerWallet={wallet} custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
-              {activeTab === "reputation"  && <ReputationTab custodialWallet={custodialWallet} />}
+              {activeTab === "reputation"  && <ReputationTab agentId={entity?.agentId ?? null} />}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}
               {activeTab === "plan"        && <PlanTab wallet={wallet} />}
             </div>

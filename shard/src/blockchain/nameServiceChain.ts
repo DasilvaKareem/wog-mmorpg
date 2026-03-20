@@ -8,6 +8,7 @@
 
 import { ethers } from "ethers";
 import { biteWallet } from "./biteChain.js";
+import { queueBiteTransaction } from "./biteTxQueue.js";
 import { traceTx } from "./txTracer.js";
 
 const NAME_SERVICE_ADDRESS = process.env.NAME_SERVICE_CONTRACT_ADDRESS;
@@ -81,8 +82,10 @@ export async function registerNameOnChain(
   if (!nameServiceContract) return false;
   try {
     return await traceTx("name-register", "registerNameOnChain", { wallet: walletAddress, name }, "bite", async () => {
-      const tx = await nameServiceContract.registerName(walletAddress, name);
-      await tx.wait();
+      await queueBiteTransaction(`name-register:${walletAddress}`, async () => {
+        const tx = await nameServiceContract.registerName(walletAddress, name);
+        await tx.wait();
+      });
       console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
       return true;
     });
@@ -113,8 +116,10 @@ export async function releaseNameOnChain(
   if (!nameServiceContract) return false;
   try {
     return await traceTx("name-release", "releaseNameOnChain", { wallet: walletAddress }, "bite", async () => {
-      const tx = await nameServiceContract.releaseName(walletAddress);
-      await tx.wait();
+      await queueBiteTransaction(`name-release:${walletAddress}`, async () => {
+        const tx = await nameServiceContract.releaseName(walletAddress);
+        await tx.wait();
+      });
       console.log(`[nameServiceChain] released name for ${walletAddress}`);
       return true;
     });

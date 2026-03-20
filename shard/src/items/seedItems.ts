@@ -6,11 +6,19 @@
  * managed by itemTokenMapping.ts and seeded in that order.
  */
 import "dotenv/config";
+import "../config/devLocalContracts.js";
 import { getContract, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { mintTo, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
 import { thirdwebClient, skaleBase } from "../blockchain/chain.js";
 import { getCatalogItemsInChainOrder } from "./itemTokenMapping.js";
+
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const DEV_ENABLED = TRUE_VALUES.has((process.env.DEV ?? "").trim().toLowerCase());
+
+function toInlineMetadataUri(metadata: unknown): string {
+  return `data:application/json;base64,${Buffer.from(JSON.stringify(metadata)).toString("base64")}`;
+}
 
 const serverAccount = privateKeyToAccount({
   client: thirdwebClient,
@@ -80,14 +88,15 @@ async function main() {
       }
 
       try {
+        const nftMetadata = {
+          name: item.name,
+          description: item.description,
+        };
         const tx = mintTo({
           contract: itemsContract,
           to: serverAddress,
           supply: 1n,
-          nft: {
-            name: item.name,
-            description: item.description,
-          },
+          nft: DEV_ENABLED ? toInlineMetadataUri(nftMetadata) : nftMetadata,
         });
         const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
         console.log(`  tx: ${receipt.transactionHash}`);

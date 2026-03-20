@@ -18,7 +18,7 @@ import {
   getZoneAuctionsFromChain,
   type AuctionData,
 } from "./auctionHouseChain.js";
-import { getEntity } from "../world/zoneRuntime.js";
+import { getAllEntities, getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getEquippedInstanceIds, getEquippedItemCounts } from "../items/inventoryState.js";
@@ -59,6 +59,21 @@ function formatAuctionForResponse(auction: AuctionData) {
 }
 
 export function registerAuctionHouseRoutes(server: FastifyInstance) {
+  function resolveZoneAgentId(zoneId: string, walletAddress: string): string | null {
+    const matches = new Set<string>();
+
+    for (const entity of getAllEntities().values()) {
+      if (entity.type !== "player") continue;
+      if (entity.region !== zoneId) continue;
+      if (entity.walletAddress?.toLowerCase() !== walletAddress.toLowerCase()) continue;
+      if (entity.agentId == null) continue;
+      matches.add(entity.agentId.toString());
+    }
+
+    if (matches.size !== 1) return null;
+    return Array.from(matches)[0] ?? null;
+  }
+
   /**
    * GET /auctionhouse/npc/:entityId
    * Get auctioneer NPC details and list active auctions in their zone.
@@ -392,10 +407,12 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       reserveGold(bidderAddress, bidAmount);
 
       // Place bid on-chain
+      const bidderAgentId = resolveZoneAgentId(zoneId, bidderAddress);
       const { txHash, previousBidder, previousBid } = await placeBidOnChain(
         auctionId,
         bidderAddress,
-        bidAmount
+        bidAmount,
+        bidderAgentId
       );
 
       // Unreserve previous bidder's gold (if any)
