@@ -25,13 +25,13 @@ The target end state is:
 
 ### What exists now
 
-- Custom WoG identity contract in [contracts/WoGIdentityRegistry.sol](/home/preyanshu/wog-mmorpg/contracts/WoGIdentityRegistry.sol)
-- Custom WoG reputation contract in [contracts/WoGReputationRegistry.sol](/home/preyanshu/wog-mmorpg/contracts/WoGReputationRegistry.sol)
-- External identity-registry client in [shard/src/blockchain/blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
-- Local-first reputation system in [shard/src/economy/reputationManager.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationManager.ts)
-- Fire-and-forget reputation bridge in [shard/src/economy/reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts)
-- Wallet-keyed API routes in [shard/src/economy/reputationRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationRoutes.ts)
-- Partial A2A identity exposure in [shard/src/agents/a2aRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/agents/a2aRoutes.ts)
+- Custom WoG identity contract in [contracts/WoGIdentityRegistry.sol](contracts/WoGIdentityRegistry.sol)
+- Custom WoG reputation contract in [contracts/WoGReputationRegistry.sol](contracts/WoGReputationRegistry.sol)
+- External identity-registry client in [shard/src/blockchain/blockchain.ts](shard/src/blockchain/blockchain.ts)
+- Local-first reputation system in [shard/src/economy/reputationManager.ts](shard/src/economy/reputationManager.ts)
+- Fire-and-forget reputation bridge in [shard/src/economy/reputationChain.ts](shard/src/economy/reputationChain.ts)
+- Wallet-keyed API routes in [shard/src/economy/reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
+- Partial A2A identity exposure in [shard/src/agents/a2aRoutes.ts](shard/src/agents/a2aRoutes.ts)
 
 ### What is wrong with the current model
 
@@ -219,8 +219,8 @@ Every persisted character record needs:
 
 Search areas likely affected:
 
-- character mint path in [shard/src/blockchain/blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
-- spawn and restore logic in [shard/src/world/spawnOrders.ts](/home/preyanshu/wog-mmorpg/shard/src/world/spawnOrders.ts)
+- character mint path in [shard/src/blockchain/blockchain.ts](shard/src/blockchain/blockchain.ts)
+- spawn and restore logic in [shard/src/world/spawnOrders.ts](shard/src/world/spawnOrders.ts)
 - any persisted save model storing player identity
 
 ## 2. Reputation data
@@ -396,9 +396,9 @@ If upstream code is incomplete or unstable:
 
 ### Current touch points
 
-- [shard/src/blockchain/blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
-- [shard/src/economy/x402Deployment.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/x402Deployment.ts)
-- [shard/src/world/spawnOrders.ts](/home/preyanshu/wog-mmorpg/shard/src/world/spawnOrders.ts)
+- [shard/src/blockchain/blockchain.ts](shard/src/blockchain/blockchain.ts)
+- [shard/src/economy/x402Deployment.ts](shard/src/economy/x402Deployment.ts)
+- [shard/src/world/spawnOrders.ts](shard/src/world/spawnOrders.ts)
 
 ### Tasks
 
@@ -423,8 +423,8 @@ If upstream code is incomplete or unstable:
 
 ### Current touch points
 
-- [shard/src/economy/reputationManager.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationManager.ts)
-- [shard/src/economy/reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts)
+- [shard/src/economy/reputationManager.ts](shard/src/economy/reputationManager.ts)
+- [shard/src/economy/reputationChain.ts](shard/src/economy/reputationChain.ts)
 
 ### Tasks
 
@@ -451,16 +451,16 @@ If upstream code is incomplete or unstable:
 
 ### Current write paths to change
 
-- [shard/src/combat/pvpReputationIntegration.ts](/home/preyanshu/wog-mmorpg/shard/src/combat/pvpReputationIntegration.ts)
-- [shard/src/economy/auctionHouseTick.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/auctionHouseTick.ts)
-- [shard/src/social/questSystem.ts](/home/preyanshu/wog-mmorpg/shard/src/social/questSystem.ts)
-- [shard/src/agents/agentBehaviors.ts](/home/preyanshu/wog-mmorpg/shard/src/agents/agentBehaviors.ts)
-- [shard/src/professions/crafting.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/crafting.ts)
-- [shard/src/professions/alchemy.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/alchemy.ts)
-- [shard/src/professions/leatherworking.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/leatherworking.ts)
-- [shard/src/professions/jewelcrafting.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/jewelcrafting.ts)
-- [shard/src/professions/enchanting.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/enchanting.ts)
-- [shard/src/professions/cooking.ts](/home/preyanshu/wog-mmorpg/shard/src/professions/cooking.ts)
+- [shard/src/combat/pvpReputationIntegration.ts](shard/src/combat/pvpReputationIntegration.ts)
+- [shard/src/economy/auctionHouseTick.ts](shard/src/economy/auctionHouseTick.ts)
+- [shard/src/social/questSystem.ts](shard/src/social/questSystem.ts)
+- [shard/src/agents/agentBehaviors.ts](shard/src/agents/agentBehaviors.ts)
+- [shard/src/professions/crafting.ts](shard/src/professions/crafting.ts)
+- [shard/src/professions/alchemy.ts](shard/src/professions/alchemy.ts)
+- [shard/src/professions/leatherworking.ts](shard/src/professions/leatherworking.ts)
+- [shard/src/professions/jewelcrafting.ts](shard/src/professions/jewelcrafting.ts)
+- [shard/src/professions/enchanting.ts](shard/src/professions/enchanting.ts)
+- [shard/src/professions/cooking.ts](shard/src/professions/cooking.ts)
 
 ### Tasks
 
@@ -507,8 +507,8 @@ If upstream code is incomplete or unstable:
 
 ### Current touch points
 
-- [shard/src/agents/a2aRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/agents/a2aRoutes.ts)
-- [shard/src/blockchain/blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
+- [shard/src/agents/a2aRoutes.ts](shard/src/agents/a2aRoutes.ts)
+- [shard/src/blockchain/blockchain.ts](shard/src/blockchain/blockchain.ts)
 
 ### Tasks
 
@@ -530,7 +530,7 @@ If upstream code is incomplete or unstable:
 
 ### Current touch points
 
-- [shard/src/economy/reputationRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationRoutes.ts)
+- [shard/src/economy/reputationRoutes.ts](shard/src/economy/reputationRoutes.ts)
 - related client consumers
 
 ### Tasks
@@ -553,9 +553,9 @@ If upstream code is incomplete or unstable:
 
 ### Current client touch points
 
-- [client/src/components/InspectDialog.tsx](/home/preyanshu/wog-mmorpg/client/src/components/InspectDialog.tsx)
-- [client/src/components/ChampionsPage.tsx](/home/preyanshu/wog-mmorpg/client/src/components/ChampionsPage.tsx)
-- [client/src/components/ReputationPanel.tsx](/home/preyanshu/wog-mmorpg/client/src/components/ReputationPanel.tsx)
+- [client/src/components/InspectDialog.tsx](client/src/components/InspectDialog.tsx)
+- [client/src/components/ChampionsPage.tsx](client/src/components/ChampionsPage.tsx)
+- [client/src/components/ReputationPanel.tsx](client/src/components/ReputationPanel.tsx)
 - any other views that surface trust data
 
 ### Tasks
@@ -923,31 +923,31 @@ This section tracks the actual implementation state of the repo relative to this
   - `/api/agents/:agentId/identity`
   - `/api/agents/:agentId/validations`
 - primary ERC-8004 docs were updated to match the new route shapes and identity model
-- `DEV=true` local integration now auto-loads Hardhat deployment addresses from [hardhat/deployments/localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json) via [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts), overriding stale zero-address or mainnet-style env values during local shard boot
+- `DEV=true` local integration now auto-loads Hardhat deployment addresses from [hardhat/deployments/localhost.json](hardhat/deployments/localhost.json) via [devLocalContracts.ts](shard/src/config/devLocalContracts.ts), overriding stale zero-address or mainnet-style env values during local shard boot
 - local mock prerequisite game contracts were added for full Hardhat integration testing:
-  - [WoGMockGold.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockGold.sol)
-  - [WoGMockItems.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockItems.sol)
-  - [WoGMockCharacters.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockCharacters.sol)
-- [deploy.ts](/home/preyanshu/wog-mmorpg/hardhat/scripts/deploy.ts) now deploys the mock asset contracts alongside the ERC-8004 registries and writes the localhost manifest consumed by shard dev mode
+  - [WoGMockGold.sol](hardhat/contracts/WoGMockGold.sol)
+  - [WoGMockItems.sol](hardhat/contracts/WoGMockItems.sol)
+  - [WoGMockCharacters.sol](hardhat/contracts/WoGMockCharacters.sol)
+- [deploy.ts](hardhat/scripts/deploy.ts) now deploys the mock asset contracts alongside the ERC-8004 registries and writes the localhost manifest consumed by shard dev mode
 - local DEV metadata minting no longer depends on thirdweb upload authorization:
   - character and item metadata use inline `data:application/json;base64,...` URIs when `DEV=true`
 - local treasury seeding now checks actual on-chain treasury GOLD balance before skipping welcome-fund minting, fixing stale Redis state after Hardhat chain resets
-- BITE-side runtime writes now run through a shared serialized queue in [biteTxQueue.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/biteTxQueue.ts), with nonce/transient RPC retries, instead of firing concurrent transactions from the shared server signer
+- BITE-side runtime writes now run through a shared serialized queue in [biteTxQueue.ts](shard/src/blockchain/biteTxQueue.ts), with nonce/transient RPC retries, instead of firing concurrent transactions from the shared server signer
 - reputation now uses an eventually-consistent read model instead of an indefinitely stale local cache:
-  - [reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts) can now read on-chain scores and emits notifications when init/batch writes land
-  - [reputationManager.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationManager.ts) now schedules reconciliation, persists chain-synced values back to Redis, and serves an eventually-consistent API view
-  - [reputationRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationRoutes.ts) now uses the eventually-consistent read path for `/api/agents/:agentId/reputation`
+  - [reputationChain.ts](shard/src/economy/reputationChain.ts) can now read on-chain scores and emits notifications when init/batch writes land
+  - [reputationManager.ts](shard/src/economy/reputationManager.ts) now schedules reconciliation, persists chain-synced values back to Redis, and serves an eventually-consistent API view
+  - [reputationRoutes.ts](shard/src/economy/reputationRoutes.ts) now uses the eventually-consistent read path for `/api/agents/:agentId/reputation`
 - the shared BITE queue now covers the ERC-8004 and adjacent game write paths that were racing on Hardhat:
-  - identity registration and endpoint updates in [blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
-  - validation claims in [validation.ts](/home/preyanshu/wog-mmorpg/shard/src/erc8004/validation.ts)
-  - reputation initialization and batch updates in [reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts)
-  - name service writes in [nameServiceChain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/nameServiceChain.ts)
+  - identity registration and endpoint updates in [blockchain.ts](shard/src/blockchain/blockchain.ts)
+  - validation claims in [validation.ts](shard/src/erc8004/validation.ts)
+  - reputation initialization and batch updates in [reputationChain.ts](shard/src/economy/reputationChain.ts)
+  - name service writes in [nameServiceChain.ts](shard/src/blockchain/nameServiceChain.ts)
   - other BITE gameplay mutators in trade, auctions, guilds, guild vault, land plots, and prediction pools
-- name-service auto-registration logging in [characterRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/character/characterRoutes.ts) now only reports success when the chain write actually completes
+- name-service auto-registration logging in [characterRoutes.ts](shard/src/character/characterRoutes.ts) now only reports success when the chain write actually completes
 
 ### Contract status
 
-- [contracts/WoGIdentityRegistry.sol](/home/preyanshu/wog-mmorpg/contracts/WoGIdentityRegistry.sol) was updated to match the shard runtime ABI more closely and now exposes:
+- [contracts/WoGIdentityRegistry.sol](contracts/WoGIdentityRegistry.sol) was updated to match the shard runtime ABI more closely and now exposes:
   - `register(string agentURI)`
   - `setAgentURI(...)`
   - `setAgentWallet(...)`
@@ -956,15 +956,15 @@ This section tracks the actual implementation state of the repo relative to this
   - `getAgentWallet(...)`
   - `tokenURI(...)`
   - `isAuthorizedOrOwner(...)`
-- [contracts/WoGReputationRegistry.sol](/home/preyanshu/wog-mmorpg/contracts/WoGReputationRegistry.sol) now includes:
+- [contracts/WoGReputationRegistry.sol](contracts/WoGReputationRegistry.sol) now includes:
   - `recordInteraction(...)`
   - `getTopAgents(...)`
   - better internal identity tracking for initialized agents
-- [contracts/WoGValidationRegistry.sol](/home/preyanshu/wog-mmorpg/contracts/WoGValidationRegistry.sol) was added and now provides:
+- [contracts/WoGValidationRegistry.sol](contracts/WoGValidationRegistry.sol) was added and now provides:
   - `verifyCapability(...)`
   - `getVerifications(...)`
   - `isVerified(...)`
-- a unified deploy script now exists at [shard/src/deploy/deployERC8004Registries.ts](/home/preyanshu/wog-mmorpg/shard/src/deploy/deployERC8004Registries.ts)
+- a unified deploy script now exists at [shard/src/deploy/deployERC8004Registries.ts](shard/src/deploy/deployERC8004Registries.ts)
 
 ### Validation completed
 
@@ -1054,7 +1054,7 @@ Verified after the eventual-consistency reputation fix:
   - publish validation -> on-chain verification record
   - UI reads back live on-chain-backed data correctly
 - validation claims exist in backend APIs, but validation badges are not yet surfaced prominently in UI
-- identity logic still partially lives in [shard/src/blockchain/blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts) and could be moved further into `shard/src/erc8004/`
+- identity logic still partially lives in [shard/src/blockchain/blockchain.ts](shard/src/blockchain/blockchain.ts) and could be moved further into `shard/src/erc8004/`
 
 ### Hardening left for later
 

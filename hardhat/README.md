@@ -7,7 +7,7 @@ Local Hardhat project for compiling, testing, and deploying the WoG Solidity con
 
 ## Included contracts
 
-This workspace contains copies of the app's Solidity contracts from the repo-level [contracts](/home/preyanshu/wog-mmorpg/contracts) folder, including:
+This workspace contains copies of the app's Solidity contracts from the repo-level [contracts](contracts) folder, including:
 
 - `WoGIdentityRegistry.sol`
 - `WoGReputationRegistry.sol`
@@ -69,7 +69,7 @@ cp .env.example .env
 npm run deploy:localhost
 ```
 
-This writes [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json), which shard consumes automatically when started with `DEV=true`.
+This writes [localhost.json](hardhat/deployments/localhost.json), which shard consumes automatically when started with `DEV=true`.
 
 Deploy to the in-process Hardhat network:
 
@@ -104,7 +104,7 @@ The deploy script prints addresses for:
 - `NAME_SERVICE_CONTRACT_ADDRESS`
 - `PREDICTION_CONTRACT_ADDRESS`
 
-For local shard dev, these addresses are also written to [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json), and shard auto-loads them when `DEV=true`.
+For local shard dev, these addresses are also written to [localhost.json](hardhat/deployments/localhost.json), and shard auto-loads them when `DEV=true`.
 
 ## Shard Integration
 

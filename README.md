@@ -34,10 +34,10 @@ wog-mmorpg/
 ```
 
 Important paths:
-- [server.ts](/home/preyanshu/wog-mmorpg/shard/src/server.ts)
-- [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts)
-- [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md)
-- [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md)
+- [server.ts](shard/src/server.ts)
+- [devLocalContracts.ts](shard/src/config/devLocalContracts.ts)
+- [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
+- [hardhat/README.md](hardhat/README.md)
 
 ## Install
 
@@ -73,7 +73,7 @@ cp .env.example .env
 npm run deploy:localhost
 ```
 
-This writes [localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json) with the deployed local addresses.
+This writes [localhost.json](hardhat/deployments/localhost.json) with the deployed local addresses.
 
 ### 3. Start shard in local dev mode
 
@@ -82,7 +82,7 @@ cd shard
 DEV=true REDIS_ALLOW_MEMORY_FALLBACK=true pnpm dev
 ```
 
-When `DEV=true`, shard automatically loads the Hardhat manifest through [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts) and overrides stale local contract env values with the active local deployment.
+When `DEV=true`, shard automatically loads the Hardhat manifest through [devLocalContracts.ts](shard/src/config/devLocalContracts.ts) and overrides stale local contract env values with the active local deployment.
 
 That means local dev no longer requires manually copying all contract addresses into `shard/.env`.
 
@@ -120,7 +120,7 @@ Notes:
 
 ### Hardhat
 
-See [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md).
+See [hardhat/README.md](hardhat/README.md).
 
 The local workspace contains:
 - local copies of the WoG contracts
@@ -229,9 +229,8 @@ What is not fully complete yet:
 
 ## Additional Docs
 
-- [ERC8004_FULL_INTEGRATION_PLAN.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_FULL_INTEGRATION_PLAN.md)
-- [ERC8004_IMPLEMENTATION_ROLLOUT_README.md](/home/preyanshu/wog-mmorpg/docs/ERC8004_IMPLEMENTATION_ROLLOUT_README.md)
-- [hardhat/README.md](/home/preyanshu/wog-mmorpg/hardhat/README.md)
+- [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
+- [hardhat/README.md](hardhat/README.md)
 
 ## License
 
