@@ -276,8 +276,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           try {
             const existing = await reverseLookupOnChain(walletAddress);
             if (!existing) {
-              await registerNameOnChain(walletAddress, character.name);
-              server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
+              const registered = await registerNameOnChain(walletAddress, character.name);
+              if (registered) {
+                server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
+              } else {
+                server.log.warn(`[nameService] Auto-register did not complete for ${walletAddress}`);
+              }
             }
           } catch (err) {
             server.log.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);

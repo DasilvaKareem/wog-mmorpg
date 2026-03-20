@@ -4,7 +4,9 @@
  * In-memory is the read source; chain writes are fire-and-forget backup
  */
 import {
+  getReputationOnChain,
   initReputationOnChain,
+  registerReputationChainListener,
   submitFeedbackOnChain,
 } from "../erc8004/reputation.js";
 import { getRedis } from "../redis.js";
@@ -63,6 +65,81 @@ export class ReputationManager {
   private chainInitInFlight: Set<string> = new Set();
   private chainInitRetryAttempts: Map<string, number> = new Map();
   private chainInitRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+  private chainSyncInFlight: Set<string> = new Set();
+  private chainSyncNeeded: Set<string> = new Set();
+  private lastChainSyncAt: Map<string, number> = new Map();
+  private readonly chainSyncIntervalMs = 20_000;
+  private readonly chainSyncStaleMs = 30_000;
+
+  constructor() {
+    registerReputationChainListener((agentId) => {
+      this.scheduleChainReconcile(agentId);
+    });
+
+    setInterval(() => {
+      this.flushPendingChainReconciles().catch(() => {});
+    }, this.chainSyncIntervalMs);
+  }
+
+  private persistScore(agentId: string, rep: ReputationScore): void {
+    const redis = getRedis();
+    if (!redis) return;
+    redis.hset(`reputation:agent:${agentId}`, {
+      combat: String(rep.combat),
+      economic: String(rep.economic),
+      social: String(rep.social),
+      crafting: String(rep.crafting),
+      agent: String(rep.agent),
+      overall: String(rep.overall),
+      lastUpdated: String(rep.lastUpdated),
+    }).catch(() => {});
+  }
+
+  private applyChainScore(agentId: string, chainScore: ReputationScore): void {
+    this.scores.set(agentId, chainScore);
+    this.chainSyncNeeded.delete(agentId);
+    this.lastChainSyncAt.set(agentId, Date.now());
+    this.persistScore(agentId, chainScore);
+  }
+
+  private scheduleChainReconcile(agentId: string | bigint): void {
+    this.chainSyncNeeded.add(normalizeAgentId(agentId));
+  }
+
+  private async reconcileFromChain(agentId: string | bigint): Promise<ReputationScore | null> {
+    const key = normalizeAgentId(agentId);
+    if (this.chainSyncInFlight.has(key)) {
+      return this.scores.get(key) ?? null;
+    }
+
+    this.chainSyncInFlight.add(key);
+    try {
+      const chainScore = await getReputationOnChain(key);
+      if (!chainScore) {
+        return this.scores.get(key) ?? null;
+      }
+
+      const normalized: ReputationScore = {
+        combat: chainScore.combat,
+        economic: chainScore.economic,
+        social: chainScore.social,
+        crafting: chainScore.crafting,
+        agent: chainScore.agent,
+        overall: chainScore.overall,
+        lastUpdated: chainScore.lastUpdated || Date.now(),
+      };
+      this.applyChainScore(key, normalized);
+      return normalized;
+    } finally {
+      this.chainSyncInFlight.delete(key);
+    }
+  }
+
+  private async flushPendingChainReconciles(): Promise<void> {
+    for (const agentId of Array.from(this.chainSyncNeeded)) {
+      await this.reconcileFromChain(agentId).catch(() => {});
+    }
+  }
 
   private scheduleChainInit(agentId: string, reason: string): void {
     if (this.chainInitSucceeded.has(agentId) || this.chainInitInFlight.has(agentId)) {
@@ -135,18 +212,43 @@ export class ReputationManager {
           });
         }
         this.scheduleChainInit(key, stored && stored.overall ? "redis-restore" : "fresh-init");
+        this.scheduleChainReconcile(key);
       }).catch(() => {
         this.scheduleChainInit(key, "redis-read-failed");
+        this.scheduleChainReconcile(key);
       });
     } else {
       this.scheduleChainInit(key, "fresh-init");
+      this.scheduleChainReconcile(key);
     }
   }
 
   /** Get reputation scores for an agent */
   getReputation(agentId: string | bigint): ReputationScore | null {
     const key = normalizeAgentId(agentId);
-    return this.scores.get(key) ?? null;
+    const rep = this.scores.get(key) ?? null;
+    const lastSync = this.lastChainSyncAt.get(key) ?? 0;
+    if (!rep) {
+      this.ensureInitialized(key);
+      this.scheduleChainReconcile(key);
+      return null;
+    }
+    if (Date.now() - lastSync > this.chainSyncStaleMs) {
+      this.scheduleChainReconcile(key);
+    }
+    return rep;
+  }
+
+  async getEventuallyConsistentReputation(agentId: string | bigint): Promise<ReputationScore | null> {
+    const key = normalizeAgentId(agentId);
+    this.ensureInitialized(key);
+    const rep = this.scores.get(key) ?? null;
+    const lastSync = this.lastChainSyncAt.get(key) ?? 0;
+    if (!rep || this.chainSyncNeeded.has(key) || Date.now() - lastSync > this.chainSyncStaleMs) {
+      const synced = await this.reconcileFromChain(key).catch(() => null);
+      return synced ?? this.scores.get(key) ?? rep;
+    }
+    return rep;
   }
 
   /** Get rank name for a given score */
@@ -194,21 +296,12 @@ export class ReputationManager {
     }
 
     this.scheduleChainInit(key, "submitFeedback");
+    this.scheduleChainReconcile(key);
     submitFeedbackOnChain(key, category, delta, reason).catch(() => {});
 
-    // Persist to Redis (fire-and-forget)
+    this.persistScore(key, rep);
     const redis = getRedis();
     if (redis) {
-      redis.hset(`reputation:agent:${key}`, {
-        combat: String(rep.combat),
-        economic: String(rep.economic),
-        social: String(rep.social),
-        crafting: String(rep.crafting),
-        agent: String(rep.agent),
-        overall: String(rep.overall),
-        lastUpdated: String(rep.lastUpdated),
-      }).catch(() => {});
-
       // Append snapshot to timeline (sorted set, score = timestamp)
       const snap = JSON.stringify({
         combat: rep.combat, economic: rep.economic, social: rep.social,

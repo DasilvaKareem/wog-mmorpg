@@ -18,13 +18,19 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteWallet } from "./biteChain.js";
+import { queueBiteTransaction } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { traceTx } from "./txTracer.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
-const skaleProvider = new ethers.JsonRpcProvider("https://skale-base.skalenodes.com/v1/base");
+const skaleProvider = new ethers.JsonRpcProvider(
+  process.env.SKALE_BASE_RPC_URL || "https://skale-base.skalenodes.com/v1/base"
+);
 import { getNFT } from "thirdweb/extensions/erc721";
+
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const DEV_ENABLED = TRUE_VALUES.has((process.env.DEV ?? "").trim().toLowerCase());
 
 // =============================================================================
 //  Balance Cache — avoids redundant RPC reads (TTL-based eviction)
@@ -79,6 +85,10 @@ const inflightGold = new Map<string, Promise<string>>();
 const inflightItem = new Map<string, Promise<bigint>>();
 
 const ERC721_TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
+
+function toInlineMetadataUri(metadata: unknown): string {
+  return `data:application/json;base64,${Buffer.from(JSON.stringify(metadata)).toString("base64")}`;
+}
 
 function shouldLogOwnershipWarning(address: string, ttlMs = 60_000): boolean {
   const key = address.toLowerCase();
@@ -266,14 +276,15 @@ async function ensureItemTokenIdExists(targetChainTokenId: bigint): Promise<void
       }
 
       const receipt = await queueTransaction(async () => {
+        const nftMetadata = {
+          name: item.name,
+          description: item.description,
+        };
         const tx = mintERC1155({
           contract: itemsContract,
           to: serverAccount.address,
           supply: 1n,
-          nft: {
-            name: item.name,
-            description: item.description,
-          },
+          nft: DEV_ENABLED ? toInlineMetadataUri(nftMetadata) : nftMetadata,
         });
         return sendTransactionWithManagedGas(tx, serverAccount);
       });
@@ -642,8 +653,10 @@ export async function registerIdentity(
     // Use A2A endpoint URL as the agentURI so it's discoverable on-chain
     const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
     const agentURI = `${base}/a2a/${ownerAddress}`;
-    const registerTx = await identityRegistryContract["register(string)"](agentURI);
-    const receipt = await registerTx.wait();
+    const receipt = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
+      const registerTx = await identityRegistryContract["register(string)"](agentURI);
+      return registerTx.wait();
+    });
 
     // Extract agentId from the Registered event
     const registeredEvent = receipt.logs.find(
@@ -660,14 +673,18 @@ export async function registerIdentity(
 
     // Store character tokenId as metadata
     const charTokenBytes = ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]);
-    await identityRegistryContract.setMetadata(agentId, "characterTokenId", charTokenBytes)
-      .then((tx: any) => tx.wait())
+    await queueBiteTransaction(`identity-metadata:${agentId}`, async () =>
+      identityRegistryContract.setMetadata(agentId, "characterTokenId", charTokenBytes)
+        .then((tx: any) => tx.wait())
+    )
       .catch((err: any) => console.warn(`[identity] setMetadata failed: ${err.message?.slice(0, 80)}`));
 
     // Transfer the agent NFT to the character's owner
     if (ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
-      await identityRegistryContract.transferFrom(serverAddress, ownerAddress, agentId)
-        .then((tx: any) => tx.wait())
+      await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
+        identityRegistryContract.transferFrom(serverAddress, ownerAddress, agentId)
+          .then((tx: any) => tx.wait())
+      )
         .then(() => console.log(`[identity] Transferred agent #${agentId} → ${ownerAddress}`))
         .catch((err: any) => console.warn(`[identity] Transfer to ${ownerAddress} failed: ${err.message?.slice(0, 80)}`));
     }
@@ -700,8 +717,10 @@ export async function getA2AEndpoint(agentId: bigint): Promise<string | null> {
 export async function setA2AEndpoint(agentId: bigint, endpointUrl: string): Promise<string | null> {
   if (!identityRegistryContract) return null;
   try {
-    const tx = await identityRegistryContract.setAgentURI(agentId, endpointUrl);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`identity-agent-uri:${agentId}`, async () => {
+      const tx = await identityRegistryContract.setAgentURI(agentId, endpointUrl);
+      return tx.wait();
+    });
     console.log(`[identity] Updated A2A endpoint for agent #${agentId} → ${endpointUrl}`);
     return receipt.hash;
   } catch (err: any) {
@@ -795,10 +814,11 @@ export async function mintCharacterWithIdentity(
 ): Promise<MintCharacterResult> {
   return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", () =>
     queueTransaction(async () => {
+      const nftPayload = DEV_ENABLED ? toInlineMetadataUri(nft) : nft;
       const tx = mintERC721({
         contract: characterContract,
         to: toAddress,
-        nft,
+        nft: nftPayload,
       });
       const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
       txStats.characterMints++;
@@ -907,26 +927,30 @@ export async function updateCharacterMetadata(entity: {
       },
     };
 
-    // Upload to IPFS with retry — thirdweb storage is intermittently slow from GCE
     let uri: string | undefined;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        uri = await Promise.race([
-          upload({ client: thirdwebClient, files: [metadata] }),
-          new Promise<never>((_, reject) =>
-            setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
-          ),
-        ]);
-        break;
-      } catch (err: any) {
-        const msg = String(err?.message ?? "");
-        if (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET")) {
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-            continue;
+    if (DEV_ENABLED) {
+      uri = toInlineMetadataUri(metadata);
+    } else {
+      // Upload to IPFS with retry — thirdweb storage is intermittently slow from GCE
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          uri = await Promise.race([
+            upload({ client: thirdwebClient, files: [metadata] }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
+            ),
+          ]);
+          break;
+        } catch (err: any) {
+          const msg = String(err?.message ?? "");
+          if (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET")) {
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+              continue;
+            }
           }
+          throw err;
         }
-        throw err;
       }
     }
     if (!uri) throw new Error("Metadata upload failed after 3 attempts");

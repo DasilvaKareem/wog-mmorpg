@@ -86,6 +86,15 @@ async function isTreasurySeeded(): Promise<boolean> {
   return false;
 }
 
+async function hasTreasuryGold(treasuryAddress: string, minimumGold: number): Promise<boolean> {
+  try {
+    const balance = parseFloat(await getGoldBalance(treasuryAddress));
+    return Number.isFinite(balance) && balance >= minimumGold;
+  } catch {
+    return false;
+  }
+}
+
 async function markTreasurySeeded(): Promise<void> {
   const redis = getRedis();
   if (redis) {
@@ -192,7 +201,10 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
       return createAndSeedTreasury(server);
     }
 
-    if (!(await isTreasurySeeded())) {
+    const seeded = await isTreasurySeeded();
+    const funded = await hasTreasuryGold(treasuryAddress, WELCOME_GOLD);
+
+    if (!seeded || !funded) {
       console.log(`[wallet/register] Treasury ${treasuryAddress} not seeded, minting ${TREASURY_SEED_GOLD} GOLD...`);
       const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
       await markTreasurySeeded();

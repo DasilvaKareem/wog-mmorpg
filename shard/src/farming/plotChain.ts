@@ -8,6 +8,7 @@
 
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import { traceTx } from "../blockchain/txTracer.js";
 
 const LAND_REGISTRY_ADDRESS = process.env.LAND_REGISTRY_CONTRACT_ADDRESS;
@@ -51,8 +52,10 @@ export async function claimPlotOnChain(
   if (!landRegistryContract) return false;
   try {
     return await traceTx("plot-claim", "claimPlotOnChain", { plotId, zoneId, owner: ownerAddress }, "bite", async () => {
-      const tx = await landRegistryContract.claimPlot(plotId, zoneId, x, y, ownerAddress);
-      await tx.wait();
+      await queueBiteTransaction(`plot-claim:${plotId}:${ownerAddress}`, async () => {
+        const tx = await landRegistryContract.claimPlot(plotId, zoneId, x, y, ownerAddress);
+        await tx.wait();
+      });
       console.log(`[plotChain] Claimed "${plotId}" for ${ownerAddress}`);
       return true;
     });
@@ -69,8 +72,10 @@ export async function releasePlotOnChain(ownerAddress: string): Promise<boolean>
   if (!landRegistryContract) return false;
   try {
     return await traceTx("plot-release", "releasePlotOnChain", { owner: ownerAddress }, "bite", async () => {
-      const tx = await landRegistryContract.releasePlot(ownerAddress);
-      await tx.wait();
+      await queueBiteTransaction(`plot-release:${ownerAddress}`, async () => {
+        const tx = await landRegistryContract.releasePlot(ownerAddress);
+        await tx.wait();
+      });
       console.log(`[plotChain] Released plot for ${ownerAddress}`);
       return true;
     });
@@ -90,8 +95,10 @@ export async function transferPlotOnChain(
   if (!landRegistryContract) return false;
   try {
     return await traceTx("plot-transfer", "transferPlotOnChain", { from: fromAddress, to: toAddress }, "bite", async () => {
-      const tx = await landRegistryContract.transferPlot(fromAddress, toAddress);
-      await tx.wait();
+      await queueBiteTransaction(`plot-transfer:${fromAddress}:${toAddress}`, async () => {
+        const tx = await landRegistryContract.transferPlot(fromAddress, toAddress);
+        await tx.wait();
+      });
       console.log(`[plotChain] Transferred plot ${fromAddress} → ${toAddress}`);
       return true;
     });
@@ -120,8 +127,10 @@ export async function updateBuildingOnChain(
     }
 
     return await traceTx("plot-building", "updateBuildingOnChain", { plotId, buildingType, stage }, "bite", async () => {
-      const tx = await landRegistryContract.updateBuilding(tokenId, buildingType, stage);
-      await tx.wait();
+      await queueBiteTransaction(`plot-building:${plotId}:${buildingType}:${stage}`, async () => {
+        const tx = await landRegistryContract.updateBuilding(tokenId, buildingType, stage);
+        await tx.wait();
+      });
       console.log(`[plotChain] Updated building on "${plotId}": ${buildingType} stage ${stage}`);
       return true;
     });

@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { bite, biteWallet, biteProvider } from "./biteChain.js";
+import { queueBiteTransaction } from "./biteTxQueue.js";
 import { traceTx } from "./txTracer.js";
 
 const TRADE_CONTRACT_ADDRESS = process.env.TRADE_CONTRACT_ADDRESS!;
@@ -60,13 +61,15 @@ export async function createTradeOnChain(
   seller: string
 ): Promise<{ tradeId: number; txHash: string }> {
   return traceTx("trade-create", "createTradeOnChain", { tokenId, quantity, seller }, "bite", async () => {
-    const tx = await tradeContract.createTrade(
-      encryptedAskPrice,
-      tokenId,
-      quantity,
-      seller
-    );
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`trade-create:${seller}:${tokenId}`, async () => {
+      const tx = await tradeContract.createTrade(
+        encryptedAskPrice,
+        tokenId,
+        quantity,
+        seller
+      );
+      return tx.wait();
+    });
 
     // Parse TradeCreated event to extract the tradeId
     for (const log of receipt.logs) {
@@ -98,13 +101,15 @@ export async function submitOfferOnChain(
   buyer: string
 ): Promise<{ txHash: string }> {
   return traceTx("trade-offer", "submitOfferOnChain", { tradeId, buyer }, "bite", async () => {
-    const tx = await tradeContract.submitOffer(
-      tradeId,
-      encryptedBidPrice,
-      buyer,
-      { value: ethers.parseEther("0.00001") }
-    );
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`trade-offer:${tradeId}:${buyer}`, async () => {
+      const tx = await tradeContract.submitOffer(
+        tradeId,
+        encryptedBidPrice,
+        buyer,
+        { value: ethers.parseEther("0.00001") }
+      );
+      return tx.wait();
+    });
     return { txHash: receipt.hash };
   });
 }
@@ -132,8 +137,10 @@ export async function waitForTradeResolution(
 /** Cancel a trade that hasn't received an offer yet. */
 export async function cancelTradeOnChain(tradeId: number): Promise<string> {
   return traceTx("trade-cancel", "cancelTradeOnChain", { tradeId }, "bite", async () => {
-    const tx = await tradeContract.cancelTrade(tradeId);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`trade-cancel:${tradeId}`, async () => {
+      const tx = await tradeContract.cancelTrade(tradeId);
+      return tx.wait();
+    });
     return receipt.hash;
   });
 }

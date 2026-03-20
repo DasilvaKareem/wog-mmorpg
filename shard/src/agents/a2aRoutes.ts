@@ -11,8 +11,11 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
+import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
 
 const BASE_URL = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
+const A2A_CHAIN_NAME =
+  SKALE_BASE_CHAIN_ID === 31337 ? "hardhat-local" : "skale-bite-v2-sandbox";
 
 /** Supported A2A JSON-RPC methods */
 const A2A_METHODS = ["message/send", "message/read", "agent/card"] as const;
@@ -64,8 +67,8 @@ function buildAgentCard(walletAddress: string, entity?: { name: string; classId?
     ],
     // ERC-8004 identity metadata
     erc8004: {
-      chain: "skale-bite-v2-sandbox",
-      chainId: 103698795,
+      chain: A2A_CHAIN_NAME,
+      chainId: SKALE_BASE_CHAIN_ID,
       registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
       walletAddress,
     },
@@ -202,7 +205,7 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       agentId: agentId,
       endpoint: endpoint ?? null,
       walletAddress: wallet ?? null,
-      chainId: 103698795,
+      chainId: SKALE_BASE_CHAIN_ID,
       registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
     };
   });
@@ -244,8 +247,8 @@ export function registerA2ARoutes(server: FastifyInstance): void {
         },
       ],
       erc8004: {
-        chain: "skale-bite-v2-sandbox",
-        chainId: 103698795,
+        chain: A2A_CHAIN_NAME,
+        chainId: SKALE_BASE_CHAIN_ID,
         registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
       },
     };

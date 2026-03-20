@@ -81,7 +81,7 @@ export async function registerReputationRoutes(app: FastifyInstance) {
   }>("/api/agents/:agentId/reputation", async (req, reply) => {
     const { agentId } = req.params;
 
-    const reputation = reputationManager.getReputation(agentId);
+    const reputation = await reputationManager.getEventuallyConsistentReputation(agentId);
     if (!reputation) {
       return reply.code(404).send({
         error: "Reputation not found for this agent",

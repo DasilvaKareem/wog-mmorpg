@@ -5,6 +5,7 @@
 
 import { ethers } from "ethers";
 import { bite, biteWallet, biteProvider } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import type {
   PredictionPool,
   EncryptedPosition,
@@ -91,13 +92,15 @@ export class PredictionPoolManager {
     const poolId = randomUUID();
 
     // Create pool on-chain
-    const tx = await predictionContract!.createPool(
-      poolId,
-      battleId,
-      duration,
-      betLockTime
-    );
-    await tx.wait();
+    await queueBiteTransaction(`prediction-create:${poolId}`, async () => {
+      const tx = await predictionContract!.createPool(
+        poolId,
+        battleId,
+        duration,
+        betLockTime
+      );
+      await tx.wait();
+    });
 
     // Create local pool state
     const now = Date.now();
@@ -147,13 +150,15 @@ export class PredictionPoolManager {
 
     // Submit on-chain
     const amountWei = ethers.parseUnits(amount.toString(), 18);
-    const tx = await predictionContract!.placeBet(
-      poolId,
-      encryptedChoice,
-      betterAddress,
-      { value: amountWei }
-    );
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`prediction-bet:${poolId}:${betterAddress}`, async () => {
+      const tx = await predictionContract!.placeBet(
+        poolId,
+        encryptedChoice,
+        betterAddress,
+        { value: amountWei }
+      );
+      return tx.wait();
+    });
 
     // Create position
     const positionId = randomUUID();
@@ -204,8 +209,10 @@ export class PredictionPoolManager {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    const tx = await predictionContract!.lockPool(poolId);
-    await tx.wait();
+    await queueBiteTransaction(`prediction-lock:${poolId}`, async () => {
+      const tx = await predictionContract!.lockPool(poolId);
+      await tx.wait();
+    });
 
     pool.status = "locked";
   }
@@ -244,12 +251,14 @@ export class PredictionPoolManager {
     }
 
     // Submit settlement on-chain
-    const tx = await predictionContract!.settleBattle(
-      poolId,
-      winnerChoice,
-      decryptedChoices
-    );
-    await tx.wait();
+    await queueBiteTransaction(`prediction-settle:${poolId}`, async () => {
+      const tx = await predictionContract!.settleBattle(
+        poolId,
+        winnerChoice,
+        decryptedChoices
+      );
+      await tx.wait();
+    });
 
     // Calculate payouts
     pool.status = "settled";
@@ -357,8 +366,10 @@ export class PredictionPoolManager {
     }
 
     // Claim on-chain
-    const tx = await predictionContract!.claimWinnings(poolId);
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(`prediction-claim:${poolId}:${betterAddress}`, async () => {
+      const tx = await predictionContract!.claimWinnings(poolId);
+      return tx.wait();
+    });
 
     position.claimed = true;
 
@@ -511,8 +522,10 @@ export class PredictionPoolManager {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    const tx = await predictionContract!.cancelPool(poolId, reason);
-    await tx.wait();
+    await queueBiteTransaction(`prediction-cancel:${poolId}`, async () => {
+      const tx = await predictionContract!.cancelPool(poolId, reason);
+      await tx.wait();
+    });
 
     pool.status = "cancelled";
   }

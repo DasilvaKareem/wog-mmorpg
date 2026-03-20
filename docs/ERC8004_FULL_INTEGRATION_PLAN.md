@@ -923,6 +923,27 @@ This section tracks the actual implementation state of the repo relative to this
   - `/api/agents/:agentId/identity`
   - `/api/agents/:agentId/validations`
 - primary ERC-8004 docs were updated to match the new route shapes and identity model
+- `DEV=true` local integration now auto-loads Hardhat deployment addresses from [hardhat/deployments/localhost.json](/home/preyanshu/wog-mmorpg/hardhat/deployments/localhost.json) via [devLocalContracts.ts](/home/preyanshu/wog-mmorpg/shard/src/config/devLocalContracts.ts), overriding stale zero-address or mainnet-style env values during local shard boot
+- local mock prerequisite game contracts were added for full Hardhat integration testing:
+  - [WoGMockGold.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockGold.sol)
+  - [WoGMockItems.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockItems.sol)
+  - [WoGMockCharacters.sol](/home/preyanshu/wog-mmorpg/hardhat/contracts/WoGMockCharacters.sol)
+- [deploy.ts](/home/preyanshu/wog-mmorpg/hardhat/scripts/deploy.ts) now deploys the mock asset contracts alongside the ERC-8004 registries and writes the localhost manifest consumed by shard dev mode
+- local DEV metadata minting no longer depends on thirdweb upload authorization:
+  - character and item metadata use inline `data:application/json;base64,...` URIs when `DEV=true`
+- local treasury seeding now checks actual on-chain treasury GOLD balance before skipping welcome-fund minting, fixing stale Redis state after Hardhat chain resets
+- BITE-side runtime writes now run through a shared serialized queue in [biteTxQueue.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/biteTxQueue.ts), with nonce/transient RPC retries, instead of firing concurrent transactions from the shared server signer
+- reputation now uses an eventually-consistent read model instead of an indefinitely stale local cache:
+  - [reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts) can now read on-chain scores and emits notifications when init/batch writes land
+  - [reputationManager.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationManager.ts) now schedules reconciliation, persists chain-synced values back to Redis, and serves an eventually-consistent API view
+  - [reputationRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationRoutes.ts) now uses the eventually-consistent read path for `/api/agents/:agentId/reputation`
+- the shared BITE queue now covers the ERC-8004 and adjacent game write paths that were racing on Hardhat:
+  - identity registration and endpoint updates in [blockchain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/blockchain.ts)
+  - validation claims in [validation.ts](/home/preyanshu/wog-mmorpg/shard/src/erc8004/validation.ts)
+  - reputation initialization and batch updates in [reputationChain.ts](/home/preyanshu/wog-mmorpg/shard/src/economy/reputationChain.ts)
+  - name service writes in [nameServiceChain.ts](/home/preyanshu/wog-mmorpg/shard/src/blockchain/nameServiceChain.ts)
+  - other BITE gameplay mutators in trade, auctions, guilds, guild vault, land plots, and prediction pools
+- name-service auto-registration logging in [characterRoutes.ts](/home/preyanshu/wog-mmorpg/shard/src/character/characterRoutes.ts) now only reports success when the chain write actually completes
 
 ### Contract status
 
@@ -950,6 +971,75 @@ This section tracks the actual implementation state of the repo relative to this
 - `client` build/check passes
 - `shard` build passes
 - the three ERC-8004 registry contracts compile together with `solc`
+- local Hardhat deploy/build flow passes:
+  - `cd hardhat && npm run compile`
+  - `cd hardhat && npm run deploy:localhost`
+  - `cd shard && npm run build`
+
+### Local integration verification
+
+The repo now has a usable full local ERC-8004 integration path under `DEV=true` on Hardhat.
+
+Verified local contracts:
+
+- `GOLD_CONTRACT_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3`
+- `ITEMS_CONTRACT_ADDRESS=0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`
+- `CHARACTER_CONTRACT_ADDRESS=0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0`
+- `IDENTITY_REGISTRY_ADDRESS=0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9`
+- `REPUTATION_REGISTRY_ADDRESS=0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9`
+- `VALIDATION_REGISTRY_ADDRESS=0x5FC8d32690cc91D4c39d9d3abcBD16989F875707`
+
+Verified end-to-end before the BITE queue hardening:
+
+- wallet registration succeeds and a fresh wallet receives welcome funds on-chain
+- character creation mints the character NFT locally and stores `characterTokenId`
+- ERC-8004 identity registration succeeds, stores `agentId`, transfers the identity NFT to the player wallet, and writes the A2A endpoint to the identity token URI
+- `/a2a/resolve/:agentId` and `/api/agents/:agentId/identity` resolve the minted identity correctly
+- merchant/item initialization succeeds against the local mock items contract
+- gameplay state mutates normally after spawn and is persisted back to Redis/save state
+
+Root cause found during local verification:
+
+- Hardhat exposed nonce races on the shared BITE signer because multiple modules sent transactions concurrently during character bootstrap
+- the main failures showed up as `NONCE_EXPIRED` / `Nonce too low` on:
+  - validation claim publishing
+  - reputation initialization
+  - name-service auto-registration
+
+Verified after the shared BITE queue fix with a fresh local wallet/character:
+
+- auth challenge + verify succeeds for a fresh wallet
+- `/wallet/register` succeeds and on-chain GOLD balance is `0.02`
+- `/character/create` succeeds and mints:
+  - `characterTokenId=1`
+  - `agentId=2`
+- `/api/agents/2/identity` resolves the correct wallet, A2A endpoint, and `characterTokenId`
+- `/api/agents/2/validations` returns the expected `wog:a2a-enabled` claim
+- `/name/lookup/:address` resolves the expected `.wog` name
+- `/spawn` succeeds with the minted `characterTokenId` and `agentId`
+- direct contract reads confirm:
+  - identity owner = player wallet
+  - identity wallet = player wallet
+  - identity token URI = local A2A endpoint
+  - identity metadata `characterTokenId` = `1`
+  - validation registry contains the capability claim
+  - reputation registry initialized successfully on-chain
+
+Remaining post-queue gap:
+
+- the nonce issue was most visible on Hardhat automine, but it was still a real architectural defect because all of those modules shared one signer without one queue boundary
+
+Verified after the eventual-consistency reputation fix:
+
+- a fresh local agent can receive a reputation delta through `/api/agents/:agentId/reputation/feedback`
+- the API still remains fast because local writes happen immediately in memory
+- the reputation contract is updated by the existing 15s batch flush
+- once the chain write lands, `/api/agents/:agentId/reputation` now converges to the contract value on the next read instead of remaining stale indefinitely
+- observed local test:
+  - agent `4`
+  - submitted `social +7`
+  - contract moved from `500` to `507`
+  - API moved from `500/500` to `507/501` and then stayed aligned with chain
 
 ### Not complete yet
 
@@ -958,7 +1048,7 @@ This section tracks the actual implementation state of the repo relative to this
   - `IDENTITY_REGISTRY_ADDRESS`
   - `REPUTATION_REGISTRY_ADDRESS`
   - `VALIDATION_REGISTRY_ADDRESS`
-- full live end-to-end on-chain verification is still pending:
+- full live end-to-end verification on the target network is still pending:
   - mint character -> identity registration
   - write reputation -> on-chain update
   - publish validation -> on-chain verification record

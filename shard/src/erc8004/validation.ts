@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import { normalizeAgentId } from "./agentResolution.js";
 
 const VALIDATION_REGISTRY_ADDRESS = process.env.VALIDATION_REGISTRY_ADDRESS;
@@ -32,8 +33,17 @@ export async function publishValidationClaim(
 ): Promise<string | null> {
   if (!validationContract) return null;
   try {
-    const tx = await validationContract.verifyCapability(toIdentityId(agentId), claim, BigInt(validUntil));
-    const receipt = await tx.wait();
+    const receipt = await queueBiteTransaction(
+      `validation:${normalizeAgentId(agentId)}:${claim}`,
+      async () => {
+        const tx = await validationContract.verifyCapability(
+          toIdentityId(agentId),
+          claim,
+          BigInt(validUntil)
+        );
+        return tx.wait();
+      }
+    );
     return receipt.hash;
   } catch (err) {
     console.warn(`[erc8004.validation] publish claim failed for ${normalizeAgentId(agentId)} ${claim}:`, err);

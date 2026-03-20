@@ -1,5 +1,6 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 
 const GUILD_VAULT_CONTRACT_ADDRESS = process.env.GUILD_VAULT_CONTRACT_ADDRESS;
 
@@ -60,8 +61,10 @@ export async function depositItemOnChain(
 ): Promise<string> {
   if (!vaultContract) throw new Error("Vault contract not initialized");
 
-  const tx = await vaultContract.depositItem(guildId, tokenId, quantity, depositor);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-vault-deposit:${guildId}:${depositor}:${tokenId}`, async () => {
+    const tx = await vaultContract.depositItem(guildId, tokenId, quantity, depositor);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -76,8 +79,10 @@ export async function withdrawItemOnChain(
 ): Promise<string> {
   if (!vaultContract) throw new Error("Vault contract not initialized");
 
-  const tx = await vaultContract.withdrawItem(guildId, tokenId, quantity, recipient);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-vault-withdraw:${guildId}:${recipient}:${tokenId}`, async () => {
+    const tx = await vaultContract.withdrawItem(guildId, tokenId, quantity, recipient);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 
@@ -93,8 +98,10 @@ export async function lendItemOnChain(
 ): Promise<{ loanId: number; txHash: string }> {
   if (!vaultContract) throw new Error("Vault contract not initialized");
 
-  const tx = await vaultContract.lendItem(guildId, tokenId, quantity, borrower, durationDays);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-vault-lend:${guildId}:${borrower}:${tokenId}`, async () => {
+    const tx = await vaultContract.lendItem(guildId, tokenId, quantity, borrower, durationDays);
+    return tx.wait();
+  });
 
   // Parse ItemLent event
   for (const log of receipt.logs) {
@@ -123,8 +130,10 @@ export async function returnItemOnChain(
 ): Promise<string> {
   if (!vaultContract) throw new Error("Vault contract not initialized");
 
-  const tx = await vaultContract.returnItem(loanId, borrower);
-  const receipt = await tx.wait();
+  const receipt = await queueBiteTransaction(`guild-vault-return:${loanId}:${borrower}`, async () => {
+    const tx = await vaultContract.returnItem(loanId, borrower);
+    return tx.wait();
+  });
   return receipt.hash;
 }
 

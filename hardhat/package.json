@@ -1,0 +1,31 @@
+{
+  "name": "wog-hardhat",
+  "version": "1.0.0",
+  "description": "Local Hardhat workspace for WoG contracts and ERC-8004 testing",
+  "private": true,
+  "scripts": {
+    "clean": "hardhat clean",
+    "compile": "hardhat compile",
+    "node": "hardhat node",
+    "test": "hardhat test",
+    "deploy:localhost": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:hardhat": "hardhat run scripts/deploy.ts --network hardhat"
+  },
+  "keywords": [
+    "hardhat",
+    "solidity",
+    "erc-8004",
+    "wog"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.28.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.9.6",
+    "dotenv": "^17.3.1"
+  }
+}
