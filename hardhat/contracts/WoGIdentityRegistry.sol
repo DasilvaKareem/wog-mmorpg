@@ -18,6 +18,7 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
         string agentURI;
         uint256 createdAt;
         bool active;
+        bool hasCharacterToken;
     }
 
     uint256 private _nextAgentId = 1;
@@ -85,7 +86,7 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
         string memory agentEndpoint
     ) public returns (uint256 identityId) {
         if (!authorizedMinters[msg.sender]) revert Unauthorized();
-        if (characterToIdentity[characterTokenId] != 0) revert IdentityAlreadyExists();
+        if (_hasBoundCharacter(characterTokenId)) revert IdentityAlreadyExists();
 
         identityId = _mintIdentity(
             characterOwner,
@@ -173,20 +174,19 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
             uint256 nextCharacterTokenId = abi.decode(metadataValue, (uint256));
             uint256 previousCharacterTokenId = identity.characterTokenId;
             uint256 boundIdentityId = characterToIdentity[nextCharacterTokenId];
-            if (boundIdentityId != 0 && boundIdentityId != agentId) {
+            if (_hasBoundCharacter(nextCharacterTokenId) && boundIdentityId != agentId) {
                 revert IdentityAlreadyExists();
             }
             if (
-                previousCharacterTokenId != 0 &&
+                identity.hasCharacterToken &&
                 previousCharacterTokenId != nextCharacterTokenId &&
                 characterToIdentity[previousCharacterTokenId] == agentId
             ) {
                 delete characterToIdentity[previousCharacterTokenId];
             }
             identity.characterTokenId = nextCharacterTokenId;
-            if (nextCharacterTokenId != 0) {
-                characterToIdentity[nextCharacterTokenId] = agentId;
-            }
+            identity.hasCharacterToken = true;
+            characterToIdentity[nextCharacterTokenId] = agentId;
         } else if (_equals(metadataKey, "metadataURI")) {
             identity.metadataURI = abi.decode(metadataValue, (string));
             emit IdentityUpdated(agentId, identity.metadataURI);
@@ -209,7 +209,7 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
 
     function getIdentityByCharacter(uint256 characterTokenId) external view returns (Identity memory) {
         uint256 identityId = characterToIdentity[characterTokenId];
-        if (identityId == 0) revert IdentityNotFound();
+        if (!_hasBoundCharacter(characterTokenId)) revert IdentityNotFound();
         return identities[identityId];
     }
 
@@ -257,7 +257,7 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
         bool linkCharacter
     ) internal returns (uint256 agentId) {
         if (mintTo == address(0) || characterOwner == address(0)) revert InvalidWallet();
-        if (linkCharacter && characterTokenId != 0 && characterToIdentity[characterTokenId] != 0) {
+        if (linkCharacter && _hasBoundCharacter(characterTokenId)) {
             revert IdentityAlreadyExists();
         }
 
@@ -269,10 +269,11 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
             metadataURI: metadataURI,
             agentURI: agentURI,
             createdAt: block.timestamp,
-            active: true
+            active: true,
+            hasCharacterToken: linkCharacter
         });
 
-        if (linkCharacter && characterTokenId != 0) {
+        if (linkCharacter) {
             characterToIdentity[characterTokenId] = agentId;
             _metadata[agentId]["characterTokenId"] = abi.encode(characterTokenId);
         }
@@ -327,5 +328,11 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
 
     function _equals(string memory a, string memory b) internal pure returns (bool) {
         return keccak256(bytes(a)) == keccak256(bytes(b));
+    }
+
+    function _hasBoundCharacter(uint256 characterTokenId) internal view returns (bool) {
+        uint256 identityId = characterToIdentity[characterTokenId];
+        if (identityId == 0) return false;
+        return identities[identityId].hasCharacterToken;
     }
 }

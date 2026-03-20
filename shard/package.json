@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "pnpm run build && node dist/server.js"
+    "start": "pnpm run build && node dist/server.js",
+    "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",
