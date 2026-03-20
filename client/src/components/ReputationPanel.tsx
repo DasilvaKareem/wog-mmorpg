@@ -23,17 +23,26 @@ interface ReputationData {
   rank: string;
 }
 
+interface IdentityData {
+  ownerWallet: string | null;
+  endpoint: string | null;
+  characterTokenId: string | null;
+  onChainRegistered: boolean;
+}
+
 interface FeedbackItem {
   category: string;
   delta: number;
   reason: string;
   timestamp: number;
-  validated: boolean;
+  validated?: boolean;
 }
 
 export function ReputationPanel({ agentId }: ReputationPanelProps) {
   const [reputation, setReputation] = useState<ReputationData | null>(null);
+  const [identity, setIdentity] = useState<IdentityData | null>(null);
   const [history, setHistory] = useState<FeedbackItem[]>([]);
+  const [validations, setValidations] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -41,6 +50,11 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
   useEffect(() => {
     fetchReputation();
   }, [agentId]);
+
+  const toDate = (value: number): Date => {
+    const timestamp = value < 1_000_000_000_000 ? value * 1000 : value;
+    return new Date(timestamp);
+  };
 
   const fetchReputation = async () => {
     setLoading(true);
@@ -53,21 +67,45 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
     }
 
     try {
-      // Fetch reputation
-      const repResponse = await fetch(`${API_URL}/api/agents/${agentId}/reputation`);
+      const [repResponse, historyResponse, identityResponse, validationsResponse] =
+        await Promise.all([
+          fetch(`${API_URL}/api/agents/${agentId}/reputation`),
+          fetch(`${API_URL}/api/agents/${agentId}/reputation/history?limit=10`),
+          fetch(`${API_URL}/api/agents/${agentId}/identity`),
+          fetch(`${API_URL}/api/agents/${agentId}/validations`),
+        ]);
+
       if (!repResponse.ok) {
         throw new Error("Reputation not found");
       }
       const repData = await repResponse.json();
       setReputation(repData.reputation);
 
-      // Fetch history
-      const historyResponse = await fetch(
-        `${API_URL}/api/agents/${agentId}/reputation/history?limit=10`
-      );
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();
         setHistory(historyData.history);
+      } else {
+        setHistory([]);
+      }
+
+      if (identityResponse.ok) {
+        const identityData = await identityResponse.json();
+        setIdentity(identityData.identity ?? null);
+      } else {
+        setIdentity(null);
+      }
+
+      if (validationsResponse.ok) {
+        const validationData = await validationsResponse.json();
+        setValidations(
+          Array.isArray(validationData.validations)
+            ? validationData.validations
+                .map((claim: { claimType?: string }) => claim.claimType ?? "")
+                .filter(Boolean)
+            : []
+        );
+      } else {
+        setValidations([]);
       }
     } catch (err) {
       setError((err as Error).message);
@@ -130,6 +168,28 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
           {reputation.rank}
         </Badge>
       </div>
+
+      {(identity || validations.length > 0) && (
+        <div className="space-y-2 rounded border border-gray-200 p-3 dark:border-gray-700">
+          {identity && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-gray-500">
+              <span>
+                {identity.onChainRegistered ? "On-chain identity active" : "Identity registration pending"}
+              </span>
+              {identity.characterTokenId && <span>Character #{identity.characterTokenId}</span>}
+            </div>
+          )}
+          {validations.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {validations.map((claimType) => (
+                <Badge key={claimType} variant="secondary">
+                  {claimType}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Overall Progress Bar */}
       <div className="space-y-1">
@@ -230,7 +290,7 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
                       {item.reason}
                     </div>
                     <div className="text-gray-400 text-xs mt-1">
-                      {new Date(item.timestamp * 1000).toLocaleDateString()}
+                      {toDate(item.timestamp).toLocaleDateString()}
                     </div>
                   </div>
                   {item.validated && (
@@ -246,7 +306,7 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
       {/* Info */}
       <div className="text-xs text-gray-500 text-center pt-2 border-t">
         Last updated:{" "}
-        {new Date(reputation.lastUpdated * 1000).toLocaleString()}
+        {toDate(reputation.lastUpdated).toLocaleString()}
       </div>
     </Card>
   );

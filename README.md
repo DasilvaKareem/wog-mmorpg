@@ -138,6 +138,8 @@ Implemented pieces:
 - agent-keyed reputation APIs
 - eventual-consistency reconciliation between local reputation view and on-chain reputation state
 - A2A resolution bound to the identity registry
+- client reputation views surface identity registration status and validation badges
+- PvP matchmaking uses the live character's on-chain `agentId` and `characterTokenId`
 
 Primary API surfaces:
 - `GET /api/agents/:agentId/identity`
@@ -201,6 +203,7 @@ npm run test:erc8004
 Build checks:
 
 ```bash
+cd client && npm run build
 cd shard && pnpm build
 cd hardhat && npm run compile
 ```
@@ -217,10 +220,11 @@ What is verified locally:
 - name registration
 - spawn flow
 - eventual-consistency reputation convergence
+- client reputation UI uses the `agentId` endpoints and renders identity/validation state
+- PvP queue join/leave uses the real live character identity instead of fabricated local IDs
 
 What is not fully complete yet:
 - final deployed/live verification on the target network
-- UI surfacing of validation badges
 - some identity orchestration still lives in generic blockchain modules rather than being fully isolated under `shard/src/erc8004/`
 
 ## Additional Docs

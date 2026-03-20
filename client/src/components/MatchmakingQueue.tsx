@@ -14,12 +14,31 @@ interface QueueStatus {
   averageWaitTime: number;
 }
 
+interface QueueIdentity {
+  agentId: string;
+  characterTokenId: string;
+  level: number;
+}
+
+interface StatePlayerEntity {
+  type?: string;
+  walletAddress?: string;
+  name?: string;
+  level?: number;
+  agentId?: string;
+  characterTokenId?: string;
+}
+
+interface StateSnapshot {
+  zones?: Record<string, { entities?: Record<string, StatePlayerEntity> }>;
+}
+
 export function MatchmakingQueue(): React.ReactElement {
   const [queues, setQueues] = React.useState<QueueStatus[]>([]);
   const [selectedFormat, setSelectedFormat] = React.useState<string>("1v1");
   const [inQueue, setInQueue] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
-  const { address, isConnected } = useWallet();
+  const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
   const { notify } = useToast();
 
   React.useEffect(() => {
@@ -38,6 +57,49 @@ export function MatchmakingQueue(): React.ReactElement {
     }
   };
 
+  const resolveQueueIdentity = React.useCallback(async (): Promise<QueueIdentity | null> => {
+    if (!address) return null;
+
+    const response = await fetch(`${API_URL}/state`);
+    if (!response.ok) {
+      throw new Error("Unable to load live world state");
+    }
+
+    const snapshot = (await response.json()) as StateSnapshot;
+    const normalizedWallet = address.toLowerCase();
+    const preferredName = deployedCharacterName?.trim().toLowerCase() ?? null;
+    const liveName =
+      characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
+
+    const players = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
+      Object.values(zone.entities ?? {}).filter((entity) =>
+        entity.type === "player" &&
+        entity.walletAddress?.toLowerCase() === normalizedWallet &&
+        entity.agentId &&
+        entity.characterTokenId
+      )
+    );
+
+    if (players.length === 0) {
+      return null;
+    }
+
+    const selected =
+      players.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
+      players.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
+      players[0];
+
+    if (!selected.agentId || !selected.characterTokenId) {
+      return null;
+    }
+
+    return {
+      agentId: selected.agentId,
+      characterTokenId: selected.characterTokenId,
+      level: selected.level ?? characterProgress?.level ?? 1,
+    };
+  }, [address, characterProgress, deployedCharacterName]);
+
   const handleJoinQueue = async () => {
     if (!address) {
       notify("Connect wallet first", "error");
@@ -49,15 +111,21 @@ export function MatchmakingQueue(): React.ReactElement {
       const token = await getAuthToken(address);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      const queueIdentity = await resolveQueueIdentity();
+
+      if (!queueIdentity) {
+        notify("Spawn a character with an on-chain identity before joining queue", "error");
+        return;
+      }
 
       const response = await fetch(`${API_URL}/api/pvp/queue/join`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          agentId: `agent_${address.slice(2, 10)}`,
+          agentId: queueIdentity.agentId,
           walletAddress: address,
-          characterTokenId: "1",
-          level: 10,
+          characterTokenId: queueIdentity.characterTokenId,
+          level: queueIdentity.level,
           format: selectedFormat,
         }),
       });
@@ -84,12 +152,18 @@ export function MatchmakingQueue(): React.ReactElement {
       const token = await getAuthToken(address);
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      const queueIdentity = await resolveQueueIdentity();
+
+      if (!queueIdentity) {
+        notify("No active on-chain character found in queue context", "error");
+        return;
+      }
 
       const response = await fetch(`${API_URL}/api/pvp/queue/leave`, {
         method: "POST",
         headers,
         body: JSON.stringify({
-          agentId: `agent_${address.slice(2, 10)}`,
+          agentId: queueIdentity.agentId,
           format: selectedFormat,
         }),
       });
@@ -100,6 +174,7 @@ export function MatchmakingQueue(): React.ReactElement {
       }
     } catch (error) {
       console.error("Failed to leave queue:", error);
+      notify(`Error: ${(error as Error).message}`, "error");
     } finally {
       setLoading(false);
     }
