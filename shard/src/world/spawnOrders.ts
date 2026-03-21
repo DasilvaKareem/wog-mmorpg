@@ -181,9 +181,11 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedOrigin != null && { origin: resolvedOrigin }),
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
+      activeQuests: saved?.activeQuests ?? [],
       completedQuests: saved?.completedQuests ?? [],
       storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
+      pendingQuestApprovals: saved?.pendingQuestApprovals ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
@@ -225,10 +227,12 @@ export function registerSpawnOrders(server: FastifyInstance) {
         x: entity.x,
         y: entity.y,
         kills: 0,
+        activeQuests: [],
         completedQuests: [],
         storyFlags: [],
         learnedTechniques: [],
         professions: [],
+        pendingQuestApprovals: [],
       });
     }
 
