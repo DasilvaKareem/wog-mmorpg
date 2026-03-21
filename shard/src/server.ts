@@ -87,6 +87,8 @@ import { biteProvider, SKALE_BASE_CHAIN_ID } from "./blockchain/biteChain.js";
 
 const server = Fastify({ logger: true });
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
+const LOCAL_TEST_MODE = (process.env.LOCAL_TEST_MODE ?? "").trim().toLowerCase();
+const SKIP_MERCHANT_BOOTSTRAP = LOCAL_TEST_MODE === "core";
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -720,13 +722,17 @@ registerWebPushRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh();
 spawnNpcs();
-registerMerchantAgentTick(server);
-// Defer merchant wallet init so the tx queue isn't flooded at boot
-setTimeout(() => {
-  initMerchantWallets().catch((err) => {
-    server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-}, 60_000);
+if (SKIP_MERCHANT_BOOTSTRAP) {
+  server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
+} else {
+  registerMerchantAgentTick(server);
+  // Defer merchant wallet init so the tx queue isn't flooded at boot
+  setTimeout(() => {
+    initMerchantWallets().catch((err) => {
+      server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+  }, 60_000);
+}
 spawnOreNodes();
 spawnFlowerNodes();
 spawnNectarNodes();

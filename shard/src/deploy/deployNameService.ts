@@ -29,7 +29,7 @@ async function main() {
   // 1. Read Solidity source
   const solPath = resolve(
     import.meta.dirname,
-    "../../../contracts/WoGNameService.sol"
+    "../../../hardhat/contracts/WoGNameService.sol"
   );
   const source = readFileSync(solPath, "utf-8");
 

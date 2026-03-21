@@ -17,7 +17,7 @@ import { biteWallet } from "../blockchain/biteChain.js";
 
 async function main() {
   // 1. Read Solidity source
-  const solPath = resolve(import.meta.dirname, "../../contracts/WoGAuctionHouse.sol");
+  const solPath = resolve(import.meta.dirname, "../../../hardhat/contracts/WoGAuctionHouse.sol");
   const source = readFileSync(solPath, "utf-8");
 
   console.log("Compiling WoGAuctionHouse.sol...");

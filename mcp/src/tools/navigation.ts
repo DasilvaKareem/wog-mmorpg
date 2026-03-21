@@ -5,14 +5,14 @@
  *  1. navigate_to        — blocking walk: polls until arrived, returns when done
  *  2. navigate_to_entity — look up entity position, then blocking walk
  *  3. navigate_to_npc    — find NPC by name/type in zone, blocking walk
- *  4. navigate_to_portal — walk to the correct portal for a target zone
- *  5. travel_to_zone     — multi-hop BFS travel across the world graph
+ *  4. navigate_to_portal — walk to the boundary/portal landmark for a target zone
+ *  5. travel_to_zone     — unified-world travel across the world graph
  *  6. find_nearby        — spatial scan of zone entities by type/name/radius
  *
  * Coordinate note:
  *   Zone JSON stores positions as { x, z }
  *   /command move uses { x, y } where y == the world Z axis
- *   Portal positions come back as position.x / position.z from /portals/:zoneId
+ *   Portal landmarks are static hints used for navigation; actual zone travel uses /command { action: "travel" }
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -376,13 +376,13 @@ export function registerNavigationTools(server: McpServer): void {
   );
 
   /**
-   * Full zone-to-zone travel — multi-hop BFS route with blocking walks + transitions.
+   * Full zone-to-zone travel — unified-world travel with region-change polling.
    */
   server.registerTool(
     "travel_to_zone",
     {
       description:
-        "Travel from your current zone to any other zone in the world. Automatically plans the portal route (BFS shortest path), walks to each portal, and transitions through. Handles multi-hop travel (e.g. village-square → dark-forest = 2 hops). Returns when you arrive in the destination zone.",
+        "Travel from your current zone to any other zone in the world using the live unified-world travel command. Handles multi-hop paths conceptually, but the shard itself performs travel by moving toward the destination region and updating region automatically.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
         entityId: z.string().describe("Your entity ID"),
@@ -395,7 +395,7 @@ export function registerNavigationTools(server: McpServer): void {
       },
     },
     async ({ sessionId, entityId, currentZoneId, destinationZoneId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
+      const { token } = requireSession(sessionId);
 
       if (currentZoneId === destinationZoneId) {
         return {
@@ -413,48 +413,46 @@ export function registerNavigationTools(server: McpServer): void {
         };
       }
 
-      const log: string[] = [`Route: ${route.join(" → ")}`];
+      const log: string[] = [`Route hint: ${route.join(" → ")}`];
       let currentZone = currentZoneId;
 
-      for (let hop = 0; hop < route.length - 1; hop++) {
-        const fromZone = route[hop];
-        const toZone = route[hop + 1];
+      try {
+        await shard.post(
+          "/command",
+          {
+            entityId,
+            zoneId: currentZoneId,
+            action: "travel",
+            targetZone: destinationZoneId,
+          },
+          token
+        );
+        log.push(`Issued travel command toward ${destinationZoneId}`);
+      } catch (err) {
+        const msg = err instanceof ShardError ? err.message : String(err);
+        log.push(`Travel command failed: ${msg}`);
+      }
 
-        // Find the portal from fromZone → toZone
-        const portal = ZONE_PORTALS[fromZone]?.find((p) => p.destZone === toZone);
-        if (!portal) {
-          log.push(`ERROR: No portal from ${fromZone} → ${toZone}`);
-          break;
-        }
-
-        // Walk to the portal
-        log.push(`[${hop + 1}/${route.length - 1}] Walking to ${portal.portalId} portal in ${fromZone}...`);
-        const walkResult = await walkTo(entityId, fromZone, portal.x, portal.y, token, 40_000);
-
-        if (!walkResult.arrived) {
-          log.push(`Timed out walking to portal in ${fromZone} (${Math.round(walkResult.distanceRemaining)} units remaining)`);
-          break;
-        }
-        log.push(`Reached portal at (${Math.round(walkResult.x)}, ${Math.round(walkResult.y)})`);
-
-        // Transition through the portal
-        log.push(`Transitioning ${fromZone} → ${toZone}...`);
-        try {
-          const tx = await shard.post<any>(
-            `/transition/${fromZone}/portal/${portal.portalId}`,
-            { walletAddress, entityId, zoneId: fromZone },
-            token
-          );
-          currentZone = toZone;
-          log.push(`Arrived in ${toZone}${tx.position ? ` at (${Math.round(tx.position.x)}, ${Math.round(tx.position.z ?? tx.position.y)})` : ""}`);
-        } catch (err) {
-          const msg = err instanceof ShardError ? err.message : String(err);
-          log.push(`Transition failed: ${msg}`);
+      const deadline = Date.now() + 60_000;
+      while (Date.now() < deadline) {
+        await sleep(POLL_MS);
+        const state = await shard.get<any>("/state").catch(() => null);
+        const zoneEntry = state?.zones && typeof state.zones === "object"
+          ? Object.entries(state.zones).find(([, zone]: any) => zone?.entities?.[entityId])
+          : null;
+        if (!zoneEntry) continue;
+        currentZone = zoneEntry[0];
+        if (currentZone === destinationZoneId) {
           break;
         }
       }
 
       const success = currentZone === destinationZoneId;
+      if (success) {
+        log.push(`Arrived in ${destinationZoneId}`);
+      } else {
+        log.push(`Timed out before reaching ${destinationZoneId}; current zone is ${currentZone}`);
+      }
       return {
         content: [{
           type: "text" as const,
@@ -478,7 +476,7 @@ export function registerNavigationTools(server: McpServer): void {
     "navigate_to_portal",
     {
       description:
-        "Walk to the portal that leads toward a destination zone and WAIT until arrived. Does NOT transition — use zone_transition after this to cross. Useful when you want to control the transition yourself.",
+        "Walk to the portal landmark that leads toward a destination zone and wait until arrived. In the current architecture, actual crossing is done with travel_to_zone or POST /command action=travel, not a portal transition endpoint.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
         entityId: z.string().describe("Your entity ID"),
@@ -514,7 +512,7 @@ export function registerNavigationTools(server: McpServer): void {
             position: { x: Math.round(result.x), y: Math.round(result.y) },
             distanceFromPortal: Math.round(result.distanceRemaining),
             nextStep: result.arrived
-              ? `Call zone_transition with portalId: "${portal.portalId}" to cross into ${destinationZoneId}`
+              ? `Call travel_to_zone or POST /command with action "travel" and targetZone "${destinationZoneId}" to continue`
               : "Still moving — try again or increase timeout",
           }, null, 2),
         }],

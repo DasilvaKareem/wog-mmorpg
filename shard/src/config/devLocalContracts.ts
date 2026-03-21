@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getOfficialErc8004Addresses } from "../erc8004/official.js";
 
 type DeploymentManifest = {
   chainId?: number;
@@ -48,6 +49,29 @@ function readLocalManifest(): DeploymentManifest | null {
   return null;
 }
 
+function applyOfficialRegistryFallback(chainIdRaw: string | undefined): void {
+  const chainId = Number(chainIdRaw);
+  const official = getOfficialErc8004Addresses(chainId);
+  if (!official) return;
+
+  if (shouldOverrideWithManifest("IDENTITY_REGISTRY_ADDRESS", process.env.IDENTITY_REGISTRY_ADDRESS)) {
+    process.env.IDENTITY_REGISTRY_ADDRESS = official.identity;
+  }
+  if (official.reputation && shouldOverrideWithManifest("REPUTATION_REGISTRY_ADDRESS", process.env.REPUTATION_REGISTRY_ADDRESS)) {
+    process.env.REPUTATION_REGISTRY_ADDRESS = official.reputation;
+  }
+  if (shouldOverrideWithManifest("VALIDATION_REGISTRY_ADDRESS", process.env.VALIDATION_REGISTRY_ADDRESS)) {
+    if (official.validation) {
+      process.env.VALIDATION_REGISTRY_ADDRESS = official.validation;
+    } else {
+      delete process.env.VALIDATION_REGISTRY_ADDRESS;
+    }
+  }
+  if (!official.reputation && shouldOverrideWithManifest("REPUTATION_REGISTRY_ADDRESS", process.env.REPUTATION_REGISTRY_ADDRESS)) {
+    delete process.env.REPUTATION_REGISTRY_ADDRESS;
+  }
+}
+
 if (DEV_ENABLED) {
   process.env.SKALE_BASE_CHAIN_ID ??= "31337";
   process.env.SKALE_BASE_RPC_URL ??= process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
@@ -70,4 +94,6 @@ if (DEV_ENABLED) {
       "[dev] DEV=true but no Hardhat deployment manifest was found. Run the local Hardhat deploy before starting shard."
     );
   }
+} else {
+  applyOfficialRegistryFallback(process.env.SKALE_BASE_CHAIN_ID);
 }

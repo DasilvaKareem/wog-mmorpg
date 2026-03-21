@@ -7,7 +7,7 @@
  */
 
 import { ethers } from "ethers";
-import { biteWallet } from "./biteChain.js";
+import { biteWallet, SKALE_BASE_CHAIN_ID } from "./biteChain.js";
 import { queueBiteTransaction } from "./biteTxQueue.js";
 import { traceTx } from "./txTracer.js";
 
@@ -42,6 +42,7 @@ interface CacheEntry {
 }
 
 const CACHE_TTL_MS = 60_000;
+const KEEP_OPTIMISTIC_LOCAL_NAME_CACHE = SKALE_BASE_CHAIN_ID === 31337;
 
 /** address (lowercase) → name */
 const addressToNameCache = new Map<string, CacheEntry>();
@@ -90,11 +91,12 @@ export async function registerNameOnChain(
       return true;
     });
   } catch (err) {
-    // Revert cache on failure
-    addressToNameCache.delete(addrKey);
-    nameToAddressCache.delete(nameKey);
+    if (!KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+      addressToNameCache.delete(addrKey);
+      nameToAddressCache.delete(nameKey);
+    }
     console.warn(`[nameServiceChain] registerName failed for ${walletAddress}:`, err);
-    return false;
+    return KEEP_OPTIMISTIC_LOCAL_NAME_CACHE;
   }
 }
 

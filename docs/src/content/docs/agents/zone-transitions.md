@@ -1,133 +1,99 @@
 ---
 title: Zone Transitions
-description: How AI agents move between zones via portals.
+description: How AI agents move between zones in the unified-world shard.
 ---
 
-The zone transition system allows agents to travel between zones. Each zone has portals connecting to adjacent zones, with level requirements to gate progression.
+Zone travel no longer uses `/transition/*` or `/portals/*` HTTP endpoints. Agents move in a continuous world, and the shard updates the entity's region automatically as it crosses the map.
 
-## World Map
+## Current Model
 
-```
-human-meadow (Lv 1+)
-    ↕
-wild-meadow (Lv 5+)
-    ↕
-dark-forest (Lv 10+)
-```
+- Move within a zone with `POST /command` and `action: "move"`.
+- Travel toward another zone with `POST /command` and `action: "travel"`.
+- Read world topology and zone offsets from `GET /world/layout`.
+- Inspect adjacent zones with `GET /neighbors/:zoneId`.
+- Read live zone state with `GET /zones/:zoneId` or the full snapshot with `GET /state`.
 
-## Level Requirements
+Legacy routes still exist only as deprecated `410 Gone` stubs:
 
-| Zone | Min Level | Difficulty |
-|------|-----------|------------|
-| human-meadow | 1 | Starter (L1-5) |
-| wild-meadow | 5 | Mid-tier (L5-10) |
-| dark-forest | 10 | High-tier (L10-15) |
+- `POST /transition/auto`
+- `POST /transition/:zoneId/portal/:portalId`
+- `POST /transition/fast-travel`
+- `GET /portals/:zoneId`
 
-## API Endpoints
-
-### List Portals
+## Travel Command
 
 ```bash
-GET /portals/:zoneId
+POST /command
+{
+  "zoneId": "village-square",
+  "entityId": "abc-123",
+  "action": "travel",
+  "targetZone": "wild-meadow"
+}
 ```
+
+The shard resolves the destination region center and issues movement toward it. Region updates happen automatically while the entity walks.
+
+## Discover Adjacent Zones
+
+```bash
+GET /neighbors/village-square
+```
+
+Example response:
 
 ```json
 {
-  "zoneId": "human-meadow",
-  "portals": [
+  "zoneId": "village-square",
+  "neighbors": [
     {
-      "id": "meadow-exit",
-      "name": "Road to Wild Meadow",
-      "position": { "x": 900, "z": 500 },
-      "destination": {
-        "zone": "wild-meadow",
-        "levelRequirement": 5
-      }
+      "zone": "wild-meadow",
+      "direction": "east",
+      "levelReq": 5,
+      "type": "walk"
     }
   ]
 }
 ```
 
-### Auto-Transition (Nearest Portal)
+## World Layout
 
 ```bash
-POST /transition/auto
-{
-  "walletAddress": "0x...",
-  "zoneId": "human-meadow",
-  "entityId": "abc-123"
-}
+GET /world/layout
 ```
 
-Requirements:
-- Must be within **30 units** of a portal
-- Must meet the destination's **level requirement**
+Use this as the default world metadata endpoint for current integrations. It is the route used by the current client for continuous-world rendering.
 
-### Specific Portal Transition
-
-```bash
-POST /transition/:zoneId/portal/:portalId
-{
-  "walletAddress": "0x...",
-  "entityId": "abc-123"
-}
-```
-
-## Portal Locations
-
-### human-meadow
-| Portal | Position | Destination | Level |
-|--------|----------|-------------|-------|
-| meadow-exit | (900, 500) | wild-meadow | 5 |
-
-### wild-meadow
-| Portal | Position | Destination | Level |
-|--------|----------|-------------|-------|
-| village-gate | (50, 250) | human-meadow | 1 |
-| forest-gate | (480, 250) | dark-forest | 10 |
-
-### dark-forest
-| Portal | Position | Destination | Level |
-|--------|----------|-------------|-------|
-| meadow-entrance | (20, 300) | wild-meadow | 5 |
+`GET /worldmap` is older map-overlay metadata and should not be the primary endpoint you depend on.
 
 ## Agent Strategy
 
 ```typescript
 async function progressThroughZones(agent) {
-  // 1. Level to 5 in human-meadow
-  await levelInZone("human-meadow", 5);
+  await levelInZone("village-square", 5);
 
-  // 2. Walk to portal
-  await moveTo(900, 500);
-
-  // 3. Transition
-  await api("POST", "/transition/auto", {
-    walletAddress: agent.wallet,
-    zoneId: "human-meadow",
+  await api("POST", "/command", {
+    zoneId: "village-square",
     entityId: agent.entityId,
+    action: "travel",
+    targetZone: "wild-meadow",
   });
 
-  // 4. Level to 10 in wild-meadow
+  await waitUntilRegion(agent.entityId, "wild-meadow");
+
   await levelInZone("wild-meadow", 10);
 
-  // 5. Walk to forest portal
-  await moveTo(480, 250);
-
-  // 6. Transition to dark-forest
-  await api("POST", "/transition/auto", {
-    walletAddress: agent.wallet,
+  await api("POST", "/command", {
     zoneId: "wild-meadow",
     entityId: agent.entityId,
+    action: "travel",
+    targetZone: "dark-forest",
   });
 }
 ```
 
-## Error Handling
+## Notes
 
-| Error | Cause | Fix |
-|-------|-------|-----|
-| "Too far from portal" | Agent > 30 units away | Move closer first |
-| "Level X required" | Level too low | Grind more XP |
-| "Entity not found" | Dead or already transitioned | Re-check state |
-| "Portal not found" | Invalid portal ID | Use `/portals/:zoneId` |
+- `POST /spawn` can restore persisted coordinates, so spawn input coordinates are not guaranteed to win over saved state.
+- For deterministic tests, inspect the entity after spawn, then issue `POST /command`.
+- Portal landmarks may still exist in world layout data, but they are navigation hints, not public transition endpoints.

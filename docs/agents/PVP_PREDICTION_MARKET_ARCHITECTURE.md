@@ -32,10 +32,10 @@ shard/src/
 └── predictionRoutes.ts         # Betting API endpoints
 ```
 
-### Smart Contract (contracts/)
+### Smart Contract (hardhat/contracts/)
 
 ```
-contracts/
+hardhat/contracts/
 └── PvPPredictionMarket.sol     # On-chain betting with BITE encryption
 ```
 
@@ -109,7 +109,7 @@ queued → betting → in_progress → completed
 
 **Files**:
 - `shard/src/predictionPoolManager.ts` (Logic)
-- `contracts/PvPPredictionMarket.sol` (Smart Contract)
+- `hardhat/contracts/PvPPredictionMarket.sol` (Smart Contract)
 
 **BITE Protocol Integration**:
 

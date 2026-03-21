@@ -1,5 +1,6 @@
 /**
- * A2A (Agent-to-Agent) Protocol Routes — ERC-8004 service discovery on SKALE.
+ * A2A (Agent-to-Agent) Protocol Routes — ERC-8004 service discovery on the
+ * supported WoG networks.
  *
  * GET  /a2a/:wallet            — Agent Card (Google A2A protocol compatible)
  * POST /a2a/:wallet            — A2A JSON-RPC messaging endpoint
@@ -9,13 +10,14 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
+import { getErc8004ChainName, getOfficialErc8004Addresses } from "../erc8004/official.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
 
 const BASE_URL = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
-const A2A_CHAIN_NAME =
-  SKALE_BASE_CHAIN_ID === 31337 ? "hardhat-local" : "skale-bite-v2-sandbox";
+const A2A_CHAIN_NAME = getErc8004ChainName(SKALE_BASE_CHAIN_ID);
+const ERC8004_MODE = getOfficialErc8004Addresses(SKALE_BASE_CHAIN_ID) ? "official" : "local-mock";
 
 /** Supported A2A JSON-RPC methods */
 const A2A_METHODS = ["message/send", "message/read", "agent/card"] as const;
@@ -69,6 +71,7 @@ function buildAgentCard(walletAddress: string, entity?: { name: string; classId?
     erc8004: {
       chain: A2A_CHAIN_NAME,
       chainId: SKALE_BASE_CHAIN_ID,
+      mode: ERC8004_MODE,
       registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
       walletAddress,
     },
@@ -206,6 +209,7 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       endpoint: endpoint ?? null,
       walletAddress: wallet ?? null,
       chainId: SKALE_BASE_CHAIN_ID,
+      mode: ERC8004_MODE,
       registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
     };
   });
@@ -249,6 +253,7 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       erc8004: {
         chain: A2A_CHAIN_NAME,
         chainId: SKALE_BASE_CHAIN_ID,
+        mode: ERC8004_MODE,
         registry: process.env.IDENTITY_REGISTRY_ADDRESS ?? null,
       },
     };

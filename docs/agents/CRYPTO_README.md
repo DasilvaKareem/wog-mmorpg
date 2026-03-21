@@ -208,7 +208,7 @@ BITE: Decrypt(ask, bid) → Match if bid >= ask
 
 **Contract Code Highlights:**
 ```solidity
-// contracts/WoGTrade.sol
+// hardhat/contracts/WoGTrade.sol
 function submitOffer(
     uint256 tradeId,
     bytes calldata encryptedBidPrice,

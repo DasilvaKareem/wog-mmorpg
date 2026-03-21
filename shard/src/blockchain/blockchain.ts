@@ -20,6 +20,7 @@ import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteWallet } from "./biteChain.js";
 import { queueBiteTransaction } from "./biteTxQueue.js";
 import { ethers } from "ethers";
+import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 
@@ -601,24 +602,9 @@ export async function burnItem(
 
 // --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---
 
-const IDENTITY_REGISTRY_ABI = [
-  "function register(string agentURI) returns (uint256 agentId)",
-  "function setAgentURI(uint256 agentId, string newURI)",
-  "function setAgentWallet(uint256 agentId, address newWallet, uint256 deadline, bytes signature)",
-  "function setMetadata(uint256 agentId, string metadataKey, bytes metadataValue)",
-  "function getMetadata(uint256 agentId, string metadataKey) view returns (bytes)",
-  "function getAgentWallet(uint256 agentId) view returns (address)",
-  "function tokenURI(uint256 tokenId) view returns (string)",
-  "function ownerOf(uint256 tokenId) view returns (address)",
-  "function balanceOf(address owner) view returns (uint256)",
-  "function transferFrom(address from, address to, uint256 tokenId)",
-  "function isAuthorizedOrOwner(address spender, uint256 agentId) view returns (bool)",
-  "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
-];
-
 const identityRegistryAddress = process.env.IDENTITY_REGISTRY_ADDRESS;
 const identityRegistryContract = identityRegistryAddress && biteWallet
-  ? new ethers.Contract(identityRegistryAddress, IDENTITY_REGISTRY_ABI, biteWallet)
+  ? new ethers.Contract(identityRegistryAddress, OFFICIAL_IDENTITY_REGISTRY_ABI, biteWallet)
   : null;
 
 if (identityRegistryAddress) {
@@ -633,14 +619,20 @@ export interface IdentityRegistrationResult {
   agentUri: string | null;
 }
 
+export interface IdentityRegistrationOptions {
+  beforeTransfer?: (agentId: bigint) => Promise<void>;
+}
+
 /**
- * Register an agent identity on the ERC-8004 IdentityRegistryUpgradeable.
- * Mints to the server wallet, then transfers to the agent's wallet.
+ * Register an agent identity on the ERC-8004 identity registry.
+ * Uses the metadata-aware registration path when available, then transfers
+ * the minted identity NFT to the character owner.
  */
 export async function registerIdentity(
   characterTokenId: bigint,
   ownerAddress: string,
-  metadataURI: string
+  metadataURI: string,
+  options?: IdentityRegistrationOptions
 ): Promise<IdentityRegistrationResult> {
   if (!identityRegistryContract || !biteWallet) {
     return { agentId: null, txHash: null, agentUri: null };
@@ -653,8 +645,22 @@ export async function registerIdentity(
     // Use A2A endpoint URL as the agentURI so it's discoverable on-chain
     const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
     const agentURI = `${base}/a2a/${ownerAddress}`;
+    const metadataEntries = [
+      {
+        metadataKey: "characterTokenId",
+        metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]),
+      },
+      {
+        metadataKey: "metadataURI",
+        metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["string"], [metadataURI]),
+      },
+    ];
+
     const receipt = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
-      const registerTx = await identityRegistryContract["register(string)"](agentURI);
+      const registerTx = await identityRegistryContract["register(string,(string,bytes)[])"](
+        agentURI,
+        metadataEntries
+      );
       return registerTx.wait();
     });
 
@@ -664,20 +670,16 @@ export async function registerIdentity(
     );
     const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
 
-    if (!agentId) {
+    if (agentId == null) {
       console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
       return { agentId: null, txHash: receipt.hash, agentUri: agentURI };
     }
 
     console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} → tx ${receipt.hash}`);
 
-    // Store character tokenId as metadata
-    const charTokenBytes = ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]);
-    await queueBiteTransaction(`identity-metadata:${agentId}`, async () =>
-      identityRegistryContract.setMetadata(agentId, "characterTokenId", charTokenBytes)
-        .then((tx: any) => tx.wait())
-    )
-      .catch((err: any) => console.warn(`[identity] setMetadata failed: ${err.message?.slice(0, 80)}`));
+    if (options?.beforeTransfer) {
+      await options.beforeTransfer(BigInt(agentId));
+    }
 
     // Transfer the agent NFT to the character's owner
     if (ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
@@ -736,6 +738,15 @@ export async function getAgentWallet(agentId: bigint): Promise<string | null> {
   if (!identityRegistryContract) return null;
   try {
     return await identityRegistryContract.getAgentWallet(agentId);
+  } catch {
+    return null;
+  }
+}
+
+export async function getIdentityOwner(agentId: bigint): Promise<string | null> {
+  if (!identityRegistryContract) return null;
+  try {
+    return await identityRegistryContract.ownerOf(agentId);
   } catch {
     return null;
   }
@@ -810,7 +821,8 @@ export interface MintCharacterResult {
 /** Mint a character NFT (ERC-721) to a player address and return mint + identity details. */
 export async function mintCharacterWithIdentity(
   toAddress: string,
-  nft: { name: string; description: string; properties: Record<string, unknown> }
+  nft: { name: string; description: string; properties: Record<string, unknown> },
+  validationTags: string[] = []
 ): Promise<MintCharacterResult> {
   return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", () =>
     queueTransaction(async () => {
@@ -833,7 +845,19 @@ export async function mintCharacterWithIdentity(
 
       if (identityRegistryContract && tokenId != null) {
         try {
-          identity = await registerIdentity(tokenId, toAddress, `ipfs://${receipt.transactionHash}`);
+          const { publishValidationClaim } = await import("../erc8004/validation.js");
+          identity = await registerIdentity(
+            tokenId,
+            toAddress,
+            `ipfs://${receipt.transactionHash}`,
+            {
+              beforeTransfer: async (agentId) => {
+                for (const tag of validationTags) {
+                  await publishValidationClaim(agentId, tag);
+                }
+              },
+            }
+          );
         } catch (err: any) {
           console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
         }

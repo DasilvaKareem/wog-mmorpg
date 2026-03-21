@@ -3,14 +3,14 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 
 async function deployFixture() {
-  const [server, player, other] = await ethers.getSigners();
+  const [server, player, other, validator] = await ethers.getSigners();
 
   const gold = await ethers.deployContract("WoGMockGold");
   const items = await ethers.deployContract("WoGMockItems");
   const characters = await ethers.deployContract("WoGMockCharacters");
-  const identity = await ethers.deployContract("WoGIdentityRegistry");
-  const reputation = await ethers.deployContract("WoGReputationRegistry");
-  const validation = await ethers.deployContract("WoGValidationRegistry");
+  const identity = await ethers.deployContract("WoGMockIdentityRegistry");
+  const reputation = await ethers.deployContract("WoGMockReputationRegistry", [await identity.getAddress()]);
+  const validation = await ethers.deployContract("WoGMockValidationRegistry", [await identity.getAddress()]);
 
   await Promise.all([
     gold.waitForDeployment(),
@@ -21,15 +21,11 @@ async function deployFixture() {
     validation.waitForDeployment(),
   ]);
 
-  return { server, player, other, gold, items, characters, identity, reputation, validation };
+  return { server, player, other, validator, gold, items, characters, identity, reputation, validation };
 }
 
 function encodeUint(value: bigint) {
   return ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [value]);
-}
-
-function encodeString(value: string) {
-  return ethers.AbiCoder.defaultAbiCoder().encode(["string"], [value]);
 }
 
 describe("WoG ERC-8004 local integration", function () {
@@ -44,168 +40,118 @@ describe("WoG ERC-8004 local integration", function () {
     expect(await validation.getAddress()).to.match(/^0x[a-fA-F0-9]{40}$/);
   });
 
-  it("runs the shard-style bootstrap flow across mock assets and ERC-8004 registries", async function () {
-    const { server, player, gold, items, characters, identity, reputation, validation } =
-      await loadFixture(deployFixture);
+  it("matches the official identity registry semantics", async function () {
+    const { player, other, identity } = await loadFixture(deployFixture);
 
-    const characterTokenUri = "data:application/json;base64,character";
-    const itemTokenUri = "data:application/json;base64,item";
-    const agentUri = `http://127.0.0.1:3000/a2a/${player.address}`;
-    const metadataUri = "ipfs://wog/character/0";
-    const validUntil = (await time.latest()) + 365 * 24 * 60 * 60;
+    const metadata = [
+      { metadataKey: "characterTokenId", metadataValue: encodeUint(77n) },
+    ];
 
-    await expect(gold.connect(server).mintTo(player.address, ethers.parseEther("0.02")))
-      .to.changeTokenBalance(gold, player, ethers.parseEther("0.02"));
-
-    await expect(characters.connect(server).mintTo(player.address, characterTokenUri))
-      .to.emit(characters, "Transfer")
-      .withArgs(ethers.ZeroAddress, player.address, 0n);
-    expect(await characters.nextTokenIdToMint()).to.equal(1n);
-    expect(await characters.ownerOf(0n)).to.equal(player.address);
-    expect(await characters.tokenURI(0n)).to.equal(characterTokenUri);
-
-    await items.connect(server).mintTo(player.address, ethers.MaxUint256, itemTokenUri, 3n);
-    expect(await items.nextTokenIdToMint()).to.equal(1n);
-    expect(await items.balanceOf(player.address, 0n)).to.equal(3n);
-    expect(await items.uri(0n)).to.equal(itemTokenUri);
-
-    await expect(identity.connect(server).register(agentUri))
+    await expect(identity.connect(player)["register(string,(string,bytes)[])"]("ipfs://agent-77", metadata))
       .to.emit(identity, "Registered")
-      .withArgs(1n, agentUri, server.address);
+      .withArgs(0n, "ipfs://agent-77", player.address);
 
-    await expect(identity.connect(server).setMetadata(1n, "characterTokenId", encodeUint(0n)))
-      .to.emit(identity, "MetadataUpdated")
-      .withArgs(1n, "characterTokenId", encodeUint(0n));
+    expect(await identity.ownerOf(0n)).to.equal(player.address);
+    expect(await identity.tokenURI(0n)).to.equal("ipfs://agent-77");
+    expect(await identity.getMetadata(0n, "characterTokenId")).to.equal(encodeUint(77n));
+    expect(await identity.getAgentWallet(0n)).to.equal(player.address);
 
-    await expect(identity.connect(server).setMetadata(1n, "metadataURI", encodeString(metadataUri)))
-      .to.emit(identity, "IdentityUpdated")
-      .withArgs(1n, metadataUri);
-
-    await expect(identity.connect(server).transferFrom(server.address, player.address, 1n))
-      .to.emit(identity, "AgentWalletUpdated")
-      .withArgs(1n, player.address);
-
-    await expect(validation.connect(server).verifyCapability(1n, "wog:a2a-enabled", validUntil))
-      .to.emit(validation, "CapabilityVerified")
-      .withArgs(1n, server.address, "wog:a2a-enabled", validUntil);
-
-    await expect(reputation.connect(server).initializeReputation(1n))
-      .to.emit(reputation, "ReputationInitialized")
-      .withArgs(1n);
-
-    await expect(
-      reputation.connect(server).batchUpdateReputation(1n, [0, 0, 7, 0, 3], "bootstrap")
-    ).to.emit(reputation, "FeedbackSubmitted");
-
-    expect(await identity.ownerOf(1n)).to.equal(player.address);
-    expect(await identity.getAgentWallet(1n)).to.equal(player.address);
-    expect(await identity.tokenURI(1n)).to.equal(agentUri);
-    expect(await identity.characterToIdentity(0n)).to.equal(1n);
-
-    const rawCharacterTokenId = await identity.getMetadata(1n, "characterTokenId");
-    const rawMetadataUri = await identity.getMetadata(1n, "metadataURI");
-    expect(ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterTokenId)[0]).to.equal(0n);
-    expect(ethers.AbiCoder.defaultAbiCoder().decode(["string"], rawMetadataUri)[0]).to.equal(metadataUri);
-
-    const verifications = await validation.getVerifications(1n);
-    expect(verifications).to.have.length(1);
-    expect(verifications[0].claim).to.equal("wog:a2a-enabled");
-    expect(await validation.isVerified(1n, "wog:a2a-enabled")).to.equal(true);
-
-    const score = await reputation.getReputation(1n);
-    expect(score.combat).to.equal(500n);
-    expect(score.economic).to.equal(500n);
-    expect(score.social).to.equal(507n);
-    expect(score.crafting).to.equal(500n);
-    expect(score.agent).to.equal(503n);
-    expect(score.overall).to.equal(501n);
-
-    const [topAgentIds, topScores] = await reputation.getTopAgents(1n);
-    expect(topAgentIds).to.deep.equal([1n]);
-    expect(topScores[0].overall).to.equal(501n);
-    expect(await reputation.getRankName(score.overall)).to.equal("Average Citizen");
-  });
-
-  it("supports the WoG helper identity path and keeps ownership-linked metadata consistent", async function () {
-    const { server, player, other, identity } = await loadFixture(deployFixture);
-
-    const characterTokenId = 77n;
-    const metadataUri = "ipfs://wog/character/77";
-    const endpoint = "http://127.0.0.1:3000/a2a/test-helper";
-
-    await expect(
-      identity.connect(server).createIdentityWithEndpoint(characterTokenId, player.address, metadataUri, endpoint)
-    )
-      .to.emit(identity, "IdentityCreated")
-      .withArgs(1n, characterTokenId, player.address, metadataUri);
-
-    expect(await identity.ownerOf(1n)).to.equal(player.address);
-    expect(await identity.characterToIdentity(characterTokenId)).to.equal(1n);
-    expect(await identity.tokenURI(1n)).to.equal(endpoint);
-
-    const helperIdentity = await identity.getIdentityByCharacter(characterTokenId);
-    expect(helperIdentity.characterTokenId).to.equal(characterTokenId);
-    expect(helperIdentity.characterOwner).to.equal(player.address);
-    expect(helperIdentity.metadataURI).to.equal(metadataUri);
-    expect(helperIdentity.agentURI).to.equal(endpoint);
-    expect(helperIdentity.active).to.equal(true);
-
-    const rawCharacterTokenId = await identity.getMetadata(1n, "characterTokenId");
-    expect(ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterTokenId)[0]).to.equal(
-      characterTokenId
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const deadline = BigInt((await time.latest()) + 240);
+    const signature = await other.signTypedData(
+      {
+        name: "ERC8004IdentityRegistry",
+        version: "1",
+        chainId,
+        verifyingContract: await identity.getAddress(),
+      },
+      {
+        AgentWalletSet: [
+          { name: "agentId", type: "uint256" },
+          { name: "newWallet", type: "address" },
+          { name: "owner", type: "address" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+      {
+        agentId: 0n,
+        newWallet: other.address,
+        owner: player.address,
+        deadline,
+      }
     );
 
-    await expect(identity.connect(player).setAgentWallet(1n, other.address, (await time.latest()) + 60, "0x"))
-      .to.emit(identity, "AgentWalletUpdated")
-      .withArgs(1n, other.address);
+    await identity.connect(player).setAgentWallet(0n, other.address, deadline, signature);
+    expect(await identity.getAgentWallet(0n)).to.equal(other.address);
+    expect(await identity.ownerOf(0n)).to.equal(player.address);
 
-    expect(await identity.ownerOf(1n)).to.equal(other.address);
-    const transferredIdentity = await identity.identities(1n);
-    expect(transferredIdentity.characterOwner).to.equal(other.address);
+    await identity.connect(player).transferFrom(player.address, other.address, 0n);
+    expect(await identity.ownerOf(0n)).to.equal(other.address);
+    expect(await identity.getAgentWallet(0n)).to.equal(ethers.ZeroAddress);
   });
 
-  it("enforces authorization and expiry rules across the registries", async function () {
-    const { server, player, other, identity, reputation, validation } = await loadFixture(deployFixture);
+  it("matches the official reputation registry semantics", async function () {
+    const { server, player, other, identity, reputation } = await loadFixture(deployFixture);
 
-    await expect(identity.connect(player).createIdentityWithEndpoint(1n, player.address, "ipfs://meta", ""))
-      .to.be.revertedWithCustomError(identity, "Unauthorized");
+    await identity.connect(player)["register(string)"]("ipfs://agent-1");
 
-    await identity.connect(server).register("http://127.0.0.1:3000/a2a/server");
-    await identity.connect(server).transferFrom(server.address, player.address, 1n);
+    await expect(
+      reputation.connect(player).giveFeedback(0n, 10, 0, "social", "self", "", "", ethers.ZeroHash)
+    ).to.be.revertedWith("Self-feedback not allowed");
 
-    await expect(identity.connect(other).setAgentURI(1n, "http://127.0.0.1:3000/a2a/other"))
-      .to.be.revertedWithCustomError(identity, "Unauthorized");
+    await expect(
+      reputation.connect(other).giveFeedback(0n, 12, 0, "social", "helpful", "https://client.example", "ipfs://feedback/1", ethers.ZeroHash)
+    ).to.emit(reputation, "NewFeedback");
 
-    await expect(identity.connect(player).setAgentWallet(1n, other.address, (await time.latest()) - 1, "0x"))
-      .to.be.revertedWithCustomError(identity, "SignatureExpired");
+    await reputation.connect(server).giveFeedback(0n, -2, 0, "social", "minor-issue", "", "", ethers.ZeroHash);
 
-    await expect(reputation.connect(player).initializeReputation(1n))
-      .to.be.revertedWithCustomError(reputation, "Unauthorized");
+    const clients = Array.from(await reputation.getClients(0n));
+    expect(clients).to.deep.equal([other.address, server.address]);
 
-    await expect(validation.connect(player).verifyCapability(1n, "wog:a2a-enabled", (await time.latest()) + 60))
-      .to.be.revertedWithCustomError(validation, "Unauthorized");
+    const summary = await reputation.getSummary(0n, clients, "social", "");
+    expect(summary[0]).to.equal(2n);
+    expect(summary[1]).to.equal(5n);
+    expect(summary[2]).to.equal(0n);
 
-    await expect(validation.connect(server).verifyCapability(1n, "wog:a2a-enabled", await time.latest()))
-      .to.be.revertedWithCustomError(validation, "InvalidExpiry");
+    const feedback = await reputation.readFeedback(0n, other.address, 1n);
+    expect(feedback[0]).to.equal(12n);
+    expect(feedback[2]).to.equal("social");
+    expect(feedback[3]).to.equal("helpful");
+    expect(feedback[4]).to.equal(false);
+
+    await reputation.connect(other).appendResponse(0n, other.address, 1n, "ipfs://response/1", ethers.ZeroHash);
+    expect(await reputation.getResponseCount(0n, other.address, 1n, [])).to.equal(1n);
+
+    await reputation.connect(other).revokeFeedback(0n, 1n);
+    const revoked = await reputation.readFeedback(0n, other.address, 1n);
+    expect(revoked[4]).to.equal(true);
   });
 
-  it("expires validation claims and tracks multi-agent reputation ordering", async function () {
-    const { server, validation, reputation } = await loadFixture(deployFixture);
+  it("matches the official validation registry semantics", async function () {
+    const { player, validator, identity, validation } = await loadFixture(deployFixture);
 
-    const expiry = (await time.latest()) + 120;
-    await validation.connect(server).verifyCapability(5n, "wog:trade-capable", expiry);
-    expect(await validation.isVerified(5n, "wog:trade-capable")).to.equal(true);
+    await identity.connect(player)["register(string)"]("ipfs://agent-validation");
+    const requestHash = ethers.keccak256(ethers.toUtf8Bytes("validation-request"));
 
-    await time.increaseTo(expiry + 1);
-    expect(await validation.isVerified(5n, "wog:trade-capable")).to.equal(false);
+    await expect(
+      validation.connect(player).validationRequest(validator.address, 0n, "ipfs://validation/request/1", requestHash)
+    ).to.emit(validation, "ValidationRequest");
 
-    await reputation.connect(server).initializeReputation(10n);
-    await reputation.connect(server).initializeReputation(11n);
-    await reputation.connect(server).recordInteraction(10n, true, 50n);
-    await reputation.connect(server).recordInteraction(11n, false, 50n);
+    await expect(
+      validation.connect(validator).validationResponse(requestHash, 100, "ipfs://validation/response/1", ethers.ZeroHash, "wog:a2a-enabled")
+    ).to.emit(validation, "ValidationResponse");
 
-    const [agentIds, scores] = await reputation.getTopAgents(2n);
-    expect(agentIds).to.deep.equal([10n, 11n]);
-    expect(scores[0].overall).to.be.greaterThan(scores[1].overall);
+    const status = await validation.getValidationStatus(requestHash);
+    expect(status[0]).to.equal(validator.address);
+    expect(status[1]).to.equal(0n);
+    expect(status[2]).to.equal(100n);
+    expect(status[4]).to.equal("wog:a2a-enabled");
+
+    const summary = await validation.getSummary(0n, [validator.address], "wog:a2a-enabled");
+    expect(summary[0]).to.equal(1n);
+    expect(summary[1]).to.equal(100);
+
+    expect(await validation.getAgentValidations(0n)).to.deep.equal([requestHash]);
+    expect(await validation.getValidatorRequests(validator.address)).to.deep.equal([requestHash]);
   });
 });
