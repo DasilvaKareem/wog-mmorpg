@@ -126,12 +126,6 @@ async function main() {
   console.log(`\nWoGIdentityRegistry deployed at: ${address}`);
   console.log(`\nAdd to your .env:`);
   console.log(`  IDENTITY_REGISTRY_ADDRESS=${address}`);
-
-  // 4. Deployer is already authorized via constructor (authorizedMinters[msg.sender] = true)
-  // Confirm by reading the mapping
-  const deployedContract = new ethers.Contract(address, abi, deployWallet);
-  const isAuthorized = await deployedContract.authorizedMinters(deployerAddress);
-  console.log(`\nDeployer ${deployerAddress} authorized as minter: ${isAuthorized}`);
 }
 
 main().catch((err) => {

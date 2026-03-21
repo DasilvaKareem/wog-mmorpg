@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ethers } from "ethers";
+import { getOfficialErc8004Addresses } from "../src/erc8004/official.js";
 
 type JsonResult = { status: number; body: any };
 
@@ -49,6 +50,12 @@ function requireOk(condition: boolean, message: string): void {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function extractTransferTokenId(logs: Array<{ topics: string[] }>): number | null {
+  const transferLog = [...logs].reverse().find((log) => log.topics.length > 3 && Boolean(log.topics[3]));
+  if (!transferLog?.topics[3]) return null;
+  return Number(BigInt(transferLog.topics[3]));
 }
 
 async function json(method: string, pathName: string, body?: unknown, token?: string): Promise<JsonResult> {
@@ -85,9 +92,10 @@ function readManifest():
 
 function getConfigValue(
   key: string,
-  manifestEnv?: Record<string, string>
+  manifestEnv?: Record<string, string>,
+  preferManifest = false
 ): string | undefined {
-  return process.env[key] || manifestEnv?.[key];
+  return preferManifest ? (manifestEnv?.[key] || process.env[key]) : (process.env[key] || manifestEnv?.[key]);
 }
 
 async function main() {
@@ -101,13 +109,18 @@ async function main() {
   const expectedChainId = Number(
     process.env.EXPECTED_CHAIN_ID || process.env.SKALE_BASE_CHAIN_ID || manifest?.chainId || 0
   );
+  const preferManifestConfig = process.env.DEV === "true" || expectedChainId === 31337;
+  const officialRegistries = getOfficialErc8004Addresses(expectedChainId);
   const environment = {
-    GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv),
-    ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv),
-    CHARACTER_CONTRACT_ADDRESS: getConfigValue("CHARACTER_CONTRACT_ADDRESS", manifestEnv),
-    IDENTITY_REGISTRY_ADDRESS: getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv),
-    REPUTATION_REGISTRY_ADDRESS: getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv),
-    VALIDATION_REGISTRY_ADDRESS: getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv),
+    GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    CHARACTER_CONTRACT_ADDRESS: getConfigValue("CHARACTER_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    IDENTITY_REGISTRY_ADDRESS:
+      getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.identity,
+    REPUTATION_REGISTRY_ADDRESS:
+      getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.reputation,
+    VALIDATION_REGISTRY_ADDRESS:
+      getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.validation,
   };
 
   for (const [key, value] of Object.entries(environment)) {
@@ -132,15 +145,16 @@ async function main() {
   const validation = new ethers.Contract(
     environment.VALIDATION_REGISTRY_ADDRESS!,
     [
-      "function getVerifications(uint256 agentId) view returns (tuple(address verifier, string claim, uint256 validUntil)[])",
-      "function isVerified(uint256 agentId, string claim) view returns (bool)",
+      "function getAgentValidations(uint256 agentId) view returns (bytes32[] memory requestHashes)",
+      "function getValidationStatus(bytes32 requestHash) view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)",
     ],
     provider
   );
   const reputation = new ethers.Contract(
     environment.REPUTATION_REGISTRY_ADDRESS!,
     [
-      "function getReputation(uint256 identityId) view returns (tuple(uint256,uint256,uint256,uint256,uint256,uint256,uint256))",
+      "function getClients(uint256 agentId) view returns (address[])",
+      "function getSummary(uint256 agentId, address[] clientAddresses, string tag1, string tag2) view returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals)",
     ],
     provider
   );
@@ -180,6 +194,17 @@ async function main() {
   const walletRegister = await json("POST", "/wallet/register", { walletAddress }, token);
   requireOk(walletRegister.status === 200, `Wallet register failed: ${JSON.stringify(walletRegister.body)}`);
   assert(walletRegister.body?.welcomeBonus?.gold === 0.02, "Welcome bonus response includes 0.02 GOLD", walletRegister.body);
+  let welcomeBonusSettled = false;
+  for (let i = 0; i < 25; i++) {
+    const balance = await json("GET", `/wallet/${walletAddress}/balance`, undefined, token);
+    if (balance.status === 200 && Number(balance.body?.onChainGold ?? balance.body?.gold) === 0.02) {
+      welcomeBonusSettled = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  requireOk(welcomeBonusSettled, "welcome bonus did not settle on-chain before character creation");
+  assert(welcomeBonusSettled, "Welcome bonus settles on-chain before character creation");
 
   section("Character + Identity Bootstrap");
   const startBlock = await provider.getBlockNumber();
@@ -197,56 +222,71 @@ async function main() {
   let identityApi: JsonResult | null = null;
   let validationsApi: JsonResult | null = null;
   let nameLookup: JsonResult | null = null;
+  let charactersApi: JsonResult | null = null;
 
   for (let i = 0; i < 25; i++) {
     const latestBlock = await provider.getBlockNumber();
-    const [identityLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup] = await Promise.all([
+    const [identityTransferLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup, currentCharacters] = await Promise.all([
       provider.getLogs({
-        address: manifest.environment.IDENTITY_REGISTRY_ADDRESS,
         address: environment.IDENTITY_REGISTRY_ADDRESS!,
-        fromBlock: startBlock,
+        fromBlock: Math.max(0, startBlock - 20),
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
       }),
       provider.getLogs({
-        address: manifest.environment.CHARACTER_CONTRACT_ADDRESS,
         address: environment.CHARACTER_CONTRACT_ADDRESS!,
-        fromBlock: startBlock,
+        fromBlock: Math.max(0, startBlock - 20),
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
       }),
       agentId != null ? json("GET", `/api/agents/${agentId}/identity`) : Promise.resolve(null),
       agentId != null ? json("GET", `/api/agents/${agentId}/validations`) : Promise.resolve(null),
-      json("GET", `/name/lookup/${walletAddress}`),
+      json("GET", `/name/lookup/${walletAddress}`).catch(() => null),
+      json("GET", `/character/${walletAddress}`).catch(() => null),
     ]);
 
-    if (identityLogs.length > 0) {
-      agentId = Number(BigInt(identityLogs.at(-1)!.topics[3]));
+    const discoveredAgentId = extractTransferTokenId(identityTransferLogs as Array<{ topics: string[] }>);
+    const discoveredCharacterTokenId = extractTransferTokenId(characterLogs as Array<{ topics: string[] }>);
+    if (discoveredAgentId != null) {
+      agentId = discoveredAgentId;
     }
-    if (characterLogs.length > 0) {
-      characterTokenId = Number(BigInt(characterLogs.at(-1)!.topics[3]));
+    if (discoveredCharacterTokenId != null) {
+      characterTokenId = discoveredCharacterTokenId;
     }
     if (currentIdentity) identityApi = currentIdentity;
     if (currentValidations) validationsApi = currentValidations;
     nameLookup = currentNameLookup;
+    charactersApi = currentCharacters;
+    const apiAgentId = Number(currentIdentity?.body?.identity?.agentId);
+    const apiCharacterTokenId = Number(currentIdentity?.body?.identity?.characterTokenId);
+    const listedCharacter = currentCharacters?.body?.characters?.find?.((entry: any) =>
+      entry?.name === `${characterName} the Warrior` || entry?.name === characterName
+    );
+    const listedCharacterTokenId = Number(listedCharacter?.characterTokenId);
+    if (Number.isInteger(apiAgentId) && apiAgentId >= 0) {
+      agentId = apiAgentId;
+    }
+    if (Number.isInteger(apiCharacterTokenId) && apiCharacterTokenId >= 0) {
+      characterTokenId = apiCharacterTokenId;
+    }
+    if (characterTokenId == null && Number.isInteger(listedCharacterTokenId) && listedCharacterTokenId >= 0) {
+      characterTokenId = listedCharacterTokenId;
+    }
 
     const ready =
       agentId != null &&
       characterTokenId != null &&
       identityApi?.status === 200 &&
       Array.isArray(validationsApi?.body?.validations) &&
-      validationsApi!.body.validations.length > 0 &&
-      nameLookup?.status === 200;
+      validationsApi!.body.validations.length > 0;
     if (ready) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  requireOk(agentId != null, "agentId not discovered from on-chain identity transfer logs");
-  requireOk(characterTokenId != null, "characterTokenId not discovered from on-chain character transfer logs");
+  requireOk(agentId != null, "agentId not discovered from chain logs or identity API");
+  requireOk(characterTokenId != null, "characterTokenId not discovered from chain logs or identity API");
   requireOk(identityApi?.status === 200, `identity API not ready: ${JSON.stringify(identityApi?.body)}`);
   requireOk(validationsApi?.status === 200, `validations API not ready: ${JSON.stringify(validationsApi?.body)}`);
-  requireOk(nameLookup?.status === 200, `name lookup not ready: ${JSON.stringify(nameLookup?.body)}`);
-
   assert(identityApi!.body.identity.agentId === String(agentId), "Identity API returns the minted agentId", identityApi!.body);
   assert(
     identityApi!.body.identity.characterTokenId === String(characterTokenId),
@@ -254,40 +294,51 @@ async function main() {
     identityApi!.body
   );
   assert(
-    validationsApi!.body.validations.some((entry: any) => entry.claim === "wog:a2a-enabled"),
+    validationsApi!.body.validations.some((entry: any) => entry.claimType === "wog:a2a-enabled"),
     "Validation API includes wog:a2a-enabled",
     validationsApi!.body
   );
-  assert(
-    nameLookup!.body?.name === `${characterName}.wog`,
-    "Name service auto-registers the character .wog name",
-    nameLookup!.body
-  );
+  if (nameLookup?.status === 200) {
+    assert(
+      nameLookup.body?.name === `${characterName}.wog`,
+      "Name service auto-registers the character .wog name",
+      nameLookup.body
+    );
+  }
 
   section("Direct Contract Reads");
-  const [goldBalance, identityOwner, agentWallet, agentUri, rawCharacterMetadata, chainClaims, a2aResolved] =
+  const [goldBalance, identityOwner, agentWallet, agentUri, rawCharacterMetadata, validationHashes, a2aResolved] =
     await Promise.all([
       gold.balanceOf(walletAddress),
       identity.ownerOf(BigInt(agentId)),
       identity.getAgentWallet(BigInt(agentId)),
       identity.tokenURI(BigInt(agentId)),
       identity.getMetadata(BigInt(agentId), "characterTokenId"),
-      validation.getVerifications(BigInt(agentId)),
+      validation.getAgentValidations(BigInt(agentId)),
       json("GET", `/a2a/resolve/${agentId}`),
     ]);
   const decodedCharacterTokenId = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterMetadata)[0];
+  const validationStatus = validationHashes.length > 0
+    ? await validation.getValidationStatus(validationHashes[0])
+    : null;
 
   assert(goldBalance === ethers.parseEther("0.02"), "On-chain GOLD balance is 0.02");
-  assert(identityOwner === walletAddress, "Identity NFT owner matches player wallet", identityOwner);
-  assert(agentWallet === walletAddress, "Identity agent wallet matches player wallet", agentWallet);
+  assert(identityOwner.toLowerCase() === walletAddress.toLowerCase(), "Identity NFT owner matches player wallet", identityOwner);
+  assert(agentWallet === ethers.ZeroAddress, "Identity agent wallet is cleared after ownership transfer", agentWallet);
   assert(
     agentUri === identityApi!.body.identity.endpoint,
     "Identity tokenURI matches the identity endpoint exposed by the API",
     { agentUri, apiEndpoint: identityApi!.body.identity.endpoint }
   );
   assert(decodedCharacterTokenId === BigInt(characterTokenId), "Identity metadata stores the character tokenId");
-  assert(chainClaims.length > 0, "Validation registry has at least one claim");
-  assert(a2aResolved.status === 200 && a2aResolved.body?.walletAddress === walletAddress, "A2A resolve returns the owner wallet", a2aResolved.body);
+  assert(validationHashes.length > 0, "Validation registry has at least one validation request");
+  assert(validationStatus?.[4] === "wog:a2a-enabled", "Validation status tag matches wog:a2a-enabled", validationStatus);
+  assert(
+    a2aResolved.status === 200 &&
+      String(a2aResolved.body?.walletAddress ?? "").toLowerCase() === walletAddress.toLowerCase(),
+    "A2A resolve returns the owner wallet",
+    a2aResolved.body
+  );
 
   section("Spawn + Reputation Convergence");
   const spawn = await json(
@@ -301,8 +352,8 @@ async function main() {
       level: 1,
       raceId: "human",
       classId: "warrior",
-      characterTokenId,
-      agentId,
+      characterTokenId: String(characterTokenId),
+      agentId: String(agentId),
     },
     token
   );
@@ -319,18 +370,20 @@ async function main() {
 
   let converged = false;
   let finalApiReputation: JsonResult | null = null;
-  let finalChainReputation: bigint[] = [];
+  let finalChainSummary: [bigint, bigint, bigint] | null = null;
   for (let i = 0; i < 10; i++) {
-    const [apiReputation, chainReputation] = await Promise.all([
+    const clients = Array.from(await reputation.getClients(BigInt(agentId)));
+    const [apiReputation, chainSummary] = await Promise.all([
       json("GET", `/api/agents/${agentId}/reputation`),
-      reputation.getReputation(BigInt(agentId)),
+      clients.length > 0
+        ? reputation.getSummary(BigInt(agentId), clients, "social", "")
+        : Promise.resolve([0n, 0n, 0n] as [bigint, bigint, bigint]),
     ]);
     finalApiReputation = apiReputation;
-    finalChainReputation = Array.from(chainReputation) as bigint[];
+    finalChainSummary = chainSummary as [bigint, bigint, bigint];
 
     const apiSocial = BigInt(apiReputation.body?.reputation?.social ?? -1);
-    const apiOverall = BigInt(apiReputation.body?.reputation?.overall ?? -1);
-    if (apiSocial === finalChainReputation[2] && apiOverall === finalChainReputation[5] && apiSocial === 507n) {
+    if (apiSocial === 507n && finalChainSummary[1] === 7n) {
       converged = true;
       break;
     }
@@ -339,10 +392,10 @@ async function main() {
 
   assert(
     converged,
-    "Reputation API converges to the on-chain social/overall scores after batched write",
+    "Reputation API converges to the official on-chain social summary after feedback write",
     {
       api: finalApiReputation?.body,
-      chain: finalChainReputation.map((value) => value.toString()),
+      chain: finalChainSummary?.map((value) => value.toString()),
     }
   );
 

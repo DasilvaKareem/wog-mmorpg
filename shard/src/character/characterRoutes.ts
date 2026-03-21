@@ -15,6 +15,8 @@ import { publishValidationClaim } from "../erc8004/validation.js";
 
 type CharacterListEntry = {
   tokenId: string;
+  characterTokenId?: string | null;
+  agentId?: string | null;
   name: string;
   description: string;
   properties: {
@@ -241,11 +243,20 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         void (async () => {
           try {
             const mintResult = needsCharacterMint
-              ? await mintCharacterWithIdentity(walletAddress, metadata)
+              ? await mintCharacterWithIdentity(walletAddress, metadata, ["wog:a2a-enabled"])
               : {
                   txHash: null,
                   tokenId: BigInt(existingSave!.characterTokenId!),
-                  identity: await registerIdentity(BigInt(existingSave!.characterTokenId!), walletAddress, ""),
+                  identity: await registerIdentity(
+                    BigInt(existingSave!.characterTokenId!),
+                    walletAddress,
+                    "",
+                    {
+                      beforeTransfer: async (agentId) => {
+                        await publishValidationClaim(agentId, "wog:a2a-enabled");
+                      },
+                    }
+                  ),
                 };
 
             server.log.info(
@@ -258,8 +269,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             });
             if (mintResult.identity?.agentId != null) {
               reputationManager.ensureInitialized(mintResult.identity.agentId);
-              const validUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
-              void publishValidationClaim(mintResult.identity.agentId, "wog:a2a-enabled", validUntil);
             }
 
             for (const entity of getAllEntities().values()) {
@@ -400,6 +409,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
               if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
                 return {
                   tokenId: nft.id.toString(),
+                  characterTokenId: nft.id.toString(),
+                  agentId: null,
                   name: nft.metadata.name,
                   description: nft.metadata.description,
                   properties: {
@@ -422,6 +433,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                   if (saved) {
                     return {
                       tokenId: nft.id.toString(),
+                      characterTokenId: saved.characterTokenId ?? nft.id.toString(),
+                      agentId: saved.agentId ?? null,
                       name: nft.metadata.name,
                       description: nft.metadata.description,
                       properties: {
@@ -438,6 +451,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
               return {
                 tokenId: nft.id.toString(),
+                characterTokenId: nft.id.toString(),
+                agentId: null,
                 name: nft.metadata.name,
                 description: nft.metadata.description,
                 properties: props,
@@ -473,6 +488,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           if (liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name))) {
             return {
               tokenId: `redis-${i}`,
+              characterTokenId: saved.characterTokenId ?? null,
+              agentId: saved.agentId ?? null,
               name: fullName,
               description: `Level ${liveEntity.level} ${saved.raceId} ${saved.classId}`,
               properties: {
@@ -487,6 +504,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
           return {
             tokenId: `redis-${i}`,
+            characterTokenId: saved.characterTokenId ?? null,
+            agentId: saved.agentId ?? null,
             name: fullName,
             description: `Level ${saved.level} ${saved.raceId} ${saved.classId}`,
             properties: {

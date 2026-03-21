@@ -3,490 +3,348 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+interface IIdentityRegistry {
+    function isAuthorizedOrOwner(address spender, uint256 agentId) external view returns (bool);
+}
+
 /**
  * @title WoGReputationRegistry
- * @notice ERC-8004 compliant Reputation Registry for WoG MMORPG
- * @dev Tracks multi-dimensional reputation scores for characters
+ * @notice Local mock of the official ERC-8004 reputation registry semantics.
  */
 contract WoGReputationRegistry is Ownable {
-    // ============ Enums ============
+    int128 private constant MAX_ABS_VALUE = 1e38;
 
-    enum ReputationCategory {
-        Combat,      // PvP/PvE performance
-        Economic,    // Trading, market activity
-        Social,      // Guild, community participation
-        Crafting,    // Item creation, quality
-        Agent        // AI agent behavior (if applicable)
-    }
-
-    // ============ Structs ============
-
-    struct ReputationScore {
-        uint256 combat;
-        uint256 economic;
-        uint256 social;
-        uint256 crafting;
-        uint256 agent;
-        uint256 overall;
-        uint256 lastUpdated;
-    }
-
-    struct ReputationFeedback {
-        address submitter;
-        uint256 identityId;
-        ReputationCategory category;
-        int256 delta; // Can be positive or negative
-        string reason;
-        uint256 timestamp;
-        bool validated;
-    }
-
-    // ============ State ============
-
-    // identityId => ReputationScore
-    mapping(uint256 => ReputationScore) public reputations;
-    uint256[] private _knownIdentityIds;
-    mapping(uint256 => bool) private _knownIdentitySet;
-
-    // Feedback history
-    ReputationFeedback[] public feedbackHistory;
-
-    // identityId => feedback indices
-    mapping(uint256 => uint256[]) public identityFeedback;
-
-    // Authorized reporters (contracts that can submit reputation updates)
-    mapping(address => bool) public authorizedReporters;
-
-    // Category weights for overall score calculation (in basis points, total = 10000)
-    mapping(ReputationCategory => uint256) public categoryWeights;
-
-    // Max/min score bounds
-    uint256 public constant MAX_SCORE = 1000;
-    uint256 public constant MIN_SCORE = 0;
-    uint256 public constant DEFAULT_SCORE = 500; // Start at middle
-
-    // ============ Events ============
-
-    event ReputationUpdated(
-        uint256 indexed identityId,
-        ReputationCategory category,
-        uint256 newScore,
-        int256 delta
+    event NewFeedback(
+        uint256 indexed agentId,
+        address indexed clientAddress,
+        uint64 feedbackIndex,
+        int128 value,
+        uint8 valueDecimals,
+        string indexed indexedTag1,
+        string tag1,
+        string tag2,
+        string endpoint,
+        string feedbackURI,
+        bytes32 feedbackHash
     );
 
-    event FeedbackSubmitted(
-        uint256 indexed feedbackId,
-        uint256 indexed identityId,
-        address indexed submitter,
-        ReputationCategory category,
-        int256 delta
+    event FeedbackRevoked(
+        uint256 indexed agentId,
+        address indexed clientAddress,
+        uint64 indexed feedbackIndex
     );
 
-    event ReporterAuthorized(address indexed reporter);
-    event ReporterRevoked(address indexed reporter);
-    event ReputationInitialized(uint256 indexed identityId);
+    event ResponseAppended(
+        uint256 indexed agentId,
+        address indexed clientAddress,
+        uint64 feedbackIndex,
+        address indexed responder,
+        string responseURI,
+        bytes32 responseHash
+    );
 
-    // ============ Errors ============
-
-    error Unauthorized();
-    error InvalidScore();
-    error InvalidDelta();
-
-    // ============ Constructor ============
-
-    constructor() {
-        // Set default category weights (can be adjusted)
-        categoryWeights[ReputationCategory.Combat] = 3000;    // 30%
-        categoryWeights[ReputationCategory.Economic] = 2500;  // 25%
-        categoryWeights[ReputationCategory.Social] = 2000;    // 20%
-        categoryWeights[ReputationCategory.Crafting] = 1500;  // 15%
-        categoryWeights[ReputationCategory.Agent] = 1000;     // 10%
-
-        // Owner is authorized by default
-        authorizedReporters[msg.sender] = true;
+    struct Feedback {
+        int128 value;
+        uint8 valueDecimals;
+        bool isRevoked;
+        string tag1;
+        string tag2;
     }
 
-    // ============ Core Functions ============
+    address private immutable _identityRegistry;
 
-    /**
-     * @notice Initialize reputation for a new identity
-     * @param identityId Identity to initialize
-     */
-    function initializeReputation(uint256 identityId) external {
-        if (!authorizedReporters[msg.sender]) revert Unauthorized();
+    mapping(uint256 => mapping(address => mapping(uint64 => Feedback))) private _feedback;
+    mapping(uint256 => mapping(address => uint64)) private _lastIndex;
+    mapping(uint256 => mapping(address => mapping(uint64 => mapping(address => uint64)))) private _responseCount;
+    mapping(uint256 => mapping(address => mapping(uint64 => address[]))) private _responders;
+    mapping(uint256 => mapping(address => mapping(uint64 => mapping(address => bool)))) private _responderExists;
+    mapping(uint256 => address[]) private _clients;
+    mapping(uint256 => mapping(address => bool)) private _clientExists;
 
-        // Only initialize if not already initialized
-        if (reputations[identityId].lastUpdated == 0) {
-            _trackIdentity(identityId);
-            reputations[identityId] = ReputationScore({
-                combat: DEFAULT_SCORE,
-                economic: DEFAULT_SCORE,
-                social: DEFAULT_SCORE,
-                crafting: DEFAULT_SCORE,
-                agent: DEFAULT_SCORE,
-                overall: DEFAULT_SCORE,
-                lastUpdated: block.timestamp
-            });
-            emit ReputationInitialized(identityId);
-        }
+    constructor(address identityRegistry_) {
+        require(identityRegistry_ != address(0), "bad identity");
+        _identityRegistry = identityRegistry_;
     }
 
-    /**
-     * @notice Submit reputation feedback
-     * @param identityId Identity receiving feedback
-     * @param category Reputation category
-     * @param delta Change in reputation (positive or negative)
-     * @param reason Human-readable reason
-     */
-    function submitFeedback(
-        uint256 identityId,
-        ReputationCategory category,
-        int256 delta,
-        string memory reason
+    function getIdentityRegistry() external view returns (address) {
+        return _identityRegistry;
+    }
+
+    function giveFeedback(
+        uint256 agentId,
+        int128 value,
+        uint8 valueDecimals,
+        string calldata tag1,
+        string calldata tag2,
+        string calldata endpoint,
+        string calldata feedbackURI,
+        bytes32 feedbackHash
     ) external {
-        if (!authorizedReporters[msg.sender]) revert Unauthorized();
-        _trackIdentity(identityId);
-
-        // Create feedback record
-        uint256 feedbackId = feedbackHistory.length;
-        feedbackHistory.push(
-            ReputationFeedback({
-                submitter: msg.sender,
-                identityId: identityId,
-                category: category,
-                delta: delta,
-                reason: reason,
-                timestamp: block.timestamp,
-                validated: true // Auto-validated from authorized reporters
-            })
+        require(valueDecimals <= 18, "too many decimals");
+        require(value >= -MAX_ABS_VALUE && value <= MAX_ABS_VALUE, "value too large");
+        require(
+            !IIdentityRegistry(_identityRegistry).isAuthorizedOrOwner(msg.sender, agentId),
+            "Self-feedback not allowed"
         );
 
-        identityFeedback[identityId].push(feedbackId);
+        uint64 currentIndex = ++_lastIndex[agentId][msg.sender];
+        _feedback[agentId][msg.sender][currentIndex] = Feedback({
+            value: value,
+            valueDecimals: valueDecimals,
+            tag1: tag1,
+            tag2: tag2,
+            isRevoked: false
+        });
 
-        // Update reputation score
-        _updateReputationScore(identityId, category, delta);
-
-        emit FeedbackSubmitted(feedbackId, identityId, msg.sender, category, delta);
-    }
-
-    /**
-     * @notice Batch update multiple categories at once
-     * @param identityId Identity to update
-     * @param deltas Array of deltas (indexed by category enum)
-     * @param reason Reason for update
-     */
-    function batchUpdateReputation(
-        uint256 identityId,
-        int256[5] memory deltas,
-        string memory reason
-    ) external {
-        if (!authorizedReporters[msg.sender]) revert Unauthorized();
-        _trackIdentity(identityId);
-
-        for (uint256 i = 0; i < 5; i++) {
-            if (deltas[i] != 0) {
-                ReputationCategory category = ReputationCategory(i);
-                _updateReputationScore(identityId, category, deltas[i]);
-
-                // Record feedback
-                uint256 feedbackId = feedbackHistory.length;
-                feedbackHistory.push(
-                    ReputationFeedback({
-                        submitter: msg.sender,
-                        identityId: identityId,
-                        category: category,
-                        delta: deltas[i],
-                        reason: reason,
-                        timestamp: block.timestamp,
-                        validated: true
-                    })
-                );
-                identityFeedback[identityId].push(feedbackId);
-                emit FeedbackSubmitted(feedbackId, identityId, msg.sender, category, deltas[i]);
-            }
+        if (!_clientExists[agentId][msg.sender]) {
+            _clients[agentId].push(msg.sender);
+            _clientExists[agentId][msg.sender] = true;
         }
-    }
 
-    /**
-     * @notice Generic ERC-8004-style interaction alias.
-     * @dev Success maps to positive agent reputation, failure to negative agent reputation.
-     */
-    function recordInteraction(
-        uint256 identityId,
-        bool success,
-        uint256 weight
-    ) external {
-        if (!authorizedReporters[msg.sender]) revert Unauthorized();
-        _trackIdentity(identityId);
-
-        int256 delta = success ? int256(weight) : -int256(weight);
-        uint256 feedbackId = feedbackHistory.length;
-        feedbackHistory.push(
-            ReputationFeedback({
-                submitter: msg.sender,
-                identityId: identityId,
-                category: ReputationCategory.Agent,
-                delta: delta,
-                reason: success ? "interaction-success" : "interaction-failure",
-                timestamp: block.timestamp,
-                validated: true
-            })
-        );
-
-        identityFeedback[identityId].push(feedbackId);
-        _updateReputationScore(identityId, ReputationCategory.Agent, delta);
-
-        emit FeedbackSubmitted(
-            feedbackId,
-            identityId,
+        emit NewFeedback(
+            agentId,
             msg.sender,
-            ReputationCategory.Agent,
-            delta
+            currentIndex,
+            value,
+            valueDecimals,
+            tag1,
+            tag1,
+            tag2,
+            endpoint,
+            feedbackURI,
+            feedbackHash
         );
     }
 
-    /**
-     * @notice Internal function to update reputation score
-     * @param identityId Identity to update
-     * @param category Category to update
-     * @param delta Change amount
-     */
-    function _updateReputationScore(
-        uint256 identityId,
-        ReputationCategory category,
-        int256 delta
-    ) internal {
-        ReputationScore storage rep = reputations[identityId];
+    function revokeFeedback(uint256 agentId, uint64 feedbackIndex) external {
+        require(feedbackIndex > 0, "index must be > 0");
+        require(feedbackIndex <= _lastIndex[agentId][msg.sender], "index out of bounds");
+        require(!_feedback[agentId][msg.sender][feedbackIndex].isRevoked, "Already revoked");
 
-        // Get current score for category
-        uint256 currentScore;
-        if (category == ReputationCategory.Combat) {
-            currentScore = rep.combat;
-        } else if (category == ReputationCategory.Economic) {
-            currentScore = rep.economic;
-        } else if (category == ReputationCategory.Social) {
-            currentScore = rep.social;
-        } else if (category == ReputationCategory.Crafting) {
-            currentScore = rep.crafting;
-        } else if (category == ReputationCategory.Agent) {
-            currentScore = rep.agent;
+        _feedback[agentId][msg.sender][feedbackIndex].isRevoked = true;
+        emit FeedbackRevoked(agentId, msg.sender, feedbackIndex);
+    }
+
+    function appendResponse(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex,
+        string calldata responseURI,
+        bytes32 responseHash
+    ) external {
+        require(feedbackIndex > 0, "index must be > 0");
+        require(bytes(responseURI).length > 0, "Empty URI");
+        require(feedbackIndex <= _lastIndex[agentId][clientAddress], "index out of bounds");
+
+        if (!_responderExists[agentId][clientAddress][feedbackIndex][msg.sender]) {
+            _responders[agentId][clientAddress][feedbackIndex].push(msg.sender);
+            _responderExists[agentId][clientAddress][feedbackIndex][msg.sender] = true;
         }
+        _responseCount[agentId][clientAddress][feedbackIndex][msg.sender]++;
 
-        // Calculate new score (with bounds checking)
-        uint256 newScore;
-        if (delta >= 0) {
-            uint256 increase = uint256(delta);
-            newScore = currentScore + increase;
-            if (newScore > MAX_SCORE) {
-                newScore = MAX_SCORE;
+        emit ResponseAppended(agentId, clientAddress, feedbackIndex, msg.sender, responseURI, responseHash);
+    }
+
+    function getLastIndex(uint256 agentId, address clientAddress) external view returns (uint64) {
+        return _lastIndex[agentId][clientAddress];
+    }
+
+    function readFeedback(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex
+    )
+        external
+        view
+        returns (int128 value, uint8 valueDecimals, string memory tag1, string memory tag2, bool isRevoked)
+    {
+        require(feedbackIndex > 0, "index must be > 0");
+        require(feedbackIndex <= _lastIndex[agentId][clientAddress], "index out of bounds");
+        Feedback storage f = _feedback[agentId][clientAddress][feedbackIndex];
+        return (f.value, f.valueDecimals, f.tag1, f.tag2, f.isRevoked);
+    }
+
+    function getSummary(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        string calldata tag1,
+        string calldata tag2
+    ) external view returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals) {
+        require(clientAddresses.length > 0, "clientAddresses required");
+
+        bytes32 emptyHash = keccak256(bytes(""));
+        bytes32 tag1Hash = keccak256(bytes(tag1));
+        bytes32 tag2Hash = keccak256(bytes(tag2));
+
+        int256 sum;
+        uint64[19] memory decimalCounts;
+
+        for (uint256 i; i < clientAddresses.length; i++) {
+            uint64 lastIdx = _lastIndex[agentId][clientAddresses[i]];
+            for (uint64 j = 1; j <= lastIdx; j++) {
+                Feedback storage fb = _feedback[agentId][clientAddresses[i]][j];
+                if (fb.isRevoked) continue;
+                if (emptyHash != tag1Hash && tag1Hash != keccak256(bytes(fb.tag1))) continue;
+                if (emptyHash != tag2Hash && tag2Hash != keccak256(bytes(fb.tag2))) continue;
+
+                int256 factor = int256(10 ** uint256(18 - fb.valueDecimals));
+                int256 normalized = fb.value * factor;
+                decimalCounts[fb.valueDecimals]++;
+                sum += normalized;
+                count++;
             }
-        } else {
-            uint256 decrease = uint256(-delta);
-            if (decrease > currentScore) {
-                newScore = MIN_SCORE;
-            } else {
-                newScore = currentScore - decrease;
+        }
+
+        if (count == 0) {
+            return (0, 0, 0);
+        }
+
+        uint8 modeDecimals;
+        uint64 maxCount;
+        for (uint8 d; d <= 18; d++) {
+            if (decimalCounts[d] > maxCount) {
+                maxCount = decimalCounts[d];
+                modeDecimals = d;
             }
         }
 
-        // Update category score
-        if (category == ReputationCategory.Combat) {
-            rep.combat = newScore;
-        } else if (category == ReputationCategory.Economic) {
-            rep.economic = newScore;
-        } else if (category == ReputationCategory.Social) {
-            rep.social = newScore;
-        } else if (category == ReputationCategory.Crafting) {
-            rep.crafting = newScore;
-        } else if (category == ReputationCategory.Agent) {
-            rep.agent = newScore;
+        int256 avgWad = sum / int256(uint256(count));
+        summaryValue = int128(avgWad / int256(10 ** uint256(18 - modeDecimals)));
+        summaryValueDecimals = modeDecimals;
+    }
+
+    function readAllFeedback(
+        uint256 agentId,
+        address[] calldata clientAddresses,
+        string calldata tag1,
+        string calldata tag2,
+        bool includeRevoked
+    )
+        external
+        view
+        returns (
+            address[] memory clients,
+            uint64[] memory feedbackIndexes,
+            int128[] memory values,
+            uint8[] memory valueDecimals,
+            string[] memory tag1s,
+            string[] memory tag2s,
+            bool[] memory revokedStatuses
+        )
+    {
+        address[] memory clientList = _resolveClients(agentId, clientAddresses);
+
+        bytes32 emptyHash = keccak256(bytes(""));
+        bytes32 tag1Hash = keccak256(bytes(tag1));
+        bytes32 tag2Hash = keccak256(bytes(tag2));
+        uint256 totalCount;
+
+        for (uint256 i; i < clientList.length; i++) {
+            uint64 lastIdx = _lastIndex[agentId][clientList[i]];
+            for (uint64 j = 1; j <= lastIdx; j++) {
+                Feedback storage fb = _feedback[agentId][clientList[i]][j];
+                if (!includeRevoked && fb.isRevoked) continue;
+                if (emptyHash != tag1Hash && tag1Hash != keccak256(bytes(fb.tag1))) continue;
+                if (emptyHash != tag2Hash && tag2Hash != keccak256(bytes(fb.tag2))) continue;
+                totalCount++;
+            }
         }
 
-        // Recalculate overall score
-        rep.overall = _calculateOverallScore(rep);
-        rep.lastUpdated = block.timestamp;
+        clients = new address[](totalCount);
+        feedbackIndexes = new uint64[](totalCount);
+        values = new int128[](totalCount);
+        valueDecimals = new uint8[](totalCount);
+        tag1s = new string[](totalCount);
+        tag2s = new string[](totalCount);
+        revokedStatuses = new bool[](totalCount);
 
-        emit ReputationUpdated(identityId, category, newScore, delta);
-    }
+        uint256 idx;
+        for (uint256 i; i < clientList.length; i++) {
+            uint64 lastIdx = _lastIndex[agentId][clientList[i]];
+            for (uint64 j = 1; j <= lastIdx; j++) {
+                Feedback storage fb = _feedback[agentId][clientList[i]][j];
+                if (!includeRevoked && fb.isRevoked) continue;
+                if (emptyHash != tag1Hash && tag1Hash != keccak256(bytes(fb.tag1))) continue;
+                if (emptyHash != tag2Hash && tag2Hash != keccak256(bytes(fb.tag2))) continue;
 
-    /**
-     * @notice Calculate weighted overall score
-     * @param rep Reputation scores
-     * @return uint256 Overall score (0-1000)
-     */
-    function _calculateOverallScore(ReputationScore memory rep)
-        internal
-        view
-        returns (uint256)
-    {
-        uint256 weightedSum = 0;
-        weightedSum += rep.combat * categoryWeights[ReputationCategory.Combat];
-        weightedSum += rep.economic * categoryWeights[ReputationCategory.Economic];
-        weightedSum += rep.social * categoryWeights[ReputationCategory.Social];
-        weightedSum += rep.crafting * categoryWeights[ReputationCategory.Crafting];
-        weightedSum += rep.agent * categoryWeights[ReputationCategory.Agent];
-
-        // Divide by 10000 (total basis points)
-        return weightedSum / 10000;
-    }
-
-    // ============ View Functions ============
-
-    /**
-     * @notice Get reputation score for an identity
-     * @param identityId Identity to query
-     * @return ReputationScore
-     */
-    function getReputation(uint256 identityId)
-        external
-        view
-        returns (ReputationScore memory)
-    {
-        return reputations[identityId];
-    }
-
-    /**
-     * @notice Get specific category score
-     * @param identityId Identity to query
-     * @param category Category to query
-     * @return uint256 Score
-     */
-    function getCategoryScore(uint256 identityId, ReputationCategory category)
-        external
-        view
-        returns (uint256)
-    {
-        ReputationScore memory rep = reputations[identityId];
-        if (category == ReputationCategory.Combat) return rep.combat;
-        if (category == ReputationCategory.Economic) return rep.economic;
-        if (category == ReputationCategory.Social) return rep.social;
-        if (category == ReputationCategory.Crafting) return rep.crafting;
-        if (category == ReputationCategory.Agent) return rep.agent;
-        return 0;
-    }
-
-    /**
-     * @notice Get feedback history for an identity
-     * @param identityId Identity to query
-     * @return Array of feedback indices
-     */
-    function getIdentityFeedback(uint256 identityId)
-        external
-        view
-        returns (uint256[] memory)
-    {
-        return identityFeedback[identityId];
-    }
-
-    /**
-     * @notice Get feedback details
-     * @param feedbackId Feedback index
-     * @return ReputationFeedback
-     */
-    function getFeedback(uint256 feedbackId)
-        external
-        view
-        returns (ReputationFeedback memory)
-    {
-        return feedbackHistory[feedbackId];
-    }
-
-    function getFeedbackCount() external view returns (uint256) {
-        return feedbackHistory.length;
-    }
-
-    /**
-     * @notice Return top identities ordered by overall score.
-     * @dev Intended for small registry sizes; O(n^2) insertion sort in memory.
-     */
-    function getTopAgents(uint256 limit)
-        external
-        view
-        returns (uint256[] memory agentIds, ReputationScore[] memory scores)
-    {
-        uint256 count = _knownIdentityIds.length;
-        if (limit > count) {
-            limit = count;
+                clients[idx] = clientList[i];
+                feedbackIndexes[idx] = j;
+                values[idx] = fb.value;
+                valueDecimals[idx] = fb.valueDecimals;
+                tag1s[idx] = fb.tag1;
+                tag2s[idx] = fb.tag2;
+                revokedStatuses[idx] = fb.isRevoked;
+                idx++;
+            }
         }
+    }
 
-        uint256[] memory sortedIds = new uint256[](count);
-        for (uint256 i = 0; i < count; i++) {
-            sortedIds[i] = _knownIdentityIds[i];
-        }
-
-        for (uint256 i = 1; i < count; i++) {
-            uint256 currentId = sortedIds[i];
-            uint256 currentScore = reputations[currentId].overall;
-            uint256 j = i;
-
-            while (j > 0 && reputations[sortedIds[j - 1]].overall < currentScore) {
-                sortedIds[j] = sortedIds[j - 1];
-                unchecked {
-                    j--;
+    function getResponseCount(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex,
+        address[] calldata responders
+    ) external view returns (uint64 count) {
+        if (clientAddress == address(0)) {
+            address[] memory clients = _clients[agentId];
+            for (uint256 i; i < clients.length; i++) {
+                uint64 lastIdx = _lastIndex[agentId][clients[i]];
+                for (uint64 j = 1; j <= lastIdx; j++) {
+                    count += _countResponses(agentId, clients[i], j, responders);
                 }
             }
-            sortedIds[j] = currentId;
+        } else if (feedbackIndex == 0) {
+            uint64 lastIdx = _lastIndex[agentId][clientAddress];
+            for (uint64 j = 1; j <= lastIdx; j++) {
+                count += _countResponses(agentId, clientAddress, j, responders);
+            }
+        } else {
+            count = _countResponses(agentId, clientAddress, feedbackIndex, responders);
+        }
+    }
+
+    function getClients(uint256 agentId) external view returns (address[] memory) {
+        return _clients[agentId];
+    }
+
+    function getVersion() external pure returns (string memory) {
+        return "2.0.0";
+    }
+
+    function _countResponses(
+        uint256 agentId,
+        address clientAddress,
+        uint64 feedbackIndex,
+        address[] calldata responders
+    ) internal view returns (uint64 count) {
+        if (responders.length == 0) {
+            address[] memory allResponders = _responders[agentId][clientAddress][feedbackIndex];
+            for (uint256 k; k < allResponders.length; k++) {
+                count += _responseCount[agentId][clientAddress][feedbackIndex][allResponders[k]];
+            }
+        } else {
+            for (uint256 k; k < responders.length; k++) {
+                count += _responseCount[agentId][clientAddress][feedbackIndex][responders[k]];
+            }
+        }
+    }
+
+    function _resolveClients(
+        uint256 agentId,
+        address[] calldata clientAddresses
+    ) internal view returns (address[] memory clientList) {
+        if (clientAddresses.length > 0) {
+            clientList = new address[](clientAddresses.length);
+            for (uint256 i; i < clientAddresses.length; i++) {
+                clientList[i] = clientAddresses[i];
+            }
+            return clientList;
         }
 
-        agentIds = new uint256[](limit);
-        scores = new ReputationScore[](limit);
-        for (uint256 i = 0; i < limit; i++) {
-            agentIds[i] = sortedIds[i];
-            scores[i] = reputations[sortedIds[i]];
+        address[] storage storedClients = _clients[agentId];
+        clientList = new address[](storedClients.length);
+        for (uint256 i; i < storedClients.length; i++) {
+            clientList[i] = storedClients[i];
         }
-    }
-
-    /**
-     * @notice Get reputation rank name
-     * @param score Overall score
-     * @return string Rank name
-     */
-    function getRankName(uint256 score) external pure returns (string memory) {
-        if (score >= 900) return "Legendary Hero";
-        if (score >= 800) return "Renowned Champion";
-        if (score >= 700) return "Trusted Veteran";
-        if (score >= 600) return "Reliable Ally";
-        if (score >= 500) return "Average Citizen";
-        if (score >= 400) return "Questionable";
-        if (score >= 300) return "Untrustworthy";
-        return "Notorious";
-    }
-
-    // ============ Admin Functions ============
-
-    /**
-     * @notice Authorize a reporter
-     * @param reporter Address to authorize
-     */
-    function authorizeReporter(address reporter) external onlyOwner {
-        authorizedReporters[reporter] = true;
-        emit ReporterAuthorized(reporter);
-    }
-
-    /**
-     * @notice Revoke reporter authorization
-     * @param reporter Address to revoke
-     */
-    function revokeReporter(address reporter) external onlyOwner {
-        authorizedReporters[reporter] = false;
-        emit ReporterRevoked(reporter);
-    }
-
-    /**
-     * @notice Update category weights
-     * @param category Category to update
-     * @param weight New weight (in basis points)
-     */
-    function setCategoryWeight(ReputationCategory category, uint256 weight)
-        external
-        onlyOwner
-    {
-        categoryWeights[category] = weight;
-    }
-
-    function _trackIdentity(uint256 identityId) internal {
-        if (_knownIdentitySet[identityId]) return;
-        _knownIdentitySet[identityId] = true;
-        _knownIdentityIds.push(identityId);
     }
 }

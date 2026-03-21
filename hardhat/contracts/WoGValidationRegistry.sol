@@ -3,95 +3,173 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 
+interface IValidationIdentityRegistry {
+    function ownerOf(uint256 tokenId) external view returns (address);
+    function getApproved(uint256 tokenId) external view returns (address);
+    function isApprovedForAll(address owner, address operator) external view returns (bool);
+}
+
 /**
  * @title WoGValidationRegistry
- * @notice ERC-8004-style validation registry for agent capability claims
- * @dev Stores verifier attestations such as `wog:a2a-enabled` or `wog:x402-enabled`.
+ * @notice Local mock of the official ERC-8004 validation registry semantics.
  */
 contract WoGValidationRegistry is Ownable {
-    struct Verification {
-        address verifier;
-        string claim;
-        uint256 validUntil;
-    }
-
-    mapping(address => bool) public authorizedVerifiers;
-    mapping(uint256 => Verification[]) private _verifications;
-
-    event CapabilityVerified(
+    event ValidationRequest(
+        address indexed validatorAddress,
         uint256 indexed agentId,
-        address indexed verifier,
-        string claim,
-        uint256 validUntil
+        string requestURI,
+        bytes32 indexed requestHash
     );
-    event VerifierAuthorized(address indexed verifier);
-    event VerifierRevoked(address indexed verifier);
 
-    error Unauthorized();
-    error InvalidExpiry();
+    event ValidationResponse(
+        address indexed validatorAddress,
+        uint256 indexed agentId,
+        bytes32 indexed requestHash,
+        uint8 response,
+        string responseURI,
+        bytes32 responseHash,
+        string tag
+    );
 
-    constructor() {
-        authorizedVerifiers[msg.sender] = true;
+    struct ValidationStatus {
+        address validatorAddress;
+        uint256 agentId;
+        uint8 response;
+        bytes32 responseHash;
+        string tag;
+        uint256 lastUpdate;
+        bool hasResponse;
     }
 
-    /**
-     * @notice Publish a capability verification for an agent.
-     */
-    function verifyCapability(
-        uint256 agentId,
-        string memory claim,
-        uint256 expiry
-    ) external {
-        if (!authorizedVerifiers[msg.sender]) revert Unauthorized();
-        if (expiry <= block.timestamp) revert InvalidExpiry();
+    address private immutable _identityRegistry;
+    mapping(bytes32 => ValidationStatus) private validations;
+    mapping(uint256 => bytes32[]) private _agentValidations;
+    mapping(address => bytes32[]) private _validatorRequests;
 
-        _verifications[agentId].push(
-            Verification({
-                verifier: msg.sender,
-                claim: claim,
-                validUntil: expiry
-            })
+    constructor(address identityRegistry_) {
+        require(identityRegistry_ != address(0), "bad identity");
+        _identityRegistry = identityRegistry_;
+    }
+
+    function getIdentityRegistry() external view returns (address) {
+        return _identityRegistry;
+    }
+
+    function validationRequest(
+        address validatorAddress,
+        uint256 agentId,
+        string calldata requestURI,
+        bytes32 requestHash
+    ) external {
+        require(validatorAddress != address(0), "bad validator");
+        require(validations[requestHash].validatorAddress == address(0), "exists");
+
+        IValidationIdentityRegistry registry = IValidationIdentityRegistry(_identityRegistry);
+        address owner = registry.ownerOf(agentId);
+        require(
+            msg.sender == owner ||
+            registry.isApprovedForAll(owner, msg.sender) ||
+            registry.getApproved(agentId) == msg.sender,
+            "Not authorized"
         );
 
-        emit CapabilityVerified(agentId, msg.sender, claim, expiry);
+        validations[requestHash] = ValidationStatus({
+            validatorAddress: validatorAddress,
+            agentId: agentId,
+            response: 0,
+            responseHash: bytes32(0),
+            tag: "",
+            lastUpdate: block.timestamp,
+            hasResponse: false
+        });
+
+        _agentValidations[agentId].push(requestHash);
+        _validatorRequests[validatorAddress].push(requestHash);
+
+        emit ValidationRequest(validatorAddress, agentId, requestURI, requestHash);
     }
 
-    /**
-     * @notice Return all recorded verifications for an agent.
-     */
-    function getVerifications(
-        uint256 agentId
-    ) external view returns (Verification[] memory) {
-        return _verifications[agentId];
+    function validationResponse(
+        bytes32 requestHash,
+        uint8 response,
+        string calldata responseURI,
+        bytes32 responseHash,
+        string calldata tag
+    ) external {
+        ValidationStatus storage s = validations[requestHash];
+        require(s.validatorAddress != address(0), "unknown");
+        require(msg.sender == s.validatorAddress, "not validator");
+        require(response <= 100, "resp>100");
+
+        s.response = response;
+        s.responseHash = responseHash;
+        s.tag = tag;
+        s.lastUpdate = block.timestamp;
+        s.hasResponse = true;
+
+        emit ValidationResponse(s.validatorAddress, s.agentId, requestHash, response, responseURI, responseHash, tag);
     }
 
-    /**
-     * @notice Check whether an agent currently has a live verification for a claim.
-     */
-    function isVerified(uint256 agentId, string memory claim) external view returns (bool) {
-        Verification[] storage entries = _verifications[agentId];
-        bytes32 claimHash = keccak256(bytes(claim));
+    function getValidationStatus(
+        bytes32 requestHash
+    )
+        external
+        view
+        returns (
+            address validatorAddress,
+            uint256 agentId,
+            uint8 response,
+            bytes32 responseHash,
+            string memory tag,
+            uint256 lastUpdate
+        )
+    {
+        ValidationStatus memory s = validations[requestHash];
+        require(s.validatorAddress != address(0), "unknown");
+        return (s.validatorAddress, s.agentId, s.response, s.responseHash, s.tag, s.lastUpdate);
+    }
 
-        for (uint256 i = entries.length; i > 0; i--) {
-            Verification storage entry = entries[i - 1];
-            if (entry.validUntil < block.timestamp) {
-                continue;
+    function getSummary(
+        uint256 agentId,
+        address[] calldata validatorAddresses,
+        string calldata tag
+    ) external view returns (uint64 count, uint8 avgResponse) {
+        bytes32[] storage requestHashes = _agentValidations[agentId];
+        uint256 totalResponse;
+
+        for (uint256 i; i < requestHashes.length; i++) {
+            ValidationStatus storage s = validations[requestHashes[i]];
+
+            bool matchValidator = (validatorAddresses.length == 0);
+            if (!matchValidator) {
+                for (uint256 j; j < validatorAddresses.length; j++) {
+                    if (s.validatorAddress == validatorAddresses[j]) {
+                        matchValidator = true;
+                        break;
+                    }
+                }
             }
-            if (keccak256(bytes(entry.claim)) == claimHash) {
-                return true;
+
+            bool matchTag = (bytes(tag).length == 0) || (keccak256(bytes(s.tag)) == keccak256(bytes(tag)));
+
+            if (matchValidator && matchTag && s.hasResponse) {
+                totalResponse += s.response;
+                count++;
             }
         }
 
-        return false;
+        avgResponse = count > 0 ? uint8(totalResponse / count) : 0;
     }
 
-    function authorizeVerifier(address verifier) external onlyOwner {
-        authorizedVerifiers[verifier] = true;
-        emit VerifierAuthorized(verifier);
+    function getAgentValidations(uint256 agentId) external view returns (bytes32[] memory) {
+        return _agentValidations[agentId];
     }
 
-    function revokeVerifier(address verifier) external onlyOwner {
-        authorizedVerifiers[verifier] = false;
-        emit VerifierRevoked(verifier);
+    function getValidatorRequests(address validatorAddress) external view returns (bytes32[] memory) {
+        return _validatorRequests[validatorAddress];
+    }
+
+    function getVersion() external pure returns (string memory) {
+        return "2.0.0";
     }
 }

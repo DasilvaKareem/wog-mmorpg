@@ -2,306 +2,157 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
+import "@openzeppelin/contracts/interfaces/IERC1271.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 /**
  * @title WoGIdentityRegistry
- * @notice ERC-8004-style identity registry used by WoG agents and characters
- * @dev Exposes the runtime-facing ABI currently used by the shard, while
- *      keeping WoG-specific helpers for direct character registration.
+ * @notice Local mock of the official ERC-8004 identity registry semantics.
  */
-contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
-    struct Identity {
-        uint256 characterTokenId;
-        address characterOwner;
-        string metadataURI;
-        string agentURI;
-        uint256 createdAt;
-        bool active;
-        bool hasCharacterToken;
+contract WoGIdentityRegistry is ERC721URIStorage, Ownable, EIP712 {
+    struct MetadataEntry {
+        string metadataKey;
+        bytes metadataValue;
     }
 
-    uint256 private _nextAgentId = 1;
-
-    mapping(uint256 => Identity) public identities;
-    mapping(uint256 => uint256) public characterToIdentity;
+    uint256 private _lastId;
     mapping(uint256 => mapping(string => bytes)) private _metadata;
-
-    mapping(address => bool) public authorizedMinters;
+    bytes32 private constant AGENT_WALLET_SET_TYPEHASH =
+        keccak256("AgentWalletSet(uint256 agentId,address newWallet,address owner,uint256 deadline)");
+    bytes4 private constant ERC1271_MAGICVALUE = 0x1626ba7e;
+    uint256 private constant MAX_DEADLINE_DELAY = 5 minutes;
+    bytes32 private constant RESERVED_AGENT_WALLET_KEY_HASH = keccak256("agentWallet");
 
     event Registered(uint256 indexed agentId, string agentURI, address indexed owner);
-    event IdentityCreated(
-        uint256 indexed identityId,
-        uint256 indexed characterTokenId,
-        address indexed owner,
-        string metadataURI
+    event MetadataSet(
+        uint256 indexed agentId,
+        string indexed indexedMetadataKey,
+        string metadataKey,
+        bytes metadataValue
     );
-    event IdentityUpdated(uint256 indexed identityId, string newMetadataURI);
-    event AgentEndpointUpdated(uint256 indexed identityId, string endpoint);
-    event AgentWalletUpdated(uint256 indexed identityId, address indexed newWallet);
-    event MetadataUpdated(uint256 indexed identityId, string indexed metadataKey, bytes metadataValue);
-    event IdentityDeactivated(uint256 indexed identityId);
-    event MinterAuthorized(address indexed minter);
-    event MinterRevoked(address indexed minter);
-
-    error IdentityAlreadyExists();
-    error IdentityNotFound();
-    error Unauthorized();
-    error IdentityInactive();
-    error InvalidAgentId();
-    error InvalidWallet();
-    error SignatureExpired();
-
-    constructor() ERC721("WoG Character Identity", "WOGID") {
-        authorizedMinters[msg.sender] = true;
+    event URIUpdated(uint256 indexed agentId, string newURI, address indexed updatedBy);
+    constructor() ERC721("AgentIdentity", "AGENT") EIP712("ERC8004IdentityRegistry", "1") {
     }
 
-    /**
-     * @notice Runtime-facing ERC-8004 registration path.
-     * @dev Mints the new agent identity to msg.sender and sets its discoverable URI.
-     */
+    function register() external returns (uint256 agentId) {
+        agentId = _lastId++;
+        _metadata[agentId]["agentWallet"] = abi.encodePacked(msg.sender);
+        _safeMint(msg.sender, agentId);
+        emit Registered(agentId, "", msg.sender);
+        emit MetadataSet(agentId, "agentWallet", "agentWallet", abi.encodePacked(msg.sender));
+    }
+
     function register(string memory agentURI) external returns (uint256 agentId) {
-        agentId = _mintIdentity(msg.sender, 0, msg.sender, "", agentURI, false);
+        agentId = _lastId++;
+        _metadata[agentId]["agentWallet"] = abi.encodePacked(msg.sender);
+        _safeMint(msg.sender, agentId);
+        _setTokenURI(agentId, agentURI);
         emit Registered(agentId, agentURI, msg.sender);
+        emit MetadataSet(agentId, "agentWallet", "agentWallet", abi.encodePacked(msg.sender));
     }
 
-    /**
-     * @notice WoG helper path for registering a character-bound identity.
-     */
-    function createIdentity(
-        uint256 characterTokenId,
-        address characterOwner,
-        string memory metadataURI
-    ) external returns (uint256) {
-        return createIdentityWithEndpoint(characterTokenId, characterOwner, metadataURI, "");
-    }
+    function register(
+        string memory agentURI,
+        MetadataEntry[] memory metadata
+    ) external returns (uint256 agentId) {
+        agentId = _lastId++;
+        _metadata[agentId]["agentWallet"] = abi.encodePacked(msg.sender);
+        _safeMint(msg.sender, agentId);
+        _setTokenURI(agentId, agentURI);
+        emit Registered(agentId, agentURI, msg.sender);
+        emit MetadataSet(agentId, "agentWallet", "agentWallet", abi.encodePacked(msg.sender));
 
-    /**
-     * @notice WoG helper path for registering a character-bound identity with endpoint.
-     */
-    function createIdentityWithEndpoint(
-        uint256 characterTokenId,
-        address characterOwner,
-        string memory metadataURI,
-        string memory agentEndpoint
-    ) public returns (uint256 identityId) {
-        if (!authorizedMinters[msg.sender]) revert Unauthorized();
-        if (_hasBoundCharacter(characterTokenId)) revert IdentityAlreadyExists();
-
-        identityId = _mintIdentity(
-            characterOwner,
-            characterTokenId,
-            characterOwner,
-            metadataURI,
-            agentEndpoint,
-            true
-        );
-
-        emit Registered(identityId, agentEndpoint, characterOwner);
-    }
-
-    function updateIdentity(uint256 identityId, string memory newMetadataURI) external {
-        Identity storage identity = _requireIdentity(identityId);
-        if (!_isAuthorizedOrOwner(msg.sender, identityId) && !authorizedMinters[msg.sender]) {
-            revert Unauthorized();
+        for (uint256 i; i < metadata.length; i++) {
+            require(keccak256(bytes(metadata[i].metadataKey)) != RESERVED_AGENT_WALLET_KEY_HASH, "reserved key");
+            _metadata[agentId][metadata[i].metadataKey] = metadata[i].metadataValue;
+            emit MetadataSet(agentId, metadata[i].metadataKey, metadata[i].metadataKey, metadata[i].metadataValue);
         }
-
-        identity.metadataURI = newMetadataURI;
-        emit IdentityUpdated(identityId, newMetadataURI);
     }
 
-    function deactivateIdentity(uint256 identityId) external {
-        if (!authorizedMinters[msg.sender]) revert Unauthorized();
-
-        Identity storage identity = _requireIdentity(identityId);
-        identity.active = false;
-        emit IdentityDeactivated(identityId);
+    function getMetadata(uint256 agentId, string memory metadataKey) external view returns (bytes memory) {
+        return _metadata[agentId][metadataKey];
     }
 
-    function setAgentEndpoint(uint256 identityId, string memory endpoint) external {
-        setAgentURI(identityId, endpoint);
+    function setMetadata(uint256 agentId, string memory metadataKey, bytes memory metadataValue) external {
+        require(_isApprovedOrOwner(msg.sender, agentId), "Not authorized");
+        require(keccak256(bytes(metadataKey)) != RESERVED_AGENT_WALLET_KEY_HASH, "reserved key");
+        _metadata[agentId][metadataKey] = metadataValue;
+        emit MetadataSet(agentId, metadataKey, metadataKey, metadataValue);
     }
 
-    function getAgentEndpoint(uint256 identityId) external view returns (string memory) {
-        return tokenURI(identityId);
+    function setAgentURI(uint256 agentId, string calldata newURI) external {
+        require(_isApprovedOrOwner(msg.sender, agentId), "Not authorized");
+        _setTokenURI(agentId, newURI);
+        emit URIUpdated(agentId, newURI, msg.sender);
     }
 
-    function setAgentURI(uint256 agentId, string memory newURI) public {
-        Identity storage identity = _requireIdentity(agentId);
-        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
-            revert Unauthorized();
+    function getAgentWallet(uint256 agentId) external view returns (address) {
+        bytes memory walletData = _metadata[agentId]["agentWallet"];
+        if (walletData.length < 20) {
+            return address(0);
         }
-        if (!identity.active) revert IdentityInactive();
-
-        identity.agentURI = newURI;
-        emit AgentEndpointUpdated(agentId, newURI);
+        return address(bytes20(walletData));
     }
 
-    /**
-     * @notice Compatibility surface expected by the shard runtime.
-     * @dev Signature is currently trusted by authorization rather than verified cryptographically.
-     */
     function setAgentWallet(
         uint256 agentId,
         address newWallet,
         uint256 deadline,
-        bytes calldata
+        bytes calldata signature
     ) external {
-        if (deadline < block.timestamp) revert SignatureExpired();
-        if (newWallet == address(0)) revert InvalidWallet();
-        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
-            revert Unauthorized();
+        require(_isApprovedOrOwner(msg.sender, agentId), "Not authorized");
+        require(newWallet != address(0), "bad wallet");
+        require(block.timestamp <= deadline, "expired");
+        require(deadline <= block.timestamp + MAX_DEADLINE_DELAY, "deadline too far");
+
+        address owner = ownerOf(agentId);
+        bytes32 structHash = keccak256(
+            abi.encode(AGENT_WALLET_SET_TYPEHASH, agentId, newWallet, owner, deadline)
+        );
+        bytes32 digest = _hashTypedDataV4(structHash);
+
+        (address recovered, ECDSA.RecoverError err) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError || recovered != newWallet) {
+            (bool ok, bytes memory res) = newWallet.staticcall(
+                abi.encodeCall(IERC1271.isValidSignature, (digest, signature))
+            );
+            require(
+                ok && res.length >= 32 && abi.decode(res, (bytes4)) == ERC1271_MAGICVALUE,
+                "invalid wallet sig"
+            );
         }
 
-        address currentOwner = ownerOf(agentId);
-        _transfer(currentOwner, newWallet, agentId);
+        _metadata[agentId]["agentWallet"] = abi.encodePacked(newWallet);
+        emit MetadataSet(agentId, "agentWallet", "agentWallet", abi.encodePacked(newWallet));
     }
 
-    function setMetadata(
-        uint256 agentId,
-        string memory metadataKey,
-        bytes memory metadataValue
-    ) external {
-        Identity storage identity = _requireIdentity(agentId);
-        if (!_isAuthorizedOrOwner(msg.sender, agentId) && !authorizedMinters[msg.sender]) {
-            revert Unauthorized();
-        }
-        if (!identity.active) revert IdentityInactive();
-
-        _metadata[agentId][metadataKey] = metadataValue;
-
-        if (_equals(metadataKey, "characterTokenId")) {
-            uint256 nextCharacterTokenId = abi.decode(metadataValue, (uint256));
-            uint256 previousCharacterTokenId = identity.characterTokenId;
-            uint256 boundIdentityId = characterToIdentity[nextCharacterTokenId];
-            if (_hasBoundCharacter(nextCharacterTokenId) && boundIdentityId != agentId) {
-                revert IdentityAlreadyExists();
-            }
-            if (
-                identity.hasCharacterToken &&
-                previousCharacterTokenId != nextCharacterTokenId &&
-                characterToIdentity[previousCharacterTokenId] == agentId
-            ) {
-                delete characterToIdentity[previousCharacterTokenId];
-            }
-            identity.characterTokenId = nextCharacterTokenId;
-            identity.hasCharacterToken = true;
-            characterToIdentity[nextCharacterTokenId] = agentId;
-        } else if (_equals(metadataKey, "metadataURI")) {
-            identity.metadataURI = abi.decode(metadataValue, (string));
-            emit IdentityUpdated(agentId, identity.metadataURI);
-        }
-
-        emit MetadataUpdated(agentId, metadataKey, metadataValue);
-    }
-
-    function getMetadata(
-        uint256 agentId,
-        string memory metadataKey
-    ) external view returns (bytes memory) {
-        _requireExistingAgent(agentId);
-        return _metadata[agentId][metadataKey];
-    }
-
-    function getAgentWallet(uint256 agentId) external view returns (address) {
-        return ownerOf(agentId);
-    }
-
-    function getIdentityByCharacter(uint256 characterTokenId) external view returns (Identity memory) {
-        uint256 identityId = characterToIdentity[characterTokenId];
-        if (!_hasBoundCharacter(characterTokenId)) revert IdentityNotFound();
-        return identities[identityId];
-    }
-
-    function getOwnerIdentities(address owner) external view returns (uint256[] memory) {
-        return getAgentsByOwner(owner);
-    }
-
-    function getAgentsByOwner(address owner) public view returns (uint256[] memory identityIds) {
-        uint256 count = balanceOf(owner);
-        identityIds = new uint256[](count);
-        for (uint256 i = 0; i < count; i++) {
-            identityIds[i] = tokenOfOwnerByIndex(owner, i);
-        }
-    }
-
-    function isActive(uint256 identityId) external view returns (bool) {
-        return identities[identityId].active;
+    function unsetAgentWallet(uint256 agentId) external {
+        require(_isApprovedOrOwner(msg.sender, agentId), "Not authorized");
+        _metadata[agentId]["agentWallet"] = "";
+        emit MetadataSet(agentId, "agentWallet", "agentWallet", "");
     }
 
     function isAuthorizedOrOwner(address spender, uint256 agentId) external view returns (bool) {
-        return _isAuthorizedOrOwner(spender, agentId);
-    }
-
-    function tokenURI(uint256 tokenId) public view override returns (string memory) {
-        _requireExistingAgent(tokenId);
-        return identities[tokenId].agentURI;
-    }
-
-    function authorizeMinter(address minter) external onlyOwner {
-        authorizedMinters[minter] = true;
-        emit MinterAuthorized(minter);
-    }
-
-    function revokeMinter(address minter) external onlyOwner {
-        authorizedMinters[minter] = false;
-        emit MinterRevoked(minter);
-    }
-
-    function _mintIdentity(
-        address mintTo,
-        uint256 characterTokenId,
-        address characterOwner,
-        string memory metadataURI,
-        string memory agentURI,
-        bool linkCharacter
-    ) internal returns (uint256 agentId) {
-        if (mintTo == address(0) || characterOwner == address(0)) revert InvalidWallet();
-        if (linkCharacter && _hasBoundCharacter(characterTokenId)) {
-            revert IdentityAlreadyExists();
-        }
-
-        agentId = _nextAgentId++;
-
-        identities[agentId] = Identity({
-            characterTokenId: characterTokenId,
-            characterOwner: characterOwner,
-            metadataURI: metadataURI,
-            agentURI: agentURI,
-            createdAt: block.timestamp,
-            active: true,
-            hasCharacterToken: linkCharacter
-        });
-
-        if (linkCharacter) {
-            characterToIdentity[characterTokenId] = agentId;
-            _metadata[agentId]["characterTokenId"] = abi.encode(characterTokenId);
-        }
-
-        if (bytes(metadataURI).length > 0) {
-            _metadata[agentId]["metadataURI"] = abi.encode(metadataURI);
-        }
-
-        _safeMint(mintTo, agentId);
-
-        emit IdentityCreated(agentId, characterTokenId, characterOwner, metadataURI);
-        if (bytes(agentURI).length > 0) {
-            emit AgentEndpointUpdated(agentId, agentURI);
-        }
-    }
-
-    function _requireIdentity(uint256 identityId) internal view returns (Identity storage identity) {
-        identity = identities[identityId];
-        if (identity.createdAt == 0) revert IdentityNotFound();
-    }
-
-    function _requireExistingAgent(uint256 agentId) internal view {
-        if (!_exists(agentId)) revert InvalidAgentId();
-    }
-
-    function _isAuthorizedOrOwner(address spender, uint256 agentId) internal view returns (bool) {
-        if (!_exists(agentId)) return false;
         return _isApprovedOrOwner(spender, agentId);
+    }
+
+    function getVersion() external pure returns (string memory) {
+        return "2.0.0";
+    }
+
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        override(ERC721URIStorage)
+        returns (string memory)
+    {
+        return super.tokenURI(tokenId);
+    }
+
+    function _burn(uint256 tokenId) internal override(ERC721URIStorage) {
+        super._burn(tokenId);
     }
 
     function _beforeTokenTransfer(
@@ -309,30 +160,11 @@ contract WoGIdentityRegistry is ERC721Enumerable, Ownable {
         address to,
         uint256 firstTokenId,
         uint256 batchSize
-    ) internal override(ERC721Enumerable) {
+    ) internal override {
         super._beforeTokenTransfer(from, to, firstTokenId, batchSize);
         if (from != address(0) && to != address(0) && batchSize == 1) {
-            identities[firstTokenId].characterOwner = to;
-            emit AgentWalletUpdated(firstTokenId, to);
+            _metadata[firstTokenId]["agentWallet"] = "";
+            emit MetadataSet(firstTokenId, "agentWallet", "agentWallet", "");
         }
-    }
-
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721Enumerable)
-        returns (bool)
-    {
-        return super.supportsInterface(interfaceId);
-    }
-
-    function _equals(string memory a, string memory b) internal pure returns (bool) {
-        return keccak256(bytes(a)) == keccak256(bytes(b));
-    }
-
-    function _hasBoundCharacter(uint256 characterTokenId) internal view returns (bool) {
-        uint256 identityId = characterToIdentity[characterTokenId];
-        if (identityId == 0) return false;
-        return identities[identityId].hasCharacterToken;
     }
 }

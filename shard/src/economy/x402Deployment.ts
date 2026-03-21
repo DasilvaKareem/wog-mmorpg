@@ -8,7 +8,6 @@ import { processPayment, getPricingTier, type PaymentMethod } from "./x402Paymen
 import { saveCharacter, loadCharacter } from "../character/characterStore.js";
 import { reputationManager } from "./reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
-import { publishValidationClaim } from "../erc8004/validation.js";
 
 export interface DeploymentRequest {
   agentName: string;
@@ -306,7 +305,10 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
             stats: characterData.stats,
           },
         };
-        const mintResult = await mintCharacterWithIdentity(wallet.address, nftMetadata);
+        const mintResult = await mintCharacterWithIdentity(wallet.address, nftMetadata, [
+          "wog:a2a-enabled",
+          "wog:x402-enabled",
+        ]);
         mintTxHash = mintResult.txHash;
         if (mintResult.tokenId != null) {
           entity.characterTokenId = mintResult.tokenId;
@@ -320,9 +322,6 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
         });
         if (mintResult.identity?.agentId != null) {
           reputationManager.ensureInitialized(mintResult.identity.agentId);
-          const validUntil = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
-          void publishValidationClaim(mintResult.identity.agentId, "wog:a2a-enabled", validUntil);
-          void publishValidationClaim(mintResult.identity.agentId, "wog:x402-enabled", validUntil);
         }
         console.log(
           `[x402] ${deploymentId}: NFT minted: ${mintTxHash}${mintResult.identity?.agentId != null ? ` agentId=${mintResult.identity.agentId}` : ""}`

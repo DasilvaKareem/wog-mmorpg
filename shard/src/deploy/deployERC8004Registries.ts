@@ -94,7 +94,11 @@ function compileContracts(): Record<string, CompiledContract> {
   };
 }
 
-async function deployContract(name: string, compiled: CompiledContract): Promise<string> {
+async function deployContract(
+  name: string,
+  compiled: CompiledContract,
+  args: unknown[] = []
+): Promise<string> {
   if (!biteWallet) {
     console.error("SERVER_PRIVATE_KEY not set — cannot deploy");
     process.exit(1);
@@ -102,7 +106,7 @@ async function deployContract(name: string, compiled: CompiledContract): Promise
 
   console.log(`Deploying ${name}...`);
   const factory = new ethers.ContractFactory(compiled.abi, compiled.bytecode, biteWallet);
-  const contract = await factory.deploy();
+  const contract = await factory.deploy(...args);
   await contract.waitForDeployment();
   const address = await contract.getAddress();
   console.log(`  ${name}: ${address}`);
@@ -121,8 +125,8 @@ async function main() {
   const compiled = compileContracts();
 
   const identityAddress = await deployContract("WoGIdentityRegistry", compiled.identity);
-  const reputationAddress = await deployContract("WoGReputationRegistry", compiled.reputation);
-  const validationAddress = await deployContract("WoGValidationRegistry", compiled.validation);
+  const reputationAddress = await deployContract("WoGReputationRegistry", compiled.reputation, [identityAddress]);
+  const validationAddress = await deployContract("WoGValidationRegistry", compiled.validation, [identityAddress]);
 
   console.log("\nAdd these to your .env:");
   console.log(`IDENTITY_REGISTRY_ADDRESS=${identityAddress}`);
