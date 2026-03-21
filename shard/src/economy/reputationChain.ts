@@ -21,8 +21,16 @@ if (!reputationContract && !REPUTATION_CONTRACT_ADDRESS) {
   console.warn("[reputationChain] REPUTATION_REGISTRY_ADDRESS not set — on-chain reputation disabled");
 }
 
-function toIdentityId(agentId: string | bigint): bigint {
-  return BigInt(normalizeAgentId(agentId));
+function tryToIdentityId(agentId: string | bigint): bigint | null {
+  const normalized = normalizeAgentId(agentId);
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  try {
+    return BigInt(normalized);
+  } catch {
+    return null;
+  }
 }
 
 const FLUSH_INTERVAL_MS = 15_000;
@@ -88,9 +96,10 @@ export async function getReputationOnChain(
   agentId: string | bigint
 ): Promise<OnChainReputationScore | null> {
   if (!reputationContract) return null;
+  const identityId = tryToIdentityId(agentId);
+  if (identityId === null) return null;
 
   try {
-    const identityId = toIdentityId(agentId);
     const clients = Array.from(await reputationContract.getClients(identityId)) as string[];
     if (!clients || clients.length === 0) {
       return null;
@@ -185,7 +194,10 @@ export async function batchUpdateReputationOnChain(
 
   try {
     const normalizedAgentId = normalizeAgentId(agentId);
-    const identityId = toIdentityId(agentId);
+    const identityId = tryToIdentityId(agentId);
+    if (identityId === null) {
+      return true;
+    }
 
     for (let i = 0; i < CATEGORY_TAGS.length; i++) {
       const delta = deltas[i];

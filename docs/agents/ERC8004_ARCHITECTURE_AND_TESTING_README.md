@@ -170,17 +170,11 @@ Primary file:
 
 Local mock registries were aligned to official runtime semantics used by shard.
 
-Primary local contracts:
+Primary contracts (single source of truth):
 
-- [WoGIdentityRegistry.sol](../../contracts/WoGIdentityRegistry.sol)
-- [WoGReputationRegistry.sol](../../contracts/WoGReputationRegistry.sol)
-- [WoGValidationRegistry.sol](../../contracts/WoGValidationRegistry.sol)
-
-Hardhat copies:
-
-- [WoGIdentityRegistry.sol](../../hardhat/contracts/WoGIdentityRegistry.sol)
-- [WoGReputationRegistry.sol](../../hardhat/contracts/WoGReputationRegistry.sol)
-- [WoGValidationRegistry.sol](../../hardhat/contracts/WoGValidationRegistry.sol)
+- [WoGMockIdentityRegistry.sol](../../hardhat/contracts/WoGMockIdentityRegistry.sol)
+- [WoGMockReputationRegistry.sol](../../hardhat/contracts/WoGMockReputationRegistry.sol)
+- [WoGMockValidationRegistry.sol](../../hardhat/contracts/WoGMockValidationRegistry.sol)
 
 Deploy script wiring:
 

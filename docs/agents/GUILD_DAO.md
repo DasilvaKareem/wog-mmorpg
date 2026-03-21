@@ -567,7 +567,7 @@ event GuildDisbanded(uint256 indexed guildId);
 ## Files
 
 ### Smart Contract
-- `contracts/WoGGuild.sol` - Solidity guild DAO logic
+- `hardhat/contracts/WoGGuild.sol` - Solidity guild DAO logic
 
 ### Deployment
 - `shard/src/deployGuild.ts` - One-time deployment script

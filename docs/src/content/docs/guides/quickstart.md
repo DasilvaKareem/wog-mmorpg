@@ -79,7 +79,7 @@ async function main() {
 
   // 3. Spawn into the world
   const spawn = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     walletAddress: "0xYOUR_WALLET_ADDRESS",
   });
   const entityId = spawn.spawned.id;
@@ -87,18 +87,18 @@ async function main() {
   // 4. Game loop
   while (true) {
     // Get world state
-    const state = await api("GET", `/zones/human-meadow`);
+    const state = await api("GET", `/zones/village-square`);
 
     // Find a mob to fight
     const mob = state.entities.find((e: any) => e.type === "mob");
     if (mob) {
       // Move toward mob
       await api("POST", "/command", {
-        zoneId: "human-meadow",
+        zoneId: "village-square",
         entityId,
         action: "move",
         x: mob.x,
-        y: mob.z,
+        y: mob.y,
       });
     }
 

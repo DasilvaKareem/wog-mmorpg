@@ -10,6 +10,7 @@
 import { reputationManager, ReputationCategory } from "../src/economy/reputationManager.js";
 import { getReputationOnChain } from "../src/economy/reputationChain.js";
 import { biteWallet } from "../src/blockchain/biteChain.js";
+import { ethers } from "ethers";
 
 let passed = 0;
 let failed = 0;
@@ -49,8 +50,9 @@ function snapshot(agentId: string) {
   return rep ? { ...rep } : null;
 }
 
-const agentA = `rep-agent-a-${Date.now()}`;
-const agentB = `rep-agent-b-${Date.now()}`;
+const baseAgentId = Date.now();
+const agentA = `rep-agent-a-${baseAgentId}`;
+const agentB = `rep-agent-b-${baseAgentId}`;
 
 section("Initialization");
 
@@ -122,9 +124,46 @@ assert(
 );
 
 section("Optional Chain Convergence");
+if (
+  process.env.IDENTITY_REGISTRY_ADDRESS &&
+  process.env.REPUTATION_REGISTRY_ADDRESS &&
+  process.env.SKALE_BASE_RPC_URL &&
+  biteWallet
+) {
+  const identity = new ethers.Contract(
+    process.env.IDENTITY_REGISTRY_ADDRESS,
+    [
+      "function register(string agentURI) external returns (uint256 agentId)",
+      "function transferFrom(address from, address to, uint256 tokenId) external",
+      "event Registered(uint256 indexed agentId, string agentURI, address indexed owner)",
+    ],
+    biteWallet
+  );
 
-if (process.env.REPUTATION_REGISTRY_ADDRESS && process.env.SKALE_BASE_RPC_URL && biteWallet) {
-  const chainAgentId = `rep-chain-${Date.now()}`;
+  const registerTx = await identity.register("ipfs://rep-chain-convergence");
+  const registerReceipt = await registerTx.wait();
+  const registeredLog = registerReceipt?.logs
+    .map((log) => {
+      try {
+        return identity.interface.parseLog(log);
+      } catch {
+        return null;
+      }
+    })
+    .find((parsed) => parsed?.name === "Registered");
+
+  const mintedAgentId = registeredLog?.args?.[0];
+  if (mintedAgentId === undefined || mintedAgentId === null) {
+    throw new Error("Failed to parse minted agentId from IdentityRegistry Registered event");
+  }
+
+  // Prevent self-feedback reverts in the reputation registry by moving ownership
+  // away from the reporting signer.
+  const altOwner = ethers.Wallet.createRandom().address;
+  const transferTx = await identity.transferFrom(await biteWallet.getAddress(), altOwner, mintedAgentId);
+  await transferTx.wait();
+
+  const chainAgentId = String(mintedAgentId);
   reputationManager.ensureInitialized(chainAgentId);
   reputationManager.submitFeedback(
     chainAgentId,

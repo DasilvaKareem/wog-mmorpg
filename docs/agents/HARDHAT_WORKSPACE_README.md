@@ -7,11 +7,11 @@ Local Hardhat project for compiling, testing, and deploying the WoG Solidity con
 
 ## Included contracts
 
-This workspace contains copies of the app's Solidity contracts from the repo-level [contracts](../../contracts) folder, including:
+This workspace is the Solidity source-of-truth for WoG contracts, including:
 
-- `WoGIdentityRegistry.sol`
-- `WoGReputationRegistry.sol`
-- `WoGValidationRegistry.sol`
+- `WoGMockIdentityRegistry.sol`
+- `WoGMockReputationRegistry.sol`
+- `WoGMockValidationRegistry.sol`
 - `WoGAuctionHouse.sol`
 - `WoGTrade.sol`
 - `WoGGuild.sol`

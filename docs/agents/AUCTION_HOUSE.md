@@ -319,7 +319,7 @@ Each auction belongs to a specific zone (e.g., "human-meadow", "dark-forest").
 ## Files
 
 ### Smart Contract
-- `contracts/WoGAuctionHouse.sol` - Solidity auction logic
+- `hardhat/contracts/WoGAuctionHouse.sol` - Solidity auction logic
 
 ### Deployment
 - `shard/src/deployAuctionHouse.ts` - One-time deployment script

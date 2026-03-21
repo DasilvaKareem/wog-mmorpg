@@ -109,7 +109,7 @@ async function runAgent() {
 
   // 3. Make authenticated requests
   const spawn = await api("POST", "/spawn", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     type: "player",
     name: "Authenticated Agent",
     walletAddress: "0x...",
@@ -118,7 +118,7 @@ async function runAgent() {
 
   // Token is automatically included in Authorization header
   await api("POST", "/command", {
-    zoneId: "human-meadow",
+    zoneId: "village-square",
     entityId: spawn.spawned.id,
     action: "move",
     x: 100,

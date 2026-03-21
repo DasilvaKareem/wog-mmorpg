@@ -1,8 +1,8 @@
 /**
  * Deploy the full WoG ERC-8004 registry set:
- * - WoGIdentityRegistry
- * - WoGReputationRegistry
- * - WoGValidationRegistry
+ * - WoGMockIdentityRegistry
+ * - WoGMockReputationRegistry
+ * - WoGMockValidationRegistry
  *
  * Usage:
  *   npx tsx shard/src/deploy/deployERC8004Registries.ts
@@ -24,9 +24,9 @@ type CompiledContract = {
 };
 
 const CONTRACT_FILES = [
-  "WoGIdentityRegistry.sol",
-  "WoGReputationRegistry.sol",
-  "WoGValidationRegistry.sol",
+  "WoGMockIdentityRegistry.sol",
+  "WoGMockReputationRegistry.sol",
+  "WoGMockValidationRegistry.sol",
 ] as const;
 
 function findImports(importPath: string) {
@@ -44,7 +44,7 @@ function compileContracts(): Record<string, CompiledContract> {
     CONTRACT_FILES.map((fileName) => [
       fileName,
       {
-        content: readFileSync(resolve(import.meta.dirname, `../../../contracts/${fileName}`), "utf-8"),
+        content: readFileSync(resolve(import.meta.dirname, `../../../hardhat/contracts/${fileName}`), "utf-8"),
       },
     ])
   );
@@ -80,16 +80,16 @@ function compileContracts(): Record<string, CompiledContract> {
 
   return {
     identity: {
-      abi: output.contracts["WoGIdentityRegistry.sol"]["WoGIdentityRegistry"].abi,
-      bytecode: "0x" + output.contracts["WoGIdentityRegistry.sol"]["WoGIdentityRegistry"].evm.bytecode.object,
+      abi: output.contracts["WoGMockIdentityRegistry.sol"]["WoGMockIdentityRegistry"].abi,
+      bytecode: "0x" + output.contracts["WoGMockIdentityRegistry.sol"]["WoGMockIdentityRegistry"].evm.bytecode.object,
     },
     reputation: {
-      abi: output.contracts["WoGReputationRegistry.sol"]["WoGReputationRegistry"].abi,
-      bytecode: "0x" + output.contracts["WoGReputationRegistry.sol"]["WoGReputationRegistry"].evm.bytecode.object,
+      abi: output.contracts["WoGMockReputationRegistry.sol"]["WoGMockReputationRegistry"].abi,
+      bytecode: "0x" + output.contracts["WoGMockReputationRegistry.sol"]["WoGMockReputationRegistry"].evm.bytecode.object,
     },
     validation: {
-      abi: output.contracts["WoGValidationRegistry.sol"]["WoGValidationRegistry"].abi,
-      bytecode: "0x" + output.contracts["WoGValidationRegistry.sol"]["WoGValidationRegistry"].evm.bytecode.object,
+      abi: output.contracts["WoGMockValidationRegistry.sol"]["WoGMockValidationRegistry"].abi,
+      bytecode: "0x" + output.contracts["WoGMockValidationRegistry.sol"]["WoGMockValidationRegistry"].evm.bytecode.object,
     },
   };
 }
@@ -124,9 +124,9 @@ async function main() {
   console.log("Compiling ERC-8004 registries...");
   const compiled = compileContracts();
 
-  const identityAddress = await deployContract("WoGIdentityRegistry", compiled.identity);
-  const reputationAddress = await deployContract("WoGReputationRegistry", compiled.reputation, [identityAddress]);
-  const validationAddress = await deployContract("WoGValidationRegistry", compiled.validation, [identityAddress]);
+  const identityAddress = await deployContract("WoGMockIdentityRegistry", compiled.identity);
+  const reputationAddress = await deployContract("WoGMockReputationRegistry", compiled.reputation, [identityAddress]);
+  const validationAddress = await deployContract("WoGMockValidationRegistry", compiled.validation, [identityAddress]);
 
   console.log("\nAdd these to your .env:");
   console.log(`IDENTITY_REGISTRY_ADDRESS=${identityAddress}`);

@@ -13,8 +13,8 @@
  *   JWT_SECRET=test SKALE_BASE_RPC_URL=... IDENTITY_REGISTRY_ADDRESS=... ... npx tsx tests/erc8004DevIntegration.test.ts
  */
 
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { ethers } from "ethers";
 import { getOfficialErc8004Addresses } from "../src/erc8004/official.js";
 
@@ -52,7 +52,13 @@ function requireOk(condition: boolean, message: string): void {
   }
 }
 
-function extractTransferTokenId(logs: Array<{ topics: string[] }>): number | null {
+function assertPresent<T>(value: T, message: string): asserts value is NonNullable<T> {
+  if (value == null) {
+    throw new Error(message);
+  }
+}
+
+function extractTransferTokenId(logs: Array<{ topics: readonly string[] }>): number | null {
   const transferLog = [...logs].reverse().find((log) => log.topics.length > 3 && Boolean(log.topics[3]));
   if (!transferLog?.topics[3]) return null;
   return Number(BigInt(transferLog.topics[3]));
@@ -245,8 +251,8 @@ async function main() {
       json("GET", `/character/${walletAddress}`).catch(() => null),
     ]);
 
-    const discoveredAgentId = extractTransferTokenId(identityTransferLogs as Array<{ topics: string[] }>);
-    const discoveredCharacterTokenId = extractTransferTokenId(characterLogs as Array<{ topics: string[] }>);
+    const discoveredAgentId = extractTransferTokenId(identityTransferLogs);
+    const discoveredCharacterTokenId = extractTransferTokenId(characterLogs);
     if (discoveredAgentId != null) {
       agentId = discoveredAgentId;
     }
@@ -283,13 +289,16 @@ async function main() {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  requireOk(agentId != null, "agentId not discovered from chain logs or identity API");
-  requireOk(characterTokenId != null, "characterTokenId not discovered from chain logs or identity API");
+  assertPresent(agentId, "agentId not discovered from chain logs or identity API");
+  assertPresent(characterTokenId, "characterTokenId not discovered from chain logs or identity API");
   requireOk(identityApi?.status === 200, `identity API not ready: ${JSON.stringify(identityApi?.body)}`);
   requireOk(validationsApi?.status === 200, `validations API not ready: ${JSON.stringify(validationsApi?.body)}`);
-  assert(identityApi!.body.identity.agentId === String(agentId), "Identity API returns the minted agentId", identityApi!.body);
+  const mintedAgentId = agentId;
+  const mintedCharacterTokenId = characterTokenId;
+
+  assert(identityApi!.body.identity.agentId === String(mintedAgentId), "Identity API returns the minted agentId", identityApi!.body);
   assert(
-    identityApi!.body.identity.characterTokenId === String(characterTokenId),
+    identityApi!.body.identity.characterTokenId === String(mintedCharacterTokenId),
     "Identity API returns the minted characterTokenId",
     identityApi!.body
   );
@@ -310,12 +319,12 @@ async function main() {
   const [goldBalance, identityOwner, agentWallet, agentUri, rawCharacterMetadata, validationHashes, a2aResolved] =
     await Promise.all([
       gold.balanceOf(walletAddress),
-      identity.ownerOf(BigInt(agentId)),
-      identity.getAgentWallet(BigInt(agentId)),
-      identity.tokenURI(BigInt(agentId)),
-      identity.getMetadata(BigInt(agentId), "characterTokenId"),
-      validation.getAgentValidations(BigInt(agentId)),
-      json("GET", `/a2a/resolve/${agentId}`),
+      identity.ownerOf(BigInt(mintedAgentId)),
+      identity.getAgentWallet(BigInt(mintedAgentId)),
+      identity.tokenURI(BigInt(mintedAgentId)),
+      identity.getMetadata(BigInt(mintedAgentId), "characterTokenId"),
+      validation.getAgentValidations(BigInt(mintedAgentId)),
+      json("GET", `/a2a/resolve/${mintedAgentId}`),
     ]);
   const decodedCharacterTokenId = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterMetadata)[0];
   const validationStatus = validationHashes.length > 0
@@ -330,7 +339,7 @@ async function main() {
     "Identity tokenURI matches the identity endpoint exposed by the API",
     { agentUri, apiEndpoint: identityApi!.body.identity.endpoint }
   );
-  assert(decodedCharacterTokenId === BigInt(characterTokenId), "Identity metadata stores the character tokenId");
+  assert(decodedCharacterTokenId === BigInt(mintedCharacterTokenId), "Identity metadata stores the character tokenId");
   assert(validationHashes.length > 0, "Validation registry has at least one validation request");
   assert(validationStatus?.[4] === "wog:a2a-enabled", "Validation status tag matches wog:a2a-enabled", validationStatus);
   assert(
@@ -352,17 +361,17 @@ async function main() {
       level: 1,
       raceId: "human",
       classId: "warrior",
-      characterTokenId: String(characterTokenId),
-      agentId: String(agentId),
+      characterTokenId: String(mintedCharacterTokenId),
+      agentId: String(mintedAgentId),
     },
     token
   );
   requireOk(spawn.status === 200, `Spawn failed: ${JSON.stringify(spawn.body)}`);
-  assert(spawn.body?.spawned?.agentId === String(agentId), "Spawn response carries agentId", spawn.body);
+  assert(spawn.body?.spawned?.agentId === String(mintedAgentId), "Spawn response carries agentId", spawn.body);
 
   const feedback = await json(
     "POST",
-    `/api/agents/${agentId}/reputation/feedback`,
+    `/api/agents/${mintedAgentId}/reputation/feedback`,
     { category: "social", delta: 7, reason: "dev-integration-test" },
     token
   );
@@ -372,18 +381,18 @@ async function main() {
   let finalApiReputation: JsonResult | null = null;
   let finalChainSummary: [bigint, bigint, bigint] | null = null;
   for (let i = 0; i < 10; i++) {
-    const clients = Array.from(await reputation.getClients(BigInt(agentId)));
+    const clients = Array.from(await reputation.getClients(BigInt(mintedAgentId)));
     const [apiReputation, chainSummary] = await Promise.all([
-      json("GET", `/api/agents/${agentId}/reputation`),
+      json("GET", `/api/agents/${mintedAgentId}/reputation`),
       clients.length > 0
-        ? reputation.getSummary(BigInt(agentId), clients, "social", "")
-        : Promise.resolve([0n, 0n, 0n] as [bigint, bigint, bigint]),
+        ? reputation.getSummary(BigInt(mintedAgentId), clients, "social", "")
+        : Promise.resolve([BigInt(0), BigInt(0), BigInt(0)] as [bigint, bigint, bigint]),
     ]);
     finalApiReputation = apiReputation;
     finalChainSummary = chainSummary as [bigint, bigint, bigint];
 
     const apiSocial = BigInt(apiReputation.body?.reputation?.social ?? -1);
-    if (apiSocial === 507n && finalChainSummary[1] === 7n) {
+    if (apiSocial === BigInt(507) && finalChainSummary[1] === BigInt(7)) {
       converged = true;
       break;
     }

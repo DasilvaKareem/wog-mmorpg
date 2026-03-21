@@ -2,12 +2,14 @@
 
 ## ✅ Completed Work
 
-### 1. Zone Transitions (100% Secure)
-**File**: `shard/src/zoneTransition.ts`
+### 1. Movement Commands (Active)
+**File**: `shard/src/social/commands.ts`
 
-✅ **Added authentication to**:
-- `POST /transition/auto` - Requires JWT token
-- `POST /transition/:zoneId/portal/:portalId` - Requires JWT token
+✅ **Authenticated endpoint**:
+- `POST /command` - Requires JWT token
+
+Deprecated note:
+- legacy `/transition/*` routes still exist only as `410 Gone` stubs in `shard/src/world/zoneTransition.ts`
 
 **Security Features**:
 - JWT token verification via `authenticateRequest` middleware
@@ -24,14 +26,16 @@ TOKEN=$(curl -X POST http://localhost:3000/auth/verify \
   -d '{"walletAddress":"0x...","signature":"0x...","timestamp":...}' \
   | jq -r '.token')
 
-# Use authenticated endpoint
-curl -X POST http://localhost:3000/transition/auto \
+# Use authenticated movement endpoint
+curl -X POST http://localhost:3000/command \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "walletAddress": "0x...",
-    "zoneId": "human-meadow",
-    "entityId": "abc-123"
+    "zoneId": "village-square",
+    "entityId": "abc-123",
+    "action": "move",
+    "x": 50,
+    "y": 40
   }'
 ```
 
@@ -57,7 +61,7 @@ curl -X POST http://localhost:3000/transition/auto \
 
 | Category | Protected | Total | % |
 |----------|-----------|-------|---|
-| Zone Transitions | 2/2 | 2 | 100% ✅ |
+| Movement Commands | 1/1 | 1 | 100% ✅ |
 | Spawn Management | 1/2 | 2 | 50% |
 | Commands | 1/1 | 1 | 100% ✅ |
 | Shop | 1/3 | 3 | 33% |
@@ -114,7 +118,7 @@ These endpoints can be exploited to:
 ## 🚀 Recommended Next Steps
 
 ### Immediate (Today)
-1. ✅ Zone transitions secured
+1. ✅ Movement commands secured
 2. ⏳ Protect equipment endpoints (most critical for duping)
 3. ⏳ Protect cooking/alchemy (blockchain asset minting)
 
@@ -199,7 +203,7 @@ server.post<{ Body: CookBody }>("/cooking/cook", {
 
 ## 🧪 Testing Checklist
 
-- [x] Zone transitions require auth token
+- [x] Movement commands require auth token
 - [x] Invalid tokens return 401
 - [x] Wallet mismatch returns 403
 - [x] Entity ownership verified

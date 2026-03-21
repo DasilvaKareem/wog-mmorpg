@@ -1,5 +1,5 @@
 /**
- * One-time deploy script for the WoGIdentityRegistry (ERC-8004) contract on SKALE Base.
+ * One-time deploy script for the WoGMockIdentityRegistry (ERC-8004 local mock) contract.
  *
  * Usage:
  *   npx tsx shard/src/deploy/deployIdentityRegistry.ts
@@ -33,17 +33,17 @@ async function main() {
   // 1. Read Solidity source
   const solPath = resolve(
     import.meta.dirname,
-    "../../../contracts/WoGIdentityRegistry.sol"
+    "../../../hardhat/contracts/WoGMockIdentityRegistry.sol"
   );
   const source = readFileSync(solPath, "utf-8");
 
-  console.log("Compiling WoGIdentityRegistry.sol...");
+  console.log("Compiling WoGMockIdentityRegistry.sol...");
 
   // 2. Compile with solc + OZ import resolver
   const input = {
     language: "Solidity",
     sources: {
-      "WoGIdentityRegistry.sol": { content: source },
+      "WoGMockIdentityRegistry.sol": { content: source },
     },
     settings: {
       outputSelection: {
@@ -79,7 +79,7 @@ async function main() {
   }
 
   const compiled =
-    output.contracts["WoGIdentityRegistry.sol"]["WoGIdentityRegistry"];
+    output.contracts["WoGMockIdentityRegistry.sol"]["WoGMockIdentityRegistry"];
   const abi = compiled.abi;
   const bytecode = "0x" + compiled.evm.bytecode.object;
 
@@ -97,7 +97,7 @@ async function main() {
 
   // 3. Deploy — the production server is actively using this wallet, so we
   // retry with incrementing nonce until we find a free slot
-  console.log("Deploying WoGIdentityRegistry to SKALE Base...");
+  console.log("Deploying WoGMockIdentityRegistry...");
   const factory = new ethers.ContractFactory(abi, bytecode, deployWallet);
 
   let contract: ethers.BaseContract | null = null;
@@ -123,7 +123,7 @@ async function main() {
   await contract.waitForDeployment();
 
   const address = await contract.getAddress();
-  console.log(`\nWoGIdentityRegistry deployed at: ${address}`);
+  console.log(`\nWoGMockIdentityRegistry deployed at: ${address}`);
   console.log(`\nAdd to your .env:`);
   console.log(`  IDENTITY_REGISTRY_ADDRESS=${address}`);
 }

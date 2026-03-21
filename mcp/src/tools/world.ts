@@ -56,13 +56,13 @@ export function registerWorldTools(server: McpServer): void {
     "world_list_portals",
     {
       description:
-        "List all portals in a zone, their positions, destinations, and level requirements. Move within 30 units of a portal before using zone_transition.",
+        "List adjacent zones and travel hints for a zone. This wraps the live /neighbors/:zoneId endpoint in the unified-world movement model.",
       inputSchema: {
         zoneId: z.string().describe("Zone ID to list portals for"),
       },
     },
     async ({ zoneId }) => {
-      const data = await shard.get<unknown>(`/portals/${zoneId}`);
+      const data = await shard.get<unknown>(`/neighbors/${zoneId}`);
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
       };
@@ -73,7 +73,7 @@ export function registerWorldTools(server: McpServer): void {
     "zone_transition",
     {
       description:
-        "Transition your character to an adjacent zone through a portal. Must be within 30 units of the portal. Use world_list_portals to find portal positions.",
+        "Travel your character toward an adjacent or destination zone using the live unified-world travel command. Region updates happen automatically as your entity crosses the world layout.",
       inputSchema: {
         sessionId: z.string().describe("Session ID from auth_verify_signature"),
         entityId: z.string().describe("Your entity ID"),
@@ -82,19 +82,16 @@ export function registerWorldTools(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Specific portal ID to use. Omit to auto-transition through the nearest portal."
+            "Deprecated compatibility field. The live shard ignores portal IDs and uses target-zone travel instead."
           ),
+        targetZone: z.string().describe("Destination zone ID"),
       },
     },
-    async ({ sessionId, entityId, zoneId, portalId }) => {
-      const { walletAddress, token } = requireSession(sessionId);
-      const path = portalId
-        ? `/transition/${zoneId}/portal/${portalId}`
-        : "/transition/auto";
-
+    async ({ sessionId, entityId, zoneId, targetZone }) => {
+      const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
-        path,
-        { walletAddress, entityId, zoneId },
+        "/command",
+        { entityId, zoneId, action: "travel", targetZone },
         token
       );
       return {
@@ -187,11 +184,11 @@ export function registerWorldTools(server: McpServer): void {
     "world_get_map",
     {
       description:
-        "Get the world map: zone positions, connections, and level requirements. Useful for planning travel routes.",
+        "Get the world layout used by the live client. This uses /world/layout, which is the currently working world endpoint on the shard.",
       inputSchema: {},
     },
     async () => {
-      const data = await shard.get<unknown>("/worldmap");
+      const data = await shard.get<unknown>("/world/layout");
       return {
         content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
       };

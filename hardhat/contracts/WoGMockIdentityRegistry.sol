@@ -8,10 +8,10 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 /**
- * @title WoGIdentityRegistry
+ * @title WoGMockIdentityRegistry
  * @notice Local mock of the official ERC-8004 identity registry semantics.
  */
-contract WoGIdentityRegistry is ERC721URIStorage, Ownable, EIP712 {
+contract WoGMockIdentityRegistry is ERC721URIStorage, Ownable, EIP712 {
     struct MetadataEntry {
         string metadataKey;
         bytes metadataValue;

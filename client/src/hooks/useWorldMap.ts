@@ -38,6 +38,17 @@ export interface WorldMapMetadata {
   continents: ContinentInfo[];
 }
 
+interface WorldLayoutZone {
+  id: string;
+  offset: { x: number; z: number };
+  size: { width: number; height: number };
+  levelReq: number;
+}
+
+interface WorldLayoutData {
+  zones: Record<string, WorldLayoutZone>;
+}
+
 export type WorldMapEntities = Record<string, Entity[]>;
 
 export function useWorldMap(enabled: boolean, pollInterval = 3000) {
@@ -50,9 +61,30 @@ export function useWorldMap(enabled: boolean, pollInterval = 3000) {
   // Fetch metadata once when map opens
   const fetchMetadata = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/worldmap`);
-      if (!res.ok) return;
-      const data: WorldMapMetadata = await res.json();
+      let data: WorldMapMetadata | null = null;
+
+      const layoutRes = await fetch(`${API_URL}/world/layout`);
+      if (layoutRes.ok) {
+        const layout = (await layoutRes.json()) as WorldLayoutData;
+        data = {
+          zones: Object.values(layout.zones).map((zone) => ({
+            id: zone.id,
+            name: zone.id,
+            levelRange: `L${zone.levelReq}+`,
+            levelReq: zone.levelReq,
+            bgTint: "rgba(84,242,139,0.08)",
+            bounds: { width: zone.size.width, height: zone.size.height },
+            pois: [],
+          })),
+          connections: [],
+          continents: [],
+        };
+      } else {
+        const res = await fetch(`${API_URL}/worldmap`);
+        if (!res.ok) return;
+        data = (await res.json()) as WorldMapMetadata;
+      }
+
       if (!mountedRef.current) return;
       metadataRef.current = data;
       setMetadata(data);

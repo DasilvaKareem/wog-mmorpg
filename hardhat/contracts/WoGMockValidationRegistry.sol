@@ -10,10 +10,10 @@ interface IValidationIdentityRegistry {
 }
 
 /**
- * @title WoGValidationRegistry
+ * @title WoGMockValidationRegistry
  * @notice Local mock of the official ERC-8004 validation registry semantics.
  */
-contract WoGValidationRegistry is Ownable {
+contract WoGMockValidationRegistry is Ownable {
     event ValidationRequest(
         address indexed validatorAddress,
         uint256 indexed agentId,

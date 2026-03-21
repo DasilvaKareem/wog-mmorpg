@@ -8,9 +8,9 @@ async function deployFixture() {
   const gold = await ethers.deployContract("WoGMockGold");
   const items = await ethers.deployContract("WoGMockItems");
   const characters = await ethers.deployContract("WoGMockCharacters");
-  const identity = await ethers.deployContract("WoGIdentityRegistry");
-  const reputation = await ethers.deployContract("WoGReputationRegistry", [await identity.getAddress()]);
-  const validation = await ethers.deployContract("WoGValidationRegistry", [await identity.getAddress()]);
+  const identity = await ethers.deployContract("WoGMockIdentityRegistry");
+  const reputation = await ethers.deployContract("WoGMockReputationRegistry", [await identity.getAddress()]);
+  const validation = await ethers.deployContract("WoGMockValidationRegistry", [await identity.getAddress()]);
 
   await Promise.all([
     gold.waitForDeployment(),

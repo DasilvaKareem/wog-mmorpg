@@ -6,16 +6,16 @@ This document tracks which endpoints have authentication enforcement.
 
 ## ✅ Protected Endpoints
 
-### Zone Transitions (shard/src/zoneTransition.ts)
-- ✅ `POST /transition/auto` - Requires auth
-- ✅ `POST /transition/:zoneId/portal/:portalId` - Requires auth
-- ⚪ `GET /portals/:zoneId` - Public (read-only)
+### Zone Travel (current architecture)
+- ✅ `POST /command` with `action: "travel"` - Requires auth
+- ✅ `GET /neighbors/:zoneId` - Public discovery endpoint
+- deprecated `/transition/*` and `/portals/*` routes remain `410 Gone` stubs and should not be used by clients
 
 ### Spawn Management (shard/src/spawnOrders.ts)
 - ✅ `POST /spawn` - Requires auth, verifies wallet ownership
 - ⚪ `DELETE /spawn/:zoneId/:entityId` - Not protected (TODO)
 
-### Commands (shard/src/commands.ts)
+### Commands (shard/src/social/commands.ts)
 - ✅ `POST /command` - Requires auth
 
 ### Shop (shard/src/shop.ts)

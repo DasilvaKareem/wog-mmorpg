@@ -8,10 +8,10 @@ interface IIdentityRegistry {
 }
 
 /**
- * @title WoGReputationRegistry
+ * @title WoGMockReputationRegistry
  * @notice Local mock of the official ERC-8004 reputation registry semantics.
  */
-contract WoGReputationRegistry is Ownable {
+contract WoGMockReputationRegistry is Ownable {
     int128 private constant MAX_ABS_VALUE = 1e38;
 
     event NewFeedback(

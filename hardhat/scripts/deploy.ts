@@ -24,9 +24,9 @@ async function main() {
   const gold = await deployContract("WoGMockGold");
   const items = await deployContract("WoGMockItems");
   const characters = await deployContract("WoGMockCharacters");
-  const identity = await deployContract("WoGIdentityRegistry");
-  const reputation = await deployContract("WoGReputationRegistry", [identity.address]);
-  const validation = await deployContract("WoGValidationRegistry", [identity.address]);
+  const identity = await deployContract("WoGMockIdentityRegistry");
+  const reputation = await deployContract("WoGMockReputationRegistry", [identity.address]);
+  const validation = await deployContract("WoGMockValidationRegistry", [identity.address]);
   const auctionHouse = await deployContract("WoGAuctionHouse");
   const trade = await deployContract("WoGTrade");
   const guild = await deployContract("WoGGuild");

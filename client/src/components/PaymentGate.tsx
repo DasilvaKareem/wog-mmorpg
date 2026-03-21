@@ -74,6 +74,7 @@ export function PaymentGate({
           payOptions={{
             mode: "direct_payment",
             paymentInfo: {
+              chain: paymentChain,
               sellerAddress: sellerAddress as `0x${string}`,
               amount,
               token: paymentToken,
