@@ -195,18 +195,21 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
-      // Quest givers + Scout Kaela get the dialogue overlay
-      if (entity.type === "quest-giver" || entity.name === "Scout Kaela") {
+      // Quest givers, Scout Kaela, and any NPC with quest markers get the dialogue overlay
+      const hasQuestMarker = this.availableQuestNpcIds.has(entity.id)
+        || this.activeQuestNpcIds.has(entity.id)
+        || this.readyQuestNpcIds.has(entity.id);
+      if (entity.type === "quest-giver" || entity.name === "Scout Kaela" || hasQuestMarker) {
         gameBus.emit("questNpcClick", entity);
       }
 
-      // NPC info panel for NPCs without dedicated dialogs
+      // NPC info panel for NPCs without dedicated dialogs (skip if already opened quest dialogue)
       const NPC_INFO_TYPES = new Set([
         "trainer", "profession-trainer", "lore-npc",
         "crafting-master", "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);
-      if (NPC_INFO_TYPES.has(entity.type) && entity.name !== "Scout Kaela") {
+      if (NPC_INFO_TYPES.has(entity.type) && entity.name !== "Scout Kaela" && !hasQuestMarker) {
         gameBus.emit("npcInfoClick", entity);
       }
 
