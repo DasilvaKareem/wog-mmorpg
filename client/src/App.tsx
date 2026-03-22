@@ -8,7 +8,7 @@ import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
-import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
+import { playSoundEffect } from "@/lib/soundEffects";
 
 
 import { WalletManager } from "@/lib/walletManager";
@@ -59,9 +59,6 @@ const HotkeyBar = React.lazy(() =>
 );
 const OnboardingFlow = React.lazy(() =>
   import("@/components/OnboardingFlow").then((mod) => ({ default: mod.OnboardingFlow }))
-);
-const TutorialMasterModal = React.lazy(() =>
-  import("@/components/TutorialMasterModal").then((mod) => ({ default: mod.TutorialMasterModal }))
 );
 const SettingsDialog = React.lazy(() =>
   import("@/components/SettingsDialog").then((mod) => ({ default: mod.SettingsDialog }))
@@ -173,7 +170,6 @@ function GameWorld(): React.ReactElement {
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [inboxOpen, setInboxOpen] = React.useState(false);
-  const [tutorialMasterOpen, setTutorialMasterOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
@@ -230,7 +226,7 @@ function GameWorld(): React.ReactElement {
       if (key === "c") {
         setCharacterOpen((current) => !current);
       } else if (key === "m") {
-        setMapOpen((current) => !current);
+        setMapOpen((current) => { if (!current) playSoundEffect("ui_map_open"); return !current; });
       } else if (key === "q") {
         setQuestLogOpen((current) => !current);
       } else if (key === "i" && address && currentZone) {
@@ -264,7 +260,7 @@ function GameWorld(): React.ReactElement {
     const unsub2 = gameBus.on("inboxOpen", () => setInboxOpen(true));
     const unsub3 = gameBus.on("settingsOpen", () => setSettingsOpen(true));
     const unsub4 = gameBus.on("characterOpen", () => setCharacterOpen(true));
-    const unsub5 = gameBus.on("mapOpen", () => setMapOpen(true));
+    const unsub5 = gameBus.on("mapOpen", () => { playSoundEffect("ui_map_open"); setMapOpen(true); });
     const unsub6 = gameBus.on("questLogOpen", () => setQuestLogOpen(true));
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, []);
@@ -391,22 +387,8 @@ function GameWorld(): React.ReactElement {
             initialMode={onboardingMode}
             onClose={() => {
               setOnboardingOpen(false);
-              if (consumeTutorialMasterIntro()) {
-                setTutorialMasterOpen(true);
-              }
             }}
           />
-        )}
-        {tutorialMasterOpen && (
-          <React.Suspense fallback={null}>
-            <TutorialMasterModal
-              open={tutorialMasterOpen}
-              onClose={() => setTutorialMasterOpen(false)}
-              onShowChat={() => setChatVisible(true)}
-              onShowRanks={() => setRanksVisible(true)}
-              onShowWallet={() => setWalletVisible(true)}
-            />
-          </React.Suspense>
         )}
         {settingsOpen && <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
         {inboxOpen && <InboxDialog open={inboxOpen} onClose={() => setInboxOpen(false)} />}

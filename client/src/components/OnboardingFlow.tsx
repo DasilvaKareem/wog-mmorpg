@@ -11,10 +11,6 @@ import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import type { OnboardingStartMode } from "@/lib/onboarding";
 import {
-  queueTutorialMasterIntro,
-  warmTutorialMasterPortraitCache,
-} from "@/lib/tutorialMaster";
-import {
   trackUserSignedUp,
   trackCharacterCreated,
   trackAgentTaskStarted,
@@ -481,8 +477,6 @@ export function OnboardingFlow({
         origin,
         walletAddress: targetAddress!,
       });
-      queueTutorialMasterIntro();
-      void warmTutorialMasterPortraitCache();
       setSuccessData(successBase);
       setStep("success");
 

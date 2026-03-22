@@ -6,6 +6,7 @@ import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import { gameBus } from "@/lib/eventBus";
+import { playSoundEffect } from "@/lib/soundEffects";
 import { WalletManager } from "@/lib/walletManager";
 import { getAuthToken } from "@/lib/agentAuth";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
@@ -153,6 +154,7 @@ export function InspectDialog(): React.ReactElement | null {
       if (found) {
         setEntity(found);
         setTab("equipment");
+        playSoundEffect("ui_dialog_open");
         setOpen(true);
       }
     } catch {
@@ -180,6 +182,7 @@ export function InspectDialog(): React.ReactElement | null {
       if (self) {
         setEntity(self);
         setTab("equipment");
+        playSoundEffect("ui_dialog_open");
         setOpen(true);
       }
     } catch {
@@ -221,7 +224,7 @@ export function InspectDialog(): React.ReactElement | null {
           </div>
         </div>
         <button
-          onClick={() => setOpen(false)}
+          onClick={() => { playSoundEffect("ui_dialog_close"); setOpen(false); }}
           className="text-xs font-bold px-2 py-0.5 border"
           style={{ borderColor: BORDER, color: DIM, background: "transparent", cursor: "pointer" }}
         >

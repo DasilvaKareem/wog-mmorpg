@@ -5,7 +5,7 @@
 
 import * as React from "react";
 import { PayEmbed, darkTheme } from "thirdweb/react";
-import { defineChain, getContract } from "thirdweb";
+import { defineChain } from "thirdweb";
 import { thirdwebClient } from "@/lib/inAppWalletClient";
 
 // Server wallet that receives all fees
@@ -49,15 +49,6 @@ export function PaymentGate({
   tokenAddress = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
 }: PaymentGateProps): React.ReactElement {
   const paymentChain = React.useMemo(() => defineChain(chainId), [chainId]);
-  const paymentToken = React.useMemo(
-    () =>
-      getContract({
-        client: thirdwebClient,
-        chain: paymentChain,
-        address: tokenAddress,
-      }),
-    [paymentChain, tokenAddress]
-  );
 
   return (
     <div className="flex flex-col gap-3">
@@ -77,7 +68,7 @@ export function PaymentGate({
               chain: paymentChain,
               sellerAddress: sellerAddress as `0x${string}`,
               amount,
-              token: paymentToken,
+              token: { address: tokenAddress as `0x${string}` },
             },
             metadata: {
               name: label,

@@ -1,0 +1,426 @@
+{
+  "meta": {
+    "id": "wild-meadow-frontiers",
+    "title": "Wild Meadow Frontiers",
+    "summary": "Authored quest scenes for the wild meadow's ranger, druid, and lore-driven quest chains.",
+    "zoneIds": ["wild-meadow"],
+    "tags": ["wild-meadow", "authored", "frontier", "lore"],
+    "startingSceneId": "thornwood_frontier"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "thornwood_frontier",
+        "npcName": "Ranger Thornwood",
+        "title": "Ranger Thornwood Frontier Orders",
+        "idleText": "The meadow stays restless. If I have nothing to hand you, then either you've outgrown this stretch or the frontier is between hunts.",
+        "stages": [
+          {
+            "stageId": "bear_necessities",
+            "questId": "bear_necessities",
+            "available": {
+              "promptText": "You've cleared Marcus's line and stepped into my range. Bears have claimed the best ground in the meadow, and I need that land open again.",
+              "acceptLabel": "I'll clear the bears.",
+              "acceptedText": "Then hunt cleanly. Four Forest Bears. No wasted arrows, no wandering.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with bears?",
+              "detailsText": "Because they hold territory, and territory decides who survives out here. Clear the bears and the rest of the meadow starts to open.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask quickly. The frontier doesn't wait for polished speeches.",
+              "freeformPrompt": "Tell Thornwood how you want to approach the frontier hunt.",
+              "freeformPlaceholder": "Example: Give me the first meadow assignment.",
+              "freeformFallback": "Thornwood studies you. \"Either take the hunt or ask a clear question.\""
+            },
+            "active": {
+              "promptText": "The bears still own that patch of ground. Finish the hunt and report back with something worth hearing.",
+              "primaryLabel": "The bears are down.",
+              "resultText": "Good. If you can move bears, you can start dealing with what really nests in this meadow.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Forest Bears. Hold your nerve and don't let one broken charge become your last mistake.",
+              "declineLabel": "I'll return after the hunt.",
+              "declineText": "Do that. Out here, unfinished work becomes someone else's funeral."
+            },
+            "completedText": "The bear territory is clear. You're ready for sharper problems now."
+          },
+          {
+            "stageId": "arachnophobia",
+            "questId": "arachnophobia",
+            "available": {
+              "promptText": "With the bears pushed back, the canopy problem comes into focus. Venom Spiders have webbed the upper trees and they're spreading fast.",
+              "acceptLabel": "I'll burn through the nests.",
+              "acceptedText": "Five Venom Spiders. Cut them out before the canopy becomes theirs.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the spiders matter?",
+              "detailsText": "Because they feed on essence-rich sap and breed in every place we fail to watch. Leave them alone and the whole treeline rots from above.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. I prefer sharp questions to messy fear.",
+              "freeformPrompt": "Tell Thornwood what you need to know about the spider hunt.",
+              "freeformPlaceholder": "Example: Where do you need me to strike first?",
+              "freeformFallback": "Thornwood exhales once. \"Ask about the hunt or commit to it.\""
+            },
+            "active": {
+              "promptText": "The webs are still up there. Finish the spider work before we talk about anything else.",
+              "primaryLabel": "The spiders are dealt with.",
+              "resultText": "Good. The branches can breathe again, and now the bandits lose one more place to hide.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What exactly am I clearing?",
+              "secondaryText": "Five Venom Spiders. Keep moving and don't get boxed in where the webbing is thickest.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how infestations win. Move."
+            },
+            "completedText": "The canopy is cleaner now. The meadow's next rot wears a human face."
+          },
+          {
+            "stageId": "outlaw_justice",
+            "questId": "outlaw_justice",
+            "available": {
+              "promptText": "The spiders weren't the only scavengers watching us. Rogue Bandits have set camps in the meadow and they're testing our response.",
+              "acceptLabel": "I'll break the camps.",
+              "acceptedText": "Four Rogue Bandits. Make sure they stop reporting back.",
+              "effectType": "start_quest",
+              "detailsLabel": "What's the real risk?",
+              "detailsText": "Bandits don't just steal. They map routes, count patrols, and decide where the next raid lands. Cut them down before the meadow starts speaking their language.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Speak plainly. Outlaws understand hesitation better than mercy.",
+              "freeformPrompt": "Tell Thornwood how you want to handle the bandits.",
+              "freeformPlaceholder": "Example: Point me at the camps and I'll clean them out.",
+              "freeformFallback": "Thornwood's jaw tightens. \"Commit, clarify, or step aside.\""
+            },
+            "active": {
+              "promptText": "The bandits are still breathing somewhere in my meadow. Finish the work.",
+              "primaryLabel": "The camps are broken.",
+              "resultText": "Good. That buys us a little silence before the deeper corruption starts talking again.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me who I'm hunting.",
+              "secondaryText": "Four Rogue Bandits. Take out the ones watching the routes first.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "See that you do."
+            },
+            "completedText": "The outlaw camps are broken. What's left in the meadow is older and less forgiving."
+          },
+          {
+            "stageId": "natures_corruption",
+            "questId": "natures_corruption",
+            "available": {
+              "promptText": "This is where the meadow stops being simple. Corrupted Ents are walking the southwood line, twisted by something leaking out of the dark forest.",
+              "acceptLabel": "I'll put the corrupted guardians down.",
+              "acceptedText": "Three Corrupted Ents. Do it cleanly. They're victims as much as threats.",
+              "effectType": "start_quest",
+              "detailsLabel": "What happened to them?",
+              "detailsText": "Something fouled the essence moving through their roots. They were guardians once. Now they're proof the dark forest doesn't keep its poison to itself.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Just don't mistake sympathy for hesitation.",
+              "freeformPrompt": "Tell Thornwood what you want to know about the corrupted ents.",
+              "freeformPlaceholder": "Example: How do I handle them without getting crushed?",
+              "freeformFallback": "Thornwood keeps his gaze steady. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The corrupted guardians still stand. Finish the mercy and come back.",
+              "primaryLabel": "The ents are at rest.",
+              "resultText": "Then the meadow can exhale for a moment. One last predator remains.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Corrupted Ents. Don't let them pin you against the trees.",
+              "declineLabel": "Later.",
+              "declineText": "Every delay gives the corruption deeper roots."
+            },
+            "completedText": "The corrupted guardians are down. Only the alpha threat remains."
+          },
+          {
+            "stageId": "pack_leader",
+            "questId": "pack_leader",
+            "available": {
+              "promptText": "Everything in this stretch bends around one beast now. A Dire Wolf has been driving the meadow's violence from the shadows. Break it, and the rest will scatter.",
+              "acceptLabel": "I'll hunt the pack leader.",
+              "acceptedText": "Then make it count. One Dire Wolf. No second chances if you misread the charge.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is it different from the others?",
+              "detailsText": "Because the meadow follows strength. Kill the leader and the smaller terrors lose their nerve with it.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Speak. If you're afraid, say it clearly enough to beat it.",
+              "freeformPrompt": "Tell Thornwood how you plan to face the dire wolf.",
+              "freeformPlaceholder": "Example: I'm ready. Point me toward the alpha.",
+              "freeformFallback": "Thornwood's answer is flat. \"Either hunt it or ask a sharper question.\""
+            },
+            "active": {
+              "promptText": "The Dire Wolf still owns the field until you prove otherwise.",
+              "primaryLabel": "The pack leader is dead.",
+              "resultText": "Good. The meadow feels that kind of silence. You've earned the last test.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What am I facing again?",
+              "secondaryText": "One Dire Wolf, heavy enough to break your stance if you let it decide the rhythm.",
+              "declineLabel": "I'll return.",
+              "declineText": "Return only when the alpha is a carcass."
+            },
+            "completedText": "The pack has lost its center. Thornwood has one final measure left for you."
+          },
+          {
+            "stageId": "wilderness_survival",
+            "questId": "wilderness_survival",
+            "available": {
+              "promptText": "You've taken the meadow piece by piece. Now prove you can survive it as a whole. Bears, spiders, bandits. No excuses, no guided path.",
+              "acceptLabel": "Give me the final meadow trial.",
+              "acceptedText": "Then survive it properly and come back with the field behind you, not on your heels.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the trial prove?",
+              "detailsText": "That you can read a dangerous zone without a handler breathing over your shoulder. This is the difference between following orders and owning the field.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. Final questions should sound like resolve, not bargaining.",
+              "freeformPrompt": "Tell Thornwood how you're taking on the full meadow trial.",
+              "freeformPlaceholder": "Example: I'm ready to prove I can handle the whole frontier.",
+              "freeformFallback": "Thornwood folds his arms. \"Either take the trial or ask something worth answering.\""
+            },
+            "active": {
+              "promptText": "The meadow's final trial is still open. Finish it and we'll settle what you've become.",
+              "primaryLabel": "The wilderness trial is complete.",
+              "resultText": "Then hear this clearly: you're no tourist anymore. The meadow didn't break you, and that means the dark forest will finally take notice.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this trial asks.",
+              "secondaryText": "Finish the mixed survival test Thornwood set for you. It is meant to prove endurance, not just damage.",
+              "declineLabel": "I'll finish it first.",
+              "declineText": "Good. Come back when the frontier has actually tested you."
+            },
+            "completedText": "You've passed Thornwood's frontier trial. If the meadow has more to teach, it will have to work harder."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "caelum_essence",
+        "npcName": "Druid Caelum",
+        "title": "Druid Caelum and the Living Flow",
+        "idleText": "The roots are quiet for now. If you have no business with me, listen to the trees and move gently.",
+        "stages": [
+          {
+            "stageId": "druids_perspective",
+            "questId": "druids_perspective",
+            "available": {
+              "promptText": "Elowen sent you to hear the meadow from a druid instead of a scholar. Good. Books measure essence. We live inside it.",
+              "acceptLabel": "Teach me your view.",
+              "acceptedText": "Then listen well. The wild meadow is not empty land. It is a breathing circuit, and every careless hand leaves a scar on it.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What do the druids believe?",
+              "detailsText": "That essence is not only fuel or math. It is the living breath of Arcadia, moving through root, river, storm, and memory.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask without rushing. The forest answers slower than cities do.",
+              "freeformPrompt": "Ask Caelum what you want to understand about essence.",
+              "freeformPlaceholder": "Example: Elowen sent me. What am I missing?",
+              "freeformFallback": "Caelum closes his eyes for a moment. \"Ask one true question, not three weak ones.\""
+            },
+            "completedText": "You've heard Caelum's first lesson. Now you have to see what a wounded flow looks like."
+          },
+          {
+            "stageId": "corrupted_essence",
+            "questId": "corrupted_essence",
+            "available": {
+              "promptText": "Words are not enough. Corrupted Ents are proof of what happens when the flow is poisoned. If you want to understand imbalance, confront it.",
+              "acceptLabel": "I'll cut down the corrupted ents.",
+              "acceptedText": "Three Corrupted Ents. End their suffering and return with open eyes.",
+              "effectType": "start_quest",
+              "detailsLabel": "What should I learn from this?",
+              "detailsText": "That corruption is not chaos appearing from nowhere. It is a current redirected, a living pattern bent until it becomes violence.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. But do not ask for comfort where only truth will do.",
+              "freeformPrompt": "Tell Caelum what you need to know before facing the corrupted ents.",
+              "freeformPlaceholder": "Example: How do I read the corruption instead of just killing it?",
+              "freeformFallback": "Caelum's voice stays calm. \"Take the lesson or ask a clearer question.\""
+            },
+            "active": {
+              "promptText": "The corrupted guardians still walk. End that distortion and then speak to me again.",
+              "primaryLabel": "The corrupted ents are gone.",
+              "resultText": "Then you have seen enough to know this wound runs deeper than the meadow. Voss in the dark forest will show you the other side of the argument.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the lesson.",
+              "secondaryText": "Three Corrupted Ents. Watch what the corruption changed, not only how hard it strikes.",
+              "declineLabel": "I'll return after the task.",
+              "declineText": "Go with care. Observation matters as much as victory."
+            },
+            "completedText": "You've witnessed the meadow's corruption firsthand. Caelum has already sent your path toward the dark forest."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "sylvara_guardians",
+        "npcName": "Warden Sylvara",
+        "title": "Warden Sylvara and the Emerald Woods",
+        "idleText": "The treeline remembers. If I have no watch for you, then keep the old woods in your thoughts and your boots out of careless places.",
+        "stages": [
+          {
+            "stageId": "voice_of_the_woods",
+            "questId": "voice_of_the_woods",
+            "available": {
+              "promptText": "You stand where the meadow yields to older things. The Emerald Woods remember centuries your kind only reads about. Listen, and I'll tell you why that memory is shaking.",
+              "acceptLabel": "I'll hear the woods' warning.",
+              "acceptedText": "Then hear it properly: the balance is slipping, and you are not here by accident.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What is wrong with the woods?",
+              "detailsText": "The sequoias still stand, the druids still keep their rites, but the flow beneath them is changing. Something deeper is disturbing the old pattern.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask with respect. The old growth is patient, but not indulgent.",
+              "freeformPrompt": "Tell Sylvara what you want to know about the Emerald Woods.",
+              "freeformPlaceholder": "Example: What are the woods trying to warn us about?",
+              "freeformFallback": "Sylvara studies the treeline first, then you. \"Ask one thing clearly.\""
+            },
+            "completedText": "You've heard Sylvara's warning. The woods have already begun measuring you."
+          },
+          {
+            "stageId": "spiders_in_the_canopy",
+            "questId": "spiders_in_the_canopy",
+            "available": {
+              "promptText": "The first sign is in the canopy. Venom Spiders are feeding on essence-rich sap and spreading through the sequoias faster than the druids can contain them.",
+              "acceptLabel": "I'll clear the canopy.",
+              "acceptedText": "Five Venom Spiders. Cut them out before the old growth starts answering with fire instead of patience.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the spiders different here?",
+              "detailsText": "Because the sequoias are saturated with old essence. Anything that feeds there grows stranger, faster, and harder to uproot.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then speak. The canopy leaves no room for indecision.",
+              "freeformPrompt": "Tell Sylvara what you need before hunting the spiders.",
+              "freeformPlaceholder": "Example: Where should I strike the infestation first?",
+              "freeformFallback": "Sylvara's answer is measured. \"Ask about the infestation or commit to clearing it.\""
+            },
+            "active": {
+              "promptText": "The canopy is still infested. Finish the spider work before the woods answer more harshly.",
+              "primaryLabel": "The spiders are cleared.",
+              "resultText": "Good. With the canopy quieter, I can show you what the druids have really been protecting.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Five Venom Spiders in the old growth. Don't let their webs dictate the fight.",
+              "declineLabel": "I'll finish it first.",
+              "declineText": "See that you do."
+            },
+            "completedText": "The canopy breathes easier now. Sylvara is ready to speak more freely."
+          },
+          {
+            "stageId": "moondancer_rites",
+            "questId": "moondancer_rites",
+            "available": {
+              "promptText": "You've earned the calmer lesson. Let me tell you what Moondancer Glade preserves and why the old rites matter more than outsiders understand.",
+              "acceptLabel": "I'm listening.",
+              "acceptedText": "Then listen for the hum beneath your feet. That is what harmony sounds like when a forest still remembers itself.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What do the rites actually do?",
+              "detailsText": "They align the forest's essence with celestial cycles. Standing stones, roots, moonlight, and memory all pulled into one living correction.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, and I'll answer as plainly as the woods allow.",
+              "freeformPrompt": "Ask Sylvara about Moondancer Glade and the druid rites.",
+              "freeformPlaceholder": "Example: Why do the standing stones matter so much?",
+              "freeformFallback": "Sylvara rests a hand on her staff. \"Ask a true question and I'll answer it.\""
+            },
+            "completedText": "You've heard the old rites described in Sylvara's words. Now comes the part where theory fails."
+          },
+          {
+            "stageId": "ents_awakened",
+            "questId": "ents_awakened",
+            "available": {
+              "promptText": "The harmony is breaking anyway. Corrupted Ents, once guardians, are walking against the very forest they served. Mercy now looks like force.",
+              "acceptLabel": "I'll put the awakened ents down.",
+              "acceptedText": "Four Corrupted Ents. Do not mistake pity for permission to be careless.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call it mercy?",
+              "detailsText": "Because they were protectors before the dark forest bled poison through the roots. Ending them is sorrow, not triumph.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. But understand that not every clean answer feels kind.",
+              "freeformPrompt": "Tell Sylvara what you want to know before facing the corrupted ents.",
+              "freeformPlaceholder": "Example: What should I be watching for in the old guardians?",
+              "freeformFallback": "Sylvara's tone stays even. \"Ask clearly or take the burden.\""
+            },
+            "active": {
+              "promptText": "The corrupted guardians are still abroad. End their torment and return.",
+              "primaryLabel": "The ents are laid to rest.",
+              "resultText": "Then the woods owe you a hard kind of gratitude. One last vigil remains.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Four Corrupted Ents. Respect their strength and don't let grief slow your hand.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how corruption learns patience."
+            },
+            "completedText": "The awakened guardians are at rest. Sylvara's final words are waiting."
+          },
+          {
+            "stageId": "sylvaras_vigil",
+            "questId": "sylvaras_vigil",
+            "available": {
+              "promptText": "You've fought for these woods. Now stand still and hear what they mean to those of us who never stopped listening.",
+              "acceptLabel": "I'll hear your final vigil.",
+              "acceptedText": "Then take this with you: the old woods do not forget their defenders, even when the rest of Arcadia does.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What should I carry forward?",
+              "detailsText": "That age alone does not protect what is sacred. Someone still has to stand the line, season after season, whether glory notices or not.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, and then carry the answer beyond this treeline.",
+              "freeformPrompt": "Ask Sylvara what she wants remembered about the Emerald Woods.",
+              "freeformPlaceholder": "Example: What do the woods ask of people like us now?",
+              "freeformFallback": "Sylvara's gaze softens only slightly. \"Ask what matters, and I'll answer.\""
+            },
+            "completedText": "Sylvara has already spoken her vigil over you. The old woods have no need to repeat themselves."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "thessaly_aurundel",
+        "npcName": "Sage Thessaly",
+        "title": "Sage Thessaly and Aurundel's Burden",
+        "idleText": "Aurundel still drifts above us whether anyone below deserves it or not. If you have no question for me, then look up and think harder.",
+        "stages": [
+          {
+            "stageId": "the_sky_city",
+            "questId": "the_sky_city",
+            "available": {
+              "promptText": "Orin sent you for the truth behind Aurundel. Fine. I'll tell you what it means to be born in a city held above the world by power that never gets to rest.",
+              "acceptLabel": "Tell me about Aurundel.",
+              "acceptedText": "Then listen carefully. Beauty without cost is a lie, and Aurundel was never cheap.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why does Aurundel matter?",
+              "detailsText": "Because it proves what Arcadia achieved and what it chained itself to. A sky-city is wonder and burden in the same breath.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask plainly. Nostalgia has no patience for tourists.",
+              "freeformPrompt": "Ask Thessaly what you want to know about Aurundel.",
+              "freeformPlaceholder": "Example: What was it actually like to grow up there?",
+              "freeformFallback": "Thessaly's eyes stay distant. \"Ask one real question.\""
+            },
+            "completedText": "You've heard Thessaly's first truth about Aurundel. The burden comes next."
+          },
+          {
+            "stageId": "aurundels_burden",
+            "questId": "aurundels_burden",
+            "available": {
+              "promptText": "Aurundel floats because something below it pays the price. Right now that cost reaches the caravans crossing this meadow, and Rogue Bandits are making the strain worse.",
+              "acceptLabel": "I'll break the raiders.",
+              "acceptedText": "Four Rogue Bandits. Clear them, and then we'll speak about what declining empires really ask from the ground beneath them.",
+              "effectType": "start_quest",
+              "detailsLabel": "What burden am I really fighting?",
+              "detailsText": "An empire that built wonders so large they still consume the future long after the glory faded. The bandits are only the visible symptom.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask, but don't pretend this is only about a few thieves on the road.",
+              "freeformPrompt": "Tell Thessaly what you need to know before dealing with the bandits.",
+              "freeformPlaceholder": "Example: What does clearing them change for Aurundel's people?",
+              "freeformFallback": "Thessaly exhales slowly. \"Ask about the burden or take the work.\""
+            },
+            "active": {
+              "promptText": "The bandits are still on the caravans. Finish that and then we'll talk honestly.",
+              "primaryLabel": "The raiders are dealt with.",
+              "resultText": "Good. Now you understand at least one thing clearly: decline is paid for by whoever still has to carry supplies through it.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Rogue Bandits in the meadow. Break the raiders and the route breathes again.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "Return with results, not sentiment."
+            },
+            "completedText": "Thessaly has shown you both the sky-city's wonder and its cost."
+          }
+        ]
+      }
+    }
+  ]
+}

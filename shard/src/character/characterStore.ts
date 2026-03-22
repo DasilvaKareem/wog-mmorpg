@@ -30,6 +30,7 @@ export interface CharacterSaveData {
   y: number;
   kills: number;
   completedQuests: string[];
+  storyFlags: string[];
   learnedTechniques: string[];
   professions: string[];
   signatureTechniqueId?: string;
@@ -114,6 +115,7 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     y: parseFloat(raw.y ?? "0"),
     kills: parseInt(raw.kills ?? "0", 10),
     completedQuests: parseStringArray(raw.completedQuests),
+    storyFlags: parseStringArray(raw.storyFlags),
     learnedTechniques: parseStringArray(raw.learnedTechniques),
     professions: parseStringArray(raw.professions),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,

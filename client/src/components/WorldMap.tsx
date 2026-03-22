@@ -2,6 +2,7 @@ import * as React from "react";
 import { useWorldMap } from "@/hooks/useWorldMap";
 import type { SimplePOI } from "@/hooks/useWorldMap";
 import { gameBus } from "@/lib/eventBus";
+import { playSoundEffect } from "@/lib/soundEffects";
 import type { Entity } from "@/types";
 
 /* ── Icon glyphs ── */
@@ -63,6 +64,7 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
   const continents = metadata?.continents ?? [];
 
   const handleZoneClick = (zoneId: string) => {
+    playSoundEffect("ui_button_click");
     gameBus.emit("switchZone", { zoneId });
     onClose();
   };
@@ -108,7 +110,10 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
             {">>> WORLD MAP <<<"}
           </h2>
           <button
-            onClick={onClose}
+            onClick={() => {
+              playSoundEffect("ui_button_click");
+              onClose();
+            }}
             className="text-[9px] uppercase tracking-wider transition-colors"
             style={{ color: "#9aa7cc" }}
             onMouseEnter={(e) => (e.currentTarget.style.color = "#edf2ff")}
@@ -132,7 +137,10 @@ export function WorldMap({ open, onClose }: WorldMapProps): React.ReactElement |
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setSelectedContinent(c.id)}
+                  onClick={() => {
+                    playSoundEffect("ui_tab_switch");
+                    setSelectedContinent(c.id);
+                  }}
                   className="flex items-center gap-1.5 px-3 py-1.5 transition-all whitespace-nowrap"
                   style={{
                     border: isActive ? "2px solid #54f28b" : "2px solid #283454",

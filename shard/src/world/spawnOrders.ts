@@ -182,6 +182,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
       completedQuests: saved?.completedQuests ?? [],
+      storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
@@ -225,6 +226,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
         y: entity.y,
         kills: 0,
         completedQuests: [],
+        storyFlags: [],
         learnedTechniques: [],
         professions: [],
       });

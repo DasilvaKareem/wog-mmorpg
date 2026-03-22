@@ -20,6 +20,7 @@ import {
   clampToZoneBounds,
   ZONE_LEVEL_REQUIREMENTS,
   getRegionAtPosition,
+  getWorldLayout,
   getZoneOffset,
 } from "./worldLayout.js";
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
@@ -156,6 +157,8 @@ export interface Entity {
   activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
   /** Completed quest IDs (players only) - used for quest chain prerequisites. */
   completedQuests?: string[];
+  /** Persistent story/dialogue flags (players only). */
+  storyFlags?: string[];
   /** Learned techniques (players only). */
   learnedTechniques?: string[]; // Array of technique IDs
   /** Cumulative kill count (players only). */
@@ -2763,6 +2766,7 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         y: entity.y,
         kills: entity.kills ?? 0,
         completedQuests: entity.completedQuests ?? [],
+        storyFlags: entity.storyFlags ?? [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: getLearnedProfessions(entity.walletAddress),
         equipment: entity.equipment ?? undefined,
@@ -2837,7 +2841,8 @@ export function registerZoneRuntime(server: FastifyInstance) {
     "/zones/:zoneId",
     async (request, reply) => {
       const zoneId = request.params.zoneId;
-      if (!knownRegions.has(zoneId)) {
+      const configuredZone = getWorldLayout().zones[zoneId];
+      if (!knownRegions.has(zoneId) && !configuredZone) {
         reply.code(404);
         return { error: "Zone not found" };
       }

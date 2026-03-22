@@ -2,6 +2,7 @@ import * as React from "react";
 import { useWalletContext } from "@/context/WalletContext";
 import { usePushNotifications } from "@/hooks/usePushNotifications";
 import { useBackgroundMusic } from "@/hooks/useBackgroundMusic";
+import { playSoundEffect } from "@/lib/soundEffects";
 
 const LS_SOUND = "wog-sound-enabled";
 
@@ -44,6 +45,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.Re
   if (!open) return null;
 
   const toggleSound = () => {
+    playSoundEffect("ui_button_click");
     const next = !soundEnabled;
     setSoundEnabled(next);
     writeBool(LS_SOUND, next);
@@ -51,6 +53,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.Re
   };
 
   const handlePushToggle = async () => {
+    playSoundEffect("ui_button_click");
     if (push.isSubscribed) {
       await push.unsubscribe();
     } else {
@@ -71,7 +74,10 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps): React.Re
         <div className="flex items-center justify-between border-b-2 border-[#1a2a44] bg-[#111d33] px-4 py-2.5">
           <span className="text-[11px] uppercase tracking-widest text-[#ffcc00]">Settings</span>
           <button
-            onClick={onClose}
+            onClick={() => {
+              playSoundEffect("ui_button_click");
+              onClose();
+            }}
             className="text-[14px] leading-none text-[#596a8a] hover:text-[#ffcc00] transition-colors"
           >
             x

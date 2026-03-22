@@ -1,0 +1,350 @@
+{
+  "meta": {
+    "id": "moondancer-glade-rites",
+    "title": "Moondancer Glade Rites",
+    "summary": "Authored quest scenes for Elder Druid Moonwhisper and Moonherb Gatherer Lirien in Moondancer Glade.",
+    "zoneIds": ["moondancer-glade"],
+    "tags": ["moondancer-glade", "authored", "rites", "moonlit"],
+    "startingSceneId": "moonwhisper_rites"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "moonwhisper_rites",
+        "npcName": "Elder Druid Moonwhisper",
+        "title": "Elder Druid Moonwhisper and the Broken Pact",
+        "idleText": "The Glade still holds its breath between moon phases. If I have nothing for you, then either the ley lines are resting or you have already carried enough of their trouble for one cycle.",
+        "stages": [
+          {
+            "stageId": "moondancer_elder_wisdom",
+            "questId": "moondancer_elder_wisdom",
+            "available": {
+              "promptText": "Ancient pacts have started fraying in the Glade, and places built on ritual rarely fail quietly. If you would help, begin by listening before you reach for force.",
+              "acceptLabel": "I'll hear the elder's wisdom.",
+              "acceptedText": "Then hear this first: balance is not stillness. It is relationship under pressure, and ours is failing.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What broke in the Glade?",
+              "detailsText": "Pacts between guardians, druids, spirits, and ley lines. Once trust in a ritual ecosystem fails, even holy things start behaving like trespassers.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask softly if you can. Moonlit places remember the tone as much as the words.",
+              "freeformPrompt": "Ask Moonwhisper what you want to understand about Moondancer Glade.",
+              "freeformPlaceholder": "Example: What should I notice first about the Glade's imbalance?",
+              "freeformFallback": "Moonwhisper's gaze stays far away for a moment. \"Ask one clear thing, and I will answer.\""
+            },
+            "completedText": "Moonwhisper has opened the first layer of the problem. Now the Glade tests whether you can act inside sacred disorder."
+          },
+          {
+            "stageId": "moondancer_stalker_shadows",
+            "questId": "moondancer_stalker_shadows",
+            "available": {
+              "promptText": "Moon Stalkers once guarded these paths under full light. Corruption taught them to hunt the same paths instead.",
+              "acceptLabel": "I'll put down the Stalkers.",
+              "acceptedText": "Four Moon Stalkers. End the feral lesson before the full moon turns it into custom.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why begin with the Stalkers?",
+              "detailsText": "Because they show what happens when guardianship loses memory but keeps instinct. That failure spreads quickly if not checked.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Moonlight is kind only to the attentive.",
+              "freeformPrompt": "Tell Moonwhisper what you need before facing the Moon Stalkers.",
+              "freeformPlaceholder": "Example: What kind of mistake do they punish under moonlight?",
+              "freeformFallback": "Moonwhisper inclines her head. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The Stalkers are still loose under the moon. Finish the hunt.",
+              "primaryLabel": "The Stalkers are down.",
+              "resultText": "Good. The paths are quieter again, which means the smaller bright things can no longer hide behind panic.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Moon Stalkers. Trust rhythm and line of sight more than speed.",
+              "declineLabel": "Later.",
+              "declineText": "Moon phases wait for no one, and neither do feral guardians."
+            },
+            "completedText": "The moonlit paths are clearer. Moonwhisper's next concern flies on old alliances turned bitter."
+          },
+          {
+            "stageId": "moondancer_fae_rebellion",
+            "questId": "moondancer_fae_rebellion",
+            "available": {
+              "promptText": "Fae Guardians were once allies in these groves. Now they strike at anyone who enters, as if pact and trespass became the same word overnight.",
+              "acceptLabel": "I'll quell the rebellion.",
+              "acceptedText": "Four Fae Guardians. Put them down as gently as this work allows.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does this rebellion matter so much?",
+              "detailsText": "Because alliance is harder to restore than territory. When protectors turn on each other, the whole ritual order loses confidence in itself.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Broken alliances deserve more than blunt descriptions.",
+              "freeformPrompt": "Tell Moonwhisper what you need before confronting the Fae Guardians.",
+              "freeformPlaceholder": "Example: What should I remember about what they used to be?",
+              "freeformFallback": "Moonwhisper's voice thins. \"Ask one true question, or go.\""
+            },
+            "active": {
+              "promptText": "The Fae are still in revolt. Finish the work and return.",
+              "primaryLabel": "The Fae are dealt with.",
+              "resultText": "Good. The Glade just regained a little room for ritual instead of reaction. We can use that room now.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Fae Guardians. Remember they are fallen allies, not simple vermin.",
+              "declineLabel": "Later.",
+              "declineText": "Rebellions deepen when everyone agrees to postpone them."
+            },
+            "completedText": "The Fae rebellion is quieter. Moonwhisper's next request belongs to ritual supply, not violence alone."
+          },
+          {
+            "stageId": "moondancer_moonflower_rite",
+            "questId": "moondancer_moonflower_rite",
+            "available": {
+              "promptText": "The Moonflower only blooms when both moons align. I need those blooms before the alignment passes, or the purification rite begins already compromised.",
+              "acceptLabel": "I'll gather the Moonflowers.",
+              "acceptedText": "Six Moonflowers. Gather them from the sacred clearings before the pooled light thins.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the flowers matter to the rite?",
+              "detailsText": "Because some rituals require living timing, not just ingredients. Moonflower carries alignment in its structure.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Sacred harvesting is still a covenant, not a grocery list.",
+              "freeformPrompt": "Tell Moonwhisper what you need before gathering the Moonflowers.",
+              "freeformPlaceholder": "Example: What should I respect most in the sacred clearings?",
+              "freeformFallback": "Moonwhisper rests both hands on her staff. \"Ask with care, or go gather.\""
+            },
+            "active": {
+              "promptText": "The Moonflower rite is still waiting on the blooms. Finish the gathering before the moons move on.",
+              "primaryLabel": "The Moonflowers are gathered.",
+              "resultText": "Good. The rite can still be assembled honestly. Now we return to the things trying to choke the Glade shut.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Six Moonflowers gathered from the clearings touched by both moons.",
+              "declineLabel": "Later.",
+              "declineText": "Aligned blooms do not negotiate with hesitation."
+            },
+            "completedText": "The ritual flowers are secured. Moonwhisper's next threat grows walls from grief."
+          },
+          {
+            "stageId": "moondancer_dryad_thorns",
+            "questId": "moondancer_dryad_thorns",
+            "available": {
+              "promptText": "Twilight Dryads are weaving thorn walls across the Glade. They were gentle once. Now they are turning sanctuary into enclosure.",
+              "acceptLabel": "I'll clear the Dryads.",
+              "acceptedText": "Three Twilight Dryads. Open the Glade before ritual space becomes a prison.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the thorn walls so dangerous?",
+              "detailsText": "Because sacred places need movement as much as stillness. Once paths close, panic and doctrine both harden badly.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Walls made of sorrow still cut flesh all the same.",
+              "freeformPrompt": "Tell Moonwhisper what you need before confronting the Twilight Dryads.",
+              "freeformPlaceholder": "Example: What are the thorn walls doing to the ley lines?",
+              "freeformFallback": "Moonwhisper's eyes sharpen. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The thorn walls still hold parts of the Glade closed. Finish the clearing.",
+              "primaryLabel": "The Dryads are stopped.",
+              "resultText": "Good. The ley lines can move a little more freely now. Which means the betrayal at the center can no longer hide behind disorder.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Twilight Dryads. Break the enclosure before the thorns decide your route for you.",
+              "declineLabel": "Later.",
+              "declineText": "Closed sacred ground teaches the wrong lesson quickly."
+            },
+            "completedText": "The thorn walls are reduced. Moonwhisper is ready to name the betrayal inside the order itself."
+          },
+          {
+            "stageId": "moondancer_druid_purge",
+            "questId": "moondancer_druid_purge",
+            "available": {
+              "promptText": "Shadow Druids were once my students. That is what makes them dangerous. They understand the rites they are poisoning from within.",
+              "acceptLabel": "I'll end the Shadow Druids.",
+              "acceptedText": "Three Shadow Druids. Cut corruption out of the order before it convinces the Glade that betrayal is tradition.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is this betrayal worse than the rest?",
+              "detailsText": "Because internal corruption teaches every surrounding system to mistrust itself. Once priest and rite turn on one another, collapse accelerates.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Some wounds still deserve accurate language.",
+              "freeformPrompt": "Tell Moonwhisper what you need before facing the Shadow Druids.",
+              "freeformPlaceholder": "Example: What should I remember about what they know?",
+              "freeformFallback": "Moonwhisper closes her eyes briefly. \"Ask honestly, or go do the hard thing.\""
+            },
+            "active": {
+              "promptText": "The Shadow Druids are still at work inside the ley lines. Finish the purge.",
+              "primaryLabel": "The traitors are down.",
+              "resultText": "Good. The order is smaller now, but cleaner. Only the one who began this remains.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Shadow Druids. Treat them as knowledgeable enemies, not merely bitter ones.",
+              "declineLabel": "Later.",
+              "declineText": "Betrayal left alive becomes doctrine."
+            },
+            "completedText": "The inner corruption is cut back. Moonwhisper's next step is the duel at the root of it all."
+          },
+          {
+            "stageId": "moondancer_archdruid_duel",
+            "questId": "moondancer_archdruid_duel",
+            "available": {
+              "promptText": "The Moondancer Archdruid started this collapse and still channels corruption through the ley lines. Defeat him, or accept that the Glade has a new theology written in rot.",
+              "acceptLabel": "I'll face the Archdruid.",
+              "acceptedText": "One Moondancer Archdruid. This is not a hunt. It is judgment wearing ritual form.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why must it be a duel?",
+              "detailsText": "Because some figures distort a whole system by becoming its unquestioned center. They have to be answered directly, not merely surrounded.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final ritual duels deserve more than courage without thought.",
+              "freeformPrompt": "Tell Moonwhisper what you need before facing the Moondancer Archdruid.",
+              "freeformPlaceholder": "Example: What kind of mistake gives the Archdruid control of the duel?",
+              "freeformFallback": "Moonwhisper's staff glows faintly. \"Ask clearly or go render judgment.\""
+            },
+            "active": {
+              "promptText": "The Archdruid still stands at the center of the ley corruption. End the duel.",
+              "primaryLabel": "The Archdruid is defeated.",
+              "resultText": "Good. The Glade just recovered its center. One final severing remains, and it belongs to what rose from the damaged ley lines themselves.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Moondancer Archdruid. Fight the center of the corruption, not just its spectacle.",
+              "declineLabel": "Later.",
+              "declineText": "Centers of collapse do not improve while observed."
+            },
+            "completedText": "The Archdruid has fallen. Moonwhisper's final trial is aimed at the residue left in the lines."
+          },
+          {
+            "stageId": "moondancer_lunar_trial",
+            "questId": "moondancer_lunar_trial",
+            "available": {
+              "promptText": "Lunar Wraiths now rise from the corrupted ley lines when the moons are full. Destroy them and the ancient peace of the Glade can begin to return honestly.",
+              "acceptLabel": "Give me the final lunar trial.",
+              "acceptedText": "Six Lunar Wraiths. Sever the residue and return.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the final trial prove?",
+              "detailsText": "That you can cleanse not only the visible leaders of corruption, but the lingering pattern they taught the place to repeat.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final questions should sound like restoration, not conquest.",
+              "freeformPrompt": "Tell Moonwhisper how you're approaching the final lunar trial.",
+              "freeformPlaceholder": "Example: I'm ready to finish this. What matters most now?",
+              "freeformFallback": "Moonwhisper bows her head. \"Ask one final worthy thing, or take the trial.\""
+            },
+            "active": {
+              "promptText": "The ley-line severing is incomplete. Finish the Lunar Wraiths and return.",
+              "primaryLabel": "The trial is complete.",
+              "resultText": "Then hear this: the Glade is not healed in a single night, but it is no longer repeating its worst wounds without resistance. That is enough for peace to begin again.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this proves.",
+              "secondaryText": "That you can cleanse the pattern left behind after power, betrayal, and ritual collapse have already spent themselves.",
+              "declineLabel": "Later.",
+              "declineText": "Full moons are poor allies for the undecided."
+            },
+            "completedText": "Moonwhisper has already spoken the Glade's thanks. The rest of the healing belongs to time and proper moons."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "lirien_moonherbs",
+        "npcName": "Moonherb Gatherer Lirien",
+        "title": "Moonherb Gatherer Lirien and the Salvage Work",
+        "idleText": "The garden can survive silence better than panic. If I have nothing for you, then either the cuttings are safe for a while or you finally stopped trampling the beds in your head.",
+        "stages": [
+          {
+            "stageId": "moondancer_lirien_intro",
+            "questId": "moondancer_lirien_intro",
+            "available": {
+              "promptText": "The Glade grows herbs with extraordinary potency when the moons and ley lines agree. Right now they barely agree with themselves. If you're willing to help, start by understanding what's still worth saving.",
+              "acceptLabel": "Tell me what the garden needs.",
+              "acceptedText": "Then begin with this: salvage is not lesser work. It is how sacred gardens survive bad eras.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why are the herbs so important here?",
+              "detailsText": "Because ritual flora is memory made edible, medicinal, and repeatable. Lose the herbs and the Glade forgets part of its own language.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask softly. Some plants answer tone before touch.",
+              "freeformPrompt": "Ask Lirien what you want to understand about salvaging the Glade's herbs.",
+              "freeformPlaceholder": "Example: What kind of plants are at risk first?",
+              "freeformFallback": "Lirien brushes moonlit pollen from her hands. \"Ask one careful question.\""
+            },
+            "completedText": "Lirien has laid out the stakes. Now she needs the harvest before dawn steals it."
+          },
+          {
+            "stageId": "moondancer_lirien_gather",
+            "questId": "moondancer_lirien_gather",
+            "available": {
+              "promptText": "Moonpetal blooms only in clearings touched by both moons, and it wilts at dawn. If we lose this window, we lose a whole cycle of recovery.",
+              "acceptLabel": "I'll gather the Moonpetals.",
+              "acceptedText": "Four Moonpetals. Gather fast, but do not gather carelessly.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is Moonpetal so valuable?",
+              "detailsText": "Because it stores alignment in a form alchemists and druids can actually use. It's timing made botanical.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Dawn is the enemy here, not difficulty.",
+              "freeformPrompt": "Tell Lirien what you need before gathering Moonpetal.",
+              "freeformPlaceholder": "Example: What should I watch for in the moonlit clearings?",
+              "freeformFallback": "Lirien glances at the sky. \"Ask clearly or go while the blooms still listen.\""
+            },
+            "active": {
+              "promptText": "The Moonpetal harvest isn't done. Finish it before dawn teaches us regret again.",
+              "primaryLabel": "The Moonpetals are gathered.",
+              "resultText": "Good. That gives the garden a future for one more cycle. Next I need the raiders off my beds long enough to finish the work.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Four Moonpetals gathered before dawn from the clearings touched by both moons.",
+              "declineLabel": "Later.",
+              "declineText": "Moonpetal harvested later is moonpetal lost."
+            },
+            "completedText": "The harvest is in hand. Lirien's next problem has wings, tempers, and a claim on her garden."
+          },
+          {
+            "stageId": "moondancer_lirien_defend",
+            "questId": "moondancer_lirien_defend",
+            "available": {
+              "promptText": "Fae Guardians keep raiding my garden as if cultivation were theft. I need them driven off before every careful bed becomes a battlefield.",
+              "acceptLabel": "I'll defend the garden.",
+              "acceptedText": "Three Fae Guardians. Make room for the herbs to survive.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the garden provoke them?",
+              "detailsText": "Because cultivation looks like ownership to wounded spirits, and wounded spirits tend to flatten nuance first.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Garden defense is still a form of diplomacy once it fails.",
+              "freeformPrompt": "Tell Lirien what you need before defending the moonherb beds.",
+              "freeformPlaceholder": "Example: What should I protect first when they rush the garden?",
+              "freeformFallback": "Lirien grips her shears tighter. \"Ask one practical thing or go clear them.\""
+            },
+            "active": {
+              "promptText": "The garden is still under pressure. Finish the defense.",
+              "primaryLabel": "The garden is secure.",
+              "resultText": "Good. Now I can work without looking over my shoulder every minute. Which means the final elixir can finally be made.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Fae Guardians threatening the cultivated beds and harvest routes.",
+              "declineLabel": "Later.",
+              "declineText": "Gardens do not survive on postponed protection."
+            },
+            "completedText": "The beds are safer. Lirien's last task asks you to turn the harvest into sight."
+          },
+          {
+            "stageId": "moondancer_lirien_elixir",
+            "questId": "moondancer_lirien_elixir",
+            "available": {
+              "promptText": "With the Moonpetals in hand, I can finally ask for the part that matters most: transformation. Brew the Elixirs of Clarity and help restore ley-line sight to the druids who still stand.",
+              "acceptLabel": "I'll brew the elixirs.",
+              "acceptedText": "Two Elixirs of Clarity. Make them worthy of the moonlight they came from.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is the final elixir so important?",
+              "detailsText": "Because seeing corruption clearly is half the work of resisting it. Most failures begin with blurred judgment, not weak hands.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final brews deserve focus.",
+              "freeformPrompt": "Tell Lirien what you need before brewing the Elixirs of Clarity.",
+              "freeformPlaceholder": "Example: What kind of mistake ruins the clarity?",
+              "freeformFallback": "Lirien looks straight at you. \"Ask one useful brewing question, or get to the station.\""
+            },
+            "active": {
+              "promptText": "The elixirs still aren't brewed. Finish them and return.",
+              "primaryLabel": "The elixirs are complete.",
+              "resultText": "Good. The garden gave us more than petals this cycle. It gave the Glade a better chance to see its own wounds before they deepen again.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Two Elixirs of Clarity brewed from the gathered Moonpetals for the druids' ley-line sight.",
+              "declineLabel": "Later.",
+              "declineText": "Clarity deferred is just confusion with better posture."
+            },
+            "completedText": "Lirien has already accepted the brew. The garden's answer now moves through the druids instead of the beds."
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,350 @@
+{
+  "meta": {
+    "id": "lake-lumina-reflections",
+    "title": "Lake Lumina Reflections",
+    "summary": "Authored quest scenes for Lumen Priestess Aurelia and Tide Alchemist Nereus at Lake Lumina.",
+    "zoneIds": ["lake-lumina"],
+    "tags": ["lake-lumina", "authored", "radiance", "purification"],
+    "startingSceneId": "aurelia_lake"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "aurelia_lake",
+        "npcName": "Lumen Priestess Aurelia",
+        "title": "Lumen Priestess Aurelia and the Drowned Light",
+        "idleText": "The Lake still reflects more than it reveals. If I have nothing for you, then either the sanctum is breathing easier or the next corruption has not yet shown its face.",
+        "stages": [
+          {
+            "stageId": "lumina_priestess_plea",
+            "questId": "lumina_priestess_plea",
+            "available": {
+              "promptText": "Lake Lumina was once a place people came to be restored. Now the water glows like a wound pretending to be holy. If you would help, begin by hearing what was lost.",
+              "acceptLabel": "I'll hear the plea.",
+              "acceptedText": "Then understand this first: sacred places do not stop mattering just because corruption learns how to wear their light.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What changed in the Lake?",
+              "detailsText": "Its radiance turned defensive, then predatory. Corruption rarely arrives as darkness first; it often arrives as holiness bent just enough to wound.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask reverently if you can. Light can still be impatient.",
+              "freeformPrompt": "Ask Aurelia what you want to understand about Lake Lumina's corruption.",
+              "freeformPlaceholder": "Example: What should I notice first in the Lake's light?",
+              "freeformFallback": "Aurelia lowers her eyes. \"Ask one clear thing, and I will answer.\""
+            },
+            "completedText": "Aurelia has told you what the Lake became. Now she needs the first layer of corruption cut away."
+          },
+          {
+            "stageId": "lumina_wraith_light",
+            "questId": "lumina_wraith_light",
+            "available": {
+              "promptText": "Luminous Wraiths are turning the Lake's own brilliance into weaponry. That kind of blasphemy spreads faster than common rot.",
+              "acceptLabel": "I'll banish the Wraiths.",
+              "acceptedText": "Four Luminous Wraiths. Cut the false light away before it teaches the water new cruelty.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the Wraiths the first threat?",
+              "detailsText": "Because they weaponize what should have been mercy. Once healing light becomes predatory, trust dies with it.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. False light is still a kind of deception.",
+              "freeformPrompt": "Tell Aurelia what you need before facing the Luminous Wraiths.",
+              "freeformPlaceholder": "Example: What does their light do to people who hesitate?",
+              "freeformFallback": "Aurelia traces a small ward in the air. \"Ask clearly or take the work.\""
+            },
+            "active": {
+              "promptText": "The Wraiths still distort the Lake's radiance. Finish the banishment.",
+              "primaryLabel": "The Wraiths are banished.",
+              "resultText": "Good. The shoreline is clearer for a moment, which means the heavier shapes beneath the water can finally be addressed.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Luminous Wraiths. Keep your line of sight and don't let their glare dictate the fight.",
+              "declineLabel": "Later.",
+              "declineText": "Distorted light does not improve with waiting."
+            },
+            "completedText": "The false radiance is thinner. Aurelia's next problem rose from the Lake itself."
+          },
+          {
+            "stageId": "lumina_crystal_crush",
+            "questId": "lumina_crystal_crush",
+            "available": {
+              "promptText": "Crystal Golems have grown from the Lake's own deposits and are sealing the waterways under their weight. Beauty becomes obstruction quickly here.",
+              "acceptLabel": "I'll shatter the Golems.",
+              "acceptedText": "Four Crystal Golems. Break the shoreline free before the sanctum closes around itself.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the Crystal Golems matter?",
+              "detailsText": "Because they turn sacred geography into dead architecture. Once the waterways close, purification becomes much harder than defense.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Stone grown from radiance still kills like stone.",
+              "freeformPrompt": "Tell Aurelia what you need before facing the Crystal Golems.",
+              "freeformPlaceholder": "Example: What do they threaten besides the shore?",
+              "freeformFallback": "Aurelia's tone stays calm. \"Ask about the golems or take the task.\""
+            },
+            "active": {
+              "promptText": "The Crystal Golems still choke the shore. Finish the shattering.",
+              "primaryLabel": "The Golems are down.",
+              "resultText": "Good. The pathways through the water can breathe again. That gives us a chance to retrieve what the old temple left behind.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Crystal Golems along the shore. Don't let the terrain harden around your mistakes.",
+              "declineLabel": "Later.",
+              "declineText": "Closed waterways become lasting wounds."
+            },
+            "completedText": "The shoreline is clearer. Aurelia's next task is to recover what the temple lost to the depths."
+          },
+          {
+            "stageId": "lumina_sunken_relics",
+            "questId": "lumina_sunken_relics",
+            "available": {
+              "promptText": "Arcane Crystals still lie on the lakebed where the old temple fell apart. I need them for the purification ritual before darker things reach them first.",
+              "acceptLabel": "I'll retrieve the crystals.",
+              "acceptedText": "Five Arcane Crystals. Bring them back cleanly; relic work in corrupted water rewards discipline more than daring.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the relics essential?",
+              "detailsText": "Because sacred restoration requires original resonance where possible. New tools can help, but the old temple still knows how to answer its own wounds.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Retrieval in holy ruins is still a kind of prayer if done correctly.",
+              "freeformPrompt": "Tell Aurelia what you need before retrieving the Arcane Crystals.",
+              "freeformPlaceholder": "Example: What should I respect most in the sunken temple?",
+              "freeformFallback": "Aurelia folds her hands. \"Ask with care, or go bring the relics home.\""
+            },
+            "active": {
+              "promptText": "The relic retrieval isn't complete. Bring me the Arcane Crystals before the ritual window narrows.",
+              "primaryLabel": "The relics are secured.",
+              "resultText": "Good. The ritual can proceed later now. First, we need to grant rest to those who still confuse duty with attack.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Arcane Crystals from the lakebed and sunken temple remains.",
+              "declineLabel": "Later.",
+              "declineText": "The deep keeps what the slow fail to claim."
+            },
+            "completedText": "The relics are recovered. Aurelia's next burden is mercy for drowned guardians."
+          },
+          {
+            "stageId": "lumina_drowned_honor",
+            "questId": "lumina_drowned_honor",
+            "available": {
+              "promptText": "Drowned Knights still patrol their ruined posts. They mistake every movement for trespass because duty outlived understanding.",
+              "acceptLabel": "I'll grant them peace.",
+              "acceptedText": "Three Drowned Knights. Give them the silence their service was denied.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call this an act of honor?",
+              "detailsText": "Because not every foe should be remembered as a villain. Some are simply obligations that were never released correctly.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Mercy can still require steel.",
+              "freeformPrompt": "Tell Aurelia what you need before facing the Drowned Knights.",
+              "freeformPlaceholder": "Example: What should I understand about their duty?",
+              "freeformFallback": "Aurelia's expression saddens. \"Ask clearly or take the burden.\""
+            },
+            "active": {
+              "promptText": "The Drowned Knights still keep their ruined watch. Finish the work.",
+              "primaryLabel": "The Knights are at rest.",
+              "resultText": "Good. The sanctum is a little less haunted now. What comes next is not duty, but hunger wrapped in scales.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Drowned Knights. Treat them seriously even if you pity them.",
+              "declineLabel": "Later.",
+              "declineText": "Duty twisted by death does not unwind on its own."
+            },
+            "completedText": "The drowned guardians are quieter. Aurelia's next threat coils below the pillars."
+          },
+          {
+            "stageId": "lumina_serpent_depths",
+            "questId": "lumina_serpent_depths",
+            "available": {
+              "promptText": "Lumen Serpents have wrapped themselves around the old pillars and turned reflected light into a weapon. The deeper water is theirs unless we say otherwise.",
+              "acceptLabel": "I'll slay the Serpents.",
+              "acceptedText": "Three Lumen Serpents. Keep your eyes guarded and your rhythm cleaner than theirs.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the Serpents different from the other threats?",
+              "detailsText": "Because they exploit the Lake exactly as it is now. They are not merely surviving corruption; they are thriving in its optics.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Depth and light together make poor company for the careless.",
+              "freeformPrompt": "Tell Aurelia what you need before facing the Lumen Serpents.",
+              "freeformPlaceholder": "Example: What kind of mistake do the reflected beams punish first?",
+              "freeformFallback": "Aurelia lifts her staff slightly. \"Ask sharply or take the task.\""
+            },
+            "active": {
+              "promptText": "The Serpents still control too much of the depthline. Finish the hunt.",
+              "primaryLabel": "The Serpents are slain.",
+              "resultText": "Good. The sanctum's center is finally reachable, which means the final guardian can no longer hide behind the water.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Lumen Serpents in the deeper water around the pillars. Respect reflected angles.",
+              "declineLabel": "Later.",
+              "declineText": "Depth predators do not lose patience."
+            },
+            "completedText": "The Serpents are gone. Aurelia can finally speak the inner guardian's name."
+          },
+          {
+            "stageId": "lumina_solaris_warden",
+            "questId": "lumina_solaris_warden",
+            "available": {
+              "promptText": "The Solaris Warden once protected the innermost sanctum. Now it guards corruption with the full authority of an old holy machine.",
+              "acceptLabel": "I'll defeat the Warden.",
+              "acceptedText": "One Solaris Warden. Break the sanctum open to healing again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the Warden matter so much?",
+              "detailsText": "Because sacred systems become catastrophes when their final guardian can no longer distinguish purity from possession.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final sanctum fights deserve more than impulse.",
+              "freeformPrompt": "Tell Aurelia what you need before facing the Solaris Warden.",
+              "freeformPlaceholder": "Example: What kind of error does it punish first?",
+              "freeformFallback": "Aurelia's voice lowers. \"Ask clearly or go free the sanctum.\""
+            },
+            "active": {
+              "promptText": "The Solaris Warden still holds the center. End it and return.",
+              "primaryLabel": "The Warden has fallen.",
+              "resultText": "Good. The inner sanctum is open again. Only the deepest corruption remains now, and it no longer has excuses to hide behind.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Solaris Warden at the sanctum center. Treat it as corrupted authority, not just another large target.",
+              "declineLabel": "I'll return after the fight.",
+              "declineText": "Return when the center is ours again."
+            },
+            "completedText": "The sanctum has reopened. Aurelia's last task belongs to the trenches."
+          },
+          {
+            "stageId": "lumina_horror_purge",
+            "questId": "lumina_horror_purge",
+            "available": {
+              "promptText": "Sunken Horrors from the trenchline are the last concentration of corruption here. Destroy them and the Lake finally gets the chance to remember itself again.",
+              "acceptLabel": "Give me the final purge.",
+              "acceptedText": "Five Sunken Horrors. Finish the trenchline corruption and return.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the final purge prove?",
+              "detailsText": "That you can cleanse a sacred place all the way to its ugliest depths, not only restore what remains beautiful on the surface.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final purifications should sound like resolve.",
+              "freeformPrompt": "Tell Aurelia how you're approaching the final trenchline purge.",
+              "freeformPlaceholder": "Example: I'm ready to finish this. What matters most?",
+              "freeformFallback": "Aurelia's light steadies. \"Ask one last worthy thing, or take the purge.\""
+            },
+            "active": {
+              "promptText": "The trenchline purge is still open. Finish it and return.",
+              "primaryLabel": "The final purge is complete.",
+              "resultText": "Then hear this clearly: the Lake is not healed all at once, but it is no longer surrendering. That is how sanctuaries come back.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this final act proves.",
+              "secondaryText": "That you can carry restoration all the way through ugliness instead of stopping at the first sign of recovered beauty.",
+              "declineLabel": "Later.",
+              "declineText": "Sacred waters do not cleanse themselves while we stall."
+            },
+            "completedText": "Aurelia has already spoken the Lake's gratitude over you. The rest belongs to the water itself."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "nereus_tides",
+        "npcName": "Tide Alchemist Nereus",
+        "title": "Tide Alchemist Nereus and the Purification Work",
+        "idleText": "Alchemical circles hold better when fewer people interfere with them. If I have nothing for you, then either the reagents are stable or you finally brought me enough time to think.",
+        "stages": [
+          {
+            "stageId": "lumina_nereus_intro",
+            "questId": "lumina_nereus_intro",
+            "available": {
+              "promptText": "Lumina's waters used to heal without argument. Now they corrode flesh and memory alike. If we're going to reverse even a fraction of that, we start with method, not hope.",
+              "acceptLabel": "Tell me what the work needs.",
+              "acceptedText": "Good. Remember that purification is never just faith. It is process, ingredients, and a refusal to fake results.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What is your angle on the Lake?",
+              "detailsText": "Aurelia guards sanctity. I study mechanism. Between us, the Lake may yet remember how to heal.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask precisely. Alchemy resents vague intentions.",
+              "freeformPrompt": "Ask Nereus what you want to know about purifying Lumina.",
+              "freeformPlaceholder": "Example: What part of the process matters most first?",
+              "freeformFallback": "Nereus adjusts a vial. \"Ask one practical question.\""
+            },
+            "completedText": "Nereus has outlined the work. Now he needs clean reagents and tested theory."
+          },
+          {
+            "stageId": "lumina_nereus_gather",
+            "questId": "lumina_nereus_gather",
+            "available": {
+              "promptText": "Arcane Crystals from the lakebed still hold pockets of relatively pure essence. I need them before the contamination pattern spreads any deeper through the basin.",
+              "acceptLabel": "I'll retrieve the samples.",
+              "acceptedText": "Four Arcane Crystals. Bring them back intact; reagents are useless if handled like trophies.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why these crystals specifically?",
+              "detailsText": "Because they preserve the Lake's better chemistry in miniature. Think of them as clean arguments inside a polluted system.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Sampling is where good alchemy starts or fails.",
+              "freeformPrompt": "Tell Nereus what you need before collecting the Arcane Crystals.",
+              "freeformPlaceholder": "Example: What makes a recovered sample still usable?",
+              "freeformFallback": "Nereus doesn't look up. \"Ask about the samples or go recover them.\""
+            },
+            "active": {
+              "promptText": "The sample run isn't complete. Bring me the Arcane Crystals and then we'll decide whether the Lake still wants help.",
+              "primaryLabel": "The samples are secured.",
+              "resultText": "Good. Now the process has a clean anchor. The next reagent is harder to admire and more dangerous to collect.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Four Arcane Crystals retrieved intact from the lakebed.",
+              "declineLabel": "Later.",
+              "declineText": "Samples degrade faster than optimism."
+            },
+            "completedText": "Nereus has the clean samples. He now needs the serpents' reactive scales."
+          },
+          {
+            "stageId": "lumina_nereus_serpents",
+            "questId": "lumina_nereus_serpents",
+            "available": {
+              "promptText": "Lumen Serpent scales absorb and redirect light magic better than anything else left in this basin. I need them if we're going to tune the draught correctly.",
+              "acceptLabel": "I'll bring the scales.",
+              "acceptedText": "Two Lumen Serpents. Bring me what sheds and do not mistake collection for reverence.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the scales matter so much?",
+              "detailsText": "Because reactive material lets us route purification instead of merely pouring it into corruption and hoping the reaction is kind.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Reagent hunts reward specifics.",
+              "freeformPrompt": "Tell Nereus what you need before hunting the Serpents.",
+              "freeformPlaceholder": "Example: What are the scales doing in the formula?",
+              "freeformFallback": "Nereus frowns slightly. \"Ask about the reagent or go get it.\""
+            },
+            "active": {
+              "promptText": "The Serpent reagent isn't ready. Finish the hunt.",
+              "primaryLabel": "The scales are secured.",
+              "resultText": "Good. With the crystals and scales together, the formula finally deserves a flame.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Two Lumen Serpents for scales suitable to Nereus's purification formula.",
+              "declineLabel": "Later.",
+              "declineText": "Reactions postponed are rarely reactions improved."
+            },
+            "completedText": "The reagents are assembled. Nereus's final demand is proof the formula can actually be made."
+          },
+          {
+            "stageId": "lumina_nereus_purify",
+            "questId": "lumina_nereus_purify",
+            "available": {
+              "promptText": "Now we stop talking and synthesize. Brew the Purification Draught properly and we move from theory to intervention.",
+              "acceptLabel": "I'll brew the draught.",
+              "acceptedText": "Two Purification Draughts. One for the Lake, one to prove the first was not a fluke.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why brew two?",
+              "detailsText": "Because any serious process needs replication. A single success is a rumor; two is evidence.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final formulas deserve discipline.",
+              "freeformPrompt": "Tell Nereus what you need before brewing the Purification Draught.",
+              "freeformPlaceholder": "Example: What kind of failure ruins the whole batch?",
+              "freeformFallback": "Nereus folds his hands. \"Ask one real formulation question, or get to work.\""
+            },
+            "active": {
+              "promptText": "The draught still isn't brewed. Finish it and return.",
+              "primaryLabel": "The draught is complete.",
+              "resultText": "Good. That's no longer a theory. It's intervention. Which is the closest thing this Lake has had to hope in some time.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Two Purification Draughts brewed cleanly from the recovered reagents.",
+              "declineLabel": "Later.",
+              "declineText": "Chemistry does not honor procrastination."
+            },
+            "completedText": "Nereus has already accepted the batch. The water will answer it on its own timescale."
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,575 @@
+{
+  "meta": {
+    "id": "dwarven-strongholds",
+    "title": "Dwarven Strongholds",
+    "summary": "Authored quest scenes for Gemloch and Felsrock, centered on mountain survival, citadel recovery, and dwarven salvage.",
+    "zoneIds": ["viridian-range", "felsrock-citadel"],
+    "tags": ["viridian-range", "felsrock-citadel", "authored", "dwarven", "gemloch"],
+    "startingSceneId": "barak_range"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "barak_range",
+        "npcName": "Gemloch Overseer Barak",
+        "title": "Gemloch Overseer Barak and the High Pass",
+        "idleText": "The Range is always one bad step from killing someone. If I have nothing open for you, the mountain is either satisfied or gathering another lesson.",
+        "stages": [
+          {
+            "stageId": "viridian_overseers_task",
+            "questId": "viridian_overseers_task",
+            "available": {
+              "promptText": "These peaks make fools out of the unbriefed. If you want to survive the Range, start by listening instead of climbing.",
+              "acceptLabel": "Give me the mountain's first lesson.",
+              "acceptedText": "Then hear it plain: Gemloch doesn't reward bravery. It rewards judgment under pressure and cold.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What makes the Range different?",
+              "detailsText": "Height, exposure, unstable passes, and ore-rich depths that make monsters as stubborn as the miners chasing them.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask like you intend to remember it.",
+              "freeformPrompt": "Ask Barak what you should understand first about the Viridian Range.",
+              "freeformPlaceholder": "Example: What kills most people up here first?",
+              "freeformFallback": "Barak narrows his eyes. \"Ask one solid question and I'll answer it.\""
+            },
+            "completedText": "Barak has given you his first mountain law. The work starts where the passes narrow."
+          },
+          {
+            "stageId": "viridian_yeti_cull",
+            "questId": "viridian_yeti_cull",
+            "available": {
+              "promptText": "Mountain Yetis have taken the lower passes and the caravans are paying for it in blood and broken wagons.",
+              "acceptLabel": "I'll clear the yetis.",
+              "acceptedText": "Four Mountain Yetis. Cull them before the lower passes become a graveyard with a trail through it.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start there?",
+              "detailsText": "Because supply lines decide whether a mountain settlement is a fortress or a starvation story.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Cold problems don't warm themselves while you hesitate.",
+              "freeformPrompt": "Tell Barak what you need before hunting the Mountain Yetis.",
+              "freeformPlaceholder": "Example: What kind of ground do they try to trap people on?",
+              "freeformFallback": "Barak shifts his pickaxe. \"Ask about the cull or take it.\""
+            },
+            "active": {
+              "promptText": "The Yetis still hold the lower passes. Finish the cull.",
+              "primaryLabel": "The yetis are down.",
+              "resultText": "Good. The caravans can breathe again, which means the mountain can afford to show you its next cruelty.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Mountain Yetis in the lower passes. Watch for the rush and don't let the terrain help them.",
+              "declineLabel": "Later.",
+              "declineText": "Cold doesn't wait. Neither do Yetis."
+            },
+            "completedText": "The lower passes are quieter. Barak's next warning has scales."
+          },
+          {
+            "stageId": "viridian_basilisk_eyes",
+            "questId": "viridian_basilisk_eyes",
+            "available": {
+              "promptText": "Now the ridge wants to test your attention. Rock Basilisks make a religion out of one bad glance.",
+              "acceptLabel": "I'll clear the basilisks.",
+              "acceptedText": "Four Rock Basilisks. Keep your eyes useful and your pride smaller than their stare.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do they matter so much?",
+              "detailsText": "Because the mountain doesn't only kill with force. Sometimes it kills by making you look exactly where you shouldn't.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Just don't ask me how to survive if you plan to ignore the answer.",
+              "freeformPrompt": "Tell Barak what you need before facing the Rock Basilisks.",
+              "freeformPlaceholder": "Example: What mistake do they punish first?",
+              "freeformFallback": "Barak grunts once. \"Ask about the basilisks or get moving.\""
+            },
+            "active": {
+              "promptText": "The basilisks are still nesting along the ridge. Finish the job.",
+              "primaryLabel": "The basilisks are dead.",
+              "resultText": "Good. Now the ridge is readable again, which means we can chase ore instead of just surviving the climb.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Rock Basilisks along the ridge. Respect the angle of approach more than your instinct to rush.",
+              "declineLabel": "I'll return after the fight.",
+              "declineText": "Do that. Stone doesn't forgive impatience."
+            },
+            "completedText": "The ridge is safer. Barak's next assignment is about greed and logistics."
+          },
+          {
+            "stageId": "viridian_ore_expedition",
+            "questId": "viridian_ore_expedition",
+            "available": {
+              "promptText": "The upper veins are rich with gold, but miners won't touch them without proof the route is worth the risk. Bring me ore and prove the mountain still pays.",
+              "acceptLabel": "I'll bring back the gold ore.",
+              "acceptedText": "Five Gold Ore. If you're going to risk the climb, make sure the mountain regrets giving anything up.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is the ore important now?",
+              "detailsText": "Because survival buys time, but resources buy permanence. Camps become settlements only when the mountain starts paying back what it costs.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Miners die faster when they romanticize a vein.",
+              "freeformPrompt": "Tell Barak what you need before the ore expedition.",
+              "freeformPlaceholder": "Example: What's the real risk on the upper veins?",
+              "freeformFallback": "Barak scratches frost from his beard. \"Ask sharp or take the haul.\""
+            },
+            "active": {
+              "promptText": "The ore run isn't done. Bring back the gold and then we'll talk about keeping the heights open.",
+              "primaryLabel": "The ore is secured.",
+              "resultText": "Good. Now we can justify holding the line up here. Which is useful, because the sky has started hunting the miners too.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Gold Ore from the upper veins. Take the route that keeps your footing first and greed second.",
+              "declineLabel": "Later.",
+              "declineText": "The vein won't move. The weather will."
+            },
+            "completedText": "The ore expedition paid off. Barak's next threat comes from above."
+          },
+          {
+            "stageId": "viridian_condor_nests",
+            "questId": "viridian_condor_nests",
+            "available": {
+              "promptText": "Storm Condors have decided the cliff routes belong to them. Miners are getting lifted off the rock before they even draw breath to scream.",
+              "acceptLabel": "I'll bring down the condors.",
+              "acceptedText": "Three Storm Condors. Make the cliffs survivable again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the condors so disruptive?",
+              "detailsText": "Because vertical danger changes every calculation. One thing hunting from above can close a whole route without ever touching the ground.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Air threats punish the lazy thinker first.",
+              "freeformPrompt": "Tell Barak what you need before facing the Storm Condors.",
+              "freeformPlaceholder": "Example: What makes the cliff routes so bad with condors on them?",
+              "freeformFallback": "Barak folds his arms. \"Ask about the condors or take the work.\""
+            },
+            "active": {
+              "promptText": "The condors are still circling the cliffs. Finish the work.",
+              "primaryLabel": "The condors are down.",
+              "resultText": "Good. The upper routes can breathe again. That means the deeper tunnels are next.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Storm Condors. Stay off predictable ground where the dive can own you.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "See that you do."
+            },
+            "completedText": "The cliff routes are clearer. Barak's next problem is made from the mountain itself."
+          },
+          {
+            "stageId": "viridian_golem_smash",
+            "questId": "viridian_golem_smash",
+            "available": {
+              "promptText": "Gemloch Golems have started walking the deep tunnels again. Animated ore is bad enough. Animated ore in a mine is a message.",
+              "acceptLabel": "I'll smash the golems.",
+              "acceptedText": "Three Gemloch Golems. Break them apart before the deep decides to close around us.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call them a message?",
+              "detailsText": "Because the mountain only animates its own body when something deeper has gone wrong. These are symptoms with fists.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Just don't mistake ore with a heartbeat for normal cave trouble.",
+              "freeformPrompt": "Tell Barak what you need before smashing the Gemloch Golems.",
+              "freeformPlaceholder": "Example: What are they really guarding down there?",
+              "freeformFallback": "Barak's expression hardens. \"Ask clearly or take the hammer to them.\""
+            },
+            "active": {
+              "promptText": "The golems are still in the tunnels. Finish it and then we'll talk about what kind of mountain is waking up.",
+              "primaryLabel": "The golems are broken.",
+              "resultText": "Good. Now the deeper threat can be named without sounding like superstition.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Gemloch Golems in the deep tunnels. Keep mobile and don't let a dead end become a coffin.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how tunnels become tombs."
+            },
+            "completedText": "The golems are down. Barak is ready to point you at the mountain's true titan."
+          },
+          {
+            "stageId": "viridian_titan_fall",
+            "questId": "viridian_titan_fall",
+            "available": {
+              "promptText": "The Avalanche Titan is not a monster in the usual sense. It's the mountain deciding motion should kill on purpose. Bring it down, or this whole range becomes negotiation with rockslides.",
+              "acceptLabel": "I'll bring down the titan.",
+              "acceptedText": "One Avalanche Titan. This is the kind of fight mountains remember.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is the titan different?",
+              "detailsText": "Because scale changes morale. Once a camp believes the mountain itself hates them, the pass is lost even before the first collapse.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Final mountain fights deserve that much respect.",
+              "freeformPrompt": "Tell Barak what you need before facing the Avalanche Titan.",
+              "freeformPlaceholder": "Example: What kind of mistake gets people buried against it?",
+              "freeformFallback": "Barak taps the stone with his boot. \"Ask sharper or go make history.\""
+            },
+            "active": {
+              "promptText": "The Avalanche Titan still walks. End it and then the summit can finally be tested cleanly.",
+              "primaryLabel": "The titan has fallen.",
+              "resultText": "Good. The mountain just got smaller in the right way. One last pass remains.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Avalanche Titan. Respect momentum, falling terrain, and every instinct telling you to overcommit.",
+              "declineLabel": "I'll return after the kill.",
+              "declineText": "Return standing."
+            },
+            "completedText": "The titan is down. Barak's last title waits at the summit."
+          },
+          {
+            "stageId": "viridian_frost_breaker",
+            "questId": "viridian_frost_breaker",
+            "available": {
+              "promptText": "One trial remains. Frost Giants descend when the blizzards hit, and if the high pass stays closed, the whole range eventually starves. Clear it and the summit is yours.",
+              "acceptLabel": "Give me the summit trial.",
+              "acceptedText": "Six Frost Giants. Take the pass back from winter itself.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the final title prove?",
+              "detailsText": "That you can hold a mountain route open against everything the height, cold, and creatures here can throw at it.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. Final questions should sound like readiness, not altitude sickness.",
+              "freeformPrompt": "Tell Barak how you're approaching the high-pass trial.",
+              "freeformPlaceholder": "Example: I'm ready for the summit. What matters most?",
+              "freeformFallback": "Barak gives a hard nod. \"Take the pass or ask one last clean question.\""
+            },
+            "active": {
+              "promptText": "The high pass is still contested. Finish the Frost Giants and come back.",
+              "primaryLabel": "The summit trial is complete.",
+              "resultText": "Then hear it plain: the Range has tested your footing, your lungs, your greed, and your nerve. You still stand. That's enough for me.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this proves.",
+              "secondaryText": "That you can hold the high pass against winter, giants, and the mountain's own contempt.",
+              "declineLabel": "Later.",
+              "declineText": "Summits won later are usually won by someone else."
+            },
+            "completedText": "Barak has already named you against the Range. The mountain keeps quieter company with you now."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "haldor_citadel",
+        "npcName": "Forgeguard Captain Haldor",
+        "title": "Forgeguard Captain Haldor and the Broken Citadel",
+        "idleText": "The Citadel still burns, just not always for us. If no order is open with me, then the next fight is deeper inside.",
+        "stages": [
+          {
+            "stageId": "felsrock_captains_orders",
+            "questId": "felsrock_captains_orders",
+            "available": {
+              "promptText": "Felsrock isn't dead, but it's close enough to smell like failure. If you're here to help reclaim it, start by hearing what still stands and what turned against us.",
+              "acceptLabel": "Give me your orders.",
+              "acceptedText": "Then listen. The Citadel still has structure, steel, and stubbornness. It lacks breathing room.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What broke first?",
+              "detailsText": "Control. The moment our own creations stopped recognizing command, every corridor became a question of whether the walls were still ours.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Citadels fall slower than people think and faster than they deserve.",
+              "freeformPrompt": "Ask Haldor what you should understand first about reclaiming Felsrock.",
+              "freeformPlaceholder": "Example: What kind of fight is this really?",
+              "freeformFallback": "Haldor's stare stays level. \"Ask one useful thing.\""
+            },
+            "completedText": "Haldor has given you the state of the Citadel. Now he needs metal answered with force."
+          },
+          {
+            "stageId": "felsrock_automaton_sweep",
+            "questId": "felsrock_automaton_sweep",
+            "available": {
+              "promptText": "Iron Automatons still patrol the halls like the command to stand down was never forged. Disable them and reclaim the corridors one section at a time.",
+              "acceptLabel": "I'll sweep the automatons.",
+              "acceptedText": "Four Iron Automatons. Strip the hallway of its false guardians.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with the automatons?",
+              "detailsText": "Because a fortress cannot recover while its own defenses are the first thing killing anyone who enters.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Steel problems deserve steel thinking.",
+              "freeformPrompt": "Tell Haldor what you need before clearing the Iron Automatons.",
+              "freeformPlaceholder": "Example: What should I expect from the corridor patrols?",
+              "freeformFallback": "Haldor clenches his jaw. \"Ask about the sweep or take it.\""
+            },
+            "active": {
+              "promptText": "The automatons still control too much of the corridor. Finish the sweep.",
+              "primaryLabel": "The automatons are disabled.",
+              "resultText": "Good. Now we can walk our own halls without asking permission from dead metal.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Iron Automatons. Keep the fight moving and don't let them pin you in narrow metal lanes.",
+              "declineLabel": "Later.",
+              "declineText": "Later gives machines more ground than they deserve."
+            },
+            "completedText": "The hallways are cleaner. Haldor's next threat came from the furnace itself."
+          },
+          {
+            "stageId": "felsrock_forgebound_fury",
+            "questId": "felsrock_forgebound_fury",
+            "available": {
+              "promptText": "Molten Forgebound clawed out of the great furnace when control failed. Living slag with a memory for heat and destruction.",
+              "acceptLabel": "I'll destroy the Forgebound.",
+              "acceptedText": "Four Molten Forgebound. Cool the forge floor by force if you have to.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are they worse than automatons?",
+              "detailsText": "Because machines can still pretend to be disciplined. Furnace-born things only remember appetite.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Just don't ask me how to make lava polite.",
+              "freeformPrompt": "Tell Haldor what you need before facing the Molten Forgebound.",
+              "freeformPlaceholder": "Example: What makes the forge floor so dangerous now?",
+              "freeformFallback": "Haldor gives a humorless grunt. \"Ask clearly or start swinging.\""
+            },
+            "active": {
+              "promptText": "The forge floor is still hostile. Finish the Forgebound and come back.",
+              "primaryLabel": "The Forgebound are down.",
+              "resultText": "Good. The furnace stops feeling like a mouth for a moment. That gives us room to rebuild instead of just survive.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Molten Forgebound. Don't let heat and choke points become the real enemy.",
+              "declineLabel": "I'll return.",
+              "declineText": "Return when the forge floor is ours again."
+            },
+            "completedText": "The forge floor is under better control. Haldor's next order is about rebuilding, not only killing."
+          },
+          {
+            "stageId": "felsrock_deep_salvage",
+            "questId": "felsrock_deep_salvage",
+            "available": {
+              "promptText": "A fortress isn't reclaimed by victory alone. We need material, structure, and proof the lower halls still serve more than memory. Craft the steel we need from salvage.",
+              "acceptLabel": "I'll handle the salvage work.",
+              "acceptedText": "Three Steel Alloys. Bring the Citadel something it can build on.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why make time for salvage now?",
+              "detailsText": "Because empty triumph collapses. Recovery has to put weight back into the walls.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Rebuilding is the harder discipline.",
+              "freeformPrompt": "Tell Haldor what you need before handling the deep salvage work.",
+              "freeformPlaceholder": "Example: What are we trying to restore first?",
+              "freeformFallback": "Haldor's answer is blunt. \"Ask about the salvage or do it.\""
+            },
+            "active": {
+              "promptText": "The salvage work isn't done. Bring back the Steel Alloys and then we'll talk about what else wants the halls.",
+              "primaryLabel": "The alloys are ready.",
+              "resultText": "Good. That buys the Citadel structure. Unfortunately, the deep has started sending teeth of its own.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Craft three Steel Alloys from salvage in the lower halls.",
+              "declineLabel": "Later.",
+              "declineText": "Walls don't hold themselves together on promises."
+            },
+            "completedText": "The salvage work is done. Haldor's next problem tunneled in from below."
+          },
+          {
+            "stageId": "felsrock_dweller_depths",
+            "questId": "felsrock_dweller_depths",
+            "available": {
+              "promptText": "Deep Dwellers have started tearing through the lower sections. If they keep undermining the east wing, we lose more than masonry.",
+              "acceptLabel": "I'll clear the Deep Dwellers.",
+              "acceptedText": "Three Deep Dwellers. Stop them before the Citadel remembers how to collapse.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are they so dangerous here?",
+              "detailsText": "Because tunnel things attack more than bodies. They attack confidence in the floor itself.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Foundation fights deserve that much seriousness.",
+              "freeformPrompt": "Tell Haldor what you need before facing the Deep Dwellers.",
+              "freeformPlaceholder": "Example: What do they threaten besides the walls?",
+              "freeformFallback": "Haldor's expression hardens. \"Ask clearly or take the depths.\""
+            },
+            "active": {
+              "promptText": "The Dwellers are still working the foundations. Finish it.",
+              "primaryLabel": "The Deep Dwellers are dead.",
+              "resultText": "Good. The floor can be trusted for one more day. Now we deal with the runes that kept too much memory in them.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Deep Dwellers in the undermined sections. Don't let the terrain collapse the fight around you.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how foundations fail."
+            },
+            "completedText": "The foundation threat is reduced. Haldor's next order glows in old glyphwork."
+          },
+          {
+            "stageId": "felsrock_rune_breaker",
+            "questId": "felsrock_rune_breaker",
+            "available": {
+              "promptText": "Rune Golems were never meant to wake without masters to command them. Now the old inscriptions are driving them in circles through the lower wards.",
+              "acceptLabel": "I'll break the Rune Golems.",
+              "acceptedText": "Three Rune Golems. Shatter the core runes and don't get sentimental about old craftsmanship.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the runes matter so much?",
+              "detailsText": "Because when old protections lose context, they keep performing duty as ruin instead of order.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Ancient mistakes deserve modern clarity.",
+              "freeformPrompt": "Tell Haldor what you need before facing the Rune Golems.",
+              "freeformPlaceholder": "Example: What turns their wards into a real threat?",
+              "freeformFallback": "Haldor's answer is immediate. \"Ask about the runes or break them.\""
+            },
+            "active": {
+              "promptText": "The Rune Golems are still active. Break them and return.",
+              "primaryLabel": "The runed constructs are broken.",
+              "resultText": "Good. The old wards just lost their fists. Only the forge's will remains now.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Rune Golems. Break the core rune or you'll just keep fighting the same mistake.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "Do that."
+            },
+            "completedText": "The runed guardians are broken. Haldor is ready to march you toward the master of this failure."
+          },
+          {
+            "stageId": "felsrock_forgemaster_end",
+            "questId": "felsrock_forgemaster_end",
+            "available": {
+              "promptText": "The Forgemaster Infernal has been sitting at the center of this catastrophe, driving every construct and furnace-born thing through the Citadel. End it and we take Felsrock back in spirit if not yet in full.",
+              "acceptLabel": "I'll end the Forgemaster.",
+              "acceptedText": "One Forgemaster Infernal. Make the great forge ours again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is this the true center?",
+              "detailsText": "Because systems only become disasters at this scale when one controlling will turns every tool into a weapon at once.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final citadel fights deserve discipline.",
+              "freeformPrompt": "Tell Haldor what you need before facing the Forgemaster Infernal.",
+              "freeformPlaceholder": "Example: What makes this fight different from the rest of the reclamation?",
+              "freeformFallback": "Haldor grips his blade. \"Ask sharp or go kill the thing.\""
+            },
+            "active": {
+              "promptText": "The Forgemaster still controls too much of the Citadel. End it.",
+              "primaryLabel": "The Forgemaster is down.",
+              "resultText": "Good. The core of the disaster just broke. One last reckoning remains in the throne room.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Forgemaster Infernal. This is the heart of the Citadel's corruption, not another strong machine.",
+              "declineLabel": "I'll return after the kill.",
+              "declineText": "Return with the forge quieter."
+            },
+            "completedText": "The Forgemaster has fallen. Haldor's last order belongs to the old throne."
+          },
+          {
+            "stageId": "felsrock_kings_reckoning",
+            "questId": "felsrock_kings_reckoning",
+            "available": {
+              "promptText": "One last mission. Corrupted Dwarf Kings still haunt the throne room like greed itself learned how to wear a crown after death. Put them down and close this chapter properly.",
+              "acceptLabel": "Give me the final reckoning.",
+              "acceptedText": "Five Corrupted Dwarf Kings. Lay the throne room to rest.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why end in the throne room?",
+              "detailsText": "Because every reclaimed fortress has to decide whether it still respects the ghosts that built it. This is where respect ends and judgment begins.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final reckonings should sound like resolve.",
+              "freeformPrompt": "Tell Haldor how you're approaching the throne-room reckoning.",
+              "freeformPlaceholder": "Example: What should I understand before I face the kings?",
+              "freeformFallback": "Haldor's tone is low. \"Take the reckoning or ask a worthy final question.\""
+            },
+            "active": {
+              "promptText": "The throne room is not settled yet. Finish the reckoning and come back.",
+              "primaryLabel": "The reckoning is complete.",
+              "resultText": "Then hear it from me: Felsrock is still wounded, but it is no longer bowing to what broke it. You helped make that true.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this proves.",
+              "secondaryText": "That the Citadel's final authority belongs to the living who reclaim it, not the dead who refuse to leave it.",
+              "declineLabel": "Later.",
+              "declineText": "Thrones left for later rarely get kinder."
+            },
+            "completedText": "Haldor has already given his judgment on what you did for Felsrock."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "korra_reforge",
+        "npcName": "Runesmith Korra",
+        "title": "Runesmith Korra and the Reforging Effort",
+        "idleText": "The forge can cool for an hour, not a year. If I've no work for you, then either we're ahead of disaster or disaster is winding up again.",
+        "stages": [
+          {
+            "stageId": "felsrock_korra_intro",
+            "questId": "felsrock_korra_intro",
+            "available": {
+              "promptText": "The master forge went dark and half the Citadel forgot what it meant to build instead of burn. If you're willing to help restart proper craft, sit down and listen.",
+              "acceptLabel": "Tell me what the forge needs.",
+              "acceptedText": "Then hear this: rebuilding starts long before the furnace lights. It starts with someone refusing to accept ruin as the final shape.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why does your forge matter so much?",
+              "detailsText": "Because once a stronghold stops making its own future, it begins living off inventory and memory. Both run out.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. If you're going to help a forge breathe again, I'd prefer you think while doing it.",
+              "freeformPrompt": "Ask Korra what you should understand first about restarting the Citadel's forge.",
+              "freeformPlaceholder": "Example: What really failed when the master forge went dark?",
+              "freeformFallback": "Korra flicks ash from a blueprint. \"Ask one useful question.\""
+            },
+            "completedText": "Korra has outlined the rebuild. Now she needs raw material and working space."
+          },
+          {
+            "stageId": "felsrock_korra_salvage",
+            "questId": "felsrock_korra_salvage",
+            "available": {
+              "promptText": "Mithril Ore is sealed behind collapsed armory walls. If we want rune-forging back, we start by recovering what the Citadel still hides from itself.",
+              "acceptLabel": "I'll recover the ore.",
+              "acceptedText": "Four Mithril Ore. Bring me enough to prove the rebuild is more than talk.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why Mithril first?",
+              "detailsText": "Because master-grade work needs master-grade material. You don't restart a great forge by pretending scrap and excellence are the same thing.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Salvage is still a craft when you do it properly.",
+              "freeformPrompt": "Tell Korra what you need before recovering the Mithril Ore.",
+              "freeformPlaceholder": "Example: What matters most when I go after the sealed ore?",
+              "freeformFallback": "Korra doesn't look up. \"Ask about the haul or go get it.\""
+            },
+            "active": {
+              "promptText": "The Mithril run isn't done. Bring back the ore and then we can pretend the forge has a future again.",
+              "primaryLabel": "The ore is here.",
+              "resultText": "Good. That gives us material. What we still don't have is a forge floor quiet enough to use it.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Four Mithril Ore from the sealed armory side of the Citadel.",
+              "declineLabel": "Later.",
+              "declineText": "Mithril doesn't walk off, but opportunity does."
+            },
+            "completedText": "Korra has the ore she needs. Her next problem is the automaton mess around the forge."
+          },
+          {
+            "stageId": "felsrock_korra_clear",
+            "questId": "felsrock_korra_clear",
+            "available": {
+              "promptText": "Iron Automatons are still trampling the forge floor. I can't relight anything while metal with no judgment keeps smashing my equipment.",
+              "acceptLabel": "I'll clear the forge floor.",
+              "acceptedText": "Three Iron Automatons. Make the workspace worthy of a furnace again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is this separate from Haldor's war?",
+              "detailsText": "Because soldiers reclaim territory. Smiths reclaim function. I care less about winning a hall than winning a working forge.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Precision matters more near anvils than bravado ever will.",
+              "freeformPrompt": "Tell Korra what you need before clearing the forge floor.",
+              "freeformPlaceholder": "Example: What part of the floor matters most to protect?",
+              "freeformFallback": "Korra taps the anvil once. \"Ask clearly or start breaking machines.\""
+            },
+            "active": {
+              "promptText": "The forge floor still isn't clean enough to trust. Finish the clear-out.",
+              "primaryLabel": "The forge floor is clear.",
+              "resultText": "Good. Now the real test begins. Materials and space mean nothing if you can't turn them into work.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Iron Automatons on the forge floor. Protect the workspace while you're dismantling them.",
+              "declineLabel": "Later.",
+              "declineText": "The forge cools every minute you delay."
+            },
+            "completedText": "The workspace is usable. Korra's final demand is proof you can craft at Citadel standard."
+          },
+          {
+            "stageId": "felsrock_korra_reforge",
+            "questId": "felsrock_korra_reforge",
+            "available": {
+              "promptText": "Now prove you can do more than gather and clear. Craft the Reinforced Plates and show me the forge can shape skill again instead of only memory.",
+              "acceptLabel": "I'll handle the reforging.",
+              "acceptedText": "Two Reinforced Plates. If you can do master-grade work here, the Citadel still has a future worth fighting for.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does this final craft prove?",
+              "detailsText": "That recovery is real when production restarts. A lit forge without capable hands is just a warmer ruin.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final craft tests should sound like concentration, not fear.",
+              "freeformPrompt": "Tell Korra what you need before the final reforge.",
+              "freeformPlaceholder": "Example: What separates usable work from Citadel-grade work here?",
+              "freeformFallback": "Korra smiles thinly. \"Ask a smith's question or get to work.\""
+            },
+            "active": {
+              "promptText": "The reforge isn't complete. Bring me the Reinforced Plates and then we'll decide what this place still deserves.",
+              "primaryLabel": "The plates are finished.",
+              "resultText": "Good. That's not nostalgia. That's production. The Citadel can still make something worthy of itself.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Craft two Reinforced Plates to prove the forge and the smith can both still operate at Felsrock standard.",
+              "declineLabel": "Later.",
+              "declineText": "Master-grade work does not improve by waiting for courage."
+            },
+            "completedText": "Korra has already accepted your work as real reforging. The forge remembers."
+          }
+        ]
+      }
+    }
+  ]
+}

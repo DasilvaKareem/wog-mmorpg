@@ -12,6 +12,10 @@ docs/.astro/
 .pnpm-store/
 pnpm-lock.yaml
 
+# Service account keys
+firebase-sa.json
+*.sa.json
+
 # Temporary files
 *.bak
 *.bak2

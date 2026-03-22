@@ -40,6 +40,8 @@ interface EntityVisual {
   spriteScale: number; // mob/boss scale multiplier
   inViewport: boolean;
   combatUntil: number; // timestamp when combat state expires
+  walkUntil: number; // keep locomotion animation alive across polling gaps
+  moveTweenVersion: number; // ignore stale tween completions from older move updates
   /** When > Date.now(), updateVisual will NOT override the current animation.
    *  Set by attack/knockback/lunge/gather to prevent idle flickering. */
   animLockUntil: number;
@@ -122,10 +124,12 @@ export class EntityRenderer {
 
   /** Optional elevation query for depth sorting */
   private elevationQuery: ElevationQuery | null = null;
+  private movementHoldMs = TWEEN_DURATION + 150;
 
-  constructor(scene: Phaser.Scene, options?: { lowPower?: boolean }) {
+  constructor(scene: Phaser.Scene, options?: { lowPower?: boolean; movementHoldMs?: number }) {
     this.scene = scene;
     this.lowPower = options?.lowPower ?? false;
+    this.movementHoldMs = Math.max(TWEEN_DURATION, options?.movementHoldMs ?? this.movementHoldMs);
   }
 
   /** Set coordinate scale (called when terrain loads and we know the ratio) */
@@ -770,6 +774,8 @@ export class EntityRenderer {
         spriteScale: 1,
         inViewport: true,
         combatUntil: 0,
+        walkUntil: 0,
+        moveTweenVersion: 0,
         animLockUntil: 0,
       };
     }
@@ -920,6 +926,8 @@ export class EntityRenderer {
       spriteScale: mobScale,
       inViewport: true,
       combatUntil: initialCombat ? Date.now() + COMBAT_LINGER_MS : 0,
+      walkUntil: 0,
+      moveTweenVersion: 0,
       animLockUntil: 0,
     };
 
@@ -936,13 +944,15 @@ export class EntityRenderer {
     py: number,
     entity: Entity,
   ): void {
+    const now = Date.now();
     const dx = px - visual.lastX;
     const dy = py - visual.lastY;
     const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5;
+    const locomoting = visual.moving || now < visual.walkUntil;
 
     // Weapon visible only when in combat AND standing idle
     const inCombat = this.isEntityInCombat(visual, entity);
-    const showWeapon = inCombat && !moved && !visual.moving;
+    const showWeapon = inCombat && !moved && !locomoting;
 
     // Try layered composite, check for recomposite (equipment changes), fall back to class-based
     const currentKey = visual.sprite.texture.key;
@@ -999,13 +1009,16 @@ export class EntityRenderer {
       visual.label.setText(expectedLabel);
     }
 
-    const animLocked = Date.now() < visual.animLockUntil;
+    const animLocked = now < visual.animLockUntil;
 
     if (moved) {
       // Determine facing direction
       const dir = inferDirection(dx, dy);
       visual.facing = dir;
       visual.moving = true;
+      visual.walkUntil = now + this.movementHoldMs;
+      visual.moveTweenVersion += 1;
+      const moveTweenVersion = visual.moveTweenVersion;
 
       // Play walk animation (movement overrides lock — entity physically relocated)
       if (!animLocked) {
@@ -1036,9 +1049,10 @@ export class EntityRenderer {
           this.repositionOverlays(visual);
         },
         onComplete: () => {
+          if (visual.moveTweenVersion !== moveTweenVersion) return;
           visual.moving = false;
-          // Switch to idle after movement only if no action animation is playing
-          if (Date.now() >= visual.animLockUntil) {
+          // Hold walk until we miss the expected next movement update.
+          if (Date.now() >= visual.walkUntil && Date.now() >= visual.animLockUntil) {
             const curKey = visual.sprite.texture.key;
             const idleAnim = `${curKey}-idle-${visual.facing}`;
             if (this.scene.anims.exists(idleAnim)) {
@@ -1047,23 +1061,35 @@ export class EntityRenderer {
           }
         },
       });
-    } else if (!visual.moving && !animLocked) {
-      // Not moving and no action animation playing — ensure idle animation
-      const idleAnim = `${textureKey}-idle-${visual.facing}`;
-      if (
-        this.scene.anims.exists(idleAnim) &&
-        visual.sprite.anims.getName() !== idleAnim
-      ) {
-        visual.sprite.play(idleAnim);
+    } else {
+      const s = visual.spriteScale;
+
+      if (!visual.moving) {
+        visual.sprite.setPosition(px, py);
+        visual.label.setPosition(px, py - 12 * s);
+        visual.hpBg.setPosition(px, py + 10 * s);
+        visual.partyRing?.setPosition(px, py);
+        this.repositionOverlays(visual);
       }
 
-      // Snap position (in case of drift)
-      const s = visual.spriteScale;
-      visual.sprite.setPosition(px, py);
-      visual.label.setPosition(px, py - 12 * s);
-      visual.hpBg.setPosition(px, py + 10 * s);
-      visual.partyRing?.setPosition(px, py);
-      this.repositionOverlays(visual);
+      if (!animLocked && now < visual.walkUntil) {
+        const walkAnim = `${textureKey}-walk-${visual.facing}`;
+        if (
+          this.scene.anims.exists(walkAnim) &&
+          visual.sprite.anims.getName() !== walkAnim
+        ) {
+          visual.sprite.play(walkAnim);
+        }
+      } else if (!visual.moving && !animLocked) {
+        // Not moving and no action animation playing — ensure idle animation
+        const idleAnim = `${textureKey}-idle-${visual.facing}`;
+        if (
+          this.scene.anims.exists(idleAnim) &&
+          visual.sprite.anims.getName() !== idleAnim
+        ) {
+          visual.sprite.play(idleAnim);
+        }
+      }
     }
 
     // Update HP bar

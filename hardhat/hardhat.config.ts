@@ -33,6 +33,11 @@ const config: HardhatUserConfig = {
       url: process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545",
       accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : undefined,
     },
+    skale: {
+      url: "https://skale-base.skalenodes.com/v1/base",
+      chainId: 1187947933,
+      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [],
+    },
   },
   paths: {
     sources: "./contracts",

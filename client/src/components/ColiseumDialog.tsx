@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useWogNames } from "@/hooks/useWogNames";
+import { playSoundEffect } from "@/lib/soundEffects";
 import type { Entity } from "@/types";
 import { ColiseumViewer } from "./ColiseumViewer";
 import { MatchmakingQueue } from "./MatchmakingQueue";
@@ -56,6 +57,7 @@ export function ColiseumDialog(): React.ReactElement {
 
   useGameBridge("arenaMasterClick", (entity: Entity) => {
     if (entity.type !== "arena-master") return;
+    playSoundEffect("ui_dialog_open");
     setNpc(entity);
     setOpen(true);
     setSelectedBattleId(null);

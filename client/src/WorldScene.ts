@@ -13,6 +13,15 @@ import { gameBus } from "@/lib/eventBus";
 import { registerEntitySprites, preloadMobSprites, registerMobSpriteAnimations } from "@/EntitySpriteGenerator";
 import { preloadOverworld } from "@/OverworldAtlas";
 import { preloadLayerSprites } from "@/LayeredSpriteCompositor";
+import {
+  ALL_SOUND_EFFECT_IDS,
+  SOUND_EFFECT_EVENT,
+  getSoundEffectConfig,
+  getSoundEffectUrls,
+  isSoundEffectsEnabled,
+  playSoundEffect,
+  type SoundEffectId,
+} from "@/lib/soundEffects";
 
 /** Zoom threshold below which the strategic overview renders instead of tiles */
 const OVERVIEW_ENTER = 0.38;
@@ -40,6 +49,11 @@ function capitalize(s: string): string {
 
 function pad(n: number): string {
   return String(n).padStart(3, " ");
+}
+
+function clampBarFill(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(10, Math.round(value)));
 }
 
 export class WorldScene extends Phaser.Scene {
@@ -111,6 +125,11 @@ export class WorldScene extends Phaser.Scene {
   private dayNightOverlay!: Phaser.GameObjects.Rectangle;
   private currentPhase: GameTime["phase"] = "day";
   private gameTimeText!: Phaser.GameObjects.Text;
+  private queuedSoundPlays = new Map<SoundEffectId, number>();
+  private loadingSounds = new Set<SoundEffectId>();
+  private soundEffectListener: ((event: Event) => void) | null = null;
+  private soundToggleListener: ((event: Event) => void) | null = null;
+  private audioUnlockListener: (() => void) | null = null;
 
   constructor() {
     super({ key: "WorldScene" });
@@ -128,6 +147,11 @@ export class WorldScene extends Phaser.Scene {
 
     // Mob PNG sprite sheets (generated via falsprite)
     preloadMobSprites(this);
+
+    // Preload all sound effects so they play instantly
+    for (const id of ALL_SOUND_EFFECT_IDS) {
+      this.load.audio(id, getSoundEffectUrls(id));
+    }
   }
 
   create(): void {
@@ -138,6 +162,7 @@ export class WorldScene extends Phaser.Scene {
     this.touchMode = coarsePointer || noHover;
     this.mobileMode = this.touchMode || smallViewport;
     this.pollDelayMs = this.mobileMode ? Math.max(POLL_INTERVAL, 2500) : POLL_INTERVAL;
+    this.sound.mute = !isSoundEffectsEnabled();
 
     // Enable second touch pointer for pinch gestures.
     this.input.addPointer(1);
@@ -147,7 +172,10 @@ export class WorldScene extends Phaser.Scene {
 
     this.worldLayout = new WorldLayoutManager();
     this.tilemapRenderer = new TilemapRenderer(this);
-    this.entityRenderer = new EntityRenderer(this, { lowPower: this.mobileMode });
+    this.entityRenderer = new EntityRenderer(this, {
+      lowPower: this.mobileMode,
+      movementHoldMs: this.pollDelayMs + 150,
+    });
     this.abilityLayer = new AbilityEffectsLayer(this);
     this.floatingText = new FloatingTextLayer(this);
 
@@ -167,8 +195,8 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
-      // Quest givers get the dialogue overlay instead of generic NPC info
-      if (entity.type === "quest-giver") {
+      // Quest givers + Scout Kaela get the dialogue overlay
+      if (entity.type === "quest-giver" || entity.name === "Scout Kaela") {
         gameBus.emit("questNpcClick", entity);
       }
 
@@ -178,7 +206,7 @@ export class WorldScene extends Phaser.Scene {
         "crafting-master", "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);
-      if (NPC_INFO_TYPES.has(entity.type)) {
+      if (NPC_INFO_TYPES.has(entity.type) && entity.name !== "Scout Kaela") {
         gameBus.emit("npcInfoClick", entity);
       }
 
@@ -317,6 +345,7 @@ export class WorldScene extends Phaser.Scene {
 
     // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
+      playSoundEffect("move_zone_transition");
       this.scrollToZone(zoneId);
     });
 
@@ -337,6 +366,27 @@ export class WorldScene extends Phaser.Scene {
       }
     });
 
+    if (typeof window !== "undefined") {
+      this.audioUnlockListener = () => {
+        void this.ensureAudioReady();
+      };
+      this.soundEffectListener = (event: Event) => {
+        const custom = event as CustomEvent<{ id?: SoundEffectId }>;
+        const id = custom.detail?.id;
+        if (!id) return;
+        void this.playManagedSound(id);
+      };
+      this.soundToggleListener = (event: Event) => {
+        const custom = event as CustomEvent<{ enabled?: boolean }>;
+        if (typeof custom.detail?.enabled !== "boolean") return;
+        this.sound.mute = !custom.detail.enabled;
+      };
+      window.addEventListener("pointerdown", this.audioUnlockListener, true);
+      window.addEventListener("keydown", this.audioUnlockListener, true);
+      window.addEventListener(SOUND_EFFECT_EVENT, this.soundEffectListener);
+      window.addEventListener("wog:sound-toggle", this.soundToggleListener);
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubscribeSwitchZone?.();
       this.unsubscribeSwitchZone = null;
@@ -344,6 +394,21 @@ export class WorldScene extends Phaser.Scene {
       this.unsubscribeLockToPlayer = null;
       this.unsubscribeFocusEntity?.();
       this.unsubscribeFocusEntity = null;
+      if (typeof window !== "undefined") {
+        if (this.audioUnlockListener) {
+          window.removeEventListener("pointerdown", this.audioUnlockListener, true);
+          window.removeEventListener("keydown", this.audioUnlockListener, true);
+        }
+        if (this.soundEffectListener) {
+          window.removeEventListener(SOUND_EFFECT_EVENT, this.soundEffectListener);
+        }
+        if (this.soundToggleListener) {
+          window.removeEventListener("wog:sound-toggle", this.soundToggleListener);
+        }
+      }
+      this.audioUnlockListener = null;
+      this.soundEffectListener = null;
+      this.soundToggleListener = null;
     });
 
     // Initialize seamless world
@@ -357,6 +422,93 @@ export class WorldScene extends Phaser.Scene {
       callbackScope: this,
       loop: true,
     });
+  }
+
+  private playLoadedSound(id: SoundEffectId): void {
+    if (!isSoundEffectsEnabled() || !this.cache.audio.exists(id)) return;
+    const config = getSoundEffectConfig(id);
+    this.sound.play(id, { volume: config.volume });
+  }
+
+  private async ensureAudioReady(): Promise<boolean> {
+    if (!isSoundEffectsEnabled()) return false;
+    const manager = this.sound as Phaser.Sound.WebAudioSoundManager & {
+      context?: AudioContext;
+      locked?: boolean;
+      unlock?: () => void;
+    };
+
+    if (manager.context?.state === "suspended") {
+      try {
+        await manager.context.resume();
+      } catch {
+        return false;
+      }
+    }
+
+    if (manager.locked && typeof manager.unlock === "function") {
+      try {
+        manager.unlock();
+      } catch {
+        return false;
+      }
+    }
+
+    if (manager.context?.state === "running" && typeof window !== "undefined" && this.audioUnlockListener) {
+      window.removeEventListener("pointerdown", this.audioUnlockListener, true);
+      window.removeEventListener("keydown", this.audioUnlockListener, true);
+      this.audioUnlockListener = null;
+    }
+
+    return !manager.locked;
+  }
+
+  private playQueuedSound(id: SoundEffectId): void {
+    const plays = this.queuedSoundPlays.get(id) ?? 0;
+    this.queuedSoundPlays.delete(id);
+    for (let i = 0; i < plays; i += 1) {
+      this.playLoadedSound(id);
+    }
+  }
+
+  private startSoundLoad(id: SoundEffectId): void {
+    const cleanup = () => {
+      this.load.off("filecomplete", onComplete);
+      this.load.off("loaderror", onError);
+      this.loadingSounds.delete(id);
+    };
+
+    const onComplete = (key: string) => {
+      if (key !== id) return;
+      cleanup();
+      this.playQueuedSound(id);
+    };
+
+    const onError = (file: { key?: string }) => {
+      if (file.key !== id) return;
+      cleanup();
+      this.queuedSoundPlays.delete(id);
+    };
+
+    this.loadingSounds.add(id);
+    this.load.on("filecomplete", onComplete);
+    this.load.on("loaderror", onError);
+    this.load.audio(id, getSoundEffectUrls(id));
+    this.load.start();
+  }
+
+  private async playManagedSound(id: SoundEffectId): Promise<void> {
+    if (!isSoundEffectsEnabled()) return;
+    const audioReady = await this.ensureAudioReady();
+    if (!audioReady) return;
+    if (this.cache.audio.exists(id)) {
+      this.playLoadedSound(id);
+      return;
+    }
+
+    this.queuedSoundPlays.set(id, (this.queuedSoundPlays.get(id) ?? 0) + 1);
+    if (this.loadingSounds.has(id)) return;
+    this.startSoundLoad(id);
   }
 
   /** Release camera tracking entirely (ESC, arrow keys, drag) */
@@ -646,14 +798,14 @@ export class WorldScene extends Phaser.Scene {
 
     // HP bar
     const hpRatio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
-    const hpBarFill = Math.round(hpRatio * 10);
+    const hpBarFill = clampBarFill(hpRatio * 10);
     const hpBar = "#".repeat(hpBarFill) + "-".repeat(10 - hpBarFill);
     lines.push(`HP [${hpBar}] ${e.hp}/${e.maxHp}`);
 
     // Essence bar
     if (e.essence !== undefined && e.maxEssence && e.maxEssence > 0) {
       const esRatio = e.essence / e.maxEssence;
-      const esFill = Math.round(esRatio * 10);
+      const esFill = clampBarFill(esRatio * 10);
       const esBar = "*".repeat(esFill) + "-".repeat(10 - esFill);
       lines.push(`ES [${esBar}] ${e.essence}/${e.maxEssence}`);
     }

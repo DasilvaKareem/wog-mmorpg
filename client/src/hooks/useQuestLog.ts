@@ -5,7 +5,7 @@ export interface ActiveQuestEntry {
   questId: string;
   title: string;
   description: string;
-  objective: { type: string; targetMobName?: string; targetNpcName?: string; count: number };
+  objective: { type: string; targetMobName?: string; targetNpcName?: string; targetItemName?: string; count: number };
   progress: number;
   required: number;
   complete: boolean;
@@ -41,6 +41,9 @@ export interface ActivityEntry {
 export interface QuestLogData {
   entityId: string;
   playerName: string;
+  classId?: string | null;
+  origin?: string | null;
+  storyFlags: string[];
   zoneId: string;
   activeQuests: ActiveQuestEntry[];
   completedQuests: CompletedQuestEntry[];
