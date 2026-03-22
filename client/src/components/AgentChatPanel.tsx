@@ -122,6 +122,7 @@ const SLASH_COMMANDS = [
   { cmd: "/party",    desc: "Party members" },
   { cmd: "/travel",   desc: "Travel to a zone" },
   { cmd: "/where",    desc: "Current position" },
+  { cmd: "/speak",    desc: "Speak publicly as your champion" },
 ];
 
 const CMD_COLOR = "#c792ea";
@@ -530,6 +531,45 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setInput("");
     setSending(true);
     const ts = Date.now();
+
+    const speakMatch = !replyTarget ? msg.match(/^\/(?:speak|say)\s+(.+)$/is) : null;
+    if (speakMatch) {
+      const spokenText = speakMatch[1]?.trim().slice(0, 200) ?? "";
+      setMessages((prev) => mergeConsoleMessages(prev, [toChatMessage("user", msg, ts)]));
+
+      if (!spokenText) {
+        addSystemMsg("[ERR] Usage: /speak <message>");
+        setSending(false);
+        return;
+      }
+
+      if (!status?.entityId) {
+        addSystemMsg("[ERR] Deploy your champion before using /speak.");
+        setSending(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId: status.entityId, message: spokenText }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setMessages((prev) => mergeConsoleMessages(prev, [
+            toChatMessage("activity", `✓ Spoke publicly: "${spokenText}"`, Date.now()),
+          ]));
+        } else {
+          addSystemMsg(`[ERR] ${data.error ?? "Speak failed"}`);
+        }
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
 
     if (replyTarget) {
       try {
