@@ -137,10 +137,10 @@ const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
 };
 const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
-const DOCK_STORAGE_PREFIX = "wog:world-dock";
-const MIN_DOCK_WIDTH = 240;
-const MAX_DOCK_WIDTH = 520;
-const MIN_DOCK_PANEL_HEIGHT = 180;
+const DOCK_STORAGE_PREFIX = "wog:world-dock:v2";
+const MIN_DOCK_WIDTH = 320;
+const MAX_DOCK_WIDTH = 640;
+const MIN_DOCK_PANEL_HEIGHT = 220;
 const DOCK_SPLITTER_HEIGHT = 12;
 const LEFT_DOCK_TOP_OFFSET = 56;
 const RIGHT_DOCK_TOP_OFFSET = 16;
@@ -234,15 +234,7 @@ function GameWorld(): React.ReactElement {
   const showLeftDock = professionsVisible || showRanks;
   const showRightDock = showWallet || showChat;
 
-  const [leftDockWidthRaw, setLeftDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-width`, 320);
-  const [rightDockWidthRaw, setRightDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-width`, 420);
-  const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, 300);
-  const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, 300);
-
   const maxDockWidth = Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.floor(viewport.width * 0.5)));
-  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
-  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
-
   const leftAvailableHeight = Math.max(
     MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
     viewport.height - LEFT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
@@ -260,6 +252,35 @@ function GameWorld(): React.ReactElement {
     MIN_DOCK_PANEL_HEIGHT,
     rightAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_SPLITTER_HEIGHT,
   );
+
+  const defaultLeftDockWidth = clamp(
+    Math.round(viewport.width * 0.22),
+    MIN_DOCK_WIDTH,
+    Math.min(440, maxDockWidth),
+  );
+  const defaultRightDockWidth = clamp(
+    Math.round(viewport.width * 0.28),
+    420,
+    maxDockWidth,
+  );
+  const defaultLeftTopHeight = clamp(
+    Math.round(leftAvailableHeight * 0.42),
+    260,
+    leftMaxTopHeight,
+  );
+  const defaultRightTopHeight = clamp(
+    Math.round(rightAvailableHeight * 0.54),
+    360,
+    rightMaxTopHeight,
+  );
+
+  const [leftDockWidthRaw, setLeftDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-width`, defaultLeftDockWidth);
+  const [rightDockWidthRaw, setRightDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-width`, defaultRightDockWidth);
+  const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, defaultLeftTopHeight);
+  const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, defaultRightTopHeight);
+
+  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
+  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
 
   const leftTopHeight = clamp(leftTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight);
   const rightTopHeight = clamp(rightTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight);
