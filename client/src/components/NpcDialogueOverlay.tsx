@@ -567,7 +567,10 @@ function PortraitPanel({ portrait }: { portrait: DialoguePortrait }): React.Reac
     zIndex: 51,
   };
 
-  return portrait.src ? (
+  // Only render if an actual portrait image exists — skip the dev placeholder
+  if (!portrait.src) return null as unknown as React.ReactElement;
+
+  return (
     <img
       alt={portrait.alt}
       className="absolute pointer-events-none select-none hidden sm:block"
@@ -580,30 +583,6 @@ function PortraitPanel({ portrait }: { portrait: DialoguePortrait }): React.Reac
         filter: "drop-shadow(4px 4px 12px rgba(0,0,0,0.7))",
       }}
     />
-  ) : (
-    <div
-      className="absolute pointer-events-none select-none hidden sm:flex items-end"
-      style={sharedStyle}
-    >
-      <div
-        className="border-2 px-4 py-5 shadow-2xl"
-        style={{
-          borderColor: portrait.accent ?? BORDER,
-          background: "rgba(10,14,24,0.92)",
-          minWidth: 180,
-        }}
-      >
-        <div className="text-[10px] uppercase tracking-[0.2em]" style={{ color: DIM }}>
-          Portrait Ready
-        </div>
-        <div className="mt-2 text-[20px] font-bold" style={{ color: portrait.accent ?? TEXT }}>
-          {portrait.label ?? portrait.alt}
-        </div>
-        <div className="mt-1 text-[11px]" style={{ color: DIM }}>
-          Wire your generated character or NPC portrait into the dialogue node.
-        </div>
-      </div>
-    </div>
   );
 }
 
