@@ -1070,8 +1070,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {/* ── Stop confirmation ──────────────────────────────────────── */}
       {/* ── Send-agent-here confirmation ─────────────────────────── */}
       {pendingGoto && (
-        <div className="absolute bottom-[56px] left-0 right-0 z-40 border-t border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono flex items-center justify-between gap-2">
-          <span className="text-[11px] text-[#e0af68] truncate">
+        <div className="absolute bottom-[56px] left-2 right-2 z-40 rounded border border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono shadow-[4px_4px_0_0_#000]">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-w-0 break-words text-[10px] leading-relaxed text-[#e0af68] sm:text-[11px]">
             {pendingGoto.action === "accept-quest" && pendingGoto.questTitle
               ? <>Accept <span className="text-[#ffcc00]">"{pendingGoto.questTitle}"</span> from {pendingGoto.name}?</>
               : pendingGoto.action === "complete-quest" && pendingGoto.questTitle
@@ -1080,50 +1081,51 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               ? <>Learn <span className="text-[#ffcc00]">{pendingGoto.teachesProfession}</span> from {pendingGoto.name}?</>
               : <>→ Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?</>
             }
-          </span>
-          <div className="flex gap-2 shrink-0">
-            {pendingGoto.action === "accept-quest" && (
+            </span>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {pendingGoto.action === "accept-quest" && (
+                <button
+                  onClick={() => void confirmGoto("accept-quest")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#54f28b] px-2 py-0.5 text-[10px] text-[#54f28b] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                >
+                  Accept
+                </button>
+              )}
+              {pendingGoto.action === "complete-quest" && (
+                <button
+                  onClick={() => void confirmGoto("complete-quest")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#f2c854] px-2 py-0.5 text-[10px] text-[#f2c854] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+                >
+                  Turn In
+                </button>
+              )}
+              {pendingGoto.teachesProfession && (
+                <button
+                  onClick={() => void confirmGoto("learn-profession")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#00ff9d] px-2 py-0.5 text-[10px] text-[#00ff9d] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                >
+                  Learn
+                </button>
+              )}
+              {!pendingGoto.action && (
+                <button
+                  onClick={() => void confirmGoto()}
+                  disabled={!token || !isRunning}
+                  className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+                >
+                  Go
+                </button>
+              )}
               <button
-                onClick={() => void confirmGoto("accept-quest")}
-                disabled={!token || !isRunning}
-                className="border border-[#54f28b] px-2 py-0.5 text-[10px] text-[#54f28b] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                onClick={() => setPendingGoto(null)}
+                className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
               >
-                Accept Quest
+                ✕
               </button>
-            )}
-            {pendingGoto.action === "complete-quest" && (
-              <button
-                onClick={() => void confirmGoto("complete-quest")}
-                disabled={!token || !isRunning}
-                className="border border-[#f2c854] px-2 py-0.5 text-[10px] text-[#f2c854] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
-              >
-                Turn In
-              </button>
-            )}
-            {pendingGoto.teachesProfession && (
-              <button
-                onClick={() => void confirmGoto("learn-profession")}
-                disabled={!token || !isRunning}
-                className="border border-[#00ff9d] px-2 py-0.5 text-[10px] text-[#00ff9d] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
-              >
-                Learn
-              </button>
-            )}
-            {!pendingGoto.action && (
-              <button
-                onClick={() => void confirmGoto()}
-                disabled={!token || !isRunning}
-                className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
-              >
-                Go
-              </button>
-            )}
-            <button
-              onClick={() => setPendingGoto(null)}
-              className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
-            >
-              ✕
-            </button>
+            </div>
           </div>
         </div>
       )}

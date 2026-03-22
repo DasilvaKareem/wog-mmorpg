@@ -143,26 +143,28 @@ function CharacterSection({
               className="flex-1 text-left cursor-pointer rounded border-2 border-[#29334d] bg-[#0a0f1e] px-2 py-1 transition-colors hover:border-[#54f28b] hover:bg-[#10182b]"
               title="Click to center the camera on your character"
             >
-              <div className="mb-1 flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
+              <div className="mb-1 flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     {characterProgress.source === "live" && (
                       <span className="text-[8px] font-bold uppercase tracking-wide text-[#54f28b]">[live]</span>
                     )}
-                    <span className="truncate text-[9px] text-[#f1f5ff]">{activeCharacterName}</span>
-                    {activeCharacterLevel != null && (
-                      <span className="shrink-0 text-[8px] font-bold text-[#ffcc00]">L{activeCharacterLevel}</span>
-                    )}
+                    <span className="min-w-0 break-words text-[9px] leading-tight text-[#f1f5ff]">{activeCharacterName}</span>
                   </div>
                   {(activeCharacterRace || activeCharacterClass) && (
-                    <div className="truncate text-[8px] text-[#9aa7cc]">
+                    <div className="mt-0.5 break-words text-[8px] leading-tight text-[#9aa7cc]">
                       {[activeCharacterRace, activeCharacterClass].filter(Boolean).join(" • ")}
                     </div>
                   )}
                 </div>
-                <span className="shrink-0 text-[8px] font-bold uppercase tracking-wide text-[#54f28b]">
-                  Focus
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+                  {activeCharacterLevel != null && (
+                    <span className="text-[8px] font-bold text-[#ffcc00]">L{activeCharacterLevel}</span>
+                  )}
+                  <span className="text-[8px] font-bold uppercase tracking-wide text-[#54f28b]">
+                    Center
+                  </span>
+                </div>
               </div>
               <HpBar hp={characterProgress.hp} maxHp={characterProgress.maxHp} />
               <XpBar level={characterProgress.level} xp={characterProgress.xp} />
@@ -216,14 +218,14 @@ function CharacterSection({
         <div className="space-y-1">
           <div className="flex gap-2">
             <div className="flex-1 rounded border-2 border-[#29334d] bg-[#0a0f1e] px-2 py-1">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate text-[9px] text-[#f1f5ff]">{activeCharacterName}</span>
+              <div className="flex items-start gap-2">
+                <span className="min-w-0 flex-1 break-words text-[9px] leading-tight text-[#f1f5ff]">{activeCharacterName}</span>
                 {activeCharacterLevel != null && (
                   <span className="shrink-0 text-[8px] font-bold text-[#ffcc00]">L{activeCharacterLevel}</span>
                 )}
               </div>
               {(activeCharacterRace || activeCharacterClass) && (
-                <div className="truncate text-[8px] text-[#9aa7cc]">
+                <div className="mt-0.5 break-words text-[8px] leading-tight text-[#9aa7cc]">
                   {[activeCharacterRace, activeCharacterClass].filter(Boolean).join(" • ")}
                 </div>
               )}
