@@ -118,31 +118,30 @@ export function MatchmakingQueue(): React.ReactElement {
     const liveName =
       characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
 
-    const players = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
+    // First try players with full on-chain identity
+    const allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
       Object.values(zone.entities ?? {}).filter((entity) =>
         entity.type === "player" &&
-        entity.walletAddress?.toLowerCase() === normalizedWallet &&
-        entity.agentId &&
-        entity.characterTokenId
+        entity.walletAddress?.toLowerCase() === normalizedWallet
       )
     );
 
-    if (players.length === 0) {
+    if (allPlayers.length === 0) {
       return null;
     }
+
+    // Prefer players with full identity, fall back to any spawned player
+    const withIdentity = allPlayers.filter((e) => e.agentId && e.characterTokenId);
+    const candidates = withIdentity.length > 0 ? withIdentity : allPlayers;
 
     const selected =
-      players.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-      players.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-      players[0];
-
-    if (!selected.agentId || !selected.characterTokenId) {
-      return null;
-    }
+      candidates.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
+      candidates.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
+      candidates[0];
 
     return {
-      agentId: selected.agentId,
-      characterTokenId: selected.characterTokenId,
+      agentId: selected.agentId ?? selected.id,
+      characterTokenId: selected.characterTokenId ?? "0",
       level: selected.level ?? characterProgress?.level ?? 1,
     };
   }, [address, characterProgress, deployedCharacterName]);
