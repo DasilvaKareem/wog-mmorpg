@@ -36,9 +36,6 @@ const QuestLogDialog = React.lazy(() =>
 const GameCanvas = React.lazy(() =>
   import("@/components/GameCanvas").then((mod) => ({ default: mod.GameCanvas }))
 );
-const ShopDialog = React.lazy(() =>
-  import("@/components/ShopDialog").then((mod) => ({ default: mod.ShopDialog }))
-);
 const GuildDialog = React.lazy(() =>
   import("@/components/GuildDialog").then((mod) => ({ default: mod.GuildDialog }))
 );

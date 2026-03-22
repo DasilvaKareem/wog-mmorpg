@@ -180,9 +180,8 @@ export class WorldScene extends Phaser.Scene {
     this.floatingText = new FloatingTextLayer(this);
 
     this.entityRenderer.onClick((entity) => {
-      if (entity.type === "merchant" && entity.shopItems) {
-        gameBus.emit("merchantClick", entity);
-      } else if (entity.type === "guild-registrar") {
+      // Dedicated dialogs for specialized NPC types
+      if (entity.type === "guild-registrar") {
         gameBus.emit("guildRegistrarClick", entity);
       } else if (entity.type === "auctioneer") {
         gameBus.emit("auctioneerClick", entity);

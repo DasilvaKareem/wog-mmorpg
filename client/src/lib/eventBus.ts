@@ -1,7 +1,6 @@
 import type { Entity } from "@/types";
 
 export interface GameEventMap {
-  merchantClick: Entity;
   guildRegistrarClick: Entity;
   auctioneerClick: Entity;
   arenaMasterClick: Entity;

@@ -12,6 +12,10 @@ import { getAuthToken } from "@/lib/agentAuth";
 import { gameBus } from "@/lib/eventBus";
 import { playSoundEffect } from "@/lib/soundEffects";
 import type { Entity } from "@/types";
+import { NpcServiceTabs, getAvailableTabs, type NpcTab } from "@/components/npc-tabs/NpcServiceTabs";
+import { NpcTrainingTab } from "@/components/npc-tabs/NpcTrainingTab";
+import { NpcProfessionTab } from "@/components/npc-tabs/NpcProfessionTab";
+import { NpcShopTab } from "@/components/npc-tabs/NpcShopTab";
 
 const BG = "#11182b";
 const BG_DARK = "#0a0e18";
@@ -618,6 +622,10 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   const [ambientReply, setAmbientReply] = React.useState<NpcAmbientDialogueResponse | null>(null);
   const [ambientLoading, setAmbientLoading] = React.useState(false);
   const [ambientError, setAmbientError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<NpcTab>("dialogue");
+  const [currentZoneId, setCurrentZoneId] = React.useState("village-square");
+
+  useGameBridge("zoneChanged", ({ zoneId }) => setCurrentZoneId(zoneId));
 
   const handleClose = React.useCallback(() => {
     playSoundEffect("ui_dialog_close");
@@ -632,6 +640,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
     setAmbientReply(null);
     setAmbientError(null);
     setAmbientLoading(false);
+    setActiveTab("dialogue");
   }, []);
 
   const handleEffects = React.useCallback((effects: DialogueEffect[]) => {
@@ -893,6 +902,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
     setAmbientReply(null);
     setAmbientError(null);
     setAmbientLoading(false);
+    setActiveTab("dialogue");
 
     if (isScoutKaela(entity.name)) {
       setChampionName("Champion");
@@ -991,6 +1001,9 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
         handleClose();
         return;
       }
+
+      // Only handle dialogue-specific shortcuts on the dialogue tab
+      if (activeTab !== "dialogue") return;
 
       if (
         /^[1-9]$/.test(event.key)
@@ -1098,7 +1111,22 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
           </button>
         </div>
 
-        {activeTitle && (
+        {/* Service tabs — only shown when NPC has multiple services */}
+        {npc && <NpcServiceTabs entity={npc} activeTab={activeTab} onTabChange={setActiveTab} />}
+
+        {/* Non-dialogue tabs */}
+        {activeTab === "training" && npc?.teachesClass && (
+          <NpcTrainingTab entity={npc} onClose={handleClose} />
+        )}
+        {activeTab === "professions" && npc?.teachesProfession && (
+          <NpcProfessionTab entity={npc} onClose={handleClose} />
+        )}
+        {activeTab === "shop" && npc?.shopItems?.length && (
+          <NpcShopTab entity={npc} zoneId={npc.zoneId ?? currentZoneId} />
+        )}
+
+        {/* Dialogue tab content (everything below is the existing dialogue UI) */}
+        {activeTab === "dialogue" && activeTitle && (
           <div className="px-4 py-1.5 border-b flex items-center gap-2" style={{ borderColor: "#1a2035", background: "#0d1322" }}>
             <span className="text-[12px] font-bold" style={{ color: TEXT }}>
               {activeTitle}
@@ -1118,6 +1146,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
           </div>
         )}
 
+        {activeTab === "dialogue" && (<>
         <div className="px-4 py-4" style={{ minHeight: 112 }}>
           <p className="text-[12px] leading-[1.7]" style={{ color: isChampionSpeaking ? CHAMPION_COLOR : TEXT, whiteSpace: "pre-wrap" }}>
             {displayed}
@@ -1416,6 +1445,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
             )}
           </div>
         </div>
+        </>)}
       </div>
     </div>
   );

@@ -2,11 +2,6 @@ import * as React from "react";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { API_URL } from "@/config";
 import type { Entity } from "@/types";
-import { formatCopperString } from "@/lib/currency";
-import { useWalletContext } from "@/context/WalletContext";
-import { getAuthToken } from "@/lib/agentAuth";
-import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
-import type { TechniqueInfo } from "@/hooks/useTechniques";
 import {
   TUTORIAL_MASTER_HOTKEYS,
   TUTORIAL_MASTER_INTRO,
@@ -36,74 +31,6 @@ interface NpcRoleInfo {
 }
 
 const NPC_ROLES: Record<string, NpcRoleInfo> = {
-  "quest-giver": {
-    title: "Quest Giver",
-    icon: "!",
-    color: "#f2c854",
-    description: () => "Offers quests and adventures to those brave enough to accept. Complete quests to earn gold and experience.",
-    details: () => [
-      "Talk to this NPC to view available quests",
-      "Quests reward gold, XP, and sometimes items",
-      "Some quests unlock access to new areas",
-    ],
-  },
-  trainer: {
-    title: "Combat Trainer",
-    icon: "T",
-    color: "#f25454",
-    description: (e) =>
-      e.teachesClass
-        ? `A master ${capitalize(e.teachesClass)} trainer who can teach powerful combat techniques.`
-        : "A combat trainer who teaches fighting techniques to aspiring warriors.",
-    details: (e) => {
-      const lines = [
-        "Click 'Send Agent to Trainer' to dispatch your agent here",
-        "Higher-level techniques cost more gold to learn",
-      ];
-      if (e.teachesClass) lines.unshift(`Specializes in ${capitalize(e.teachesClass)} techniques`);
-      return lines;
-    },
-  },
-  "profession-trainer": {
-    title: "Profession Trainer",
-    icon: "P",
-    color: "#54f28b",
-    description: (e) =>
-      e.teachesProfession
-        ? `A skilled ${capitalize(e.teachesProfession)} trainer who can teach gathering and crafting skills.`
-        : "A profession trainer who teaches trade skills to those seeking a livelihood.",
-    details: (e) => {
-      const lines = [
-        "Learn and improve profession skills",
-        "Profession skills level up from 1 to 300",
-        "Higher skill unlocks better recipes and nodes",
-      ];
-      if (e.teachesProfession) lines.unshift(`Teaches ${capitalize(e.teachesProfession)}`);
-      return lines;
-    },
-  },
-  "lore-npc": {
-    title: "Lore Keeper",
-    icon: "L",
-    color: "#5dadec",
-    description: () => "A keeper of ancient knowledge and history. Speaks of the lands, creatures, and legends of Arcadia.",
-    details: () => [
-      "Shares stories and world lore",
-      "May reveal hints about hidden areas",
-      "Knowledge of the world's history and secrets",
-    ],
-  },
-  "crafting-master": {
-    title: "Crafting Master",
-    icon: "C",
-    color: "#b48efa",
-    description: () => "An expert artisan who oversees the crafting stations. Provides guidance on creating powerful items.",
-    details: () => [
-      "Access to advanced crafting stations",
-      "Can craft weapons, armor, and enchantments",
-      "Requires raw materials gathered from the world",
-    ],
-  },
   forge: {
     title: "Forge",
     icon: "#",
@@ -203,143 +130,6 @@ const TUTORIAL_MASTER_ROLE: NpcRoleInfo = {
   ],
 };
 
-/* ── Technique list for trainers ──────────────────────────── */
-function TrainerTechniqueList({ className }: { className: string }): React.ReactElement {
-  const [techniques, setTechniques] = React.useState<TechniqueInfo[]>([]);
-  const [loading, setLoading] = React.useState(true);
-
-  React.useEffect(() => {
-    setLoading(true);
-    fetch(`${API_URL}/techniques/class/${className}`)
-      .then((r) => (r.ok ? r.json() : { techniques: [] }))
-      .then((data) => setTechniques(data.techniques ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [className]);
-
-  if (loading) {
-    return <div className="text-[10px]" style={{ color: DIM }}>Loading techniques...</div>;
-  }
-
-  if (techniques.length === 0) {
-    return <div className="text-[10px]" style={{ color: DIM }}>No techniques found</div>;
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {techniques.map((tech) => {
-        const visual = getTechniqueVisual(tech.id, tech.type);
-        const primary = colorToCss(visual.primary);
-        const secondary = colorToCss(visual.secondary);
-        const accent = colorToCss(visual.accent);
-        return (
-          <div key={tech.id} className="border p-1.5" style={{ borderColor: primary, background: "#0d1628" }}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span
-                  className="flex h-5 w-5 items-center justify-center border text-[9px] font-bold"
-                  style={{ borderColor: primary, color: accent, background: "#10192d" }}
-                >
-                  {visual.uiGlyph}
-                </span>
-                <span className="text-[11px] font-bold" style={{ color: primary }}>
-                  {tech.name}
-                </span>
-              </div>
-              <div className="flex items-center gap-1">
-                <span className="text-[8px] uppercase font-bold px-1 border" style={{ borderColor: "#1e2842", color: DIM }}>
-                  Lv{tech.levelRequired}
-                </span>
-                <span className="text-[9px] uppercase font-bold" style={{ color: secondary }}>
-                  {tech.type}
-                </span>
-              </div>
-            </div>
-            <div className="text-[10px] mt-0.5" style={{ color: DIM }}>
-              {tech.description}
-            </div>
-            <div className="flex gap-3 mt-0.5 text-[9px]" style={{ color: accent }}>
-              <span>CD: {tech.cooldown}s</span>
-              <span>ES: {tech.essenceCost}</span>
-              <span>Cost: {formatCopperString(tech.copperCost ?? 0)}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ── Agent action button ──────────────────────────────────── */
-function AgentActionButton({ entity, onClose }: { entity: Entity; onClose: () => void }): React.ReactElement | null {
-  const { address } = useWalletContext();
-  const [status, setStatus] = React.useState<"idle" | "sending" | "ok" | "err">("idle");
-
-  const isProfessionTrainer = entity.type === "profession-trainer" && entity.teachesProfession;
-  const isClassTrainer = entity.type === "trainer";
-  if (!isProfessionTrainer && !isClassTrainer) return null;
-
-  const label = isProfessionTrainer
-    ? `Learn ${capitalize(entity.teachesProfession ?? "")}`
-    : "Send Agent to Trainer";
-  const color = isProfessionTrainer ? "#00ff9d" : "#f25454";
-
-  async function handleClick() {
-    if (!address || status === "sending") return;
-    setStatus("sending");
-    try {
-      const token = await getAuthToken(address);
-      if (!token) { setStatus("err"); return; }
-      const body: Record<string, string> = {
-        entityId: entity.id,
-        zoneId: (entity.zoneId as string) ?? "",
-        name: entity.name,
-      };
-      if (isProfessionTrainer) {
-        body.action = "learn-profession";
-        body.profession = entity.teachesProfession ?? "";
-      }
-      const res = await fetch(`${API_URL}/agent/goto-npc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      if (res.ok) {
-        setStatus("ok");
-        setTimeout(() => { onClose(); setStatus("idle"); }, 800);
-      } else {
-        setStatus("err");
-        setTimeout(() => setStatus("idle"), 2000);
-      }
-    } catch {
-      setStatus("err");
-      setTimeout(() => setStatus("idle"), 2000);
-    }
-  }
-
-  const btnLabel = status === "sending" ? "..." : status === "ok" ? "✓ Sent!" : status === "err" ? "Error" : label;
-
-  return (
-    <div className="px-3 py-2 border-t" style={{ borderColor: BORDER }}>
-      <button
-        onClick={() => void handleClick()}
-        disabled={!address || status === "sending"}
-        className="w-full py-1.5 text-[10px] uppercase tracking-widest font-bold border-2 transition disabled:opacity-40"
-        style={{
-          borderColor: status === "ok" ? ACCENT : status === "err" ? "#ff4d6d" : color,
-          color: status === "ok" ? ACCENT : status === "err" ? "#ff4d6d" : color,
-          background: "#0a1020",
-        }}
-      >
-        {btnLabel}
-      </button>
-      {!address && (
-        <div className="mt-1 text-[9px] text-center" style={{ color: DIM }}>Connect wallet to send your agent</div>
-      )}
-    </div>
-  );
-}
-
 /* ── Main Component ───────────────────────────────────────── */
 export function NpcInfoDialog(): React.ReactElement | null {
   const [open, setOpen] = React.useState(false);
@@ -358,7 +148,6 @@ export function NpcInfoDialog(): React.ReactElement | null {
   const role = tutorialMaster ? TUTORIAL_MASTER_ROLE : (NPC_ROLES[entity.type] ?? FALLBACK_ROLE);
   const description = role.description(entity);
   const details = role.details(entity);
-  const trainerClass = entity.type === "trainer" ? (entity.teachesClass ?? "").toLowerCase() : "";
 
   return (
     <div
@@ -501,19 +290,6 @@ export function NpcInfoDialog(): React.ReactElement | null {
           </div>
         </>
       )}
-
-      {/* Techniques list for combat trainers */}
-      {trainerClass && (
-        <div className="px-3 py-2 border-b" style={{ borderColor: BORDER }}>
-          <div className="text-[10px] font-bold uppercase mb-1.5" style={{ color: "#f25454" }}>
-            {capitalize(trainerClass)} Techniques
-          </div>
-          <TrainerTechniqueList className={trainerClass} />
-        </div>
-      )}
-
-      {/* Agent action button for trainers */}
-      <AgentActionButton entity={entity} onClose={() => setOpen(false)} />
 
       {/* Location */}
       <div className="px-3 py-2">
