@@ -215,7 +215,7 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
                 className={cn(
                   "border-2 border-black px-1.5 py-0.5 text-[8px] uppercase shadow-[1px_1px_0_0_#000] transition-colors",
                   tab === "lobby"
-                    ? "bg-[#7aa2f7] text-[#0f1830]"
+                    ? "bg-[#2a2210] text-[#ffcc00]"
                     : "bg-[#283454] text-[#9aa7cc] hover:bg-[#324165]"
                 )}
                 type="button"
@@ -227,7 +227,7 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
                 className={cn(
                   "border-2 border-black px-1.5 py-0.5 text-[8px] uppercase shadow-[1px_1px_0_0_#000] transition-colors",
                   tab === "leaderboard"
-                    ? "bg-[#7aa2f7] text-[#0f1830]"
+                    ? "bg-[#2a2210] text-[#ffcc00]"
                     : "bg-[#283454] text-[#9aa7cc] hover:bg-[#324165]"
                 )}
                 type="button"
@@ -257,7 +257,7 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
                   className={cn(
                     "border-2 border-black px-1.5 py-0.5 text-[8px] uppercase shadow-[1px_1px_0_0_#000] transition-colors",
                     sortBy === s.key
-                      ? "bg-[#7aa2f7] text-[#0f1830]"
+                      ? "bg-[#2a2210] text-[#ffcc00]"
                       : "bg-[#283454] text-[#9aa7cc] hover:bg-[#324165]"
                   )}
                   type="button"

@@ -2782,6 +2782,11 @@ export async function saveAllOnlinePlayers(): Promise<void> {
 }
 
 export function registerZoneRuntime(server: FastifyInstance) {
+  const configuredZoneIds = Object.keys(getWorldLayout().zones);
+  for (const zoneId of configuredZoneIds) {
+    getOrCreateZone(zoneId);
+  }
+
   // Start the tick loop
   tickInterval = setInterval(worldTick, TICK_MS);
 
@@ -2802,7 +2807,8 @@ export function registerZoneRuntime(server: FastifyInstance) {
 
   server.get("/zones", async () => {
     const result: Record<string, { entityCount: number; tick: number }> = {};
-    for (const [id, zone] of getAllZones()) {
+    for (const id of configuredZoneIds) {
+      const zone = getOrCreateZone(id);
       result[id] = { entityCount: zone.entities.size, tick: zone.tick };
     }
     return result;
@@ -2841,8 +2847,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
     "/zones/:zoneId",
     async (request, reply) => {
       const zoneId = request.params.zoneId;
-      const configuredZone = getWorldLayout().zones[zoneId];
-      if (!knownRegions.has(zoneId) && !configuredZone) {
+      if (!configuredZoneIds.includes(zoneId)) {
         reply.code(404);
         return { error: "Zone not found" };
       }

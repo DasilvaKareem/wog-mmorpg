@@ -13,6 +13,7 @@ interface ItemTooltipProps {
   item: CatalogItem;
   equipped: {
     tokenId: number;
+    name?: string;
     durability: number;
     maxDurability: number;
     broken?: boolean;
@@ -57,7 +58,7 @@ export function ItemTooltip({ item, equipped, style }: ItemTooltipProps): React.
     >
       {/* Name with quality color */}
       <div className="font-bold" style={{ color: nameColor }}>
-        {item.name}
+        {equipped.name ?? item.name}
       </div>
 
       {/* Quality badge */}

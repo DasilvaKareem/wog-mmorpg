@@ -30,7 +30,7 @@ type SlotKey = "weapon" | "shield" | "chest" | "legs" | "boots" | "helm" | "shou
 
 interface EquipSlotProps {
   slot: SlotKey;
-  equipped?: { tokenId: number; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string };
+  equipped?: { tokenId: number; name?: string; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string };
   getItem: (tokenId: number) => CatalogItem | undefined;
 }
 
@@ -63,7 +63,7 @@ function EquipSlot({ slot, equipped, getItem }: EquipSlotProps): React.ReactElem
       >
         {item ? (
           <span className="truncate px-0.5 text-[8px]" style={{ color: qualityBorder !== BORDER ? qualityBorder : TEXT }}>
-            {item.name}
+            {equipped?.name ?? item.name}
           </span>
         ) : (
           slot

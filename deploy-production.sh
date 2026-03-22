@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export COPYFILE_DISABLE=1
+
 INSTANCE="instance-20260213-193154"
 ZONE="us-central1-f"
 REMOTE_DIR="/opt/wog-mmorpg"
@@ -34,8 +36,9 @@ gcloud compute scp --zone=$ZONE /tmp/wog-mcp.tar.gz $INSTANCE:/tmp/wog-mcp.tar.g
 echo "[4/5] Extracting and installing deps..."
 gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
   cd $REMOTE_DIR && \
-  tar xzf /tmp/wog-shard.tar.gz --no-same-owner --no-same-permissions 2>/dev/null && \
-  mkdir -p mcp && cd mcp && tar xzf /tmp/wog-mcp.tar.gz --no-same-owner --no-same-permissions 2>/dev/null && cd .. && \
+  sudo tar xzf /tmp/wog-shard.tar.gz -C $REMOTE_DIR --no-same-owner --no-same-permissions 2>/dev/null && \
+  sudo mkdir -p $REMOTE_DIR/mcp && sudo tar xzf /tmp/wog-mcp.tar.gz -C $REMOTE_DIR/mcp --no-same-owner --no-same-permissions 2>/dev/null && \
+  sudo chown -R \$USER:\$USER $REMOTE_DIR/dist $REMOTE_DIR/src $REMOTE_DIR/world $REMOTE_DIR/mcp 2>/dev/null || true && \
   rm /tmp/wog-shard.tar.gz /tmp/wog-mcp.tar.gz && \
   pnpm install --frozen-lockfile --prod && \
   cd mcp && pnpm install --frozen-lockfile --prod && cd .."

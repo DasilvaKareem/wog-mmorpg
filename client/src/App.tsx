@@ -137,6 +137,14 @@ const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
 };
 const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
+const DOCK_STORAGE_PREFIX = "wog:world-dock";
+const MIN_DOCK_WIDTH = 240;
+const MAX_DOCK_WIDTH = 520;
+const MIN_DOCK_PANEL_HEIGHT = 180;
+const DOCK_SPLITTER_HEIGHT = 12;
+const LEFT_DOCK_TOP_OFFSET = 56;
+const RIGHT_DOCK_TOP_OFFSET = 16;
+const DOCK_BOTTOM_OFFSET = 64;
 
 function useZoneTheme(zoneId: string | null) {
   React.useEffect(() => {
@@ -152,6 +160,47 @@ function useZoneTheme(zoneId: string | null) {
       ? `${theme.label} — World of Geneva`
       : "World of Geneva";
   }, [zoneId]);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function usePersistentNumber(key: string, initialValue: number): [number, React.Dispatch<React.SetStateAction<number>>] {
+  const [value, setValue] = React.useState(() => {
+    if (typeof window === "undefined") return initialValue;
+    const raw = Number(window.localStorage.getItem(key));
+    return Number.isFinite(raw) ? raw : initialValue;
+  });
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(key, String(value));
+    } catch {
+      // noop
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+function useViewportSize(): { width: number; height: number } {
+  const [size, setSize] = React.useState(() => ({
+    width: typeof window === "undefined" ? 1440 : window.innerWidth,
+    height: typeof window === "undefined" ? 900 : window.innerHeight,
+  }));
+
+  React.useEffect(() => {
+    const update = () => {
+      setSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return size;
 }
 
 function resolveOnboardingMode(event: Event): OnboardingStartMode {
@@ -177,10 +226,115 @@ function GameWorld(): React.ReactElement {
   const [ranksVisible, setRanksVisible] = React.useState<boolean | null>(null);
   const [walletVisible, setWalletVisible] = React.useState<boolean | null>(null);
   const [professionsVisible, setProfessionsVisible] = React.useState(false);
+  const viewport = useViewportSize();
 
   const showChat = chatVisible ?? !isCompactWorldUI;
   const showRanks = ranksVisible ?? !isCompactWorldUI;
   const showWallet = walletVisible ?? !isCompactWorldUI;
+  const showLeftDock = professionsVisible || showRanks;
+  const showRightDock = showWallet || showChat;
+
+  const [leftDockWidthRaw, setLeftDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-width`, 320);
+  const [rightDockWidthRaw, setRightDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-width`, 420);
+  const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, 300);
+  const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, 300);
+
+  const maxDockWidth = Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.floor(viewport.width * 0.5)));
+  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
+  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
+
+  const leftAvailableHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
+    viewport.height - LEFT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
+  );
+  const rightAvailableHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
+    viewport.height - RIGHT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
+  );
+
+  const leftMaxTopHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT,
+    leftAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_SPLITTER_HEIGHT,
+  );
+  const rightMaxTopHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT,
+    rightAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_SPLITTER_HEIGHT,
+  );
+
+  const leftTopHeight = clamp(leftTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight);
+  const rightTopHeight = clamp(rightTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight);
+
+  const startLeftWidthResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = leftDockWidth;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setLeftDockWidthRaw(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, maxDockWidth));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [leftDockWidth, maxDockWidth, setLeftDockWidthRaw]);
+
+  const startRightWidthResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightDockWidth;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setRightDockWidthRaw(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, maxDockWidth));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [maxDockWidth, rightDockWidth, setRightDockWidthRaw]);
+
+  const startLeftSplitResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = leftTopHeight;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setLeftTopHeightRaw(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [leftMaxTopHeight, leftTopHeight, setLeftTopHeightRaw]);
+
+  const startRightSplitResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = rightTopHeight;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setRightTopHeightRaw(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [rightMaxTopHeight, rightTopHeight, setRightTopHeightRaw]);
 
   const focusOwnedCharacter = React.useCallback((zoneId?: string) => {
     if (!address) return;
@@ -343,26 +497,84 @@ function GameWorld(): React.ReactElement {
         <GameCanvas />
       </React.Suspense>
       <React.Suspense fallback={null}>
-        {showWallet && <WalletPanel />}
-        {professionsVisible && (
-          <ProfessionsPanel className="absolute top-14 left-2 md:left-4 z-30" />
-        )}
-        {showRanks && (
-          <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
-        )}
-        {showChat && (
-          address ? (
-            <AgentChatPanel
-              walletAddress={address}
-              currentZone={currentZone}
-              className="absolute bottom-16 right-2 md:right-4 z-30"
+        {showLeftDock && (
+          <div
+            className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 flex flex-col gap-0 md:left-4"
+            style={{ width: `${leftDockWidth}px` }}
+          >
+            {professionsVisible && (
+              <div
+                className="min-h-0"
+                style={showRanks ? { height: `${leftTopHeight}px` } : { maxHeight: "100%" }}
+              >
+                <ProfessionsPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
+              </div>
+            )}
+            {professionsVisible && showRanks && (
+              <div className="pointer-events-auto relative h-3 shrink-0">
+                <div
+                  onPointerDown={startLeftSplitResize}
+                  className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 cursor-row-resize rounded-full bg-[#24314d] transition-colors hover:bg-[#ffcc00]"
+                  title="Resize left panels"
+                />
+              </div>
+            )}
+            {showRanks && (
+              <div className={professionsVisible ? "min-h-0 flex-1" : "min-h-0 mt-auto"}>
+                <PlayerPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
+              </div>
+            )}
+            <div
+              onPointerDown={startLeftWidthResize}
+              className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+              title="Resize left dock"
             />
-          ) : (
-            <ChatLog
-              zoneId={currentZone}
-              className="absolute bottom-16 right-2 md:right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto"
+          </div>
+        )}
+        {showRightDock && (
+          <div
+            className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 flex flex-col gap-0 md:right-4"
+            style={{ width: `${rightDockWidth}px` }}
+          >
+            {showWallet && (
+              <div
+                className="min-h-0"
+                style={showChat ? { height: `${rightTopHeight}px` } : { maxHeight: "100%" }}
+              >
+                <WalletPanel className="pointer-events-auto h-full w-full max-w-none max-h-full" />
+              </div>
+            )}
+            {showWallet && showChat && (
+              <div className="pointer-events-auto relative h-3 shrink-0">
+                <div
+                  onPointerDown={startRightSplitResize}
+                  className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 cursor-row-resize rounded-full bg-[#24314d] transition-colors hover:bg-[#ffcc00]"
+                  title="Resize right panels"
+                />
+              </div>
+            )}
+            {showChat && (
+              <div className={showWallet ? "min-h-0 flex-1" : "min-h-0 mt-auto"}>
+                {address ? (
+                  <AgentChatPanel
+                    walletAddress={address}
+                    currentZone={currentZone}
+                    className="pointer-events-auto h-full max-h-full w-full max-w-none"
+                  />
+                ) : (
+                  <ChatLog
+                    zoneId={currentZone}
+                    className="pointer-events-auto h-full max-h-full w-full max-w-none overflow-auto"
+                  />
+                )}
+              </div>
+            )}
+            <div
+              onPointerDown={startRightWidthResize}
+              className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+              title="Resize right dock"
             />
-          )
+          </div>
         )}
         {deferredDialogsReady && <DeferredWorldDialogs />}
         {questLogOpen && (

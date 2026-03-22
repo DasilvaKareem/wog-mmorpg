@@ -412,6 +412,164 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     requiredProfession: "blacksmithing",
     craftingTime: 25,
   },
+  // --- Unique Weapons — Ore-forged (Tier 1) ---
+  {
+    recipeId: "frostfang-dagger",
+    outputTokenId: 231n, // Frostfang Dagger
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 23n, quantity: 2 }, // 2x Tin Ore
+      { tokenId: 25n, quantity: 1 }, // 1x Silver Ore
+      { tokenId: 38n, quantity: 1 }, // 1x Moonflower
+    ],
+    copperCost: 30,
+    requiredProfession: "blacksmithing",
+    craftingTime: 8,
+  },
+  {
+    recipeId: "emberclaw-mace",
+    outputTokenId: 232n, // Emberclaw Mace
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 22n, quantity: 3 }, // 3x Coal Ore
+      { tokenId: 24n, quantity: 2 }, // 2x Copper Ore
+    ],
+    copperCost: 35,
+    requiredProfession: "blacksmithing",
+    craftingTime: 10,
+  },
+  {
+    recipeId: "thornvine-whip",
+    outputTokenId: 233n, // Thornvine Whip
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 24n, quantity: 1 }, // 1x Copper Ore
+      { tokenId: 23n, quantity: 1 }, // 1x Tin Ore
+      { tokenId: 35n, quantity: 2 }, // 2x Lavender
+    ],
+    copperCost: 25,
+    requiredProfession: "blacksmithing",
+    craftingTime: 7,
+  },
+  {
+    recipeId: "gloomveil-wand",
+    outputTokenId: 234n, // Gloomveil Wand
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 25n, quantity: 1 }, // 1x Silver Ore
+      { tokenId: 36n, quantity: 2 }, // 2x Sage
+    ],
+    copperCost: 30,
+    requiredProfession: "blacksmithing",
+    craftingTime: 6,
+  },
+
+  // --- Unique Weapons — Bar-forged (Tier 2) ---
+  {
+    recipeId: "wraithbone-scimitar",
+    outputTokenId: 235n, // Wraithbone Scimitar
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 86n, quantity: 2 }, // 2x Tin Bar
+      { tokenId: 87n, quantity: 1 }, // 1x Copper Bar
+      { tokenId: 38n, quantity: 1 }, // 1x Moonflower
+    ],
+    copperCost: 60,
+    requiredProfession: "blacksmithing",
+    craftingTime: 14,
+  },
+  {
+    recipeId: "duskhollow-warhammer",
+    outputTokenId: 236n, // Duskhollow Warhammer
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 87n, quantity: 3 }, // 3x Copper Bar
+      { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
+    ],
+    copperCost: 80,
+    requiredProfession: "blacksmithing",
+    craftingTime: 18,
+  },
+  {
+    recipeId: "serpentcoil-longbow",
+    outputTokenId: 237n, // Serpentcoil Longbow
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
+      { tokenId: 86n, quantity: 1 }, // 1x Tin Bar
+      { tokenId: 40n, quantity: 2 }, // 2x Dragon's Breath
+    ],
+    copperCost: 70,
+    requiredProfession: "blacksmithing",
+    craftingTime: 16,
+  },
+  {
+    recipeId: "starweaver-scepter",
+    outputTokenId: 238n, // Starweaver Scepter
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 88n, quantity: 2 }, // 2x Silver Bar
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+      { tokenId: 39n, quantity: 1 }, // 1x Starbloom
+    ],
+    copperCost: 90,
+    requiredProfession: "blacksmithing",
+    craftingTime: 18,
+  },
+
+  // --- Unique Weapons — Alloy-forged (Tier 3) ---
+  {
+    recipeId: "bloodthorn-claymore",
+    outputTokenId: 239n, // Bloodthorn Claymore
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
+      { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
+      { tokenId: 40n, quantity: 2 }, // 2x Dragon's Breath
+    ],
+    copperCost: 150,
+    requiredProfession: "blacksmithing",
+    craftingTime: 25,
+  },
+  {
+    recipeId: "moonsilver-rapier",
+    outputTokenId: 240n, // Moonsilver Rapier
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 88n, quantity: 3 }, // 3x Silver Bar
+      { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
+      { tokenId: 39n, quantity: 1 }, // 1x Starbloom
+    ],
+    copperCost: 120,
+    requiredProfession: "blacksmithing",
+    craftingTime: 22,
+  },
+  {
+    recipeId: "stormcaller-arbalest",
+    outputTokenId: 241n, // Stormcaller Arbalest
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 90n, quantity: 2 }, // 2x Steel Alloy
+      { tokenId: 87n, quantity: 2 }, // 2x Copper Bar
+      { tokenId: 162n, quantity: 1 }, // 1x Cryptonic Crystal
+    ],
+    copperCost: 130,
+    requiredProfession: "blacksmithing",
+    craftingTime: 24,
+  },
+  {
+    recipeId: "oathkeeper-maul",
+    outputTokenId: 242n, // Oathkeeper Maul
+    outputQuantity: 1,
+    requiredMaterials: [
+      { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
+      { tokenId: 90n, quantity: 1 }, // 1x Steel Alloy
+      { tokenId: 161n, quantity: 1 }, // 1x Scandix Steel
+    ],
+    copperCost: 160,
+    requiredProfession: "blacksmithing",
+    craftingTime: 26,
+  },
 ];
 
 export function getRecipeById(recipeId: string): CraftingRecipe | undefined {

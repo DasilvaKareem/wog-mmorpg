@@ -42,6 +42,7 @@ interface DiaryEntry {
 interface InventoryItem {
   tokenId: number;
   name: string;
+  displayName: string | null;
   description: string;
   category: "consumable" | "weapon" | "armor" | "material" | "tool";
   equipSlot: string | null;
@@ -453,7 +454,7 @@ function InventoryTab({
                 {eq ? (
                   <>
                     <span className="text-[10px] font-bold leading-tight truncate" style={{ color: rc }}>
-                      {eq.name}
+                      {eq.displayName ?? eq.name}
                     </span>
                     <span className="text-[8px] uppercase mt-0.5" style={{ color: rc + "99" }}>{eq.rarity}</span>
                     {durPct !== null && (
@@ -547,7 +548,7 @@ function InventoryTab({
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[13px] font-bold text-[#d6deff]">{item.name}</span>
+                      <span className="text-[13px] font-bold text-[#d6deff]">{item.displayName ?? item.name}</span>
                       <span
                         className="text-[10px] uppercase tracking-wide border px-1"
                         style={{ color: rc, borderColor: rc + "44", backgroundColor: rc + "11" }}

@@ -30,6 +30,10 @@ const TOKEN_CATEGORY_MAP: Record<number, { category: WeaponCategory; tier: Weapo
   112: { category: "ranged", tier: "high" },
   113: { category: "melee",  tier: "high" },
   114: { category: "magic",  tier: "high" },
+  // NOTE: Elite (180-184) and unique craftable (231-242) weapons are
+  // intentionally NOT in this map so generateWeaponName() returns null
+  // and the fallback preserves their catalog names (e.g. "Frostfang Dagger",
+  // "Voidsteel Greatsword") instead of overwriting them with random junk.
 };
 
 export function getWeaponMeta(tokenId: number): { category: WeaponCategory; tier: WeaponTier } | undefined {

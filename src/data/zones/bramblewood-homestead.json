@@ -1,0 +1,8 @@
+{
+  "id": "bramblewood-homestead",
+  "name": "Bramblewood Homestead",
+  "bounds": { "min": { "x": 0, "z": 0 }, "max": { "x": 640, "z": 640 } },
+  "mapTint": "rgba(140,180,100,0.12)",
+  "budget": { "maxPopulation": 10, "maxThreat": 20 },
+  "pois": []
+}

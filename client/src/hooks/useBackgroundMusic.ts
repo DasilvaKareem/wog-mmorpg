@@ -11,6 +11,7 @@ import { ASSET_BASE_URL } from "@/config";
 
 const STORAGE_KEY = "wog-music-muted";
 const VOLUME = 0.08;
+const MUSIC_TOGGLE_EVENT = "wog:music-toggle";
 
 function getMusicUrl(track: string): string {
   const base = ASSET_BASE_URL ? `${ASSET_BASE_URL}/audio` : "/audio";
@@ -47,6 +48,22 @@ export function useBackgroundMusic(track: "main-theme" | "world-theme" = "world-
     audio.muted = muted;
     try { localStorage.setItem(STORAGE_KEY, muted ? "1" : "0"); } catch {}
   }, [muted]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handleToggle = (event: Event) => {
+      const custom = event as CustomEvent<{ muted?: boolean }>;
+      if (typeof custom.detail?.muted === "boolean") {
+        setMuted(custom.detail.muted);
+        return;
+      }
+      setMuted((prev) => !prev);
+    };
+
+    window.addEventListener(MUSIC_TOGGLE_EVENT, handleToggle);
+    return () => window.removeEventListener(MUSIC_TOGGLE_EVENT, handleToggle);
+  }, []);
 
   // Start playback on first user interaction (autoplay policy)
   useEffect(() => {
@@ -94,3 +111,5 @@ export function useBackgroundMusic(track: "main-theme" | "world-theme" = "world-
 
   return { muted, toggleMute };
 }
+
+export { MUSIC_TOGGLE_EVENT };

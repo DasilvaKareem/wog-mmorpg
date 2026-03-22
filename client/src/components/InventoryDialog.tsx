@@ -11,6 +11,7 @@ import { WalletManager } from "@/lib/walletManager";
 interface InventoryItem {
   tokenId: number;
   name: string;
+  displayName: string | null;
   description: string;
   category: "consumable" | "weapon" | "armor" | "material" | "tool";
   equipSlot: string | null;
@@ -366,7 +367,7 @@ export function InventoryDialog(): React.ReactElement | null {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="text-[11px] font-bold truncate" style={{ color: rc }}>
-                              {item.name}
+                              {item.displayName ?? item.name}
                             </span>
                             {item.equipped && (
                               <span className="text-[7px] uppercase px-1 py-px border"
@@ -469,7 +470,7 @@ function ItemDetail({
       <div>
         <div className="flex items-center gap-1.5 mb-1">
           <span className="text-[16px]">{CATEGORY_ICONS[item.category] ?? "\uD83D\uDCE6"}</span>
-          <span className="text-[12px] font-bold" style={{ color: rc }}>{item.name}</span>
+          <span className="text-[12px] font-bold" style={{ color: rc }}>{item.displayName ?? item.name}</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-[8px] uppercase tracking-wide border px-1 py-px"

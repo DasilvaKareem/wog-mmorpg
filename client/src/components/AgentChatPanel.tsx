@@ -673,7 +673,6 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const isRunning = status?.running ?? false;
   const isDeployed = isRunning || (status?.config?.enabled === true && status?.entityId != null);
   const entityName = status?.entity?.name ?? "Agent";
-  const entityLevel = status?.entity?.level ?? 1;
   const focus = status?.config?.focus ?? "idle";
   const focusColor = FOCUS_COLORS[focus] ?? "#8b9abc";
   const hp = status?.entity?.hp;
@@ -703,8 +702,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </button>
           <span className="text-[11px] text-[#54f28b] uppercase tracking-widest">
             {">> "}
-            <span className="text-[#ffcc00]">{entityName}</span>
-            {entityLevel > 1 && <span className="text-[#9aa7cc]"> Lv{entityLevel}</span>}
+            <span className="text-[#ffcc00]">Console</span>
           </span>
         </div>
         <div className="flex items-center gap-2">
