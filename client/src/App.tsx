@@ -137,11 +137,11 @@ const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
 };
 const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
-const DOCK_STORAGE_PREFIX = "wog:world-dock:v3";
-const MIN_DOCK_WIDTH = 320;
+const DOCK_STORAGE_PREFIX = "wog:world-dock:v4";
+const MIN_DOCK_WIDTH = 240;
 const MAX_DOCK_WIDTH = 560;
 const MIN_DOCK_PANEL_HEIGHT = 220;
-const DOCK_SPLITTER_HEIGHT = 12;
+const DOCK_PANEL_GAP = 12;
 const LEFT_DOCK_TOP_OFFSET = 56;
 const RIGHT_DOCK_TOP_OFFSET = 16;
 const DOCK_BOTTOM_OFFSET = 64;
@@ -247,62 +247,115 @@ function GameWorld(): React.ReactElement {
   const leftDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
   const rightDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
   const leftAvailableHeight = Math.max(
-    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_PANEL_GAP,
     viewport.height - LEFT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
   );
   const rightAvailableHeight = Math.max(
-    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_PANEL_GAP,
     viewport.height - RIGHT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
   );
-
-  const leftMaxTopHeight = Math.max(
-    MIN_DOCK_PANEL_HEIGHT,
-    leftAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_SPLITTER_HEIGHT,
+  const defaultLeftTopWidth = clamp(
+    Math.round(viewport.width * (showRightDock ? 0.19 : 0.21)),
+    MIN_DOCK_WIDTH,
+    Math.min(320, leftDockMaxWidth),
   );
-  const rightMaxTopHeight = Math.max(
-    MIN_DOCK_PANEL_HEIGHT,
-    rightAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_SPLITTER_HEIGHT,
-  );
-
-  const defaultLeftDockWidth = clamp(
+  const defaultLeftBottomWidth = clamp(
     Math.round(viewport.width * (showRightDock ? 0.22 : 0.24)),
     MIN_DOCK_WIDTH,
-    Math.min(400, leftDockMaxWidth),
+    Math.min(360, leftDockMaxWidth),
   );
-  const defaultRightDockWidth = clamp(
-    Math.round(viewport.width * (showLeftDock ? 0.24 : 0.28)),
-    MIN_DOCK_WIDTH + 16,
+  const defaultRightTopWidth = clamp(
+    Math.round(viewport.width * (showLeftDock ? 0.27 : 0.31)),
+    Math.max(MIN_DOCK_WIDTH + 40, 320),
     Math.min(440, rightDockMaxWidth),
   );
+  const defaultRightBottomWidth = clamp(
+    Math.round(viewport.width * (showLeftDock ? 0.24 : 0.27)),
+    Math.max(MIN_DOCK_WIDTH + 20, 300),
+    Math.min(400, rightDockMaxWidth),
+  );
   const defaultLeftTopHeight = clamp(
-    Math.round(leftAvailableHeight * 0.42),
+    Math.round(leftAvailableHeight * 0.36),
+    240,
+    leftAvailableHeight,
+  );
+  const defaultLeftBottomHeight = clamp(
+    Math.round(leftAvailableHeight * 0.46),
     260,
-    leftMaxTopHeight,
+    leftAvailableHeight,
   );
   const defaultRightTopHeight = clamp(
-    Math.round(rightAvailableHeight * 0.54),
-    360,
-    rightMaxTopHeight,
+    Math.round(rightAvailableHeight * 0.52),
+    320,
+    rightAvailableHeight,
+  );
+  const defaultRightBottomHeight = clamp(
+    Math.round(rightAvailableHeight * 0.38),
+    260,
+    rightAvailableHeight,
   );
 
-  const [leftDockWidthRaw, setLeftDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-width`, defaultLeftDockWidth);
-  const [rightDockWidthRaw, setRightDockWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-width`, defaultRightDockWidth);
+  const [leftTopWidthRaw, setLeftTopWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-width`, defaultLeftTopWidth);
+  const [leftBottomWidthRaw, setLeftBottomWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-bottom-width`, defaultLeftBottomWidth);
+  const [rightTopWidthRaw, setRightTopWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-width`, defaultRightTopWidth);
+  const [rightBottomWidthRaw, setRightBottomWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-bottom-width`, defaultRightBottomWidth);
   const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, defaultLeftTopHeight);
+  const [leftBottomHeightRaw, setLeftBottomHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-bottom-height`, defaultLeftBottomHeight);
   const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, defaultRightTopHeight);
+  const [rightBottomHeightRaw, setRightBottomHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-bottom-height`, defaultRightBottomHeight);
 
-  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
-  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
+  const leftTopWidth = clamp(leftTopWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
+  const leftBottomWidth = clamp(leftBottomWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
+  const rightTopWidth = clamp(rightTopWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
+  const rightBottomWidth = clamp(rightBottomWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
 
-  const leftTopHeight = clamp(leftTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight);
-  const rightTopHeight = clamp(rightTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight);
+  const leftTopHeight = professionsVisible
+    ? clamp(
+        leftTopHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        professionsVisible && showRanks
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_PANEL_GAP)
+          : leftAvailableHeight,
+      )
+    : 0;
+  const leftBottomHeight = showRanks
+    ? clamp(
+        leftBottomHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        professionsVisible
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftTopHeight - DOCK_PANEL_GAP)
+          : leftAvailableHeight,
+      )
+    : 0;
+  const rightTopHeight = showWallet
+    ? clamp(
+        rightTopHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        showWallet && showChat
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_PANEL_GAP)
+          : rightAvailableHeight,
+      )
+    : 0;
+  const rightBottomHeight = showChat
+    ? clamp(
+        rightBottomHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        showWallet
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightTopHeight - DOCK_PANEL_GAP)
+          : rightAvailableHeight,
+      )
+    : 0;
 
-  const startLeftWidthResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startLeftWidthResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startWidth: number,
+    setWidth: React.Dispatch<React.SetStateAction<number>>,
+  ) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = leftDockWidth;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setLeftDockWidthRaw(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, leftDockMaxWidth));
+      setWidth(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, leftDockMaxWidth));
     };
 
     const onUp = () => {
@@ -312,15 +365,18 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [leftDockMaxWidth, leftDockWidth, setLeftDockWidthRaw]);
+  }, [leftDockMaxWidth]);
 
-  const startRightWidthResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startRightWidthResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startWidth: number,
+    setWidth: React.Dispatch<React.SetStateAction<number>>,
+  ) => {
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = rightDockWidth;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setRightDockWidthRaw(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, rightDockMaxWidth));
+      setWidth(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, rightDockMaxWidth));
     };
 
     const onUp = () => {
@@ -330,15 +386,19 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [rightDockMaxWidth, rightDockWidth, setRightDockWidthRaw]);
+  }, [rightDockMaxWidth]);
 
-  const startLeftSplitResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startTopHeightResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startHeight: number,
+    setHeight: React.Dispatch<React.SetStateAction<number>>,
+    maxHeight: number,
+  ) => {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = leftTopHeight;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setLeftTopHeightRaw(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight));
+      setHeight(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, maxHeight));
     };
 
     const onUp = () => {
@@ -348,15 +408,19 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [leftMaxTopHeight, leftTopHeight, setLeftTopHeightRaw]);
+  }, []);
 
-  const startRightSplitResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+  const startBottomHeightResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startHeight: number,
+    setHeight: React.Dispatch<React.SetStateAction<number>>,
+    maxHeight: number,
+  ) => {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = rightTopHeight;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setRightTopHeightRaw(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight));
+      setHeight(clamp(startHeight - (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, maxHeight));
     };
 
     const onUp = () => {
@@ -366,7 +430,7 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [rightMaxTopHeight, rightTopHeight, setRightTopHeightRaw]);
+  }, []);
 
   const focusOwnedCharacter = React.useCallback((zoneId?: string) => {
     if (!address) return;
@@ -530,63 +594,85 @@ function GameWorld(): React.ReactElement {
       </React.Suspense>
       <React.Suspense fallback={null}>
         {showLeftDock && (
-          <div
-            className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 flex flex-col gap-0 md:left-4"
-            style={{ width: `${leftDockWidth}px` }}
-          >
+          <div className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 md:left-4">
             {professionsVisible && (
               <div
-                className="min-h-0"
-                style={showRanks ? { height: `${leftTopHeight}px` } : { maxHeight: "100%" }}
+                className="absolute left-0 top-0 min-h-0"
+                style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
               >
                 <ProfessionsPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
-              </div>
-            )}
-            {professionsVisible && showRanks && (
-              <div className="pointer-events-auto relative h-3 shrink-0">
                 <div
-                  onPointerDown={startLeftSplitResize}
-                  className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 cursor-row-resize rounded-full bg-[#24314d] transition-colors hover:bg-[#ffcc00]"
-                  title="Resize left panels"
+                  onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
+                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize professions panel"
+                />
+                <div
+                  onPointerDown={(event) => startTopHeightResize(
+                    event,
+                    leftTopHeight,
+                    setLeftTopHeightRaw,
+                    showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize professions panel"
                 />
               </div>
             )}
             {showRanks && (
-              <div className={professionsVisible ? "min-h-0 flex-1" : "min-h-0 mt-auto"}>
+              <div
+                className="absolute bottom-0 left-0 min-h-0"
+                style={{ width: `${leftBottomWidth}px`, height: `${leftBottomHeight}px` }}
+              >
                 <PlayerPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
+                <div
+                  onPointerDown={(event) => startLeftWidthResize(event, leftBottomWidth, setLeftBottomWidthRaw)}
+                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize lobby panel"
+                />
+                <div
+                  onPointerDown={(event) => startBottomHeightResize(
+                    event,
+                    leftBottomHeight,
+                    setLeftBottomHeightRaw,
+                    professionsVisible ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftTopHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -top-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize lobby panel"
+                />
               </div>
             )}
-            <div
-              onPointerDown={startLeftWidthResize}
-              className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-              title="Resize left dock"
-            />
           </div>
         )}
         {showRightDock && (
-          <div
-            className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 flex flex-col gap-0 md:right-4"
-            style={{ width: `${rightDockWidth}px` }}
-          >
+          <div className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 md:right-4">
             {showWallet && (
               <div
-                className="min-h-0"
-                style={showChat ? { height: `${rightTopHeight}px` } : { maxHeight: "100%" }}
+                className="absolute right-0 top-0 min-h-0"
+                style={{ width: `${rightTopWidth}px`, height: `${rightTopHeight}px` }}
               >
                 <WalletPanel className="pointer-events-auto h-full w-full max-w-none max-h-full" />
-              </div>
-            )}
-            {showWallet && showChat && (
-              <div className="pointer-events-auto relative h-3 shrink-0">
                 <div
-                  onPointerDown={startRightSplitResize}
-                  className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 cursor-row-resize rounded-full bg-[#24314d] transition-colors hover:bg-[#ffcc00]"
-                  title="Resize right panels"
+                  onPointerDown={(event) => startRightWidthResize(event, rightTopWidth, setRightTopWidthRaw)}
+                  className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize inventory panel"
+                />
+                <div
+                  onPointerDown={(event) => startTopHeightResize(
+                    event,
+                    rightTopHeight,
+                    setRightTopHeightRaw,
+                    showChat ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightBottomHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize inventory panel"
                 />
               </div>
             )}
             {showChat && (
-              <div className={showWallet ? "min-h-0 flex-1" : "min-h-0 mt-auto"}>
+              <div
+                className="absolute bottom-0 right-0 min-h-0"
+                style={{ width: `${rightBottomWidth}px`, height: `${rightBottomHeight}px` }}
+              >
                 {address ? (
                   <AgentChatPanel
                     walletAddress={address}
@@ -599,13 +685,23 @@ function GameWorld(): React.ReactElement {
                     className="pointer-events-auto h-full max-h-full w-full max-w-none overflow-auto"
                   />
                 )}
+                <div
+                  onPointerDown={(event) => startRightWidthResize(event, rightBottomWidth, setRightBottomWidthRaw)}
+                  className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize console panel"
+                />
+                <div
+                  onPointerDown={(event) => startBottomHeightResize(
+                    event,
+                    rightBottomHeight,
+                    setRightBottomHeightRaw,
+                    showWallet ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightTopHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -top-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize console panel"
+                />
               </div>
             )}
-            <div
-              onPointerDown={startRightWidthResize}
-              className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-              title="Resize right dock"
-            />
           </div>
         )}
         {deferredDialogsReady && <DeferredWorldDialogs />}
