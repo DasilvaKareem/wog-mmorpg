@@ -384,12 +384,12 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
   return (
     <Card
       className={cn(
-        "pointer-events-auto w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto",
+        "pointer-events-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden",
         className,
       )}
       data-tutorial-id="wallet-panel"
     >
-      <CardHeader className="pb-2">
+      <CardHeader className="shrink-0 pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
           <div className="flex items-center gap-2">
             <button
@@ -403,11 +403,11 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
           </div>
         </CardTitle>
       </CardHeader>
-      {!collapsed && <CardContent className="space-y-3 text-[9px]">
-        <div className="flex items-center justify-between">
+      {!collapsed && <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto text-[9px]">
+        <div className="flex items-start justify-between gap-2">
           <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
-          <div className="flex items-center gap-1">
-            <Badge>{address ? dn(address) : "..."}</Badge>
+          <div className="flex min-w-0 items-center gap-1">
+            <Badge className="min-w-0 max-w-[11rem] truncate">{address ? dn(address) : "..."}</Badge>
             <button
               onClick={disconnect}
               className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"

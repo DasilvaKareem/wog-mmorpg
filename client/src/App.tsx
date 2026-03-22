@@ -137,9 +137,9 @@ const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
 };
 const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
-const DOCK_STORAGE_PREFIX = "wog:world-dock:v2";
+const DOCK_STORAGE_PREFIX = "wog:world-dock:v3";
 const MIN_DOCK_WIDTH = 320;
-const MAX_DOCK_WIDTH = 640;
+const MAX_DOCK_WIDTH = 560;
 const MIN_DOCK_PANEL_HEIGHT = 220;
 const DOCK_SPLITTER_HEIGHT = 12;
 const LEFT_DOCK_TOP_OFFSET = 56;
@@ -234,7 +234,18 @@ function GameWorld(): React.ReactElement {
   const showLeftDock = professionsVisible || showRanks;
   const showRightDock = showWallet || showChat;
 
-  const maxDockWidth = Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.floor(viewport.width * 0.5)));
+  const minWorldStageWidth = Math.max(360, Math.floor(viewport.width * 0.32));
+  const singleDockMaxWidth = Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.floor(viewport.width * 0.36)));
+  const dualDockWidthBudget = Math.max(
+    MIN_DOCK_WIDTH * 2,
+    viewport.width - minWorldStageWidth - 48,
+  );
+  const sharedDockMaxWidth = Math.max(
+    MIN_DOCK_WIDTH,
+    Math.min(MAX_DOCK_WIDTH, Math.floor(dualDockWidthBudget / 2)),
+  );
+  const leftDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
+  const rightDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
   const leftAvailableHeight = Math.max(
     MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_SPLITTER_HEIGHT,
     viewport.height - LEFT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
@@ -254,14 +265,14 @@ function GameWorld(): React.ReactElement {
   );
 
   const defaultLeftDockWidth = clamp(
-    Math.round(viewport.width * 0.22),
+    Math.round(viewport.width * (showRightDock ? 0.22 : 0.24)),
     MIN_DOCK_WIDTH,
-    Math.min(440, maxDockWidth),
+    Math.min(400, leftDockMaxWidth),
   );
   const defaultRightDockWidth = clamp(
-    Math.round(viewport.width * 0.28),
-    420,
-    maxDockWidth,
+    Math.round(viewport.width * (showLeftDock ? 0.24 : 0.28)),
+    MIN_DOCK_WIDTH + 16,
+    Math.min(440, rightDockMaxWidth),
   );
   const defaultLeftTopHeight = clamp(
     Math.round(leftAvailableHeight * 0.42),
@@ -279,8 +290,8 @@ function GameWorld(): React.ReactElement {
   const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, defaultLeftTopHeight);
   const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, defaultRightTopHeight);
 
-  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
-  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, maxDockWidth);
+  const leftDockWidth = clamp(leftDockWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
+  const rightDockWidth = clamp(rightDockWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
 
   const leftTopHeight = clamp(leftTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, leftMaxTopHeight);
   const rightTopHeight = clamp(rightTopHeightRaw, MIN_DOCK_PANEL_HEIGHT, rightMaxTopHeight);
@@ -291,7 +302,7 @@ function GameWorld(): React.ReactElement {
     const startWidth = leftDockWidth;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setLeftDockWidthRaw(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, maxDockWidth));
+      setLeftDockWidthRaw(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, leftDockMaxWidth));
     };
 
     const onUp = () => {
@@ -301,7 +312,7 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [leftDockWidth, maxDockWidth, setLeftDockWidthRaw]);
+  }, [leftDockMaxWidth, leftDockWidth, setLeftDockWidthRaw]);
 
   const startRightWidthResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -309,7 +320,7 @@ function GameWorld(): React.ReactElement {
     const startWidth = rightDockWidth;
 
     const onMove = (moveEvent: PointerEvent) => {
-      setRightDockWidthRaw(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, maxDockWidth));
+      setRightDockWidthRaw(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, rightDockMaxWidth));
     };
 
     const onUp = () => {
@@ -319,7 +330,7 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
-  }, [maxDockWidth, rightDockWidth, setRightDockWidthRaw]);
+  }, [rightDockMaxWidth, rightDockWidth, setRightDockWidthRaw]);
 
   const startLeftSplitResize = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();

@@ -688,7 +688,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   return (
     <div
       data-tutorial-id="agent-chat-panel"
-      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] w-96 lg:w-[28rem] max-w-[50vw] ${collapsed ? "" : "h-[45vh] max-h-[400px]"} ${className}`}
+      className={`flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${collapsed ? "" : "h-full"} ${className}`}
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
