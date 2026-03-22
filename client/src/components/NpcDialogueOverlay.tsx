@@ -1,6 +1,7 @@
 import * as React from "react";
 
 import { API_URL } from "@/config";
+import { fetchZone } from "@/ShardClient";
 import { SCOUT_KAELA_BRIEFED_FLAG } from "@/dialogue/data/questDialogueData";
 import { useDialogueRunner } from "@/dialogue/runtime";
 import { buildNpcQuestDialogueScript, buildScoutKaelaDialogueScript } from "@/dialogue/questScripts";
@@ -11,6 +12,7 @@ import { useWalletContext } from "@/context/WalletContext";
 import { getAuthToken } from "@/lib/agentAuth";
 import { gameBus } from "@/lib/eventBus";
 import { playSoundEffect } from "@/lib/soundEffects";
+import { WalletManager } from "@/lib/walletManager";
 import type { Entity } from "@/types";
 import { NpcServiceTabs, getAvailableTabs, type NpcTab } from "@/components/npc-tabs/NpcServiceTabs";
 import { NpcTrainingTab } from "@/components/npc-tabs/NpcTrainingTab";
@@ -586,6 +588,40 @@ function PortraitPanel({ portrait }: { portrait: DialoguePortrait }): React.Reac
   );
 }
 
+async function resolveLivePlayerIdentity(
+  ownerAddress: string,
+  zoneHints: Array<string | null | undefined>,
+): Promise<{ entityId: string; championName: string } | null> {
+  const walletManager = WalletManager.getInstance();
+  const trackedWallet = await walletManager.getTrackedWalletAddress();
+  const custodialWallet = walletManager.custodialAddress;
+  const walletsToMatch = new Set(
+    [ownerAddress, trackedWallet, custodialWallet]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase()),
+  );
+
+  const zonesToSearch = Array.from(
+    new Set(zoneHints.filter((value): value is string => Boolean(value))),
+  );
+
+  for (const zoneId of zonesToSearch) {
+    const zone = await fetchZone(zoneId);
+    if (!zone) continue;
+    for (const entity of Object.values(zone.entities)) {
+      if (entity.type !== "player") continue;
+      const entityWallet = entity.walletAddress?.toLowerCase();
+      if (!entityWallet || !walletsToMatch.has(entityWallet)) continue;
+      return {
+        entityId: entity.id,
+        championName: entity.name,
+      };
+    }
+  }
+
+  return null;
+}
+
 export function NpcDialogueOverlay(): React.ReactElement | null {
   const { address } = useWalletContext();
   const [open, setOpen] = React.useState(false);
@@ -605,6 +641,54 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   const [currentZoneId, setCurrentZoneId] = React.useState("village-square");
 
   useGameBridge("zoneChanged", ({ zoneId }) => setCurrentZoneId(zoneId));
+
+  React.useEffect(() => {
+    if (!open || !npc || !address || playerEntityId) return;
+
+    let cancelled = false;
+
+    void (async () => {
+      let resolvedChampionName: string | null = null;
+      let nextPlayerId: string | null = null;
+
+      try {
+        const logRes = await fetch(`${API_URL}/questlog/${address}`);
+        if (logRes.ok) {
+          const logData = await logRes.json();
+          resolvedChampionName = logData.playerName ?? null;
+          nextPlayerId = logData.entityId ?? null;
+        }
+      } catch {
+        // Ignore quest log failures and fall back to live entity resolution.
+      }
+
+      if (!nextPlayerId) {
+        try {
+          const liveIdentity = await resolveLivePlayerIdentity(address, [
+            npc.zoneId,
+            currentZoneId,
+          ]);
+          if (liveIdentity) {
+            nextPlayerId = liveIdentity.entityId;
+            resolvedChampionName = liveIdentity.championName;
+          }
+        } catch {
+          // Ignore live entity failures and keep the chat locked.
+        }
+      }
+
+      if (cancelled || !nextPlayerId) return;
+
+      setPlayerEntityId(nextPlayerId);
+      if (resolvedChampionName) {
+        setChampionName(resolvedChampionName);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, currentZoneId, npc, open, playerEntityId]);
 
   const handleClose = React.useCallback(() => {
     playSoundEffect("ui_dialog_close");
@@ -913,6 +997,21 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
         }
       } catch {
         // Ignore quest log failures and still open the dialogue shell.
+      }
+
+      if (!playerId) {
+        try {
+          const liveIdentity = await resolveLivePlayerIdentity(address, [
+            entity.zoneId,
+            currentZoneId,
+          ]);
+          if (liveIdentity) {
+            playerId = liveIdentity.entityId;
+            resolvedChampionName = liveIdentity.championName || resolvedChampionName;
+          }
+        } catch {
+          // Ignore live zone fallback failures and leave dialogue shell open.
+        }
       }
     }
 

@@ -379,6 +379,7 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
   }, []);
 
   const audioMuted = !soundEnabled && musicMuted;
+  const actionTileClass = "flex min-h-8 items-center justify-center border-2 px-2.5 py-1 text-center text-[7px] uppercase tracking-wide transition sm:text-[8px]";
 
   // Don't render the panel at all when not connected — the Navbar handles sign-in
   if (!isConnected) return <></>;
@@ -451,26 +452,24 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
           selectCharacter={selectCharacter}
           walletAddress={address!}
         />
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2 pt-1">
           <Link
             to="/champions"
-            className="flex flex-1 items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+            className={cn(actionTileClass, "border-[#ffcc00]/60 bg-[#2a2210] text-[#ffcc00] hover:bg-[#3d3218]")}
           >
             View Champion
           </Link>
           <button
             type="button"
             onClick={() => gameBus.emit("inventoryOpen", undefined as never)}
-            className="flex-1 border-2 border-[#b48efa]/40 bg-[#1a1028] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#b48efa] transition hover:bg-[#251840]"
+            className={cn(actionTileClass, "border-[#b48efa]/40 bg-[#1a1028] text-[#b48efa] hover:bg-[#251840]")}
           >
             Bag
           </button>
-        </div>
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => gameBus.emit("characterOpen", undefined as never)}
-            className="flex-1 border-2 border-[#c83232]/40 bg-[#1e1010] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#c83232] transition hover:bg-[#2a1818]"
+            className={cn(actionTileClass, "border-[#c83232]/40 bg-[#1e1010] text-[#c83232] hover:bg-[#2a1818]")}
           >
             Character
           </button>
@@ -504,39 +503,35 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
               }
             }}
             disabled={!address}
-            className="flex-1 border-2 border-[#ffcc00]/40 bg-[#1e1a10] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#2a2418] disabled:opacity-40 disabled:cursor-not-allowed"
+            className={cn(actionTileClass, "border-[#ffcc00]/40 bg-[#1e1a10] text-[#ffcc00] hover:bg-[#2a2418] disabled:cursor-not-allowed disabled:opacity-40")}
           >
             Inspect
           </button>
-        </div>
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => gameBus.emit("inboxOpen", undefined as never)}
-            className="flex-1 border-2 border-[#6ea8fe]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#6ea8fe] transition hover:bg-[#1a2840]"
+            className={cn(actionTileClass, "border-[#6ea8fe]/40 bg-[#101a2e] text-[#6ea8fe] hover:bg-[#1a2840]")}
           >
             Inbox
           </button>
           <button
             type="button"
             onClick={() => gameBus.emit("settingsOpen", undefined as never)}
-            className="flex-1 border-2 border-[#9aa7cc]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#9aa7cc] transition hover:bg-[#1a2840]"
+            className={cn(actionTileClass, "border-[#9aa7cc]/40 bg-[#101a2e] text-[#9aa7cc] hover:bg-[#1a2840]")}
           >
             Settings
           </button>
-        </div>
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={toggleAudioMute}
-            className="flex-1 border-2 border-[#54f28b]/40 bg-[#0f1e10] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#54f28b] transition hover:bg-[#1a2e18]"
+            className={cn(actionTileClass, "border-[#54f28b]/40 bg-[#0f1e10] text-[#54f28b] hover:bg-[#1a2e18]")}
           >
             {audioMuted ? "Unmute" : "Mute"}
           </button>
           <button
             type="button"
             onClick={() => void toggleFullscreen()}
-            className="flex-1 border-2 border-[#6ea8fe]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#6ea8fe] transition hover:bg-[#1a2840]"
+            className={cn(actionTileClass, "border-[#6ea8fe]/40 bg-[#101a2e] text-[#6ea8fe] hover:bg-[#1a2840]")}
           >
             {isFullscreen ? "Window" : "Fullscreen"}
           </button>
