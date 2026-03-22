@@ -195,21 +195,23 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("entityInspect", { entityId: entity.id, zoneId: entity.zoneId ?? this.currentZoneLabel });
       }
 
-      // Quest givers, Scout Kaela, and any NPC with quest markers get the dialogue overlay
-      const hasQuestMarker = this.availableQuestNpcIds.has(entity.id)
-        || this.activeQuestNpcIds.has(entity.id)
-        || this.readyQuestNpcIds.has(entity.id);
-      if (entity.type === "quest-giver" || entity.name === "Scout Kaela" || hasQuestMarker) {
+      // Any NPC with a character role gets the quest dialogue overlay.
+      // The overlay fetches quests from the server and handles the no-quest case
+      // with ambient dialogue — no need to gate by type on the client.
+      const DIALOGUE_NPC_TYPES = new Set([
+        "quest-giver", "lore-npc", "trainer", "profession-trainer",
+        "merchant", "crafting-master",
+      ]);
+      if (DIALOGUE_NPC_TYPES.has(entity.type) || entity.name === "Scout Kaela") {
         gameBus.emit("questNpcClick", entity);
       }
 
-      // NPC info panel for NPCs without dedicated dialogs (skip if already opened quest dialogue)
-      const NPC_INFO_TYPES = new Set([
-        "trainer", "profession-trainer", "lore-npc",
-        "crafting-master", "forge", "alchemy-lab", "enchanting-altar",
+      // Crafting stations / non-character NPCs get the info panel only
+      const STATION_TYPES = new Set([
+        "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);
-      if (NPC_INFO_TYPES.has(entity.type) && entity.name !== "Scout Kaela" && !hasQuestMarker) {
+      if (STATION_TYPES.has(entity.type)) {
         gameBus.emit("npcInfoClick", entity);
       }
 
