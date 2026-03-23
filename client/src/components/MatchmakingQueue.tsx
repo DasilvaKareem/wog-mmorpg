@@ -7,6 +7,7 @@ import { useWallet } from "@/hooks/useWallet";
 import { useGameContext } from "@/context/GameContext";
 import { getAuthToken } from "@/lib/agentAuth";
 import { gameBus } from "@/lib/eventBus";
+import { WalletManager } from "@/lib/walletManager";
 import { API_URL } from "../config.js";
 
 interface QueueStatus {
@@ -23,12 +24,13 @@ interface QueueIdentity {
 }
 
 interface StatePlayerEntity {
+  id?: string;
   type?: string;
   walletAddress?: string;
   name?: string;
   level?: number;
   agentId?: string;
-  characterTokenId?: string;
+  characterTokenId?: string | number;
 }
 
 interface StateSnapshot {
@@ -107,41 +109,51 @@ export function MatchmakingQueue(): React.ReactElement {
   const resolveQueueIdentity = React.useCallback(async (): Promise<QueueIdentity | null> => {
     if (!address) return null;
 
+    const walletManager = WalletManager.getInstance();
+    const trackedWallet = await walletManager.getTrackedWalletAddress();
+    const custodialWallet = walletManager.custodialAddress;
+    const walletsToMatch = new Set(
+      [address, trackedWallet, custodialWallet]
+        .filter((value): value is string => Boolean(value))
+        .map((value) => value.toLowerCase()),
+    );
+
     const response = await fetch(`${API_URL}/state`);
     if (!response.ok) {
       throw new Error("Unable to load live world state");
     }
 
     const snapshot = (await response.json()) as StateSnapshot;
-    const normalizedWallet = address.toLowerCase();
     const preferredName = deployedCharacterName?.trim().toLowerCase() ?? null;
     const liveName =
       characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
 
-    // First try players with full on-chain identity
     const allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
-      Object.values(zone.entities ?? {}).filter((entity) =>
-        entity.type === "player" &&
-        entity.walletAddress?.toLowerCase() === normalizedWallet
-      )
+      Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
+        if (entity.type !== "player") return [];
+        const entityWallet = entity.walletAddress?.toLowerCase();
+        if (!entityWallet || !walletsToMatch.has(entityWallet)) return [];
+        return [{ ...entity, id: entity.id ?? entityId }];
+      }),
     );
 
     if (allPlayers.length === 0) {
       return null;
     }
 
-    // Prefer players with full identity, fall back to any spawned player
-    const withIdentity = allPlayers.filter((e) => e.agentId && e.characterTokenId);
-    const candidates = withIdentity.length > 0 ? withIdentity : allPlayers;
+    const withIdentity = allPlayers.filter((entity) => entity.agentId && entity.characterTokenId);
+    if (withIdentity.length === 0) {
+      return null;
+    }
 
     const selected =
-      candidates.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-      candidates.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-      candidates[0];
+      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
+      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
+      withIdentity[0];
 
     return {
-      agentId: selected.agentId ?? selected.id,
-      characterTokenId: selected.characterTokenId ?? "0",
+      agentId: String(selected.agentId),
+      characterTokenId: String(selected.characterTokenId),
       level: selected.level ?? characterProgress?.level ?? 1,
     };
   }, [address, characterProgress, deployedCharacterName]);
