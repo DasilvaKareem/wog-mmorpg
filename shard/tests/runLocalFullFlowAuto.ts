@@ -13,7 +13,6 @@ const REDIS_CONTAINER_NAME = process.env.TEST_REDIS_CONTAINER_NAME || "wog-test-
 const DEFAULT_ENV: Record<string, string> = {
   DEV: "true",
   REDIS_URL,
-  REQUIRE_REDIS_PERSISTENCE: "true",
   JWT_SECRET: process.env.JWT_SECRET || "local-dev-jwt-secret",
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef",
   SERVER_PRIVATE_KEY:

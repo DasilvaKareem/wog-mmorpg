@@ -230,6 +230,9 @@ This means chain-owned facts now follow one consistent rule:
 - `REQUIRE_REDIS_PERSISTENCE=true|false`
   - default: `true`
   - when `true`, boot fails if Redis is unavailable
+- `REDIS_ALLOW_MEMORY_FALLBACK=true|false`
+  - default: `false`
+  - when `true`, local/test workflows may run without Redis
 - `PLAYER_PERSIST_INTERVAL_MS=<number>`
   - default: `5000`
   - controls periodic online-player checkpoint frequency

@@ -115,10 +115,13 @@ THIRDWEB_CLIENT_ID=...
 ```
 
 Notes:
+- `DEV` is opt-in. If unset, the shard treats `DEV` as `false`.
 - in `DEV=true`, the local Hardhat manifest is the preferred source for local contract addresses
 - in non-dev environments, provide explicit RPC + contract addresses
 - for standalone shard test runs that import auth code, `JWT_SECRET` must be set
-- shard persistence now expects Redis by default; set `REQUIRE_REDIS_PERSISTENCE=false` only for explicit local fallback workflows
+- shard persistence expects Redis by default
+- in-memory fallback is disabled by default; set `REDIS_ALLOW_MEMORY_FALLBACK=true` only for explicit local fallback workflows
+- set `REQUIRE_REDIS_PERSISTENCE=false` only for intentional local fallback workflows
 
 Additional persistence-related shard envs:
 

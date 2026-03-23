@@ -1,13 +1,13 @@
 /**
  * Shared Redis client singleton.
- * In production (REDIS_URL set), Redis is the authoritative persistent store.
- * In local/dev without Redis URL, callers may use in-memory fallback.
+ * Redis is the authoritative persistent store by default.
+ * In-memory fallback is only enabled when REDIS_ALLOW_MEMORY_FALLBACK=true.
  */
 
 let redis: any = null;
 let initialized = false;
 let redisConfigured = false;
-let memoryFallbackAllowed = true;
+let memoryFallbackAllowed = false;
 let lastRedisError: string | null = null;
 
 function resolveRedisUrl(): { url: string | null; source: string | null } {
@@ -47,7 +47,7 @@ async function init() {
   const { url: redisUrl, source } = resolveRedisUrl();
   redisConfigured = Boolean(redisUrl);
   const fallbackOverride = parseBooleanEnv(process.env.REDIS_ALLOW_MEMORY_FALLBACK);
-  memoryFallbackAllowed = fallbackOverride ?? !redisConfigured;
+  memoryFallbackAllowed = fallbackOverride ?? false;
 
   if (redisUrl) {
     try {
@@ -90,7 +90,11 @@ async function init() {
       redis = null;
     }
   } else {
-    console.log("[redis] No Redis URL configured, using in-memory fallback");
+    if (memoryFallbackAllowed) {
+      console.log("[redis] No Redis URL configured, using in-memory fallback");
+    } else {
+      console.warn("[redis] No Redis URL configured and memory fallback is disabled");
+    }
   }
 }
 
@@ -108,8 +112,8 @@ export function isRedisConfigured(): boolean {
 }
 
 /**
- * In-memory fallback is only expected for local/dev unless explicitly enabled.
- * Set REDIS_ALLOW_MEMORY_FALLBACK=true to force dual-mode behavior.
+ * In-memory fallback is disabled by default.
+ * Set REDIS_ALLOW_MEMORY_FALLBACK=true to allow dual-mode behavior explicitly.
  */
 export function isMemoryFallbackAllowed(): boolean {
   return memoryFallbackAllowed;
