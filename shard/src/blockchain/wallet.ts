@@ -5,6 +5,15 @@ import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
 import { goldToCopper, copperToGold } from "./currency.js";
 import { createCustodialWallet, getCustodialWallet } from "./custodialWalletRedis.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import {
+  acquireChainOperationLock,
+  createChainOperation,
+  getChainOperation,
+  listDueChainOperations,
+  markChainOperationRetryable,
+  releaseChainOperationLock,
+  updateChainOperation,
+} from "./chainOperationStore.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -17,7 +26,9 @@ const TREASURY_SEED_GOLD = "100000";
 const TREASURY_ADDRESS_KEY = "wallet:welcome-treasury:address";
 const TREASURY_SEEDED_KEY = "wallet:welcome-treasury:seeded";
 const REGISTERED_WALLET_KEY_PREFIX = "wallet:registered:";
+const WALLET_REGISTRATION_STATUS_KEY_PREFIX = "wallet:registration:";
 const WELCOME_GOLD = copperToGold(WELCOME_COPPER);
+const WALLET_REGISTRATION_OP_TYPE = "wallet-register";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -154,6 +165,51 @@ async function markWalletRegistered(address: string): Promise<void> {
   registeredWallets.add(normalized);
 }
 
+function walletRegistrationStatusKey(address: string): string {
+  return `${WALLET_REGISTRATION_STATUS_KEY_PREFIX}${normalizeAddress(address)}`;
+}
+
+async function getWalletRegistrationStatus(address: string): Promise<Record<string, string> | null> {
+  const redis = getRedis();
+  if (!redis) {
+    assertRedisAvailable("getWalletRegistrationStatus");
+    return null;
+  }
+  const raw = await redis.hgetall(walletRegistrationStatusKey(address));
+  return raw && Object.keys(raw).length > 0 ? raw : null;
+}
+
+async function saveWalletRegistrationStatus(address: string, fields: Record<string, string | number | null | undefined>): Promise<void> {
+  const redis = getRedis();
+  if (!redis) {
+    assertRedisAvailable("saveWalletRegistrationStatus");
+    return;
+  }
+
+  const key = walletRegistrationStatusKey(address);
+  const data: Record<string, string> = {};
+  const deletes: string[] = [];
+  for (const [field, value] of Object.entries(fields)) {
+    if (value == null || value === "") {
+      deletes.push(field);
+    } else {
+      data[field] = String(value);
+    }
+  }
+  if (Object.keys(data).length > 0) await redis.hset(key, data);
+  if (deletes.length > 0) await redis.hdel(key, ...deletes);
+}
+
+async function findPendingWalletRegistrationOperation(address: string): Promise<string | null> {
+  const status = await getWalletRegistrationStatus(address);
+  const operationId = status?.operationId;
+  if (!operationId) return null;
+  const record = await getChainOperation(operationId);
+  if (!record) return null;
+  if (record.status === "completed" || record.status === "failed_permanent") return null;
+  return operationId;
+}
+
 async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
   const treasury = await createCustodialWallet();
   const treasuryAddress = normalizeAddress(treasury.address);
@@ -284,6 +340,110 @@ export interface WalletRegistrationResult {
   };
 }
 
+export async function processWalletRegistrationOperation(
+  server: FastifyInstance,
+  operationId: string,
+): Promise<void> {
+  const record = await getChainOperation(operationId);
+  if (!record || record.type !== WALLET_REGISTRATION_OP_TYPE) return;
+  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
+
+  const payload = JSON.parse(record.payload) as { address?: string };
+  const address = normalizeAddress(payload.address ?? record.subject);
+  const now = Date.now();
+
+  try {
+    await updateChainOperation(operationId, {
+      status: "submitted",
+      attemptCount: record.attemptCount + 1,
+      lastAttemptAt: now,
+      nextAttemptAt: now,
+    });
+    await saveWalletRegistrationStatus(address, {
+      operationId,
+      status: "submitted",
+      updatedAt: now,
+    });
+
+    const status = (await getWalletRegistrationStatus(address)) ?? {};
+    let sfuelTx = status.sfuelTx || "";
+    let treasuryWallet = status.treasuryWallet || "";
+    let goldTx = status.goldTx || "";
+
+    if (!sfuelTx) {
+      sfuelTx = await distributeSFuel(address);
+      await saveWalletRegistrationStatus(address, { sfuelTx, updatedAt: Date.now() });
+      console.log(`[wallet/register] sFUEL sent to ${address}: ${sfuelTx}`);
+    }
+
+    if (!goldTx) {
+      treasuryWallet = await ensureWelcomeTreasury(server);
+      await saveWalletRegistrationStatus(address, { treasuryWallet, updatedAt: Date.now() });
+      try { await distributeSFuel(treasuryWallet); } catch {}
+      await waitForTreasuryBalance(treasuryWallet, WELCOME_GOLD);
+      goldTx = await transferWelcomeBonus(server, treasuryWallet, address, WELCOME_GOLD);
+      await saveWalletRegistrationStatus(address, { goldTx, updatedAt: Date.now() });
+      console.log(`[wallet/register] Welcome bonus ${WELCOME_COPPER}c sent to ${address}: ${goldTx}`);
+    }
+
+    await markWalletRegistered(address);
+    await updateChainOperation(operationId, {
+      status: "completed",
+      completedAt: Date.now(),
+      txHash: goldTx || sfuelTx || undefined,
+      lastError: undefined,
+    });
+    await saveWalletRegistrationStatus(address, {
+      status: "completed",
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+      operationId,
+      sfuelTx,
+      goldTx,
+      treasuryWallet,
+      lastError: null,
+    });
+  } catch (err: any) {
+    await markChainOperationRetryable(operationId, err);
+    const updated = await getChainOperation(operationId);
+    await saveWalletRegistrationStatus(address, {
+      operationId,
+      status: updated?.status ?? "failed_retryable",
+      updatedAt: Date.now(),
+      lastError: String(err?.message ?? err ?? "").slice(0, 240),
+      nextAttemptAt: updated?.nextAttemptAt ?? "",
+    });
+    console.warn(`[wallet/register] Registration retry scheduled for ${address}: ${String(err?.message ?? err ?? "").slice(0, 160)}`);
+  } finally {
+    await releaseChainOperationLock(operationId).catch(() => {});
+  }
+}
+
+export async function processPendingWalletRegistrations(server: FastifyInstance): Promise<void> {
+  const ops = await listDueChainOperations(WALLET_REGISTRATION_OP_TYPE);
+  for (const op of ops) {
+    await processWalletRegistrationOperation(server, op.operationId);
+  }
+}
+
+export function startWalletRegistrationWorker(server: FastifyInstance): void {
+  const tick = async () => {
+    await processPendingWalletRegistrations(server);
+  };
+
+  void tick().catch((err) => {
+    server.log.error(err, "[wallet/register] initial worker tick failed");
+  });
+
+  const interval = setInterval(() => {
+    tick().catch((err) => server.log.error(err, "[wallet/register] worker tick failed"));
+  }, 5_000);
+
+  server.addHook("onClose", async () => {
+    clearInterval(interval);
+  });
+}
+
 /**
  * Transfer gold from the treasury to a player wallet (e.g. mob loot rewards).
  * Returns the transaction hash, or throws on failure.
@@ -337,31 +497,21 @@ export async function registerWalletWithWelcomeBonus(
   if (await isWalletRegistered(normalized)) {
     return { ok: true, message: "Already registered" };
   }
-
-  // Mark registered immediately so the API responds fast — never block on blockchain
-  await markWalletRegistered(normalized);
-
-  // sFUEL + welcome gold both run in background — don't block the response
-  void (async () => {
-    try {
-      const sfuelTx = await distributeSFuel(address);
-      console.log(`[wallet/register] sFUEL sent to ${address}: ${sfuelTx}`);
-    } catch (err: any) {
-      console.warn(`[wallet/register] sFUEL distribution failed for ${address}: ${String(err?.message ?? "").slice(0, 150)}`);
-    }
-
-    try {
-      const treasuryAddress = await ensureWelcomeTreasury(server);
-      try { await distributeSFuel(treasuryAddress); } catch {}
-      await waitForTreasuryBalance(treasuryAddress, WELCOME_GOLD);
-      const goldTx = await transferWelcomeBonus(server, treasuryAddress, address, WELCOME_GOLD);
-      console.log(
-        `[wallet/register] Welcome bonus ${WELCOME_COPPER}c sent to ${address}: ${goldTx}`
-      );
-    } catch (err: any) {
-      console.warn(`[wallet/register] Background welcome bonus failed for ${address}: ${String(err?.message ?? "").slice(0, 150)}`);
-    }
-  })();
+  const existingPending = await findPendingWalletRegistrationOperation(normalized);
+  let operationId = existingPending;
+  if (!operationId) {
+    const record = await createChainOperation(WALLET_REGISTRATION_OP_TYPE, normalized, { address: normalized });
+    operationId = record.operationId;
+    await saveWalletRegistrationStatus(normalized, {
+      operationId,
+      status: "queued",
+      updatedAt: Date.now(),
+      lastError: null,
+    });
+  }
+  void processWalletRegistrationOperation(server, operationId).catch((err) => {
+    server.log.warn(`[wallet/register] async registration dispatch failed for ${normalized}: ${String((err as Error)?.message ?? err).slice(0, 160)}`);
+  });
 
   return {
     ok: true,

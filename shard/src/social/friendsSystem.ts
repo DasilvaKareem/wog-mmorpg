@@ -35,6 +35,7 @@ interface FriendRequest {
 
 const MAX_FRIENDS = 50;
 const REDIS_KEY_PREFIX = "friends:";
+const REDIS_REQUEST_KEY_PREFIX = "friends:req:";
 const REQUEST_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 // ── In-memory stores ───────────────────────────────────────────────
@@ -68,13 +69,35 @@ export async function areFriends(walletA: string, walletB: string): Promise<bool
   return getFriends(a).some((f) => f.wallet === b);
 }
 
-function freshRequests(wallet: string): FriendRequest[] {
+async function persistRequests(wallet: string, requests: FriendRequest[]): Promise<void> {
   const key = norm(wallet);
+  requestStore.set(key, requests);
+  const redis = getRedis();
+  if (redis) {
+    await redis.set(`${REDIS_REQUEST_KEY_PREFIX}${key}`, JSON.stringify(requests));
+  }
+}
+
+async function freshRequests(wallet: string): Promise<FriendRequest[]> {
+  const key = norm(wallet);
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(`${REDIS_REQUEST_KEY_PREFIX}${key}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as FriendRequest[];
+        requestStore.set(key, parsed);
+      }
+    } catch {
+      // fall back to in-memory cache
+    }
+  }
+
   const now = Date.now();
   const list = (requestStore.get(key) ?? []).filter(
     (r) => now - r.createdAt < REQUEST_TTL_MS,
   );
-  requestStore.set(key, list);
+  await persistRequests(key, list);
   return list;
 }
 
@@ -257,7 +280,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const fromName = fromPlayer?.name ?? (fromWogName ? `${fromWogName}.wog` : from.slice(0, 10));
 
     // Dedupe: remove existing request from same sender
-    const pending = freshRequests(to);
+    const pending = await freshRequests(to);
     const deduped = pending.filter((r) => r.fromWallet !== from);
 
     const request: FriendRequest = {
@@ -267,7 +290,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       toWallet: to,
       createdAt: Date.now(),
     };
-    requestStore.set(to, [...deduped, request]);
+    await persistRequests(to, [...deduped, request]);
 
     return reply.send({ success: true, requestId: request.id });
   });
@@ -279,7 +302,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
   server.get<{ Params: { wallet: string } }>(
     "/friends/requests/:wallet",
     async (req, reply) => {
-      const requests = freshRequests(req.params.wallet);
+      const requests = await freshRequests(req.params.wallet);
       return reply.send({ requests });
     },
   );
@@ -301,7 +324,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       return reply.code(403).send({ error: "Not authorized to accept requests for this wallet" });
     }
 
-    const requests = freshRequests(wallet);
+    const requests = await freshRequests(wallet);
     const request = requests.find((r) => r.id === requestId);
     if (!request) {
       return reply.code(404).send({ error: "Request not found or expired" });
@@ -322,7 +345,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     addMutualFriend(wallet, request.fromWallet);
 
     // Remove the accepted request
-    requestStore.set(
+    await persistRequests(
       wallet,
       requests.filter((r) => r.id !== requestId),
     );
@@ -347,8 +370,8 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       return reply.code(403).send({ error: "Not authorized to decline requests for this wallet" });
     }
 
-    const requests = freshRequests(wallet);
-    requestStore.set(
+    const requests = await freshRequests(wallet);
+    await persistRequests(
       wallet,
       requests.filter((r) => r.id !== requestId),
     );
@@ -427,7 +450,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     const fromWogName = !fromPlayer ? await reverseLookupOnChain(from).catch(() => null) : null;
     const fromName = fromPlayer?.name ?? (fromWogName ? `${fromWogName}.wog` : from.slice(0, 10));
 
-    const pending = freshRequests(to);
+    const pending = await freshRequests(to);
     const deduped = pending.filter((r) => r.fromWallet !== from);
 
     const request: FriendRequest = {
@@ -437,7 +460,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
       toWallet: to,
       createdAt: Date.now(),
     };
-    requestStore.set(to, [...deduped, request]);
+    await persistRequests(to, [...deduped, request]);
 
     return reply.send({ success: true, requestId: request.id, resolvedWallet: to });
   });

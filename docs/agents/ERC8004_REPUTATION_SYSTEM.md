@@ -46,13 +46,14 @@ Chain write and summary read logic lives in:
 - [reputationChain.ts](../../shard/src/economy/reputationChain.ts)
 
 The bridge uses the official reputation ABI surface and writes through the shared tx queue.
+It now also writes through the shared Redis-backed chain operation store so feedback updates are durable and retryable across shard restarts.
 
 ### Consistency Model
 
 Reputation model is eventually consistent:
 
 1. gameplay API path updates local read model quickly
-2. chain writes are submitted asynchronously
+2. chain writes are recorded in Redis as durable operations and submitted asynchronously
 3. chain summary is read back and reconciled
 
 Primary manager:
@@ -73,6 +74,21 @@ Identity bootstrap files:
 
 - [blockchain.ts](../../shard/src/blockchain/blockchain.ts)
 - [characterRoutes.ts](../../shard/src/character/characterRoutes.ts)
+- [characterBootstrap.ts](../../shard/src/character/characterBootstrap.ts)
+
+Current identity consistency model:
+
+1. Redis seeds gameplay character data immediately
+2. Redis stores a durable bootstrap job for chain-owned identity fields
+3. worker retries unfinished bootstrap on interval and on shard boot
+4. worker reconciles existing NFT and identity from chain before minting or re-registering
+
+This means:
+
+- `characterTokenId` and `agentId` are treated as blockchain-owned facts
+- Redis stores the shard projection and retry state machine
+- a failed initial identity registration is retried, not just logged and dropped
+- reputation feedback writes follow the same durable retry pattern instead of relying on memory-only batching
 
 ## Validation Relationship
 
@@ -133,6 +149,19 @@ Covers:
 
 Latest verified status: passing (`20/20`).
 
+### Durable Bootstrap Recovery
+
+```bash
+cd shard
+DEV=true REDIS_URL=redis://127.0.0.1:6379 ENCRYPTION_KEY=0123456789abcdef0123456789abcdef SERVER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 JWT_SECRET=local-dev-jwt-secret npx tsx tests/characterBootstrapOutbox.test.ts
+```
+
+Covers:
+
+- recovery from missing Redis `characterTokenId`
+- recovery from missing Redis `agentId`
+- no duplicate mint or identity when chain already has the truth
+
 ## Official Network Compatibility Notes
 
 Verified official Sepolia compatibility for identity+reputation via direct on-chain reads:
@@ -146,4 +175,3 @@ Mainnet mapping should be maintained only in:
 - [official.ts](../../shard/src/erc8004/official.ts)
 
 Do not hardcode official addresses in route or manager files.
-

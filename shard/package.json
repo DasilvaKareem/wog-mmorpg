@@ -9,7 +9,11 @@
     "start": "pnpm run build && node dist/server.js",
     "test": "tsx tests/runLocalFullFlowAuto.ts",
     "test:erc8004": "tsx tests/erc8004DevIntegration.test.ts",
-    "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts"
+    "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts",
+    "test:character-bootstrap": "tsx tests/characterBootstrapOutbox.test.ts",
+    "test:chain-ops": "tsx tests/chainOperationStoreRecovery.test.ts",
+    "test:chain-recovery": "tsx tests/chainReconciliationRecovery.test.ts",
+    "test:blockchain-writes": "tsx tests/blockchainWriteProcessorRecovery.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",

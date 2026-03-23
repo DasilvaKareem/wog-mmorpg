@@ -9,6 +9,15 @@ import { biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
 import { OFFICIAL_REPUTATION_REGISTRY_ABI } from "../erc8004/official.js";
+import {
+  acquireChainOperationLock,
+  createChainOperation,
+  getChainOperation,
+  listDueChainOperations,
+  markChainOperationRetryable,
+  releaseChainOperationLock,
+  updateChainOperation,
+} from "../blockchain/chainOperationStore.js";
 
 const REPUTATION_CONTRACT_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS;
 
@@ -33,7 +42,6 @@ function tryToIdentityId(agentId: string | bigint): bigint | null {
   }
 }
 
-const FLUSH_INTERVAL_MS = 15_000;
 const DEFAULT_SCORE = 500;
 const MIN_SCORE = 0;
 const MAX_SCORE = 1000;
@@ -41,8 +49,18 @@ const MAX_SCORE = 1000;
 const CATEGORY_TAGS = ["combat", "economic", "social", "crafting", "agent"] as const;
 type CategoryIndex = 0 | 1 | 2 | 3 | 4;
 
-const pendingFeedback = new Map<string, [number, number, number, number, number]>();
-const chainUpdateListeners = new Set<(agentId: string, reason: string) => void>();
+const REPUTATION_OP_TYPE = "reputation-feedback";
+
+function getChainUpdateListeners(): Set<(agentId: string, reason: string) => void> {
+  const globalKey = "__wogReputationChainListeners";
+  const globalStore = globalThis as typeof globalThis & {
+    [globalKey]?: Set<(agentId: string, reason: string) => void>;
+  };
+  if (!globalStore[globalKey]) {
+    globalStore[globalKey] = new Set<(agentId: string, reason: string) => void>();
+  }
+  return globalStore[globalKey]!;
+}
 
 export interface OnChainReputationScore {
   combat: number;
@@ -59,7 +77,7 @@ function clampScore(value: number): number {
 }
 
 function notifyChainUpdate(agentId: string, reason: string): void {
-  for (const listener of chainUpdateListeners) {
+  for (const listener of getChainUpdateListeners()) {
     try {
       listener(agentId, reason);
     } catch (err) {
@@ -71,8 +89,9 @@ function notifyChainUpdate(agentId: string, reason: string): void {
 export function registerReputationChainListener(
   listener: (agentId: string, reason: string) => void
 ): () => void {
-  chainUpdateListeners.add(listener);
-  return () => chainUpdateListeners.delete(listener);
+  const listeners = getChainUpdateListeners();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 export async function initReputationOnChain(
@@ -131,17 +150,6 @@ export async function getReputationOnChain(
   }
 }
 
-function mergePendingFeedback(
-  agentId: string,
-  deltas: [number, number, number, number, number]
-): void {
-  const existing = pendingFeedback.get(agentId) ?? [0, 0, 0, 0, 0];
-  for (let i = 0; i < 5; i++) {
-    existing[i] += deltas[i];
-  }
-  pendingFeedback.set(agentId, existing);
-}
-
 export async function submitFeedbackOnChain(
   agentId: string | bigint,
   category: number,
@@ -152,38 +160,13 @@ export async function submitFeedbackOnChain(
   if (category < 0 || category > 4) return;
 
   const key = normalizeAgentId(agentId);
-  let deltas = pendingFeedback.get(key);
-  if (!deltas) {
-    deltas = [0, 0, 0, 0, 0];
-    pendingFeedback.set(key, deltas);
-  }
-  deltas[category as CategoryIndex] += delta;
-}
-
-async function flushPendingFeedback(): Promise<void> {
-  if (pendingFeedback.size === 0) return;
-
-  const batch = new Map(pendingFeedback);
-  pendingFeedback.clear();
-
-  for (const [agentId, deltas] of batch) {
-    if (deltas.every((d) => d === 0)) continue;
-
-    try {
-      const ok = await batchUpdateReputationOnChain(agentId, deltas, "batched-feedback");
-      if (!ok) mergePendingFeedback(agentId, deltas);
-    } catch (err) {
-      console.warn(`[reputationChain] flush failed for ${agentId}:`, err);
-      mergePendingFeedback(agentId, deltas);
-    }
-  }
-}
-
-setInterval(() => {
-  flushPendingFeedback().catch((err) => {
-    console.warn("[reputationChain] flushPendingFeedback error:", err);
+  const deltas: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  deltas[category as CategoryIndex] = delta;
+  const record = await createChainOperation(REPUTATION_OP_TYPE, key, { agentId: key, deltas, reason: _reason });
+  void processReputationOperation(record.operationId).catch((err) => {
+    console.warn(`[reputationChain] queue dispatch failed for ${key}:`, err);
   });
-}, FLUSH_INTERVAL_MS);
+}
 
 export async function batchUpdateReputationOnChain(
   agentId: string | bigint,
@@ -224,4 +207,57 @@ export async function batchUpdateReputationOnChain(
     console.warn(`[reputationChain] feedback update failed for ${normalizeAgentId(agentId)}:`, err);
     return false;
   }
+}
+
+export async function processReputationOperation(operationId: string): Promise<void> {
+  const record = await getChainOperation(operationId);
+  if (!record || record.type !== REPUTATION_OP_TYPE) return;
+  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
+
+  try {
+    await updateChainOperation(operationId, {
+      status: "submitted",
+      attemptCount: record.attemptCount + 1,
+      lastAttemptAt: Date.now(),
+      nextAttemptAt: Date.now(),
+      lastError: undefined,
+    });
+    const payload = JSON.parse(record.payload) as { agentId: string; deltas: [number, number, number, number, number]; reason?: string };
+    const ok = await batchUpdateReputationOnChain(payload.agentId, payload.deltas, payload.reason ?? "queued-feedback");
+    if (!ok) throw new Error(`Failed to reconcile reputation for ${payload.agentId}`);
+    await updateChainOperation(operationId, {
+      status: "completed",
+      completedAt: Date.now(),
+      lastError: undefined,
+    });
+  } catch (err) {
+    await markChainOperationRetryable(operationId, err);
+    throw err;
+  } finally {
+    await releaseChainOperationLock(operationId).catch(() => {});
+  }
+}
+
+export async function processPendingReputationOperations(
+  logger: { error: (err: unknown, msg?: string) => void } = console,
+): Promise<void> {
+  const ops = await listDueChainOperations(REPUTATION_OP_TYPE);
+  for (const op of ops) {
+    try {
+      await processReputationOperation(op.operationId);
+    } catch (err) {
+      logger.error(err, `[reputationChain] worker failed for ${op.operationId}`);
+    }
+  }
+}
+
+export function startReputationChainWorker(logger: { error: (err: unknown, msg?: string) => void }): void {
+  const tick = async () => {
+    await processPendingReputationOperations(logger);
+  };
+
+  void tick().catch((err) => logger.error(err, "[reputationChain] initial worker tick failed"));
+  setInterval(() => {
+    tick().catch((err) => logger.error(err, "[reputationChain] worker tick failed"));
+  }, 5_000);
 }

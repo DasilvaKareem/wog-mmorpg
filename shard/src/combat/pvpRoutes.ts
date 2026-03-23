@@ -147,7 +147,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       preferredTeam,
     };
 
-    pvpBattleManager.joinQueue(entry);
+    await pvpBattleManager.joinQueue(entry);
 
     return reply.send({
       success: true,
@@ -234,7 +234,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
         groupId,
       };
 
-      pvpBattleManager.joinQueue(entry);
+      await pvpBattleManager.joinQueue(entry);
       queued.push(memberEntity.name);
     }
 
@@ -275,7 +275,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       });
     }
 
-    const removed = pvpBattleManager.leaveQueue(agentId, format);
+    const removed = await pvpBattleManager.leaveQueue(agentId, format);
 
     return reply.send({
       success: removed,

@@ -37,7 +37,7 @@ export class PvPPredictionIntegration {
     config.marketPoolId = poolId;
 
     // Create battle
-    const battleId = pvpBattleManager.createBattle(config);
+    const battleId = await pvpBattleManager.createBattle(config);
 
     // Store mappings
     this.battleToPoolMap.set(battleId, poolId);

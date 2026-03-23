@@ -7,6 +7,8 @@ It documents:
 - official registry integration on supported SKALE chains
 - local Hardhat mock integration for dev and CI
 - current identity, reputation, and validation flow in shard
+- durable character bootstrap retry and reconciliation flow
+- replayable runtime chain-write processors for mint / identity / validation / metadata
 - what tests are passing today and what each test proves
 
 ## Quick Ops Checklist
@@ -48,7 +50,21 @@ cd shard
 DEV=true REDIS_ALLOW_MEMORY_FALLBACK=true LOCAL_TEST_MODE=core JWT_SECRET=local-dev-jwt-secret npx tsx tests/erc8004DevIntegration.test.ts
 ```
 
-6. Optional official compatibility read checks (Sepolia identity + reputation):
+6. Run durable character bootstrap recovery test:
+
+```bash
+cd shard
+DEV=true REDIS_URL=redis://127.0.0.1:6379 ENCRYPTION_KEY=0123456789abcdef0123456789abcdef SERVER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 JWT_SECRET=local-dev-jwt-secret npx tsx tests/characterBootstrapOutbox.test.ts
+```
+
+7. Run replay recovery for the remaining ERC-8004-adjacent blockchain writes:
+
+```bash
+cd shard
+DEV=true REDIS_URL=redis://127.0.0.1:6379 SERVER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 npx tsx tests/blockchainWriteProcessorRecovery.test.ts
+```
+
+8. Optional official compatibility read checks (Sepolia identity + reputation):
 
 ```bash
 node --input-type=module
@@ -97,16 +113,36 @@ Identity is the trust anchor. Character bootstrap binds gameplay entities to `ag
 
 Key behavior:
 
-1. mint or recover character NFT
-2. register identity in identity registry
-3. persist `agentId` and `characterTokenId`
-4. transfer identity NFT to player owner wallet
+1. seed gameplay character data in Redis immediately
+2. enqueue a Redis-backed bootstrap job for chain-owned fields
+3. mint or reconcile character NFT from chain
+4. register or reconcile identity in the ERC-8004 registry
+5. persist `agentId` and `characterTokenId` as Redis cache of chain-confirmed facts
+6. transfer identity NFT to player owner wallet
+
+Character bootstrap is now durable:
+
+- pending jobs live in Redis under `character:bootstrap:*`
+- due jobs are indexed in `character:bootstrap:pending`
+- shard boot starts a worker that resumes unfinished jobs
+- retries reconcile from chain before creating new on-chain state
+- `characterTokenId` and `agentId` are blockchain-owned facts; Redis stores the shard projection plus retry state
+- character saves expose explicit registration state:
+  - `unregistered`
+  - `pending_mint`
+  - `mint_confirmed`
+  - `identity_pending`
+  - `registered`
+  - `failed_retryable`
+  - `failed_permanent`
+- bootstrap retries are capped by `CHARACTER_BOOTSTRAP_MAX_RETRIES`
 
 Primary files:
 
 - [blockchain.ts](../../shard/src/blockchain/blockchain.ts)
 - [identity.ts](../../shard/src/erc8004/identity.ts)
 - [characterRoutes.ts](../../shard/src/character/characterRoutes.ts)
+- [characterBootstrap.ts](../../shard/src/character/characterBootstrap.ts)
 
 ### Reputation
 
@@ -127,6 +163,32 @@ Rules:
 - If `VALIDATION_REGISTRY_ADDRESS` exists, shard publishes and reads validation claims.
 - If missing, shard does not fail identity/reputation/gameplay flow.
 - API returns empty validations instead of hard failure.
+- Validation publication is now replayable through the shared tracked chain-operation store.
+
+## Chain Mutation Runtime Model
+
+The shard now uses one runtime rule for ERC-8004-adjacent chain mutations:
+
+1. create a durable Redis operation record first
+2. execute the chain mutation through a registered processor
+3. record retryable vs permanent failure state in Redis
+4. replay pending work from Redis on worker tick / shard boot
+5. treat chain-owned facts as authoritative and Redis as the projection plus operation state
+
+This now covers:
+
+- character NFT mint
+- identity registration
+- validation publication
+- character metadata update
+- wallet welcome bonus bootstrap
+- name registration
+- reputation submission
+
+Shared runtime knobs:
+
+- `CHAIN_OPERATION_MAX_RETRIES`
+- `CHARACTER_BOOTSTRAP_MAX_RETRIES`
 
 Primary files:
 
@@ -217,10 +279,53 @@ What it validates:
 - validation claim publication and reads (local mode)
 - spawn with `agentId`
 - reputation convergence from API to chain summary
+- wallet/name/reputation flows still work after the shared durable chain-operation migration
 
 Status: passing (`20 passed, 0 failed` on latest verified local run).
 
-### 3. Official Sepolia Compatibility (Read-Only)
+### 3. Durable Character Bootstrap Recovery
+
+Command:
+
+```bash
+cd shard
+DEV=true REDIS_URL=redis://127.0.0.1:6379 ENCRYPTION_KEY=0123456789abcdef0123456789abcdef SERVER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 JWT_SECRET=local-dev-jwt-secret npx tsx tests/characterBootstrapOutbox.test.ts
+```
+
+What it validates:
+
+- `/character/create` queues durable blockchain bootstrap
+- Redis bootstrap jobs reach `completed`
+- if Redis loses `characterTokenId` and `agentId`, the worker restores them from chain without reminting or duplicating identity
+- if Redis loses only `agentId`, the worker restores it from on-chain metadata
+- completed jobs are removed from the pending index
+- retry cap transitions to `failed_permanent` and leaves the character visibly unregistered
+
+Status: verified locally after the durable bootstrap update.
+
+### 4. Remaining Blockchain Write Processor Recovery
+
+Command:
+
+```bash
+cd shard
+DEV=true REDIS_URL=redis://127.0.0.1:6379 SERVER_PRIVATE_KEY=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 npx tsx tests/blockchainWriteProcessorRecovery.test.ts
+```
+
+What it validates:
+
+- character mint retryable failure on invalid payload
+- character mint replay to completion after payload correction
+- identity registration retryable failure on invalid owner address
+- identity replay to completion after payload correction
+- validation claim completion as part of identity replay
+- metadata update retryable failure on invalid token payload
+- metadata replay to completion after payload correction
+- metadata dedupe still works after successful replay
+
+Status: passing (`8 passed, 0 failed` on latest verified local run).
+
+### 4. Official Sepolia Compatibility (Read-Only)
 
 Validated by direct RPC calls:
 
@@ -234,5 +339,7 @@ This confirms official Sepolia identity+reputation compatibility with shard ABI 
 
 - Do not assume validation registry exists on every supported official network.
 - Do not key trust logic by wallet; always key by `agentId`.
+- Treat `characterTokenId` and `agentId` as blockchain-owned facts. Redis is the shard cache plus retry/reconciliation state.
+- Broader shard chain bridges now also use the same Redis-backed operation tracking pattern in `shard/src/blockchain/chainOperationStore.ts`.
 - Prefer updating [official.ts](../../shard/src/erc8004/official.ts) for network/address mapping changes.
 - Keep local integration deterministic by using `LOCAL_TEST_MODE=core` during shard integration tests.

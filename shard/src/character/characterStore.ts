@@ -17,6 +17,8 @@ export interface CharacterSaveData {
   xp: number;
   characterTokenId?: string;
   agentId?: string;
+  chainRegistrationStatus?: "unregistered" | "pending_mint" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
+  chainRegistrationLastError?: string;
   raceId: string;
   classId: string;
   calling?: CharacterCalling;
@@ -129,6 +131,8 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     xp: parseInt(raw.xp ?? "0", 10) || 0,
     characterTokenId: raw.characterTokenId || undefined,
     agentId: raw.agentId || undefined,
+    chainRegistrationStatus: (raw.chainRegistrationStatus as CharacterSaveData["chainRegistrationStatus"]) || undefined,
+    chainRegistrationLastError: raw.chainRegistrationLastError || undefined,
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
     gender: raw.gender,

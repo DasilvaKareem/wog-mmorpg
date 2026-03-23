@@ -15,6 +15,7 @@ import {
   getMerchantBuyPrice,
   recordMerchantSale,
   recordMerchantPurchase,
+  resolveMerchantEntityId,
 } from "../world/merchantAgent.js";
 import { logDiary, narrativeBuy, narrativeRecycle, narrativeSell } from "../social/diary.js";
 import { copperToGold } from "../blockchain/currency.js";
@@ -44,7 +45,8 @@ export function registerShopRoutes(server: FastifyInstance) {
    * Includes dynamic pricing and stock if merchant agent is active.
    */
   const shopNpcHandler = async (request: any, reply: any) => {
-    const entityId = request.params.entityId;
+    const requestedEntityId = request.params.entityId;
+    const entityId = resolveMerchantEntityId(requestedEntityId);
 
     const entity = getEntity(entityId);
     if (!entity || entity.type !== "merchant" || !entity.shopItems) {
@@ -182,7 +184,7 @@ export function registerShopRoutes(server: FastifyInstance) {
 
       // Update merchant inventory if using dynamic path
       if (merchantState) {
-        recordMerchantSale(merchantEntityId!, tokenId, quantity);
+        await recordMerchantSale(merchantEntityId!, tokenId, quantity);
       }
 
       // Log buy diary entry
@@ -215,7 +217,7 @@ export function registerShopRoutes(server: FastifyInstance) {
         totalCost,
         remainingGold: formatGold(getAvailableGold(buyerAddress, safeOnChainGold)),
         itemTx,
-        merchantEntityId: merchantEntityId ?? null,
+      merchantEntityId: merchantEntityId ? resolveMerchantEntityId(merchantEntityId) : null,
       };
     } catch (err) {
       server.log.error(err, `Shop buy failed for ${buyerAddress}`);
@@ -338,7 +340,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       merchantState.goldBalance = Math.max(0, merchantState.goldBalance - goldPayout);
 
       // Update merchant inventory
-      recordMerchantPurchase(merchantEntityId, tokenId, quantity);
+      await recordMerchantPurchase(merchantEntityId, tokenId, quantity);
 
       server.log.info(
         `[shop/sell] ${sellerAddress} sold ${quantity}x ${item.name} to ${entity.name} for ${totalPayout} gold`

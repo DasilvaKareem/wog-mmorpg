@@ -6,7 +6,7 @@ import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/block
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
-import { type ProfessionType, getLearnedProfessions } from "../professions/professions.js";
+import { type ProfessionType, getLearnedProfessions, restoreProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
 import { CROP_CATALOG, GROWTH_MULTIPLIERS, type CropType } from "../farming/cropCatalog.js";
 import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
@@ -31,6 +31,8 @@ import { recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 import { transferFromTreasury } from "../blockchain/wallet.js";
 import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
+import { getRedis } from "../redis.js";
+import { reputationManager } from "../economy/reputationManager.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -435,6 +437,7 @@ export function getSpawnedWallets(): Map<string, SpawnedEntry> {
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
+const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
 const MOVE_SPEED = 30; // units per tick
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
@@ -449,6 +452,131 @@ interface PartyTargetLock {
 }
 
 const partyTargetLocks = new Map<string, PartyTargetLock>();
+const LIVE_PLAYER_IDS_KEY = "world:live-players";
+const LIVE_PLAYER_KEY_PREFIX = "world:live-player:";
+
+interface PersistedLivePlayer {
+  entity: Record<string, unknown>;
+  professions: string[];
+  savedAt: number;
+}
+
+function livePlayerKey(walletAddress: string): string {
+  return `${LIVE_PLAYER_KEY_PREFIX}${walletAddress.toLowerCase()}`;
+}
+
+function serializeLivePlayerEntity(entity: Entity): Record<string, unknown> {
+  return {
+    ...entity,
+    ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
+    ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+    ...(entity.cooldowns instanceof Map && { cooldowns: Object.fromEntries(entity.cooldowns) }),
+  };
+}
+
+function hydrateLivePlayerEntity(raw: Record<string, unknown>): Entity {
+  const entity = { ...raw } as Entity & { cooldowns?: Record<string, number> | Map<string, number> };
+  if (typeof raw.characterTokenId === "string" && /^\d+$/.test(raw.characterTokenId)) {
+    entity.characterTokenId = BigInt(raw.characterTokenId);
+  }
+  if (typeof raw.agentId === "string" && /^\d+$/.test(raw.agentId)) {
+    entity.agentId = BigInt(raw.agentId);
+  }
+  if (raw.cooldowns && !(raw.cooldowns instanceof Map)) {
+    entity.cooldowns = new Map(
+      Object.entries(raw.cooldowns as Record<string, number>).map(([techniqueId, expiresAt]) => [
+        techniqueId,
+        Number(expiresAt) || 0,
+      ])
+    );
+  }
+  return entity;
+}
+
+async function persistLivePlayerEntity(entity: Entity): Promise<void> {
+  if (entity.type !== "player" || !entity.walletAddress) return;
+  const redis = getRedis();
+  if (!redis) return;
+
+  const payload: PersistedLivePlayer = {
+    entity: serializeLivePlayerEntity(entity),
+    professions: getLearnedProfessions(entity.walletAddress),
+    savedAt: Date.now(),
+  };
+
+  const tx = redis.multi();
+  tx.sadd(LIVE_PLAYER_IDS_KEY, entity.walletAddress.toLowerCase());
+  tx.set(livePlayerKey(entity.walletAddress), JSON.stringify(payload));
+  await tx.exec();
+}
+
+async function removeLivePlayerEntity(walletAddress: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  const tx = redis.multi();
+  tx.srem(LIVE_PLAYER_IDS_KEY, walletAddress.toLowerCase());
+  tx.del(livePlayerKey(walletAddress));
+  await tx.exec();
+}
+
+export async function restoreLivePlayersFromRedis(): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
+
+  const wallets: string[] = await redis.smembers(LIVE_PLAYER_IDS_KEY);
+  if (!Array.isArray(wallets) || wallets.length === 0) return 0;
+
+  let restored = 0;
+  for (const wallet of wallets) {
+    const raw = await redis.get(livePlayerKey(wallet));
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw) as PersistedLivePlayer;
+      const entity = hydrateLivePlayerEntity(parsed.entity);
+      if (entity.type !== "player" || !entity.walletAddress) continue;
+      if (isWalletSpawned(entity.walletAddress) || world.entities.has(entity.id)) continue;
+
+      if (entity.stats) {
+        recalculateEntityVitals(entity);
+      } else if (entity.raceId && entity.classId) {
+        entity.stats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level ?? 1);
+        recalculateEntityVitals(entity);
+      }
+
+      const zoneId = entity.region ?? "village-square";
+      getOrCreateZone(zoneId).entities.set(entity.id, entity);
+      registerSpawnedWallet(entity.walletAddress, entity.id, zoneId);
+      if (parsed.professions.length > 0) {
+        restoreProfessions(entity.walletAddress, parsed.professions);
+      }
+      if (entity.agentId != null) {
+        reputationManager.ensureInitialized(entity.agentId);
+      }
+      restored++;
+    } catch (err) {
+      console.warn("[live-player] Failed to restore player from Redis:", err);
+    }
+  }
+
+  if (restored > 0) {
+    console.log(`[live-player] Restored ${restored} active player session(s) from Redis`);
+  }
+
+  return restored;
+}
+
+export function persistLivePlayerEntityEventually(entity: Entity, context: string): void {
+  void persistLivePlayerEntity(entity).catch((err) => {
+    console.warn(`[live-player] Failed to persist ${entity.name} after ${context}:`, err);
+  });
+}
+
+export function removeLivePlayerEntityEventually(walletAddress: string, context: string): void {
+  void removeLivePlayerEntity(walletAddress).catch((err) => {
+    console.warn(`[live-player] Failed to remove ${walletAddress} after ${context}:`, err);
+  });
+}
 
 /** Return the attack range for an entity based on its class definition. */
 function getEntityAttackRange(entity: Entity): number {
@@ -2779,6 +2907,7 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
         equipment: entity.equipment ?? undefined,
       });
+      await persistLivePlayerEntity(entity);
       count++;
     } catch (err) {
       console.error(`[auto-save] Failed to save ${entity.name}:`, err);
@@ -2798,12 +2927,12 @@ export function registerZoneRuntime(server: FastifyInstance) {
   // Start the tick loop
   tickInterval = setInterval(worldTick, TICK_MS);
 
-  // Periodic auto-save every 60 seconds
+  // Periodic online-player checkpointing.
   autoSaveInterval = setInterval(() => {
     saveAllOnlinePlayers().catch((err) =>
       console.error("[auto-save] Periodic save error:", err)
     );
-  }, 60_000);
+  }, PLAYER_PERSIST_INTERVAL_MS);
 
   server.addHook("onClose", async () => {
     if (autoSaveInterval) clearInterval(autoSaveInterval);
@@ -2812,6 +2941,8 @@ export function registerZoneRuntime(server: FastifyInstance) {
     await saveAllOnlinePlayers();
     console.log("[shutdown] All online players saved");
   });
+
+  console.log(`[auto-save] Online player checkpoints every ${PLAYER_PERSIST_INTERVAL_MS}ms`);
 
   server.get("/zones", async () => {
     const result: Record<string, { entityCount: number; tick: number }> = {};

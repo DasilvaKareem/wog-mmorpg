@@ -1,6 +1,11 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "../blockchain/chainOperationStore.js";
 import { OFFICIAL_VALIDATION_REGISTRY_ABI } from "./official.js";
 import { normalizeAgentId } from "./agentResolution.js";
 
@@ -40,34 +45,52 @@ export async function publishValidationClaim(
     );
     const requestURI = `wog://validation/request/${normalizeAgentId(agentId)}/${encodeURIComponent(claim)}`;
     const responseURI = `wog://validation/response/${normalizeAgentId(agentId)}/${encodeURIComponent(claim)}`;
-
-    await queueBiteTransaction(`validation-request:${normalizeAgentId(agentId)}:${claim}`, async () => {
-      const tx = await validationContract.validationRequest(
-        validatorAddress,
-        toIdentityId(agentId),
-        requestURI,
-        requestHash
-      );
-      return tx.wait();
+    return await executeRegisteredChainOperation<string>("validation-claim", `${normalizeAgentId(agentId)}:${claim}`, {
+      agentId: normalizeAgentId(agentId),
+      claim,
+      validatorAddress,
+      requestHash,
+      requestURI,
+      responseURI,
     });
-
-    const receipt = await queueBiteTransaction(`validation-response:${normalizeAgentId(agentId)}:${claim}`, async () => {
-      const tx = await validationContract.validationResponse(
-        requestHash,
-        100,
-        responseURI,
-        ethers.ZeroHash,
-        claim
-      );
-      return tx.wait();
-    });
-
-    return receipt.hash;
   } catch (err) {
     console.warn(`[erc8004.validation] publish claim failed for ${normalizeAgentId(agentId)} ${claim}:`, err);
     return null;
   }
 }
+
+registerChainOperationProcessor("validation-claim", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as {
+    agentId: string;
+    claim: string;
+    validatorAddress: string;
+    requestHash: string;
+    requestURI: string;
+    responseURI: string;
+  };
+  await queueBiteTransaction(`validation-request:${payload.agentId}:${payload.claim}`, async () => {
+    const tx = await validationContract!.validationRequest(
+      payload.validatorAddress,
+      toIdentityId(payload.agentId),
+      payload.requestURI,
+      payload.requestHash
+    );
+    return tx.wait();
+  });
+
+  const receipt = await queueBiteTransaction(`validation-response:${payload.agentId}:${payload.claim}`, async () => {
+    const tx = await validationContract!.validationResponse(
+      payload.requestHash,
+      100,
+      payload.responseURI,
+      ethers.ZeroHash,
+      payload.claim
+    );
+    return tx.wait();
+  });
+
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 export async function getValidationClaims(agentId: string | bigint): Promise<AgentValidation[]> {
   if (!validationContract) return [];

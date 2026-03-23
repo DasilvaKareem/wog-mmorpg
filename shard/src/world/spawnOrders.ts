@@ -7,6 +7,8 @@ import {
   isWalletSpawned,
   registerSpawnedWallet,
   unregisterSpawnedWallet,
+  persistLivePlayerEntityEventually,
+  removeLivePlayerEntityEventually,
   type Entity,
 } from "./zoneRuntime.js";
 import { randomUUID } from "crypto";
@@ -241,6 +243,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     // Register wallet in spawn registry (one player per shard)
     if (type === "player" && walletAddress) {
       registerSpawnedWallet(walletAddress, entity.id, spawnZoneId);
+      persistLivePlayerEntityEventually(entity, "spawn");
       // Re-link to persisted party (survives server restarts)
       rehydratePartyMembership(entity.id, walletAddress).catch((err) =>
         server.log.error(`[party] Rehydration error for ${entity.name}: ${err}`)
@@ -303,7 +306,10 @@ export function registerSpawnOrders(server: FastifyInstance) {
       return { error: "Not authorized to despawn this entity" };
     }
 
-    if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
+    if (entity.walletAddress) {
+      unregisterSpawnedWallet(entity.walletAddress);
+      removeLivePlayerEntityEventually(entity.walletAddress, "despawn");
+    }
     getAllEntities().delete(entityId);
     return { deleted: entityId };
   };

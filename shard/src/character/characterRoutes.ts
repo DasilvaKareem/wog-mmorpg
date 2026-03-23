@@ -3,15 +3,13 @@ import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
-import { mintCharacterWithIdentity, getOwnedCharacters, registerIdentity } from "../blockchain/blockchain.js";
+import { getOwnedCharacters } from "../blockchain/blockchain.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
-import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
-import { reputationManager } from "../economy/reputationManager.js";
-import { publishValidationClaim } from "../erc8004/validation.js";
+import { enqueueCharacterBootstrap, processCharacterBootstrapJob } from "./characterBootstrap.js";
 
 type CharacterListEntry = {
   tokenId: string;
@@ -205,6 +203,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           name: character.name,
           level: 1,
           xp: 0,
+          chainRegistrationStatus: "unregistered",
           raceId: character.race.id,
           classId: character.class.id,
           calling,
@@ -235,67 +234,21 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
       const needsCharacterMint = !existingSave?.characterTokenId;
       const needsIdentityRegistration = !existingSave?.agentId;
+      let bootstrapStatus = "completed";
+      let chainRegistrationStatus = existingSave?.chainRegistrationStatus ?? (
+        existingSave?.characterTokenId && existingSave?.agentId ? "registered" : "unregistered"
+      );
 
       if (!existingSave || needsCharacterMint || needsIdentityRegistration) {
-        // Mint NFT + register name in background — don't block the response.
-        // Repeated create calls used to remint the same character because Redis was
-        // already seeded but we still executed this block unconditionally.
-        void (async () => {
-          try {
-            const mintResult = needsCharacterMint
-              ? await mintCharacterWithIdentity(walletAddress, metadata, ["wog:a2a-enabled"])
-              : {
-                  txHash: null,
-                  tokenId: BigInt(existingSave!.characterTokenId!),
-                  identity: await registerIdentity(
-                    BigInt(existingSave!.characterTokenId!),
-                    walletAddress,
-                    "",
-                    {
-                      beforeTransfer: async (agentId) => {
-                        await publishValidationClaim(agentId, "wog:a2a-enabled");
-                      },
-                    }
-                  ),
-                };
-
-            server.log.info(
-              `${needsCharacterMint ? "Minted" : "Recovered identity for"} character "${character.name}" to ${walletAddress}: ${mintResult.txHash ?? "identity-only"}`
-            );
-
-            await saveCharacter(walletAddress, character.name, {
-              ...(mintResult.tokenId != null && { characterTokenId: mintResult.tokenId.toString() }),
-              ...(mintResult.identity?.agentId != null && { agentId: mintResult.identity.agentId.toString() }),
-            });
-            if (mintResult.identity?.agentId != null) {
-              reputationManager.ensureInitialized(mintResult.identity.agentId);
-            }
-
-            for (const entity of getAllEntities().values()) {
-              if (entity.type !== "player") continue;
-              if (entity.walletAddress?.toLowerCase() !== walletAddress.toLowerCase()) continue;
-              if (entity.name !== character.name) continue;
-              if (mintResult.tokenId != null) entity.characterTokenId = mintResult.tokenId;
-              if (mintResult.identity?.agentId != null) entity.agentId = mintResult.identity.agentId;
-            }
-          } catch (err) {
-            server.log.warn(`[character] Character identity bootstrap failed for ${walletAddress} (non-fatal, Redis has data): ${(err as Error).message}`);
-          }
-
-          try {
-            const existing = await reverseLookupOnChain(walletAddress);
-            if (!existing) {
-              const registered = await registerNameOnChain(walletAddress, character.name);
-              if (registered) {
-                server.log.info(`[nameService] Auto-registered "${character.name}.wog" for ${walletAddress}`);
-              } else {
-                server.log.warn(`[nameService] Auto-register did not complete for ${walletAddress}`);
-              }
-            }
-          } catch (err) {
-            server.log.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
-          }
-        })();
+        const job = await enqueueCharacterBootstrap(walletAddress, character.name, "character:create", ["wog:a2a-enabled"]);
+        bootstrapStatus = job.status;
+        chainRegistrationStatus =
+          job.status === "completed"
+            ? "registered"
+            : job.status === "queued"
+              ? "unregistered"
+              : job.status;
+        void processCharacterBootstrapJob(walletAddress, character.name, server.log);
       } else {
         server.log.info(`[character] Existing character "${character.name}" on ${walletAddress} already has NFT + ERC-8004 identity`);
       }
@@ -320,6 +273,11 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           level: responseLevel,
           xp: responseXp,
           stats: responseStats,
+        },
+        bootstrap: {
+          status: bootstrapStatus,
+          sourceOfTruth: "blockchain-eventual",
+          chainRegistrationStatus,
         },
       };
     } catch (err) {

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { createCustodialWallet } from "../blockchain/custodialWallet.js";
-import { mintCharacterWithIdentity, mintGold, distributeSFuel } from "../blockchain/blockchain.js";
+import { mintGold, distributeSFuel } from "../blockchain/blockchain.js";
 import { generateAuthToken } from "../auth/auth.js";
 import { computeCharacter, validateCharacterInput } from "../character/characterCreate.js";
 import { getOrCreateZone, recalculateEntityVitals, isWalletSpawned, registerSpawnedWallet, type Entity } from "../world/zoneRuntime.js";
@@ -8,6 +8,7 @@ import { processPayment, getPricingTier, type PaymentMethod } from "./x402Paymen
 import { saveCharacter, loadCharacter } from "../character/characterStore.js";
 import { reputationManager } from "./reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
+import { enqueueCharacterBootstrap, processCharacterBootstrapJob } from "../character/characterBootstrap.js";
 
 export interface DeploymentRequest {
   agentName: string;
@@ -286,48 +287,21 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
     // 12. Fire blockchain calls (non-blocking — agent is already in-world)
     const pricingTier = getPricingTier(request.payment.method);
     const goldBonus = pricingTier.goldBonus;
-    let mintTxHash = "pending";
+    let mintTxHash = "queued";
     let goldTxHash = "pending";
     let sfuelTxHash = "pending";
 
     // Run blockchain operations in background — don't block the response
     (async () => {
       try {
-        console.log(`[x402] ${deploymentId}: Minting character NFT...`);
-        const nftMetadata = {
-          name: `${characterData.name} the ${characterData.class.name}`,
-          description: `Level 1 ${characterData.race.name} ${characterData.class.name}`,
-          properties: {
-            race: characterData.race.id,
-            class: characterData.class.id,
-            level: 1,
-            xp: 0,
-            stats: characterData.stats,
-          },
-        };
-        const mintResult = await mintCharacterWithIdentity(wallet.address, nftMetadata, [
+        console.log(`[x402] ${deploymentId}: Queueing durable character bootstrap...`);
+        await enqueueCharacterBootstrap(wallet.address, request.character.name, "x402:deploy", [
           "wog:a2a-enabled",
           "wog:x402-enabled",
         ]);
-        mintTxHash = mintResult.txHash;
-        if (mintResult.tokenId != null) {
-          entity.characterTokenId = mintResult.tokenId;
-        }
-        if (mintResult.identity?.agentId != null) {
-          entity.agentId = mintResult.identity.agentId;
-        }
-        await saveCharacter(wallet.address, request.character.name, {
-          ...(mintResult.tokenId != null && { characterTokenId: mintResult.tokenId.toString() }),
-          ...(mintResult.identity?.agentId != null && { agentId: mintResult.identity.agentId.toString() }),
-        });
-        if (mintResult.identity?.agentId != null) {
-          reputationManager.ensureInitialized(mintResult.identity.agentId);
-        }
-        console.log(
-          `[x402] ${deploymentId}: NFT minted: ${mintTxHash}${mintResult.identity?.agentId != null ? ` agentId=${mintResult.identity.agentId}` : ""}`
-        );
+        void processCharacterBootstrapJob(wallet.address, request.character.name);
       } catch (err) {
-        console.error(`[x402] ${deploymentId}: NFT mint failed (non-fatal):`, err instanceof Error ? err.message : err);
+        console.error(`[x402] ${deploymentId}: Character bootstrap queue failed (non-fatal):`, err instanceof Error ? err.message : err);
       }
 
       try {

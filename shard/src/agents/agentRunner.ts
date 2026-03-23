@@ -13,6 +13,8 @@ import {
   getAgentEntityRef,
   setAgentEntityRef,
   patchAgentConfig,
+  getAgentRuntimeState,
+  setAgentRuntimeState,
   appendChatMessage,
   getChatHistory,
   askSummonerQuestion,
@@ -26,6 +28,7 @@ import {
   type AgentStrategy,
   type AgentObjective,
   type PendingQuestion,
+  type AgentRuntimeState,
 } from "./agentConfigStore.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
@@ -234,6 +237,41 @@ export class AgentRunner {
   constructor(userWallet: string) {
     this.userWallet = userWallet;
     this.walletTag = userWallet.slice(0, 8);
+  }
+
+  private async restoreRuntimeSnapshot(): Promise<void> {
+    const runtime = await getAgentRuntimeState(this.userWallet);
+    if (!runtime) return;
+
+    this.currentScript = runtime.currentScript ?? null;
+    this.currentActivity = runtime.currentActivity ?? "Idle";
+    this.recentActivities = Array.isArray(runtime.recentActivities) ? runtime.recentActivities.slice(-20) : [];
+    this.currentRegion = runtime.currentRegion ?? this.currentRegion;
+    this.entityId = runtime.entityId ?? this.entityId;
+    this.custodialWallet = runtime.custodialWallet ?? this.custodialWallet;
+    this.pendingQuestionId = runtime.pendingQuestionId ?? null;
+    this.lastTrigger = runtime.lastTrigger ?? null;
+  }
+
+  private async persistRuntimeSnapshot(): Promise<void> {
+    const runtime: AgentRuntimeState = {
+      currentScript: this.currentScript,
+      currentActivity: this.currentActivity,
+      recentActivities: this.recentActivities.slice(-20),
+      currentRegion: this.currentRegion,
+      entityId: this.entityId,
+      custodialWallet: this.custodialWallet,
+      pendingQuestionId: this.pendingQuestionId,
+      lastTrigger: this.lastTrigger,
+      updatedAt: Date.now(),
+    };
+    await setAgentRuntimeState(this.userWallet, runtime);
+  }
+
+  private persistRuntimeSnapshotEventually(context: string): void {
+    void this.persistRuntimeSnapshot().catch((err) => {
+      console.warn(`[agent:${this.walletTag}] Failed to persist runtime after ${context}: ${err.message?.slice(0, 80)}`);
+    });
   }
 
   // ── Public API (called from chat routes / manager) ─────────────────────────
@@ -1377,6 +1415,7 @@ export class AgentRunner {
 
   async start(waitForFirstTick = false): Promise<void> {
     this.running = true;
+    await this.restoreRuntimeSnapshot();
     console.log(`[agent:${this.walletTag}] Loop starting`);
 
     let resolveFirst: () => void;
@@ -1401,6 +1440,7 @@ export class AgentRunner {
 
   stop(): void {
     this.running = false;
+    this.persistRuntimeSnapshotEventually("stop");
     if (this.mcpClient) {
       this.mcpClient.disconnect().catch(() => {});
       this.mcpClient = null;
@@ -1511,6 +1551,7 @@ export class AgentRunner {
 
         const config = await getAgentConfig(this.userWallet);
         if (!config?.enabled) {
+          this.persistRuntimeSnapshotEventually("disabled");
           if (!firstTickDone) onFirstTickFail(new Error("Agent config disabled"));
           this.running = false;
           break;
@@ -1527,6 +1568,7 @@ export class AgentRunner {
             const sessionEntity = this.entityId ? getWorldEntity(this.entityId) : null;
             void sendAgentPush(this.userWallet, { type: "session_ended", agentName: sessionEntity?.name ?? "Agent", detail: `Session limit reached (${hours}h)` });
             await patchAgentConfig(this.userWallet, { enabled: false });
+            this.persistRuntimeSnapshotEventually("session-limit");
             this.running = false;
             break;
           }
@@ -1558,6 +1600,7 @@ export class AgentRunner {
           firstTickDone = true;
           console.log(`[agent:${this.walletTag}] First tick OK — entity ${this.entityId} in ${this.currentRegion}`);
           onFirstTick();
+          this.persistRuntimeSnapshotEventually("first-tick");
 
           // Load origin for dialogue system
           if (this.custodialWallet && entity.name) {
@@ -1919,6 +1962,7 @@ export class AgentRunner {
       } finally {
         this.telemetry.lastLoopAt = Date.now();
         this.updateTimingMetric(this.telemetry.loop, performance.now() - loopStartedAt);
+        this.persistRuntimeSnapshotEventually("loop");
       }
 
       await sleep(TICK_MS);

@@ -1,9 +1,11 @@
+import { biteWallet } from "./biteChain.js";
+
 const NONCE_ERROR_CODES = new Set(["-32004", "-32000", "-32603", "NONCE_EXPIRED"]);
 const MAX_RETRIES = 3;
 
 let biteTxChain: Promise<void> = Promise.resolve();
 
-function isTransientRpcSendError(err: unknown): boolean {
+export function isTransientRpcSendError(err: unknown): boolean {
   const msg = String((err as any)?.message ?? err ?? "");
   const code = String((err as any)?.code ?? (err as any)?.cause?.code ?? (err as any)?.data?.code ?? "");
   return (
@@ -28,7 +30,11 @@ function isNonceError(err: unknown): boolean {
   );
 }
 
-export async function queueBiteTransaction<T>(label: string, fn: () => Promise<T>): Promise<T> {
+export async function queueServerWalletTransaction<T>(
+  label: string,
+  fn: () => Promise<T>,
+  options?: { beforeAttempt?: () => Promise<void> | void }
+): Promise<T> {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -42,6 +48,7 @@ export async function queueBiteTransaction<T>(label: string, fn: () => Promise<T
   try {
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
+        await options?.beforeAttempt?.();
         return await fn();
       } catch (err) {
         lastError = err;
@@ -60,4 +67,14 @@ export async function queueBiteTransaction<T>(label: string, fn: () => Promise<T
   }
 
   throw lastError;
+}
+
+export async function queueBiteTransaction<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  return queueServerWalletTransaction(label, fn, {
+    beforeAttempt: async () => {
+      // thirdweb and ethers/BITE transactions share the same server private key in local/prod.
+      // Reset the NonceManager before each send so it resyncs to the latest pending nonce.
+      (biteWallet as { reset?: () => void } | null)?.reset?.();
+    },
+  });
 }

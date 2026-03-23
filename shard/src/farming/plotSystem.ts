@@ -11,6 +11,15 @@
 
 import { getRedis } from "../redis.js";
 import { claimPlotOnChain, releasePlotOnChain, transferPlotOnChain, updateBuildingOnChain } from "./plotChain.js";
+import {
+  acquireChainOperationLock,
+  createChainOperation,
+  getChainOperation,
+  listDueChainOperations,
+  markChainOperationRetryable,
+  releaseChainOperationLock,
+  updateChainOperation,
+} from "../blockchain/chainOperationStore.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -39,6 +48,10 @@ export interface PlotState {
 
 const PLOT_KEY_PREFIX = "plot:";
 const OWNER_KEY_PREFIX = "plot:owner:";
+const PLOT_OP_CLAIM = "plot-claim";
+const PLOT_OP_RELEASE = "plot-release";
+const PLOT_OP_TRANSFER = "plot-transfer";
+const PLOT_OP_BUILDING = "plot-building";
 
 function plotKey(plotId: string): string { return `${PLOT_KEY_PREFIX}${plotId}`; }
 function ownerKey(wallet: string): string { return `${OWNER_KEY_PREFIX}${wallet.toLowerCase()}`; }
@@ -255,6 +268,13 @@ function clearPlotInRedis(plotId: string, wallet: string): void {
   redis.del(ownerKey(wallet)).catch(() => {});
 }
 
+async function enqueuePlotOperation(type: string, subject: string, payload: unknown): Promise<void> {
+  const record = await createChainOperation(type, subject, payload);
+  void processPlotOperation(record.operationId).catch((err) => {
+    console.warn(`[plots] Failed to dispatch ${type} for ${subject}: ${String((err as Error)?.message ?? err).slice(0, 160)}`);
+  });
+}
+
 /**
  * Restore all plot ownership from Redis on boot.
  * Call once during server startup before routes are registered.
@@ -345,7 +365,13 @@ export function claimPlot(
 
   // Persist to Redis + chain
   persistPlotToRedis(state);
-  void claimPlotOnChain(plotId, state.zoneId, state.x, state.y, wallet).catch(() => {});
+  void enqueuePlotOperation(PLOT_OP_CLAIM, plotId, {
+    plotId,
+    zoneId: state.zoneId,
+    x: state.x,
+    y: state.y,
+    ownerAddress: wallet,
+  });
 
   return { ok: true, plot: state };
 }
@@ -371,7 +397,7 @@ export function releasePlot(
 
   // Persist to Redis + chain
   clearPlotInRedis(plotId, wallet);
-  void releasePlotOnChain(wallet).catch(() => {});
+  void enqueuePlotOperation(PLOT_OP_RELEASE, plotId, { ownerAddress: wallet, plotId });
 
   return { ok: true, plotId };
 }
@@ -403,7 +429,11 @@ export function transferPlot(
   // Persist to Redis + chain
   persistPlotToRedis(state);
   clearPlotInRedis(plotId, from); // remove old owner key
-  void transferPlotOnChain(from, to).catch(() => {});
+  void enqueuePlotOperation(PLOT_OP_TRANSFER, plotId, {
+    plotId,
+    fromAddress: from,
+    toAddress: to,
+  });
 
   return { ok: true };
 }
@@ -422,7 +452,11 @@ export function setPlotBuilding(
 
   // Persist to Redis + chain
   persistPlotToRedis(state);
-  void updateBuildingOnChain(plotId, buildingType ?? "", stage).catch(() => {});
+  void enqueuePlotOperation(PLOT_OP_BUILDING, plotId, {
+    plotId,
+    buildingType: buildingType ?? "",
+    stage,
+  });
 }
 
 /** Check if a wallet owns a specific plot */
@@ -435,4 +469,78 @@ export function isPlotOwner(plotId: string, walletAddress: string): boolean {
 /** Get all farmland zone IDs that have plots */
 export function getFarmlandZoneIds(): string[] {
   return [...new Set(PLOT_DEFS.map((d) => d.zoneId))];
+}
+
+export async function processPlotOperation(operationId: string): Promise<void> {
+  const record = await getChainOperation(operationId);
+  if (!record) return;
+  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
+
+  try {
+    await updateChainOperation(operationId, {
+      status: "submitted",
+      attemptCount: record.attemptCount + 1,
+      lastAttemptAt: Date.now(),
+      nextAttemptAt: Date.now(),
+      lastError: undefined,
+    });
+    const payload = JSON.parse(record.payload) as Record<string, string | number>;
+    let success = false;
+    if (record.type === PLOT_OP_CLAIM) {
+      success = await claimPlotOnChain(
+        String(payload.plotId),
+        String(payload.zoneId),
+        Number(payload.x),
+        Number(payload.y),
+        String(payload.ownerAddress),
+      );
+    } else if (record.type === PLOT_OP_RELEASE) {
+      success = await releasePlotOnChain(String(payload.ownerAddress));
+    } else if (record.type === PLOT_OP_TRANSFER) {
+      success = await transferPlotOnChain(String(payload.fromAddress), String(payload.toAddress));
+    } else if (record.type === PLOT_OP_BUILDING) {
+      success = await updateBuildingOnChain(String(payload.plotId), String(payload.buildingType ?? ""), Number(payload.stage ?? 0));
+    }
+
+    if (!success) {
+      throw new Error(`Chain operation ${record.type} did not complete`);
+    }
+
+    await updateChainOperation(operationId, {
+      status: "completed",
+      completedAt: Date.now(),
+      lastError: undefined,
+    });
+  } catch (err) {
+    await markChainOperationRetryable(operationId, err);
+    throw err;
+  } finally {
+    await releaseChainOperationLock(operationId).catch(() => {});
+  }
+}
+
+export async function processPendingPlotOperations(
+  logger: { error: (err: unknown, msg?: string) => void } = console,
+): Promise<void> {
+  for (const type of [PLOT_OP_CLAIM, PLOT_OP_RELEASE, PLOT_OP_TRANSFER, PLOT_OP_BUILDING]) {
+    const ops = await listDueChainOperations(type);
+    for (const op of ops) {
+      try {
+        await processPlotOperation(op.operationId);
+      } catch (err) {
+        logger.error(err, `[plots] worker failed for ${op.operationId}`);
+      }
+    }
+  }
+}
+
+export function startPlotOperationWorker(logger: { error: (err: unknown, msg?: string) => void }): void {
+  const tick = async () => {
+    await processPendingPlotOperations(logger);
+  };
+
+  void tick().catch((err) => logger.error(err, "[plots] initial worker tick failed"));
+  setInterval(() => {
+    tick().catch((err) => logger.error(err, "[plots] worker tick failed"));
+  }, 5_000);
 }

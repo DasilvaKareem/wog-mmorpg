@@ -1,19 +1,33 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { readdirSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
+import Redis from "ioredis";
 
 const TEST_SHARD_PORT = process.env.TEST_SHARD_PORT || "3001";
 const SHARD_URL = process.env.SHARD_URL || `http://127.0.0.1:${TEST_SHARD_PORT}`;
-const VERBOSE = process.env.FULL_FLOW_VERBOSE === "true";
 const HARDHAT_RPC = process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
+const REDIS_URL = process.env.REDIS_URL || "redis://127.0.0.1:6379/15";
+const VERBOSE = process.env.FULL_FLOW_VERBOSE === "true";
+const REDIS_CONTAINER_NAME = process.env.TEST_REDIS_CONTAINER_NAME || "wog-test-redis";
+
 const DEFAULT_ENV: Record<string, string> = {
   DEV: "true",
-  REDIS_ALLOW_MEMORY_FALLBACK: "true",
-  LOCAL_TEST_MODE: "core",
+  REDIS_URL,
+  REQUIRE_REDIS_PERSISTENCE: "true",
   JWT_SECRET: process.env.JWT_SECRET || "local-dev-jwt-secret",
+  ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef",
+  SERVER_PRIVATE_KEY:
+    process.env.SERVER_PRIVATE_KEY ||
+    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   SHARD_URL,
   PORT: TEST_SHARD_PORT,
+  TEST_SHARD_PORT,
+  HARDHAT_RPC_URL: HARDHAT_RPC,
+};
+
+type ServiceHandle = {
+  child: ChildProcess | null;
+  startedByRunner: boolean;
 };
 
 function run(
@@ -52,9 +66,7 @@ function startBackground(
     detached: true,
     shell: false,
   });
-  if (stdio === "ignore") {
-    child.unref();
-  }
+  if (stdio === "ignore") child.unref();
   return child;
 }
 
@@ -72,12 +84,11 @@ async function stopBackground(child: ChildProcess | null, label: string): Promis
 
   for (const signal of ["SIGINT", "SIGTERM", "SIGKILL"] as const) {
     try {
-      // Kill the full process group so shell wrappers and children also stop.
       process.kill(-child.pid, signal);
     } catch {
       return;
     }
-    const exited = await waitExit(signal === "SIGKILL" ? 2000 : 4000);
+    const exited = await waitExit(signal === "SIGKILL" ? 2_000 : 4_000);
     if (exited) return;
   }
 
@@ -110,6 +121,31 @@ async function isShardUp(): Promise<boolean> {
   }
 }
 
+async function isRedisUp(): Promise<boolean> {
+  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
+  try {
+    await redis.connect();
+    const pong = await redis.ping();
+    return pong === "PONG";
+  } catch {
+    return false;
+  } finally {
+    await redis.quit().catch(() => {});
+    redis.disconnect();
+  }
+}
+
+async function resetRedisDb(): Promise<void> {
+  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
+  try {
+    await redis.connect();
+    await redis.flushdb();
+  } finally {
+    await redis.quit().catch(() => {});
+    redis.disconnect();
+  }
+}
+
 async function waitFor(check: () => Promise<boolean>, label: string, timeoutMs = 60_000): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
@@ -119,54 +155,116 @@ async function waitFor(check: () => Promise<boolean>, label: string, timeoutMs =
   throw new Error(`Timed out waiting for ${label}`);
 }
 
+async function ensureDockerRedis(repoRoot: string, env: NodeJS.ProcessEnv): Promise<ServiceHandle> {
+  if (await isRedisUp()) {
+    console.log("[full-flow] Redis already running.");
+    return { child: null, startedByRunner: false };
+  }
+
+  console.log("[full-flow] Redis not detected. Starting docker Redis...");
+  try {
+    await run("docker", ["rm", "-f", REDIS_CONTAINER_NAME], repoRoot, env).catch(() => {});
+    await run(
+      "docker",
+      ["run", "-d", "--rm", "--name", REDIS_CONTAINER_NAME, "-p", "6379:6379", "redis:7-alpine"],
+      repoRoot,
+      env
+    );
+  } catch (err) {
+    throw new Error(`Failed to start Redis container ${REDIS_CONTAINER_NAME}: ${String(err)}`);
+  }
+
+  await waitFor(isRedisUp, "Redis");
+  return { child: null, startedByRunner: true };
+}
+
+async function stopDockerRedisIfStarted(handle: ServiceHandle, repoRoot: string, env: NodeJS.ProcessEnv): Promise<void> {
+  if (!handle.startedByRunner) return;
+  await run("docker", ["rm", "-f", REDIS_CONTAINER_NAME], repoRoot, env).catch(() => {});
+}
+
+async function ensureHardhat(hardhatDir: string, env: NodeJS.ProcessEnv): Promise<ServiceHandle> {
+  if (await isHardhatUp()) {
+    console.log("[full-flow] Hardhat RPC already running.");
+    return { child: null, startedByRunner: false };
+  }
+
+  console.log("[full-flow] Hardhat RPC not detected. Starting local node...");
+  const child = startBackground("npm", ["run", "node"], hardhatDir, env);
+  await waitFor(isHardhatUp, "Hardhat RPC");
+  return { child, startedByRunner: true };
+}
+
+async function ensureShard(shardDir: string, env: NodeJS.ProcessEnv): Promise<ServiceHandle> {
+  if (await isShardUp()) {
+    throw new Error(
+      `Shard test port ${TEST_SHARD_PORT} is already in use. Stop the existing shard or set TEST_SHARD_PORT to a free port.`
+    );
+  }
+
+  console.log(`[full-flow] Starting shard on ${SHARD_URL}...`);
+  const child = startBackground("pnpm", ["run", "dev"], shardDir, env);
+  await waitFor(isShardUp, "shard health endpoint");
+  return { child, startedByRunner: true };
+}
+
+async function stopShard(handle: ServiceHandle): Promise<void> {
+  if (!handle.startedByRunner) return;
+  await stopBackground(handle.child, "shard");
+}
+
 async function main(): Promise<void> {
   const shardDir = process.cwd();
-  const testsDir = path.join(shardDir, "tests");
   const repoRoot = path.resolve(shardDir, "..");
   const hardhatDir = path.join(repoRoot, "hardhat");
   const env = { ...process.env, ...DEFAULT_ENV };
 
-  let startedHardhat: ChildProcess | null = null;
-  let startedShard: ChildProcess | null = null;
+  let redisHandle: ServiceHandle = { child: null, startedByRunner: false };
+  let hardhatHandle: ServiceHandle = { child: null, startedByRunner: false };
+  let shardHandle: ServiceHandle = { child: null, startedByRunner: false };
 
   try {
+    redisHandle = await ensureDockerRedis(repoRoot, env);
+    console.log(`[full-flow] Resetting Redis test DB at ${REDIS_URL}...`);
+    await resetRedisDb();
+
     console.log("[full-flow] Running Hardhat contract tests...");
     await run("npm", ["test"], hardhatDir, env);
 
-    if (!(await isHardhatUp())) {
-      console.log("[full-flow] Hardhat RPC not detected. Starting local node...");
-      startedHardhat = startBackground("npm", ["run", "node"], hardhatDir, env);
-      await waitFor(isHardhatUp, "Hardhat RPC");
-    } else {
-      console.log("[full-flow] Hardhat RPC already running.");
-    }
+    hardhatHandle = await ensureHardhat(hardhatDir, env);
 
     console.log("[full-flow] Deploying local contracts to Hardhat...");
     await run("npm", ["run", "deploy:localhost"], hardhatDir, env);
 
-    if (!(await isShardUp())) {
-      console.log("[full-flow] Shard API not detected. Starting shard server...");
-      startedShard = startBackground("npm", ["run", "dev"], shardDir, env);
-      await waitFor(isShardUp, "shard health endpoint");
-    } else {
-      console.log("[full-flow] Shard API already running.");
-    }
+    console.log("[full-flow] Running queue/store recovery suite...");
+    await run("pnpm", ["run", "test:chain-ops"], shardDir, env);
 
-    const testFiles = readdirSync(testsDir)
-      .filter((name) => name.endsWith(".test.ts"))
-      .sort();
-    if (testFiles.length === 0) {
-      throw new Error("No *.test.ts files found in shard/tests");
-    }
+    shardHandle = await ensureShard(shardDir, env);
 
-    console.log(`[full-flow] Running shard test suite (${testFiles.length} files)...`);
-    for (const fileName of testFiles) {
-      console.log(`[full-flow] -> ${fileName}`);
-      await run("npx", ["tsx", `tests/${fileName}`], shardDir, env);
-    }
+    console.log("[full-flow] Running shard-dependent suites with shard up...");
+    await run("pnpm", ["run", "test:character-bootstrap"], shardDir, env);
+    await run("pnpm", ["run", "test:erc8004"], shardDir, {
+      ...env,
+      REDIS_ALLOW_MEMORY_FALLBACK: "true",
+      LOCAL_TEST_MODE: "core",
+    });
+
+    console.log("[full-flow] Stopping shard before isolated reconciliation replay suite...");
+    await stopShard(shardHandle);
+    shardHandle = { child: null, startedByRunner: false };
+
+    console.log("[full-flow] Running isolated chain reconciliation recovery suite...");
+    await run("pnpm", ["run", "test:chain-recovery"], shardDir, env);
+    console.log("[full-flow] Running isolated blockchain write processor recovery suite...");
+    await run("pnpm", ["run", "test:blockchain-writes"], shardDir, env);
+
+    console.log("[full-flow] All local full-flow suites passed.");
   } finally {
-    await stopBackground(startedShard, "shard");
-    await stopBackground(startedHardhat, "hardhat");
+    await stopShard(shardHandle);
+    if (hardhatHandle.startedByRunner) {
+      await stopBackground(hardhatHandle.child, "hardhat");
+    }
+    await stopDockerRedisIfStarted(redisHandle, repoRoot, env);
   }
 }
 

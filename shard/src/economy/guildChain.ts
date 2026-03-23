@@ -1,6 +1,11 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "../blockchain/chainOperationStore.js";
 
 const GUILD_CONTRACT_ADDRESS = process.env.GUILD_CONTRACT_ADDRESS;
 
@@ -34,6 +39,11 @@ const GUILD_ABI = [
 const guildContract = GUILD_CONTRACT_ADDRESS
   ? new ethers.Contract(GUILD_CONTRACT_ADDRESS, GUILD_ABI, biteWallet)
   : null;
+
+function ensureGuildContract(): ethers.Contract {
+  if (!guildContract) throw new Error("Guild contract not initialized");
+  return guildContract;
+}
 
 // -- Types --
 
@@ -112,72 +122,75 @@ export async function createGuildOnChain(
   initialDeposit: number,
   creationFee: number
 ): Promise<{ guildId: number; txHash: string }> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const depositWei = ethers.parseUnits(initialDeposit.toString(), 18);
-  const feeWei = ethers.parseUnits(creationFee.toString(), 18);
-
-  const receipt = await queueBiteTransaction(`guild-create:${founder}:${name}`, async () => {
-    const tx = await guildContract.createGuild(name, description, founder, depositWei, feeWei);
+  return executeRegisteredChainOperation("guild-create", `${founder.toLowerCase()}:${name.toLowerCase()}`, {
+    name, description, founder, initialDeposit, creationFee
+  });
+}
+async function processGuildCreate(record: ChainOperationRecord): Promise<{ result: { guildId: number; txHash: string }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { name: string; description: string; founder: string; initialDeposit: number; creationFee: number };
+  const contract = ensureGuildContract();
+  const depositWei = ethers.parseUnits(payload.initialDeposit.toString(), 18);
+  const feeWei = ethers.parseUnits(payload.creationFee.toString(), 18);
+  const receipt = await queueBiteTransaction(`guild-create:${payload.founder}:${payload.name}`, async () => {
+    const tx = await contract.createGuild(payload.name, payload.description, payload.founder, depositWei, feeWei);
     return tx.wait();
   });
-
-  // Parse GuildCreated event
   for (const log of receipt.logs) {
     try {
-      const parsed = guildContract.interface.parseLog(log);
+      const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "GuildCreated") {
-        return {
-          guildId: Number(parsed.args.guildId),
-          txHash: receipt.hash,
-        };
+        return { result: { guildId: Number(parsed.args.guildId), txHash: receipt.hash }, txHash: receipt.hash };
       }
-    } catch {
-      // Not our event, skip
-    }
+    } catch {}
   }
-
   throw new Error("GuildCreated event not found in receipt");
 }
+registerChainOperationProcessor("guild-create", processGuildCreate);
 
 /**
  * Invite a member to the guild.
  */
 export async function inviteMemberOnChain(guildId: number, member: string): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-invite:${guildId}:${member}`, async () => {
-    const tx = await guildContract.inviteMember(guildId, member);
+  return executeRegisteredChainOperation("guild-invite", `${guildId}:${member.toLowerCase()}`, { guildId, member });
+}
+registerChainOperationProcessor("guild-invite", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; member: string };
+  const receipt = await queueBiteTransaction(`guild-invite:${payload.guildId}:${payload.member}`, async () => {
+    const tx = await ensureGuildContract().inviteMember(payload.guildId, payload.member);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Join a guild.
  */
 export async function joinGuildOnChain(guildId: number, member: string): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-join:${guildId}:${member}`, async () => {
-    const tx = await guildContract.joinGuild(guildId, member);
+  return executeRegisteredChainOperation("guild-join", `${guildId}:${member.toLowerCase()}`, { guildId, member });
+}
+registerChainOperationProcessor("guild-join", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; member: string };
+  const receipt = await queueBiteTransaction(`guild-join:${payload.guildId}:${payload.member}`, async () => {
+    const tx = await ensureGuildContract().joinGuild(payload.guildId, payload.member);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Leave a guild.
  */
 export async function leaveGuildOnChain(guildId: number, member: string): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-leave:${guildId}:${member}`, async () => {
-    const tx = await guildContract.leaveGuild(guildId, member);
+  return executeRegisteredChainOperation("guild-leave", `${guildId}:${member.toLowerCase()}`, { guildId, member });
+}
+registerChainOperationProcessor("guild-leave", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; member: string };
+  const receipt = await queueBiteTransaction(`guild-leave:${payload.guildId}:${payload.member}`, async () => {
+    const tx = await ensureGuildContract().leaveGuild(payload.guildId, payload.member);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Deposit gold into guild treasury.
@@ -187,16 +200,17 @@ export async function depositGoldOnChain(
   member: string,
   amount: number
 ): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const amountWei = ethers.parseUnits(amount.toString(), 18);
-
-  const receipt = await queueBiteTransaction(`guild-deposit:${guildId}:${member}`, async () => {
-    const tx = await guildContract.depositGold(guildId, member, amountWei);
+  return executeRegisteredChainOperation("guild-deposit", `${guildId}:${member.toLowerCase()}:${amount}`, { guildId, member, amount });
+}
+registerChainOperationProcessor("guild-deposit", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; member: string; amount: number };
+  const amountWei = ethers.parseUnits(payload.amount.toString(), 18);
+  const receipt = await queueBiteTransaction(`guild-deposit:${payload.guildId}:${payload.member}`, async () => {
+    const tx = await ensureGuildContract().depositGold(payload.guildId, payload.member, amountWei);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Create a proposal.
@@ -209,39 +223,37 @@ export async function createProposalOnChain(
   targetAddress: string,
   targetAmount: number
 ): Promise<{ proposalId: number; txHash: string }> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const amountWei = ethers.parseUnits(targetAmount.toString(), 18);
-
-  const receipt = await queueBiteTransaction(`guild-proposal:${guildId}:${proposer}`, async () => {
-    const tx = await guildContract.createProposal(
-      guildId,
-      proposer,
-      proposalType,
-      description,
-      targetAddress,
+  return executeRegisteredChainOperation("guild-proposal", `${guildId}:${proposer.toLowerCase()}:${proposalType}`, {
+    guildId, proposer, proposalType, description, targetAddress, targetAmount
+  });
+}
+registerChainOperationProcessor("guild-proposal", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as {
+    guildId: number; proposer: string; proposalType: ProposalType; description: string; targetAddress: string; targetAmount: number;
+  };
+  const amountWei = ethers.parseUnits(payload.targetAmount.toString(), 18);
+  const contract = ensureGuildContract();
+  const receipt = await queueBiteTransaction(`guild-proposal:${payload.guildId}:${payload.proposer}`, async () => {
+    const tx = await contract.createProposal(
+      payload.guildId,
+      payload.proposer,
+      payload.proposalType,
+      payload.description,
+      payload.targetAddress,
       amountWei
     );
     return tx.wait();
   });
-
-  // Parse ProposalCreated event
   for (const log of receipt.logs) {
     try {
-      const parsed = guildContract.interface.parseLog(log);
+      const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "ProposalCreated") {
-        return {
-          proposalId: Number(parsed.args.proposalId),
-          txHash: receipt.hash,
-        };
+        return { result: { proposalId: Number(parsed.args.proposalId), txHash: receipt.hash }, txHash: receipt.hash };
       }
-    } catch {
-      // Not our event, skip
-    }
+    } catch {}
   }
-
   throw new Error("ProposalCreated event not found in receipt");
-}
+});
 
 /**
  * Vote on a proposal.
@@ -251,27 +263,31 @@ export async function voteOnProposalOnChain(
   voter: string,
   voteYes: boolean
 ): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-vote:${proposalId}:${voter}`, async () => {
-    const tx = await guildContract.vote(proposalId, voter, voteYes);
+  return executeRegisteredChainOperation("guild-vote", `${proposalId}:${voter.toLowerCase()}:${voteYes}`, { proposalId, voter, voteYes });
+}
+registerChainOperationProcessor("guild-vote", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { proposalId: number; voter: string; voteYes: boolean };
+  const receipt = await queueBiteTransaction(`guild-vote:${payload.proposalId}:${payload.voter}`, async () => {
+    const tx = await ensureGuildContract().vote(payload.proposalId, payload.voter, payload.voteYes);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Execute a proposal (after voting period ends).
  */
 export async function executeProposalOnChain(proposalId: number): Promise<string> {
-  if (!guildContract) throw new Error("Guild contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-execute:${proposalId}`, async () => {
-    const tx = await guildContract.executeProposal(proposalId);
+  return executeRegisteredChainOperation("guild-execute", String(proposalId), { proposalId });
+}
+registerChainOperationProcessor("guild-execute", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { proposalId: number };
+  const receipt = await queueBiteTransaction(`guild-execute:${payload.proposalId}`, async () => {
+    const tx = await ensureGuildContract().executeProposal(payload.proposalId);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Get guild details from contract.

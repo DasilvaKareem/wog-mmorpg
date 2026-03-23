@@ -8,6 +8,7 @@
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import type { AgentTier } from "./agentTiers.js";
+import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
 
 export type AgentFocus =
   | "questing"
@@ -90,6 +91,18 @@ export interface AgentEntityRef {
   characterName?: string;
 }
 
+export interface AgentRuntimeState {
+  currentScript: BotScript | null;
+  currentActivity: string;
+  recentActivities: string[];
+  currentRegion: string;
+  entityId: string | null;
+  custodialWallet: string | null;
+  pendingQuestionId: string | null;
+  lastTrigger: TriggerEvent | null;
+  updatedAt: number;
+}
+
 // In-memory fallback
 const memConfig = new Map<string, AgentConfig>();
 const memWallet = new Map<string, string>();
@@ -98,6 +111,7 @@ const memEntity = new Map<string, AgentEntityRef>();
 function walletKey(k: string) { return `agent:config:${k.toLowerCase()}`; }
 function custWalletKey(k: string) { return `agent:wallet:${k.toLowerCase()}`; }
 function entityKey(k: string) { return `agent:entity:${k.toLowerCase()}`; }
+function runtimeKey(k: string) { return `agent:runtime:${k.toLowerCase()}`; }
 
 export function defaultConfig(): AgentConfig {
   return {
@@ -324,6 +338,62 @@ export async function clearAgentEntityRef(userWallet: string): Promise<void> {
     assertRedisAvailable("clearAgentEntityRef");
   }
   memEntity.delete(key);
+}
+
+// ── Runtime snapshot ────────────────────────────────────────────────────────
+
+const memRuntime = new Map<string, AgentRuntimeState>();
+
+export async function getAgentRuntimeState(userWallet: string): Promise<AgentRuntimeState | null> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(runtimeKey(key));
+      if (raw) return JSON.parse(raw) as AgentRuntimeState;
+      return null;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAgentRuntimeState");
+  }
+  return memRuntime.get(key) ?? null;
+}
+
+export async function setAgentRuntimeState(userWallet: string, runtime: AgentRuntimeState): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const payload = { ...runtime, updatedAt: Date.now() };
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.set(runtimeKey(key), JSON.stringify(payload));
+      memRuntime.set(key, payload);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("setAgentRuntimeState");
+  }
+  memRuntime.set(key, payload);
+}
+
+export async function clearAgentRuntimeState(userWallet: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.del(runtimeKey(key));
+      memRuntime.delete(key);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("clearAgentRuntimeState");
+  }
+  memRuntime.delete(key);
 }
 
 // ── Champion Questions ──────────────────────────────────────────────────────

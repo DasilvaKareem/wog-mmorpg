@@ -36,6 +36,7 @@ wog-mmorpg/
 Important paths:
 - [server.ts](shard/src/server.ts)
 - [devLocalContracts.ts](shard/src/config/devLocalContracts.ts)
+- [SHARD_PERSISTENCE_ARCHITECTURE.md](docs/SHARD_PERSISTENCE_ARCHITECTURE.md)
 - [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
 - [docs/agents/README.md](docs/agents/README.md)
 
@@ -117,6 +118,16 @@ Notes:
 - in `DEV=true`, the local Hardhat manifest is the preferred source for local contract addresses
 - in non-dev environments, provide explicit RPC + contract addresses
 - for standalone shard test runs that import auth code, `JWT_SECRET` must be set
+- shard persistence now expects Redis by default; set `REQUIRE_REDIS_PERSISTENCE=false` only for explicit local fallback workflows
+
+Additional persistence-related shard envs:
+
+```env
+REQUIRE_REDIS_PERSISTENCE=true
+PLAYER_PERSIST_INTERVAL_MS=5000
+CHAIN_OPERATION_MAX_RETRIES=8
+CHARACTER_BOOTSTRAP_MAX_RETRIES=8
+```
 
 ### Hardhat
 
@@ -169,7 +180,21 @@ Current coverage includes:
 
 ### Shard integration tests
 
-Fast shard-side logic tests:
+Primary local full-flow:
+
+```bash
+cd shard
+pnpm test
+```
+
+This orchestrates:
+- Hardhat contract tests
+- local contract deploy
+- tracked chain-op store recovery tests
+- shard-up bootstrap and ERC-8004 integration tests
+- shard-down isolated replay recovery tests
+
+Focused shard-side logic tests:
 
 ```bash
 cd shard
@@ -177,7 +202,18 @@ JWT_SECRET=test npx tsx tests/partyIntegration.test.ts
 JWT_SECRET=test npx tsx tests/reputation.test.ts
 ```
 
-ERC-8004 end-to-end shard test:
+Focused persistence / reconciliation suites:
+
+```bash
+cd shard
+pnpm run test:chain-ops
+pnpm run test:character-bootstrap
+pnpm run test:erc8004
+pnpm run test:chain-recovery
+pnpm run test:blockchain-writes
+```
+
+ERC-8004 end-to-end shard test, standalone:
 
 ```bash
 cd shard
@@ -210,6 +246,20 @@ cd hardhat && npm run compile
 
 ## Current Status
 
+Persistence hardening now in place:
+- Redis-backed live online player session restore
+- Redis-backed party invites, membership restore, and friend requests
+- Redis-backed agent runtime snapshot restore
+- Redis-backed merchant state restore using stable merchant identity across restarts
+- Redis-backed PvP stats, queue flush-on-join, and battle recovery metadata
+- Redis-backed durable blockchain operation records for wallet/name/plot/reputation/guild/vault/auction/trade/prediction writes
+- replayable processors for character mint, identity registration, validation publication, and metadata updates
+- retry/reconciliation workers for async blockchain-backed bootstrap and bridge flows
+- retry caps with visible permanent-failure states for tracked chain operations and character bootstrap
+- frequent online-player checkpoints
+- fail-fast boot when Redis persistence is required
+- health endpoint reports persistence status
+
 What is verified locally:
 - local Hardhat contract deployment
 - shard auto-configuration in `DEV=true`
@@ -220,6 +270,10 @@ What is verified locally:
 - name registration
 - spawn flow
 - eventual-consistency reputation convergence
+- durable character bootstrap recovery from Redis loss against on-chain truth
+- processor-backed retry recovery for wallet, name, plot, and reputation flows
+- processor-backed retry recovery for character mint, identity registration, validation, and metadata sync
+- module-level import/type sanity for the tracked blockchain bridge updates
 - client reputation UI uses the `agentId` endpoints and renders identity/validation state
 - PvP queue join/leave uses the real live character identity instead of fabricated local IDs
 
@@ -229,6 +283,7 @@ What is not fully complete yet:
 
 ## Additional Docs
 
+- [SHARD_PERSISTENCE_ARCHITECTURE.md](docs/SHARD_PERSISTENCE_ARCHITECTURE.md)
 - [ERC8004_FULL_INTEGRATION_PLAN.md](docs/ERC8004_FULL_INTEGRATION_PLAN.md)
 - [docs/agents/README.md](docs/agents/README.md)
 

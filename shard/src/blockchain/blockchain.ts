@@ -18,11 +18,16 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteWallet } from "./biteChain.js";
-import { queueBiteTransaction } from "./biteTxQueue.js";
+import { isTransientRpcSendError, queueBiteTransaction, queueServerWalletTransaction } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "./chainOperationStore.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
 const skaleProvider = new ethers.JsonRpcProvider(
@@ -156,70 +161,10 @@ export function getTxStats(): TxStats & { uptime: string; txPerMinute: string } 
   return { ...txStats, uptime: `${hours}h ${mins}m`, txPerMinute: txPerMin };
 }
 
-/**
- * Transaction queue — serializes all server-wallet transactions to prevent
- * nonce collisions on SKALE.  Each call to `queueTransaction` waits for every
- * earlier transaction to settle before sending the next one.  On nonce errors
- * it retries up to 3 times with short back-off.
- */
-let txChain: Promise<void> = Promise.resolve();
-
-const NONCE_ERROR_CODES = [-32004, -32000, -32603]; // common nonce / replacement error codes
 const MAX_RETRIES = 3;
 
-function isTransientRpcSendError(err: any): boolean {
-  const msg = String(err?.message ?? err ?? "");
-  const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
-  return (
-    msg.includes("fetch failed") ||
-    msg.includes("UND_ERR_SOCKET") ||
-    msg.includes("ECONNRESET") ||
-    msg.includes("ETIMEDOUT") ||
-    msg.includes("socket hang up") ||
-    msg.includes("502") ||
-    msg.includes("503") ||
-    code === "UND_ERR_SOCKET"
-  );
-}
-
 async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  let resolve!: (v: void) => void;
-  const gate = new Promise<void>((r) => { resolve = r; });
-  const prev = txChain;
-  txChain = gate;
-
-  await prev; // wait for all earlier txs to finish
-
-  let lastError: unknown;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      const result = await fn();
-      resolve();
-      return result;
-    } catch (err: any) {
-      lastError = err;
-      const code = err?.code ?? err?.cause?.code ?? err?.data?.code;
-      const msg = String(err?.message ?? err ?? "");
-      const isNonceError =
-        NONCE_ERROR_CODES.includes(code) ||
-        msg.includes("nonce") ||
-        msg.includes("replacement transaction");
-      const isTransientRpcError = isTransientRpcSendError(err);
-
-      if ((isNonceError || isTransientRpcError) && attempt < MAX_RETRIES) {
-        const delay = 1000 * 2 ** attempt; // 1s, 2s, 4s
-        console.warn(
-          `[blockchain] ${isNonceError ? "Nonce" : "RPC transport"} error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
-        );
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      break;
-    }
-  }
-
-  resolve(); // unblock queue even on failure
-  throw lastError;
+  return queueServerWalletTransaction("thirdweb-server-tx", fn);
 }
 
 const goldContract = getContract({
@@ -389,38 +334,12 @@ async function sendTransactionWithManagedGas(
  * SKALE sFUEL is the native gas token — free, but wallets need a dust amount.
  */
 export async function distributeSFuel(toAddress: string): Promise<string> {
-  return traceTx("sfuel", "distributeSFuel", { to: toAddress }, "skale", () =>
-    queueTransaction(async () => {
-      const tx = prepareTransaction({
-        to: toAddress,
-        value: toWei(SFUEL_DISTRIBUTION_AMOUNT),
-        chain: skaleBase,
-        client: thirdwebClient,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-      txStats.sfuelDistributions++;
-      recordTx("sfuel", receipt.transactionHash);
-      return receipt.transactionHash;
-    })
-  );
+  return executeRegisteredChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
 }
 
 /** Mint gold (ERC-20) to a player address. `amount` is in whole tokens (e.g. "50"). */
 export async function mintGold(toAddress: string, amount: string): Promise<string> {
-  return traceTx("gold-mint", "mintGold", { to: toAddress, amount }, "skale", () =>
-    queueTransaction(async () => {
-      const tx = mintERC20({
-        contract: goldContract,
-        to: toAddress,
-        amount,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-      txStats.goldMints++;
-      recordTx("gold-mint", receipt.transactionHash);
-      goldCache.invalidate(toAddress.toLowerCase());
-      return receipt.transactionHash;
-    })
-  );
+  return executeRegisteredChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
 }
 
 /** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
@@ -479,18 +398,10 @@ export async function transferGoldFrom(
   toAddress: string,
   amount: string
 ): Promise<string> {
-  return traceTx("gold-transfer", "transferGoldFrom", { from: fromAccount.address, to: toAddress, amount }, "skale", async () => {
-    const tx = transferERC20({
-      contract: goldContract,
-      to: toAddress,
-      amount,
-    });
-    const receipt = await sendTransactionWithManagedGas(tx, fromAccount);
-    txStats.goldTransfers++;
-    recordTx("gold-transfer", receipt.transactionHash);
-    goldCache.invalidate(fromAccount.address.toLowerCase());
-    goldCache.invalidate(toAddress.toLowerCase());
-    return receipt.transactionHash;
+  return executeRegisteredChainOperation("gold-transfer", `${fromAccount.address.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`, {
+    fromAddress: fromAccount.address,
+    toAddress,
+    amount,
   });
 }
 
@@ -500,22 +411,10 @@ export async function mintItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  return traceTx("item-mint", "mintItem", { to: toAddress, tokenId, quantity }, "skale", async () => {
-    const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
-    await ensureItemTokenIdExists(chainTokenId);
-    return queueTransaction(async () => {
-      const tx = mintAdditionalSupplyTo({
-        contract: itemsContract,
-        to: toAddress,
-        tokenId: chainTokenId,
-        supply: quantity,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-      txStats.itemMints++;
-      recordTx("item-mint", receipt.transactionHash);
-      itemCache.invalidate(toAddress.toLowerCase());
-      return receipt.transactionHash;
-    });
+  return executeRegisteredChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+    toAddress,
+    tokenId: tokenId.toString(),
+    quantity: quantity.toString(),
   });
 }
 
@@ -567,36 +466,10 @@ export async function burnItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
-  return traceTx("item-burn", "burnItem", { from: fromAddress, tokenId, quantity }, "skale", async () => {
-    // Resolve the player's custodial account so we sign as the token owner
-    let signer: Account = serverAccount;
-    try {
-      signer = await getCustodialWallet(fromAddress);
-    } catch {
-      // Not a custodial wallet — fall back to server (will fail if not approved)
-    }
-
-    // Ensure the signer has sFUEL for gas
-    if (signer !== serverAccount) {
-      try {
-        await distributeSFuel(fromAddress);
-      } catch { /* best-effort */ }
-    }
-
-    return queueTransaction(async () => {
-      const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
-      const tx = burn({
-        contract: itemsContract,
-        account: fromAddress,
-        id: chainTokenId,
-        value: quantity,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, signer);
-      txStats.itemBurns++;
-      recordTx("item-burn", receipt.transactionHash);
-      itemCache.invalidate(fromAddress.toLowerCase());
-      return receipt.transactionHash;
-    });
+  return executeRegisteredChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+    fromAddress,
+    tokenId: tokenId.toString(),
+    quantity: quantity.toString(),
   });
 }
 
@@ -621,6 +494,186 @@ export interface IdentityRegistrationResult {
 
 export interface IdentityRegistrationOptions {
   beforeTransfer?: (agentId: bigint) => Promise<void>;
+  validationTags?: string[];
+}
+
+interface CharacterMintPayload {
+  toAddress: string;
+  nft: { name: string; description: string; properties: Record<string, unknown> };
+}
+
+interface IdentityRegistrationPayload {
+  characterTokenId: string;
+  ownerAddress: string;
+  metadataURI: string;
+  validationTags: string[];
+}
+
+interface CharacterMintProcessorResult {
+  txHash: string;
+  tokenId: string | null;
+}
+
+interface IdentityRegistrationProcessorResult {
+  agentId: string | null;
+  txHash: string | null;
+  agentUri: string | null;
+}
+
+interface CharacterMetadataPayload {
+  characterTokenId: string;
+  name: string;
+  raceId: string;
+  classId: string;
+  level: number;
+  xp: number;
+  stats: CharacterStats;
+}
+
+async function processCharacterMintPayload(payload: CharacterMintPayload): Promise<CharacterMintProcessorResult> {
+  return traceTx("character-mint", "mintCharacter", { to: payload.toAddress, name: payload.nft.name }, "skale", async () => {
+    const nftPayload = DEV_ENABLED ? toInlineMetadataUri(payload.nft) : payload.nft;
+    const tx = mintERC721({
+      contract: characterContract,
+      to: payload.toAddress,
+      nft: nftPayload,
+    });
+    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    txStats.characterMints++;
+    recordTx("character-mint", receipt.transactionHash);
+    characterCache.invalidate(payload.toAddress.toLowerCase());
+    const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
+    const transferLog = fullReceipt?.logs.find((log) => log.topics[0] === ERC721_TRANSFER_TOPIC);
+    const tokenId = transferLog?.topics[3] ? BigInt(transferLog.topics[3]).toString() : null;
+    return {
+      txHash: receipt.transactionHash,
+      tokenId,
+    };
+  });
+}
+
+async function processIdentityRegistrationPayload(
+  payload: IdentityRegistrationPayload
+): Promise<IdentityRegistrationProcessorResult> {
+  if (!identityRegistryContract || !biteWallet) {
+    return { agentId: null, txHash: null, agentUri: null };
+  }
+  if (!ethers.isAddress(payload.ownerAddress)) {
+    throw new Error(`Invalid owner address: ${payload.ownerAddress}`);
+  }
+
+  const characterTokenId = BigInt(payload.characterTokenId);
+  const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
+  const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
+  const agentURI = `${base}/a2a/${payload.ownerAddress}`;
+  const metadataEntries = [
+    {
+      metadataKey: "characterTokenId",
+      metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]),
+    },
+    {
+      metadataKey: "metadataURI",
+      metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["string"], [payload.metadataURI]),
+    },
+  ];
+
+  const receipt = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
+    const registerTx = await identityRegistryContract["register(string,(string,bytes)[])"](
+      agentURI,
+      metadataEntries
+    );
+    return registerTx.wait();
+  });
+
+  const registeredEvent = receipt.logs.find(
+    (log: any) => log.fragment?.name === "Registered" || log.topics?.[0] === ethers.id("Registered(uint256,string,address)")
+  );
+  const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
+
+  if (agentId == null) {
+    console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
+    return { agentId: null, txHash: receipt.hash, agentUri: agentURI };
+  }
+
+  console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} -> tx ${receipt.hash}`);
+
+  if (payload.validationTags.length > 0) {
+    const { publishValidationClaim } = await import("../erc8004/validation.js");
+    for (const tag of payload.validationTags) {
+      await publishValidationClaim(agentId, tag);
+    }
+  }
+
+  if (payload.ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
+    await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
+      identityRegistryContract.transferFrom(serverAddress, payload.ownerAddress, agentId)
+        .then((tx: any) => tx.wait())
+    );
+    console.log(`[identity] Transferred agent #${agentId} -> ${payload.ownerAddress}`);
+  }
+
+  return { agentId: BigInt(agentId).toString(), txHash: receipt.hash, agentUri: agentURI };
+}
+
+async function processCharacterMetadataPayload(payload: CharacterMetadataPayload): Promise<string> {
+  return traceTx(
+    "metadata-update",
+    "updateCharacterMetadata",
+    { tokenId: payload.characterTokenId, name: payload.name, level: payload.level },
+    "skale",
+    async () => {
+      const metadata = {
+        name: payload.name,
+        description: `Level ${payload.level} ${payload.raceId} ${payload.classId}`,
+        properties: {
+          race: payload.raceId,
+          class: payload.classId,
+          level: payload.level,
+          xp: payload.xp,
+          stats: payload.stats,
+        },
+      };
+
+      let uri: string | undefined;
+      if (DEV_ENABLED) {
+        uri = toInlineMetadataUri(metadata);
+      } else {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            uri = await Promise.race([
+              upload({ client: thirdwebClient, files: [metadata] }),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
+              ),
+            ]);
+            break;
+          } catch (err: any) {
+            const msg = String(err?.message ?? "");
+            if (
+              (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET"))
+              && attempt < 2
+            ) {
+              await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+              continue;
+            }
+            throw err;
+          }
+        }
+      }
+      if (!uri) throw new Error("Metadata upload failed after 3 attempts");
+
+      const tx = setTokenURI({
+        contract: characterContract,
+        tokenId: BigInt(payload.characterTokenId),
+        uri,
+      });
+      const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+      txStats.metadataUpdates++;
+      recordTx("metadata-update", receipt.transactionHash);
+      lastSyncedLevel.set(payload.characterTokenId, payload.level);
+      return receipt.transactionHash;
+    }
+  );
 }
 
 /**
@@ -639,59 +692,25 @@ export async function registerIdentity(
   }
 
   try {
-    const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
-
-    // Register agent — mints NFT to server wallet (msg.sender)
-    // Use A2A endpoint URL as the agentURI so it's discoverable on-chain
-    const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
-    const agentURI = `${base}/a2a/${ownerAddress}`;
-    const metadataEntries = [
+    const validationTags = options?.validationTags ?? [];
+    const result = await executeRegisteredChainOperation<IdentityRegistrationProcessorResult>(
+      "identity-register",
+      `${characterTokenId.toString()}:${ownerAddress.toLowerCase()}`,
       {
-        metadataKey: "characterTokenId",
-        metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]),
-      },
-      {
-        metadataKey: "metadataURI",
-        metadataValue: ethers.AbiCoder.defaultAbiCoder().encode(["string"], [metadataURI]),
-      },
-    ];
-
-    const receipt = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
-      const registerTx = await identityRegistryContract["register(string,(string,bytes)[])"](
-        agentURI,
-        metadataEntries
-      );
-      return registerTx.wait();
-    });
-
-    // Extract agentId from the Registered event
-    const registeredEvent = receipt.logs.find(
-      (log: any) => log.fragment?.name === "Registered" || log.topics?.[0] === ethers.id("Registered(uint256,string,address)")
+        characterTokenId: characterTokenId.toString(),
+        ownerAddress,
+        metadataURI,
+        validationTags,
+      } satisfies IdentityRegistrationPayload
     );
-    const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
-
-    if (agentId == null) {
-      console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
-      return { agentId: null, txHash: receipt.hash, agentUri: agentURI };
+    if (result.agentId != null && options?.beforeTransfer && validationTags.length === 0) {
+      await options.beforeTransfer(BigInt(result.agentId));
     }
-
-    console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} → tx ${receipt.hash}`);
-
-    if (options?.beforeTransfer) {
-      await options.beforeTransfer(BigInt(agentId));
-    }
-
-    // Transfer the agent NFT to the character's owner
-    if (ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
-      await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
-        identityRegistryContract.transferFrom(serverAddress, ownerAddress, agentId)
-          .then((tx: any) => tx.wait())
-      )
-        .then(() => console.log(`[identity] Transferred agent #${agentId} → ${ownerAddress}`))
-        .catch((err: any) => console.warn(`[identity] Transfer to ${ownerAddress} failed: ${err.message?.slice(0, 80)}`));
-    }
-
-    return { agentId: BigInt(agentId), txHash: receipt.hash, agentUri: agentURI };
+    return {
+      agentId: result.agentId != null ? BigInt(result.agentId) : null,
+      txHash: result.txHash,
+      agentUri: result.agentUri,
+    };
   } catch (err: any) {
     console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);
     return { agentId: null, txHash: null, agentUri: null };
@@ -719,12 +738,10 @@ export async function getA2AEndpoint(agentId: bigint): Promise<string | null> {
 export async function setA2AEndpoint(agentId: bigint, endpointUrl: string): Promise<string | null> {
   if (!identityRegistryContract) return null;
   try {
-    const receipt = await queueBiteTransaction(`identity-agent-uri:${agentId}`, async () => {
-      const tx = await identityRegistryContract.setAgentURI(agentId, endpointUrl);
-      return tx.wait();
+    return await executeRegisteredChainOperation("identity-agent-uri", agentId.toString(), {
+      agentId: agentId.toString(),
+      endpointUrl,
     });
-    console.log(`[identity] Updated A2A endpoint for agent #${agentId} → ${endpointUrl}`);
-    return receipt.hash;
   } catch (err: any) {
     console.warn(`[identity] Failed to set A2A endpoint for agent #${agentId}: ${err.message?.slice(0, 80)}`);
     return null;
@@ -824,52 +841,34 @@ export async function mintCharacterWithIdentity(
   nft: { name: string; description: string; properties: Record<string, unknown> },
   validationTags: string[] = []
 ): Promise<MintCharacterResult> {
-  return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", () =>
-    queueTransaction(async () => {
-      const nftPayload = DEV_ENABLED ? toInlineMetadataUri(nft) : nft;
-      const tx = mintERC721({
-        contract: characterContract,
-        to: toAddress,
-        nft: nftPayload,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-      txStats.characterMints++;
-      recordTx("character-mint", receipt.transactionHash);
-      characterCache.invalidate(toAddress.toLowerCase());
-      const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
-      const transferLog = fullReceipt?.logs.find(
-        (log) => log.topics[0] === ERC721_TRANSFER_TOPIC
-      );
-      const tokenId = transferLog?.topics[3] ? BigInt(transferLog.topics[3]) : null;
-      let identity: IdentityRegistrationResult | null = null;
+  return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", async () => {
+    const mintResult = await executeRegisteredChainOperation<CharacterMintProcessorResult>(
+      "character-mint",
+      `${toAddress.toLowerCase()}:${nft.name.toLowerCase()}`,
+      { toAddress, nft } satisfies CharacterMintPayload
+    );
+    const tokenId = mintResult.tokenId != null ? BigInt(mintResult.tokenId) : null;
 
-      if (identityRegistryContract && tokenId != null) {
-        try {
-          const { publishValidationClaim } = await import("../erc8004/validation.js");
-          identity = await registerIdentity(
-            tokenId,
-            toAddress,
-            `ipfs://${receipt.transactionHash}`,
-            {
-              beforeTransfer: async (agentId) => {
-                for (const tag of validationTags) {
-                  await publishValidationClaim(agentId, tag);
-                }
-              },
-            }
-          );
-        } catch (err: any) {
-          console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
-        }
+    let identity: IdentityRegistrationResult | null = null;
+    if (identityRegistryContract && tokenId != null) {
+      try {
+        identity = await registerIdentity(
+          tokenId,
+          toAddress,
+          `ipfs://${mintResult.txHash}`,
+          { validationTags }
+        );
+      } catch (err: any) {
+        console.warn(`[identity] Failed to register identity from mint: ${err.message?.slice(0, 80)}`);
       }
+    }
 
-      return {
-        txHash: receipt.transactionHash,
-        tokenId,
-        identity,
-      };
-    })
-  );
+    return {
+      txHash: identity?.txHash || mintResult.txHash,
+      tokenId,
+      identity,
+    };
+  });
 }
 
 /** Compatibility wrapper kept while call sites are cut over to structured mint results. */
@@ -920,6 +919,38 @@ export async function getOwnedCharacters(address: string) {
   return nfts;
 }
 
+export async function findIdentityByCharacterTokenId(
+  characterTokenId: bigint
+): Promise<{ agentId: bigint; ownerAddress: string | null; agentUri: string | null } | null> {
+  if (!identityRegistryContract || !identityRegistryAddress) return null;
+
+  const latestBlock = BigInt(await biteProvider.getBlockNumber());
+  const registeredTopic = ethers.id("Registered(uint256,string,address)");
+  const logs = await paginatedGetLogs(identityRegistryAddress, [registeredTopic], latestBlock);
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+
+  for (let index = logs.length - 1; index >= 0; index--) {
+    const agentIdTopic = logs[index].topics?.[1];
+    if (!agentIdTopic) continue;
+    const agentId = BigInt(agentIdTopic);
+    try {
+      const rawMetadata = await identityRegistryContract.getMetadata(agentId, "characterTokenId");
+      if (!rawMetadata || rawMetadata === "0x") continue;
+      const [storedCharacterTokenId] = coder.decode(["uint256"], rawMetadata);
+      if (BigInt(storedCharacterTokenId) !== characterTokenId) continue;
+      const [ownerAddress, agentUri] = await Promise.all([
+        identityRegistryContract.ownerOf(agentId).then((value: string) => value).catch(() => null),
+        identityRegistryContract.tokenURI(agentId).then((value: string) => value).catch(() => null),
+      ]);
+      return { agentId, ownerAddress, agentUri };
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 // Dedup: track last successfully synced level per tokenId to skip redundant uploads
 const lastSyncedLevel = new Map<string, number>();
 
@@ -937,59 +968,142 @@ export async function updateCharacterMetadata(entity: {
   if (lastSyncedLevel.get(tokenKey) === entity.level) {
     return "skipped-same-level";
   }
-
-  return traceTx("metadata-update", "updateCharacterMetadata", { tokenId: entity.characterTokenId, name: entity.name, level: entity.level }, "skale", async () => {
-    const metadata = {
+  return executeRegisteredChainOperation<string>(
+    "character-metadata-update",
+    `${tokenKey}:${entity.level}`,
+    {
+      characterTokenId: tokenKey,
       name: entity.name,
-      description: `Level ${entity.level} ${entity.raceId} ${entity.classId}`,
-      properties: {
-        race: entity.raceId,
-        class: entity.classId,
-        level: entity.level,
-        xp: entity.xp,
-        stats: entity.stats,
-      },
-    };
+      raceId: entity.raceId,
+      classId: entity.classId,
+      level: entity.level,
+      xp: entity.xp,
+      stats: entity.stats,
+    } satisfies CharacterMetadataPayload
+  );
+}
 
-    let uri: string | undefined;
-    if (DEV_ENABLED) {
-      uri = toInlineMetadataUri(metadata);
-    } else {
-      // Upload to IPFS with retry — thirdweb storage is intermittently slow from GCE
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          uri = await Promise.race([
-            upload({ client: thirdwebClient, files: [metadata] }),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
-            ),
-          ]);
-          break;
-        } catch (err: any) {
-          const msg = String(err?.message ?? "");
-          if (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET")) {
-            if (attempt < 2) {
-              await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-              continue;
-            }
-          }
-          throw err;
-        }
+registerChainOperationProcessor("sfuel-distribute", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { toAddress: string };
+  return traceTx("sfuel", "distributeSFuel", { to: payload.toAddress }, "skale", async () => {
+    const tx = prepareTransaction({
+      to: payload.toAddress,
+      value: toWei(SFUEL_DISTRIBUTION_AMOUNT),
+      chain: skaleBase,
+      client: thirdwebClient,
+    });
+    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    txStats.sfuelDistributions++;
+    recordTx("sfuel", receipt.transactionHash);
+    return { result: receipt.transactionHash, txHash: receipt.transactionHash };
+  });
+});
+
+registerChainOperationProcessor("gold-mint", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { toAddress: string; amount: string };
+  return traceTx("gold-mint", "mintGold", { to: payload.toAddress, amount: payload.amount }, "skale", async () => {
+    const tx = mintERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
+    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    txStats.goldMints++;
+    recordTx("gold-mint", receipt.transactionHash);
+    goldCache.invalidate(payload.toAddress.toLowerCase());
+    return { result: receipt.transactionHash, txHash: receipt.transactionHash };
+  });
+});
+
+registerChainOperationProcessor("gold-transfer", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { fromAddress: string; toAddress: string; amount: string };
+  return traceTx("gold-transfer", "transferGoldFrom", { from: payload.fromAddress, to: payload.toAddress, amount: payload.amount }, "skale", async () => {
+    let signer: Account = serverAccount;
+    if (payload.fromAddress.toLowerCase() !== serverAccount.address.toLowerCase()) {
+      try {
+        signer = await getCustodialWallet(payload.fromAddress);
+      } catch {
+        signer = serverAccount;
       }
     }
-    if (!uri) throw new Error("Metadata upload failed after 3 attempts");
-
-    return queueTransaction(async () => {
-      const tx = setTokenURI({
-        contract: characterContract,
-        tokenId: entity.characterTokenId,
-        uri,
-      });
-      const receipt = await sendTransactionWithManagedGas(tx, serverAccount);
-      txStats.metadataUpdates++;
-      recordTx("metadata-update", receipt.transactionHash);
-      lastSyncedLevel.set(tokenKey, entity.level);
-      return receipt.transactionHash;
-    });
+    const tx = transferERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
+    const receipt = await sendTransactionWithManagedGas(tx, signer);
+    txStats.goldTransfers++;
+    recordTx("gold-transfer", receipt.transactionHash);
+    goldCache.invalidate(payload.fromAddress.toLowerCase());
+    goldCache.invalidate(payload.toAddress.toLowerCase());
+    return { result: receipt.transactionHash, txHash: receipt.transactionHash };
   });
-}
+});
+
+registerChainOperationProcessor("item-mint", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { toAddress: string; tokenId: string; quantity: string };
+  return traceTx("item-mint", "mintItem", payload, "skale", async () => {
+    const chainTokenId = await getChainTokenIdForGameTokenId(BigInt(payload.tokenId));
+    await ensureItemTokenIdExists(chainTokenId);
+    const tx = mintAdditionalSupplyTo({
+      contract: itemsContract,
+      to: payload.toAddress,
+      tokenId: chainTokenId,
+      supply: BigInt(payload.quantity),
+    });
+    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    txStats.itemMints++;
+    recordTx("item-mint", receipt.transactionHash);
+    itemCache.invalidate(payload.toAddress.toLowerCase());
+    return { result: receipt.transactionHash, txHash: receipt.transactionHash };
+  });
+});
+
+registerChainOperationProcessor("item-burn", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { fromAddress: string; tokenId: string; quantity: string };
+  return traceTx("item-burn", "burnItem", payload, "skale", async () => {
+    let signer: Account = serverAccount;
+    try {
+      signer = await getCustodialWallet(payload.fromAddress);
+    } catch {
+      signer = serverAccount;
+    }
+    if (signer !== serverAccount) {
+      try {
+        await distributeSFuel(payload.fromAddress);
+      } catch {}
+    }
+    const chainTokenId = await getChainTokenIdForGameTokenId(BigInt(payload.tokenId));
+    const tx = burn({
+      contract: itemsContract,
+      account: payload.fromAddress,
+      id: chainTokenId,
+      value: BigInt(payload.quantity),
+    });
+    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, signer));
+    txStats.itemBurns++;
+    recordTx("item-burn", receipt.transactionHash);
+    itemCache.invalidate(payload.fromAddress.toLowerCase());
+    return { result: receipt.transactionHash, txHash: receipt.transactionHash };
+  });
+});
+
+registerChainOperationProcessor("identity-agent-uri", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { agentId: string; endpointUrl: string };
+  const receipt = await queueBiteTransaction(`identity-agent-uri:${payload.agentId}`, async () => {
+    const tx = await identityRegistryContract!.setAgentURI(BigInt(payload.agentId), payload.endpointUrl);
+    return tx.wait();
+  });
+  console.log(`[identity] Updated A2A endpoint for agent #${payload.agentId} → ${payload.endpointUrl}`);
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("character-mint", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as CharacterMintPayload;
+  const result = await processCharacterMintPayload(payload);
+  return { result, txHash: result.txHash };
+});
+
+registerChainOperationProcessor("identity-register", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as IdentityRegistrationPayload;
+  const result = await processIdentityRegistrationPayload(payload);
+  return { result, txHash: result.txHash };
+});
+
+registerChainOperationProcessor("character-metadata-update", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as CharacterMetadataPayload;
+  const result = await processCharacterMetadataPayload(payload);
+  return { result, txHash: result };
+});
