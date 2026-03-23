@@ -13,7 +13,7 @@ const FRAME_W = 16;
 const FRAME_H = 22;
 const SCALE = 8;
 const BODY_X = 6;
-const WEAPON_OFFSET_X = -4;
+const WEAPON_OFFSET_X = -9;
 const BUFFER_W = FRAME_W + BODY_X;
 const CANVAS_W = BUFFER_W * SCALE; // 176
 const CANVAS_H = FRAME_H * SCALE; // 176
@@ -83,7 +83,7 @@ interface LayerDef {
   scale?: number;
 }
 
-const ARMOR_SCALE = 0.9;
+const ARMOR_SCALE = 0.6;
 
 // Image cache to avoid reloading PNGs on every render
 const imageCache = new Map<string, HTMLImageElement>();
@@ -122,32 +122,31 @@ export function CharacterPreview({ skinColor, eyeColor, hairStyle, classId }: Pr
     // Build layer list in draw order (bottom → top)
     const layers: LayerDef[] = [];
 
-    // 1. Body (always present)
-    const skin = SKIN_MAP[skinColor] ?? "medium";
-    layers.push({ src: `${base}/body/body-${skin}.png` });
+    // 1. Body (hardcoded to medium for now)
+    layers.push({ src: `${base}/body/body-medium.png` });
 
-    // 2. Eyes (only clean dot-style PNGs)
-    const eye = EYE_MAP[eyeColor] ?? "brown";
-    if (CLEAN_EYES.has(eye)) {
-      layers.push({ src: `${base}/eyes/eyes-${eye}.png` });
-    }
+    // 2. Eyes — disabled for now, will fix later
+    // const eye = EYE_MAP[eyeColor] ?? "brown";
+    // if (CLEAN_EYES.has(eye)) {
+    //   layers.push({ src: `${base}/eyes/eyes-${eye}.png` });
+    // }
 
-    // 3. Hair
-    const hair = HAIR_MAP[hairStyle] ?? "short";
-    if (hair) {
-      layers.push({ src: `${base}/hair/hair-${hair}.png` });
-    }
+    // 3. Hair — disabled for now, will fix later
+    // const hair = HAIR_MAP[hairStyle] ?? "short";
+    // if (hair) {
+    //   layers.push({ src: `${base}/hair/hair-${hair}.png`, dx: 6, dy: -5, scale: 0.8 });
+    // }
 
     // 4. Equipment based on class
     const equip = CLASS_EQUIPMENT[classId ?? "warrior"] ?? CLASS_EQUIPMENT.warrior;
     if (equip.chest) {
-      layers.push({ src: `${base}/chest/chest-${equip.chest}.png`, dx: BODY_X, scale: ARMOR_SCALE });
+      layers.push({ src: `${base}/chest/chest-${equip.chest}.png`, dx: BODY_X, dy: 5, scale: ARMOR_SCALE });
     }
     if (equip.legs) {
-      layers.push({ src: `${base}/legs/legs-${equip.legs}.png`, dx: BODY_X, scale: ARMOR_SCALE });
+      layers.push({ src: `${base}/legs/legs-${equip.legs}.png`, dx: BODY_X, dy: 5, scale: ARMOR_SCALE });
     }
     if (equip.boots) {
-      layers.push({ src: `${base}/boots/boots-${equip.boots}.png`, dx: BODY_X, scale: ARMOR_SCALE });
+      layers.push({ src: `${base}/boots/boots-${equip.boots}.png`, dx: BODY_X, dy: 5, scale: ARMOR_SCALE });
     }
 
     const weaponLayer: LayerDef | null = equip.weapon
