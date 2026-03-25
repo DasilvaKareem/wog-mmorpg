@@ -26,19 +26,7 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
   free: {
     supervisorEnabled: false,
     sessionLimitMs: 6 * 3600_000,       // 6 hours
-    allowedZones: [
-      // Core zones below L25
-      "village-square", "wild-meadow", "dark-forest",
-      "auroral-plains", "emerald-woods",
-      // Connector zones below L25
-      "northwind-hollow", "windswept-bluffs", "stormbreak-pass", "frostfall-ridge",
-      // Farmland zones (no level gate)
-      "sunflower-fields", "harvest-hollow", "willowfen-pastures",
-      "bramblewood-homestead", "goldenreach-grange", "dewveil-orchard",
-      "thornwall-ranch", "moonpetal-gardens", "ironroot-farmstead",
-      "crystalbloom-terrace", "copperfield-meadow", "silkwood-grove",
-      "emberglow-estate", "starfall-ranch",
-    ],
+    allowedZones: "all",
     retreatEnabled: false,
     techniquesEnabled: true,
     selfAdaptationEnabled: false,

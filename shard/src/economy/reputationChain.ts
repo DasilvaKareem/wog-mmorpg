@@ -46,6 +46,10 @@ const DEFAULT_SCORE = 500;
 const MIN_SCORE = 0;
 const MAX_SCORE = 1000;
 
+/** Per-entity backoff cache: maps normalized agentId → timestamp when retry is allowed */
+const reputationFailBackoff = new Map<string, number>();
+const REPUTATION_FAIL_BACKOFF_MS = 60_000; // 60 seconds before retrying a failed entity
+
 const CATEGORY_TAGS = ["combat", "economic", "social", "crafting", "agent"] as const;
 type CategoryIndex = 0 | 1 | 2 | 3 | 4;
 
@@ -118,6 +122,14 @@ export async function getReputationOnChain(
   const identityId = tryToIdentityId(agentId);
   if (identityId === null) return null;
 
+  const normalizedId = normalizeAgentId(agentId);
+
+  // Check per-entity failure backoff — skip if recently failed
+  const retryAfter = reputationFailBackoff.get(normalizedId);
+  if (retryAfter && Date.now() < retryAfter) {
+    return null;
+  }
+
   try {
     const clients = Array.from(await reputationContract.getClients(identityId)) as string[];
     if (!clients || clients.length === 0) {
@@ -135,6 +147,9 @@ export async function getReputationOnChain(
     const agent = clampScore(DEFAULT_SCORE + agentAvg);
     const overall = Math.round((combat + economic + social + crafting + agent) / 5);
 
+    // Clear backoff on success
+    reputationFailBackoff.delete(normalizedId);
+
     return {
       combat,
       economic,
@@ -145,7 +160,9 @@ export async function getReputationOnChain(
       lastUpdated: Date.now(),
     };
   } catch (err) {
-    console.warn(`[reputationChain] getReputation failed for ${normalizeAgentId(agentId)}:`, err);
+    // Set backoff so we don't spam retries for this entity
+    reputationFailBackoff.set(normalizedId, Date.now() + REPUTATION_FAIL_BACKOFF_MS);
+    console.warn(`[reputationChain] getReputation failed for ${normalizedId} (backing off ${REPUTATION_FAIL_BACKOFF_MS / 1000}s):`, err);
     return null;
   }
 }

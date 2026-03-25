@@ -35,6 +35,7 @@ import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
 import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
 import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
@@ -137,6 +138,8 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
     case "goto":       return "Walk to the target NPC the user pointed at.";
     case "learning":   return "Find a trainer NPC and learn new techniques/skills.";
+    case "leatherworking": return "Craft leather armor at a tanning rack.";
+    case "jewelcrafting": return "Craft jewelry — rings and amulets at a jeweler's bench.";
     case "dungeon":    return "Enter dungeon gates and clear all mobs inside for XP and loot.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     default:           return "Be autonomous — quest and improve your character.";
@@ -153,12 +156,14 @@ function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: 
     case "crafting":   return { type: "craft",   reason: "User focus: crafting" };
     case "alchemy":    return { type: "brew",    reason: "User focus: alchemy" };
     case "cooking":    return { type: "cook",    reason: "User focus: cooking" };
-    case "enchanting": return { type: "combat",  maxLevelOffset: levelOffset, reason: "Enchanting — need to farm XP first" };
+    case "enchanting": return { type: "enchant", reason: "User focus: enchanting" };
     case "shopping":   return { type: "shop",    reason: "User focus: shopping" };
     case "trading":    return { type: "trade",   reason: "User focus: trading" };
     case "traveling":  return { type: "travel",  targetZone, reason: "User focus: traveling" };
     case "goto":       return { type: "goto",    reason: "User clicked an NPC" };
     case "learning":   return { type: "learn",   reason: "User focus: learn techniques" };
+    case "leatherworking": return { type: "leatherwork", reason: "User focus: leatherworking" };
+    case "jewelcrafting": return { type: "jewelcraft", reason: "User focus: jewelcrafting" };
     case "dungeon":    return { type: "dungeon", reason: "User focus: dungeon" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
@@ -359,7 +364,7 @@ export class AgentRunner {
       return { ok: false, reason: "agent not fully initialized" };
     }
     if (Date.now() < this.nextTechniqueCheckAt) {
-      return { ok: false, reason: "on cooldown, try again shortly" };
+      return { ok: false, reason: "technique learning on cooldown" };
     }
 
     try {
@@ -425,6 +430,7 @@ export class AgentRunner {
       }
     } catch (err: any) {
       console.debug(`[agent] learnNextTechnique: ${err.message?.slice(0, 60)}`);
+      this.nextTechniqueCheckAt = Date.now() + 30_000;
       return { ok: false, reason: `error: ${err.message?.slice(0, 80) ?? "unknown"}` };
     }
   }
@@ -862,6 +868,17 @@ export class AgentRunner {
         category: result.category,
       });
       this.maybeScheduleBlockedTrigger(failure);
+
+      // Surface repeated failures to the user so they know what's going wrong
+      if (failure.consecutive === 3) {
+        const what = script?.type ?? "action";
+        const why = result.reason ?? "unknown error";
+        void this.logActivity(`[BLOCKED] ${what} failed 3x: ${why}`);
+      } else if (failure.consecutive === 10) {
+        const what = script?.type ?? "action";
+        const why = result.reason ?? "unknown error";
+        void this.logActivity(`[STUCK] ${what} blocked 10x in a row: ${why} — may need a different approach`);
+      }
       return;
     }
 
@@ -1228,11 +1245,40 @@ export class AgentRunner {
       case "cook":    return behaviors.doCooking(ctx, strategy);
       case "quest":   return behaviors.doQuesting(ctx, strategy, (l) => this.findNextZoneForLevel(l));
       case "learn": {
+        const learnCooldownKey = "learn-technique";
+        if (this.isInteractionOnCooldown(learnCooldownKey)) {
+          return actionBlocked("technique learning on cooldown", {
+            failureKey: learnCooldownKey, endpoint: "/techniques/learn", category: "transient",
+          });
+        }
         const result = await this.learnNextTechnique();
-        return result.ok
-          ? actionProgressed(result.reason)
-          : actionBlocked(result.reason, { failureKey: "learn-technique", endpoint: "/techniques/learn" });
+        if (result.ok) {
+          this.clearFailure(learnCooldownKey);
+          return actionProgressed(result.reason);
+        }
+        // Back off 30s on any failure to prevent spam
+        this.setInteractionCooldown(learnCooldownKey, 30_000);
+        const failure = this.recordFailure({
+          key: learnCooldownKey, reason: result.reason,
+          scriptType: "learn", endpoint: "/techniques/learn", category: "transient",
+        });
+        // After 5 consecutive failures, abandon the learn script and let the
+        // supervisor pick a new focus (combat, quest, etc.)
+        if (failure.consecutive >= 5) {
+          this.currentScript = null;
+          console.warn(`[agent:${this.walletTag}] learn-technique abandoned after ${failure.consecutive} failures — clearing script`);
+          void this.logActivity?.(`Giving up on learning techniques after ${failure.consecutive} failures`);
+          return actionBlocked(result.reason, {
+            failureKey: learnCooldownKey, endpoint: "/techniques/learn", category: "strategic",
+          });
+        }
+        return actionBlocked(result.reason, {
+          failureKey: learnCooldownKey, endpoint: "/techniques/learn", category: "transient",
+        });
       }
+      case "enchant":      return behaviors.doEnchanting(ctx, strategy);
+      case "leatherwork":  return behaviors.doLeatherworking(ctx, strategy);
+      case "jewelcraft":   return behaviors.doJewelcrafting(ctx, strategy);
       case "dungeon": return behaviors.doDungeon(ctx, strategy, { gateEntityId: script.gateEntityId, gateRank: script.gateRank });
       case "idle":    return actionIdle("Idle");
     }
@@ -1857,6 +1903,50 @@ export class AgentRunner {
 
         // Skip zone management while inside a dungeon instance
         const inDungeon = this.currentRegion.startsWith("dungeon-");
+
+        // ── Party follow: non-leaders follow the leader's zone ──────────
+        // Skip if agent has a user-set objective (objective takes priority over party)
+        const hasObjective = (config.objectives ?? []).some((o) => o.status === "active" || o.status === "pending");
+        if (!inDungeon && !hasObjective && this.entityId) {
+          const partyId = getPlayerPartyId(this.entityId);
+          if (partyId) {
+            const leaderId = getPartyLeaderId(this.entityId);
+            if (leaderId && leaderId !== this.entityId) {
+              const leaderEntity = getWorldEntity(leaderId) as any;
+              const leaderZone = leaderEntity?.region as string | undefined;
+              if (leaderZone && leaderZone !== this.currentRegion && !leaderZone.startsWith("dungeon-")) {
+                const myLevel = entity.level ?? 1;
+                const zoneReq = ZONE_LEVEL_REQUIREMENTS[leaderZone] ?? 1;
+                if (myLevel >= zoneReq) {
+                  if (config.targetZone !== leaderZone || focus !== "traveling") {
+                    console.log(`[agent:${this.walletTag}] Following party leader to ${leaderZone}`);
+                    void this.logActivity(`Following party leader to ${leaderZone.replace(/-/g, " ")}`);
+                    await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: leaderZone });
+                    this.currentScript = { type: "travel", targetZone: leaderZone, reason: "Following party leader" };
+                    this.ticksOnCurrentScript = 0;
+                    await sleep(TICK_MS);
+                    continue;
+                  }
+                }
+              }
+
+              // Same zone as leader — match their combat/questing focus
+              if (leaderEntity?.walletAddress) {
+                const leaderOwner = leaderEntity.walletAddress as string;
+                const leaderConfig = await getAgentConfig(leaderOwner);
+                const leaderFocus = leaderConfig?.focus;
+                if (leaderFocus && (leaderFocus === "combat" || leaderFocus === "questing") && focus !== leaderFocus && focus !== "traveling") {
+                  console.log(`[agent:${this.walletTag}] Matching party leader focus: ${leaderFocus}`);
+                  await patchAgentConfig(this.userWallet, { focus: leaderFocus, targetZone: undefined });
+                  this.currentScript = null;
+                  this.ticksSinceLastDecision = MAX_STALE_TICKS;
+                  await sleep(TICK_MS);
+                  continue;
+                }
+              }
+            }
+          }
+        }
 
         if (!inDungeon) {
           // Normalize target zone

@@ -952,6 +952,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   }, [address, ambientLoading, history, npc, playerEntityId]);
 
   useGameBridge("questNpcClick", async (entity: Entity) => {
+    if (entity.type === "quest-giver" && !address) return;
     playSoundEffect("ui_dialog_open");
     setOpen(true);
     setNpc(entity);
@@ -1128,7 +1129,8 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   const isChampionSpeaking = activeSpeaker === "champion" || activeSpeaker === "player";
   const activeTitle = graphSession?.sceneTitle ?? legacyNode?.title;
   const activeChoices = graphNode?.type === "choice" ? graphNode.choices : legacyNode?.choices;
-  const showAmbientPanel = !graphSession;
+  const isQuestGiver = npc.type === "quest-giver";
+  const showAmbientPanel = !graphSession && !(isQuestGiver && !playerEntityId);
   const showGraphFreeformPanel = graphNode?.type === "freeform";
 
   return (

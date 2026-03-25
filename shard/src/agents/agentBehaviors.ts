@@ -917,6 +917,150 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
   }
 }
 
+// ── Leatherworking ───────────────────────────────────────────────────────────
+
+export async function doLeatherworking(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
+  try {
+    const learned = await ctx.learnProfession("leatherworking");
+    if (!learned) return actionProgressed("Working toward leatherworking access");
+
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    const rack = ctx.findNearestEntity(entities, me, (e) => e.type === "tanning-rack");
+    if (!rack) {
+      return fallbackToCombat(ctx, "No tanning rack in this zone", strategy);
+    }
+
+    const [rackId, rackEntity] = rack;
+    const moving = await ctx.moveToEntity(me, rackEntity);
+    if (moving) return actionProgressed(`Moving to ${rackEntity.name ?? "tanning rack"}`);
+
+    const recipesRes = await ctx.api("GET", "/leatherworking/recipes");
+    const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+
+    let lastError: string | null = null;
+    for (const recipe of recipes) {
+      try {
+        const result = await ctx.api("POST", "/leatherworking/craft", {
+          walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+          entityId: ctx.entityId, stationId: rackId,
+          recipeId: recipe.recipeId ?? recipe.id,
+        });
+        const craftedTokenId = Number(result?.crafted?.tokenId ?? 0);
+        const craftedInstanceId = typeof result?.crafted?.instanceId === "string"
+          ? result.crafted.instanceId
+          : undefined;
+        const craftedItem = craftedTokenId ? getItemByTokenId(BigInt(craftedTokenId)) : undefined;
+        const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
+        console.log(`[agent:${ctx.walletTag}] Leatherworked ${craftedName}`);
+        void ctx.logActivity(`Crafted ${craftedName} (leatherworking)`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "crafting",
+          origin: me.origin, classId: me.classId,
+          detail: craftedName,
+        });
+
+        if (craftedItem?.equipSlot && (!me.equipment?.[craftedItem.equipSlot] || craftedItem.equipSlot === "weapon")) {
+          const equipped = await ctx.equipItem(craftedTokenId, craftedInstanceId);
+          if (equipped) {
+            void ctx.logActivity(`Equipped ${craftedName}`);
+          }
+        }
+        return actionCompleted(`Leatherworked ${craftedName}`);
+      } catch (err: any) {
+        lastError = formatAgentError(err);
+        console.debug(`[agent:${ctx.walletTag}] leatherwork ${recipe.name ?? recipe.recipeId}: ${lastError.slice(0, 60)}`);
+      }
+    }
+
+    void ctx.logActivity("Missing materials for leatherworking — skinning");
+    const gatherResult = await doGathering(ctx, strategy);
+    return lastError ? actionBlocked(lastError, {
+      failureKey: `leatherworking:craft:${ctx.currentRegion}`,
+      endpoint: "/leatherworking/craft",
+    }) : gatherResult;
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    console.debug(`[agent] leatherworking tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `leatherworking:error:${ctx.currentRegion}` });
+  }
+}
+
+// ── Jewelcrafting ────────────────────────────────────────────────────────────
+
+export async function doJewelcrafting(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
+  try {
+    const learned = await ctx.learnProfession("jewelcrafting");
+    if (!learned) return actionProgressed("Working toward jewelcrafting access");
+
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    const bench = ctx.findNearestEntity(entities, me, (e) => e.type === "jewelers-bench");
+    if (!bench) {
+      return fallbackToCombat(ctx, "No jeweler's bench in this zone", strategy);
+    }
+
+    const [stationId, benchEntity] = bench;
+    const moving = await ctx.moveToEntity(me, benchEntity);
+    if (moving) return actionProgressed(`Moving to ${benchEntity.name ?? "jeweler's bench"}`);
+
+    const recipesRes = await ctx.api("GET", "/jewelcrafting/recipes");
+    const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+
+    let lastError: string | null = null;
+    for (const recipe of recipes) {
+      try {
+        const result = await ctx.api("POST", "/jewelcrafting/craft", {
+          walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+          entityId: ctx.entityId, stationId,
+          recipeId: recipe.recipeId ?? recipe.id,
+        });
+        const craftedTokenId = Number(result?.crafted?.tokenId ?? 0);
+        const craftedInstanceId = typeof result?.crafted?.instanceId === "string"
+          ? result.crafted.instanceId
+          : undefined;
+        const craftedItem = craftedTokenId ? getItemByTokenId(BigInt(craftedTokenId)) : undefined;
+        const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
+        console.log(`[agent:${ctx.walletTag}] Jewelcrafted ${craftedName}`);
+        void ctx.logActivity(`Jewelcrafted ${craftedName}`);
+        emitAgentChat({
+          entityId: ctx.entityId, entityName: me.name ?? "Agent",
+          zoneId: ctx.currentRegion, event: "crafting",
+          origin: me.origin, classId: me.classId,
+          detail: craftedName,
+        });
+
+        if (craftedItem?.equipSlot && (!me.equipment?.[craftedItem.equipSlot])) {
+          const equipped = await ctx.equipItem(craftedTokenId, craftedInstanceId);
+          if (equipped) {
+            void ctx.logActivity(`Equipped ${craftedName}`);
+          }
+        }
+        return actionCompleted(`Jewelcrafted ${craftedName}`);
+      } catch (err: any) {
+        lastError = formatAgentError(err);
+        console.debug(`[agent:${ctx.walletTag}] jewelcraft ${recipe.name ?? recipe.recipeId}: ${lastError.slice(0, 60)}`);
+      }
+    }
+
+    void ctx.logActivity("Missing materials for jewelcrafting — gathering ore");
+    const gatherResult = await doGathering(ctx, strategy, "ore");
+    return lastError ? actionBlocked(lastError, {
+      failureKey: `jewelcrafting:craft:${ctx.currentRegion}`,
+      endpoint: "/jewelcrafting/craft",
+    }) : gatherResult;
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    console.debug(`[agent] jewelcrafting tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `jewelcrafting:error:${ctx.currentRegion}` });
+  }
+}
+
 // ── Shopping ─────────────────────────────────────────────────────────────────
 
 export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
@@ -1543,11 +1687,17 @@ export async function doQuesting(
       void ctx.logActivity("Gathering resources for quest");
       return doGathering(ctx, strategy);
     } else {
-      return fallbackToCombat(ctx, "No quest objectives to work on", strategy);
+      const pendingCount = (me.pendingQuestApprovals ?? []).length;
+      const activeCount = activeQuests.filter((aq: any) => !aq.complete).length;
+      const detail = `active=${activeCount} pending=${pendingCount} total=${activeQuests.length}`;
+      console.warn(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
+      void ctx.logActivity(`No quest objectives — grinding mobs while waiting (${detail})`);
+      return fallbackToCombat(ctx, `No quest objectives (${detail})`, strategy);
     }
   } catch (err: any) {
     const reason = formatAgentError(err);
-    console.debug(`[agent] questing tick: ${reason.slice(0, 60)}`);
+    console.error(`[agent:${ctx.walletTag}] Quest system error: ${reason}`);
+    void ctx.logActivity(`Quest error: ${reason} — grinding mobs as fallback`);
     return fallbackToCombat(ctx, `Quest system error: ${reason}`, strategy);
   }
 }
@@ -1609,7 +1759,8 @@ async function fallbackToCombat(
   strategy: AgentStrategy,
 ): Promise<ActionResult> {
   void ctx.logActivity(`${reason} — fighting to earn XP/gold`);
-  ctx.setScript({ type: "combat", maxLevelOffset: 1, reason: `Farming gold: ${reason}` });
+  // Do combat for this tick only — do NOT overwrite the script so we
+  // return to the original focus (e.g. questing) on the next tick.
   const result = await doCombat(ctx, strategy);
   return result.status === "idle" ? actionProgressed(reason) : result;
 }

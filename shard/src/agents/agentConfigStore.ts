@@ -24,7 +24,9 @@ export type AgentFocus =
   | "learning"
   | "idle"
   | "goto"
-  | "dungeon";
+  | "dungeon"
+  | "leatherworking"
+  | "jewelcrafting";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 
