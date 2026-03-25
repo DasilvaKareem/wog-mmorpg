@@ -893,17 +893,24 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
 
   const partyMemberIds = getPartyMembers(xpRecipient.id);
 
-  // Filter to alive, player-type members (use global entity map so cross-zone party members get XP)
+  // Filter to alive, player-type members in the SAME ZONE as the kill
   const eligibleMembers: Entity[] = [];
   for (const memberId of partyMemberIds) {
     const member = world.entities.get(memberId);
-    if (member && member.type === "player" && member.hp > 0 && member.level != null) {
-      eligibleMembers.push(member);
-    } else if (member) {
-      console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
-    } else {
+    if (!member) {
       console.warn(`[xp-debug] MEMBER NOT FOUND: memberId=${memberId}`);
+      continue;
     }
+    if (member.type !== "player" || member.hp <= 0 || member.level == null) {
+      console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
+      continue;
+    }
+    // Must be in the same zone as the kill — no free XP from another zone
+    if (member.region !== zone.zoneId) {
+      console.log(`[xp-debug] WRONG ZONE: ${member.name} in ${member.region} (kill in ${zone.zoneId}) — no XP`);
+      continue;
+    }
+    eligibleMembers.push(member);
   }
 
   // Fallback: if somehow no eligible members, give to tagger directly

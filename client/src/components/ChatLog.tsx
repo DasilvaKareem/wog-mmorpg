@@ -35,6 +35,8 @@ function getEventColor(type: ZoneEvent["type"]): string {
       return "text-[#e0af68]"; // gold
     case "system":
       return "text-[#9aa7cc]"; // gray
+    case "profession":
+      return "text-[#f2a854]"; // warm amber
     default:
       return "text-[#edf2ff]";
   }

@@ -749,29 +749,103 @@ function OverviewTab({
 
 // ── Professions tab ───────────────────────────────────────────────────────
 
-function ProfessionsTab({ learned }: { learned: string[] }) {
+const RECIPE_ENDPOINTS: Record<string, string> = {
+  alchemy: "/alchemy/recipes",
+  cooking: "/cooking/recipes",
+  blacksmithing: "/crafting/recipes",
+  leatherworking: "/leatherworking/recipes",
+  jewelcrafting: "/jewelcrafting/recipes",
+};
+
+interface RecipeInfo { recipeId?: string; id?: string; name?: string; output?: { name?: string }; }
+
+function ProfessionsTab({
+  learned,
+  skills,
+  custodialWallet,
+}: {
+  learned: string[];
+  skills: Record<string, { level: number; xp: number; actions: number; progress: number }>;
+  custodialWallet: string | null;
+}) {
+  const [expandedProf, setExpandedProf] = React.useState<string | null>(null);
+  const [recipes, setRecipes] = React.useState<Record<string, RecipeInfo[]>>({});
+  const [loadingRecipes, setLoadingRecipes] = React.useState<string | null>(null);
+
+  async function toggleExpand(profId: string) {
+    if (expandedProf === profId) { setExpandedProf(null); return; }
+    setExpandedProf(profId);
+    if (recipes[profId]) return;
+    const endpoint = RECIPE_ENDPOINTS[profId];
+    if (!endpoint) return;
+    setLoadingRecipes(profId);
+    try {
+      const res = await fetch(`${API_URL}${endpoint}`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.recipes ?? []);
+        setRecipes((prev) => ({ ...prev, [profId]: list }));
+      }
+    } catch { /* non-fatal */ }
+    finally { setLoadingRecipes(null); }
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="flex flex-col gap-3">
       {ALL_PROFESSIONS.map((p) => {
         const isLearned = learned.includes(p.id);
+        const skill = skills[p.id];
+        const isExpanded = expandedProf === p.id;
+        const hasRecipes = !!RECIPE_ENDPOINTS[p.id];
         return (
-          <div
-            key={p.id}
-            className={`flex flex-col items-center border-4 border-black py-5 shadow-[3px_3px_0_0_#000] transition ${
-              isLearned ? "bg-[linear-gradient(180deg,#0d1f0f,#0b1020)]" : "bg-[#0a0f1a] opacity-50"
-            }`}
-          >
-            <span className="text-[26px]">{p.icon}</span>
-            <span className={`mt-2 text-[17px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#596a8a]"}`}>
-              {p.name}
-            </span>
-            <span className="mt-1 text-[13px] font-mono">
-              {isLearned ? (
-                <span className="text-[#54f28b]">[✓ Learned]</span>
-              ) : (
-                <span className="text-[#596a8a]">[Locked]</span>
+          <div key={p.id} className={`border-4 border-black shadow-[3px_3px_0_0_#000] transition ${isLearned ? "bg-[linear-gradient(180deg,#0d1f0f,#0b1020)]" : "bg-[#0a0f1a] opacity-50"}`}>
+            <button
+              type="button"
+              onClick={() => isLearned && hasRecipes ? toggleExpand(p.id) : undefined}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left ${isLearned && hasRecipes ? "cursor-pointer hover:bg-[#112a1b]/30" : ""}`}
+            >
+              <span className="text-[22px] shrink-0">{p.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[15px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#596a8a]"}`}>
+                    {p.name}
+                  </span>
+                  {isLearned && skill && (
+                    <span className="text-[11px] font-mono text-[#ffcc00]">Lv.{skill.level}</span>
+                  )}
+                  {!isLearned && <span className="text-[11px] font-mono text-[#596a8a]">[Locked]</span>}
+                </div>
+                {isLearned && skill && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="flex-1 h-[6px] bg-[#1a2240] border border-[#29334d]">
+                      <div className="h-full bg-[#54f28b] transition-all" style={{ width: `${Math.min(skill.progress, 100)}%` }} />
+                    </div>
+                    <span className="text-[9px] font-mono text-[#9aa7cc] shrink-0">{Math.round(skill.progress)}%</span>
+                    <span className="text-[9px] font-mono text-[#596a8a] shrink-0">{skill.actions} actions</span>
+                  </div>
+                )}
+              </div>
+              {isLearned && hasRecipes && (
+                <span className="text-[11px] text-[#596a8a] shrink-0">{isExpanded ? "−" : "+"}</span>
               )}
-            </span>
+            </button>
+            {isExpanded && isLearned && (
+              <div className="border-t-2 border-[#1e2842] px-4 py-3">
+                {loadingRecipes === p.id ? (
+                  <p className="text-[11px] text-[#596a8a] font-mono">Loading recipes...</p>
+                ) : (recipes[p.id] ?? []).length === 0 ? (
+                  <p className="text-[11px] text-[#596a8a] font-mono">No recipes available</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {(recipes[p.id] ?? []).map((r, i) => (
+                      <div key={r.recipeId ?? r.id ?? i} className="border border-[#29334d] bg-[#0a0f1a] px-2 py-1.5">
+                        <p className="text-[11px] font-mono text-[#d6deff] truncate">{r.output?.name ?? r.name ?? r.recipeId ?? "Unknown"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
@@ -987,10 +1061,12 @@ function PartyTab({
   custodialWallet,
   entityId,
   entityZoneId,
+  ownerWallet,
 }: {
   custodialWallet: string | null;
   entityId: string | null;
   entityZoneId: string | null;
+  ownerWallet: string | null;
 }) {
   const [partyStatus, setPartyStatus] = React.useState<{ inParty: boolean; partyId?: string; members: PartyMember[] }>({ inParty: false, members: [] });
   const [invites, setInvites] = React.useState<PartyInviteInfo[]>([]);
@@ -1031,11 +1107,13 @@ function PartyTab({
   }
 
   async function sendInvite(target: SearchResult) {
-    if (!entityId || !entityZoneId) return;
+    if (!entityId || !entityZoneId || !ownerWallet) return;
     if (!target.walletAddress) { setActionMsg("Champion has no wallet — cannot invite"); return; }
     try {
+      const token = await getAuthToken(ownerWallet);
+      if (!token) { setActionMsg("Auth failed"); return; }
       const res = await fetch(`${API_URL}/party/invite-champion`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ fromEntityId: entityId, fromZoneId: entityZoneId, toCustodialWallet: target.walletAddress }),
       });
       const d = await res.json();
@@ -1046,27 +1124,42 @@ function PartyTab({
   }
 
   async function acceptInvite(invite: PartyInviteInfo) {
-    if (!custodialWallet) return;
-    const res = await fetch(`${API_URL}/party/accept-invite`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ custodialWallet, inviteId: invite.id }),
-    });
-    const d = await res.json();
-    if (!res.ok) setActionMsg(`Error: ${d.error}`);
-    else setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/accept-invite`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ custodialWallet, inviteId: invite.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) setActionMsg(`Error: ${d.error}`);
+      else { setInvites((prev) => prev.filter((i) => i.id !== invite.id)); setActionMsg("Joined party!"); }
+    } catch { setActionMsg("Failed to accept invite"); }
     setTimeout(() => setActionMsg(null), 4000);
   }
 
   async function declineInvite(invite: PartyInviteInfo) {
-    if (!custodialWallet) return;
-    await fetch(`${API_URL}/party/decline-invite`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ custodialWallet, inviteId: invite.id }) });
-    setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/decline-invite`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ custodialWallet, inviteId: invite.id }) });
+      if (res.ok) setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      else { const d = await res.json().catch(() => ({})); setActionMsg(`Error: ${(d as any).error ?? "Failed"}`); setTimeout(() => setActionMsg(null), 4000); }
+    } catch { setActionMsg("Failed to decline invite"); setTimeout(() => setActionMsg(null), 4000); }
   }
 
   async function leaveParty() {
-    if (!custodialWallet) return;
-    const res = await fetch(`${API_URL}/party/leave-wallet`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ custodialWallet }) });
-    if (res.ok) setPartyStatus({ inParty: false, members: [] });
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/leave-wallet`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ custodialWallet }) });
+      if (res.ok) { setPartyStatus({ inParty: false, members: [] }); setActionMsg("Left party"); }
+      else { const d = await res.json().catch(() => ({})); setActionMsg(`Error: ${(d as any).error ?? res.statusText}`); }
+    } catch { setActionMsg("Failed to leave party"); }
+    setTimeout(() => setActionMsg(null), 4000);
   }
 
   return (
@@ -2871,6 +2964,7 @@ export function ChampionsPage(): React.ReactElement {
   const [entity, setEntity]                 = React.useState<LiveEntity | null>(null);
   const [zoneId, setZoneId]                 = React.useState<string | null>(null);
   const [professions, setProfessions]       = React.useState<string[]>([]);
+  const [profSkills, setProfSkills]         = React.useState<Record<string, { level: number; xp: number; actions: number; progress: number }>>({});
   const [diary, setDiary]                   = React.useState<DiaryEntry[]>([]);
   const [items, setItems]                   = React.useState<InventoryItem[]>([]);
   const [inventoryLoading, setInventoryLoading] = React.useState(false);
@@ -2946,7 +3040,7 @@ export function ChampionsPage(): React.ReactElement {
           fetch(`${API_URL}/professions/${profWallet}`),
           fetch(`${API_URL}/diary/${wallet}?limit=200`),
         ]);
-        if (profRes.ok)  { const pd = await profRes.json();  setProfessions(pd.professions ?? []); }
+        if (profRes.ok)  { const pd = await profRes.json();  setProfessions(pd.professions ?? []); setProfSkills(pd.skills ?? {}); }
         if (diaryRes.ok) { const dd = await diaryRes.json(); setDiary(dd.entries ?? []); }
       } catch { /* non-fatal */ }
       finally { setLoading(false); }
@@ -3021,11 +3115,11 @@ export function ChampionsPage(): React.ReactElement {
               }} />}
               {activeTab === "overview"    && <OverviewTab entity={entity} diary={diary} kills={kills} deaths={deaths} quests={quests} itemCount={items.length} />}
               {activeTab === "guild"       && <GuildTab custodialWallet={custodialWallet} ownerWallet={wallet} />}
-              {activeTab === "professions" && <ProfessionsTab learned={professions} />}
+              {activeTab === "professions" && <ProfessionsTab learned={professions} skills={profSkills} custodialWallet={custodialWallet} />}
               {activeTab === "quests"      && <QuestsTab diary={diary} />}
               {activeTab === "activity"    && <ActivityTab diary={diary} />}
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
-              {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} ownerWallet={wallet} />}
               {activeTab === "friends"     && <FriendsTab ownerWallet={wallet} custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "reputation"  && <ReputationTab agentId={entity?.agentId ?? null} />}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}

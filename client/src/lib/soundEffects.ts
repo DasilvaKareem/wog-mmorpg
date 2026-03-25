@@ -14,10 +14,18 @@ export type SoundEffectId =
   | "ui_item_pickup"
   | "ui_item_drop"
   | "ui_level_up"
+  | "combat_melee_hit"
+  | "combat_melee_miss"
+  | "combat_ranged_hit"
+  | "combat_ranged_miss"
+  | "combat_defend"
+  | "combat_flee"
+  | "combat_battle_start"
+  | "combat_victory"
   | "move_zone_transition";
 
 type SoundEffectConfig = {
-  category: "ui" | "movement";
+  category: "ui" | "movement" | "combat";
   path: string;
   volume: number;
 };
@@ -72,6 +80,46 @@ const SOUND_EFFECTS: Record<SoundEffectId, SoundEffectConfig> = {
     category: "ui",
     path: "sfx/ui/ui_level_up",
     volume: 0.2,
+  },
+  combat_melee_hit: {
+    category: "combat",
+    path: "sfx/combat/combat_melee_hit",
+    volume: 0.3,
+  },
+  combat_melee_miss: {
+    category: "combat",
+    path: "sfx/combat/combat_melee_miss",
+    volume: 0.25,
+  },
+  combat_ranged_hit: {
+    category: "combat",
+    path: "sfx/combat/combat_ranged_hit",
+    volume: 0.3,
+  },
+  combat_ranged_miss: {
+    category: "combat",
+    path: "sfx/combat/combat_ranged_miss",
+    volume: 0.25,
+  },
+  combat_defend: {
+    category: "combat",
+    path: "sfx/combat/combat_defend",
+    volume: 0.3,
+  },
+  combat_flee: {
+    category: "combat",
+    path: "sfx/combat/combat_flee",
+    volume: 0.25,
+  },
+  combat_battle_start: {
+    category: "combat",
+    path: "sfx/combat/combat_battle_start",
+    volume: 0.3,
+  },
+  combat_victory: {
+    category: "combat",
+    path: "sfx/combat/combat_victory",
+    volume: 0.3,
   },
   move_zone_transition: {
     category: "movement",

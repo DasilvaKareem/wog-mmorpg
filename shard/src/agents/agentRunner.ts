@@ -1930,20 +1930,6 @@ export class AgentRunner {
                 }
               }
 
-              // Same zone as leader — match their combat/questing focus
-              if (leaderEntity?.walletAddress) {
-                const leaderOwner = leaderEntity.walletAddress as string;
-                const leaderConfig = await getAgentConfig(leaderOwner);
-                const leaderFocus = leaderConfig?.focus;
-                if (leaderFocus && (leaderFocus === "combat" || leaderFocus === "questing") && focus !== leaderFocus && focus !== "traveling") {
-                  console.log(`[agent:${this.walletTag}] Matching party leader focus: ${leaderFocus}`);
-                  await patchAgentConfig(this.userWallet, { focus: leaderFocus, targetZone: undefined });
-                  this.currentScript = null;
-                  this.ticksSinceLastDecision = MAX_STALE_TICKS;
-                  await sleep(TICK_MS);
-                  continue;
-                }
-              }
             }
           }
         }

@@ -14,6 +14,7 @@ import { reputationManager, ReputationCategory } from "../economy/reputationMana
 import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
@@ -614,6 +615,12 @@ export async function doGathering(
           entityId: ctx.entityId, oreNodeId: nodeId,
         });
         void ctx.logActivity(`Mined ${nodeEntity.name ?? "ore node"}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${me.name} is mining ${nodeEntity.name ?? "ore"}`,
+          entityId: ctx.entityId, entityName: me.name,
+          data: { profession: "mining", target: nodeEntity.name },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "gathering",
@@ -638,6 +645,12 @@ export async function doGathering(
           entityId: ctx.entityId, flowerNodeId: nodeId,
         });
         void ctx.logActivity(`Gathered ${nodeEntity.name ?? "flower node"}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${me.name} is foraging ${nodeEntity.name ?? "herbs"}`,
+          entityId: ctx.entityId, entityName: me.name,
+          data: { profession: "herbalism", target: nodeEntity.name },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "gathering",
@@ -704,6 +717,12 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Brewed ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Brewed ${recipe.name ?? recipe.recipeId}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${zs.me.name} is brewing ${recipe.name ?? recipe.recipeId}`,
+          entityId: ctx.entityId, entityName: zs.me.name,
+          data: { profession: "alchemy", target: recipe.name ?? recipe.recipeId },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: zs.me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "brewing",
@@ -767,6 +786,12 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
         });
         console.log(`[agent:${ctx.walletTag}] Cooked ${recipe.name ?? recipe.recipeId}`);
         void ctx.logActivity(`Cooked ${recipe.name ?? recipe.recipeId}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${zs.me.name} is cooking ${recipe.name ?? recipe.recipeId}`,
+          entityId: ctx.entityId, entityName: zs.me.name,
+          data: { profession: "cooking", target: recipe.name ?? recipe.recipeId },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: zs.me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "cooking",
@@ -833,6 +858,12 @@ export async function doEnchanting(ctx: AgentContext, strategy: AgentStrategy): 
         equipmentSlot: "weapon",
       });
       void ctx.logActivity(`Enchanted weapon with ${elixir.name}`);
+      logZoneEvent({
+        zoneId: ctx.currentRegion, type: "profession", tick: 0,
+        message: `${me.name} is enchanting a weapon with ${elixir.name}`,
+        entityId: ctx.entityId, entityName: me.name,
+        data: { profession: "enchanting", target: elixir.name },
+      });
       return actionCompleted(`Enchanted weapon with ${elixir.name}`);
     } else {
       void ctx.logActivity("No weapon to enchant — forging one first");
@@ -884,6 +915,12 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
         const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
         console.log(`[agent:${ctx.walletTag}] Crafted ${craftedName}`);
         void ctx.logActivity(`Crafted ${craftedName}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${me.name} is smithing ${craftedName}`,
+          entityId: ctx.entityId, entityName: me.name,
+          data: { profession: "crafting", target: craftedName },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "crafting",
@@ -956,6 +993,12 @@ export async function doLeatherworking(ctx: AgentContext, strategy: AgentStrateg
         const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
         console.log(`[agent:${ctx.walletTag}] Leatherworked ${craftedName}`);
         void ctx.logActivity(`Crafted ${craftedName} (leatherworking)`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${me.name} is leatherworking ${craftedName}`,
+          entityId: ctx.entityId, entityName: me.name,
+          data: { profession: "leatherworking", target: craftedName },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "crafting",
@@ -1028,6 +1071,12 @@ export async function doJewelcrafting(ctx: AgentContext, strategy: AgentStrategy
         const craftedName = result?.crafted?.displayName ?? recipe.name ?? recipe.recipeId;
         console.log(`[agent:${ctx.walletTag}] Jewelcrafted ${craftedName}`);
         void ctx.logActivity(`Jewelcrafted ${craftedName}`);
+        logZoneEvent({
+          zoneId: ctx.currentRegion, type: "profession", tick: 0,
+          message: `${me.name} is jewelcrafting ${craftedName}`,
+          entityId: ctx.entityId, entityName: me.name,
+          data: { profession: "jewelcrafting", target: craftedName },
+        });
         emitAgentChat({
           entityId: ctx.entityId, entityName: me.name ?? "Agent",
           zoneId: ctx.currentRegion, event: "crafting",

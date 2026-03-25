@@ -2,6 +2,7 @@ import Phaser from "phaser";
 
 import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
+import { playSoundEffect } from "@/lib/soundEffects";
 
 /** Tile size in pixels for arena rendering */
 const TILE_PX = 16;
@@ -207,6 +208,7 @@ export class BattleScene extends Phaser.Scene {
         this.renderArena(this.battleState.config.arena);
         this.arenaTitle.setText(this.battleState.config.arena.name);
         this.centerCamera(this.battleState.config.arena);
+        playSoundEffect("combat_battle_start");
       }
 
       this.updateCombatants();
@@ -518,9 +520,11 @@ export class BattleScene extends Phaser.Scene {
       if (entry.killed) {
         text = "KILLED!";
         color = "#ff4d6d";
+        playSoundEffect("combat_melee_hit");
       } else if (entry.damage) {
         text = `-${entry.damage}`;
         color = "#ff6666";
+        playSoundEffect("combat_melee_hit");
       } else if (entry.healing) {
         text = `+${entry.healing}`;
         color = "#54f28b";
@@ -553,6 +557,7 @@ export class BattleScene extends Phaser.Scene {
 
   private onBattleEnd(): void {
     if (!this.battleState) return;
+    playSoundEffect("combat_victory");
 
     const winner = this.battleState.winner;
     if (winner) {

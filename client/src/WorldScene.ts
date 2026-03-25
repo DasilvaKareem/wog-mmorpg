@@ -1246,11 +1246,12 @@ export class WorldScene extends Phaser.Scene {
         this.entityRenderer.triggerDeath(evt.entityId);
       }
 
-      // Level up animation
+      // Level up animation + sound
       if (evt.type === "levelup" && evt.entityId) {
         const pos = pixelPositions.get(evt.entityId);
         if (pos) this.abilityLayer.playLevelUp(pos);
         this.entityRenderer.triggerLevelUp(evt.entityId);
+        playSoundEffect("ui_level_up");
       }
 
       // Technique learned animation
@@ -1300,6 +1301,24 @@ export class WorldScene extends Phaser.Scene {
           const pos = pixelPositions.get(healId ?? "");
           if (pos) this.floatingText.showCombatText(evt.id + ":heal", pos, { healing: evtData.healing }, "ability");
         }
+      }
+
+      // Combat SFX
+      if (evt.type === "combat" && evtData) {
+        if (evtData.blocked) {
+          playSoundEffect("combat_defend");
+        } else if (evtData.dodged) {
+          playSoundEffect(isMelee ? "combat_melee_miss" : "combat_ranged_miss");
+        } else if (evtData.damage) {
+          playSoundEffect(isMelee ? "combat_melee_hit" : "combat_ranged_hit");
+        }
+      } else if (evt.type === "ability" && evtData?.damage) {
+        playSoundEffect("combat_ranged_hit");
+      }
+
+      // Loot pickup sound
+      if (evt.type === "loot") {
+        playSoundEffect("ui_item_pickup");
       }
 
       // Speech bubbles for agent dialogue and NPC interactions
