@@ -213,12 +213,13 @@ export function awardProfessionXp(
     }
   }
 
-  // Persist character
+  // Persist character + profession skills
   if (entity.walletAddress && entity.name) {
     saveCharacter(entity.walletAddress, entity.name, {
       level: entity.level,
       xp: entity.xp,
       kills: entity.kills,
+      professionSkills: getProfessionSkills(entity.walletAddress),
     }).catch((err) =>
       console.error(`[persistence] Save failed after ${actionLabel} for ${entity.name}:`, err),
     );

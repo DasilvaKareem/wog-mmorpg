@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { createSwordshieldattackClip } from "./generated/swordShieldAttackClip.js";
 
 /**
  * Pre-built AnimationClips for humanoid characters.
@@ -1944,6 +1945,7 @@ export class AnimationLibrary {
         createWalkClip(),
         createIdleClip(),
         createAttackClip(),
+        createSwordshieldattackClip(),
         createHeroicStrikeClip(),
         createCleaveClip(),
         createShieldWallClip(),
@@ -1968,6 +1970,13 @@ export class AnimationLibrary {
       }
     }
     return this.clips.get(name)!;
+  }
+
+  static names(): string[] {
+    if (!this.clips) {
+      this.get("idle");
+    }
+    return Array.from(this.clips!.keys());
   }
 
   static readonly LOOPING = new Set(["walk", "idle"]);

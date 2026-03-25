@@ -40,10 +40,38 @@ export interface ZoneState {
   tick: number;
 }
 
+export type VisibleIntentCategory = "attack" | "heal" | "buff" | "debuff";
+export type VisibleIntentDelivery = "melee" | "projectile" | "area" | "channel" | "instant";
+export type VisibleIntentSeverity = "normal" | "dangerous";
+export type VisibleIntentState = "queued" | "casting";
+
+export interface VisibleIntent {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: string;
+  targetId: string;
+  targetName: string;
+  targetType: string;
+  category: VisibleIntentCategory;
+  delivery: VisibleIntentDelivery;
+  severity: VisibleIntentSeverity;
+  state: VisibleIntentState;
+  techniqueId?: string;
+  techniqueName?: string;
+}
+
 export type Order =
   | { action: "move"; x: number; y: number }
   | { action: "attack"; targetId: string }
-  | { action: "technique"; targetId: string; techniqueId: string };
+  | { action: "technique"; targetId: string; techniqueId: string; resolving?: boolean };
+
+export interface CastingIntent {
+  targetId: string;
+  techniqueId: string;
+  startedAtTick: number;
+  resolveAtTick: number;
+}
 
 export interface EquippedItemState {
   tokenId: number;
@@ -197,6 +225,8 @@ export interface Entity {
   pendingQuestApprovals?: string[];
   /** Entity ID of party leader to follow when idle (rented characters). */
   followLeaderId?: string;
+  /** In-flight technique windup state for pre-resolution telegraphing. */
+  castingIntent?: CastingIntent;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -592,6 +622,116 @@ const RANGED_CLASSES = new Set(["mage", "warlock", "ranger", "cleric"]);
 /** Return the animStyle for a basic auto-attack: "projectile" for ranged, "melee" for melee. */
 function getBasicAttackAnimStyle(entity: Entity): "melee" | "projectile" {
   return RANGED_CLASSES.has(entity.classId ?? "") ? "projectile" : "melee";
+}
+
+function getVisibleIntentCategory(order: Order, technique?: TechniqueDefinition): VisibleIntentCategory {
+  if (order.action === "attack") return "attack";
+
+  switch (technique?.type) {
+    case "healing":
+      return "heal";
+    case "buff":
+      return "buff";
+    case "debuff":
+      return "debuff";
+    default:
+      return "attack";
+  }
+}
+
+function getVisibleIntentDelivery(order: Order, source: Entity, technique?: TechniqueDefinition): VisibleIntentDelivery {
+  if (order.action === "attack") {
+    return getBasicAttackAnimStyle(source);
+  }
+
+  return technique?.animStyle ?? "instant";
+}
+
+function getVisibleIntentSeverity(
+  source: Entity,
+  category: VisibleIntentCategory,
+  delivery: VisibleIntentDelivery,
+): VisibleIntentSeverity {
+  if (source.type === "boss") return "dangerous";
+  if (category === "attack" && (delivery === "area" || delivery === "channel")) return "dangerous";
+  if (category === "debuff" && delivery !== "instant") return "dangerous";
+  return "normal";
+}
+
+function getTechniqueWindupTicks(technique: TechniqueDefinition): number {
+  if (technique.animStyle === "projectile" || technique.animStyle === "area" || technique.animStyle === "channel") {
+    return 1;
+  }
+  return 0;
+}
+
+function buildVisibleIntents(zone: ZoneState): VisibleIntent[] {
+  const intents: VisibleIntent[] = [];
+
+  for (const entity of zone.entities.values()) {
+    if (entity.castingIntent) {
+      const technique = getTechniqueById(entity.castingIntent.techniqueId);
+      const target = getEntity(entity.castingIntent.targetId);
+      if (technique && target && target.hp > 0) {
+        const castingOrder: Order = {
+          action: "technique",
+          targetId: target.id,
+          techniqueId: technique.id,
+        };
+        const category = getVisibleIntentCategory(castingOrder, technique);
+        const delivery = getVisibleIntentDelivery(castingOrder, entity, technique);
+        const severity = getVisibleIntentSeverity(entity, category, delivery);
+
+        intents.push({
+          id: `intent:${zone.zoneId}:${entity.id}:casting:${technique.id}`,
+          sourceId: entity.id,
+          sourceName: entity.name,
+          sourceType: entity.type,
+          targetId: target.id,
+          targetName: target.name,
+          targetType: target.type,
+          category,
+          delivery,
+          severity,
+          state: "casting",
+          techniqueId: technique.id,
+          techniqueName: technique.name,
+        });
+      }
+      continue;
+    }
+
+    const order = entity.order;
+    if (!order || order.action === "move") continue;
+
+    const target = getEntity(order.targetId);
+    if (!target || target.hp <= 0) continue;
+
+    const technique = order.action === "technique"
+      ? getTechniqueById(order.techniqueId)
+      : undefined;
+    const category = getVisibleIntentCategory(order, technique);
+    const delivery = getVisibleIntentDelivery(order, entity, technique);
+    const severity = getVisibleIntentSeverity(entity, category, delivery);
+
+    intents.push({
+      id: `intent:${zone.zoneId}:${entity.id}:${order.action}:${order.action === "technique" ? order.techniqueId : target.id}`,
+      sourceId: entity.id,
+      sourceName: entity.name,
+      sourceType: entity.type,
+      targetId: target.id,
+      targetName: target.name,
+      targetType: target.type,
+      category,
+      delivery,
+      severity,
+      state: "queued",
+      ...(order.action === "technique" && { techniqueId: order.techniqueId }),
+      ...(technique?.name && { techniqueName: technique.name }),
+    });
+  }
+
+  return intents;
 }
 
 // ── Stat-based combat mechanics (players only) ────────────────────────
@@ -2014,7 +2154,29 @@ async function worldTick() {
     }
 
     for (const entity of zone.entities.values()) {
+      if (!entity.castingIntent) continue;
+
+      const target = getEntity(entity.castingIntent.targetId);
+      const technique = getTechniqueById(entity.castingIntent.techniqueId);
+      if (!target || target.hp <= 0 || !technique) {
+        entity.castingIntent = undefined;
+        continue;
+      }
+
+      if (zone.tick >= entity.castingIntent.resolveAtTick) {
+        entity.order = {
+          action: "technique",
+          targetId: entity.castingIntent.targetId,
+          techniqueId: entity.castingIntent.techniqueId,
+          resolving: true,
+        };
+        entity.castingIntent = undefined;
+      }
+    }
+
+    for (const entity of zone.entities.values()) {
       if (!entity.order) continue;
+      if (entity.castingIntent) continue;
 
       if (entity.order.action === "move") {
         const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
@@ -2299,13 +2461,31 @@ async function worldTick() {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
           }
-          // Deduct essence
-          const currentEssence = entity.essence ?? 0;
-          entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+          const windupTicks = getTechniqueWindupTicks(technique);
+          if (windupTicks > 0 && !entity.order.resolving) {
+            const currentEssence = entity.essence ?? 0;
+            entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+            if (!entity.cooldowns) entity.cooldowns = new Map();
+            entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+            entity.castingIntent = {
+              targetId: target.id,
+              techniqueId: technique.id,
+              startedAtTick: zone.tick,
+              resolveAtTick: zone.tick + windupTicks,
+            };
+            entity.order = undefined;
+            continue;
+          }
 
-          // Set cooldown
-          if (!entity.cooldowns) entity.cooldowns = new Map();
-          entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+          if (!entity.order.resolving) {
+            // Deduct essence
+            const currentEssence = entity.essence ?? 0;
+            entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+
+            // Set cooldown
+            if (!entity.cooldowns) entity.cooldowns = new Map();
+            entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+          }
 
           // Apply technique effects inline (mirrors techniqueRoutes logic)
           const techResult = applyTechniqueInCombat(entity, target, technique, zone);
@@ -2639,6 +2819,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.leashing) continue;
       if (entity.spawnX == null || entity.spawnY == null) continue;
@@ -2660,6 +2841,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.leashing) continue; // Don't re-aggro while walking home
 
@@ -2707,6 +2889,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (!entity.followLeaderId) continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.travelTargetZone) continue;
 
@@ -2743,6 +2926,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       // Skip players that are traveling to another zone
       if (entity.travelTargetZone) continue;
@@ -3009,6 +3193,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
             toSerializableEntity(entity),
           ])
         ),
+        visibleIntents: buildVisibleIntents(zone),
         recentEvents,
       };
     }

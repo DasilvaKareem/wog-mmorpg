@@ -45,6 +45,8 @@ export interface CharacterSaveData {
   ultimateTechniqueId?: string;
   /** Serialized equipment map — persisted as JSON string in Redis */
   equipment?: Record<string, unknown>;
+  /** Per-profession skill XP/level/actions */
+  professionSkills?: Record<string, { xp: number; level: number; actions: number }>;
 }
 
 // In-memory fallback (always available)

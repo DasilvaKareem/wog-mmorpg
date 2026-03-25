@@ -30,7 +30,7 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
     retreatEnabled: false,
     techniquesEnabled: true,
     selfAdaptationEnabled: false,
-    marketTradingEnabled: false,
+    marketTradingEnabled: true,
   },
   starter: {
     supervisorEnabled: true,
@@ -39,7 +39,7 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
     retreatEnabled: true,
     techniquesEnabled: true,
     selfAdaptationEnabled: true,
-    marketTradingEnabled: false,
+    marketTradingEnabled: true,
   },
   pro: {
     supervisorEnabled: true,

@@ -17,6 +17,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { restoreProfessions } from "../professions/professions.js";
+import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
 import { getWorldLayout, getZoneOffset } from "./worldLayout.js";
@@ -206,6 +207,14 @@ export function registerSpawnOrders(server: FastifyInstance) {
       restored = true;
       server.log.info(
         `[persistence] Restored character "${entity.name}" from spawn name "${name}" L${entity.level}`
+      );
+    }
+
+    // Restore per-profession skill XP/levels
+    if (saved?.professionSkills && walletAddress) {
+      restoreProfessionSkills(walletAddress, saved.professionSkills);
+      server.log.info(
+        `[persistence] Restored profession skills for "${entity.name}": ${Object.entries(saved.professionSkills).map(([p, d]) => `${p} L${d.level}`).join(", ")}`
       );
     }
 

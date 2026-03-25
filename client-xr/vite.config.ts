@@ -9,6 +9,7 @@ export default defineConfig({
     port: 5174,
     proxy: {
       "/zones": API_URL,
+      "/players": API_URL,
       "/v1": API_URL,
       "/v2": API_URL,
       "/world": API_URL,

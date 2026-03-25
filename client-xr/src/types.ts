@@ -26,6 +26,7 @@ export interface Entity {
   zoneId?: string;
   essence?: number;
   maxEssence?: number;
+  order?: EntityOrder;
   activeEffects?: ActiveEffect[];
   // Resource nodes
   oreType?: string;
@@ -67,7 +68,34 @@ export interface ZoneResponse {
   tick: number;
   gameTime?: GameTime;
   entities: Record<string, Entity>;
+  visibleIntents?: VisibleIntent[];
   recentEvents?: ZoneEvent[];
+}
+
+export type EntityOrder =
+  | { action: "move"; x: number; y: number }
+  | { action: "attack"; targetId: string }
+  | { action: "technique"; targetId: string; techniqueId: string; resolving?: boolean };
+
+export type VisibleIntentCategory = "attack" | "heal" | "buff" | "debuff";
+export type VisibleIntentDelivery = "melee" | "projectile" | "area" | "channel" | "instant";
+export type VisibleIntentSeverity = "normal" | "dangerous";
+export type VisibleIntentState = "queued" | "casting";
+
+export interface VisibleIntent {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: string;
+  targetId: string;
+  targetName: string;
+  targetType: string;
+  category: VisibleIntentCategory;
+  delivery: VisibleIntentDelivery;
+  severity: VisibleIntentSeverity;
+  state: VisibleIntentState;
+  techniqueId?: string;
+  techniqueName?: string;
 }
 
 /** V2 terrain — full zone in one response */
