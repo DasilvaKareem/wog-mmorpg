@@ -4,7 +4,7 @@
  *
  * Usage:
  *   cd hardhat
- *   DEPLOYER_PRIVATE_KEY=0x... npx hardhat run scripts/deployERC8004ToSkale.ts --network skale
+ *   DEPLOYER_PRIVATE_KEY=0x... npx hardhat run scripts/deployERC8004ToSkale.ts --network skaleSepolia
  */
 import { ethers } from "hardhat";
 import type { BaseContract, ContractFactory } from "ethers";

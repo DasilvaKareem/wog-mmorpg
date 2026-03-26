@@ -1,33 +1,64 @@
+import "dotenv/config";
 import { spawn, type ChildProcess } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import Redis from "ioredis";
+import { ethers } from "ethers";
 
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const DEV_RAW = (process.env.DEV ?? "").trim().toLowerCase();
+const DEV_ENABLED = DEV_RAW === "" ? true : TRUE_VALUES.has(DEV_RAW);
 const TEST_SHARD_PORT = process.env.TEST_SHARD_PORT || "3001";
-const SHARD_URL = process.env.SHARD_URL || `http://127.0.0.1:${TEST_SHARD_PORT}`;
+const SHARD_URL = process.env.SHARD_URL || process.env.WOG_SHARD_URL || `http://127.0.0.1:${TEST_SHARD_PORT}`;
 const HARDHAT_RPC = process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
 const REDIS_URL = process.env.REDIS_URL || "redis://127.0.0.1:6379/15";
 const VERBOSE = process.env.FULL_FLOW_VERBOSE === "true";
 const REDIS_CONTAINER_NAME = process.env.TEST_REDIS_CONTAINER_NAME || "wog-test-redis";
 
-const DEFAULT_ENV: Record<string, string> = {
-  DEV: "true",
+const SHARD_DEFAULT_ENV: Record<string, string> = {
   REDIS_URL,
   JWT_SECRET: process.env.JWT_SECRET || "local-dev-jwt-secret",
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef",
   SERVER_PRIVATE_KEY:
     process.env.SERVER_PRIVATE_KEY ||
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-  SHARD_URL,
-  PORT: TEST_SHARD_PORT,
-  TEST_SHARD_PORT,
-  HARDHAT_RPC_URL: HARDHAT_RPC,
 };
+
+const DEFAULT_ENV: Record<string, string> = DEV_ENABLED
+  ? {
+      ...SHARD_DEFAULT_ENV,
+      DEV: "true",
+      SHARD_URL: `http://127.0.0.1:${TEST_SHARD_PORT}`,
+      WOG_SHARD_URL: `http://127.0.0.1:${TEST_SHARD_PORT}`,
+      PORT: TEST_SHARD_PORT,
+      TEST_SHARD_PORT,
+      LOCAL_TEST_MODE: "core",
+      HARDHAT_RPC_URL: HARDHAT_RPC,
+      SKALE_BASE_RPC_URL: HARDHAT_RPC,
+      SKALE_BASE_CHAIN_ID: "31337",
+      SFUEL_DISTRIBUTION_AMOUNT: process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.0001",
+    }
+  : {
+      ...SHARD_DEFAULT_ENV,
+    };
 
 type ServiceHandle = {
   child: ChildProcess | null;
   startedByRunner: boolean;
 };
+
+function getPortFromShardUrl(shardUrl: string): string | null {
+  try {
+    const parsed = new URL(shardUrl);
+    return parsed.port || null;
+  } catch {
+    return null;
+  }
+}
+
+function getDefaultTestShardUrl(): string {
+  return `http://127.0.0.1:${TEST_SHARD_PORT}`;
+}
 
 function run(
   cmd: string,
@@ -109,9 +140,34 @@ async function isHardhatUp(): Promise<boolean> {
   }
 }
 
-async function isShardUp(): Promise<boolean> {
+async function hardhatRpc(method: string, params: unknown[]): Promise<unknown> {
+  const res = await fetch(HARDHAT_RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  if (!res.ok) {
+    throw new Error(`Hardhat RPC ${method} failed with HTTP ${res.status}`);
+  }
+  const body = await res.json() as { result?: unknown; error?: { message?: string } };
+  if (body.error) {
+    throw new Error(body.error.message || `Hardhat RPC ${method} failed`);
+  }
+  return body.result;
+}
+
+async function fundHardhatAccount(privateKey: string | undefined, balance = "1000"): Promise<void> {
+  if (!privateKey) return;
+  const wallet = new ethers.Wallet(privateKey);
+  await hardhatRpc("hardhat_setBalance", [
+    wallet.address,
+    ethers.toBeHex(ethers.parseEther(balance)),
+  ]);
+}
+
+async function isShardUp(shardUrl = SHARD_URL): Promise<boolean> {
   try {
-    const res = await fetch(`${SHARD_URL}/health`);
+    const res = await fetch(`${shardUrl}/health`);
     if (!res.ok) return false;
     const body = (await res.json()) as { ok?: boolean };
     return body.ok === true;
@@ -120,8 +176,8 @@ async function isShardUp(): Promise<boolean> {
   }
 }
 
-async function isRedisUp(): Promise<boolean> {
-  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
+async function isRedisUp(redisUrl = REDIS_URL): Promise<boolean> {
+  const redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
   try {
     await redis.connect();
     const pong = await redis.ping();
@@ -134,8 +190,8 @@ async function isRedisUp(): Promise<boolean> {
   }
 }
 
-async function resetRedisDb(): Promise<void> {
-  const redis = new Redis(REDIS_URL, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
+async function resetRedisDb(redisUrl = REDIS_URL): Promise<void> {
+  const redis = new Redis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, enableReadyCheck: true });
   try {
     await redis.connect();
     await redis.flushdb();
@@ -195,15 +251,20 @@ async function ensureHardhat(hardhatDir: string, env: NodeJS.ProcessEnv): Promis
 }
 
 async function ensureShard(shardDir: string, env: NodeJS.ProcessEnv): Promise<ServiceHandle> {
-  if (await isShardUp()) {
+  const shardUrl = env.SHARD_URL || env.WOG_SHARD_URL || SHARD_URL;
+  if (await isShardUp(shardUrl)) {
     throw new Error(
-      `Shard test port ${TEST_SHARD_PORT} is already in use. Stop the existing shard or set TEST_SHARD_PORT to a free port.`
+      `Shard test URL ${shardUrl} is already in use. Stop the existing shard or set TEST_SHARD_PORT to a free port.`
     );
   }
 
-  console.log(`[full-flow] Starting shard on ${SHARD_URL}...`);
+  console.log(`[full-flow] Starting shard on ${shardUrl}...`);
   const child = startBackground("pnpm", ["run", "dev"], shardDir, env);
-  await waitFor(isShardUp, "shard health endpoint");
+  await waitFor(
+    () => isShardUp(shardUrl),
+    `shard health endpoint at ${shardUrl}`,
+    DEV_ENABLED ? 120_000 : 60_000
+  );
   return { child, startedByRunner: true };
 }
 
@@ -218,6 +279,57 @@ async function main(): Promise<void> {
   const hardhatDir = path.join(repoRoot, "hardhat");
   const env = { ...process.env, ...DEFAULT_ENV };
 
+  if (!DEV_ENABLED) {
+    console.log("[full-flow] DEV is false; using existing env-backed services only.");
+    if (!env.REDIS_URL) {
+      throw new Error("[full-flow] REDIS_URL is required when DEV is false");
+    }
+    await waitFor(() => isRedisUp(env.REDIS_URL), `Redis at ${env.REDIS_URL}`);
+    console.log(`[full-flow] Resetting Redis test DB at ${env.REDIS_URL}...`);
+    await resetRedisDb(env.REDIS_URL);
+    const configuredShardUrl = getDefaultTestShardUrl();
+    const configuredShardPort = getPortFromShardUrl(configuredShardUrl) || TEST_SHARD_PORT;
+    const testEnv = {
+      ...env,
+      SHARD_URL: configuredShardUrl,
+      WOG_SHARD_URL: configuredShardUrl,
+      PORT: configuredShardPort,
+      TEST_SHARD_PORT: configuredShardPort,
+      LOCAL_TEST_MODE: "core",
+      SFUEL_DISTRIBUTION_AMOUNT: env.SFUEL_DISTRIBUTION_AMOUNT || "0.000001",
+    };
+    let shardHandle: ServiceHandle = { child: null, startedByRunner: false };
+
+    try {
+      shardHandle = await ensureShard(shardDir, testEnv);
+
+      console.log("[full-flow] Running queue/store recovery suite...");
+      await run("pnpm", ["run", "test:chain-ops"], shardDir, testEnv);
+
+      console.log("[full-flow] Running shard-dependent suites with core shard up...");
+      await run("pnpm", ["run", "test:character-bootstrap"], shardDir, testEnv);
+      await run("pnpm", ["run", "test:erc8004"], shardDir, {
+        ...testEnv,
+        REDIS_ALLOW_MEMORY_FALLBACK: testEnv.REDIS_ALLOW_MEMORY_FALLBACK || "true",
+      });
+
+      console.log("[full-flow] Stopping shard before isolated reconciliation replay suite...");
+      await stopShard(shardHandle);
+      shardHandle = { child: null, startedByRunner: false };
+
+      console.log("[full-flow] Running isolated chain reconciliation recovery suite...");
+      await run("pnpm", ["run", "test:chain-recovery"], shardDir, testEnv);
+
+      console.log("[full-flow] Running isolated blockchain write processor recovery suite...");
+      await run("pnpm", ["run", "test:blockchain-writes"], shardDir, testEnv);
+
+      console.log("[full-flow] Env-backed core shard suite passed.");
+      return;
+    } finally {
+      await stopShard(shardHandle);
+    }
+  }
+
   let redisHandle: ServiceHandle = { child: null, startedByRunner: false };
   let hardhatHandle: ServiceHandle = { child: null, startedByRunner: false };
   let shardHandle: ServiceHandle = { child: null, startedByRunner: false };
@@ -231,6 +343,7 @@ async function main(): Promise<void> {
     await run("npm", ["test"], hardhatDir, env);
 
     hardhatHandle = await ensureHardhat(hardhatDir, env);
+    await fundHardhatAccount(env.SERVER_PRIVATE_KEY);
 
     console.log("[full-flow] Deploying local contracts to Hardhat...");
     await run("npm", ["run", "deploy:localhost"], hardhatDir, env);

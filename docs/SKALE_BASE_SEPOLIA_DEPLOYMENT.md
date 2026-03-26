@@ -1,0 +1,40 @@
+# SKALE Base Sepolia Deployment
+
+Date: 2026-03-26
+Network: SKALE Base Sepolia
+Chain ID: 324705682
+RPC: `https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha`
+Explorer: `https://base-sepolia-testnet-explorer.skalenodes.com/`
+Deployer wallet: `0xCBE9ED3F7cb464B36a630725a14E7CbdA13E50b8`
+
+Deployed from Hardhat via `scripts/deploy.ts` on network `skaleSepolia`.
+Canonical machine-readable manifest: `hardhat/deployments/skaleSepolia.json`.
+
+Non-DEV shard behavior:
+- use the official ERC-8004 Sepolia identity registry `0x8004A818BFB912233c491871b3d84c89A494BD9e`
+- use the official ERC-8004 Sepolia reputation registry `0x8004B663056A597Dffe9eCcC1965A193B7388713`
+- do not use the custom deployed ERC-8004 registries below in non-DEV mode
+- there is currently no official validation registry configured in `shard/src/erc8004/official.ts` for Sepolia
+
+## Test Behavior
+
+- In `shard`, `pnpm run test` with `DEV=false` or unset runs the full env-backed suite against the configured RPC/contracts.
+- In that non-DEV path, the runner does not start local Hardhat.
+- The runner expects Redis from `REDIS_URL`, starts a shard process on the test port, and uses the official Sepolia ERC-8004 identity/reputation registries.
+- Validation-specific assertions are skipped when no validation registry is configured.
+
+## Contract Addresses
+
+- `GOLD_CONTRACT_ADDRESS=0x64DCbBa18873Cff6D82b01Be48C4A71530907599`
+- `ITEMS_CONTRACT_ADDRESS=0x8310879324ab014d37Ff00e7cE4f9BA997Ac1a3b`
+- `CHARACTER_CONTRACT_ADDRESS=0x84c8De907404a040696d84E2f446B8124B39A3B1`
+- `IDENTITY_REGISTRY_ADDRESS=0x55D2042CBBceDd9769A63bed3815fdF593035C03`
+- `REPUTATION_REGISTRY_ADDRESS=0xCae22C391b2aD548E9E1b2a4Bc51b4ea7065881f`
+- `VALIDATION_REGISTRY_ADDRESS=0x695606de050d828F650a2bDbbb480653900ee001`
+- `AUCTION_HOUSE_CONTRACT_ADDRESS=0xd4BbB7af25D1E789e53118CFFF28BA7887D35733`
+- `TRADE_CONTRACT_ADDRESS=0xBfC9d52DC609e3Ab97f5402FAae2818d5652F0aD`
+- `GUILD_CONTRACT_ADDRESS=0xCDd016eb73C8Ea9463eA51F9e697731FE1fB90Dc`
+- `GUILD_VAULT_CONTRACT_ADDRESS=0x918706F16C438383aee6e883302942ba779877B9`
+- `LAND_REGISTRY_CONTRACT_ADDRESS=0x229a6672D42b52767327632240e6E674273e3097`
+- `NAME_SERVICE_CONTRACT_ADDRESS=0x87b75cAa9B05b9BE941651Bb092c16272A563836`
+- `PREDICTION_CONTRACT_ADDRESS=0x7F1Eed8d0FFDf225552c7Cb64C495A83AB839b2d`

@@ -2,6 +2,8 @@ import Redis from "ioredis";
 import { ethers } from "ethers";
 
 process.env.CHARACTER_BOOTSTRAP_MAX_RETRIES ??= "2";
+const DEV_ENABLED = (process.env.DEV ?? "").trim().toLowerCase() === "true";
+const CHAIN_WAIT_TIMEOUT_MS = DEV_ENABLED ? 30_000 : 180_000;
 
 type JsonResult = { status: number; body: any };
 
@@ -67,7 +69,7 @@ function bootstrapId(walletAddress: string, characterName: string): string {
   return `${walletAddress.toLowerCase()}:${characterName}`;
 }
 
-async function poll<T>(label: string, fn: () => Promise<T | null>, timeoutMs = 30_000, intervalMs = 1_000): Promise<T> {
+async function poll<T>(label: string, fn: () => Promise<T | null>, timeoutMs = CHAIN_WAIT_TIMEOUT_MS, intervalMs = 1_000): Promise<T> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const value = await fn();

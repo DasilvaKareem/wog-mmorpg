@@ -369,10 +369,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                   tokenId: nft.id.toString(),
                   characterTokenId: nft.id.toString(),
                   agentId: null,
-                  name: nft.metadata.name,
-                  description: nft.metadata.description,
+                  name: String(nft.metadata.name ?? nft.id.toString()),
+                  description: String(nft.metadata.description ?? ""),
                   properties: {
-                    ...props,
+                    ...(props ?? {}),
                     level: liveEntity.level,
                     xp: liveEntity.xp,
                     stats: {
@@ -393,10 +393,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                       tokenId: nft.id.toString(),
                       characterTokenId: saved.characterTokenId ?? nft.id.toString(),
                       agentId: saved.agentId ?? null,
-                      name: nft.metadata.name,
-                      description: nft.metadata.description,
+                      name: String(nft.metadata.name ?? nft.id.toString()),
+                      description: String(nft.metadata.description ?? ""),
                       properties: {
-                        ...props,
+                        ...(props ?? {}),
                         level: saved.level,
                         xp: saved.xp,
                       },
@@ -411,9 +411,9 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                 tokenId: nft.id.toString(),
                 characterTokenId: nft.id.toString(),
                 agentId: null,
-                name: nft.metadata.name,
-                description: nft.metadata.description,
-                properties: props,
+                name: String(nft.metadata.name ?? nft.id.toString()),
+                description: String(nft.metadata.description ?? ""),
+                properties: props ?? {},
               };
             })
           );

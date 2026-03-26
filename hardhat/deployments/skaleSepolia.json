@@ -1,7 +1,7 @@
 {
-  "network": "localhost",
-  "chainId": 31337,
-  "deployedAt": "2026-03-26T22:54:18.370Z",
+  "network": "skaleSepolia",
+  "chainId": 324705682,
+  "deployedAt": "2026-03-26T16:51:35.011Z",
   "environment": {
     "GOLD_CONTRACT_ADDRESS": "0x64DCbBa18873Cff6D82b01Be48C4A71530907599",
     "ITEMS_CONTRACT_ADDRESS": "0x8310879324ab014d37Ff00e7cE4f9BA997Ac1a3b",

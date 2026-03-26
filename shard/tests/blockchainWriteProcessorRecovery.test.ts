@@ -30,6 +30,7 @@ const logger: LoggerLike = {
 
 let passed = 0;
 let failed = 0;
+const HAS_VALIDATION_REGISTRY = Boolean(process.env.VALIDATION_REGISTRY_ADDRESS);
 
 function assert(condition: boolean, label: string, details?: unknown): void {
   if (condition) {
@@ -160,12 +161,17 @@ async function main() {
   );
   requireOk(identity !== null, "identity should be discoverable after replay");
   assert(identity.ownerAddress?.toLowerCase() === identityOwner.toLowerCase(), "identity owner converges to corrected address", identity);
-  const validations = await poll(
-    "validation claim visibility",
-    async () => await getValidationClaims(identity.agentId),
-    (value) => value.some((entry) => entry.claimType === "battle-tested" && entry.active),
-  );
-  assert(validations.some((entry) => entry.claimType === "battle-tested" && entry.active), "identity replay also completes validation claim", validations);
+  if (HAS_VALIDATION_REGISTRY) {
+    const validations = await poll(
+      "validation claim visibility",
+      async () => await getValidationClaims(identity.agentId),
+      (value) => value.some((entry) => entry.claimType === "battle-tested" && entry.active),
+    );
+    assert(validations.some((entry) => entry.claimType === "battle-tested" && entry.active), "identity replay also completes validation claim", validations);
+  } else {
+    const validations = await getValidationClaims(identity.agentId);
+    assert(validations.length === 0, "validation claim assertions are skipped when no validation registry is configured", validations);
+  }
 
   console.log("\n── Character Metadata Recovery ──");
   const metadataOp = await createChainOperation("character-metadata-update", `${tokenId}:9`, {

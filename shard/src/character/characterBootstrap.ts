@@ -1,5 +1,12 @@
 import type { FastifyBaseLogger } from "fastify";
-import { getOwnedCharacters, mintCharacterWithIdentity, registerIdentity, findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
+import {
+  getOwnedCharacters,
+  getOwnedCharacterTokenIdsFromTransfers,
+  mintCharacterWithIdentity,
+  recoverCharacterTokenIdFromTransaction,
+  registerIdentity,
+  findIdentityByCharacterTokenId,
+} from "../blockchain/blockchain.js";
 import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
@@ -181,7 +188,27 @@ function normalizeCharacterKey(name: string, classId?: string | null): string {
 
 async function reconcileCharacterTokenFromChain(walletAddress: string, characterName: string, classId: string): Promise<bigint | null> {
   const desiredKey = normalizeCharacterKey(characterName, classId);
-  const owned = await getOwnedCharacters(walletAddress);
+  try {
+    const tokenIds = await Promise.race([
+      getOwnedCharacterTokenIdsFromTransfers(walletAddress),
+      new Promise<bigint[]>((resolve) => setTimeout(() => resolve([]), 10_000)),
+    ]);
+    if (tokenIds.length === 1) {
+      return tokenIds[0] ?? null;
+    }
+  } catch {
+    // Fall through to the richer metadata-based lookup below.
+  }
+
+  let owned: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
+  try {
+    owned = await Promise.race([
+      getOwnedCharacters(walletAddress),
+      new Promise<Awaited<ReturnType<typeof getOwnedCharacters>>>((resolve) => setTimeout(() => resolve([]), 10_000)),
+    ]);
+  } catch {
+    owned = [];
+  }
   for (const nft of owned) {
     const props = (nft.metadata?.properties ?? {}) as Record<string, unknown>;
     const candidateKey = normalizeCharacterKey(String(nft.metadata?.name ?? ""), typeof props.class === "string" ? props.class : null);
@@ -191,6 +218,24 @@ async function reconcileCharacterTokenFromChain(walletAddress: string, character
     } catch {
       continue;
     }
+  }
+  return null;
+}
+
+async function waitForCharacterTokenRecovery(
+  walletAddress: string,
+  characterName: string,
+  classId: string,
+  timeoutMs = 90_000,
+  intervalMs = 3_000
+): Promise<bigint | null> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const recovered = await reconcileCharacterTokenFromChain(walletAddress, characterName, classId);
+    if (recovered != null) {
+      return recovered;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
   return null;
 }
@@ -205,6 +250,45 @@ function updateRuntimeProjection(walletAddress: string, characterName: string, t
     if (tokenId != null) entity.characterTokenId = tokenId;
     if (agentId != null) entity.agentId = agentId;
   }
+}
+
+async function findIdentityByCharacterTokenIdWithTimeout(
+  tokenId: bigint,
+  walletAddress: string,
+  timeoutMs = 10_000
+): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
+  try {
+    const ownedMatch = await Promise.race([
+      findIdentityByCharacterTokenId(tokenId, walletAddress),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+    if (ownedMatch?.agentId != null) {
+      return ownedMatch;
+    }
+    return await Promise.race([
+      findIdentityByCharacterTokenId(tokenId),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
+async function waitForIdentityRecovery(
+  tokenId: bigint,
+  walletAddress: string,
+  timeoutMs = 90_000,
+  intervalMs = 3_000,
+): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const recovered = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress, 10_000);
+    if (recovered?.agentId != null) {
+      return recovered;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
 }
 
 async function ensureNameRegistered(walletAddress: string, characterName: string, logger?: FastifyBaseLogger): Promise<void> {
@@ -329,6 +413,15 @@ async function acquireLock(walletAddress: string, characterName: string): Promis
   return true;
 }
 
+function startLockHeartbeat(walletAddress: string, characterName: string): NodeJS.Timeout | null {
+  const redis = getRedis();
+  if (!redis) return null;
+  const keyName = lockKey(walletAddress, characterName);
+  return setInterval(() => {
+    void redis.pexpire(keyName, 30_000).catch(() => {});
+  }, 10_000);
+}
+
 async function releaseLock(walletAddress: string, characterName: string): Promise<void> {
   const redis = getRedis();
   if (redis) {
@@ -381,6 +474,7 @@ export async function processCharacterBootstrapJob(
   const job = await loadCharacterBootstrapJob(walletAddress, characterName);
   if (!job) return null;
   if (!(await acquireLock(walletAddress, characterName))) return job;
+  const heartbeat = startLockHeartbeat(walletAddress, characterName);
 
   try {
     const saved = await loadCharacter(walletAddress, characterName);
@@ -406,11 +500,30 @@ export async function processCharacterBootstrapJob(
       if (recoveredTokenId != null) {
         tokenId = recoveredTokenId;
       } else {
-        const mintResult = await mintCharacterWithIdentity(walletAddress, metadata, currentJob.validationTags);
+        const mintResult = await mintCharacterWithIdentity(
+          walletAddress,
+          metadata,
+          currentJob.validationTags,
+          { skipIdentityRegistration: true }
+        );
         if (mintResult.tokenId == null) {
-          throw new Error("Character mint completed without tokenId");
+          let recoveredAfterMint = mintResult.txHash
+            ? await recoverCharacterTokenIdFromTransaction(mintResult.txHash)
+            : null;
+          if (recoveredAfterMint == null) {
+            recoveredAfterMint = await waitForCharacterTokenRecovery(
+              walletAddress,
+              characterName,
+              saved.classId
+            );
+          }
+          if (recoveredAfterMint == null) {
+            throw new Error("Character mint completed without tokenId");
+          }
+          tokenId = recoveredAfterMint;
+        } else {
+          tokenId = mintResult.tokenId;
         }
-        tokenId = mintResult.tokenId;
         if (mintResult.identity?.agentId != null) {
           agentId = mintResult.identity.agentId;
         }
@@ -442,7 +555,7 @@ export async function processCharacterBootstrapJob(
       await saveJob(currentJob);
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
-      const recoveredIdentity = await findIdentityByCharacterTokenId(tokenId);
+      const recoveredIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress);
       if (recoveredIdentity?.agentId != null) {
         agentId = recoveredIdentity.agentId;
       } else {
@@ -450,9 +563,15 @@ export async function processCharacterBootstrapJob(
           validationTags: currentJob.validationTags,
         });
         if (identityResult.agentId == null) {
-          throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
+          const recoveredAfterRegister = await waitForIdentityRecovery(tokenId, walletAddress);
+          if (recoveredAfterRegister?.agentId != null) {
+            agentId = recoveredAfterRegister.agentId;
+          } else {
+            throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
+          }
+        } else {
+          agentId = identityResult.agentId;
         }
-        agentId = identityResult.agentId;
       }
 
       await saveCharacter(walletAddress, characterName, { agentId: agentId.toString() });
@@ -482,6 +601,7 @@ export async function processCharacterBootstrapJob(
     const latest = await loadCharacterBootstrapJob(walletAddress, characterName);
     return await markRetryable(latest ?? job, err);
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     await releaseLock(walletAddress, characterName);
   }
 }

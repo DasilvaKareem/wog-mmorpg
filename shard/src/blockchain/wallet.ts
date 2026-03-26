@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { distributeSFuel, mintGold, getGoldBalance, getItemBalance, transferGoldFrom } from "./blockchain.js";
+import { biteProvider } from "./biteChain.js";
 import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
 import { goldToCopper, copperToGold } from "./currency.js";
@@ -14,6 +15,7 @@ import {
   releaseChainOperationLock,
   updateChainOperation,
 } from "./chainOperationStore.js";
+import { ethers } from "ethers";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -29,6 +31,9 @@ const REGISTERED_WALLET_KEY_PREFIX = "wallet:registered:";
 const WALLET_REGISTRATION_STATUS_KEY_PREFIX = "wallet:registration:";
 const WELCOME_GOLD = copperToGold(WELCOME_COPPER);
 const WALLET_REGISTRATION_OP_TYPE = "wallet-register";
+const LOCAL_HARDHAT_CHAIN_ID = "31337";
+const TREASURY_MIN_NATIVE_BALANCE = ethers.parseEther("0.1");
+const LOCAL_TREASURY_TOP_UP_BALANCE = ethers.parseEther("1000");
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -103,6 +108,28 @@ async function hasTreasuryGold(treasuryAddress: string, minimumGold: number): Pr
     return Number.isFinite(balance) && balance >= minimumGold;
   } catch {
     return false;
+  }
+}
+
+async function ensureTreasuryGasBalance(server: FastifyInstance, treasuryAddress: string): Promise<void> {
+  try {
+    const balance = await biteProvider.getBalance(treasuryAddress);
+    if (balance >= TREASURY_MIN_NATIVE_BALANCE) return;
+
+    const chainId = process.env.SKALE_BASE_CHAIN_ID?.trim() || String((await biteProvider.getNetwork()).chainId);
+    if (chainId === LOCAL_HARDHAT_CHAIN_ID) {
+      await biteProvider.send("hardhat_setBalance", [
+        treasuryAddress,
+        ethers.toBeHex(LOCAL_TREASURY_TOP_UP_BALANCE),
+      ]);
+      server.log.info(`[wallet/register] Auto-topped local treasury gas for ${treasuryAddress}`);
+      return;
+    }
+
+    await distributeSFuel(treasuryAddress);
+    server.log.info(`[wallet/register] Topped up treasury gas for ${treasuryAddress}`);
+  } catch (err: any) {
+    server.log.warn(`[wallet/register] Failed ensuring treasury gas for ${treasuryAddress}: ${err.message}`);
   }
 }
 
@@ -222,6 +249,7 @@ async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
   } catch (err: any) {
     console.warn(`[wallet/register] Failed to fund treasury gas ${treasuryAddress}: ${err.message}`);
   }
+  await ensureTreasuryGasBalance(server, treasuryAddress);
 
   console.log(`[wallet/register] Minting ${TREASURY_SEED_GOLD} GOLD to treasury...`);
   const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
@@ -267,6 +295,8 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
       console.log(`[wallet/register] Treasury ${treasuryAddress} seeded: ${seedTx}`);
     }
 
+    await ensureTreasuryGasBalance(server, treasuryAddress);
+
     return treasuryAddress;
   })();
 
@@ -277,22 +307,6 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
   }
 }
 
-async function waitForTreasuryBalance(
-  treasuryAddress: string,
-  minimumGold: number,
-  attempts = 20,
-  delayMs = 3000
-): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
-    const balance = parseFloat(await getGoldBalance(treasuryAddress));
-    if (Number.isFinite(balance) && balance >= minimumGold) return;
-    if (i < attempts - 1) await delay(delayMs);
-  }
-  throw new Error(
-    `Welcome treasury balance not ready for transfer (required ${minimumGold}g)`
-  );
-}
-
 async function transferWelcomeBonus(
   server: FastifyInstance,
   treasuryAddress: string,
@@ -300,8 +314,9 @@ async function transferWelcomeBonus(
   welcomeGold: number
 ): Promise<string> {
   const treasuryAccount = await getCustodialWallet(treasuryAddress);
+  await ensureTreasuryGasBalance(server, treasuryAddress);
 
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 10; attempt++) {
     try {
       return await transferGoldFrom(treasuryAccount, recipientAddress, welcomeGold.toString());
     } catch (err: any) {
@@ -313,15 +328,20 @@ async function transferWelcomeBonus(
 
       if (lowGasBalance) {
         try {
-          await distributeSFuel(treasuryAddress);
+          await ensureTreasuryGasBalance(server, treasuryAddress);
           server.log.info(`[wallet/register] Topped up treasury gas for ${treasuryAddress} after transfer attempt ${attempt + 1}`);
         } catch (sfuelErr: any) {
           server.log.warn(`[wallet/register] Failed topping up treasury gas ${treasuryAddress}: ${sfuelErr.message}`);
         }
       }
 
-      if ((!insufficientBalance && !lowGasBalance) || attempt === 4) throw err;
-      await delay(1200 * (attempt + 1));
+      if ((!insufficientBalance && !lowGasBalance) || attempt === 9) throw err;
+      if (insufficientBalance) {
+        server.log.info(
+          `[wallet/register] Treasury ${treasuryAddress} balance not ready for ${recipientAddress} yet, retrying transfer attempt ${attempt + 1}`
+        );
+      }
+      await delay(1500 * (attempt + 1));
     }
   }
 
@@ -379,8 +399,7 @@ export async function processWalletRegistrationOperation(
     if (!goldTx) {
       treasuryWallet = await ensureWelcomeTreasury(server);
       await saveWalletRegistrationStatus(address, { treasuryWallet, updatedAt: Date.now() });
-      try { await distributeSFuel(treasuryWallet); } catch {}
-      await waitForTreasuryBalance(treasuryWallet, WELCOME_GOLD);
+      await ensureTreasuryGasBalance(server, treasuryWallet);
       goldTx = await transferWelcomeBonus(server, treasuryWallet, address, WELCOME_GOLD);
       await saveWalletRegistrationStatus(address, { goldTx, updatedAt: Date.now() });
       console.log(`[wallet/register] Welcome bonus ${WELCOME_COPPER}c sent to ${address}: ${goldTx}`);

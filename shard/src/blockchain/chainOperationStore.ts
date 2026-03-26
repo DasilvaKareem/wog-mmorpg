@@ -334,7 +334,11 @@ export async function processTrackedChainOperation<T = unknown>(
 ): Promise<T | null> {
   const record = await getChainOperation(operationId);
   if (!record) return null;
-  if (record.status === "submitted" || record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
+  const now = Date.now();
+  const submittedStillLeased =
+    record.status === "submitted" &&
+    record.nextAttemptAt > now;
+  if (submittedStillLeased || record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
     return null;
   }
   const processor = processorRegistry.get(record.type);

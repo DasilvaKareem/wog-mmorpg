@@ -7,7 +7,6 @@ import { getBalance } from "thirdweb/extensions/erc20";
 import { mintAdditionalSupplyTo } from "thirdweb/extensions/erc1155";
 import { mintTo as mintERC1155, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
 import { balanceOf as balanceOfERC1155, burn } from "thirdweb/extensions/erc1155";
-import { mintTo as mintERC721, setTokenURI } from "thirdweb/extensions/erc721";
 import { getOwnedNFTs } from "thirdweb/extensions/erc721";
 import type { CharacterStats } from "../character/classes.js";
 import {
@@ -17,8 +16,8 @@ import {
 import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
-import { biteProvider, biteWallet } from "./biteChain.js";
-import { isTransientRpcSendError, queueBiteTransaction, queueServerWalletTransaction } from "./biteTxQueue.js";
+import { biteProvider, biteSigner, biteWallet } from "./biteChain.js";
+import { isTransientRpcSendError, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
@@ -37,6 +36,7 @@ import { getNFT } from "thirdweb/extensions/erc721";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const DEV_ENABLED = TRUE_VALUES.has((process.env.DEV ?? "").trim().toLowerCase());
+const INLINE_TEST_METADATA = DEV_ENABLED;
 
 // =============================================================================
 //  Balance Cache — avoids redundant RPC reads (TTL-based eviction)
@@ -91,9 +91,107 @@ const inflightGold = new Map<string, Promise<string>>();
 const inflightItem = new Map<string, Promise<bigint>>();
 
 const ERC721_TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
+const IDENTITY_RECEIPT_TIMEOUT_MS = DEV_ENABLED ? 10_000 : 60_000;
+const CHARACTER_WRITE_ABI = [
+  "function mintTo(address to, string tokenUri) returns (uint256)",
+  "function setTokenURI(uint256 tokenId, string tokenUri)",
+];
+
+async function resolveMintedCharacterTokenId(
+  transactionHash: string
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const fullReceipt = await skaleProvider.getTransactionReceipt(transactionHash).catch(() => null);
+    const transferLog = fullReceipt?.logs.find(
+      (log) =>
+        log.address.toLowerCase() === process.env.CHARACTER_CONTRACT_ADDRESS!.toLowerCase() &&
+        log.topics[0] === ERC721_TRANSFER_TOPIC &&
+        log.topics.length > 3
+    );
+    if (transferLog?.topics[3]) {
+      return BigInt(transferLog.topics[3]).toString();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+
+  // Never infer the minted tokenId from unrelated transfers to the same wallet.
+  // If the receipt is still unavailable, fall back to "unknown" and let the
+  // higher-level recovery path rediscover the correct token from chain later.
+  return null;
+}
+
+export async function recoverCharacterTokenIdFromTransaction(
+  transactionHash: string,
+  timeoutMs = DEV_ENABLED ? 10_000 : 90_000,
+  intervalMs = DEV_ENABLED ? 1_000 : 3_000,
+): Promise<bigint | null> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const tokenId = await resolveMintedCharacterTokenId(transactionHash).catch(() => null);
+    if (tokenId != null) {
+      return BigInt(tokenId);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return null;
+}
+
+async function waitForTransactionVisibility(
+  provider: ethers.Provider,
+  transactionHash: string,
+  timeoutMs = DEV_ENABLED ? 4_000 : 15_000,
+  intervalMs = 1_000,
+): Promise<boolean> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const [tx, receipt] = await Promise.all([
+      provider.getTransaction(transactionHash).catch(() => null),
+      provider.getTransactionReceipt(transactionHash).catch(() => null),
+    ]);
+    if (tx || receipt) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  return false;
+}
 
 function toInlineMetadataUri(metadata: unknown): string {
   return `data:application/json;base64,${Buffer.from(JSON.stringify(metadata)).toString("base64")}`;
+}
+
+async function resolveCharacterMetadataUri(metadata: Record<string, unknown>): Promise<string> {
+  if (INLINE_TEST_METADATA) {
+    return toInlineMetadataUri(metadata);
+  }
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const uploaded = await Promise.race<string | string[]>([
+        upload({ client: thirdwebClient, files: [metadata as any] }) as Promise<string | string[]>,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
+        ),
+      ]);
+      if (Array.isArray(uploaded)) {
+        if (!uploaded[0]) throw new Error("Metadata upload returned no URI");
+        return uploaded[0];
+      }
+      return uploaded;
+    } catch (err: any) {
+      const msg = String(err?.message ?? "");
+      if (
+        (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET"))
+        && attempt < 2
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 2_000 * (attempt + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  throw new Error("Metadata upload failed after 3 attempts");
 }
 
 function shouldLogOwnershipWarning(address: string, ttlMs = 60_000): boolean {
@@ -179,9 +277,14 @@ const itemsContract = getContract({
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
 
+const characterWriteContract = process.env.CHARACTER_CONTRACT_ADDRESS && biteSigner
+  ? new ethers.Contract(process.env.CHARACTER_CONTRACT_ADDRESS, CHARACTER_WRITE_ABI, biteSigner)
+  : null;
+
 // Default dust amount for gas funding. Override via SFUEL_DISTRIBUTION_AMOUNT if needed.
-// 0.001 sFUEL is no longer enough for some SKALE ERC-20 transfers at current gas prices.
-const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.01";
+// Keep the default conservative on testnet so repeated bootstrap/test runs do not
+// drain the server wallet. Deployments can raise this explicitly if needed.
+const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.000001";
 const TX_GAS_PRICE_CACHE_MS = 5_000;
 let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
 
@@ -476,8 +579,8 @@ export async function burnItem(
 // --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---
 
 const identityRegistryAddress = process.env.IDENTITY_REGISTRY_ADDRESS;
-const identityRegistryContract = identityRegistryAddress && biteWallet
-  ? new ethers.Contract(identityRegistryAddress, OFFICIAL_IDENTITY_REGISTRY_ABI, biteWallet)
+const identityRegistryContract = identityRegistryAddress && (biteSigner ?? biteWallet)
+  ? new ethers.Contract(identityRegistryAddress, OFFICIAL_IDENTITY_REGISTRY_ABI, biteSigner ?? biteWallet)
   : null;
 
 if (identityRegistryAddress) {
@@ -532,21 +635,34 @@ interface CharacterMetadataPayload {
 
 async function processCharacterMintPayload(payload: CharacterMintPayload): Promise<CharacterMintProcessorResult> {
   return traceTx("character-mint", "mintCharacter", { to: payload.toAddress, name: payload.nft.name }, "skale", async () => {
-    const nftPayload = DEV_ENABLED ? toInlineMetadataUri(payload.nft) : payload.nft;
-    const tx = mintERC721({
-      contract: characterContract,
-      to: payload.toAddress,
-      nft: nftPayload,
+    if (!characterWriteContract) {
+      throw new Error("Character write contract unavailable");
+    }
+    const tokenUri = await resolveCharacterMetadataUri(payload.nft);
+    const receipt = await queueBiteTransaction(`character-mint:${payload.toAddress.toLowerCase()}`, async () => {
+      const gasPrice = await resolveManagedGasPrice();
+      const tx = await waitForBiteSubmission(
+        characterWriteContract.mintTo(payload.toAddress, tokenUri, {
+          gasPrice,
+          maxFeePerGas: undefined,
+          maxPriorityFeePerGas: undefined,
+          type: 0,
+          nonce: await reserveServerNonce() ?? undefined,
+        })
+      );
+      const visibleOnChain = await waitForTransactionVisibility(skaleProvider, tx.hash);
+      if (!visibleOnChain) {
+        throw new Error(`Character mint tx ${tx.hash} never became visible on-chain`);
+      }
+      return await waitForBiteReceipt(tx.wait(), DEV_ENABLED ? 10_000 : 60_000);
     });
-    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    const txHash = String((receipt as any).hash ?? (receipt as any).transactionHash);
     txStats.characterMints++;
-    recordTx("character-mint", receipt.transactionHash);
+    recordTx("character-mint", txHash);
     characterCache.invalidate(payload.toAddress.toLowerCase());
-    const fullReceipt = await skaleProvider.getTransactionReceipt(receipt.transactionHash);
-    const transferLog = fullReceipt?.logs.find((log) => log.topics[0] === ERC721_TRANSFER_TOPIC);
-    const tokenId = transferLog?.topics[3] ? BigInt(transferLog.topics[3]).toString() : null;
+    const tokenId = await resolveMintedCharacterTokenId(txHash);
     return {
-      txHash: receipt.transactionHash,
+      txHash,
       tokenId,
     };
   });
@@ -555,7 +671,7 @@ async function processCharacterMintPayload(payload: CharacterMintPayload): Promi
 async function processIdentityRegistrationPayload(
   payload: IdentityRegistrationPayload
 ): Promise<IdentityRegistrationProcessorResult> {
-  if (!identityRegistryContract || !biteWallet) {
+  if (!identityRegistryAddress || !(biteSigner ?? biteWallet) || !biteWallet) {
     return { agentId: null, txHash: null, agentUri: null };
   }
   if (!ethers.isAddress(payload.ownerAddress)) {
@@ -564,6 +680,17 @@ async function processIdentityRegistrationPayload(
 
   const characterTokenId = BigInt(payload.characterTokenId);
   const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
+  const identityWriteProvider = new ethers.JsonRpcProvider(
+    process.env.SKALE_BASE_RPC_URL || "https://skale-base.skalenodes.com/v1/base"
+  );
+  const identityWriteSigner = process.env.SERVER_PRIVATE_KEY
+    ? new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, identityWriteProvider)
+    : null;
+  const identityWriteContract = new ethers.Contract(
+    identityRegistryAddress,
+    OFFICIAL_IDENTITY_REGISTRY_ABI,
+    identityWriteSigner ?? biteSigner ?? biteWallet
+  );
   const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
   const agentURI = `${base}/a2a/${payload.ownerAddress}`;
   const metadataEntries = [
@@ -577,13 +704,106 @@ async function processIdentityRegistrationPayload(
     },
   ];
 
-  const receipt = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
-    const registerTx = await identityRegistryContract["register(string,(string,bytes)[])"](
-      agentURI,
-      metadataEntries
+  const findExistingIdentityWithTimeout = async (
+    requestedOwner?: string,
+    timeoutMs = DEV_ENABLED ? 4_000 : 10_000
+  ) => {
+    return await Promise.race<
+      Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null
+    >([
+      findIdentityByCharacterTokenId(characterTokenId, requestedOwner).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  };
+
+  const reuseExistingIdentity = async (): Promise<IdentityRegistrationProcessorResult | null> => {
+    const existingForOwner = await findExistingIdentityWithTimeout(payload.ownerAddress);
+    if (existingForOwner?.agentId) {
+      return {
+        agentId: existingForOwner.agentId.toString(),
+        txHash: null,
+        agentUri: existingForOwner.agentUri ?? agentURI,
+      };
+    }
+
+    const existing = await findExistingIdentityWithTimeout();
+    if (!existing?.agentId) return null;
+
+    const currentOwner = existing.ownerAddress?.toLowerCase() ?? null;
+    const desiredOwner = payload.ownerAddress.toLowerCase();
+    const serverOwner = serverAddress.toLowerCase();
+
+    if (currentOwner === desiredOwner) {
+      return {
+        agentId: existing.agentId.toString(),
+        txHash: null,
+        agentUri: existing.agentUri ?? agentURI,
+      };
+    }
+
+    if (currentOwner !== serverOwner) {
+      return null;
+    }
+
+    await queueBiteTransaction(`identity-transfer:${existing.agentId}`, async () =>
+      waitForBiteSubmission(identityWriteContract.transferFrom(
+        serverAddress,
+        payload.ownerAddress,
+        existing.agentId,
+        { nonce: await reserveServerNonce() ?? undefined }
+      ))
+        .then((tx: any) => waitForBiteReceipt(tx.wait()))
     );
-    return registerTx.wait();
-  });
+    console.log(`[identity] Recovered and transferred agent #${existing.agentId} -> ${payload.ownerAddress}`);
+    return {
+      agentId: existing.agentId.toString(),
+      txHash: null,
+      agentUri: existing.agentUri ?? agentURI,
+    };
+  };
+
+  const alreadyOwned = await reuseExistingIdentity();
+  if (alreadyOwned) {
+    return alreadyOwned;
+  }
+
+  let receipt: any = null;
+  let submittedTxHash: string | null = null;
+  try {
+    const registerTx = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
+      const registerTx = await waitForBiteSubmission(
+        identityWriteContract["register(string,(string,bytes)[])"](
+          agentURI,
+          metadataEntries,
+          { nonce: await reserveServerNonce() ?? undefined }
+        )
+      );
+      return registerTx;
+    });
+    submittedTxHash = registerTx.hash ?? null;
+    if (!submittedTxHash) {
+      throw new Error(`Identity registration submission returned no tx hash for character ${characterTokenId.toString()}`);
+    }
+    const visibleOnChain = await waitForTransactionVisibility(identityWriteProvider, submittedTxHash);
+    if (!visibleOnChain) {
+      throw new Error(`Identity registration tx ${submittedTxHash} never became visible on-chain`);
+    }
+    receipt = await waitForBiteReceipt(registerTx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS).catch(() => null);
+  } catch (err) {
+    const recovered = await reuseExistingIdentity();
+    if (recovered) {
+      return recovered;
+    }
+    throw err;
+  }
+
+  if (!receipt) {
+    const recovered = await reuseExistingIdentity();
+    if (recovered) {
+      return recovered;
+    }
+    throw new Error(`Identity registration receipt not available for tx ${submittedTxHash}`);
+  }
 
   const registeredEvent = receipt.logs.find(
     (log: any) => log.fragment?.name === "Registered" || log.topics?.[0] === ethers.id("Registered(uint256,string,address)")
@@ -591,6 +811,10 @@ async function processIdentityRegistrationPayload(
   const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
 
   if (agentId == null) {
+    const recovered = await reuseExistingIdentity();
+    if (recovered) {
+      return recovered;
+    }
     console.warn(`[identity] Registered but could not extract agentId from tx ${receipt.hash}`);
     return { agentId: null, txHash: receipt.hash, agentUri: agentURI };
   }
@@ -605,10 +829,22 @@ async function processIdentityRegistrationPayload(
   }
 
   if (payload.ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
-    await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
-      identityRegistryContract.transferFrom(serverAddress, payload.ownerAddress, agentId)
-        .then((tx: any) => tx.wait())
-    );
+    try {
+      await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
+        waitForBiteSubmission(identityWriteContract.transferFrom(
+          serverAddress,
+          payload.ownerAddress,
+          agentId,
+          { nonce: await reserveServerNonce() ?? undefined }
+        ))
+          .then((tx: any) => waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS))
+      );
+    } catch (err) {
+      const currentOwner = await getIdentityOwner(BigInt(agentId));
+      if (currentOwner?.toLowerCase() !== payload.ownerAddress.toLowerCase()) {
+        throw err;
+      }
+    }
     console.log(`[identity] Transferred agent #${agentId} -> ${payload.ownerAddress}`);
   }
 
@@ -622,6 +858,9 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
     { tokenId: payload.characterTokenId, name: payload.name, level: payload.level },
     "skale",
     async () => {
+      if (!characterWriteContract) {
+        throw new Error("Character write contract unavailable");
+      }
       const metadata = {
         name: payload.name,
         description: `Level ${payload.level} ${payload.raceId} ${payload.classId}`,
@@ -634,44 +873,30 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
         },
       };
 
-      let uri: string | undefined;
-      if (DEV_ENABLED) {
-        uri = toInlineMetadataUri(metadata);
-      } else {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            uri = await Promise.race([
-              upload({ client: thirdwebClient, files: [metadata] }),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("Metadata upload timed out (15s)")), 15_000)
-              ),
-            ]);
-            break;
-          } catch (err: any) {
-            const msg = String(err?.message ?? "");
-            if (
-              (msg.includes("timed out") || msg.includes("ETIMEDOUT") || msg.includes("fetch failed") || msg.includes("ECONNRESET"))
-              && attempt < 2
-            ) {
-              await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
-              continue;
-            }
-            throw err;
-          }
-        }
-      }
-      if (!uri) throw new Error("Metadata upload failed after 3 attempts");
+      const uri = await resolveCharacterMetadataUri(metadata);
 
-      const tx = setTokenURI({
-        contract: characterContract,
-        tokenId: BigInt(payload.characterTokenId),
-        uri,
+      const receipt = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
+        const gasPrice = await resolveManagedGasPrice();
+        const tx = await waitForBiteSubmission(
+          characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
+            gasPrice,
+            maxFeePerGas: undefined,
+            maxPriorityFeePerGas: undefined,
+            type: 0,
+            nonce: await reserveServerNonce() ?? undefined,
+          })
+        );
+        const visibleOnChain = await waitForTransactionVisibility(skaleProvider, tx.hash);
+        if (!visibleOnChain) {
+          throw new Error(`Character metadata tx ${tx.hash} never became visible on-chain`);
+        }
+        return await waitForBiteReceipt(tx.wait(), DEV_ENABLED ? 10_000 : 60_000);
       });
-      const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+      const txHash = String((receipt as any).hash ?? (receipt as any).transactionHash);
       txStats.metadataUpdates++;
-      recordTx("metadata-update", receipt.transactionHash);
+      recordTx("metadata-update", txHash);
       lastSyncedLevel.set(payload.characterTokenId, payload.level);
-      return receipt.transactionHash;
+      return txHash;
     }
   );
 }
@@ -691,7 +916,72 @@ export async function registerIdentity(
     return { agentId: null, txHash: null, agentUri: null };
   }
 
+  const recoverExistingIdentity = async (
+    timeoutMs = DEV_ENABLED ? 5_000 : 20_000,
+    intervalMs = 1_500
+  ): Promise<IdentityRegistrationResult | null> => {
+    const desiredOwner = ownerAddress.toLowerCase();
+    const serverAddress = await biteWallet!.getAddress();
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const existing = await Promise.race([
+        findIdentityByCharacterTokenId(characterTokenId, ownerAddress).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      if (existing?.agentId != null) {
+        return {
+          agentId: existing.agentId,
+          txHash: null,
+          agentUri: existing.agentUri,
+        };
+      }
+
+      const anyOwnerIdentity = await Promise.race([
+        findIdentityByCharacterTokenId(characterTokenId).catch(() => null),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+      ]);
+      if (anyOwnerIdentity?.agentId != null) {
+        const currentOwner = anyOwnerIdentity.ownerAddress?.toLowerCase() ?? null;
+        if (currentOwner === desiredOwner) {
+          return {
+            agentId: anyOwnerIdentity.agentId,
+            txHash: null,
+            agentUri: anyOwnerIdentity.agentUri,
+          };
+        }
+        if (currentOwner === serverAddress.toLowerCase() && desiredOwner !== currentOwner) {
+          try {
+            await queueBiteTransaction(`identity-transfer:${anyOwnerIdentity.agentId}`, async () =>
+              waitForBiteSubmission(identityRegistryContract.transferFrom(
+                serverAddress,
+                ownerAddress,
+                anyOwnerIdentity.agentId,
+                { nonce: await reserveServerNonce() ?? undefined }
+              ))
+                .then((tx: any) => waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS).catch(() => null))
+            );
+          } catch {}
+          return {
+            agentId: anyOwnerIdentity.agentId,
+            txHash: null,
+            agentUri: anyOwnerIdentity.agentUri,
+          };
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return null;
+  };
+
   try {
+    const existing = await Promise.race([
+      findIdentityByCharacterTokenId(characterTokenId, ownerAddress).catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000)),
+    ]);
+    if (existing) {
+      return { ...existing, txHash: null };
+    }
+
     const validationTags = options?.validationTags ?? [];
     const result = await executeRegisteredChainOperation<IdentityRegistrationProcessorResult>(
       "identity-register",
@@ -703,6 +993,11 @@ export async function registerIdentity(
         validationTags,
       } satisfies IdentityRegistrationPayload
     );
+    if (result.agentId == null) {
+      const recovered = await recoverExistingIdentity();
+      if (recovered) return recovered;
+      throw new Error(`Identity registration completed without agentId for character ${characterTokenId.toString()}`);
+    }
     if (result.agentId != null && options?.beforeTransfer && validationTags.length === 0) {
       await options.beforeTransfer(BigInt(result.agentId));
     }
@@ -712,8 +1007,11 @@ export async function registerIdentity(
       agentUri: result.agentUri,
     };
   } catch (err: any) {
-    console.warn(`[identity] Failed to register identity for character ${characterTokenId}: ${err.message?.slice(0, 120)}`);
-    return { agentId: null, txHash: null, agentUri: null };
+    const recovered = await recoverExistingIdentity();
+    if (recovered) {
+      return recovered;
+    }
+    throw err;
   }
 }
 
@@ -782,10 +1080,11 @@ async function paginatedGetLogs(
   address: string,
   topics: (string | null)[],
   latestBlock: bigint,
+  fromBlock: bigint = 0n,
 ): Promise<ethers.Log[]> {
   // Try the full range first — most RPCs allow it
   try {
-    return await biteProvider.getLogs({ address, fromBlock: 0, toBlock: latestBlock, topics });
+    return await biteProvider.getLogs({ address, fromBlock, toBlock: latestBlock, topics });
   } catch (err: any) {
     const msg = String(err?.message ?? "");
     if (!msg.includes("Block range") && !msg.includes("block range") && !msg.includes("too many")) {
@@ -796,7 +1095,7 @@ async function paginatedGetLogs(
   // RPC enforces a 2000-block limit — paginate accordingly
   const chunkSize = 1999n;
   const all: ethers.Log[] = [];
-  for (let from = 0n; from <= latestBlock; from += chunkSize + 1n) {
+  for (let from = fromBlock; from <= latestBlock; from += chunkSize + 1n) {
     const to = from + chunkSize > latestBlock ? latestBlock : from + chunkSize;
     const logs = await biteProvider.getLogs({ address, fromBlock: from, toBlock: to, topics });
     all.push(...logs);
@@ -804,7 +1103,7 @@ async function paginatedGetLogs(
   return all;
 }
 
-async function getOwnedCharacterTokenIdsFromTransfers(owner: string): Promise<bigint[]> {
+export async function getOwnedCharacterTokenIdsFromTransfers(owner: string): Promise<bigint[]> {
   const normalized = owner.toLowerCase();
   const ownerTopic = ethers.zeroPadValue(normalized as `0x${string}`, 32);
   const contractAddress = process.env.CHARACTER_CONTRACT_ADDRESS!;
@@ -835,11 +1134,16 @@ export interface MintCharacterResult {
   identity: IdentityRegistrationResult | null;
 }
 
+interface MintCharacterOptions {
+  skipIdentityRegistration?: boolean;
+}
+
 /** Mint a character NFT (ERC-721) to a player address and return mint + identity details. */
 export async function mintCharacterWithIdentity(
   toAddress: string,
   nft: { name: string; description: string; properties: Record<string, unknown> },
-  validationTags: string[] = []
+  validationTags: string[] = [],
+  options: MintCharacterOptions = {}
 ): Promise<MintCharacterResult> {
   return traceTx("character-mint", "mintCharacter", { to: toAddress, name: nft.name }, "skale", async () => {
     const mintResult = await executeRegisteredChainOperation<CharacterMintProcessorResult>(
@@ -850,7 +1154,7 @@ export async function mintCharacterWithIdentity(
     const tokenId = mintResult.tokenId != null ? BigInt(mintResult.tokenId) : null;
 
     let identity: IdentityRegistrationResult | null = null;
-    if (identityRegistryContract && tokenId != null) {
+    if (!options.skipIdentityRegistration && identityRegistryContract && tokenId != null) {
       try {
         identity = await registerIdentity(
           tokenId,
@@ -920,35 +1224,73 @@ export async function getOwnedCharacters(address: string) {
 }
 
 export async function findIdentityByCharacterTokenId(
-  characterTokenId: bigint
+  characterTokenId: bigint,
+  ownerAddress?: string
 ): Promise<{ agentId: bigint; ownerAddress: string | null; agentUri: string | null } | null> {
   if (!identityRegistryContract || !identityRegistryAddress) return null;
 
   const latestBlock = BigInt(await biteProvider.getBlockNumber());
   const registeredTopic = ethers.id("Registered(uint256,string,address)");
-  const logs = await paginatedGetLogs(identityRegistryAddress, [registeredTopic], latestBlock);
   const coder = ethers.AbiCoder.defaultAbiCoder();
+  const recentFromBlock = latestBlock > 5_000n ? latestBlock - 5_000n : 0n;
 
-  for (let index = logs.length - 1; index >= 0; index--) {
-    const agentIdTopic = logs[index].topics?.[1];
-    if (!agentIdTopic) continue;
-    const agentId = BigInt(agentIdTopic);
-    try {
-      const rawMetadata = await identityRegistryContract.getMetadata(agentId, "characterTokenId");
-      if (!rawMetadata || rawMetadata === "0x") continue;
-      const [storedCharacterTokenId] = coder.decode(["uint256"], rawMetadata);
-      if (BigInt(storedCharacterTokenId) !== characterTokenId) continue;
-      const [ownerAddress, agentUri] = await Promise.all([
-        identityRegistryContract.ownerOf(agentId).then((value: string) => value).catch(() => null),
-        identityRegistryContract.tokenURI(agentId).then((value: string) => value).catch(() => null),
-      ]);
-      return { agentId, ownerAddress, agentUri };
-    } catch {
-      continue;
+  const searchLogs = async (
+    logs: ethers.Log[],
+    agentIdTopicIndex: number
+  ): Promise<{ agentId: bigint; ownerAddress: string | null; agentUri: string | null } | null> => {
+    const requestedOwner = ownerAddress?.toLowerCase() ?? null;
+    for (let index = logs.length - 1; index >= 0; index--) {
+      const agentIdTopic = logs[index].topics?.[agentIdTopicIndex];
+      if (!agentIdTopic) continue;
+      const agentId = BigInt(agentIdTopic);
+      try {
+        const rawMetadata = await identityRegistryContract.getMetadata(agentId, "characterTokenId");
+        if (!rawMetadata || rawMetadata === "0x") continue;
+        const [storedCharacterTokenId] = coder.decode(["uint256"], rawMetadata);
+        if (BigInt(storedCharacterTokenId) !== characterTokenId) continue;
+        const [ownerAddress, agentUri] = await Promise.all([
+          identityRegistryContract.ownerOf(agentId).then((value: string) => value).catch(() => null),
+          identityRegistryContract.tokenURI(agentId).then((value: string) => value).catch(() => null),
+        ]);
+        if (requestedOwner && ownerAddress?.toLowerCase() !== requestedOwner) {
+          continue;
+        }
+        return { agentId, ownerAddress, agentUri };
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
+
+  const recentLogs = await paginatedGetLogs(
+    identityRegistryAddress,
+    [registeredTopic],
+    latestBlock,
+    recentFromBlock
+  ).catch(() => []);
+
+  if (ownerAddress) {
+    const ownerTopic = ethers.zeroPadValue(ownerAddress.toLowerCase(), 32);
+    const transferLogs = await paginatedGetLogs(
+      identityRegistryAddress,
+      [ERC721_TRANSFER_TOPIC, null, ownerTopic],
+      latestBlock,
+      recentFromBlock
+    ).catch(() => []);
+    const transferMatch = await searchLogs(transferLogs, 3);
+    if (transferMatch) {
+      return transferMatch;
     }
   }
 
-  return null;
+  const recentMatch = await searchLogs(recentLogs, 1);
+  if (recentMatch) {
+    return recentMatch;
+  }
+
+  const fullLogs = await paginatedGetLogs(identityRegistryAddress, [registeredTopic], latestBlock);
+  return await searchLogs(fullLogs, 1);
 }
 
 // Dedup: track last successfully synced level per tokenId to skip redundant uploads

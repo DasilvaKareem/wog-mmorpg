@@ -1,9 +1,29 @@
-import { biteWallet } from "./biteChain.js";
+import { biteProvider, biteWallet } from "./biteChain.js";
 
 const NONCE_ERROR_CODES = new Set(["-32004", "-32000", "-32603", "NONCE_EXPIRED"]);
 const MAX_RETRIES = 3;
+const DEFAULT_RECEIPT_TIMEOUT_MS = 45_000;
+const DEFAULT_SUBMISSION_TIMEOUT_MS = 20_000;
+const DEFAULT_QUEUE_ATTEMPT_TIMEOUT_MS = 30_000;
 
 let biteTxChain: Promise<void> = Promise.resolve();
+let nextServerNonce: number | null = null;
+
+export async function reserveServerNonce(): Promise<number | null> {
+  if (!biteWallet) return null;
+  const address = await biteWallet.getAddress();
+  const chainNonce = await biteProvider.getTransactionCount(address, "pending");
+  if (nextServerNonce == null || nextServerNonce < chainNonce) {
+    nextServerNonce = chainNonce;
+  }
+  const reserved = nextServerNonce;
+  nextServerNonce += 1;
+  return reserved;
+}
+
+export function resetServerNonce(): void {
+  nextServerNonce = null;
+}
 
 export function isTransientRpcSendError(err: unknown): boolean {
   const msg = String((err as any)?.message ?? err ?? "");
@@ -49,9 +69,14 @@ export async function queueServerWalletTransaction<T>(
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {
         await options?.beforeAttempt?.();
-        return await fn();
+        return await withBiteTimeout(
+          fn(),
+          `Timed out waiting for queued transaction attempt after ${DEFAULT_QUEUE_ATTEMPT_TIMEOUT_MS}ms`,
+          DEFAULT_QUEUE_ATTEMPT_TIMEOUT_MS
+        );
       } catch (err) {
         lastError = err;
+        resetServerNonce();
         const retryable = isNonceError(err) || isTransientRpcSendError(err);
         if (!retryable || attempt >= MAX_RETRIES) break;
         const delayMs = 1000 * 2 ** attempt;
@@ -77,4 +102,31 @@ export async function queueBiteTransaction<T>(label: string, fn: () => Promise<T
       (biteWallet as { reset?: () => void } | null)?.reset?.();
     },
   });
+}
+
+export async function waitForBiteReceipt<T>(
+  pending: Promise<T>,
+  timeoutMs = DEFAULT_RECEIPT_TIMEOUT_MS
+): Promise<T> {
+  return await withBiteTimeout(pending, `Timed out waiting for on-chain receipt after ${timeoutMs}ms`, timeoutMs);
+}
+
+export async function waitForBiteSubmission<T>(
+  pending: Promise<T>,
+  timeoutMs = DEFAULT_SUBMISSION_TIMEOUT_MS
+): Promise<T> {
+  return await withBiteTimeout(pending, `Timed out waiting for on-chain submission after ${timeoutMs}ms`, timeoutMs);
+}
+
+async function withBiteTimeout<T>(
+  pending: Promise<T>,
+  message: string,
+  timeoutMs: number,
+): Promise<T> {
+  return await Promise.race([
+    pending,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(message)), timeoutMs)
+    ),
+  ]);
 }

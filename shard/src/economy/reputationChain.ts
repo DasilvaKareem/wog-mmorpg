@@ -5,8 +5,8 @@
  */
 
 import { ethers } from "ethers";
-import { biteWallet } from "../blockchain/biteChain.js";
-import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import { biteSigner, biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "../blockchain/biteTxQueue.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
 import { OFFICIAL_REPUTATION_REGISTRY_ABI } from "../erc8004/official.js";
 import {
@@ -22,8 +22,8 @@ import {
 const REPUTATION_CONTRACT_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS;
 
 const reputationContract =
-  REPUTATION_CONTRACT_ADDRESS && biteWallet
-    ? new ethers.Contract(REPUTATION_CONTRACT_ADDRESS, OFFICIAL_REPUTATION_REGISTRY_ABI, biteWallet)
+  REPUTATION_CONTRACT_ADDRESS && (biteSigner ?? biteWallet)
+    ? new ethers.Contract(REPUTATION_CONTRACT_ADDRESS, OFFICIAL_REPUTATION_REGISTRY_ABI, biteSigner ?? biteWallet)
     : null;
 
 if (!reputationContract && !REPUTATION_CONTRACT_ADDRESS) {
@@ -204,7 +204,7 @@ export async function batchUpdateReputationOnChain(
       if (delta === 0) continue;
 
       await queueBiteTransaction(`reputation-feedback:${normalizedAgentId}:${CATEGORY_TAGS[i]}`, async () => {
-        const tx = await reputationContract.giveFeedback(
+        const tx = await waitForBiteSubmission(reputationContract.giveFeedback(
           identityId,
           BigInt(delta),
           0,
@@ -212,9 +212,10 @@ export async function batchUpdateReputationOnChain(
           reason,
           "",
           "",
-          ethers.ZeroHash
-        );
-        await tx.wait();
+          ethers.ZeroHash,
+          { nonce: await reserveServerNonce() ?? undefined }
+        ));
+        await waitForBiteReceipt(tx.wait());
       });
     }
 

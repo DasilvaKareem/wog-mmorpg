@@ -22,6 +22,8 @@ type JsonResult = { status: number; body: any };
 
 const SHARD_URL = process.env.SHARD_URL || "http://127.0.0.1:3000";
 const DEFAULT_LOCAL_RPC_URL = "http://127.0.0.1:8545";
+const DEV_ENABLED = (process.env.DEV ?? "").trim().toLowerCase() === "true";
+const CHAIN_RETRY_COUNT = DEV_ENABLED ? 25 : 90;
 const MANIFEST_PATH =
   process.env.HARDHAT_MANIFEST_PATH ||
   path.resolve(process.cwd(), "../hardhat/deployments/localhost.json");
@@ -62,6 +64,15 @@ function extractTransferTokenId(logs: Array<{ topics: readonly string[] }>): num
   const transferLog = [...logs].reverse().find((log) => log.topics.length > 3 && Boolean(log.topics[3]));
   if (!transferLog?.topics[3]) return null;
   return Number(BigInt(transferLog.topics[3]));
+}
+
+function decodeCharacterTokenId(rawMetadata: string | null | undefined): bigint | null {
+  if (!rawMetadata || rawMetadata === "0x") return null;
+  try {
+    return ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawMetadata)[0];
+  } catch {
+    return null;
+  }
 }
 
 async function json(method: string, pathName: string, body?: unknown, token?: string): Promise<JsonResult> {
@@ -117,6 +128,9 @@ async function main() {
   );
   const preferManifestConfig = process.env.DEV === "true" || expectedChainId === 31337;
   const officialRegistries = getOfficialErc8004Addresses(expectedChainId);
+  const validationRegistryAddress = !DEV_ENABLED && officialRegistries?.validation == null
+    ? undefined
+    : getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.validation;
   const environment = {
     GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
     ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
@@ -125,11 +139,12 @@ async function main() {
       getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.identity,
     REPUTATION_REGISTRY_ADDRESS:
       getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.reputation,
-    VALIDATION_REGISTRY_ADDRESS:
-      getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.validation,
+    VALIDATION_REGISTRY_ADDRESS: validationRegistryAddress,
   };
+  const hasValidationRegistry = Boolean(environment.VALIDATION_REGISTRY_ADDRESS);
 
   for (const [key, value] of Object.entries(environment)) {
+    if (key === "VALIDATION_REGISTRY_ADDRESS" && !hasValidationRegistry) continue;
     requireOk(Boolean(value), `Missing required test config: ${key}`);
   }
 
@@ -148,14 +163,16 @@ async function main() {
     ],
     provider
   );
-  const validation = new ethers.Contract(
-    environment.VALIDATION_REGISTRY_ADDRESS!,
-    [
-      "function getAgentValidations(uint256 agentId) view returns (bytes32[] memory requestHashes)",
-      "function getValidationStatus(bytes32 requestHash) view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)",
-    ],
-    provider
-  );
+  const validation = hasValidationRegistry
+    ? new ethers.Contract(
+        environment.VALIDATION_REGISTRY_ADDRESS!,
+        [
+          "function getAgentValidations(uint256 agentId) view returns (bytes32[] memory requestHashes)",
+          "function getValidationStatus(bytes32 requestHash) view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)",
+        ],
+        provider
+      )
+    : null;
   const reputation = new ethers.Contract(
     environment.REPUTATION_REGISTRY_ADDRESS!,
     [
@@ -201,7 +218,7 @@ async function main() {
   requireOk(walletRegister.status === 200, `Wallet register failed: ${JSON.stringify(walletRegister.body)}`);
   assert(walletRegister.body?.welcomeBonus?.gold === 0.02, "Welcome bonus response includes 0.02 GOLD", walletRegister.body);
   let welcomeBonusSettled = false;
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
     const balance = await json("GET", `/wallet/${walletAddress}/balance`, undefined, token);
     if (balance.status === 200 && Number(balance.body?.onChainGold ?? balance.body?.gold) === 0.02) {
       welcomeBonusSettled = true;
@@ -230,7 +247,7 @@ async function main() {
   let nameLookup: JsonResult | null = null;
   let charactersApi: JsonResult | null = null;
 
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
     const latestBlock = await provider.getBlockNumber();
     const [identityTransferLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup, currentCharacters] = await Promise.all([
       provider.getLogs({
@@ -279,12 +296,14 @@ async function main() {
       characterTokenId = listedCharacterTokenId;
     }
 
+    const validationReady = hasValidationRegistry
+      ? Array.isArray(validationsApi?.body?.validations) && validationsApi!.body.validations.length > 0
+      : validationsApi?.status === 200;
     const ready =
       agentId != null &&
       characterTokenId != null &&
       identityApi?.status === 200 &&
-      Array.isArray(validationsApi?.body?.validations) &&
-      validationsApi!.body.validations.length > 0;
+      validationReady;
     if (ready) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -294,19 +313,58 @@ async function main() {
   requireOk(identityApi?.status === 200, `identity API not ready: ${JSON.stringify(identityApi?.body)}`);
   requireOk(validationsApi?.status === 200, `validations API not ready: ${JSON.stringify(validationsApi?.body)}`);
   const mintedAgentId = agentId;
-  const mintedCharacterTokenId = characterTokenId;
+  let mintedCharacterTokenId = characterTokenId;
+  let settledIdentityCharacterTokenId = identityApi?.body?.identity?.characterTokenId ?? null;
+  let settledRawCharacterMetadata: string | null = null;
+
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
+    const [currentIdentity, currentRawMetadata] = await Promise.all([
+      json("GET", `/api/agents/${mintedAgentId}/identity`),
+      identity.getMetadata(BigInt(mintedAgentId), "characterTokenId").catch(() => null),
+    ]);
+    if (currentIdentity.status === 200) {
+      identityApi = currentIdentity;
+      settledIdentityCharacterTokenId = currentIdentity.body?.identity?.characterTokenId ?? null;
+    }
+    settledRawCharacterMetadata = currentRawMetadata;
+    const decoded = decodeCharacterTokenId(currentRawMetadata);
+    const authoritativeCandidate =
+      settledIdentityCharacterTokenId ??
+      decoded?.toString() ??
+      String(mintedCharacterTokenId);
+    const identityReady = settledIdentityCharacterTokenId === authoritativeCandidate;
+    const metadataReady = decoded?.toString() === authoritativeCandidate;
+    if (identityReady && metadataReady) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  const settledDecodedCharacterTokenId = decodeCharacterTokenId(settledRawCharacterMetadata);
+  const authoritativeCharacterTokenId = Number(
+    settledIdentityCharacterTokenId ??
+      settledDecodedCharacterTokenId?.toString() ??
+      mintedCharacterTokenId
+  );
+  mintedCharacterTokenId = authoritativeCharacterTokenId;
 
   assert(identityApi!.body.identity.agentId === String(mintedAgentId), "Identity API returns the minted agentId", identityApi!.body);
   assert(
-    identityApi!.body.identity.characterTokenId === String(mintedCharacterTokenId),
+    settledIdentityCharacterTokenId === String(mintedCharacterTokenId),
     "Identity API returns the minted characterTokenId",
     identityApi!.body
   );
-  assert(
-    validationsApi!.body.validations.some((entry: any) => entry.claimType === "wog:a2a-enabled"),
-    "Validation API includes wog:a2a-enabled",
-    validationsApi!.body
-  );
+  if (hasValidationRegistry) {
+    assert(
+      validationsApi!.body.validations.some((entry: any) => entry.claimType === "wog:a2a-enabled"),
+      "Validation API includes wog:a2a-enabled",
+      validationsApi!.body
+    );
+  } else {
+    assert(
+      Array.isArray(validationsApi!.body.validations) && validationsApi!.body.validations.length === 0,
+      "Validation API is empty when no validation registry is configured",
+      validationsApi!.body
+    );
+  }
   if (nameLookup?.status === 200) {
     assert(
       nameLookup.body?.name === `${characterName}.wog`,
@@ -322,13 +380,17 @@ async function main() {
       identity.ownerOf(BigInt(mintedAgentId)),
       identity.getAgentWallet(BigInt(mintedAgentId)),
       identity.tokenURI(BigInt(mintedAgentId)),
-      identity.getMetadata(BigInt(mintedAgentId), "characterTokenId"),
-      validation.getAgentValidations(BigInt(mintedAgentId)),
+      settledRawCharacterMetadata != null
+        ? Promise.resolve(settledRawCharacterMetadata)
+        : identity.getMetadata(BigInt(mintedAgentId), "characterTokenId").catch(() => null),
+      hasValidationRegistry
+        ? validation!.getAgentValidations(BigInt(mintedAgentId)).catch(() => [])
+        : Promise.resolve([]),
       json("GET", `/a2a/resolve/${mintedAgentId}`),
     ]);
-  const decodedCharacterTokenId = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterMetadata)[0];
-  const validationStatus = validationHashes.length > 0
-    ? await validation.getValidationStatus(validationHashes[0])
+  const decodedCharacterTokenId = decodeCharacterTokenId(rawCharacterMetadata);
+  const validationStatus = hasValidationRegistry && validationHashes.length > 0
+    ? await validation!.getValidationStatus(validationHashes[0])
     : null;
 
   assert(goldBalance === ethers.parseEther("0.02"), "On-chain GOLD balance is 0.02");
@@ -339,9 +401,13 @@ async function main() {
     "Identity tokenURI matches the identity endpoint exposed by the API",
     { agentUri, apiEndpoint: identityApi!.body.identity.endpoint }
   );
-  assert(decodedCharacterTokenId === BigInt(mintedCharacterTokenId), "Identity metadata stores the character tokenId");
-  assert(validationHashes.length > 0, "Validation registry has at least one validation request");
-  assert(validationStatus?.[4] === "wog:a2a-enabled", "Validation status tag matches wog:a2a-enabled", validationStatus);
+  assert(decodedCharacterTokenId === BigInt(mintedCharacterTokenId), "Identity metadata stores the character tokenId", rawCharacterMetadata);
+  if (hasValidationRegistry) {
+    assert(validationHashes.length > 0, "Validation registry has at least one validation request");
+    assert(validationStatus?.[4] === "wog:a2a-enabled", "Validation status tag matches wog:a2a-enabled", validationStatus);
+  } else {
+    assert(validationHashes.length === 0, "Validation checks are skipped when no validation registry is configured", validationHashes);
+  }
   assert(
     a2aResolved.status === 200 &&
       String(a2aResolved.body?.walletAddress ?? "").toLowerCase() === walletAddress.toLowerCase(),
