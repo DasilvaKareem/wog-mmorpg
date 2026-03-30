@@ -10,6 +10,7 @@ export interface Entity {
   shopItems?: number[];
   walletAddress?: string;
   agentId?: string;
+  characterTokenId?: string;
   level?: number;
   xp?: number;
   raceId?: string;
@@ -125,6 +126,25 @@ export interface CharacterCreateResponse {
 
 export interface OwnedCharacter {
   tokenId: string;
+  characterTokenId?: string | null;
+  agentId?: string | null;
+  chainRegistrationStatus?:
+    | "unregistered"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "registered"
+    | "failed_retryable"
+    | "failed_permanent";
+  bootstrapStatus?:
+    | "queued"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "completed"
+    | "failed_retryable"
+    | "failed_permanent"
+    | null;
   name: string;
   description: string;
   properties: {

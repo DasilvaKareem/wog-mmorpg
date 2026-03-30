@@ -488,6 +488,7 @@ export async function processCharacterBootstrapJob(
     let currentJob = job;
 
     if (tokenId == null) {
+      let mintIdentityTxHash: string | null = null;
       currentJob = {
         ...currentJob,
         status: "pending_mint",
@@ -527,11 +528,13 @@ export async function processCharacterBootstrapJob(
         if (mintResult.identity?.agentId != null) {
           agentId = mintResult.identity.agentId;
         }
+        mintIdentityTxHash = mintResult.identity?.txHash ?? null;
       }
 
       await saveCharacter(walletAddress, characterName, {
         characterTokenId: tokenId.toString(),
         ...(agentId != null && { agentId: agentId.toString() }),
+        ...(mintIdentityTxHash ? { agentRegistrationTxHash: mintIdentityTxHash } : {}),
         chainRegistrationStatus: agentId != null ? "registered" : "mint_confirmed",
         chainRegistrationLastError: "",
       });
@@ -556,12 +559,14 @@ export async function processCharacterBootstrapJob(
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
       const recoveredIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress);
+      let identityTxHash: string | null = null;
       if (recoveredIdentity?.agentId != null) {
         agentId = recoveredIdentity.agentId;
       } else {
         const identityResult = await registerIdentity(tokenId, walletAddress, "", {
           validationTags: currentJob.validationTags,
         });
+        identityTxHash = identityResult.txHash ?? null;
         if (identityResult.agentId == null) {
           const recoveredAfterRegister = await waitForIdentityRecovery(tokenId, walletAddress);
           if (recoveredAfterRegister?.agentId != null) {
@@ -574,7 +579,10 @@ export async function processCharacterBootstrapJob(
         }
       }
 
-      await saveCharacter(walletAddress, characterName, { agentId: agentId.toString() });
+      await saveCharacter(walletAddress, characterName, {
+        agentId: agentId.toString(),
+        ...(identityTxHash ? { agentRegistrationTxHash: identityTxHash } : {}),
+      });
       await saveCharacter(walletAddress, characterName, {
         chainRegistrationStatus: "registered",
         chainRegistrationLastError: "",

@@ -9,6 +9,36 @@ export const CLIENT_TILE_PX = 16;
 
 export const POLL_INTERVAL = 1000; // ms
 
+const SKALE_BASE_MAINNET_CHAIN_ID = 1187947933;
+const SKALE_BASE_SEPOLIA_CHAIN_ID = 324705682;
+const SKALE_BASE_MAINNET_EXPLORER = "https://skale-base-explorer.skalenodes.com";
+const SKALE_BASE_SEPOLIA_EXPLORER = "https://base-sepolia-testnet-explorer.skalenodes.com";
+
+export function getSkaleExplorerBaseUrl(chainIdOverride?: string | number | null): string | null {
+  const chainIdRaw = String(chainIdOverride ?? import.meta.env.VITE_SKALE_BASE_CHAIN_ID ?? "").trim();
+  if (chainIdRaw) {
+    const chainId = Number(chainIdRaw);
+    if (chainId === SKALE_BASE_MAINNET_CHAIN_ID) return SKALE_BASE_MAINNET_EXPLORER;
+    if (chainId === SKALE_BASE_SEPOLIA_CHAIN_ID) return SKALE_BASE_SEPOLIA_EXPLORER;
+    if (chainId === 31337) return null;
+  }
+
+  const apiUrl = API_URL.toLowerCase();
+  if (!apiUrl || apiUrl.includes("localhost") || apiUrl.includes("127.0.0.1")) return null;
+  if (apiUrl.includes("sepolia") || apiUrl.includes("testnet")) return SKALE_BASE_SEPOLIA_EXPLORER;
+  return SKALE_BASE_MAINNET_EXPLORER;
+}
+
+export function getSkaleExplorerTxUrl(
+  txHash: string | null | undefined,
+  chainIdOverride?: string | number | null
+): string | null {
+  if (!txHash) return null;
+  const baseUrl = getSkaleExplorerBaseUrl(chainIdOverride);
+  if (!baseUrl) return null;
+  return `${baseUrl}/tx/${txHash}`;
+}
+
 export const ZOOM_MIN = 0.5;
 export const ZOOM_MAX = 4;
 export const ZOOM_STEP = 0.15;

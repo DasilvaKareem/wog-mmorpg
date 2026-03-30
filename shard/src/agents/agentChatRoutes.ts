@@ -504,6 +504,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       sessionRemainingMs,
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
+      agentId: ref?.agentId ?? null,
+      characterTokenId: ref?.characterTokenId ?? null,
       custodialWallet: custodial ?? null,
       entity,
       currentActivity,
@@ -525,6 +527,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       custodialWallet: custodial ?? null,
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
+      agentId: ref?.agentId ?? null,
+      characterTokenId: ref?.characterTokenId ?? null,
     });
   });
 

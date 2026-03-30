@@ -49,6 +49,8 @@ export interface CharacterSetupResult {
   entityId: string;
   zoneId: string;
   characterName: string;
+  agentId?: string;
+  characterTokenId?: string;
   alreadyExisted: boolean;
 }
 
@@ -89,6 +91,8 @@ export async function setupAgentCharacter(
           entityId: existingRef.entityId,
           zoneId: existingRef.zoneId,
           characterName,
+          agentId: existingRef.agentId,
+          characterTokenId: existingRef.characterTokenId,
           alreadyExisted: true,
         };
       }
@@ -144,7 +148,10 @@ export async function setupAgentCharacter(
   const spawnXp = character?.properties?.xp ?? 0;
   const spawnRace = character?.properties?.race ?? raceId;
   const spawnClass = character?.properties?.class ?? classId;
-  const spawnTokenId = normalizeOnChainTokenId(character?.tokenId);
+  const spawnTokenId = normalizeOnChainTokenId(character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId);
+  const spawnAgentId = typeof character?.agentId === "string" && character.agentId.trim().length > 0
+    ? character.agentId.trim()
+    : existingSave?.agentId;
 
   // ── Step 6: Spawn into last known zone (or village-square for new agents) ──
   const startZone = existingRef?.zoneId ?? "village-square";
@@ -167,7 +174,13 @@ export async function setupAgentCharacter(
   const resolvedZoneId: string = spawnResult.zone ?? startZone;
 
   // ── Step 7: Persist entity ref ────────────────────────────────────────
-  await setAgentEntityRef(userWallet, { entityId, zoneId: resolvedZoneId, characterName: spawnName });
+  await setAgentEntityRef(userWallet, {
+    entityId,
+    zoneId: resolvedZoneId,
+    characterName: spawnName,
+    ...(spawnAgentId ? { agentId: spawnAgentId } : {}),
+    ...(spawnTokenId ? { characterTokenId: spawnTokenId } : {}),
+  });
 
   // ── Step 8: Init config if not already set ────────────────────────────
   const existingConfig = await getAgentConfig(userWallet);
@@ -188,6 +201,8 @@ export async function setupAgentCharacter(
     entityId,
     zoneId: resolvedZoneId,
     characterName: spawnName,
+    agentId: spawnAgentId,
+    characterTokenId: spawnTokenId,
     alreadyExisted: false,
   };
 }

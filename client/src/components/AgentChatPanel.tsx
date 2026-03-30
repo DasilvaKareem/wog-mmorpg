@@ -64,6 +64,8 @@ interface AgentStatusData {
   } | null;
   entityId: string | null;
   zoneId: string | null;
+  agentId?: string | null;
+  characterTokenId?: string | null;
   custodialWallet: string | null;
   entity: {
     name: string;
