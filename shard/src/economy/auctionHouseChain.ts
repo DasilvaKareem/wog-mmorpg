@@ -65,6 +65,28 @@ function cacheAuction(data: AuctionData): void {
   auctionCache.set(data.auctionId, data);
 }
 
+function isTransientRpcReadError(err: unknown): boolean {
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const haystack = `${code} ${message}`.toLowerCase();
+  return (
+    haystack.includes("timeout") ||
+    haystack.includes("network") ||
+    haystack.includes("socket") ||
+    haystack.includes("econnreset") ||
+    haystack.includes("econnrefused") ||
+    haystack.includes("etimedout") ||
+    haystack.includes("failed to detect network") ||
+    haystack.includes("missing response") ||
+    haystack.includes("server error")
+  );
+}
+
+function warnTransientAuctionRead(context: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err ?? "unknown error");
+  console.warn(`[auction] ${context} failed (transient read): ${detail.slice(0, 160)}`);
+}
+
 // -- Contract interaction helpers --
 
 /**
@@ -272,7 +294,15 @@ export async function getAuctionFromChain(auctionId: number): Promise<AuctionDat
  */
 export async function getNextAuctionId(): Promise<number> {
   const contract = ensureAuctionHouseEnabled();
-  return Number(await contract.nextAuctionId());
+  try {
+    return Number(await contract.nextAuctionId());
+  } catch (err) {
+    if (isTransientRpcReadError(err)) {
+      warnTransientAuctionRead("nextAuctionId", err);
+      return 0;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -318,7 +348,16 @@ export async function rebuildAuctionCache(): Promise<void> {
   if (!AUCTION_HOUSE_CONTRACT_ADDRESS || !biteProvider) return;
 
   // Verify contract is actually deployed before calling methods
-  const code = await biteProvider.getCode(AUCTION_HOUSE_CONTRACT_ADDRESS);
+  let code: string;
+  try {
+    code = await biteProvider.getCode(AUCTION_HOUSE_CONTRACT_ADDRESS);
+  } catch (err) {
+    if (isTransientRpcReadError(err)) {
+      warnTransientAuctionRead("cache rebuild contract code lookup", err);
+      return;
+    }
+    throw err;
+  }
   if (!code || code === "0x") {
     console.warn(`[auction] No contract deployed at ${AUCTION_HOUSE_CONTRACT_ADDRESS} — skipping cache rebuild`);
     return;
@@ -331,7 +370,16 @@ export async function rebuildAuctionCache(): Promise<void> {
   );
 
   try {
-    const nextId = Number(await readContract.nextAuctionId());
+    let nextId: number;
+    try {
+      nextId = Number(await readContract.nextAuctionId());
+    } catch (err) {
+      if (isTransientRpcReadError(err)) {
+        warnTransientAuctionRead("cache rebuild nextAuctionId", err);
+        return;
+      }
+      throw err;
+    }
     if (nextId === 0) {
       console.log("[auction] No auctions on-chain to rebuild");
       return;
@@ -339,7 +387,16 @@ export async function rebuildAuctionCache(): Promise<void> {
 
     // SKALE limits eth_getLogs to 2000 blocks per query.
     // Scan backwards from latest in 2000-block chunks until we find all auctions.
-    const latestBlock = await biteProvider.getBlockNumber();
+    let latestBlock: number;
+    try {
+      latestBlock = await biteProvider.getBlockNumber();
+    } catch (err) {
+      if (isTransientRpcReadError(err)) {
+        warnTransientAuctionRead("cache rebuild latest block lookup", err);
+        return;
+      }
+      throw err;
+    }
     const CHUNK = 1999;
 
     async function queryInChunks(filter: any): Promise<any[]> {
@@ -347,7 +404,16 @@ export async function rebuildAuctionCache(): Promise<void> {
       let to = latestBlock;
       while (to >= 0) {
         const from = Math.max(0, to - CHUNK);
-        const logs = await readContract.queryFilter(filter, from, to);
+        let logs: any[];
+        try {
+          logs = await readContract.queryFilter(filter, from, to);
+        } catch (err) {
+          if (isTransientRpcReadError(err)) {
+            warnTransientAuctionRead(`queryFilter ${String(filter?.fragment?.name ?? "unknown")} ${from}-${to}`, err);
+            break;
+          }
+          throw err;
+        }
         allLogs.push(...logs);
         if (from === 0) break;
         to = from - 1;

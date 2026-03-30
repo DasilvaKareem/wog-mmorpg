@@ -45,6 +45,28 @@ function ensureGuildContract(): ethers.Contract {
   return guildContract;
 }
 
+function isTransientRpcReadError(err: unknown): boolean {
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const haystack = `${code} ${message}`.toLowerCase();
+  return (
+    haystack.includes("timeout") ||
+    haystack.includes("network") ||
+    haystack.includes("socket") ||
+    haystack.includes("econnreset") ||
+    haystack.includes("econnrefused") ||
+    haystack.includes("etimedout") ||
+    haystack.includes("failed to detect network") ||
+    haystack.includes("missing response") ||
+    haystack.includes("server error")
+  );
+}
+
+function warnTransientGuildRead(context: string, err: unknown): void {
+  const detail = err instanceof Error ? err.message : String(err ?? "unknown error");
+  console.warn(`[guild-chain] ${context} failed (transient read): ${detail.slice(0, 160)}`);
+}
+
 // -- Types --
 
 export enum GuildStatus {
@@ -378,8 +400,15 @@ export async function getProposalFromChain(proposalId: number): Promise<Proposal
  */
 export async function getNextGuildId(): Promise<number> {
   if (!guildContract) throw new Error("Guild contract not initialized");
-
-  return Number(await guildContract.nextGuildId());
+  try {
+    return Number(await guildContract.nextGuildId());
+  } catch (err) {
+    if (isTransientRpcReadError(err)) {
+      warnTransientGuildRead("nextGuildId", err);
+      return 0;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -387,8 +416,15 @@ export async function getNextGuildId(): Promise<number> {
  */
 export async function getNextProposalId(): Promise<number> {
   if (!guildContract) throw new Error("Guild contract not initialized");
-
-  return Number(await guildContract.nextProposalId());
+  try {
+    return Number(await guildContract.nextProposalId());
+  } catch (err) {
+    if (isTransientRpcReadError(err)) {
+      warnTransientGuildRead("nextProposalId", err);
+      return 0;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -396,8 +432,15 @@ export async function getNextProposalId(): Promise<number> {
  */
 export async function getMemberGuildId(memberAddress: string): Promise<number> {
   if (!guildContract) throw new Error("Guild contract not initialized");
-
-  return Number(await guildContract.memberToGuild(memberAddress));
+  try {
+    return Number(await guildContract.memberToGuild(memberAddress));
+  } catch (err) {
+    if (isTransientRpcReadError(err)) {
+      warnTransientGuildRead(`memberToGuild:${memberAddress}`, err);
+      return 0;
+    }
+    throw err;
+  }
 }
 
 // --- Guild name cache (refreshed periodically, used by entity serialization) ---
@@ -419,14 +462,32 @@ export async function refreshGuildNameCache(): Promise<void> {
     // Verify contract is actually deployed before calling methods
     const provider = guildContract.runner?.provider;
     if (provider && GUILD_CONTRACT_ADDRESS) {
-      const code = await provider.getCode(GUILD_CONTRACT_ADDRESS);
+      let code: string;
+      try {
+        code = await provider.getCode(GUILD_CONTRACT_ADDRESS);
+      } catch (err) {
+        if (isTransientRpcReadError(err)) {
+          warnTransientGuildRead("guild cache contract code lookup", err);
+          return;
+        }
+        throw err;
+      }
       if (!code || code === "0x") {
         console.warn(`[guild-cache] No contract deployed at ${GUILD_CONTRACT_ADDRESS} — skipping refresh`);
         return;
       }
     }
 
-    const nextId = Number(await guildContract.nextGuildId());
+    let nextId: number;
+    try {
+      nextId = Number(await guildContract.nextGuildId());
+    } catch (err) {
+      if (isTransientRpcReadError(err)) {
+        warnTransientGuildRead("guild cache nextGuildId", err);
+        return;
+      }
+      throw err;
+    }
     const newCache = new Map<string, string>();
 
     // Read all guilds in parallel for faster refresh
