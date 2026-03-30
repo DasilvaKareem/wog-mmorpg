@@ -7,6 +7,7 @@ import { getRedis } from "../redis.js";
 interface Party {
   id: string;
   leaderId: string;
+  leaderWallet: string;
   memberIds: string[];
   zoneId: string;
   createdAt: number;
@@ -35,9 +36,51 @@ interface PersistedParty {
 
 const PARTY_KEY_PREFIX = "wog:party:";
 const WALLET_PARTY_KEY_PREFIX = "wog:party:wallet:";
+const PARTY_IDS_KEY = "wog:party:ids";
 
 function partyKey(partyId: string): string { return `${PARTY_KEY_PREFIX}${partyId}`; }
 function walletPartyKey(wallet: string): string { return `${WALLET_PARTY_KEY_PREFIX}${wallet.toLowerCase()}`; }
+
+function entityIdForWallet(wallet: string): string | null {
+  const ref = findEntityByCustodialWallet(wallet);
+  return ref?.entityId ?? null;
+}
+
+async function loadPersistedParty(partyId: string): Promise<Party | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+
+  const raw = await redis.get(partyKey(partyId));
+  if (!raw) return null;
+
+  const persisted = JSON.parse(raw) as PersistedParty;
+  const memberIds = persisted.memberWallets
+    .map((wallet) => entityIdForWallet(wallet))
+    .filter((entityId): entityId is string => !!entityId);
+
+  const leaderId =
+    entityIdForWallet(persisted.leaderWallet)
+    ?? memberIds[0]
+    ?? "";
+
+  const party: Party = {
+    id: persisted.id,
+    leaderId,
+    leaderWallet: persisted.leaderWallet,
+    memberIds,
+    zoneId: persisted.zoneId,
+    createdAt: persisted.createdAt,
+    shareXp: persisted.shareXp,
+    shareGold: persisted.shareGold,
+  };
+
+  parties.set(partyId, party);
+  for (const memberId of memberIds) {
+    playerToParty.set(memberId, partyId);
+  }
+
+  return party;
+}
 
 /** Persist party to Redis (fire-and-forget). */
 function persistParty(party: Party): void {
@@ -57,7 +100,8 @@ function persistParty(party: Party): void {
   }
 
   if (memberWallets.length === 0) return;
-  if (!leaderWallet) leaderWallet = memberWallets[0];
+  if (!leaderWallet) leaderWallet = party.leaderWallet || memberWallets[0];
+  party.leaderWallet = leaderWallet;
 
   const persisted: PersistedParty = {
     id: party.id,
@@ -69,10 +113,13 @@ function persistParty(party: Party): void {
     shareGold: party.shareGold,
   };
 
-  redis.set(partyKey(party.id), JSON.stringify(persisted)).catch(() => {});
+  const tx = redis.multi();
+  tx.sadd(PARTY_IDS_KEY, party.id);
+  tx.set(partyKey(party.id), JSON.stringify(persisted));
   for (const w of memberWallets) {
-    redis.set(walletPartyKey(w), party.id).catch(() => {});
+    tx.set(walletPartyKey(w), party.id);
   }
+  tx.exec().catch(() => {});
 }
 
 /** Remove party from Redis. */
@@ -80,10 +127,13 @@ function unpersistParty(partyId: string, wallets: string[]): void {
   const redis = getRedis();
   if (!redis) return;
 
-  redis.del(partyKey(partyId)).catch(() => {});
+  const tx = redis.multi();
+  tx.srem(PARTY_IDS_KEY, partyId);
+  tx.del(partyKey(partyId));
   for (const w of wallets) {
-    redis.del(walletPartyKey(w)).catch(() => {});
+    tx.del(walletPartyKey(w));
   }
+  tx.exec().catch(() => {});
 }
 
 /** Remove a single wallet from Redis party mapping. */
@@ -110,29 +160,11 @@ export async function rehydratePartyMembership(entityId: string, walletAddress: 
     const partyId = await redis.get(walletPartyKey(wallet));
     if (!partyId) return;
 
-    const raw = await redis.get(partyKey(partyId));
-    if (!raw) {
+    const party = parties.get(partyId) ?? await loadPersistedParty(partyId);
+    if (!party) {
       // Stale wallet key — clean up
       redis.del(walletPartyKey(wallet)).catch(() => {});
       return;
-    }
-
-    const persisted: PersistedParty = JSON.parse(raw);
-
-    // Get or create in-memory party
-    let party = parties.get(partyId);
-    if (!party) {
-      // Reconstruct from persisted data — leader will be re-resolved below
-      party = {
-        id: partyId,
-        leaderId: "", // resolved below
-        memberIds: [],
-        zoneId: persisted.zoneId,
-        createdAt: persisted.createdAt,
-        shareXp: persisted.shareXp,
-        shareGold: persisted.shareGold,
-      };
-      parties.set(partyId, party);
     }
 
     // Add this entity if not already present
@@ -142,11 +174,12 @@ export async function rehydratePartyMembership(entityId: string, walletAddress: 
     playerToParty.set(entityId, partyId);
 
     // Resolve leader
-    if (wallet === persisted.leaderWallet) {
-      party.leaderId = entityId;
-    }
+    const raw = await redis.get(partyKey(partyId));
+    const persisted = raw ? (JSON.parse(raw) as PersistedParty) : null;
+    if (persisted?.leaderWallet === wallet) party.leaderId = entityId;
+    if (persisted?.leaderWallet === wallet) party.leaderWallet = wallet;
     // If leader hasn't spawned yet, assign first member as interim leader
-    if (!party.leaderId && party.memberIds.length > 0) {
+    if (!party.leaderId && party.memberIds.length > 0 && party.leaderWallet === wallet) {
       party.leaderId = party.memberIds[0];
     }
 
@@ -168,13 +201,44 @@ interface PartyInvite {
 }
 const INVITE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const pendingInvites = new Map<string, PartyInvite[]>(); // custodialWallet → invites
+const PARTY_INVITE_KEY_PREFIX = "wog:party:invites:";
 
-function freshInvites(wallet: string): PartyInvite[] {
+function partyInviteKey(wallet: string): string { return `${PARTY_INVITE_KEY_PREFIX}${wallet.toLowerCase()}`; }
+
+async function persistInvites(wallet: string, invites: PartyInvite[]): Promise<void> {
+  pendingInvites.set(wallet.toLowerCase(), invites);
+  const redis = getRedis();
+  if (!redis) return;
+  if (invites.length === 0) {
+    await redis.del(partyInviteKey(wallet));
+    return;
+  }
+
+  const latestCreatedAt = invites.reduce((latest, invite) => Math.max(latest, invite.createdAt), 0);
+  const ttlMs = Math.max(1, INVITE_TTL_MS - (Date.now() - latestCreatedAt));
+  await redis.set(partyInviteKey(wallet), JSON.stringify(invites), "PX", ttlMs);
+}
+
+async function freshInvites(wallet: string): Promise<PartyInvite[]> {
+  const normalized = wallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(partyInviteKey(normalized));
+      if (raw) {
+        const parsed = JSON.parse(raw) as PartyInvite[];
+        pendingInvites.set(normalized, parsed);
+      }
+    } catch {
+      // Fall back to in-memory cache
+    }
+  }
+
   const now = Date.now();
-  const list = (pendingInvites.get(wallet.toLowerCase()) ?? []).filter(
+  const list = (pendingInvites.get(normalized) ?? []).filter(
     (i) => now - i.createdAt < INVITE_TTL_MS,
   );
-  pendingInvites.set(wallet.toLowerCase(), list);
+  await persistInvites(normalized, list);
   return list;
 }
 
@@ -240,6 +304,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
     const party: Party = {
       id: partyId,
       leaderId,
+      leaderWallet: ((leader as any).walletAddress ?? "").toLowerCase(),
       memberIds: [leaderId],
       zoneId,
       createdAt: Date.now(),
@@ -514,6 +579,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       const party: Party = {
         id: partyId,
         leaderId: fromEntityId,
+        leaderWallet: (fromEntity.walletAddress ?? "").toLowerCase(),
         memberIds: [fromEntityId],
         zoneId: fromZoneId,
         createdAt: Date.now(),
@@ -546,10 +612,10 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       partyId,
       createdAt: Date.now(),
     };
-    const existing = freshInvites(toCustodialWallet);
+    const existing = await freshInvites(toCustodialWallet);
     // Dedupe: remove any existing invite from same party
     const deduped = existing.filter((i) => i.partyId !== partyId || i.fromEntityId !== fromEntityId);
-    pendingInvites.set(toCustodialWallet.toLowerCase(), [...deduped, invite]);
+    await persistInvites(toCustodialWallet.toLowerCase(), [...deduped, invite]);
 
     return reply.send({ success: true, inviteId: invite.id });
   });
@@ -558,7 +624,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
   server.get<{ Params: { custodialWallet: string } }>(
     "/party/invites/:custodialWallet",
     async (req, reply) => {
-      const invites = freshInvites(req.params.custodialWallet);
+      const invites = await freshInvites(req.params.custodialWallet);
       return reply.send({ invites });
     },
   );
@@ -576,11 +642,11 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       return reply.code(403).send({ error: "Not authorized to accept invites for this champion" });
     }
 
-    const invites = freshInvites(custodialWallet);
+    const invites = await freshInvites(custodialWallet);
     const invite = invites.find((i) => i.id === inviteId);
     if (!invite) return reply.code(404).send({ error: "Invite not found or expired" });
 
-    const party = parties.get(invite.partyId);
+    const party = parties.get(invite.partyId) ?? await loadPersistedParty(invite.partyId);
     if (!party) return reply.code(404).send({ error: "Party no longer exists" });
     if (party.memberIds.length >= 5) return reply.code(400).send({ error: "Party is full" });
 
@@ -597,7 +663,7 @@ export function registerPartyRoutes(server: FastifyInstance): void {
     persistParty(party);
 
     // Remove accepted invite
-    pendingInvites.set(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
+    await persistInvites(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
 
     return reply.send({ success: true, party });
   });
@@ -615,8 +681,8 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       return reply.code(403).send({ error: "Not authorized to decline invites for this champion" });
     }
 
-    const invites = freshInvites(custodialWallet);
-    pendingInvites.set(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
+    const invites = await freshInvites(custodialWallet);
+    await persistInvites(custodialWallet.toLowerCase(), invites.filter((i) => i.id !== inviteId));
     return reply.send({ success: true });
   });
 
@@ -650,10 +716,10 @@ export function registerPartyRoutes(server: FastifyInstance): void {
             classId: e.classId,
             raceId: e.raceId,
             walletAddress: e.walletAddress ?? null,
-            isLeader: mId === party.leaderId,
+            isLeader: (e.walletAddress?.toLowerCase() ?? null) === party.leaderWallet,
           };
         }
-        return { entityId: mId, name: "Offline", isLeader: mId === party.leaderId, level: 0, hp: 0, maxHp: 1 };
+        return { entityId: mId, name: "Offline", isLeader: false, level: 0, hp: 0, maxHp: 1 };
       });
 
       return reply.send({ inParty: true, partyId, party, members, entityId: ref.entityId, zoneId: ref.zoneId });
@@ -696,6 +762,8 @@ export function registerPartyRoutes(server: FastifyInstance): void {
       // Promote next member to leader
       if (ref.entityId === party.leaderId) {
         party.leaderId = party.memberIds[0];
+        const newLeader = getEntity(party.leaderId) as any;
+        party.leaderWallet = (newLeader?.walletAddress ?? "").toLowerCase();
       }
 
       persistParty(party);
@@ -712,6 +780,31 @@ export function getPartyMembers(playerId: string): string[] {
 
   const party = parties.get(partyId);
   return party ? party.memberIds : [playerId];
+}
+
+export async function restorePartiesFromRedis(): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
+
+  let partyIds = await redis.smembers(PARTY_IDS_KEY);
+  if (!Array.isArray(partyIds) || partyIds.length === 0) {
+    const legacyKeys = await redis.keys(`${PARTY_KEY_PREFIX}party_*`);
+    partyIds = legacyKeys.map((key) => key.slice(PARTY_KEY_PREFIX.length));
+  }
+  if (!Array.isArray(partyIds) || partyIds.length === 0) return 0;
+
+  let restored = 0;
+  for (const partyId of partyIds) {
+    const party = await loadPersistedParty(partyId);
+    if (!party) continue;
+    restored++;
+  }
+
+  if (restored > 0) {
+    console.log(`[party] Restored ${restored} persisted party record(s) from Redis`);
+  }
+
+  return restored;
 }
 
 // Helper to check if two players are in same party
@@ -749,6 +842,7 @@ export function addEntityToParty(leaderEntityId: string, newEntityId: string, zo
     const party: Party = {
       id: partyId,
       leaderId: leaderEntityId,
+      leaderWallet: ((getEntity(leaderEntityId) as any)?.walletAddress ?? "").toLowerCase(),
       memberIds: [leaderEntityId],
       zoneId,
       createdAt: Date.now(),

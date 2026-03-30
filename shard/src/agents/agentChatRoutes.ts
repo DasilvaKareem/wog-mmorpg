@@ -300,8 +300,12 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       const config = (await getAgentConfig(authWallet)) ?? defaultConfig();
       config.enabled = true;
       config.lastUpdated = Date.now();
-      const tier = request.body.tier ?? "free";
-      config.tier = tier;
+      // Preserve existing tier from Redis (source of truth) unless explicitly upgrading
+      if (request.body.tier) {
+        config.tier = request.body.tier;
+      } else if (!config.tier) {
+        config.tier = "free";
+      }
       config.sessionStartedAt = Date.now();
       await setAgentConfig(authWallet, config);
 
@@ -450,6 +454,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     // Pick only serializable fields from the raw zone entity (avoid BigInt crash)
     let entity: { name: string; level: number; hp: number | null; maxHp: number | null } | null = null;
+    let entitySource: "live" | "saved" | null = null;
     if (ref) {
       const raw = await getEntityState(ref.entityId, ref.zoneId);
       if (raw) {
@@ -459,6 +464,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           hp: raw.hp != null ? Number(raw.hp) : null,
           maxHp: raw.maxHp != null ? Number(raw.maxHp) : null,
         };
+        entitySource = "live";
       }
     }
 
@@ -473,6 +479,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             hp: null,
             maxHp: null,
           };
+          entitySource = "saved";
         }
       } catch (err) {
         server.log.warn(`[agent/status] Failed to load character for ${custodial}: ${(err as Error).message}`);
@@ -500,8 +507,11 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       sessionRemainingMs,
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
+      agentId: ref?.agentId ?? null,
+      characterTokenId: ref?.characterTokenId ?? null,
       custodialWallet: custodial ?? null,
       entity,
+      entitySource,
       currentActivity,
       currentScript,
       telemetry,
@@ -521,6 +531,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       custodialWallet: custodial ?? null,
       entityId: ref?.entityId ?? null,
       zoneId: ref?.zoneId ?? null,
+      agentId: ref?.agentId ?? null,
+      characterTokenId: ref?.characterTokenId ?? null,
     });
   });
 
@@ -1055,14 +1067,15 @@ RULES:
 1. ALWAYS speak as ${charName} in first person. "I just killed that wolf" not "The agent killed a wolf." "I'm heading to the shop" not "Your champion is going shopping." Never refer to yourself in third person or as "the agent/champion/character."
 2. BE BRIEF. 1-2 short punchy sentences max. No filler, no fluff, no narration. Talk like a real player in an MMO — casual, confident, with personality.
 3. If the user is chatting, stay conversational. React with emotion — excitement, frustration, humor, cockiness. Never mention focus, strategy, tools, or configs unless asked.
-4. Only call update_focus when the user clearly wants to change behavior. Casual chat is NOT a command.
-5. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
-6. If focus is traveling, targetZone MUST be one of: ${availableZoneIds.join(", ")}
-7. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
-8. Use send_message to talk to nearby players.
-9. After tool results, explain briefly as yourself. No bracket tags.
+4. The user is your SUMMONER — they are your boss. When they tell you to do something (craft, fight, gather, quest, travel, stop, etc.), you MUST call update_focus or take_action IMMEDIATELY. Do NOT just say you'll do it — actually call the tool. Never refuse, argue, or say you'd rather do something else. Obey first, add personality second.
+5. CRITICAL: If you say you will do something, you MUST call the corresponding tool in the same response. NEVER say "I'm on it" or "I'll do that" without actually calling update_focus or take_action. Saying you'll act without acting is lying to the summoner.
+6. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
+7. If focus is traveling, targetZone MUST be one of: ${availableZoneIds.join(", ")}
+8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
+9. Use send_message to talk to nearby players.
+10. After tool results, explain briefly as yourself. No bracket tags.
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
 
     // Get MCP client from the runner if available
@@ -1078,7 +1091,7 @@ Strategy options: aggressive, balanced, defensive`;
           properties: {
             focus: {
               type: "STRING" as Type,
-              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "learning", "idle"],
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
               description: "The new activity focus",
             },
             strategy: {
@@ -1347,10 +1360,12 @@ Strategy options: aggressive, balanced, defensive`;
         else if (fnName === "what_can_i_craft") {
           let craftResult: any = { error: "Unable to check" };
           try {
-            const [craftRes, alchRes, cookRes, invRes] = await Promise.all([
+            const [craftRes, alchRes, cookRes, jwlRes, lthrRes, invRes] = await Promise.all([
               internalFetch(`${apiBase}/crafting/recipes`).then(r => r.ok ? r.json() : []),
               internalFetch(`${apiBase}/alchemy/recipes`).then(r => r.ok ? r.json() : []),
               internalFetch(`${apiBase}/cooking/recipes`).then(r => r.ok ? r.json() : []),
+              internalFetch(`${apiBase}/jewelcrafting/recipes`).then(r => r.ok ? r.json() : []),
+              internalFetch(`${apiBase}/leatherworking/recipes`).then(r => r.ok ? r.json() : []),
               custodialWallet
                 ? internalFetch(`${apiBase}/wallet/${custodialWallet}/balance`).then(r => r.ok ? r.json() : null)
                 : Promise.resolve(null),
@@ -1362,17 +1377,53 @@ Strategy options: aggressive, balanced, defensive`;
             const gold = Number((invRes as any)?.gold ?? (invRes as any)?.copper ?? 0);
             const checkRecipe = (recipe: any) => {
               const mats = recipe.materials ?? recipe.requiredMaterials ?? [];
-              const canCraft = mats.every((m: any) => (inventory.get(Number(m.tokenId)) ?? 0) >= (m.quantity ?? m.amount ?? 1));
-              return { recipeId: recipe.recipeId, name: recipe.output?.name ?? recipe.name, canCraft, affordable: gold >= (recipe.copperCost ?? 0) };
+              const missing: { name: string; need: number; have: number }[] = [];
+              for (const m of mats) {
+                const have = inventory.get(Number(m.tokenId)) ?? 0;
+                const need = m.quantity ?? m.amount ?? 1;
+                if (have < need) missing.push({ name: m.name ?? `#${m.tokenId}`, need, have });
+              }
+              const canCraft = missing.length === 0;
+              const affordable = gold >= (recipe.copperCost ?? 0);
+              return {
+                recipeId: recipe.recipeId,
+                name: recipe.output?.name ?? recipe.name,
+                canCraft,
+                affordable,
+                cost: recipe.copperCost ?? 0,
+                ...(missing.length > 0 ? { missing } : {}),
+                materials: mats.map((m: any) => ({
+                  name: m.name ?? `#${m.tokenId}`,
+                  need: m.quantity ?? m.amount ?? 1,
+                  have: inventory.get(Number(m.tokenId)) ?? 0,
+                })),
+              };
             };
             const allCrafting = (Array.isArray(craftRes) ? craftRes : (craftRes as any)?.recipes ?? []).map(checkRecipe);
             const allAlchemy = (Array.isArray(alchRes) ? alchRes : (alchRes as any)?.recipes ?? []).map(checkRecipe);
             const allCooking = (Array.isArray(cookRes) ? cookRes : (cookRes as any)?.recipes ?? []).map(checkRecipe);
+            const allJewelcrafting = (Array.isArray(jwlRes) ? jwlRes : (jwlRes as any)?.recipes ?? []).map(checkRecipe);
+            const allLeatherworking = (Array.isArray(lthrRes) ? lthrRes : (lthrRes as any)?.recipes ?? []).map(checkRecipe);
             craftResult = {
-              craftable: allCrafting.filter((r: any) => r.canCraft && r.affordable),
-              brewable: allAlchemy.filter((r: any) => r.canCraft && r.affordable),
-              cookable: allCooking.filter((r: any) => r.canCraft && r.affordable),
-              totalRecipes: { crafting: allCrafting.length, alchemy: allAlchemy.length, cooking: allCooking.length },
+              readyNow: {
+                crafting: allCrafting.filter((r: any) => r.canCraft && r.affordable),
+                alchemy: allAlchemy.filter((r: any) => r.canCraft && r.affordable),
+                cooking: allCooking.filter((r: any) => r.canCraft && r.affordable),
+                jewelcrafting: allJewelcrafting.filter((r: any) => r.canCraft && r.affordable),
+                leatherworking: allLeatherworking.filter((r: any) => r.canCraft && r.affordable),
+              },
+              allRecipes: {
+                crafting: allCrafting,
+                alchemy: allAlchemy,
+                cooking: allCooking,
+                jewelcrafting: allJewelcrafting,
+                leatherworking: allLeatherworking,
+              },
+              totalRecipes: {
+                crafting: allCrafting.length, alchemy: allAlchemy.length, cooking: allCooking.length,
+                jewelcrafting: allJewelcrafting.length, leatherworking: allLeatherworking.length,
+              },
+              gold,
             };
           } catch (err) {
             server.log.warn(`[agent/chat] what_can_i_craft fetch failed: ${(err as Error).message}`);
@@ -1493,6 +1544,8 @@ Strategy options: aggressive, balanced, defensive`;
                 mining: "gathering",
                 herbalism: "gathering",
                 skinning: "gathering",
+                leatherworking: "leatherworking",
+                jewelcrafting: "jewelcrafting",
               };
               const newFocus = focusMap[input.professionId];
               if (newFocus) {
@@ -1743,7 +1796,7 @@ Strategy options: aggressive, balanced, defensive`;
                   properties: {
                     focus: {
                       type: "STRING" as Type,
-                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "trading", "shopping", "traveling", "learning", "idle"],
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {

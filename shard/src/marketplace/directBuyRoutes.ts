@@ -25,7 +25,10 @@ import {
   type Operation,
 } from "./operationRegistry.js";
 import {
-  handleMppCharge,
+  createMarketplacePaymentIntent,
+  deleteMarketplacePayment,
+  validateMarketplacePayment,
+  MARKETPLACE_PAYMENT_RAIL,
   markPaymentConfirmed,
   ensureIdempotentSettlement,
 } from "./marketplacePayments.js";
@@ -196,9 +199,10 @@ export function registerDirectBuyRoutes(server: FastifyInstance) {
 
   // ── POST /marketplace/direct/listings/:listingId/buy ──────────────
   //
-  // MPP 402 flow: first call returns 402 + WWW-Authenticate challenge.
-  // Client pays via Tempo, then replays the same request with the
-  // payment credential header. Second call settles the purchase.
+  // Direct thirdweb Pay flow:
+  // 1. Client calls this route to create a payment intent.
+  // 2. Client completes the Base USDC payment in the UI.
+  // 3. Client calls /buy/confirm to settle the purchase on SKALE.
   //
   server.post<{
     Params: { listingId: string };
@@ -247,24 +251,79 @@ export function registerDirectBuyRoutes(server: FastifyInstance) {
         });
       }
 
-      // Run MPP 402 charge flow against the raw Node request.
-      // First call (no credential) → 402 challenge written to response.
-      // Second call (with credential) → 200 + receipt.
-      const chargeResult = await handleMppCharge({
-        req: request.raw,
-        res: reply.raw,
+      const paymentIntent = await createMarketplacePaymentIntent({
+        wallet,
         amountCents: listing.priceUsd,
-        operationId: existingOp?.operationId ?? listingId,
         description: `WoG Marketplace: buy listing ${listingId}`,
       });
 
-      if (chargeResult.status === 402) {
-        // 402 response already written by mppx toNodeListener
-        return;
+      return reply.send({
+        ok: true,
+        status: "payment_required",
+        listingId,
+        ...paymentIntent,
+      });
+    }
+  );
+
+  server.post<{
+    Params: { listingId: string };
+    Body: { wallet: string; paymentId: string; transactionHash?: string };
+  }>(
+    "/marketplace/direct/listings/:listingId/buy/confirm",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = getAuthenticatedWallet(request);
+      const { wallet, paymentId, transactionHash } = request.body;
+      const { listingId } = request.params;
+
+      if (!authWallet || authWallet.toLowerCase() !== wallet?.toLowerCase()) {
+        return reply.code(403).send({ error: "Wallet mismatch" });
+      }
+      if (!paymentId) {
+        return reply.code(400).send({ error: "paymentId is required" });
       }
 
-      // Payment verified — settle the purchase
-      const { receipt } = chargeResult;
+      const listing = await getRawListing(listingId);
+      if (!listing) {
+        return reply.code(404).send({ error: "Listing not found" });
+      }
+      if (listing.status !== "active") {
+        return reply
+          .code(400)
+          .send({ error: `Listing is ${listing.status}, not active` });
+      }
+      if (listing.sellerWallet === wallet.toLowerCase()) {
+        return reply
+          .code(400)
+          .send({ error: "Cannot buy your own listing" });
+      }
+
+      let existingOp = await findOperationByKey(
+        "direct_sale",
+        listing.sellerWallet,
+        wallet,
+        listing.tokenId,
+        listingId
+      );
+      if (existingOp?.status === OperationStatus.SOLD) {
+        return reply.send({
+          ok: true,
+          operationId: existingOp.operationId,
+          status: "sold",
+        });
+      }
+
+      const receipt = await validateMarketplacePayment({
+        paymentId,
+        wallet,
+        transactionHash,
+      }).catch((err: Error) =>
+        reply.code(400).send({ error: err.message })
+      );
+      if (!receipt || "statusCode" in receipt) {
+        return;
+      }
 
       // Create or reuse operation
       let op = existingOp;
@@ -279,7 +338,8 @@ export function registerDirectBuyRoutes(server: FastifyInstance) {
           instanceId: listing.instanceId,
           ownerWallet: listing.sellerWallet,
           buyerWallet: wallet,
-          paymentRail: "tempo_mpp",
+          paymentRail: MARKETPLACE_PAYMENT_RAIL,
+          paymentReference: receipt.transactionHash ?? receipt.receiptId,
           listingId,
           status: OperationStatus.PAYMENT_CONFIRMED,
         });
@@ -287,7 +347,15 @@ export function registerDirectBuyRoutes(server: FastifyInstance) {
         await markPaymentConfirmed(op.operationId, receipt);
       }
 
-      return await settlePurchase(server, op, listing, wallet, reply);
+      try {
+        const result = await settlePurchase(server, op, listing, wallet);
+        await deleteMarketplacePayment(paymentId);
+        return reply.send(result);
+      } catch (err: any) {
+        return reply
+          .code(500)
+          .send({ error: "Settlement failed: " + err.message });
+      }
     }
   );
 
@@ -385,23 +453,20 @@ async function settlePurchase(
   server: FastifyInstance,
   op: Operation,
   listing: DirectListing,
-  buyerWallet: string,
-  reply: FastifyReply
-) {
+  buyerWallet: string
+): Promise<{ ok: true; operationId: string; status: "sold"; mintTx?: string }> {
   // Idempotency: already settled?
   if (await ensureIdempotentSettlement(op.operationId)) {
-    return reply.send({
+    return {
       ok: true,
       operationId: op.operationId,
       status: "sold",
-    });
+    };
   }
 
   const locked = await acquireOperationLock(op.operationId);
   if (!locked) {
-    return reply
-      .code(409)
-      .send({ error: "Settlement in progress, please retry" });
+    throw new Error("Settlement in progress, please retry");
   }
 
   try {
@@ -426,12 +491,12 @@ async function settlePurchase(
       buyerWallet,
     });
 
-    return reply.send({
+    return {
       ok: true,
       operationId: op.operationId,
       status: "sold",
       mintTx,
-    });
+    };
   } catch (err: any) {
     server.log.error(
       err,
@@ -440,9 +505,7 @@ async function settlePurchase(
     await updateOperationStatus(op.operationId, OperationStatus.FAILED, {
       failureReason: err.message,
     });
-    return reply
-      .code(500)
-      .send({ error: "Settlement failed: " + err.message });
+    throw err;
   } finally {
     await releaseOperationLock(op.operationId);
   }

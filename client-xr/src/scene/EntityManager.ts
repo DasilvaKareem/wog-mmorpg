@@ -206,7 +206,7 @@ function makeArmorMat(matType: ArmorMaterial, quality: string | undefined, opts?
 function addArmorPieces(
   group: THREE.Group, ent: Entity, cls: { sx: number; sy: number; sz: number; color: number },
   leftArm?: THREE.Group, rightArm?: THREE.Group, leftLeg?: THREE.Mesh, rightLeg?: THREE.Mesh,
-  rig?: CharacterRig | null, bodyMesh?: THREE.Mesh | null,
+  rig?: HumanoidRigLike | null, bodyMesh?: THREE.Mesh | null,
 ) {
   const eq = ent.equipment;
   if (!eq) return;
@@ -696,7 +696,10 @@ function makeFloatingText(text: string, color: string): THREE.Sprite {
 }
 
 import { CharacterRig } from "./CharacterRig.js";
+import { AvatarAssets } from "./AvatarAssets.js";
 import { AnimationLibrary } from "./AnimationLibrary.js";
+
+type HumanoidRigLike = CharacterRig;
 
 // ── Animation types ─────────────────────────────────────────────────
 
@@ -788,11 +791,18 @@ function attackAnimForClass(classId: string | undefined): AnimName {
   }
 }
 
+function shouldUseSwordShieldAttack(ent: Entity): boolean {
+  if (!ent.equipment?.weapon || !ent.equipment?.offhand) return false;
+  return inferWeaponType(ent.equipment.weapon.name ?? "sword") === "sword";
+}
+
 interface FloatingText {
   sprite: THREE.Sprite;
   elapsed: number;
   startY: number;
 }
+
+type EntityLifeState = "alive" | "dying" | "dead-hidden";
 
 // ── Entity object tracking ──────────────────────────────────────────
 
@@ -802,6 +812,9 @@ interface EntityObject {
   targetZ: number;
   prevTargetX: number;
   prevTargetZ: number;
+  velocityX: number;
+  velocityZ: number;
+  targetAge: number;
   prevX: number;
   prevZ: number;
   targetYaw: number;
@@ -814,9 +827,10 @@ interface EntityObject {
   isMoving: boolean;
   movingSmooth: number;
   // Rig + animation
-  rig: CharacterRig | null;
+  rig: HumanoidRigLike | null;
   mixer: THREE.AnimationMixer | null;
   actions: Map<string, THREE.AnimationAction>;
+  clipOverrides: Map<string, THREE.AnimationClip>;
   currentAnim: AnimName | null;
   /** Bones needed for old-style references (armor attach, etc.) */
   leftLeg: THREE.Mesh | null;
@@ -827,6 +841,8 @@ interface EntityObject {
   hasGlbModel: boolean;
   /** Timer for simple GLB attack animation (lunge + pulse) */
   glbAttackTimer: number;
+  lifeState: EntityLifeState;
+  lifeToken: number;
 }
 
 export class EntityManager {
@@ -836,6 +852,7 @@ export class EntityManager {
   private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
+  private avatarAssets = new AvatarAssets();
 
   constructor() {
     this.group.name = "entities";
@@ -869,37 +886,42 @@ export class EntityManager {
       const pos = this.toLocal(ent.x, ent.y);
 
       if (existing) {
-        existing.prevTargetX = existing.targetX;
-        existing.prevTargetZ = existing.targetZ;
-        existing.targetX = pos.x;
-        existing.targetZ = pos.z;
+        const wasAlive = existing.lifeState === "alive";
+        const isRespawning = existing.lifeState !== "alive" && ent.hp > 0;
+
+        if (isRespawning) {
+          this.triggerRespawn(existing, ent, pos);
+        } else if (wasAlive) {
+          const dx = pos.x - existing.targetX;
+          const dz = pos.z - existing.targetZ;
+          existing.prevTargetX = existing.targetX;
+          existing.prevTargetZ = existing.targetZ;
+          existing.targetX = pos.x;
+          existing.targetZ = pos.z;
+          existing.velocityX = dx;
+          existing.velocityZ = dz;
+          existing.targetAge = 0;
+        }
 
         // Detect HP changes → trigger animations
         const hpDelta = ent.hp - existing.prevHp;
-        if (hpDelta < 0 && existing.prevHp > 0) {
+        if (wasAlive && hpDelta < 0 && existing.prevHp > 0) {
           // Took damage
           this.triggerDamage(existing, -hpDelta);
-        } else if (hpDelta > 0) {
+        } else if (wasAlive && hpDelta > 0) {
           // Healed
           this.triggerHeal(existing, hpDelta);
         }
 
         // Death detection
-        if (ent.hp <= 0 && existing.prevHp > 0) {
+        if (wasAlive && ent.hp <= 0 && existing.prevHp > 0) {
           this.triggerDeath(existing);
         }
 
         existing.prevHp = ent.hp;
         existing.entity = ent;
 
-        // Update HP bar
-        if (existing.hpBarFg && ent.maxHp > 0) {
-          const hpRatio = Math.max(0, ent.hp / ent.maxHp);
-          existing.hpBarFg.scale.x = Math.max(0.01, hpRatio);
-          (existing.hpBarFg.material as THREE.MeshBasicMaterial).color.setHex(
-            hpRatio > 0.5 ? 0x44cc44 : hpRatio > 0.25 ? 0xcccc44 : 0xcc4444
-          );
-        }
+        this.updateHpBar(existing, ent);
       } else {
         const obj = this.createEntity(ent);
         this.entities.set(id, obj);
@@ -919,66 +941,79 @@ export class EntityManager {
   update(dt: number, camera?: THREE.Camera) {
     // Constant-speed move toward target (units/sec, tuned to feel smooth at 1s poll)
     const MOVE_SPEED = 4.0;
+    const EXTRAPOLATE_MAX = 0.35;
     const step = MOVE_SPEED * dt;
 
     for (const obj of this.entities.values()) {
       const g = obj.group;
+      const isAlive = obj.lifeState === "alive";
+      obj.targetAge += dt;
 
-      // ── Smooth constant-speed interpolation ──
-      const prevPosX = g.position.x;
-      const prevPosZ = g.position.z;
+      if (isAlive) {
+        // ── Smooth constant-speed interpolation ──
+        const prevPosX = g.position.x;
+        const prevPosZ = g.position.z;
 
-      const toX = obj.targetX - g.position.x;
-      const toZ = obj.targetZ - g.position.z;
-      const dist = Math.sqrt(toX * toX + toZ * toZ);
+        const extrapolateT = Math.min(obj.targetAge, EXTRAPOLATE_MAX);
+        const desiredX = obj.targetX + obj.velocityX * extrapolateT;
+        const desiredZ = obj.targetZ + obj.velocityZ * extrapolateT;
 
-      if (dist > 0.01) {
-        if (dist <= step) {
-          g.position.x = obj.targetX;
-          g.position.z = obj.targetZ;
-        } else {
-          const f = step / dist;
-          g.position.x += toX * f;
-          g.position.z += toZ * f;
+        const toX = desiredX - g.position.x;
+        const toZ = desiredZ - g.position.z;
+        const dist = Math.sqrt(toX * toX + toZ * toZ);
+
+        if (dist > 0.01) {
+          if (dist <= step) {
+            g.position.x = desiredX;
+            g.position.z = desiredZ;
+          } else {
+            const f = step / dist;
+            g.position.x += toX * f;
+            g.position.z += toZ * f;
+          }
         }
-      }
 
-      // Sample terrain elevation so entities sit on the ground
-      if (this.elevationProvider) {
-        const targetY = this.elevationProvider.getElevationAt(g.position.x, g.position.z);
-        g.position.y += (targetY - g.position.y) * Math.min(8 * dt, 1);
-      }
+        // Sample terrain elevation so entities sit on the ground
+        if (this.elevationProvider) {
+          const targetY = this.elevationProvider.getElevationAt(g.position.x, g.position.z);
+          g.position.y += (targetY - g.position.y) * Math.min(8 * dt, 1);
+        }
 
-      // Compute facing direction from actual movement delta
-      const dx = g.position.x - prevPosX;
-      const dz = g.position.z - prevPosZ;
-      const moveDist = Math.sqrt(dx * dx + dz * dz);
+        // Compute facing direction from actual movement delta
+        const dx = g.position.x - prevPosX;
+        const dz = g.position.z - prevPosZ;
+        const moveDist = Math.sqrt(dx * dx + dz * dz);
 
-      // Track moving state with hysteresis
-      obj.isMoving = moveDist > 0.001;
-      const targetBlend = obj.isMoving ? 1 : 0;
-      obj.movingSmooth += (targetBlend - obj.movingSmooth) * Math.min(8 * dt, 1);
+        // Track moving state with hysteresis
+        obj.isMoving = moveDist > 0.001 || Math.hypot(obj.velocityX, obj.velocityZ) > 0.05;
+        const targetBlend = obj.isMoving ? 1 : 0;
+        obj.movingSmooth += (targetBlend - obj.movingSmooth) * Math.min(8 * dt, 1);
 
-      // Only update yaw if actually moving
-      if (moveDist > 0.001) {
-        obj.targetYaw = Math.atan2(dx, dz);
-      }
+        // Only update yaw if actually moving
+        if (moveDist > 0.001) {
+          obj.targetYaw = Math.atan2(dx, dz);
+        }
 
-      // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
-      const curAnim = obj.currentAnim;
-      const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
-      if (freeYaw) {
-        let yawDiff = obj.targetYaw - g.rotation.y;
-        while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
-        while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
-        g.rotation.y += yawDiff * Math.min(10 * dt, 1);
+        // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
+        const curAnim = obj.currentAnim;
+        const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
+        if (freeYaw) {
+          let yawDiff = obj.targetYaw - g.rotation.y;
+          while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
+          while (yawDiff < -Math.PI) yawDiff += Math.PI * 2;
+          g.rotation.y += yawDiff * Math.min(10 * dt, 1);
+        }
+      } else {
+        obj.isMoving = false;
+        obj.movingSmooth += (0 - obj.movingSmooth) * Math.min(8 * dt, 1);
       }
 
       // ── Animation blending via mixer ──
       if (obj.mixer && obj.rig) {
         // Pick the right locomotion animation
+        const curAnim = obj.currentAnim;
         const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "idle";
-        if (!isOneShot) {
+        if (isAlive && !isOneShot) {
           const wantAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
           if (curAnim !== wantAnim) {
             this.playAnimation(obj, wantAnim, true);
@@ -988,7 +1023,7 @@ export class EntityManager {
       }
 
       // ── GLB mob attack animation (lunge only, no scale change) ──
-      if (obj.hasGlbModel && obj.glbAttackTimer > 0) {
+      if (isAlive && obj.hasGlbModel && obj.glbAttackTimer > 0) {
         obj.glbAttackTimer -= dt;
         const t = Math.max(0, obj.glbAttackTimer);
         const total = 0.4;
@@ -1011,7 +1046,7 @@ export class EntityManager {
     }
 
     // ── Entity push-apart (prevent visual overlap) ──
-    const entArr = Array.from(this.entities.values());
+    const entArr = Array.from(this.entities.values()).filter((obj) => obj.lifeState === "alive" && obj.group.visible);
     const PUSH_RADIUS = 0.6;
     const PUSH_STRENGTH = 3.0;
     for (let i = 0; i < entArr.length; i++) {
@@ -1074,6 +1109,46 @@ export class EntityManager {
     }
   }
 
+  private forEachEntityMaterial(obj: EntityObject, fn: (mat: THREE.Material) => void) {
+    obj.group.traverse((child) => {
+      if (!(child instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const mat of materials) {
+        if (mat) fn(mat);
+      }
+    });
+  }
+
+  private snapToPosition(obj: EntityObject, x: number, z: number) {
+    const y = this.elevationProvider?.getElevationAt(x, z) ?? obj.group.position.y;
+    obj.group.position.set(x, y, z);
+  }
+
+  private updateHpBar(obj: EntityObject, ent: Entity) {
+    if (!obj.hpBarFg || ent.maxHp <= 0) return;
+    const hpRatio = Math.max(0, ent.hp / ent.maxHp);
+    obj.hpBarFg.scale.x = Math.max(0.01, hpRatio);
+    (obj.hpBarFg.material as THREE.MeshBasicMaterial).color.setHex(
+      hpRatio > 0.5 ? 0x44cc44 : hpRatio > 0.25 ? 0xcccc44 : 0xcc4444
+    );
+  }
+
+  private stopAnimations(obj: EntityObject) {
+    for (const action of obj.actions.values()) {
+      action.stop();
+    }
+    obj.mixer?.stopAllAction();
+  }
+
+  private getClipForEntity(obj: EntityObject, name: AnimName): THREE.AnimationClip | null {
+    const override = obj.clipOverrides.get(name);
+    if (override) return override;
+    if (!obj.rig) {
+      return AnimationLibrary.get(name);
+    }
+    return AnimationLibrary.get(name);
+  }
+
   // ── Animation playback helpers ──────────────────────────────────────
 
   private playAnimation(obj: EntityObject, name: AnimName, loop: boolean, onFinish?: () => void) {
@@ -1082,8 +1157,17 @@ export class EntityManager {
     // Get or create the action
     let action = obj.actions.get(name);
     if (!action) {
-      const clip = AnimationLibrary.get(name);
-      if (!clip) return;
+      const clip = this.getClipForEntity(obj, name);
+      if (!clip) {
+        if (!loop) {
+          onFinish?.();
+          const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          if (name !== nextAnim) {
+            this.playAnimation(obj, nextAnim, true);
+          }
+        }
+        return;
+      }
       action = obj.mixer.clipAction(clip);
       obj.actions.set(name, action);
     }
@@ -1241,38 +1325,83 @@ export class EntityManager {
   }
 
   private triggerDeath(obj: EntityObject) {
+    obj.lifeState = "dying";
+    obj.lifeToken += 1;
+    const deathToken = obj.lifeToken;
+    obj.isMoving = false;
+    obj.movingSmooth = 0;
+    obj.velocityX = 0;
+    obj.velocityZ = 0;
+    obj.targetAge = 0;
+    obj.glbAttackTimer = 0;
+    this.removeSpeechBubble(obj.entity.id);
+
     this.playOneShot(obj, "death", () => {
+      if (obj.lifeState !== "dying" || obj.lifeToken !== deathToken) return;
+
       // After death anim: fade out completely then hide (despawn)
       const startTime = performance.now();
       const fadeDuration = 600; // ms
-      // Make all materials transparent for fade
-      obj.group.traverse((child) => {
-        if ((child as THREE.Mesh).material) {
-          const mat = (child as THREE.Mesh).material as THREE.Material;
-          mat.transparent = true;
+      this.forEachEntityMaterial(obj, (mat) => {
+        if (mat.userData.deathOriginalTransparent === undefined) {
+          mat.userData.deathOriginalTransparent = mat.transparent;
         }
+        mat.transparent = true;
       });
+
       const fadeOut = () => {
+        if (obj.lifeState !== "dying" || obj.lifeToken !== deathToken) return;
+
         const elapsed = performance.now() - startTime;
         const t = Math.min(1, elapsed / fadeDuration);
         const opacity = 1 - t;
         // Also sink slightly into the ground
         obj.group.position.y -= 0.003;
-        obj.group.traverse((child) => {
-          if ((child as THREE.Mesh).material) {
-            const mat = (child as THREE.Mesh).material as THREE.Material;
-            mat.opacity = opacity;
-          }
+        this.forEachEntityMaterial(obj, (mat) => {
+          mat.opacity = opacity;
         });
         if (t < 1) {
           requestAnimationFrame(fadeOut);
         } else {
           // Fully despawned — hide until server removes or respawns
+          obj.lifeState = "dead-hidden";
           obj.group.visible = false;
         }
       };
       requestAnimationFrame(fadeOut);
     });
+  }
+
+  private triggerRespawn(obj: EntityObject, ent: Entity, pos: { x: number; z: number }) {
+    obj.lifeState = "alive";
+    obj.lifeToken += 1;
+    obj.group.visible = true;
+    obj.glbAttackTimer = 0;
+    obj.isMoving = false;
+    obj.movingSmooth = 0;
+    obj.velocityX = 0;
+    obj.velocityZ = 0;
+    obj.targetAge = 0;
+
+    this.forEachEntityMaterial(obj, (mat) => {
+      mat.opacity = 1;
+      mat.transparent = Boolean(mat.userData.deathOriginalTransparent);
+    });
+
+    this.stopAnimations(obj);
+    obj.currentAnim = null;
+
+    obj.prevTargetX = pos.x;
+    obj.prevTargetZ = pos.z;
+    obj.targetX = pos.x;
+    obj.targetZ = pos.z;
+    this.snapToPosition(obj, pos.x, pos.z);
+
+    if (obj.mixer && obj.rig) {
+      this.playAnimation(obj, "idle", true);
+    }
+
+    this.updateHpBar(obj, ent);
   }
 
   /** Trigger gather/craft anims from zone events */
@@ -1371,8 +1500,9 @@ export class EntityManager {
     let rightLeg: THREE.Mesh | null = null;
     let leftArm: THREE.Group | null = null;
     let rightArm: THREE.Group | null = null;
-    let rig: CharacterRig | null = null;
+    let rig: HumanoidRigLike | null = null;
     let mixer: THREE.AnimationMixer | null = null;
+    let clipOverrides = new Map<string, THREE.AnimationClip>();
 
     switch (info.style) {
       case "humanoid": {
@@ -1386,6 +1516,7 @@ export class EntityManager {
         leftArm = result.leftArm;
         rightArm = result.rightArm;
         rig = result.rig;
+        clipOverrides = result.clipOverrides;
         break;
       }
       case "mob": {
@@ -1397,6 +1528,7 @@ export class EntityManager {
         leftArm = result.leftArm;
         rightArm = result.rightArm;
         rig = result.rig;
+        clipOverrides = result.clipOverrides;
         break;
       }
       case "resource":
@@ -1443,16 +1575,25 @@ export class EntityManager {
       group.add(label);
     }
 
-    return {
+    const obj: EntityObject = {
       group, targetX: pos.x, targetZ: pos.z, prevTargetX: pos.x, prevTargetZ: pos.z,
+      velocityX: 0, velocityZ: 0, targetAge: 0,
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
       prevHp: ent.hp, bodyMesh, headMesh,
       isMoving: false, movingSmooth: 0,
-      rig, mixer, actions: new Map(), currentAnim: null,
+      rig, mixer, actions: new Map(), clipOverrides, currentAnim: null,
       leftLeg, rightLeg, leftArm, rightArm,
       hasGlbModel: !!(group as any)._hasGlbModel,
       glbAttackTimer: 0,
+      lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
+      lifeToken: 0,
     };
+
+    if (ent.hp <= 0) {
+      obj.group.visible = false;
+    }
+
+    return obj;
   }
 
   // ── Hair builder (bone-relative: Y=0 is head center) ─────────────
@@ -1593,36 +1734,27 @@ export class EntityManager {
     }
   }
 
+  private createHumanoidRig(scale = 1): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+    return {
+      rig: new CharacterRig({ scale }),
+      clipOverrides: new Map(),
+    };
+  }
+
   // ── Player ────────────────────────────────────────────────────────
 
-  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
-    const skinHex = SKIN_COLORS[ent.skinColor ?? "medium"] ?? 0xd4a574;
-    const classId = ent.classId ?? "warrior";
-    const cls = CLASS_BODY[classId] ?? CLASS_BODY.warrior;
-    const isFemale = ent.gender === "female";
-    const race = (ent.raceId ?? "human").toLowerCase();
-    const isElf = race === "elf";
-    const isDwarf = race === "dwarf";
-
-    // Race body modifiers
-    const raceScale = isDwarf ? 0.78 : isElf ? 1.12 : 1.0;
-    const raceWidthX = isDwarf ? 1.25 : isElf ? 0.9 : 1.0;
-    const raceWidthZ = isDwarf ? 1.15 : isElf ? 0.9 : 1.0;
-
-    // Gender body modifiers
-    const gsx = (isFemale ? 0.88 : 1.0) * raceWidthX;
-    const gsy = (isFemale ? 0.95 : 1.0) * raceScale;
-    const gsz = (isFemale ? 0.92 : 1.0) * raceWidthZ;
-    const armScale = (isFemale ? 0.9 : 1.0) * raceScale;
-    const headScale = isFemale ? 0.95 : isDwarf ? 1.05 : 1.0;
+  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+    const avatar = this.avatarAssets.resolvePlayer(ent);
+    const cls = avatar.classBody;
+    const { bodyScale, armScale, headScale, raceScale } = avatar.morphology;
+    const { skinHex, hairHex, eyeHex } = avatar.colors;
+    const { isFemale, isElf, isDwarf, hairStyle } = avatar.features;
 
     // ── Build skeleton ──
-    const rig = new CharacterRig({
-      scale: raceScale,
-      shoulderWidth: 0.3 * cls.sx * gsx,
-      hipWidth: (isFemale ? 0.12 : 0.1) * raceWidthX,
-      isFemale,
-    });
+    const { rig, clipOverrides } = this.createHumanoidRig(raceScale);
+    if (shouldUseSwordShieldAttack(ent)) {
+      clipOverrides.set("attack", AnimationLibrary.get("swordshieldattack"));
+    }
     group.add(rig.rootBone);
 
     // ── Attach visual meshes to bones ──
@@ -1630,7 +1762,7 @@ export class EntityManager {
     // Body → Chest bone
     const bodyMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: cls.color });
     const body = new THREE.Mesh(bodyGeo, bodyMat);
-    body.scale.set(cls.sx * gsx, cls.sy * gsy, cls.sz * gsz);
+    body.scale.set(bodyScale.x, bodyScale.y, bodyScale.z);
     body.castShadow = true;
     rig.chest.add(body);
 
@@ -1640,7 +1772,6 @@ export class EntityManager {
     rig.head.add(head);
 
     // Eyes → Head bone
-    const eyeHex = EYE_COLORS[ent.eyeColor ?? "brown"] ?? 0x6b3a1f;
     const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
     for (const dx of [-0.08, 0.08]) {
       const eye = new THREE.Mesh(eyeGeo, eyeMat);
@@ -1649,11 +1780,9 @@ export class EntityManager {
     }
 
     // Hair → Head bone
-    const style = ent.hairStyle ?? "short";
-    if (style !== "bald") {
-      const hairHex = HAIR_COLORS[style] ?? 0x4a3728;
+    if (hairStyle !== "bald") {
       const hairMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: hairHex });
-      this.buildHairOnBone(rig.head, style, hairMat);
+      this.buildHairOnBone(rig.head, hairStyle, hairMat);
     }
 
     // Race-specific ear features → Head bone
@@ -1734,23 +1863,23 @@ export class EntityManager {
 
       // Position weapons outside body — Z pushes forward, X pushes outward from hip
       if (wType === "bow") {
-        wpn.position.set(0.05, -0.1, 0.15);
-        wpn.rotation.set(0, 0.3, 0);
+        wpn.position.set(0.100, 0.020, -0.110);
+        wpn.rotation.set(0.408, 1.458, 0.000);
       } else if (wType === "staff") {
-        wpn.position.set(0.05, 0.15, 0.12);
-        wpn.rotation.set(0.05, 0, 0.05);
+        wpn.position.set(0.030, 0.160, 0.070);
+        wpn.rotation.set(0.308, 0.000, 0.050);
       } else if (wType === "axe") {
         wpn.position.set(-0.020, 0.140, 0.190);
         wpn.rotation.set(0.808, -1.342, -0.142);
       } else if (wType === "mace") {
-        wpn.position.set(0.05, 0, 0.12);
-        wpn.rotation.set(0.1, 0, -0.1);
+        wpn.position.set(0.050, 0.090, 0.190);
+        wpn.rotation.set(1.058, 0.558, -0.100);
       } else if (wType === "pickaxe") {
-        wpn.position.set(0.05, 0.05, 0.12);
-        wpn.rotation.set(0.15, 0, -0.1);
+        wpn.position.set(0.040, 0.070, 0.230);
+        wpn.rotation.set(1.158, 0.000, -0.100);
       } else if (wType === "dagger") {
-        wpn.position.set(0.03, -0.05, 0.1);
-        wpn.rotation.set(0.1, 0, -0.1);
+        wpn.position.set(0.000, 0.020, 0.070);
+        wpn.rotation.set(1.308, 0.000, -0.100);
       } else {
         // Sword — tuned via Equipment Tuner
         wpn.position.set(0.000, 0.000, 0.100);
@@ -1765,8 +1894,8 @@ export class EntityManager {
       const shieldQuality = ent.equipment.offhand.quality ?? "common";
       const shieldColor = QUALITY_COLORS[shieldQuality] ?? cls.color;
       const s = new THREE.Mesh(shieldGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: shieldColor }));
-      s.position.set(-0.05, -0.05, 0.18);
-      s.rotation.y = 0.3;
+      s.position.set(-0.090, 0.050, 0.030);
+      s.rotation.set(0.558, 0.108, 0.000);
       s.userData.equipSlot = "shield";
       rig.lHand.add(s);
     }
@@ -1778,12 +1907,12 @@ export class EntityManager {
     // Procedural armor pieces — pass rig so pieces attach to bones
     addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig, body);
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides };
   }
 
   // ── Mob ───────────────────────────────────────────────────────────
 
-  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
+  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
     const isBoss = ent.type === "boss";
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
@@ -1795,13 +1924,21 @@ export class EntityManager {
         const model = this.envAssets.place(assetName, 0, 0, 0);
         if (model) {
           model.name = "glb_mob";
+          model.traverse((child) => {
+            if (!(child instanceof THREE.Mesh)) return;
+            if (Array.isArray(child.material)) {
+              child.material = child.material.map((mat) => mat.clone());
+            } else if (child.material) {
+              child.material = child.material.clone();
+            }
+          });
           group.add(model);
           // Return dummy rig refs — GLB mobs don't use the bone animation system
           const dummyMesh = new THREE.Mesh();
           const dummyGroup = new THREE.Group();
           const rig = new CharacterRig({ scale: s });
           (group as any)._hasGlbModel = true;
-          return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig };
+          return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig, clipOverrides: new Map() };
         }
       }
     }
@@ -1874,18 +2011,21 @@ export class EntityManager {
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides: new Map() };
   }
 
   // ── NPC ───────────────────────────────────────────────────────────
 
-  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: CharacterRig } {
+  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+    const avatar = this.avatarAssets.resolveNpc(ent, color);
+    const { skinHex, eyeHex, hairHex } = avatar.colors;
+    const { hairStyle } = avatar.features;
     const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
 
-    const rig = new CharacterRig({
-      shoulderWidth: 0.27,
-      hipWidth: 0.09,
-    });
+    const { rig, clipOverrides } = this.createHumanoidRig(1);
+    if (shouldUseSwordShieldAttack(ent)) {
+      clipOverrides.set("attack", AnimationLibrary.get("swordshieldattack"));
+    }
     group.add(rig.rootBone);
 
     // Legs → thigh on hip bones, shin on knee bones
@@ -1909,13 +2049,11 @@ export class EntityManager {
     rig.chest.add(body);
 
     // Head → Head bone
-    const skinHex = ent.skinColor ? (SKIN_COLORS[ent.skinColor] ?? color) : color;
     const skinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
     const head = new THREE.Mesh(headGeo, skinMat);
     rig.head.add(head);
 
     if (ent.eyeColor) {
-      const eyeHex = EYE_COLORS[ent.eyeColor] ?? 0x333333;
       const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
       for (const dx of [-0.07, 0.07]) {
         const eye = new THREE.Mesh(eyeGeo, eyeMat);
@@ -1923,8 +2061,8 @@ export class EntityManager {
         rig.head.add(eye);
       }
     }
-    if (ent.hairStyle && ent.hairStyle !== "bald") {
-      const h = new THREE.Mesh(hairShortGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: HAIR_COLORS[ent.hairStyle] ?? 0x4a3728 }));
+    if (hairStyle !== "bald") {
+      const h = new THREE.Mesh(hairShortGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: hairHex }));
       h.position.set(0, 0.1, 0);
       rig.head.add(h);
     }
@@ -1959,7 +2097,7 @@ export class EntityManager {
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides };
   }
 
   // ── Resource node ─────────────────────────────────────────────────

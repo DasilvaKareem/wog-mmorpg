@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { playSoundEffect } from "@/lib/soundEffects";
 import { cn } from "@/lib/utils";
 
 type ToastKind = "success" | "error" | "info";
@@ -20,6 +21,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): Reac
 
   const notify = React.useCallback((message: string, kind: ToastKind = "info") => {
     setToast({ message, kind });
+    playSoundEffect("ui_notification");
   }, []);
 
   React.useEffect(() => {

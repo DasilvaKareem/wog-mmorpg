@@ -1,0 +1,125 @@
+{
+  "meta": {
+    "id": "viridian-prospects",
+    "title": "Viridian Prospects",
+    "summary": "Authored quest scenes for Prospector Helga's mining and steelmaking line in the Viridian Range.",
+    "zoneIds": ["viridian-range"],
+    "tags": ["viridian-range", "authored", "prospecting", "ore"],
+    "startingSceneId": "helga_prospect"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_prospect",
+        "npcName": "Prospector Helga",
+        "title": "Prospector Helga and the Upper Veins",
+        "idleText": "A mountain with ore is still just a mountain if no one can work it. If I have nothing for you, then either the claim is holding or the next problem hasn't climbed high enough yet.",
+        "stages": [
+          {
+            "stageId": "viridian_helga_intro",
+            "questId": "viridian_helga_intro",
+            "available": {
+              "promptText": "These mountains are rich enough to make fools brave and corpses expensive. If you're interested in a partnership, start by learning the difference between a vein and a trap.",
+              "acceptLabel": "Tell me the terms.",
+              "acceptedText": "Good. Then understand this first: prospecting is logistics disguised as greed.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What makes your claim different?",
+              "detailsText": "I don't worship ore. I plan around what it costs to extract, defend, refine, and move. That's why my stakes still stand.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Partnerships survive better on clear expectations than charm.",
+              "freeformPrompt": "Ask Helga what you should understand first about her claim.",
+              "freeformPlaceholder": "Example: What's the real problem up here besides the ore?",
+              "freeformFallback": "Helga taps a rock face with her hammer. \"Ask one useful thing.\""
+            },
+            "completedText": "Helga has laid out the gamble. Now she wants proof you can make the mountain pay."
+          },
+          {
+            "stageId": "viridian_helga_ore",
+            "questId": "viridian_helga_ore",
+            "available": {
+              "promptText": "Iron Ore from the upper veins is the backbone of every army worth naming. Bring me five and prove the claim still beats the beasts.",
+              "acceptLabel": "I'll tap the vein.",
+              "acceptedText": "Five Iron Ore. Bring me the kind of haul that justifies the climb.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why focus on iron first?",
+              "detailsText": "Because iron is infrastructure. Fancy ore impresses merchants; iron keeps civilization from forgetting how to equip itself.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Good miners think about the route out before the first swing in.",
+              "freeformPrompt": "Tell Helga what you need before mining the upper veins.",
+              "freeformPlaceholder": "Example: What makes the upper veins worth the risk?",
+              "freeformFallback": "Helga squints at you. \"Ask about the haul or go get it.\""
+            },
+            "active": {
+              "promptText": "The ore run isn't complete. Bring back the Iron Ore and then we can talk about why the camps keep getting wrecked.",
+              "primaryLabel": "The ore is secured.",
+              "resultText": "Good. That keeps the claim honest. Unfortunately, ore attracts attention as reliably as blood does.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Iron Ore from the upper veins before the claim loses the route.",
+              "declineLabel": "Later.",
+              "declineText": "Veins don't disappear. Access does."
+            },
+            "completedText": "The ore haul is done. Helga's next problem has fur and terrible timing."
+          },
+          {
+            "stageId": "viridian_helga_clear",
+            "questId": "viridian_helga_clear",
+            "available": {
+              "promptText": "Mountain Yetis wrecked my last two camps because they understand weak infrastructure when they see it. I want them taught otherwise.",
+              "acceptLabel": "I'll clear the claim jumpers.",
+              "acceptedText": "Three Mountain Yetis. Remind them the camps are not up for adoption.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the Yetis matter to the claim?",
+              "detailsText": "Because camps are capital in physical form. Lose the camp and every future haul gets more expensive before it even starts.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Camp defense is accounting with claws in it.",
+              "freeformPrompt": "Tell Helga what you need before dealing with the Yetis.",
+              "freeformPlaceholder": "Example: What part of the camp do they ruin first?",
+              "freeformFallback": "Helga snorts. \"Ask clearly or go teach them.\""
+            },
+            "active": {
+              "promptText": "The Yetis are still taking liberties with my equipment. Finish the clear-out.",
+              "primaryLabel": "The camp is safe.",
+              "resultText": "Good. Now the claim can breathe long enough for the only part I actually enjoy: turning ore into something worth selling.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Mountain Yetis threatening Helga's camps and route security.",
+              "declineLabel": "Later.",
+              "declineText": "Claims left undefended become stories told by other people."
+            },
+            "completedText": "The camp pressure is reduced. Helga's last test is whether you can turn raw gain into actual value."
+          },
+          {
+            "stageId": "viridian_helga_forge",
+            "questId": "viridian_helga_forge",
+            "available": {
+              "promptText": "Good ore means nothing if it never becomes steel. Forge the alloys and prove you understand the difference between a haul and a business.",
+              "acceptLabel": "I'll make the steel.",
+              "acceptedText": "Two Steel Alloys. Quality work only, or don't bother bringing it back.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why end on steel instead of more mining?",
+              "detailsText": "Because extraction is only the first half of a claim's intelligence. Refinement is where value stops being theoretical.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final work should sound like standards, not enthusiasm.",
+              "freeformPrompt": "Tell Helga what you need before forging the Steel Alloys.",
+              "freeformPlaceholder": "Example: What separates acceptable steel from good steel here?",
+              "freeformFallback": "Helga folds her arms. \"Ask one proper smithing question, or get to the forge.\""
+            },
+            "active": {
+              "promptText": "The forge work still isn't done. Bring me the Steel Alloys and then we'll call this partnership productive.",
+              "primaryLabel": "The steel is finished.",
+              "resultText": "Good. That's the difference between scavenging and industry. You might actually be worth the split.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Two Steel Alloys forged well enough to justify the extraction effort behind them.",
+              "declineLabel": "Later.",
+              "declineText": "Ore sitting in a sack is not profit."
+            },
+            "completedText": "Helga has already judged the steel fit. The claim is in better hands than it was."
+          }
+        ]
+      }
+    }
+  ]
+}

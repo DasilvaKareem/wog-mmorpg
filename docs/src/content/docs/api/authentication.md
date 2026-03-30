@@ -99,7 +99,7 @@ const api = createAuthenticatedAPI(token);
 
 // All requests now include Authorization header
 await api("POST", "/spawn", {
-  zoneId: "human-meadow",
+  zoneId: "village-square",
   walletAddress: "0x...",
 });
 ```

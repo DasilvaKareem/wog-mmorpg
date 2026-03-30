@@ -147,7 +147,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       preferredTeam,
     };
 
-    pvpBattleManager.joinQueue(entry);
+    await pvpBattleManager.joinQueue(entry);
 
     return reply.send({
       success: true,
@@ -234,7 +234,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
         groupId,
       };
 
-      pvpBattleManager.joinQueue(entry);
+      await pvpBattleManager.joinQueue(entry);
       queued.push(memberEntity.name);
     }
 
@@ -275,7 +275,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       });
     }
 
-    const removed = pvpBattleManager.leaveQueue(agentId, format);
+    const removed = await pvpBattleManager.leaveQueue(agentId, format);
 
     return reply.send({
       success: removed,
@@ -433,6 +433,30 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     const history = pvpBattleManager.getPlayerMatchHistory(agentId, limit);
 
     return reply.send({ history });
+  });
+
+  /**
+   * GET /api/pvp/player/:agentId/current-battle
+   * Check if a player is currently in an active battle
+   */
+  app.get<{
+    Params: {
+      agentId: string;
+    };
+  }>("/api/pvp/player/:agentId/current-battle", async (req, reply) => {
+    const { agentId } = req.params;
+
+    const activeBattle = pvpBattleManager.getActiveBattleForPlayer(agentId);
+
+    if (!activeBattle) {
+      return reply.send({ inBattle: false, battleId: null, status: null });
+    }
+
+    return reply.send({
+      inBattle: true,
+      battleId: activeBattle.battleId,
+      status: activeBattle.status,
+    });
   });
 
   /**

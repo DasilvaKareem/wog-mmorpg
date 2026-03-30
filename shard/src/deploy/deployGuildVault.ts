@@ -23,7 +23,7 @@ async function main() {
   }
 
   // 1. Read Solidity source
-  const solPath = resolve(import.meta.dirname, "../../contracts/WoGGuildVault.sol");
+  const solPath = resolve(import.meta.dirname, "../../../hardhat/contracts/WoGGuildVault.sol");
   const source = readFileSync(solPath, "utf-8");
 
   console.log("Compiling WoGGuildVault.sol...");

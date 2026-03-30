@@ -142,8 +142,14 @@ export function registerProfessionRoutes(server: FastifyInstance) {
         }
       }
 
-      // Build per-profession skill details
-      const skills = getProfessionSkills(walletAddress);
+      // Build per-profession skill details — check both owner and custodial wallets
+      let skills = getProfessionSkills(walletAddress);
+      if (Object.keys(skills).length === 0) {
+        const custodial = await getAgentCustodialWallet(walletAddress);
+        if (custodial) {
+          skills = getProfessionSkills(custodial);
+        }
+      }
       const details: Record<string, { level: number; xp: number; actions: number; progress: number }> = {};
       for (const prof of learned) {
         const skill = skills[prof] ?? { xp: 0, level: 1, actions: 0 };

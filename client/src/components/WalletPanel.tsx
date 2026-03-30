@@ -10,9 +10,12 @@ import { HpBar } from "@/components/ui/hp-bar";
 import { XpBar } from "@/components/ui/xp-bar";
 import { API_URL } from "@/config";
 import { useWallet } from "@/hooks/useWallet";
+import { MUSIC_TOGGLE_EVENT } from "@/hooks/useBackgroundMusic";
 import { useWogNames } from "@/hooks/useWogNames";
 import { gameBus } from "@/lib/eventBus";
 import { getAuthToken } from "@/lib/agentAuth";
+import { playSoundEffect } from "@/lib/soundEffects";
+import { cn } from "@/lib/utils";
 import { WalletManager } from "@/lib/walletManager";
 
 const TIER_COLORS: Record<string, string> = {
@@ -20,6 +23,8 @@ const TIER_COLORS: Record<string, string> = {
   starter: "#54f28b",
   pro: "#ffcc00",
 };
+const LS_SOUND = "wog-sound-enabled";
+const LS_MUSIC_MUTED = "wog-music-muted";
 
 function CharacterSection({
   characters,
@@ -39,6 +44,50 @@ function CharacterSection({
   walletAddress: string;
 }): React.ReactElement {
   const [switching, setSwitching] = React.useState(false);
+  const [showSwapMenu, setShowSwapMenu] = React.useState(false);
+  const liveCharacterTokenId =
+    characterProgress?.source === "live"
+      ? characterProgress.characterTokenId ??
+        characters.find((c) => {
+          const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
+          const liveBaseName = characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim();
+          return baseName === liveBaseName || c.name === characterProgress.name;
+        })?.tokenId ??
+        null
+      : null;
+  const liveCharacterBaseName =
+    characterProgress?.source === "live"
+      ? characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim()
+      : deployedCharacterName;
+
+  const activeCharacter = React.useMemo(() => {
+    if (liveCharacterTokenId) {
+      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
+      if (liveCharacter) return liveCharacter;
+    }
+
+    if (selectedCharacterTokenId) {
+      const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
+      if (selected) return selected;
+    }
+
+    if (liveCharacterBaseName) {
+      const deployed = characters.find((c) => {
+        const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
+        return baseName === liveCharacterBaseName || c.name === liveCharacterBaseName;
+      });
+      if (deployed) return deployed;
+    }
+
+    return characters[0] ?? null;
+  }, [characters, liveCharacterBaseName, liveCharacterTokenId, selectedCharacterTokenId]);
+
+  const selectionValue = liveCharacterTokenId ?? selectedCharacterTokenId ?? "";
+
+  const activeCharacterName = activeCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
+  const activeCharacterLevel = characterProgress?.level ?? activeCharacter?.properties.level ?? null;
+  const activeCharacterRace = activeCharacter?.properties.race ?? null;
+  const activeCharacterClass = activeCharacter?.properties.class ?? null;
 
   function focusCharacter() {
     if (!characterProgress) return;
@@ -88,6 +137,9 @@ function CharacterSection({
       if (res.ok && data.zoneId) {
         gameBus.emit("switchZone", { zoneId: data.zoneId });
       }
+      if (res.ok) {
+        gameBus.emit("charactersChanged", { walletAddress });
+      }
       gameBus.emit("lockToPlayer", { walletAddress });
     } catch {
       // silent
@@ -104,49 +156,160 @@ function CharacterSection({
           {switching ? "Switching..." : characterProgress ? (characterProgress.source === "live" ? "Live" : "NFT") : "--"}
         </Badge>
       </div>
-      {characters.length > 0 && (
-        <select
-          className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
-          value={selectedCharacterTokenId ?? ""}
-          disabled={switching}
-          onChange={(e) => {
-            const tokenId = e.target.value || null;
-            selectCharacter(tokenId);
-            if (tokenId && tokenId !== selectedCharacterTokenId) {
-              void handleSwitch(tokenId);
-            }
-          }}
-        >
-          {characters.length > 1 && (
-            <option value="">
-              {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
-            </option>
-          )}
-          {characters.map((c) => {
-            const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-            const isDeployed = deployedCharacterName && (baseName === deployedCharacterName || c.name === deployedCharacterName);
-            return (
-              <option key={c.tokenId} value={c.tokenId}>
-                {isDeployed ? "[LIVE] " : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
-              </option>
-            );
-          })}
-        </select>
-      )}
       {switching ? (
         <p className="text-[8px] text-[#9aa7cc]">Switching character...</p>
       ) : characterProgress ? (
-        <button
-          type="button"
-          onClick={focusCharacter}
-          className="w-full text-left cursor-pointer hover:bg-[#1a2440] transition-colors rounded px-1 py-0.5 -mx-1"
-          title="Click to focus camera on character"
-        >
-          <HpBar hp={characterProgress.hp} maxHp={characterProgress.maxHp} />
-          <XpBar level={characterProgress.level} xp={characterProgress.xp} />
-        </button>
+        <div className="space-y-1">
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={focusCharacter}
+              className="flex-1 text-left cursor-pointer rounded border-2 border-[#29334d] bg-[#0a0f1e] px-2 py-1 transition-colors hover:border-[#54f28b] hover:bg-[#10182b]"
+              title="Click to center the camera on your character"
+            >
+              <div className="mb-1 flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {characterProgress.source === "live" && (
+                      <span className="text-[8px] font-bold uppercase tracking-wide text-[#54f28b]">[live]</span>
+                    )}
+                    <span className="min-w-0 break-words text-[9px] leading-tight text-[#f1f5ff]">{activeCharacterName}</span>
+                  </div>
+                  {(activeCharacterRace || activeCharacterClass) && (
+                    <div className="mt-0.5 break-words text-[8px] leading-tight text-[#9aa7cc]">
+                      {[activeCharacterRace, activeCharacterClass].filter(Boolean).join(" • ")}
+                    </div>
+                  )}
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1 text-right">
+                  {activeCharacterLevel != null && (
+                    <span className="text-[8px] font-bold text-[#ffcc00]">L{activeCharacterLevel}</span>
+                  )}
+                  <span className="text-[8px] font-bold uppercase tracking-wide text-[#54f28b]">
+                    Center
+                  </span>
+                </div>
+              </div>
+              <HpBar hp={characterProgress.hp} maxHp={characterProgress.maxHp} />
+              <XpBar level={characterProgress.level} xp={characterProgress.xp} />
+            </button>
+            {characters.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setShowSwapMenu((prev) => !prev)}
+                disabled={switching}
+                className="shrink-0 border-2 border-[#ffcc00]/40 bg-[#1e1a10] px-2 py-1 text-[8px] font-bold uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#2a2418] disabled:opacity-40"
+                title="Choose a different character"
+              >
+                {showSwapMenu ? "Hide" : "Swap"}
+              </button>
+            )}
+          </div>
+          {showSwapMenu && characters.length > 1 && (
+            <select
+              className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
+              value={selectionValue}
+              disabled={switching}
+              onChange={(e) => {
+                const tokenId = e.target.value || null;
+                setShowSwapMenu(false);
+                selectCharacter(tokenId);
+                if (tokenId && tokenId !== selectedCharacterTokenId) {
+                  void handleSwitch(tokenId);
+                }
+              }}
+            >
+              {characters.length > 1 && (
+                <option value="">
+                  {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
+                </option>
+              )}
+              {characters.map((c) => {
+                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
+                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const pendingStatus =
+                  c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+                    ? "Minting"
+                    : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                      ? "Registering"
+                      : null;
+                return (
+                  <option key={c.tokenId} value={c.tokenId}>
+                    {isDeployed ? "[LIVE] " : ""}{pendingStatus ? `[${pendingStatus}] ` : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+        </div>
       ) : characterLoading ? (
         <p className="text-[8px] text-[#9aa7cc]">Syncing character...</p>
+      ) : characters.length > 0 ? (
+        <div className="space-y-1">
+          <div className="flex gap-2">
+            <div className="flex-1 rounded border-2 border-[#29334d] bg-[#0a0f1e] px-2 py-1">
+              <div className="flex items-start gap-2">
+                <span className="min-w-0 flex-1 break-words text-[9px] leading-tight text-[#f1f5ff]">{activeCharacterName}</span>
+                {activeCharacterLevel != null && (
+                  <span className="shrink-0 text-[8px] font-bold text-[#ffcc00]">L{activeCharacterLevel}</span>
+                )}
+              </div>
+              {(activeCharacterRace || activeCharacterClass) && (
+                <div className="mt-0.5 break-words text-[8px] leading-tight text-[#9aa7cc]">
+                  {[activeCharacterRace, activeCharacterClass].filter(Boolean).join(" • ")}
+                </div>
+              )}
+            </div>
+            {characters.length > 1 && (
+              <button
+                type="button"
+                onClick={() => setShowSwapMenu((prev) => !prev)}
+                disabled={switching}
+                className="shrink-0 border-2 border-[#ffcc00]/40 bg-[#1e1a10] px-2 py-1 text-[8px] font-bold uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#2a2418] disabled:opacity-40"
+                title="Choose a different character"
+              >
+                {showSwapMenu ? "Hide" : "Swap"}
+              </button>
+            )}
+          </div>
+          {showSwapMenu && characters.length > 1 && (
+            <select
+              className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
+              value={selectionValue}
+              disabled={switching}
+              onChange={(e) => {
+                const tokenId = e.target.value || null;
+                setShowSwapMenu(false);
+                selectCharacter(tokenId);
+                if (tokenId && tokenId !== selectedCharacterTokenId) {
+                  void handleSwitch(tokenId);
+                }
+              }}
+            >
+              {characters.length > 1 && (
+                <option value="">
+                  {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
+                </option>
+              )}
+              {characters.map((c) => {
+                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
+                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const pendingStatus =
+                  c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+                    ? "Minting"
+                    : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                      ? "Registering"
+                      : null;
+                return (
+                  <option key={c.tokenId} value={c.tokenId}>
+                    {isDeployed ? "[LIVE] " : ""}{pendingStatus ? `[${pendingStatus}] ` : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+          <p className="text-[8px] text-[#9aa7cc]">Character not live. Use Swap to deploy one.</p>
+        </div>
       ) : (
         <p className="text-[8px] text-[#9aa7cc]">No character data.</p>
       )}
@@ -154,9 +317,27 @@ function CharacterSection({
   );
 }
 
-export function WalletPanel(): React.ReactElement {
+export function WalletPanel({ className }: { className?: string } = {}): React.ReactElement {
   const [collapsed, setCollapsed] = React.useState(false);
   const [tier, setTier] = React.useState<string | null>(null);
+  const [soundEnabled, setSoundEnabled] = React.useState(() => {
+    try {
+      return window.localStorage.getItem(LS_SOUND) !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const [musicMuted, setMusicMuted] = React.useState(() => {
+    try {
+      return window.localStorage.getItem(LS_MUSIC_MUTED) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [isFullscreen, setIsFullscreen] = React.useState(() => {
+    if (typeof document === "undefined") return false;
+    return Boolean(document.fullscreenElement);
+  });
   const {
     address,
     balance,
@@ -176,15 +357,78 @@ export function WalletPanel(): React.ReactElement {
     fetch(`${API_URL}/agent/tier/${address}`).then(r => r.json()).then(d => setTier(d.tier ?? "free")).catch(() => setTier(null));
   }, [address]);
 
+  React.useEffect(() => {
+    if (typeof document === "undefined") return;
+    const updateFullscreen = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", updateFullscreen);
+    return () => document.removeEventListener("fullscreenchange", updateFullscreen);
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncFromStorage = () => {
+      try {
+        setSoundEnabled(window.localStorage.getItem(LS_SOUND) !== "0");
+        setMusicMuted(window.localStorage.getItem(LS_MUSIC_MUTED) === "1");
+      } catch {
+        // noop
+      }
+    };
+
+    window.addEventListener("storage", syncFromStorage);
+    window.addEventListener("wog:sound-toggle", syncFromStorage as EventListener);
+    window.addEventListener(MUSIC_TOGGLE_EVENT, syncFromStorage as EventListener);
+    return () => {
+      window.removeEventListener("storage", syncFromStorage);
+      window.removeEventListener("wog:sound-toggle", syncFromStorage as EventListener);
+      window.removeEventListener(MUSIC_TOGGLE_EVENT, syncFromStorage as EventListener);
+    };
+  }, []);
+
+  const toggleAudioMute = React.useCallback(() => {
+    playSoundEffect("ui_button_click");
+    try {
+      const nextSoundEnabled = !soundEnabled;
+      const nextMusicMuted = !musicMuted;
+      window.localStorage.setItem(LS_SOUND, nextSoundEnabled ? "1" : "0");
+      window.localStorage.setItem(LS_MUSIC_MUTED, nextMusicMuted ? "1" : "0");
+      setSoundEnabled(nextSoundEnabled);
+      setMusicMuted(nextMusicMuted);
+      window.dispatchEvent(new CustomEvent("wog:sound-toggle", { detail: { enabled: nextSoundEnabled } }));
+      window.dispatchEvent(new CustomEvent(MUSIC_TOGGLE_EVENT, { detail: { muted: nextMusicMuted } }));
+    } catch {
+      // noop
+    }
+  }, [musicMuted, soundEnabled]);
+
+  const toggleFullscreen = React.useCallback(async () => {
+    playSoundEffect("ui_button_click");
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await document.documentElement.requestFullscreen();
+      }
+    } catch {
+      // noop
+    }
+  }, []);
+
+  const audioMuted = !soundEnabled && musicMuted;
+  const actionTileClass = "flex min-h-8 items-center justify-center border-2 px-2.5 py-1 text-center text-[7px] uppercase tracking-wide transition sm:text-[8px]";
+
   // Don't render the panel at all when not connected — the Navbar handles sign-in
   if (!isConnected) return <></>;
 
   return (
     <Card
-      className="pointer-events-auto absolute right-2 top-12 z-30 w-48 sm:w-56 md:w-64 lg:w-80 max-w-[45vw] max-h-[45vh] overflow-auto md:right-4 md:top-4"
+      className={cn(
+        "pointer-events-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden",
+        className,
+      )}
       data-tutorial-id="wallet-panel"
     >
-      <CardHeader className="pb-2">
+      <CardHeader className="shrink-0 pb-2">
         <CardTitle className="flex items-center justify-between text-sm md:text-base">
           <div className="flex items-center gap-2">
             <button
@@ -198,11 +442,11 @@ export function WalletPanel(): React.ReactElement {
           </div>
         </CardTitle>
       </CardHeader>
-      {!collapsed && <CardContent className="space-y-3 text-[9px]">
-        <div className="flex items-center justify-between">
+      {!collapsed && <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto text-[9px]">
+        <div className="flex items-start justify-between gap-2">
           <span className="text-[8px] uppercase tracking-wide text-[#9aa7cc]">Address</span>
-          <div className="flex items-center gap-1">
-            <Badge>{address ? dn(address) : "..."}</Badge>
+          <div className="flex min-w-0 items-center gap-1">
+            <Badge className="min-w-0 max-w-[11rem] truncate">{address ? dn(address) : "..."}</Badge>
             <button
               onClick={disconnect}
               className="border-2 border-[#ff4444]/40 bg-[#2a1010] px-1.5 py-0.5 text-[7px] uppercase tracking-wide text-[#ff4444] transition hover:bg-[#3d1818]"
@@ -244,26 +488,24 @@ export function WalletPanel(): React.ReactElement {
           selectCharacter={selectCharacter}
           walletAddress={address!}
         />
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-2 pt-1">
           <Link
             to="/champions"
-            className="flex flex-1 items-center justify-center gap-1 border-2 border-[#ffcc00]/60 bg-[#2a2210] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#3d3218]"
+            className={cn(actionTileClass, "border-[#ffcc00]/60 bg-[#2a2210] text-[#ffcc00] hover:bg-[#3d3218]")}
           >
             View Champion
           </Link>
           <button
             type="button"
             onClick={() => gameBus.emit("inventoryOpen", undefined as never)}
-            className="flex-1 border-2 border-[#b48efa]/40 bg-[#1a1028] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#b48efa] transition hover:bg-[#251840]"
+            className={cn(actionTileClass, "border-[#b48efa]/40 bg-[#1a1028] text-[#b48efa] hover:bg-[#251840]")}
           >
             Bag
           </button>
-        </div>
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => gameBus.emit("characterOpen", undefined as never)}
-            className="flex-1 border-2 border-[#c83232]/40 bg-[#1e1010] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#c83232] transition hover:bg-[#2a1818]"
+            className={cn(actionTileClass, "border-[#c83232]/40 bg-[#1e1010] text-[#c83232] hover:bg-[#2a1818]")}
           >
             Character
           </button>
@@ -297,25 +539,37 @@ export function WalletPanel(): React.ReactElement {
               }
             }}
             disabled={!address}
-            className="flex-1 border-2 border-[#ffcc00]/40 bg-[#1e1a10] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#ffcc00] transition hover:bg-[#2a2418] disabled:opacity-40 disabled:cursor-not-allowed"
+            className={cn(actionTileClass, "border-[#ffcc00]/40 bg-[#1e1a10] text-[#ffcc00] hover:bg-[#2a2418] disabled:cursor-not-allowed disabled:opacity-40")}
           >
             Inspect
           </button>
-        </div>
-        <div className="flex gap-2">
           <button
             type="button"
             onClick={() => gameBus.emit("inboxOpen", undefined as never)}
-            className="flex-1 border-2 border-[#6ea8fe]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#6ea8fe] transition hover:bg-[#1a2840]"
+            className={cn(actionTileClass, "border-[#6ea8fe]/40 bg-[#101a2e] text-[#6ea8fe] hover:bg-[#1a2840]")}
           >
             Inbox
           </button>
           <button
             type="button"
             onClick={() => gameBus.emit("settingsOpen", undefined as never)}
-            className="flex-1 border-2 border-[#9aa7cc]/40 bg-[#101a2e] px-3 py-1.5 text-[8px] uppercase tracking-wide text-[#9aa7cc] transition hover:bg-[#1a2840]"
+            className={cn(actionTileClass, "border-[#9aa7cc]/40 bg-[#101a2e] text-[#9aa7cc] hover:bg-[#1a2840]")}
           >
             Settings
+          </button>
+          <button
+            type="button"
+            onClick={toggleAudioMute}
+            className={cn(actionTileClass, "border-[#54f28b]/40 bg-[#0f1e10] text-[#54f28b] hover:bg-[#1a2e18]")}
+          >
+            {audioMuted ? "Unmute" : "Mute"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void toggleFullscreen()}
+            className={cn(actionTileClass, "border-[#6ea8fe]/40 bg-[#101a2e] text-[#6ea8fe] hover:bg-[#1a2840]")}
+          >
+            {isFullscreen ? "Window" : "Fullscreen"}
           </button>
         </div>
       </CardContent>}

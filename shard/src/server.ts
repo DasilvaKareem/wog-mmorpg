@@ -6,7 +6,7 @@ import { registerZoneRuntime } from "./world/zoneRuntime.js";
 import { registerSpawnOrders } from "./world/spawnOrders.js";
 import { registerStateApi } from "./routes/stateApi.js";
 import { registerCommands } from "./social/commands.js";
-import { registerWalletRoutes } from "./blockchain/wallet.js";
+import { registerWalletRoutes, startWalletRegistrationWorker } from "./blockchain/wallet.js";
 import { registerShopRoutes } from "./economy/shop.js";
 import { registerCharacterRoutes } from "./character/characterRoutes.js";
 import { registerTradeRoutes } from "./economy/trade.js";
@@ -18,6 +18,7 @@ import { registerGuildTick } from "./economy/guildTick.js";
 import { registerGuildVaultRoutes } from "./economy/guildVault.js";
 import { spawnNpcs, tickMobRespawner } from "./world/npcSpawner.js";
 import { initMerchantWallets, registerMerchantAgentTick, getMerchantCount } from "./world/merchantAgent.js";
+import { restoreMerchantStatesFromRedis } from "./world/merchantAgent.js";
 import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
@@ -33,7 +34,7 @@ import { registerEventRoutes } from "./social/eventRoutes.js";
 import { registerTerrainRoutes } from "./world/terrainRoutes.js";
 import { registerSkinningRoutes } from "./professions/skinning.js";
 import { registerCookingRoutes } from "./professions/cooking.js";
-import { registerPartyRoutes } from "./social/partySystem.js";
+import { registerPartyRoutes, restorePartiesFromRedis } from "./social/partySystem.js";
 import { registerFriendsRoutes } from "./social/friendsSystem.js";
 import { registerAuthRoutes } from "./auth/auth.js";
 import { registerZoneTransitionRoutes } from "./world/zoneTransition.js";
@@ -57,6 +58,7 @@ import { registerRentalRoutes } from "./marketplace/rentalRoutes.js";
 import { registerItemCatalogRoutes } from "./items/itemCatalogRoutes.js";
 import { registerReputationRoutes } from "./economy/reputationRoutes.js";
 import { registerNameServiceRoutes } from "./blockchain/nameServiceRoutes.js";
+import { startNameServiceWorker } from "./blockchain/nameServiceChain.js";
 import { registerDungeonGateRoutes } from "./world/dungeonGate.js";
 import { registerEssenceTechniqueRoutes } from "./combat/essenceTechniqueRoutes.js";
 import { registerForgedTechniqueRoutes } from "./combat/forgedTechniqueRoutes.js";
@@ -70,23 +72,36 @@ import { registerNotificationRoutes } from "./social/notificationRoutes.js";
 import { registerWebPushRoutes } from "./social/webPushRoutes.js";
 import { initWebPushAlerts } from "./social/webPushService.js";
 import { registerGoldPurchaseRoutes } from "./economy/goldPurchaseRoutes.js";
+import { registerNpcDialogueRoutes } from "./social/npcDialogueRoutes.js";
+import { registerQuestGraphRoutes } from "./social/questGraphRoutes.js";
 import { initTelegramBot } from "./social/telegramNotifications.js";
 import { initWorldMapStore } from "./world/worldMapStore.js";
 import { registerFarmingRoutes } from "./farming/farming.js";
 import { registerPlotRoutes } from "./farming/plotRoutes.js";
 import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
+import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats, mintGold } from "./blockchain/blockchain.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllEntities, getEntity, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersFromRedis } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
 import { biteProvider, SKALE_BASE_CHAIN_ID } from "./blockchain/biteChain.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "./redis.js";
+import { pvpBattleManager } from "./combat/pvpBattleManager.js";
+import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js";
+import { startReputationChainWorker } from "./economy/reputationChain.js";
+import { startChainOperationReplayWorker } from "./blockchain/chainOperationStore.js";
 
 const server = Fastify({ logger: true });
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
+const REQUIRE_REDIS_PERSISTENCE = !["0", "false", "no", "off"].includes(
+  (process.env.REQUIRE_REDIS_PERSISTENCE ?? "true").trim().toLowerCase()
+);
+const LOCAL_TEST_MODE = (process.env.LOCAL_TEST_MODE ?? "").trim().toLowerCase();
+const SKIP_MERCHANT_BOOTSTRAP = LOCAL_TEST_MODE === "core";
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -184,7 +199,15 @@ async function assertConfiguredRpc(): Promise<void> {
 }
 
 // Health check — GCP and you use this to know the shard is alive
-server.get("/health", async () => ({ ok: true, uptime: process.uptime() }));
+server.get("/health", async () => ({
+  ok: true,
+  uptime: process.uptime(),
+  persistence: {
+    redisConnected: Boolean(getRedis()),
+    redisRequired: REQUIRE_REDIS_PERSISTENCE,
+    memoryFallbackAllowed: isMemoryFallbackAllowed(),
+  },
+}));
 
 // Agent discovery — how AI agents find and join the game
 server.get("/.well-known/ai-plugin.json", async (_req, reply) => {
@@ -600,17 +623,26 @@ server.post<{
     name: entity.name,
     level: entity.level ?? 1,
     xp: entity.xp ?? 0,
+    ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
+    ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
     raceId: entity.raceId ?? "human",
     classId: entity.classId ?? "warrior",
     calling: entity.calling,
     gender: entity.gender,
+    skinColor: entity.skinColor,
+    hairStyle: entity.hairStyle,
+    eyeColor: entity.eyeColor,
+    origin: entity.origin,
     zone: foundZoneId!,
     x: entity.x,
     y: entity.y,
     kills: entity.kills ?? 0,
+    activeQuests: entity.activeQuests ?? [],
     completedQuests: entity.completedQuests ?? [],
     learnedTechniques: entity.learnedTechniques ?? [],
     professions: getLearnedProfessions(entity.walletAddress),
+    pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
+    equipment: entity.equipment ?? undefined,
   });
 
   // Clear mob tags owned by this player before despawn
@@ -677,6 +709,8 @@ registerMiningRoutes(server);
 registerProfessionRoutes(server);
 registerCraftingRoutes(server);
 registerQuestRoutes(server);
+registerNpcDialogueRoutes(server);
+registerQuestGraphRoutes(server);
 registerHerbalismRoutes(server);
 registerAlchemyRoutes(server);
 registerTechniqueRoutes(server);
@@ -720,13 +754,17 @@ registerWebPushRoutes(server);
 initDungeonLootTables();
 startGuildNameCacheRefresh();
 spawnNpcs();
-registerMerchantAgentTick(server);
-// Defer merchant wallet init so the tx queue isn't flooded at boot
-setTimeout(() => {
-  initMerchantWallets().catch((err) => {
-    server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-}, 60_000);
+if (SKIP_MERCHANT_BOOTSTRAP) {
+  server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
+} else {
+  registerMerchantAgentTick(server);
+  // Defer merchant wallet init so the tx queue isn't flooded at boot
+  setTimeout(() => {
+    initMerchantWallets().catch((err) => {
+      server.log.warn(`[merchant] Wallet init failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+  }, 60_000);
+}
 spawnOreNodes();
 spawnFlowerNodes();
 spawnNectarNodes();
@@ -738,6 +776,13 @@ setInterval(() => {
 }, 5000);
 
 const start = async () => {
+  if (REQUIRE_REDIS_PERSISTENCE) {
+    assertRedisAvailable("server boot");
+    server.log.info("[redis] Redis persistence required and available");
+  } else if (!getRedis() && isMemoryFallbackAllowed()) {
+    server.log.warn("[redis] Running with memory fallback enabled; persistence guarantees are reduced");
+  }
+
   // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
   rebuildAuctionCache().catch((err: any) => {
     server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
@@ -785,6 +830,31 @@ const start = async () => {
   await initializePlotsFromRedis().catch((err: any) => {
     server.log.warn(`[plots] Plot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
+
+  await restoreMerchantStatesFromRedis().catch((err: any) => {
+    server.log.warn(`[merchant] Merchant restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  await pvpBattleManager.restoreFromRedis().catch((err: any) => {
+    server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  await restoreLivePlayersFromRedis().catch((err: any) => {
+    server.log.warn(`[live-player] Live player restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  await restorePartiesFromRedis().catch((err: any) => {
+    server.log.warn(`[party] Party restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+
+  await startCharacterBootstrapWorker(server.log).catch((err: any) => {
+    server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
+  startWalletRegistrationWorker(server);
+  startNameServiceWorker(server.log);
+  startPlotOperationWorker(server.log);
+  startReputationChainWorker(server.log);
+  startChainOperationReplayWorker(server.log);
 
   await Promise.race([
     initWorldMapStore(),

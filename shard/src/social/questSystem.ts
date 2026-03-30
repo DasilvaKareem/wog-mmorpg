@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest } from "../auth/auth.js";
+import { authenticateRequest, walletsMatch } from "../auth/auth.js";
 import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 import { mintGold, mintItem } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
@@ -41,6 +41,9 @@ export interface Quest {
   description: string;
   npcId: string; // Entity ID of quest giver
   prerequisiteQuestId?: string; // Optional: Quest that must be completed first
+  requiredStoryFlags?: string[]; // Optional: all flags the player must have before this quest appears
+  grantStoryFlagsOnAccept?: string[]; // Optional: flags granted as soon as the quest is accepted
+  grantStoryFlagsOnComplete?: string[]; // Optional: flags granted on completion/turn-in
   objective: {
     type: "kill" | "talk" | "gather" | "craft";
     targetMobType?: string; // kill quests: e.g. "mob" or specific name
@@ -73,6 +76,7 @@ export const QUEST_CATALOG: Quest[] = [
     description:
       "Guard Captain Marcus wants to greet every new arrival. Speak with him to learn about the meadow.",
     npcId: "Guard Captain Marcus",
+    requiredStoryFlags: ["tutorial:scout_kaela_briefed"],
     objective: {
       type: "talk",
       targetNpcName: "Guard Captain Marcus",
@@ -3422,13 +3426,39 @@ export function isQuestNpc(entity: { name: string }): boolean {
  * Check if a quest is available to a player (prerequisites met)
  */
 export function isQuestAvailable(quest: Quest, completedQuestIds: string[]): boolean {
-  // If no prerequisite, quest is always available
-  if (!quest.prerequisiteQuestId) {
-    return true;
-  }
+  return isQuestAvailableForPlayer(quest, completedQuestIds, []);
+}
 
-  // Check if prerequisite quest has been completed
-  return completedQuestIds.includes(quest.prerequisiteQuestId);
+function normalizeStoryFlags(storyFlags: string[] | undefined): string[] {
+  if (!storyFlags?.length) return [];
+  return Array.from(new Set(storyFlags.map((flag) => flag.trim()).filter(Boolean)));
+}
+
+function hasRequiredStoryFlags(quest: Quest, storyFlags: string[]): boolean {
+  if (!quest.requiredStoryFlags?.length) return true;
+  const flags = new Set(normalizeStoryFlags(storyFlags));
+  return quest.requiredStoryFlags.every((flag) => flags.has(flag));
+}
+
+function applyStoryFlags(entity: Entity, nextFlags: string[] | undefined): void {
+  if (!nextFlags?.length) return;
+  const merged = new Set(normalizeStoryFlags(entity.storyFlags));
+  for (const flag of nextFlags) {
+    const normalized = flag.trim();
+    if (normalized) merged.add(normalized);
+  }
+  entity.storyFlags = Array.from(merged);
+}
+
+export function isQuestAvailableForPlayer(
+  quest: Quest,
+  completedQuestIds: string[],
+  storyFlags: string[],
+): boolean {
+  if (quest.prerequisiteQuestId && !completedQuestIds.includes(quest.prerequisiteQuestId)) {
+    return false;
+  }
+  return hasRequiredStoryFlags(quest, storyFlags);
 }
 
 /**
@@ -3437,7 +3467,8 @@ export function isQuestAvailable(quest: Quest, completedQuestIds: string[]): boo
 export function getAvailableQuestsForPlayer(
   npcName: string,
   completedQuestIds: string[],
-  activeQuestIds: string[]
+  activeQuestIds: string[],
+  storyFlags: string[] = [],
 ): Quest[] {
   const allNpcQuests = getQuestsForNpc(npcName);
 
@@ -3448,8 +3479,28 @@ export function getAvailableQuestsForPlayer(
     }
 
     // Check if prerequisites are met
-    return isQuestAvailable(quest, completedQuestIds);
+    return isQuestAvailableForPlayer(quest, completedQuestIds, storyFlags);
   });
+}
+
+async function playerWalletMatches(authenticatedWallet: string, player: Entity): Promise<boolean> {
+  if (walletsMatch(authenticatedWallet, player.walletAddress)) return true;
+  const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+  return walletsMatch(custodialWallet, player.walletAddress);
+}
+
+function buildMissingQuestRequirements(
+  quest: Quest,
+  completedQuestIds: string[],
+  storyFlags: string[],
+): { prerequisiteQuestId?: string; missingStoryFlags?: string[] } {
+  const missingStoryFlags = (quest.requiredStoryFlags ?? []).filter((flag) => !storyFlags.includes(flag));
+  return {
+    ...(quest.prerequisiteQuestId && !completedQuestIds.includes(quest.prerequisiteQuestId)
+      ? { prerequisiteQuestId: quest.prerequisiteQuestId }
+      : {}),
+    ...(missingStoryFlags.length > 0 ? { missingStoryFlags } : {}),
+  };
 }
 
 /**
@@ -3573,6 +3624,7 @@ export async function awardQuestRewards(
       level: player.level,
       xp: player.xp,
       completedQuests: player.completedQuests,
+      storyFlags: player.storyFlags ?? [],
       learnedTechniques: player.learnedTechniques,
       kills: player.kills,
     }).catch((err) => console.error(`[persistence] Save failed after quest for ${player.name}:`, err));
@@ -3624,7 +3676,8 @@ export function registerQuestRoutes(server: FastifyInstance) {
       if (player && player.type === "player") {
         const completedQuestIds = player.completedQuests ?? [];
         const activeQuestIds = (player.activeQuests ?? []).map((aq: ActiveQuest) => aq.questId);
-        quests = getAvailableQuestsForPlayer(npc.name, completedQuestIds, activeQuestIds);
+        const storyFlags = player.storyFlags ?? [];
+        quests = getAvailableQuestsForPlayer(npc.name, completedQuestIds, activeQuestIds, storyFlags);
       } else {
         // Player not found, return all quests (for debugging)
         quests = getQuestsForNpc(npc.name);
@@ -3647,6 +3700,43 @@ export function registerQuestRoutes(server: FastifyInstance) {
     Params: { zoneId: string; npcId: string };
     Querystring: { playerId?: string };
   }>("/quests/:zoneId/:npcId", questsNpcHandler);
+
+  // POST /story/flags - Mark a persistent story/dialogue flag on a player
+  server.post<{
+    Body: { entityId?: string; playerId?: string; flag: string };
+  }>("/story/flags", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const playerId = request.body.entityId || request.body.playerId;
+    const authenticatedWallet = (request as any).walletAddress as string;
+    const flag = request.body.flag?.trim();
+
+    if (!playerId || !flag) {
+      reply.code(400);
+      return { error: "entityId (or playerId) and flag are required" };
+    }
+
+    const player = getEntity(playerId);
+    if (!player || player.type !== "player") {
+      reply.code(404);
+      return { error: "Player not found" };
+    }
+
+    if (!(await playerWalletMatches(authenticatedWallet, player))) {
+      reply.code(403);
+      return { error: "Not authorized to update story flags for this player" };
+    }
+
+    applyStoryFlags(player, [flag]);
+
+    if (player.walletAddress && player.name) {
+      await saveCharacter(player.walletAddress, player.name, {
+        storyFlags: player.storyFlags ?? [],
+      }).catch((err) => console.error(`[persistence] Save failed after story flag for ${player.name}:`, err));
+    }
+
+    return { ok: true, storyFlags: player.storyFlags ?? [] };
+  });
 
   // POST /quests/accept - Accept a quest
   server.post<{
@@ -3676,6 +3766,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
     // Initialize quest tracking arrays
     if (!player.activeQuests) player.activeQuests = [];
     if (!player.completedQuests) player.completedQuests = [];
+    if (!player.storyFlags) player.storyFlags = [];
 
     // Check if already active
     const existing = player.activeQuests.find((aq) => aq.questId === questId);
@@ -3691,11 +3782,12 @@ export function registerQuestRoutes(server: FastifyInstance) {
     }
 
     // Check prerequisites
-    if (!isQuestAvailable(quest, player.completedQuests)) {
+    const currentStoryFlags = normalizeStoryFlags(player.storyFlags);
+    if (!isQuestAvailableForPlayer(quest, player.completedQuests, currentStoryFlags)) {
       reply.code(400);
       return {
         error: "Prerequisite quest not completed",
-        prerequisiteQuestId: quest.prerequisiteQuestId,
+        ...buildMissingQuestRequirements(quest, player.completedQuests, currentStoryFlags),
       };
     }
 
@@ -3725,6 +3817,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       progress: 0,
       startedAt: Date.now(),
     });
+    applyStoryFlags(player, quest.grantStoryFlagsOnAccept);
 
     console.log(`[quest] ${player.name} accepted quest "${quest.title}"`);
 
@@ -3744,6 +3837,13 @@ export function registerQuestRoutes(server: FastifyInstance) {
       message: `${player.name}: Accepted quest "${quest.title}"`,
       entityId: playerId, entityName: player.name,
     });
+
+    if (player.walletAddress && player.name) {
+      saveCharacter(player.walletAddress, player.name, {
+        completedQuests: player.completedQuests,
+        storyFlags: player.storyFlags ?? [],
+      }).catch((err) => console.error(`[persistence] Save failed after quest accept for ${player.name}:`, err));
+    }
 
     return {
       accepted: true,
@@ -3868,15 +3968,16 @@ export function registerQuestRoutes(server: FastifyInstance) {
       };
     }
 
-    // Award rewards
-    await awardQuestRewards(player, quest);
-
     // Remove from active quests
     player.activeQuests.splice(activeIndex, 1);
 
     // Add to completed quests
     if (!player.completedQuests) player.completedQuests = [];
     player.completedQuests.push(questId);
+    applyStoryFlags(player, quest.grantStoryFlagsOnComplete);
+
+    // Award rewards
+    await awardQuestRewards(player, quest);
 
     console.log(
       `[quest] ${player.name} completed quest "${quest.title}" (${player.completedQuests.length} total completed)`
@@ -3897,6 +3998,13 @@ export function registerQuestRoutes(server: FastifyInstance) {
       message: `${player.name}: Completed "${quest.title}" +${quest.rewards.xp}XP +${formatCopperString(quest.rewards.copper)}`,
       entityId: playerId, entityName: player.name,
     });
+
+    if (player.walletAddress && player.name) {
+      saveCharacter(player.walletAddress, player.name, {
+        completedQuests: player.completedQuests,
+        storyFlags: player.storyFlags ?? [],
+      }).catch((err) => console.error(`[persistence] Save failed after quest turn-in for ${player.name}:`, err));
+    }
 
     return {
       completed: true,
@@ -3943,6 +4051,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
     // Initialize quest tracking
     if (!player.activeQuests) player.activeQuests = [];
     if (!player.completedQuests) player.completedQuests = [];
+    if (!player.storyFlags) player.storyFlags = [];
 
     const npcName = npc.name;
 
@@ -3965,7 +4074,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
           q.objective.targetNpcName === npcName &&
           !player.completedQuests!.includes(q.id) &&
           !player.activeQuests!.some((aq) => aq.questId === q.id) &&
-          isQuestAvailable(q, player.completedQuests!)
+          isQuestAvailableForPlayer(q, player.completedQuests!, player.storyFlags ?? [])
       );
 
       if (quest) {
@@ -3975,6 +4084,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
           progress: 0,
           startedAt: Date.now(),
         });
+        applyStoryFlags(player, quest.grantStoryFlagsOnAccept);
         console.log(`[quest] ${player.name} auto-accepted talk quest "${quest.title}"`);
       }
     }
@@ -3991,12 +4101,13 @@ export function registerQuestRoutes(server: FastifyInstance) {
     // Complete: set progress = count
     aq.progress = quest.objective.count;
 
-    // Award rewards
-    await awardQuestRewards(player, quest);
-
     // Move to completed
     player.activeQuests.splice(aqIndex, 1);
     player.completedQuests.push(quest.id);
+    applyStoryFlags(player, quest.grantStoryFlagsOnComplete);
+
+    // Award rewards
+    await awardQuestRewards(player, quest);
 
     console.log(
       `[quest] ${player.name} completed talk quest "${quest.title}" (${player.completedQuests.length} total completed)`
@@ -4014,6 +4125,13 @@ export function registerQuestRoutes(server: FastifyInstance) {
       message: `${player.name}: Completed "${quest.title}" +${quest.rewards.xp}XP +${formatCopperString(quest.rewards.copper)}`,
       entityId: playerId, entityName: player.name,
     });
+
+    if (player.walletAddress && player.name) {
+      saveCharacter(player.walletAddress, player.name, {
+        completedQuests: player.completedQuests,
+        storyFlags: player.storyFlags ?? [],
+      }).catch((err) => console.error(`[persistence] Save failed after talk quest for ${player.name}:`, err));
+    }
 
     return {
       completed: true,
@@ -4132,6 +4250,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
         playerName: player.name,
         classId: player.classId,
         origin: player.origin,
+        storyFlags: player.storyFlags ?? [],
         zoneId: playerZoneId,
         activeQuests: activeQuestsWithNpc,
         completedQuests,
@@ -4154,6 +4273,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
       const completedQuestIds = player.completedQuests ?? [];
       const activeQuestIds = (player.activeQuests ?? []).map((aq) => aq.questId);
+      const storyFlags = player.storyFlags ?? [];
 
       const available: Array<{
         questId: string; title: string; description: string;
@@ -4164,7 +4284,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       const zoneEntities = getEntitiesInRegion(zoneId);
       for (const entity of zoneEntities) {
         if (!isQuestNpc(entity)) continue;
-        const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds);
+        const quests = getAvailableQuestsForPlayer(entity.name, completedQuestIds, activeQuestIds, storyFlags);
         for (const q of quests) {
           available.push({
             questId: q.id,

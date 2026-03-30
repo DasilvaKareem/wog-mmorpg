@@ -96,7 +96,7 @@
 
 ### Auction House
 **Smart Contract & Deployment**:
-- `contracts/WoGAuctionHouse.sol` (222 lines)
+- `hardhat/contracts/WoGAuctionHouse.sol` (222 lines)
 - `shard/src/deployAuctionHouse.ts` (86 lines)
 
 **Server**:
@@ -110,7 +110,7 @@
 
 ### Guild DAO
 **Smart Contract & Deployment**:
-- `contracts/WoGGuild.sol` (305 lines)
+- `hardhat/contracts/WoGGuild.sol` (305 lines)
 - `shard/src/deployGuild.ts` (86 lines)
 
 **Server**:

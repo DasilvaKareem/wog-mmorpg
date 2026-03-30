@@ -1,0 +1,237 @@
+{
+  "meta": {
+    "id": "auroral-plains-tempests",
+    "title": "Auroral Plains Tempests",
+    "summary": "Authored quest scenes for the Auroral Plains and Windcaller Aelara's escalating stormbound trials.",
+    "zoneIds": ["auroral-plains"],
+    "tags": ["auroral-plains", "authored", "storms", "frontier"],
+    "startingSceneId": "aelara_tempests"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "aelara_tempests",
+        "npcName": "Windcaller Aelara",
+        "title": "Windcaller Aelara and the Auroral Tempests",
+        "idleText": "The auroral currents never truly still. If I have nothing for you, then listen to the wind and wait for the plains to choose their next storm.",
+        "stages": [
+          {
+            "stageId": "auroral_welcome",
+            "questId": "auroral_welcome",
+            "available": {
+              "promptText": "You feel it, don't you? The plains are louder than they look. Static in the air, pressure in the bones. Good. Then you're worth speaking to.",
+              "acceptLabel": "Show me what the plains carry.",
+              "acceptedText": "Then listen carefully. The Auroral Plains reward attention and punish arrogance in the same breath.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What makes this place different?",
+              "detailsText": "Cruton-rich winds, sudden surges of charged growth, and enough exposed sky to turn every bad decision into a public death.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, but don't flatten wonder into small talk.",
+              "freeformPrompt": "Ask Aelara what you want to understand about the Auroral Plains.",
+              "freeformPlaceholder": "Example: What should I notice first out here?",
+              "freeformFallback": "Aelara tilts her head into the wind. \"Ask one clear thing and I'll answer it.\""
+            },
+            "completedText": "Aelara has given you her first reading of the plains. The weather only gets sharper from here."
+          },
+          {
+            "stageId": "auroral_stalker_hunt",
+            "questId": "auroral_stalker_hunt",
+            "available": {
+              "promptText": "The tall grass has started moving in the wrong rhythm. Plains Stalkers are testing the edges of camp and they grow bolder when ignored.",
+              "acceptLabel": "I'll thin the stalkers.",
+              "acceptedText": "Four Plains Stalkers. Keep your eyes on what the grass is trying to hide from you.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with them?",
+              "detailsText": "Because the plains teach awareness before power. If you cannot read the hidden threat, the visible one hardly matters.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. The stalkers won't wait for polished courage.",
+              "freeformPrompt": "Tell Aelara what you need before hunting the Plains Stalkers.",
+              "freeformPlaceholder": "Example: What should I watch for when they vanish into the grass?",
+              "freeformFallback": "Aelara's fingers crackle with static. \"Ask about the hunt or commit to it.\""
+            },
+            "active": {
+              "promptText": "The stalkers are still out there reading your hesitation. Finish the hunt.",
+              "primaryLabel": "The stalkers are down.",
+              "resultText": "Good. The plains respect that kind of answer. Now they show you something stranger than claws.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Plains Stalkers. Trust the movement in the grass, not the silence after it.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how hunters become bold."
+            },
+            "completedText": "The stalkers are thinned. Aelara's next lesson glows instead of prowls."
+          },
+          {
+            "stageId": "auroral_wisp_dance",
+            "questId": "auroral_wisp_dance",
+            "available": {
+              "promptText": "At dusk the plains start pretending to be beautiful on purpose. Aurora Wisps thrive in that mistake. Disperse them before wonder turns into a feeding swarm.",
+              "acceptLabel": "I'll break the wisp dance.",
+              "acceptedText": "Four Aurora Wisps. Don't let their light convince you it isn't hungry.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the wisps dangerous?",
+              "detailsText": "Because beauty lowers the guard faster than terror. The plains know that, and so do the creatures born from them.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Just don't ask me to call them harmless because they glow.",
+              "freeformPrompt": "Tell Aelara what you want to know about the wisps.",
+              "freeformPlaceholder": "Example: What happens if too many of them gather?",
+              "freeformFallback": "Aelara's eyes reflect the charge in the air. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The wisps are still dancing where they should not be. Finish it.",
+              "primaryLabel": "The wisps are dispersed.",
+              "resultText": "Good. The sky quiets a little, which means we can finally harvest from it instead of merely surviving it.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Aurora Wisps. Keep moving and don't let their drain set the pace.",
+              "declineLabel": "I'll return after the work.",
+              "declineText": "Do that. Charged beauty rarely improves with neglect."
+            },
+            "completedText": "The wisp dance is broken. Aelara's next task asks you to gather from the storm itself."
+          },
+          {
+            "stageId": "auroral_storm_harvest",
+            "questId": "auroral_storm_harvest",
+            "available": {
+              "promptText": "Now the plains offer something instead of taking. Starbloom only opens under electrical strain. Gather it while the storms still respect me enough to warn before they strike.",
+              "acceptLabel": "I'll gather the Starbloom.",
+              "acceptedText": "Five Starbloom. Move quickly and don't mistake charged weather for permission.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the Starbloom matter?",
+              "detailsText": "Because auroral magic isn't only violence. Sometimes the storm distills itself into something usable, if you're fast enough and foolish enough to reach for it.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Gathering in a storm deserves better than vague optimism.",
+              "freeformPrompt": "Tell Aelara what you need before harvesting Starbloom.",
+              "freeformPlaceholder": "Example: What should I respect most during the storm?",
+              "freeformFallback": "Aelara exhales through a faint smile. \"Ask about the harvest or take the risk.\""
+            },
+            "active": {
+              "promptText": "The storm harvest is still unfinished. Bring back the Starbloom before the next front passes.",
+              "primaryLabel": "The blooms are gathered.",
+              "resultText": "Good. You took something useful from the storm without being consumed by it. That earns you a harder sky next.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Starbloom gathered from the charged meadows while the electrical fronts are active.",
+              "declineLabel": "Later.",
+              "declineText": "Storms do not keep appointments for the unready."
+            },
+            "completedText": "The Starbloom harvest is in hand. The sky's next answer arrives with wings."
+          },
+          {
+            "stageId": "auroral_harpy_scourge",
+            "questId": "auroral_harpy_scourge",
+            "available": {
+              "promptText": "The upper crags have started screaming again. Windborne Harpies are dive-cutting every traveler fool enough to cross the open lanes.",
+              "acceptLabel": "I'll break the harpy nests.",
+              "acceptedText": "Three Windborne Harpies. Make the sky think twice before it hunts this low again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the harpies a turning point?",
+              "detailsText": "Because ground threats teach reaction. Aerial ones punish commitment. The plains start feeling bigger the moment death attacks from above.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. Questions about the sky should sound like planning, not complaint.",
+              "freeformPrompt": "Tell Aelara what you need before facing the Windborne Harpies.",
+              "freeformPlaceholder": "Example: How do I avoid getting pinned in the open?",
+              "freeformFallback": "Aelara raises a brow. \"Ask better or take the assignment.\""
+            },
+            "active": {
+              "promptText": "The harpies still own too much sky. Finish the scourge and return.",
+              "primaryLabel": "The harpies are down.",
+              "resultText": "Good. The open lanes are survivable again, which means the real drain on the plains can finally be addressed.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Windborne Harpies from the upper crags. Stay mobile and don't let them choose your footing.",
+              "declineLabel": "I'll finish it.",
+              "declineText": "See that you do."
+            },
+            "completedText": "The harpy threat is reduced. Aelara's next concern is what feeds on the plains themselves."
+          },
+          {
+            "stageId": "auroral_wraith_purge",
+            "questId": "auroral_wraith_purge",
+            "available": {
+              "promptText": "Essence Wraiths are different. They do not simply live here. They feed on the auroral charge itself, and the plains cannot afford too much of that kind of hunger.",
+              "acceptLabel": "I'll purge the wraiths.",
+              "acceptedText": "Three Essence Wraiths. Tear them out before they leave this place dimmer than they found it.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call them a true threat?",
+              "detailsText": "Because predators kill individuals. Parasites drain ecosystems. The wraiths do the second kind of harm.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, then. But understand what you're really protecting here.",
+              "freeformPrompt": "Tell Aelara what you want to know before facing the Essence Wraiths.",
+              "freeformPlaceholder": "Example: What happens if the plains lose too much auroral charge?",
+              "freeformFallback": "Aelara's voice lowers. \"Ask sharply or take the purge.\""
+            },
+            "active": {
+              "promptText": "The wraiths are still feeding. Finish the purge and then look up.",
+              "primaryLabel": "The wraiths are gone.",
+              "resultText": "Good. The current is cleaner now. Which means the plains' sovereign predator has no more excuse to stay hidden.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Essence Wraiths. Keep pressure on them before the drain becomes your weakness.",
+              "declineLabel": "Later.",
+              "declineText": "Every delay leaves the plains a little emptier."
+            },
+            "completedText": "The wraiths are purged. Aelara is ready to name the sky's ruler."
+          },
+          {
+            "stageId": "auroral_drake_slayer",
+            "questId": "auroral_drake_slayer",
+            "available": {
+              "promptText": "Thunder doesn't belong only to the weather here. The Skyward Drake has made the upper air its throne. Bring it down, or accept that the plains answer to something wilder than any of us.",
+              "acceptLabel": "I'll bring down the drake.",
+              "acceptedText": "One Skyward Drake. If you survive this, the storm will start treating you like a participant instead of a witness.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the drake matter so much?",
+              "detailsText": "Because apex things set the emotional tone of a place. While it rules the sky, everyone below walks a little smaller.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final hunts deserve clean thinking.",
+              "freeformPrompt": "Tell Aelara what you need before facing the Skyward Drake.",
+              "freeformPlaceholder": "Example: What kind of mistake gets people killed against it?",
+              "freeformFallback": "Aelara's answer is immediate. \"Hesitation. Ask better or go.\""
+            },
+            "active": {
+              "promptText": "The drake still rules the upper winds. End that reign.",
+              "primaryLabel": "The drake is dead.",
+              "resultText": "Then the sky belongs to weather again. That is no small thing. One final storm remains between you and mastery.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Skyward Drake. Respect altitude, timing, and the first answer your instincts give you.",
+              "declineLabel": "I'll return after the kill.",
+              "declineText": "Return only when the thunder above is honest again."
+            },
+            "completedText": "The drake is down. The last trial belongs to the convergence itself."
+          },
+          {
+            "stageId": "auroral_storm_master",
+            "questId": "auroral_storm_master",
+            "available": {
+              "promptText": "You've survived the plains' beasts, parasites, and sovereign terror. Now prove you can stand inside raw convergence itself. Storm Elementals are gathering where the auroral lines cross.",
+              "acceptLabel": "Give me the final storm trial.",
+              "acceptedText": "Eight Storm Elementals. Stand in the convergence and come back with the storm behind your eyes instead of over your grave.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does this final title prove?",
+              "detailsText": "That you can survive not just creatures shaped by the plains, but the plains acting directly through pure force and charge.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. Final questions should sound like intent, not bargaining.",
+              "freeformPrompt": "Tell Aelara how you mean to face the auroral convergence.",
+              "freeformPlaceholder": "Example: I'm ready for the last storm. What matters most?",
+              "freeformFallback": "Aelara smiles into the static. \"Take the trial or ask one real final question.\""
+            },
+            "active": {
+              "promptText": "The convergence is still open and the elementals are still gathering. Finish the trial.",
+              "primaryLabel": "The storm trial is complete.",
+              "resultText": "Then take the title properly. The plains will still kill the careless, but they no longer mistake you for one of them.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this trial asks.",
+              "secondaryText": "Eight Storm Elementals at the auroral convergence. Endure the rhythm instead of fighting it blindly.",
+              "declineLabel": "Later.",
+              "declineText": "Storm titles earned later are usually earned posthumously."
+            },
+            "completedText": "Aelara has already named you against the storm. The plains heard her."
+          }
+        ]
+      }
+    }
+  ]
+}

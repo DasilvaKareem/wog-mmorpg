@@ -1,4 +1,5 @@
 import * as React from "react";
+import { playSoundEffect } from "@/lib/soundEffects";
 import { cn } from "@/lib/utils";
 
 interface HotkeyBarProps {
@@ -89,6 +90,7 @@ export function HotkeyBar({
           <button
             key={slot.key}
             onClick={actions[slot.actionKey]}
+            onMouseEnter={() => playSoundEffect("ui_button_hover")}
             title={`${slot.label} (${slot.key})`}
             data-tutorial-id={`hotkey-${slot.actionKey}`}
             className={cn(

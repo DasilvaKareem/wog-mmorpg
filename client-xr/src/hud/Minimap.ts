@@ -32,6 +32,7 @@ export class Minimap {
 
   constructor() {
     this.canvas = document.createElement("canvas");
+    this.canvas.id = "minimap";
     this.canvas.width = SIZE;
     this.canvas.height = SIZE;
     this.canvas.style.cssText = `

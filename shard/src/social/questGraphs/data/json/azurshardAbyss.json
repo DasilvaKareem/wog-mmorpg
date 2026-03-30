@@ -1,0 +1,350 @@
+{
+  "meta": {
+    "id": "azurshard-abyss",
+    "title": "Azurshard Abyss",
+    "summary": "Authored quest scenes for Dragonkin Watcher Azael and Crystal Sage Velara in the Azurshard Chasm.",
+    "zoneIds": ["azurshard-chasm"],
+    "tags": ["azurshard-chasm", "authored", "abyss", "crystal"],
+    "startingSceneId": "azael_watch"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "azael_watch",
+        "npcName": "Dragonkin Watcher Azael",
+        "title": "Dragonkin Watcher Azael and the Chasm's Law",
+        "idleText": "The Chasm devours the overconfident and educates the rest by force. If I have nothing for you, then either you have survived its latest lesson or the abyss is still deciding what form the next one should take.",
+        "stages": [
+          {
+            "stageId": "azurshard_watchers_warning",
+            "questId": "azurshard_watchers_warning",
+            "available": {
+              "promptText": "You have come far enough that ordinary warnings are no longer useful. The Chasm doesn't merely kill. It tests what you think reality owes you.",
+              "acceptLabel": "Give me the warning plainly.",
+              "acceptedText": "Then hear it: Azurshard devours the unprepared first, and the arrogant immediately after.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What makes this place unlike the others?",
+              "detailsText": "Depth so old it feels structural, crystal growth that remembers power too well, and void tears that punish anyone treating magic as predictable.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Warnings wasted on vanity are still wasted.",
+              "freeformPrompt": "Ask Azael what you should understand first about the Azurshard Chasm.",
+              "freeformPlaceholder": "Example: What does the Chasm punish first?",
+              "freeformFallback": "Azael's wings settle slightly. \"Ask one worthy question.\""
+            },
+            "completedText": "Azael has given the warning. Now the Chasm starts measuring whether you deserved it."
+          },
+          {
+            "stageId": "azurshard_dragonkin_clash",
+            "questId": "azurshard_dragonkin_clash",
+            "available": {
+              "promptText": "Azure Dragonkin once guarded these veins with discipline. Now madness has stripped that discipline down to fury. You will have to prove your strength to them the old way.",
+              "acceptLabel": "I'll face the Dragonkin.",
+              "acceptedText": "Four Azure Dragonkin. Do not confuse kinship with softness; fallen guardians hit hardest when they still remember pride.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with your own kin?",
+              "detailsText": "Because this place makes all arguments about worthiness physical eventually. Better you learn that with witnesses who still understand stature.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Strength without context is just noise.",
+              "freeformPrompt": "Tell Azael what you need before facing the Azure Dragonkin.",
+              "freeformPlaceholder": "Example: What kind of mistake makes them overwhelm people?",
+              "freeformFallback": "Azael's gaze sharpens. \"Ask clearly or take the clash.\""
+            },
+            "active": {
+              "promptText": "The Dragonkin still contest your right to descend. Finish the clash.",
+              "primaryLabel": "The Dragonkin are defeated.",
+              "resultText": "Good. Strength has been witnessed. Now you can confront what the Chasm tears open when reality weakens.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Azure Dragonkin. Respect their pride and don't let the terrain turn that pride into an angle on you.",
+              "declineLabel": "Later.",
+              "declineText": "Worthiness delayed is usually worthiness denied."
+            },
+            "completedText": "The first descent trial is passed. Azael's next warning concerns the void itself."
+          },
+          {
+            "stageId": "azurshard_void_tear",
+            "questId": "azurshard_void_tear",
+            "available": {
+              "promptText": "Void Weavers are slipping through tears in the fabric of the Chasm. They do not simply attack bodies. They attack continuity.",
+              "acceptLabel": "I'll seal the Void Weavers.",
+              "acceptedText": "Four Void Weavers. End the tears before the abyss learns new geometry.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the void tears worse than monsters?",
+              "detailsText": "Because monsters remain inside a system. Tears question the system itself, and the Chasm does not need more of that mood.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Reality problems deserve clear language.",
+              "freeformPrompt": "Tell Azael what you need before facing the Void Weavers.",
+              "freeformPlaceholder": "Example: What kind of space do the tears create around them?",
+              "freeformFallback": "Azael flexes one claw. \"Ask sharply or take the task.\""
+            },
+            "active": {
+              "promptText": "The void tears are still active. Finish the sealing.",
+              "primaryLabel": "The tears are sealed.",
+              "resultText": "Good. The edges of the Chasm hold a little better now. That means we can harvest what the deeper crystal still offers.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Void Weavers. Keep your sense of distance cleaner than theirs.",
+              "declineLabel": "Later.",
+              "declineText": "The void never improves while unattended."
+            },
+            "completedText": "The tears are quieter. Azael's next assignment is to gather from the deepest fissures."
+          },
+          {
+            "stageId": "azurshard_shard_harvest",
+            "questId": "azurshard_shard_harvest",
+            "available": {
+              "promptText": "Arcane Crystals from the deepest fissures still form in clean enough resonance to help us push back the void. We need them before the Chasm claims them for stranger uses.",
+              "acceptLabel": "I'll harvest the crystals.",
+              "acceptedText": "Six Arcane Crystals. Take them from the fissures before raw magic decides to harden around them.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are these crystals different?",
+              "detailsText": "Because they are not merely valuable. They are structural. Properly tuned, they become arguments against collapse.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Deep-harvest work punishes romantic thinking.",
+              "freeformPrompt": "Tell Azael what you need before harvesting the deep Arcane Crystals.",
+              "freeformPlaceholder": "Example: What makes a fissure safe enough to approach?",
+              "freeformFallback": "Azael's expression remains unreadable. \"Ask about the harvest or descend.\""
+            },
+            "active": {
+              "promptText": "The shard harvest is not complete. Bring back the crystals and then the descent can continue.",
+              "primaryLabel": "The crystals are secured.",
+              "resultText": "Good. Now we can contest the sentinels blocking the next wall of descent.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Six Arcane Crystals from the deepest fissures before the resonance destabilizes around them.",
+              "declineLabel": "Later.",
+              "declineText": "The best crystals rarely wait for confidence."
+            },
+            "completedText": "The harvest is complete. Azael's next obstacle stands like a crystal verdict."
+          },
+          {
+            "stageId": "azurshard_sentinel_wall",
+            "questId": "azurshard_sentinel_wall",
+            "available": {
+              "promptText": "Shard Sentinels form a living wall through the mid-chasm. They are less creatures than a decision the crystal keeps repeating.",
+              "acceptLabel": "I'll shatter the Sentinels.",
+              "acceptedText": "Three Shard Sentinels. Break the wall and reclaim the descent.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call them a wall instead of enemies?",
+              "detailsText": "Because they deny progression more than they pursue blood. The Chasm uses them the way fortresses use gates.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Obstructions deserve different thinking than predators.",
+              "freeformPrompt": "Tell Azael what you need before facing the Shard Sentinels.",
+              "freeformPlaceholder": "Example: What turns their formation into the real threat?",
+              "freeformFallback": "Azael inclines his head slightly. \"Ask clearly or break the wall.\""
+            },
+            "active": {
+              "promptText": "The Sentinel Wall still holds. Finish the breach.",
+              "primaryLabel": "The wall is broken.",
+              "resultText": "Good. The Chasm has fewer excuses now. Which means its burrowers are next to answer for themselves.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Shard Sentinels. Don't let formation and terrain turn into the same problem.",
+              "declineLabel": "Later.",
+              "declineText": "Blocked descents tend to stay blocked if respected too much."
+            },
+            "completedText": "The wall is breached. Azael's next enemy tunnels through crystal itself."
+          },
+          {
+            "stageId": "azurshard_wyrm_hunt",
+            "questId": "azurshard_wyrm_hunt",
+            "available": {
+              "promptText": "Chasm Wyrms are blind, ancient, and always listening through vibration. If they tunnel upward unchecked, the surface will inherit the abyss all at once.",
+              "acceptLabel": "I'll hunt the Wyrms.",
+              "acceptedText": "Three Chasm Wyrms. Kill them before their hunger redraws the route to the surface.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the Wyrms such a risk?",
+              "detailsText": "Because burrowers collapse boundaries. The Chasm is survivable only if it stays where it is.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Burrowers punish lazy timing.",
+              "freeformPrompt": "Tell Azael what you need before hunting the Chasm Wyrms.",
+              "freeformPlaceholder": "Example: What kind of movement gives them the advantage?",
+              "freeformFallback": "Azael's tail stills. \"Ask sharply or go hunt.\""
+            },
+            "active": {
+              "promptText": "The Wyrms are still tunneling. Finish the hunt.",
+              "primaryLabel": "The Wyrms are dead.",
+              "resultText": "Good. Now the deepest law of the Chasm can be spoken without interruption: the dragon still dreams below all of this.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Chasm Wyrms. Control vibration and don't let the ground become a rumor under you.",
+              "declineLabel": "Later.",
+              "declineText": "Wyrms turn delayed action into geography."
+            },
+            "completedText": "The burrowers are gone. Azael is ready to point you at the dragon beneath the crystal bed."
+          },
+          {
+            "stageId": "azurshard_dragon_end",
+            "questId": "azurshard_dragon_end",
+            "available": {
+              "promptText": "The Azurshard Dragon dreams on a bed of crystal and void pressure. If it wakes fully under the wrong conditions, this entire place becomes an ending rather than a zone.",
+              "acceptLabel": "I'll end the Dragon.",
+              "acceptedText": "One Azurshard Dragon. Wake it, face it, finish it.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is the Dragon the true center?",
+              "detailsText": "Because every other threat here is shaped by scale, resonance, or fear. The dragon is all three deciding to become personal.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final abyss hunts do not tolerate vague courage.",
+              "freeformPrompt": "Tell Azael what you need before facing the Azurshard Dragon.",
+              "freeformPlaceholder": "Example: What kind of mistake turns this from a hunt into a disaster?",
+              "freeformFallback": "Azael's gaze holds yours. \"Ask clearly or go make legend.\""
+            },
+            "active": {
+              "promptText": "The Dragon still dreams below. End it and return.",
+              "primaryLabel": "The Dragon is dead.",
+              "resultText": "Good. That was the deepest threat given a name. One last trial remains, because the Chasm still has creatures that feed on magic itself.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Azurshard Dragon. Do not let scale convince you that clarity is optional.",
+              "declineLabel": "Later.",
+              "declineText": "Dragons left for later usually choose their own timing."
+            },
+            "completedText": "The Dragon has fallen. Azael's final trial belongs to creatures that consume the very medium of power here."
+          },
+          {
+            "stageId": "azurshard_devourer_trial",
+            "questId": "azurshard_devourer_trial",
+            "available": {
+              "promptText": "Essence Devourers are the Chasm's final insult: creatures that eat magic itself. If you can survive them, then there is little in this abyss left to teach through force.",
+              "acceptLabel": "Give me the final devourer trial.",
+              "acceptedText": "Five Essence Devourers. Finish the abyss's last appetite and return.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the last trial prove?",
+              "detailsText": "That you can fight effectively even where the environment itself starts eating the very systems you usually rely on.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final questions should sound like adaptation, not panic.",
+              "freeformPrompt": "Tell Azael how you're approaching the final Essence Devourer trial.",
+              "freeformPlaceholder": "Example: I'm ready. What matters most against something that eats magic?",
+              "freeformFallback": "Azael's answer comes fast. \"Take the trial or ask one worthy final question.\""
+            },
+            "active": {
+              "promptText": "The final trial remains unfinished. End the Devourers and return.",
+              "primaryLabel": "The trial is complete.",
+              "resultText": "Then hear this: the abyss tested your strength, your perception, your timing, and your relationship with power itself. You still stand. That will be remembered.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this proves.",
+              "secondaryText": "That you can keep fighting even when the environment starts undoing the rules that carried you here.",
+              "declineLabel": "Later.",
+              "declineText": "Abysses rarely stay educational for the hesitant."
+            },
+            "completedText": "Azael has already witnessed your final trial. The Chasm will make up its own mind after that."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "velara_resonance",
+        "npcName": "Crystal Sage Velara",
+        "title": "Crystal Sage Velara and the Harmonic Work",
+        "idleText": "Crystals keep singing even when people stop listening. If I have nothing for you, then either the harmonics are stable or we finally bought them enough quiet to recover.",
+        "stages": [
+          {
+            "stageId": "azurshard_velara_intro",
+            "questId": "azurshard_velara_intro",
+            "available": {
+              "promptText": "The crystals in this Chasm do not simply store power. They remember patterns. Right now too many of those patterns have gone dissonant.",
+              "acceptLabel": "Show me the harmonic problem.",
+              "acceptedText": "Then listen for this: corruption here is a matter of resonance before it is a matter of violence.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What do you mean by dissonance?",
+              "detailsText": "Power expressing itself out of relational order. Not absence of strength, but strength carrying the wrong conversation through the network.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask carefully. Crystal answers are precise even when people are not.",
+              "freeformPrompt": "Ask Velara what you want to understand about the Chasm's crystal harmonics.",
+              "freeformPlaceholder": "Example: What actually changed in the network down here?",
+              "freeformFallback": "Velara closes her eyes for a breath. \"Ask one clean question.\""
+            },
+            "completedText": "Velara has named the problem. Now she needs true crystal and silence enough to retune it."
+          },
+          {
+            "stageId": "azurshard_velara_crystals",
+            "questId": "azurshard_velara_crystals",
+            "available": {
+              "promptText": "Deep-vein Arcane Crystals still resonate cleanly enough to counter the corruption if recovered before the network drags them further off key.",
+              "acceptLabel": "I'll mine the true crystals.",
+              "acceptedText": "Five Arcane Crystals. Bring me resonance, not rubble.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why these veins specifically?",
+              "detailsText": "Because deeper crystals hold cleaner memory. Surface growth picks up too much noise too quickly.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Extraction is part of the tuning process.",
+              "freeformPrompt": "Tell Velara what you need before mining the deep crystals.",
+              "freeformPlaceholder": "Example: What makes a crystal still useful for tuning?",
+              "freeformFallback": "Velara touches one humming facet. \"Ask about the tuning, or bring me the crystals.\""
+            },
+            "active": {
+              "promptText": "The deep-crystal recovery isn't complete. Bring me the proper specimens first.",
+              "primaryLabel": "The crystals are recovered.",
+              "resultText": "Good. Now we have the notes we need. What we still lack is silence.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five deep-vein Arcane Crystals fit for resonance tuning.",
+              "declineLabel": "Later.",
+              "declineText": "The network grows noisier while you hesitate."
+            },
+            "completedText": "The tuning crystals are secured. Velara now needs the loudest dissonance struck down."
+          },
+          {
+            "stageId": "azurshard_velara_shatter",
+            "questId": "azurshard_velara_shatter",
+            "available": {
+              "promptText": "Shard Sentinels have absorbed the dark resonance and are rebroadcasting corruption through the lattice. Until they break, the whole network keeps learning the wrong song.",
+              "acceptLabel": "I'll silence the Sentinels.",
+              "acceptedText": "Two Shard Sentinels. Shatter them and give the crystal field a chance to hear itself again.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the Sentinels a harmonic issue?",
+              "detailsText": "Because amplification without judgment is just noise with reach. They are moving broadcast towers for corruption.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Harmonic failures are still engineering problems, not metaphors.",
+              "freeformPrompt": "Tell Velara what you need before shattering the dissonant Sentinels.",
+              "freeformPlaceholder": "Example: What makes their resonance so disruptive?",
+              "freeformFallback": "Velara's expression tightens. \"Ask one practical thing, or go silence them.\""
+            },
+            "active": {
+              "promptText": "The Sentinels are still broadcasting corruption. Finish the work.",
+              "primaryLabel": "The Sentinels are shattered.",
+              "resultText": "Good. The network is finally quiet enough for creation to matter again.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Two Shard Sentinels carrying the loudest dissonant broadcast across the lattice.",
+              "declineLabel": "Later.",
+              "declineText": "Noise unresolved becomes structure."
+            },
+            "completedText": "The dissonant broadcast is quieter. Velara's final task is to restore the pattern through crafted resonance."
+          },
+          {
+            "stageId": "azurshard_velara_resonance",
+            "questId": "azurshard_velara_resonance",
+            "available": {
+              "promptText": "Now the network is ready for the only answer that matters: creation. Forge the enchanted items and let the act itself push clean structure back through the crystal field.",
+              "acceptLabel": "I'll complete the restoration.",
+              "acceptedText": "Two enchanted items. Creation is the strongest rebuttal to corruption when the medium still remembers how to resonate.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why use creation as the final correction?",
+              "detailsText": "Because tuning stabilizes, but making something worthy teaches the network what order feels like in practice.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final harmonic work deserves more than decorative curiosity.",
+              "freeformPrompt": "Tell Velara what you need before the final resonance restoration.",
+              "freeformPlaceholder": "Example: What makes crafted resonance stronger than forced tuning?",
+              "freeformFallback": "Velara's voice softens. \"Ask one final worthy question, or go create the answer.\""
+            },
+            "active": {
+              "promptText": "The harmonic restoration is still incomplete. Forge the items and return.",
+              "primaryLabel": "The resonance is restored.",
+              "resultText": "Good. The Chasm is still dangerous, but it no longer sounds as broken in this corner. That matters more than most people understand.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Forge two enchanted items so the act of creation carries clean structure back into the crystal network.",
+              "declineLabel": "Later.",
+              "declineText": "Good patterns decay if never reinforced."
+            },
+            "completedText": "Velara has already accepted the restoration. The crystals will keep carrying that answer whether people deserve it or not."
+          }
+        ]
+      }
+    }
+  ]
+}

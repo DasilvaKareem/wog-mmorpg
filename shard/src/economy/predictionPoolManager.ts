@@ -6,6 +6,11 @@
 import { ethers } from "ethers";
 import { bite, biteWallet, biteProvider } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "../blockchain/chainOperationStore.js";
 import type {
   PredictionPool,
   EncryptedPosition,
@@ -61,6 +66,13 @@ if (PREDICTION_CONTRACT_ADDRESS && PREDICTION_CONTRACT_ADDRESS !== "0x0000000000
   predictionContract = null;
 }
 
+function ensurePredictionContract(): ethers.Contract {
+  if (!predictionContract) {
+    throw new Error("Prediction markets are not available. Set PREDICTION_CONTRACT_ADDRESS in .env to enable.");
+  }
+  return predictionContract;
+}
+
 export class PredictionPoolManager {
   private pools: Map<string, PredictionPool>;
   private bettingHistory: Map<string, BettingHistory>;
@@ -92,15 +104,7 @@ export class PredictionPoolManager {
     const poolId = randomUUID();
 
     // Create pool on-chain
-    await queueBiteTransaction(`prediction-create:${poolId}`, async () => {
-      const tx = await predictionContract!.createPool(
-        poolId,
-        battleId,
-        duration,
-        betLockTime
-      );
-      await tx.wait();
-    });
+    await executeRegisteredChainOperation("prediction-create", poolId, { poolId, battleId, duration, betLockTime });
 
     // Create local pool state
     const now = Date.now();
@@ -150,15 +154,11 @@ export class PredictionPoolManager {
 
     // Submit on-chain
     const amountWei = ethers.parseUnits(amount.toString(), 18);
-    const receipt = await queueBiteTransaction(`prediction-bet:${poolId}:${betterAddress}`, async () => {
-      const tx = await predictionContract!.placeBet(
-        poolId,
-        encryptedChoice,
-        betterAddress,
-        { value: amountWei }
-      );
-      return tx.wait();
-    });
+    const receiptHash = await executeRegisteredChainOperation<string>(
+      "prediction-bet",
+      `${poolId}:${betterAddress.toLowerCase()}`,
+      { poolId, encryptedChoice, betterAddress, amountWei: amountWei.toString() }
+    );
 
     // Create position
     const positionId = randomUUID();
@@ -181,7 +181,7 @@ export class PredictionPoolManager {
 
     return {
       positionId,
-      txHash: receipt.hash,
+      txHash: receiptHash,
       encryptedChoice,
       amount: amountWei,
       timestamp: position.timestamp,
@@ -209,10 +209,7 @@ export class PredictionPoolManager {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    await queueBiteTransaction(`prediction-lock:${poolId}`, async () => {
-      const tx = await predictionContract!.lockPool(poolId);
-      await tx.wait();
-    });
+    await executeRegisteredChainOperation("prediction-lock", poolId, { poolId });
 
     pool.status = "locked";
   }
@@ -251,14 +248,7 @@ export class PredictionPoolManager {
     }
 
     // Submit settlement on-chain
-    await queueBiteTransaction(`prediction-settle:${poolId}`, async () => {
-      const tx = await predictionContract!.settleBattle(
-        poolId,
-        winnerChoice,
-        decryptedChoices
-      );
-      await tx.wait();
-    });
+    await executeRegisteredChainOperation("prediction-settle", poolId, { poolId, winner: winnerChoice, decryptedChoices });
 
     // Calculate payouts
     pool.status = "settled";
@@ -366,14 +356,15 @@ export class PredictionPoolManager {
     }
 
     // Claim on-chain
-    const receipt = await queueBiteTransaction(`prediction-claim:${poolId}:${betterAddress}`, async () => {
-      const tx = await predictionContract!.claimWinnings(poolId);
-      return tx.wait();
-    });
+    const receiptHash = await executeRegisteredChainOperation<string>(
+      "prediction-claim",
+      `${poolId}:${betterAddress.toLowerCase()}`,
+      { poolId, betterAddress }
+    );
 
     position.claimed = true;
 
-    return receipt.hash;
+    return receiptHash;
   }
 
   /**
@@ -522,10 +513,7 @@ export class PredictionPoolManager {
       throw new Error(`Pool ${poolId} not found`);
     }
 
-    await queueBiteTransaction(`prediction-cancel:${poolId}`, async () => {
-      const tx = await predictionContract!.cancelPool(poolId, reason);
-      await tx.wait();
-    });
+    await executeRegisteredChainOperation("prediction-cancel", poolId, { poolId, reason });
 
     pool.status = "cancelled";
   }
@@ -533,3 +521,62 @@ export class PredictionPoolManager {
 
 // Global singleton
 export const predictionPoolManager = new PredictionPoolManager();
+
+registerChainOperationProcessor("prediction-create", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string; battleId: string; duration: number; betLockTime: number };
+  const receipt = await queueBiteTransaction(`prediction-create:${payload.poolId}`, async () => {
+    const tx = await ensurePredictionContract().createPool(payload.poolId, payload.battleId, payload.duration, payload.betLockTime);
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("prediction-bet", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string; encryptedChoice: string; betterAddress: string; amountWei: string };
+  const receipt = await queueBiteTransaction(`prediction-bet:${payload.poolId}:${payload.betterAddress}`, async () => {
+    const tx = await ensurePredictionContract().placeBet(
+      payload.poolId,
+      payload.encryptedChoice,
+      payload.betterAddress,
+      { value: BigInt(payload.amountWei) }
+    );
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("prediction-lock", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string };
+  const receipt = await queueBiteTransaction(`prediction-lock:${payload.poolId}`, async () => {
+    const tx = await ensurePredictionContract().lockPool(payload.poolId);
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("prediction-settle", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string; winner: string; decryptedChoices: string[] };
+  const receipt = await queueBiteTransaction(`prediction-settle:${payload.poolId}`, async () => {
+    const tx = await ensurePredictionContract().settleBattle(payload.poolId, payload.winner, payload.decryptedChoices);
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("prediction-claim", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string; betterAddress: string };
+  const receipt = await queueBiteTransaction(`prediction-claim:${payload.poolId}:${payload.betterAddress}`, async () => {
+    const tx = await ensurePredictionContract().claimWinnings(payload.poolId);
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});
+
+registerChainOperationProcessor("prediction-cancel", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { poolId: string; reason: string };
+  const receipt = await queueBiteTransaction(`prediction-cancel:${payload.poolId}`, async () => {
+    const tx = await ensurePredictionContract().cancelPool(payload.poolId, payload.reason);
+    return tx.wait();
+  });
+  return { result: receipt.hash, txHash: receipt.hash };
+});

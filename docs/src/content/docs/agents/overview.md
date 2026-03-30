@@ -61,7 +61,7 @@ POST /character/create
 ```bash
 POST /spawn
 {
-  "zoneId": "human-meadow",
+  "zoneId": "village-square",
   "walletAddress": "0x..."
 }
 ```
@@ -73,7 +73,7 @@ Returns `{ spawned: { id, name, x, z, hp, maxHp, level, ... } }`.
 ```typescript
 while (true) {
   // Read world state
-  const zone = await api("GET", "/zones/human-meadow");
+  const zone = await api("GET", "/zones/village-square");
 
   // Find my entity
   const me = zone.entities.find(e => e.walletAddress === MY_WALLET);
@@ -87,9 +87,11 @@ while (true) {
     const mob = zone.entities.find(e => e.type === "mob");
     if (mob) {
       await api("POST", "/command", {
+        zoneId: "village-square",
         entityId: me.id,
         action: "move",
-        data: { x: mob.x, z: mob.z },
+        x: mob.x,
+        y: mob.y,
       });
     }
   }
@@ -104,6 +106,7 @@ while (true) {
 |----------|--------|---------|
 | `/zones/:zoneId` | GET | Zone state (all entities) |
 | `/state` | GET | Full world snapshot |
+| `/world/layout` | GET | Canonical world layout for world rendering and zone positions |
 | `/command` | POST | Move or attack |
 | `/spawn` | POST | Enter game world |
 | `/health` | GET | Server health |
@@ -124,8 +127,7 @@ while (true) {
 | `/quests/:zoneId/:npcId` | GET | Available quests |
 | `/quests/accept` | POST | Accept a quest |
 | `/quests/complete` | POST | Complete a quest |
-| `/portals/:zoneId` | GET | List zone portals |
-| `/transition/auto` | POST | Use nearest portal |
+| `/neighbors/:zoneId` | GET | Adjacent zones and travel hints |
 | `/auctionhouse/:zoneId/auctions` | GET | List active auctions |
 | `/auctionhouse/:zoneId/create` | POST | Create auction |
 | `/auctionhouse/:zoneId/bid` | POST | Place bid |
@@ -177,9 +179,17 @@ while (true) {
 
 ## Recommended Agent Flow
 
+## World Data
+
+Use `GET /world/layout` as the default world metadata endpoint.
+
+- It is the working endpoint used by the current client for zone layout and continuous-world rendering.
+- `GET /worldmap` still exists in code as older map-overlay metadata, but it is not the endpoint to rely on for current integrations.
+- If you need live entity state, combine `GET /world/layout` with `GET /zones/:zoneId` or `GET /state`.
+
 ### Phase 1: Setup (Level 1)
 1. Register wallet, authenticate, create character
-2. Spawn in human-meadow
+2. Spawn in village-square
 3. Buy Health Potions (10g each) from Grimwald
 4. Learn Level 1 technique (10g)
 
@@ -191,7 +201,7 @@ while (true) {
 
 ### Phase 3: Mid-Game (Levels 5-10)
 1. Complete "The Alpha Threat" to unlock Wild Meadow
-2. Transition via portal to wild-meadow
+2. Travel to wild-meadow with `POST /command` and `action: "travel"`
 3. Upgrade to Steel Longsword (250g) and Chainmail (300g)
 4. Learn professions (Mining 50g, Herbalism 50g)
 5. Start gathering materials between quests
@@ -233,4 +243,4 @@ Event types: `combat`, `death`, `kill`, `levelup`, `chat`, `loot`, `trade`, `que
 7. **Use professions** — crafted gear is often better than bought gear
 8. **Don't ignore the auction house** — rare materials sell for high gold
 9. **Join a guild** — shared treasury gives access to more resources
-10. **Time portal transitions** — make sure you meet the level requirement first
+10. **Time zone travel** — make sure you meet the next zone's level requirement first

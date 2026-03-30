@@ -7,9 +7,18 @@
  */
 
 import { ethers } from "ethers";
-import { biteWallet } from "./biteChain.js";
-import { queueBiteTransaction } from "./biteTxQueue.js";
+import { biteSigner, biteWallet, SKALE_BASE_CHAIN_ID } from "./biteChain.js";
+import { queueBiteTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
 import { traceTx } from "./txTracer.js";
+import {
+  acquireChainOperationLock,
+  createChainOperation,
+  getChainOperation,
+  listDueChainOperations,
+  markChainOperationRetryable,
+  releaseChainOperationLock,
+  updateChainOperation,
+} from "./chainOperationStore.js";
 
 const NAME_SERVICE_ADDRESS = process.env.NAME_SERVICE_CONTRACT_ADDRESS;
 
@@ -22,8 +31,8 @@ const NAME_SERVICE_ABI = [
 ];
 
 const nameServiceContract =
-  NAME_SERVICE_ADDRESS && biteWallet
-    ? new ethers.Contract(NAME_SERVICE_ADDRESS, NAME_SERVICE_ABI, biteWallet)
+  NAME_SERVICE_ADDRESS && (biteSigner ?? biteWallet)
+    ? new ethers.Contract(NAME_SERVICE_ADDRESS, NAME_SERVICE_ABI, biteSigner ?? biteWallet)
     : null;
 
 if (!nameServiceContract) {
@@ -42,6 +51,9 @@ interface CacheEntry {
 }
 
 const CACHE_TTL_MS = 60_000;
+const KEEP_OPTIMISTIC_LOCAL_NAME_CACHE = SKALE_BASE_CHAIN_ID === 31337;
+const NAME_REGISTER_OP = "name-register";
+const NAME_RELEASE_OP = "name-release";
 
 /** address (lowercase) → name */
 const addressToNameCache = new Map<string, CacheEntry>();
@@ -73,24 +85,25 @@ export async function registerNameOnChain(
   walletAddress: string,
   name: string
 ): Promise<boolean> {
-  // Update cache optimistically
   const addrKey = walletAddress.toLowerCase();
   const nameKey = name.toLowerCase();
-  setCache(addressToNameCache, addrKey, name);
-  setCache(nameToAddressCache, nameKey, walletAddress);
-
   if (!nameServiceContract) return false;
+  const record = await createChainOperation(NAME_REGISTER_OP, walletAddress.toLowerCase(), { walletAddress, name });
   try {
-    return await traceTx("name-register", "registerNameOnChain", { wallet: walletAddress, name }, "bite", async () => {
-      await queueBiteTransaction(`name-register:${walletAddress}`, async () => {
-        const tx = await nameServiceContract.registerName(walletAddress, name);
-        await tx.wait();
-      });
-      console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
-      return true;
-    });
+    await processNameOperation(record.operationId);
+    const updated = await getChainOperation(record.operationId);
+    const success = updated?.status === "completed";
+    if (success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+      setCache(addressToNameCache, addrKey, name);
+      setCache(nameToAddressCache, nameKey, walletAddress);
+    }
+    return success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE;
   } catch (err) {
-    // Revert cache on failure
+    if (KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+      setCache(addressToNameCache, addrKey, name);
+      setCache(nameToAddressCache, nameKey, walletAddress);
+      return true;
+    }
     addressToNameCache.delete(addrKey);
     nameToAddressCache.delete(nameKey);
     console.warn(`[nameServiceChain] registerName failed for ${walletAddress}:`, err);
@@ -106,23 +119,21 @@ export async function releaseNameOnChain(
 ): Promise<boolean> {
   const addrKey = walletAddress.toLowerCase();
 
-  // Clear cache
-  const cachedName = getCached(addressToNameCache, addrKey);
-  if (cachedName) {
-    nameToAddressCache.delete(cachedName.toLowerCase());
-  }
-  addressToNameCache.delete(addrKey);
-
   if (!nameServiceContract) return false;
+  const cachedName = getCached(addressToNameCache, addrKey);
+  const record = await createChainOperation(NAME_RELEASE_OP, walletAddress.toLowerCase(), {
+    walletAddress,
+    cachedName,
+  });
   try {
-    return await traceTx("name-release", "releaseNameOnChain", { wallet: walletAddress }, "bite", async () => {
-      await queueBiteTransaction(`name-release:${walletAddress}`, async () => {
-        const tx = await nameServiceContract.releaseName(walletAddress);
-        await tx.wait();
-      });
-      console.log(`[nameServiceChain] released name for ${walletAddress}`);
-      return true;
-    });
+    await processNameOperation(record.operationId);
+    const updated = await getChainOperation(record.operationId);
+    const success = updated?.status === "completed";
+    if (success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+      if (cachedName) nameToAddressCache.delete(cachedName.toLowerCase());
+      addressToNameCache.delete(addrKey);
+    }
+    return success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE;
   } catch (err) {
     console.warn(`[nameServiceChain] releaseName failed for ${walletAddress}:`, err);
     return false;
@@ -182,4 +193,125 @@ export async function reverseLookupOnChain(
 export async function isNameAvailable(name: string): Promise<boolean> {
   const addr = await resolveNameOnChain(name);
   return addr === null;
+}
+
+async function isRegisteredToWallet(walletAddress: string, name: string): Promise<boolean> {
+  const [resolvedWallet, reverseName] = await Promise.all([
+    resolveNameOnChain(name).catch(() => null),
+    reverseLookupOnChain(walletAddress).catch(() => null),
+  ]);
+  return (
+    resolvedWallet?.toLowerCase() === walletAddress.toLowerCase() &&
+    reverseName?.toLowerCase() === name.toLowerCase()
+  );
+}
+
+export async function processNameOperation(operationId: string): Promise<void> {
+  const record = await getChainOperation(operationId);
+  if (!record || (record.type !== NAME_REGISTER_OP && record.type !== NAME_RELEASE_OP)) return;
+  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
+
+  try {
+    await updateChainOperation(operationId, {
+      status: "submitted",
+      attemptCount: record.attemptCount + 1,
+      lastAttemptAt: Date.now(),
+      nextAttemptAt: Date.now(),
+      lastError: undefined,
+    });
+    const payload = JSON.parse(record.payload) as { walletAddress: string; name?: string; cachedName?: string | null };
+    const walletAddress = payload.walletAddress;
+    let txHash: string | undefined;
+
+    if (record.type === NAME_REGISTER_OP) {
+      const name = String(payload.name ?? "");
+      if (await isRegisteredToWallet(walletAddress, name)) {
+        txHash = undefined;
+      } else {
+        txHash = await traceTx("name-register", "registerNameOnChain", { wallet: walletAddress, name }, "bite", async () => {
+          try {
+            const receipt = await queueBiteTransaction(`name-register:${walletAddress}`, async () => {
+              const tx = await waitForBiteSubmission(
+                nameServiceContract!.registerName(walletAddress, name, { nonce: await reserveServerNonce() ?? undefined })
+              );
+              return waitForBiteReceipt(tx.wait());
+            });
+            return receipt.hash;
+          } catch (err) {
+            if (await isRegisteredToWallet(walletAddress, name)) {
+              return "already-registered";
+            }
+            throw err;
+          }
+        });
+      }
+      setCache(addressToNameCache, walletAddress.toLowerCase(), name);
+      setCache(nameToAddressCache, name.toLowerCase(), walletAddress);
+      console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
+    } else {
+      const existingName = await reverseLookupOnChain(walletAddress);
+      if (!existingName) {
+        txHash = undefined;
+      } else {
+        txHash = await traceTx("name-release", "releaseNameOnChain", { wallet: walletAddress }, "bite", async () => {
+          try {
+            const receipt = await queueBiteTransaction(`name-release:${walletAddress}`, async () => {
+              const tx = await waitForBiteSubmission(
+                nameServiceContract!.releaseName(walletAddress, { nonce: await reserveServerNonce() ?? undefined })
+              );
+              return waitForBiteReceipt(tx.wait());
+            });
+            return receipt.hash;
+          } catch (err) {
+            if ((await reverseLookupOnChain(walletAddress)) === null) {
+              return "already-released";
+            }
+            throw err;
+          }
+        });
+      }
+      const cachedName = payload.cachedName || getCached(addressToNameCache, walletAddress.toLowerCase());
+      if (cachedName) nameToAddressCache.delete(String(cachedName).toLowerCase());
+      addressToNameCache.delete(walletAddress.toLowerCase());
+      console.log(`[nameServiceChain] released name for ${walletAddress}`);
+    }
+
+    await updateChainOperation(operationId, {
+      status: "completed",
+      completedAt: Date.now(),
+      txHash,
+      lastError: undefined,
+    });
+  } catch (err) {
+    await markChainOperationRetryable(operationId, err);
+    throw err;
+  } finally {
+    await releaseChainOperationLock(operationId).catch(() => {});
+  }
+}
+
+export async function processPendingNameOperations(
+  logger: { error: (err: unknown, msg?: string) => void } = console,
+): Promise<void> {
+  for (const type of [NAME_REGISTER_OP, NAME_RELEASE_OP]) {
+    const ops = await listDueChainOperations(type);
+    for (const op of ops) {
+      try {
+        await processNameOperation(op.operationId);
+      } catch (err) {
+        logger.error(err, `[nameServiceChain] worker failed for ${op.operationId}`);
+      }
+    }
+  }
+}
+
+export function startNameServiceWorker(logger: { error: (err: unknown, msg?: string) => void }): void {
+  const tick = async () => {
+    await processPendingNameOperations(logger);
+  };
+
+  void tick().catch((err) => logger.error(err, "[nameServiceChain] initial worker tick failed"));
+  setInterval(() => {
+    tick().catch((err) => logger.error(err, "[nameServiceChain] worker tick failed"));
+  }, 5_000);
 }

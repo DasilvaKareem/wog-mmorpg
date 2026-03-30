@@ -2,6 +2,11 @@ import { ethers } from "ethers";
 import { biteWallet, biteProvider } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import { traceTx } from "../blockchain/txTracer.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "../blockchain/chainOperationStore.js";
 
 const AUCTION_HOUSE_CONTRACT_ADDRESS = process.env.AUCTION_HOUSE_CONTRACT_ADDRESS;
 
@@ -75,25 +80,35 @@ export async function createAuctionOnChain(
   durationSeconds: number,
   buyoutPrice: number
 ): Promise<{ auctionId: number; txHash: string }> {
-  return traceTx("auction-create", "createAuctionOnChain", { zoneId, seller, tokenId, quantity, startPrice, buyoutPrice }, "bite", async () => {
-    const contract = ensureAuctionHouseEnabled();
-    const startPriceWei = ethers.parseUnits(startPrice.toString(), 18);
-    const buyoutPriceWei = buyoutPrice > 0 ? ethers.parseUnits(buyoutPrice.toString(), 18) : 0;
+  return executeRegisteredChainOperation(
+    "auction-create",
+    `${seller.toLowerCase()}:${tokenId}:${quantity}:${zoneId}`,
+    { zoneId, seller, tokenId, quantity, startPrice, durationSeconds, buyoutPrice }
+  );
+}
 
-    const receipt = await queueBiteTransaction(`auction-create:${seller}:${tokenId}`, async () => {
+async function processAuctionCreate(
+  record: ChainOperationRecord
+): Promise<{ result: { auctionId: number; txHash: string }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as {
+    zoneId: string; seller: string; tokenId: number; quantity: number; startPrice: number; durationSeconds: number; buyoutPrice: number;
+  };
+  return traceTx("auction-create", "createAuctionOnChain", payload, "bite", async () => {
+    const contract = ensureAuctionHouseEnabled();
+    const startPriceWei = ethers.parseUnits(payload.startPrice.toString(), 18);
+    const buyoutPriceWei = payload.buyoutPrice > 0 ? ethers.parseUnits(payload.buyoutPrice.toString(), 18) : 0;
+    const receipt = await queueBiteTransaction(`auction-create:${payload.seller}:${payload.tokenId}`, async () => {
       const tx = await contract.createAuction(
-        zoneId,
-        seller,
-        tokenId,
-        quantity,
+        payload.zoneId,
+        payload.seller,
+        payload.tokenId,
+        payload.quantity,
         startPriceWei,
-        durationSeconds,
+        payload.durationSeconds,
         buyoutPriceWei
       );
       return tx.wait();
     });
-
-    // Parse AuctionCreated event to extract auctionId and cache the auction
     for (const log of receipt.logs) {
       try {
         const parsed = contract.interface.parseLog(log);
@@ -101,29 +116,27 @@ export async function createAuctionOnChain(
           const auctionId = Number(parsed.args.auctionId);
           cacheAuction({
             auctionId,
-            zoneId,
-            seller,
-            tokenId,
-            quantity,
-            startPrice,
-            buyoutPrice,
+            zoneId: payload.zoneId,
+            seller: payload.seller,
+            tokenId: payload.tokenId,
+            quantity: payload.quantity,
+            startPrice: payload.startPrice,
+            buyoutPrice: payload.buyoutPrice,
             endTime: Number(parsed.args.endTime),
             highBidder: ethers.ZeroAddress,
             highBidderAgentId: null,
             highBid: 0,
-            status: 0, // Active
+            status: 0,
             extensionCount: 0,
           });
-          return { auctionId, txHash: receipt.hash };
+          return { result: { auctionId, txHash: receipt.hash }, txHash: receipt.hash };
         }
-      } catch {
-        // Not our event, skip
-      }
+      } catch {}
     }
-
     throw new Error("AuctionCreated event not found in receipt");
   });
 }
+registerChainOperationProcessor("auction-create", processAuctionCreate);
 
 /**
  * Place a bid on behalf of an agent.
@@ -135,46 +148,50 @@ export async function placeBidOnChain(
   bidAmount: number,
   bidderAgentId?: string | null
 ): Promise<{ txHash: string; previousBidder: string; previousBid: number }> {
-  return traceTx("auction-bid", "placeBidOnChain", { auctionId, bidder, bidAmount }, "bite", async () => {
+  return executeRegisteredChainOperation(
+    "auction-bid",
+    `${auctionId}:${bidder.toLowerCase()}:${bidAmount}`,
+    { auctionId, bidder, bidAmount, bidderAgentId: bidderAgentId ?? null }
+  );
+}
+async function processAuctionBid(
+  record: ChainOperationRecord
+): Promise<{ result: { txHash: string; previousBidder: string; previousBid: number }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { auctionId: number; bidder: string; bidAmount: number; bidderAgentId?: string | null };
+  return traceTx("auction-bid", "placeBidOnChain", payload, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const bidAmountWei = ethers.parseUnits(bidAmount.toString(), 18);
-
-    const receipt = await queueBiteTransaction(`auction-bid:${auctionId}:${bidder}`, async () => {
-      const tx = await contract.placeBid(
-        auctionId,
-        bidder,
-        bidAmountWei
-      );
+    const bidAmountWei = ethers.parseUnits(payload.bidAmount.toString(), 18);
+    const receipt = await queueBiteTransaction(`auction-bid:${payload.auctionId}:${payload.bidder}`, async () => {
+      const tx = await contract.placeBid(payload.auctionId, payload.bidder, bidAmountWei);
       return tx.wait();
     });
-
-    // Parse BidPlaced event to get previous bidder and update cache
     for (const log of receipt.logs) {
       try {
         const parsed = contract.interface.parseLog(log);
         if (parsed?.name === "BidPlaced") {
-          const cached = auctionCache.get(auctionId);
+          const cached = auctionCache.get(payload.auctionId);
           if (cached) {
-            cached.highBidder = bidder;
-            cached.highBidderAgentId = bidderAgentId ?? null;
-            cached.highBid = bidAmount;
+            cached.highBidder = payload.bidder;
+            cached.highBidderAgentId = payload.bidderAgentId ?? null;
+            cached.highBid = payload.bidAmount;
             cached.endTime = Number(parsed.args.newEndTime);
             if (parsed.args.extended) cached.extensionCount++;
           }
           return {
+            result: {
+              txHash: receipt.hash,
+              previousBidder: parsed.args.previousBidder,
+              previousBid: parseFloat(ethers.formatUnits(parsed.args.previousBid, 18)),
+            },
             txHash: receipt.hash,
-            previousBidder: parsed.args.previousBidder,
-            previousBid: parseFloat(ethers.formatUnits(parsed.args.previousBid, 18)),
           };
         }
-      } catch {
-        // Not our event, skip
-      }
+      } catch {}
     }
-
     throw new Error("BidPlaced event not found in receipt");
   });
 }
+registerChainOperationProcessor("auction-bid", processAuctionBid);
 
 /**
  * Execute instant buyout at the buyout price.
@@ -183,47 +200,62 @@ export async function buyoutAuctionOnChain(
   auctionId: number,
   buyer: string
 ): Promise<{ txHash: string }> {
-  return traceTx("auction-buyout", "buyoutAuctionOnChain", { auctionId, buyer }, "bite", async () => {
+  return executeRegisteredChainOperation("auction-buyout", `${auctionId}:${buyer.toLowerCase()}`, { auctionId, buyer });
+}
+async function processAuctionBuyout(record: ChainOperationRecord): Promise<{ result: { txHash: string }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { auctionId: number; buyer: string };
+  return traceTx("auction-buyout", "buyoutAuctionOnChain", payload, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const receipt = await queueBiteTransaction(`auction-buyout:${auctionId}:${buyer}`, async () => {
-      const tx = await contract.buyout(auctionId, buyer);
+    const receipt = await queueBiteTransaction(`auction-buyout:${payload.auctionId}:${payload.buyer}`, async () => {
+      const tx = await contract.buyout(payload.auctionId, payload.buyer);
       return tx.wait();
     });
-    return { txHash: receipt.hash };
+    return { result: { txHash: receipt.hash }, txHash: receipt.hash };
   });
 }
+registerChainOperationProcessor("auction-buyout", processAuctionBuyout);
 
 /**
  * End an expired auction (server calls this when time is up).
  */
 export async function endAuctionOnChain(auctionId: number): Promise<string> {
-  return traceTx("auction-end", "endAuctionOnChain", { auctionId }, "bite", async () => {
+  return executeRegisteredChainOperation("auction-end", String(auctionId), { auctionId });
+}
+async function processAuctionEnd(record: ChainOperationRecord): Promise<{ result: string; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { auctionId: number };
+  return traceTx("auction-end", "endAuctionOnChain", payload, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const receipt = await queueBiteTransaction(`auction-end:${auctionId}`, async () => {
-      const tx = await contract.endAuction(auctionId);
+    const receipt = await queueBiteTransaction(`auction-end:${payload.auctionId}`, async () => {
+      const tx = await contract.endAuction(payload.auctionId);
       return tx.wait();
     });
-    const cached = auctionCache.get(auctionId);
-    if (cached) cached.status = 1; // Ended
-    return receipt.hash;
+    const cached = auctionCache.get(payload.auctionId);
+    if (cached) cached.status = 1;
+    return { result: receipt.hash, txHash: receipt.hash };
   });
 }
+registerChainOperationProcessor("auction-end", processAuctionEnd);
 
 /**
  * Cancel an auction (before any bids).
  */
 export async function cancelAuctionOnChain(auctionId: number): Promise<string> {
-  return traceTx("auction-cancel", "cancelAuctionOnChain", { auctionId }, "bite", async () => {
+  return executeRegisteredChainOperation("auction-cancel", String(auctionId), { auctionId });
+}
+async function processAuctionCancel(record: ChainOperationRecord): Promise<{ result: string; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { auctionId: number };
+  return traceTx("auction-cancel", "cancelAuctionOnChain", payload, "bite", async () => {
     const contract = ensureAuctionHouseEnabled();
-    const receipt = await queueBiteTransaction(`auction-cancel:${auctionId}`, async () => {
-      const tx = await contract.cancelAuction(auctionId);
+    const receipt = await queueBiteTransaction(`auction-cancel:${payload.auctionId}`, async () => {
+      const tx = await contract.cancelAuction(payload.auctionId);
       return tx.wait();
     });
-    const cached = auctionCache.get(auctionId);
-    if (cached) cached.status = 2; // Cancelled
-    return receipt.hash;
+    const cached = auctionCache.get(payload.auctionId);
+    if (cached) cached.status = 2;
+    return { result: receipt.hash, txHash: receipt.hash };
   });
 }
+registerChainOperationProcessor("auction-cancel", processAuctionCancel);
 
 /**
  * Read auction details. Uses in-memory cache (the on-chain getAuction view

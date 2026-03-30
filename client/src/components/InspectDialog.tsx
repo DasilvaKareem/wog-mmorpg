@@ -6,6 +6,7 @@ import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import { gameBus } from "@/lib/eventBus";
+import { playSoundEffect } from "@/lib/soundEffects";
 import { WalletManager } from "@/lib/walletManager";
 import { getAuthToken } from "@/lib/agentAuth";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
@@ -29,7 +30,7 @@ type SlotKey = "weapon" | "shield" | "chest" | "legs" | "boots" | "helm" | "shou
 
 interface EquipSlotProps {
   slot: SlotKey;
-  equipped?: { tokenId: number; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string };
+  equipped?: { tokenId: number; name?: string; durability: number; maxDurability: number; broken?: boolean; quality?: string; rolledStats?: Partial<CharacterStats>; bonusAffix?: string };
   getItem: (tokenId: number) => CatalogItem | undefined;
 }
 
@@ -62,7 +63,7 @@ function EquipSlot({ slot, equipped, getItem }: EquipSlotProps): React.ReactElem
       >
         {item ? (
           <span className="truncate px-0.5 text-[8px]" style={{ color: qualityBorder !== BORDER ? qualityBorder : TEXT }}>
-            {item.name}
+            {equipped?.name ?? item.name}
           </span>
         ) : (
           slot
@@ -153,6 +154,7 @@ export function InspectDialog(): React.ReactElement | null {
       if (found) {
         setEntity(found);
         setTab("equipment");
+        playSoundEffect("ui_dialog_open");
         setOpen(true);
       }
     } catch {
@@ -180,6 +182,7 @@ export function InspectDialog(): React.ReactElement | null {
       if (self) {
         setEntity(self);
         setTab("equipment");
+        playSoundEffect("ui_dialog_open");
         setOpen(true);
       }
     } catch {
@@ -221,7 +224,7 @@ export function InspectDialog(): React.ReactElement | null {
           </div>
         </div>
         <button
-          onClick={() => setOpen(false)}
+          onClick={() => { playSoundEffect("ui_dialog_close"); setOpen(false); }}
           className="text-xs font-bold px-2 py-0.5 border"
           style={{ borderColor: BORDER, color: DIM, background: "transparent", cursor: "pointer" }}
         >
@@ -446,16 +449,26 @@ function SocialActions({ entity, zoneId }: { entity: Entity; zoneId: string | nu
             (e) => e.type === "player" && e.walletAddress?.toLowerCase() === custodialNorm2,
           ) : undefined;
           if (!selfEntity2) { flash("Your champion not found in zone", "error"); break; }
-          // Resolve characterTokenId from /character endpoint
-          let charTokenId = "0";
-          try {
-            const charRes = await fetch(`${API_URL}/character/${owner}`);
-            if (charRes.ok) {
-              const charData = await charRes.json();
-              const chars = charData.characters ?? [];
-              if (chars.length > 0) charTokenId = chars[0].tokenId ?? "0";
-            }
-          } catch { /* use fallback */ }
+          let charTokenId = selfEntity2.characterTokenId ?? "0";
+          if (charTokenId === "0") {
+            try {
+              const charRes = await fetch(`${API_URL}/character/${owner}`);
+              if (charRes.ok) {
+                const charData = await charRes.json();
+                const chars = Array.isArray(charData.characters) ? charData.characters as Array<{
+                  tokenId?: string;
+                  characterTokenId?: string | null;
+                  agentId?: string | null;
+                  name?: string;
+                }> : [];
+                const matched =
+                  chars.find((character) => selfEntity2.agentId && character.agentId === selfEntity2.agentId)
+                  ?? chars.find((character) => character.name === selfEntity2.name)
+                  ?? chars[0];
+                charTokenId = matched?.characterTokenId ?? matched?.tokenId ?? "0";
+              }
+            } catch { /* use fallback */ }
+          }
           const res = await fetch(`${API_URL}/api/pvp/queue/join`, {
             method: "POST",
             headers: authHeaders,
@@ -782,9 +795,41 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
   const [rep, setRep] = React.useState<RepData | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(entity.agentId ?? null);
 
   React.useEffect(() => {
-    if (!entity.agentId) {
+    setResolvedAgentId(entity.agentId ?? null);
+  }, [entity.agentId]);
+
+  React.useEffect(() => {
+    if (entity.agentId || !entity.walletAddress) return;
+    let cancelled = false;
+
+    fetch(`${API_URL}/character/${entity.walletAddress}`)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (cancelled || !data?.characters) return;
+        const characters = Array.isArray(data.characters) ? data.characters as Array<{
+          agentId?: string | null;
+          name?: string;
+        }> : [];
+        const matched =
+          characters.find((character) => character.name === entity.name)
+          ?? characters.find((character) => typeof character.agentId === "string" && character.agentId.length > 0)
+          ?? null;
+        if (matched?.agentId) {
+          setResolvedAgentId(matched.agentId);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entity.agentId, entity.walletAddress, entity.name]);
+
+  React.useEffect(() => {
+    if (!resolvedAgentId) {
       setRep(null);
       setLoading(false);
       setError(entity.walletAddress ? "Identity registration pending" : "NPCs don't have reputation");
@@ -792,7 +837,7 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
     }
     setLoading(true);
     setError(null);
-    fetch(`${API_URL}/api/agents/${entity.agentId}/reputation`)
+    fetch(`${API_URL}/api/agents/${resolvedAgentId}/reputation`)
       .then((res) => {
         if (!res.ok) throw new Error("Not found");
         return res.json();
@@ -800,9 +845,9 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
       .then((data) => setRep(data.reputation))
       .catch(() => setError("No reputation data"))
       .finally(() => setLoading(false));
-  }, [entity.agentId]);
+  }, [resolvedAgentId, entity.walletAddress]);
 
-  if (!entity.agentId) {
+  if (!resolvedAgentId) {
     return <div className="text-[11px]" style={{ color: DIM }}>{error ?? "Identity registration pending"}</div>;
   }
   if (loading) {

@@ -360,4 +360,21 @@ export class MatchmakingSystem {
       queue.entries = queue.entries.filter((e) => now - e.queuedAt < maxAge);
     }
   }
+
+  snapshotQueues(): MatchmakingQueue[] {
+    return Array.from(this.queues.values()).map((queue) => ({
+      ...queue,
+      entries: [...queue.entries],
+    }));
+  }
+
+  restoreQueues(queues: MatchmakingQueue[]): void {
+    for (const queue of queues) {
+      const existing = this.queues.get(queue.format);
+      if (!existing) continue;
+      existing.entries = [...queue.entries];
+      existing.minPlayers = queue.minPlayers;
+      existing.maxPlayers = queue.maxPlayers;
+    }
+  }
 }

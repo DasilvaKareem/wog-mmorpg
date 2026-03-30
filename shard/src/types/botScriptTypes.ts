@@ -18,7 +18,10 @@ export type BotScriptType =
   | "learn"
   | "idle"
   | "goto"
-  | "dungeon";
+  | "dungeon"
+  | "enchant"
+  | "leatherwork"
+  | "jewelcraft";
 
 export interface BotScript {
   type: BotScriptType;

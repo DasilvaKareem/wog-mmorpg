@@ -1,79 +1,70 @@
 /**
  * Reputation Chain Layer
  * Fire-and-forget bridge between the in-memory ReputationManager and
- * the WoGReputationRegistry contract on BITE v2.
- *
- * All functions silently swallow errors — chain failures never break gameplay.
- *
- * submitFeedbackOnChain() now queues deltas and flushes every 15s via
- * batchUpdateReputationOnChain() to reduce individual RPC transactions.
+ * the official ERC-8004 reputation registry.
  */
 
 import { ethers } from "ethers";
-import { biteWallet } from "../blockchain/biteChain.js";
-import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import { biteSigner, biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "../blockchain/biteTxQueue.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
+import { OFFICIAL_REPUTATION_REGISTRY_ABI } from "../erc8004/official.js";
+import {
+  acquireChainOperationLock,
+  createChainOperation,
+  getChainOperation,
+  listDueChainOperations,
+  markChainOperationRetryable,
+  releaseChainOperationLock,
+  updateChainOperation,
+} from "../blockchain/chainOperationStore.js";
 
 const REPUTATION_CONTRACT_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS;
 
-const REPUTATION_ABI = [
-  "function initializeReputation(uint256 identityId) external",
-  "function submitFeedback(uint256 identityId, uint8 category, int256 delta, string reason) external",
-  "function batchUpdateReputation(uint256 identityId, int256[5] deltas, string reason) external",
-  "function getReputation(uint256 identityId) external view returns (tuple(uint256,uint256,uint256,uint256,uint256,uint256,uint256))",
-  "function authorizeReporter(address reporter) external",
-];
-
 const reputationContract =
-  REPUTATION_CONTRACT_ADDRESS && biteWallet
-    ? new ethers.Contract(REPUTATION_CONTRACT_ADDRESS, REPUTATION_ABI, biteWallet)
+  REPUTATION_CONTRACT_ADDRESS && (biteSigner ?? biteWallet)
+    ? new ethers.Contract(REPUTATION_CONTRACT_ADDRESS, OFFICIAL_REPUTATION_REGISTRY_ABI, biteSigner ?? biteWallet)
     : null;
 
-if (!reputationContract) {
-  if (!REPUTATION_CONTRACT_ADDRESS) {
-    console.warn(
-      "[reputationChain] REPUTATION_REGISTRY_ADDRESS not set — on-chain reputation disabled"
-    );
+if (!reputationContract && !REPUTATION_CONTRACT_ADDRESS) {
+  console.warn("[reputationChain] REPUTATION_REGISTRY_ADDRESS not set — on-chain reputation disabled");
+}
+
+function tryToIdentityId(agentId: string | bigint): bigint | null {
+  const normalized = normalizeAgentId(agentId);
+  if (!/^\d+$/.test(normalized)) {
+    return null;
   }
-}
-
-function toIdentityId(agentId: string | bigint): bigint {
-  return BigInt(normalizeAgentId(agentId));
-}
-
-/**
- * Initialize reputation on-chain for a new agent (fire-and-forget).
- * Idempotent — the contract skips if already initialized.
- */
-export async function initReputationOnChain(
-  agentId: string | bigint
-): Promise<boolean> {
-  if (!reputationContract) return false;
   try {
-    const normalizedAgentId = normalizeAgentId(agentId);
-    const identityId = toIdentityId(agentId);
-    await queueBiteTransaction(`reputation-init:${normalizedAgentId}`, async () => {
-      const tx = await reputationContract.initializeReputation(identityId);
-      await tx.wait();
-    });
-    notifyChainUpdate(normalizedAgentId, "init");
-    console.log(`[reputationChain] init ${normalizedAgentId} (id=${identityId})`);
-    return true;
-  } catch (err) {
-    console.warn(`[reputationChain] init failed for ${normalizeAgentId(agentId)}:`, err);
-    return false;
+    return BigInt(normalized);
+  } catch {
+    return null;
   }
 }
 
-// =============================================================================
-//  Batched feedback queue — accumulates deltas and flushes every 15s
-// =============================================================================
+const DEFAULT_SCORE = 500;
+const MIN_SCORE = 0;
+const MAX_SCORE = 1000;
 
-const FLUSH_INTERVAL_MS = 15_000;
+/** Per-entity backoff cache: maps normalized agentId → timestamp when retry is allowed */
+const reputationFailBackoff = new Map<string, number>();
+const REPUTATION_FAIL_BACKOFF_MS = 60_000; // 60 seconds before retrying a failed entity
 
-/** Pending deltas per agent: [combat, economic, social, crafting, agent] */
-const pendingFeedback = new Map<string, [number, number, number, number, number]>();
-const chainUpdateListeners = new Set<(agentId: string, reason: string) => void>();
+const CATEGORY_TAGS = ["combat", "economic", "social", "crafting", "agent"] as const;
+type CategoryIndex = 0 | 1 | 2 | 3 | 4;
+
+const REPUTATION_OP_TYPE = "reputation-feedback";
+
+function getChainUpdateListeners(): Set<(agentId: string, reason: string) => void> {
+  const globalKey = "__wogReputationChainListeners";
+  const globalStore = globalThis as typeof globalThis & {
+    [globalKey]?: Set<(agentId: string, reason: string) => void>;
+  };
+  if (!globalStore[globalKey]) {
+    globalStore[globalKey] = new Set<(agentId: string, reason: string) => void>();
+  }
+  return globalStore[globalKey]!;
+}
 
 export interface OnChainReputationScore {
   combat: number;
@@ -85,21 +76,12 @@ export interface OnChainReputationScore {
   lastUpdated: number;
 }
 
-function parseOnChainReputation(raw: any): OnChainReputationScore {
-  const values = Array.from(raw ?? []);
-  return {
-    combat: Number(values[0] ?? 0),
-    economic: Number(values[1] ?? 0),
-    social: Number(values[2] ?? 0),
-    crafting: Number(values[3] ?? 0),
-    agent: Number(values[4] ?? 0),
-    overall: Number(values[5] ?? 0),
-    lastUpdated: Number(values[6] ?? 0) * 1000,
-  };
+function clampScore(value: number): number {
+  return Math.max(MIN_SCORE, Math.min(MAX_SCORE, value));
 }
 
 function notifyChainUpdate(agentId: string, reason: string): void {
-  for (const listener of chainUpdateListeners) {
+  for (const listener of getChainUpdateListeners()) {
     try {
       listener(agentId, reason);
     } catch (err) {
@@ -111,39 +93,80 @@ function notifyChainUpdate(agentId: string, reason: string): void {
 export function registerReputationChainListener(
   listener: (agentId: string, reason: string) => void
 ): () => void {
-  chainUpdateListeners.add(listener);
-  return () => chainUpdateListeners.delete(listener);
+  const listeners = getChainUpdateListeners();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+export async function initReputationOnChain(
+  agentId: string | bigint
+): Promise<boolean> {
+  notifyChainUpdate(normalizeAgentId(agentId), "init");
+  return true;
+}
+
+async function getCategoryAverage(
+  identityId: bigint,
+  clients: string[],
+  tag: string
+): Promise<number> {
+  if (!reputationContract || clients.length === 0) return 0;
+  const [, summaryValue] = await reputationContract.getSummary(identityId, clients, tag, "");
+  return Number(summaryValue ?? 0);
 }
 
 export async function getReputationOnChain(
   agentId: string | bigint
 ): Promise<OnChainReputationScore | null> {
   if (!reputationContract) return null;
+  const identityId = tryToIdentityId(agentId);
+  if (identityId === null) return null;
+
+  const normalizedId = normalizeAgentId(agentId);
+
+  // Check per-entity failure backoff — skip if recently failed
+  const retryAfter = reputationFailBackoff.get(normalizedId);
+  if (retryAfter && Date.now() < retryAfter) {
+    return null;
+  }
+
   try {
-    const raw = await reputationContract.getReputation(toIdentityId(agentId));
-    return parseOnChainReputation(raw);
+    const clients = Array.from(await reputationContract.getClients(identityId)) as string[];
+    if (!clients || clients.length === 0) {
+      return null;
+    }
+
+    const [combatAvg, economicAvg, socialAvg, craftingAvg, agentAvg] = await Promise.all(
+      CATEGORY_TAGS.map((tag) => getCategoryAverage(identityId, clients, tag))
+    );
+
+    const combat = clampScore(DEFAULT_SCORE + combatAvg);
+    const economic = clampScore(DEFAULT_SCORE + economicAvg);
+    const social = clampScore(DEFAULT_SCORE + socialAvg);
+    const crafting = clampScore(DEFAULT_SCORE + craftingAvg);
+    const agent = clampScore(DEFAULT_SCORE + agentAvg);
+    const overall = Math.round((combat + economic + social + crafting + agent) / 5);
+
+    // Clear backoff on success
+    reputationFailBackoff.delete(normalizedId);
+
+    return {
+      combat,
+      economic,
+      social,
+      crafting,
+      agent,
+      overall,
+      lastUpdated: Date.now(),
+    };
   } catch (err) {
-    console.warn(`[reputationChain] getReputation failed for ${normalizeAgentId(agentId)}:`, err);
+    // Set backoff so we don't spam retries for this entity
+    reputationFailBackoff.set(normalizedId, Date.now() + REPUTATION_FAIL_BACKOFF_MS);
+    console.warn(`[reputationChain] getReputation failed for ${normalizedId} (backing off ${REPUTATION_FAIL_BACKOFF_MS / 1000}s):`, err);
     return null;
   }
 }
 
-function mergePendingFeedback(
-  agentId: string,
-  deltas: [number, number, number, number, number]
-): void {
-  const existing = pendingFeedback.get(agentId) ?? [0, 0, 0, 0, 0];
-  for (let i = 0; i < 5; i++) {
-    existing[i] += deltas[i];
-  }
-  pendingFeedback.set(agentId, existing);
-}
-
-/**
- * Submit feedback on-chain for a single category.
- * Instead of firing an immediate RPC transaction, the delta is queued
- * and flushed every 15s via batchUpdateReputationOnChain().
- */
 export async function submitFeedbackOnChain(
   agentId: string | bigint,
   category: number,
@@ -154,80 +177,105 @@ export async function submitFeedbackOnChain(
   if (category < 0 || category > 4) return;
 
   const key = normalizeAgentId(agentId);
-  let deltas = pendingFeedback.get(key);
-  if (!deltas) {
-    deltas = [0, 0, 0, 0, 0];
-    pendingFeedback.set(key, deltas);
-  }
-  deltas[category] += delta;
-}
-
-/** Flush all pending feedback as batch transactions. */
-async function flushPendingFeedback(): Promise<void> {
-  if (pendingFeedback.size === 0) return;
-
-  // Snapshot and clear so new deltas during flush go to the next batch
-  const batch = new Map(pendingFeedback);
-  pendingFeedback.clear();
-
-  for (const [agentId, deltas] of batch) {
-    // Skip wallets with all-zero deltas
-    if (deltas.every((d) => d === 0)) continue;
-
-    try {
-      const ok = await batchUpdateReputationOnChain(agentId, deltas, "batched-feedback");
-      if (!ok) {
-        mergePendingFeedback(agentId, deltas);
-      }
-    } catch (err) {
-      console.warn(`[reputationChain] flush failed for ${agentId}:`, err);
-      mergePendingFeedback(agentId, deltas);
-    }
-  }
-}
-
-// Start the flush interval
-setInterval(() => {
-  flushPendingFeedback().catch((err) => {
-    console.warn("[reputationChain] flushPendingFeedback error:", err);
+  const deltas: [number, number, number, number, number] = [0, 0, 0, 0, 0];
+  deltas[category as CategoryIndex] = delta;
+  const record = await createChainOperation(REPUTATION_OP_TYPE, key, { agentId: key, deltas, reason: _reason });
+  void processReputationOperation(record.operationId).catch((err) => {
+    console.warn(`[reputationChain] queue dispatch failed for ${key}:`, err);
   });
-}, FLUSH_INTERVAL_MS);
+}
 
-/**
- * Batch update multiple reputation categories on-chain (fire-and-forget).
- * deltas is [combat, economic, social, crafting, agent] indexed by category enum.
- */
 export async function batchUpdateReputationOnChain(
   agentId: string | bigint,
   deltas: [number, number, number, number, number],
   reason: string
 ): Promise<boolean> {
   if (!reputationContract) return false;
+
   try {
     const normalizedAgentId = normalizeAgentId(agentId);
-    const identityId = toIdentityId(agentId);
-    const bigDeltas = deltas.map(BigInt) as [
-      bigint,
-      bigint,
-      bigint,
-      bigint,
-      bigint,
-    ];
-    await queueBiteTransaction(`reputation-batch:${normalizedAgentId}`, async () => {
-      const tx = await reputationContract.batchUpdateReputation(
-        identityId,
-        bigDeltas,
-        reason
-      );
-      await tx.wait();
-    });
-    notifyChainUpdate(normalizedAgentId, "batch-update");
+    const identityId = tryToIdentityId(agentId);
+    if (identityId === null) {
+      return true;
+    }
+
+    for (let i = 0; i < CATEGORY_TAGS.length; i++) {
+      const delta = deltas[i];
+      if (delta === 0) continue;
+
+      await queueBiteTransaction(`reputation-feedback:${normalizedAgentId}:${CATEGORY_TAGS[i]}`, async () => {
+        const tx = await waitForBiteSubmission(reputationContract.giveFeedback(
+          identityId,
+          BigInt(delta),
+          0,
+          CATEGORY_TAGS[i],
+          reason,
+          "",
+          "",
+          ethers.ZeroHash,
+          { nonce: await reserveServerNonce() ?? undefined }
+        ));
+        await waitForBiteReceipt(tx.wait());
+      });
+    }
+
+    notifyChainUpdate(normalizedAgentId, "feedback");
     return true;
   } catch (err) {
-    console.warn(
-      `[reputationChain] batchUpdate failed for ${normalizeAgentId(agentId)}:`,
-      err
-    );
+    console.warn(`[reputationChain] feedback update failed for ${normalizeAgentId(agentId)}:`, err);
     return false;
   }
+}
+
+export async function processReputationOperation(operationId: string): Promise<void> {
+  const record = await getChainOperation(operationId);
+  if (!record || record.type !== REPUTATION_OP_TYPE) return;
+  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
+
+  try {
+    await updateChainOperation(operationId, {
+      status: "submitted",
+      attemptCount: record.attemptCount + 1,
+      lastAttemptAt: Date.now(),
+      nextAttemptAt: Date.now(),
+      lastError: undefined,
+    });
+    const payload = JSON.parse(record.payload) as { agentId: string; deltas: [number, number, number, number, number]; reason?: string };
+    const ok = await batchUpdateReputationOnChain(payload.agentId, payload.deltas, payload.reason ?? "queued-feedback");
+    if (!ok) throw new Error(`Failed to reconcile reputation for ${payload.agentId}`);
+    await updateChainOperation(operationId, {
+      status: "completed",
+      completedAt: Date.now(),
+      lastError: undefined,
+    });
+  } catch (err) {
+    await markChainOperationRetryable(operationId, err);
+    throw err;
+  } finally {
+    await releaseChainOperationLock(operationId).catch(() => {});
+  }
+}
+
+export async function processPendingReputationOperations(
+  logger: { error: (err: unknown, msg?: string) => void } = console,
+): Promise<void> {
+  const ops = await listDueChainOperations(REPUTATION_OP_TYPE);
+  for (const op of ops) {
+    try {
+      await processReputationOperation(op.operationId);
+    } catch (err) {
+      logger.error(err, `[reputationChain] worker failed for ${op.operationId}`);
+    }
+  }
+}
+
+export function startReputationChainWorker(logger: { error: (err: unknown, msg?: string) => void }): void {
+  const tick = async () => {
+    await processPendingReputationOperations(logger);
+  };
+
+  void tick().catch((err) => logger.error(err, "[reputationChain] initial worker tick failed"));
+  setInterval(() => {
+    tick().catch((err) => logger.error(err, "[reputationChain] worker tick failed"));
+  }, 5_000);
 }

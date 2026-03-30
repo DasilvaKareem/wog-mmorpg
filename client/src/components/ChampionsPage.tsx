@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { API_URL } from "@/config";
+import { API_URL, getSkaleExplorerTxUrl } from "@/config";
 import { useWalletContext } from "@/context/WalletContext";
 import { useWogNames } from "@/hooks/useWogNames";
 import { HpBar } from "@/components/ui/hp-bar";
@@ -20,6 +20,7 @@ interface LiveEntity {
   hp: number;
   maxHp: number;
   agentId?: string;
+  characterTokenId?: string;
   raceId?: string;
   classId?: string;
   kills?: number;
@@ -42,6 +43,7 @@ interface DiaryEntry {
 interface InventoryItem {
   tokenId: number;
   name: string;
+  displayName: string | null;
   description: string;
   category: "consumable" | "weapon" | "armor" | "material" | "tool";
   equipSlot: string | null;
@@ -453,7 +455,7 @@ function InventoryTab({
                 {eq ? (
                   <>
                     <span className="text-[10px] font-bold leading-tight truncate" style={{ color: rc }}>
-                      {eq.name}
+                      {eq.displayName ?? eq.name}
                     </span>
                     <span className="text-[8px] uppercase mt-0.5" style={{ color: rc + "99" }}>{eq.rarity}</span>
                     {durPct !== null && (
@@ -547,7 +549,7 @@ function InventoryTab({
                   </span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[13px] font-bold text-[#d6deff]">{item.name}</span>
+                      <span className="text-[13px] font-bold text-[#d6deff]">{item.displayName ?? item.name}</span>
                       <span
                         className="text-[10px] uppercase tracking-wide border px-1"
                         style={{ color: rc, borderColor: rc + "44", backgroundColor: rc + "11" }}
@@ -748,29 +750,103 @@ function OverviewTab({
 
 // ── Professions tab ───────────────────────────────────────────────────────
 
-function ProfessionsTab({ learned }: { learned: string[] }) {
+const RECIPE_ENDPOINTS: Record<string, string> = {
+  alchemy: "/alchemy/recipes",
+  cooking: "/cooking/recipes",
+  blacksmithing: "/crafting/recipes",
+  leatherworking: "/leatherworking/recipes",
+  jewelcrafting: "/jewelcrafting/recipes",
+};
+
+interface RecipeInfo { recipeId?: string; id?: string; name?: string; output?: { name?: string }; }
+
+function ProfessionsTab({
+  learned,
+  skills,
+  custodialWallet,
+}: {
+  learned: string[];
+  skills: Record<string, { level: number; xp: number; actions: number; progress: number }>;
+  custodialWallet: string | null;
+}) {
+  const [expandedProf, setExpandedProf] = React.useState<string | null>(null);
+  const [recipes, setRecipes] = React.useState<Record<string, RecipeInfo[]>>({});
+  const [loadingRecipes, setLoadingRecipes] = React.useState<string | null>(null);
+
+  async function toggleExpand(profId: string) {
+    if (expandedProf === profId) { setExpandedProf(null); return; }
+    setExpandedProf(profId);
+    if (recipes[profId]) return;
+    const endpoint = RECIPE_ENDPOINTS[profId];
+    if (!endpoint) return;
+    setLoadingRecipes(profId);
+    try {
+      const res = await fetch(`${API_URL}${endpoint}`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = Array.isArray(data) ? data : (data.recipes ?? []);
+        setRecipes((prev) => ({ ...prev, [profId]: list }));
+      }
+    } catch { /* non-fatal */ }
+    finally { setLoadingRecipes(null); }
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className="flex flex-col gap-3">
       {ALL_PROFESSIONS.map((p) => {
         const isLearned = learned.includes(p.id);
+        const skill = skills[p.id];
+        const isExpanded = expandedProf === p.id;
+        const hasRecipes = !!RECIPE_ENDPOINTS[p.id];
         return (
-          <div
-            key={p.id}
-            className={`flex flex-col items-center border-4 border-black py-5 shadow-[3px_3px_0_0_#000] transition ${
-              isLearned ? "bg-[linear-gradient(180deg,#0d1f0f,#0b1020)]" : "bg-[#0a0f1a] opacity-50"
-            }`}
-          >
-            <span className="text-[26px]">{p.icon}</span>
-            <span className={`mt-2 text-[17px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#596a8a]"}`}>
-              {p.name}
-            </span>
-            <span className="mt-1 text-[13px] font-mono">
-              {isLearned ? (
-                <span className="text-[#54f28b]">[✓ Learned]</span>
-              ) : (
-                <span className="text-[#596a8a]">[Locked]</span>
+          <div key={p.id} className={`border-4 border-black shadow-[3px_3px_0_0_#000] transition ${isLearned ? "bg-[linear-gradient(180deg,#0d1f0f,#0b1020)]" : "bg-[#0a0f1a] opacity-50"}`}>
+            <button
+              type="button"
+              onClick={() => isLearned && hasRecipes ? toggleExpand(p.id) : undefined}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left ${isLearned && hasRecipes ? "cursor-pointer hover:bg-[#112a1b]/30" : ""}`}
+            >
+              <span className="text-[22px] shrink-0">{p.icon}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`text-[15px] uppercase tracking-wide font-mono ${isLearned ? "text-[#54f28b]" : "text-[#596a8a]"}`}>
+                    {p.name}
+                  </span>
+                  {isLearned && skill && (
+                    <span className="text-[11px] font-mono text-[#ffcc00]">Lv.{skill.level}</span>
+                  )}
+                  {!isLearned && <span className="text-[11px] font-mono text-[#596a8a]">[Locked]</span>}
+                </div>
+                {isLearned && skill && (
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <div className="flex-1 h-[6px] bg-[#1a2240] border border-[#29334d]">
+                      <div className="h-full bg-[#54f28b] transition-all" style={{ width: `${Math.min(skill.progress, 100)}%` }} />
+                    </div>
+                    <span className="text-[9px] font-mono text-[#9aa7cc] shrink-0">{Math.round(skill.progress)}%</span>
+                    <span className="text-[9px] font-mono text-[#596a8a] shrink-0">{skill.actions} actions</span>
+                  </div>
+                )}
+              </div>
+              {isLearned && hasRecipes && (
+                <span className="text-[11px] text-[#596a8a] shrink-0">{isExpanded ? "−" : "+"}</span>
               )}
-            </span>
+            </button>
+            {isExpanded && isLearned && (
+              <div className="border-t-2 border-[#1e2842] px-4 py-3">
+                {loadingRecipes === p.id ? (
+                  <p className="text-[11px] text-[#596a8a] font-mono">Loading recipes...</p>
+                ) : (recipes[p.id] ?? []).length === 0 ? (
+                  <p className="text-[11px] text-[#596a8a] font-mono">No recipes available</p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {(recipes[p.id] ?? []).map((r, i) => (
+                      <div key={r.recipeId ?? r.id ?? i} className="border border-[#29334d] bg-[#0a0f1a] px-2 py-1.5">
+                        <p className="text-[11px] font-mono text-[#d6deff] truncate">{r.output?.name ?? r.name ?? r.recipeId ?? "Unknown"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       })}
@@ -986,10 +1062,12 @@ function PartyTab({
   custodialWallet,
   entityId,
   entityZoneId,
+  ownerWallet,
 }: {
   custodialWallet: string | null;
   entityId: string | null;
   entityZoneId: string | null;
+  ownerWallet: string | null;
 }) {
   const [partyStatus, setPartyStatus] = React.useState<{ inParty: boolean; partyId?: string; members: PartyMember[] }>({ inParty: false, members: [] });
   const [invites, setInvites] = React.useState<PartyInviteInfo[]>([]);
@@ -1030,11 +1108,13 @@ function PartyTab({
   }
 
   async function sendInvite(target: SearchResult) {
-    if (!entityId || !entityZoneId) return;
+    if (!entityId || !entityZoneId || !ownerWallet) return;
     if (!target.walletAddress) { setActionMsg("Champion has no wallet — cannot invite"); return; }
     try {
+      const token = await getAuthToken(ownerWallet);
+      if (!token) { setActionMsg("Auth failed"); return; }
       const res = await fetch(`${API_URL}/party/invite-champion`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ fromEntityId: entityId, fromZoneId: entityZoneId, toCustodialWallet: target.walletAddress }),
       });
       const d = await res.json();
@@ -1045,27 +1125,42 @@ function PartyTab({
   }
 
   async function acceptInvite(invite: PartyInviteInfo) {
-    if (!custodialWallet) return;
-    const res = await fetch(`${API_URL}/party/accept-invite`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ custodialWallet, inviteId: invite.id }),
-    });
-    const d = await res.json();
-    if (!res.ok) setActionMsg(`Error: ${d.error}`);
-    else setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/accept-invite`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ custodialWallet, inviteId: invite.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) setActionMsg(`Error: ${d.error}`);
+      else { setInvites((prev) => prev.filter((i) => i.id !== invite.id)); setActionMsg("Joined party!"); }
+    } catch { setActionMsg("Failed to accept invite"); }
     setTimeout(() => setActionMsg(null), 4000);
   }
 
   async function declineInvite(invite: PartyInviteInfo) {
-    if (!custodialWallet) return;
-    await fetch(`${API_URL}/party/decline-invite`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ custodialWallet, inviteId: invite.id }) });
-    setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/decline-invite`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ custodialWallet, inviteId: invite.id }) });
+      if (res.ok) setInvites((prev) => prev.filter((i) => i.id !== invite.id));
+      else { const d = await res.json().catch(() => ({})); setActionMsg(`Error: ${(d as any).error ?? "Failed"}`); setTimeout(() => setActionMsg(null), 4000); }
+    } catch { setActionMsg("Failed to decline invite"); setTimeout(() => setActionMsg(null), 4000); }
   }
 
   async function leaveParty() {
-    if (!custodialWallet) return;
-    const res = await fetch(`${API_URL}/party/leave-wallet`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ custodialWallet }) });
-    if (res.ok) setPartyStatus({ inParty: false, members: [] });
+    if (!custodialWallet || !ownerWallet) return;
+    const token = await getAuthToken(ownerWallet);
+    if (!token) { setActionMsg("Auth failed — try refreshing"); setTimeout(() => setActionMsg(null), 4000); return; }
+    try {
+      const res = await fetch(`${API_URL}/party/leave-wallet`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ custodialWallet }) });
+      if (res.ok) { setPartyStatus({ inParty: false, members: [] }); setActionMsg("Left party"); }
+      else { const d = await res.json().catch(() => ({})); setActionMsg(`Error: ${(d as any).error ?? res.statusText}`); }
+    } catch { setActionMsg("Failed to leave party"); }
+    setTimeout(() => setActionMsg(null), 4000);
   }
 
   return (
@@ -2181,6 +2276,8 @@ interface AgentIdentitySurface {
   ownerWallet: string | null;
   endpoint: string | null;
   characterTokenId: string | null;
+  registrationTxHash: string | null;
+  chainId?: number | string | null;
   onChainRegistered: boolean;
 }
 
@@ -2262,16 +2359,34 @@ function ReputationGraph({ timeline, width, height }: { timeline: RepTimelinePoi
   );
 }
 
-function ReputationTab({ agentId }: { agentId: string | null }) {
+function ReputationTab({
+  agentId,
+  ownerWallet,
+  selectedCharacter,
+}: {
+  agentId: string | null;
+  ownerWallet: string;
+  selectedCharacter: CharacterNft | null;
+}) {
   const [rep, setRep] = React.useState<RepScore | null>(null);
   const [timeline, setTimeline] = React.useState<RepTimelinePoint[]>([]);
   const [history, setHistory] = React.useState<Array<{ category: string; delta: number; reason: string; timestamp: number }>>([]);
   const [identity, setIdentity] = React.useState<AgentIdentitySurface | null>(null);
   const [validations, setValidations] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [registering, setRegistering] = React.useState(false);
+  const [registrationMessage, setRegistrationMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (!agentId) return;
+    if (!agentId) {
+      setRep(null);
+      setTimeline([]);
+      setHistory([]);
+      setIdentity(null);
+      setValidations([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     Promise.all([
       fetch(`${API_URL}/api/agents/${agentId}/reputation`).then(r => r.ok ? r.json() : null),
@@ -2294,8 +2409,82 @@ function ReputationTab({ agentId }: { agentId: string | null }) {
     }).catch(() => {}).finally(() => setLoading(false));
   }, [agentId]);
 
+  const hasActiveBootstrap = ["queued", "pending_mint", "mint_confirmed", "identity_pending"].includes(selectedCharacter?.bootstrapStatus ?? "");
+  const canManuallyRegister = Boolean(selectedCharacter && !agentId && !hasActiveBootstrap);
+
+  async function handleManualRegister() {
+    if (!selectedCharacter || registering) return;
+    setRegistering(true);
+    setRegistrationMessage(null);
+    try {
+      const token = await getAuthToken(ownerWallet);
+      if (!token) {
+        setRegistrationMessage("Wallet auth required to queue registration.");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/character/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          walletAddress: ownerWallet,
+          characterName: selectedCharacter.name,
+          characterTokenId: selectedCharacter.characterTokenId ?? selectedCharacter.tokenId,
+          raceId: selectedCharacter.properties?.race,
+          classId: selectedCharacter.properties?.class,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRegistrationMessage(data.error ?? "Failed to queue identity registration.");
+        return;
+      }
+      setRegistrationMessage(
+        data.alreadyRegistered
+          ? "This character is already registered."
+          : data.alreadyQueued
+            ? "Registration is already in progress."
+            : "Registration queued. Refresh the page in a few seconds."
+      );
+    } catch {
+      setRegistrationMessage("Network error while queueing registration.");
+    } finally {
+      setRegistering(false);
+    }
+  }
+
   if (!agentId) {
-    return <p className="text-[12px] text-[#7a84a8] py-8 text-center">Identity registration pending. Reputation will appear once the agent is registered on-chain.</p>;
+    return (
+      <div className="py-8 text-center">
+        <p className="text-[12px] text-[#7a84a8]">Identity registration pending. Reputation will appear once the agent is registered on-chain.</p>
+        {selectedCharacter?.chainRegistrationStatus && (
+          <p className="mt-2 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
+            Status: {selectedCharacter.chainRegistrationStatus.replaceAll("_", " ")}
+          </p>
+        )}
+        {selectedCharacter?.bootstrapStatus && (
+          <p className="mt-1 text-[10px] uppercase tracking-wide text-[#5dadec]">
+            Queue: {selectedCharacter.bootstrapStatus.replaceAll("_", " ")}
+          </p>
+        )}
+        {canManuallyRegister && (
+          <button
+            type="button"
+            onClick={() => void handleManualRegister()}
+            disabled={registering}
+            className="mt-4 border-2 border-black bg-[#54f28b] px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-[#060d12] shadow-[3px_3px_0_0_#000] disabled:opacity-50"
+          >
+            {registering ? "Queueing..." : "Register On-Chain"}
+          </button>
+        )}
+        {registrationMessage && (
+          <p className="mt-3 text-[10px] text-[#9aa7cc]">{registrationMessage}</p>
+        )}
+      </div>
+    );
   }
 
   if (loading) {
@@ -2307,6 +2496,7 @@ function ReputationTab({ agentId }: { agentId: string | null }) {
   }
 
   const rankColor = RANK_COLORS[rep.rank] ?? "#95A5A6";
+  const registrationTxUrl = getSkaleExplorerTxUrl(identity?.registrationTxHash, identity?.chainId);
 
   return (
     <div className="space-y-4">
@@ -2319,6 +2509,22 @@ function ReputationTab({ agentId }: { agentId: string | null }) {
             </p>
             {identity?.characterTokenId && (
               <p className="mt-1 text-[10px] text-[#9aa7cc]">Character Token #{identity.characterTokenId}</p>
+            )}
+            {identity?.registrationTxHash && (
+              <p className="mt-1 text-[9px] text-[#9aa7cc]">
+                {registrationTxUrl ? (
+                  <a
+                    href={registrationTxUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[#5dadec] underline underline-offset-2"
+                  >
+                    View Registration TX
+                  </a>
+                ) : (
+                  "Registration TX recorded"
+                )}
+              </p>
             )}
             {identity?.endpoint && (
               <p className="mt-1 truncate text-[9px] text-[#5dadec]">{identity.endpoint}</p>
@@ -2799,6 +3005,25 @@ function GoldShopTab({ wallet, custodialWallet }: { wallet: string | null; custo
 
 interface CharacterNft {
   tokenId: string;
+  characterTokenId?: string | null;
+  agentId?: string | null;
+  chainRegistrationStatus?:
+    | "unregistered"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "registered"
+    | "failed_retryable"
+    | "failed_permanent";
+  bootstrapStatus?:
+    | "queued"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "completed"
+    | "failed_retryable"
+    | "failed_permanent"
+    | null;
   name: string;
   description?: string;
   properties?: {
@@ -2811,12 +3036,12 @@ interface CharacterNft {
 
 function CharacterSwitcher({
   characters,
-  selectedName,
+  selectedCharacterTokenId,
   onSelect,
 }: {
   characters: CharacterNft[];
-  selectedName: string | null;
-  onSelect: (name: string) => void;
+  selectedCharacterTokenId: string | null;
+  onSelect: (tokenId: string) => void;
 }) {
   if (characters.length <= 1) return null;
   return (
@@ -2829,25 +3054,42 @@ function CharacterSwitcher({
           const baseName = c.name.includes(" the ") ? c.name.split(" the ")[0] : c.name;
           const lv = c.properties?.level ?? 1;
           const lc = levelColor(lv);
-          const isActive = selectedName === baseName || (!selectedName && characters[0]?.name.includes(baseName));
+          const isActive = selectedCharacterTokenId === c.tokenId || (!selectedCharacterTokenId && characters[0]?.tokenId === c.tokenId);
+          const pendingStatus =
+            c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+              ? "Minting..."
+              : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                ? "Registering..."
+                : null;
+          const isPending = pendingStatus != null;
           return (
             <button
               key={c.tokenId}
-              onClick={() => onSelect(baseName)}
+              onClick={() => onSelect(c.tokenId)}
+              disabled={isPending}
               className={`text-left px-3 py-2 border-2 transition ${
                 isActive
                   ? "border-[#ffcc00]/60 bg-[#2a2210]"
-                  : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
+                  : isPending
+                    ? "border-[#2a3450] bg-[#10162a] opacity-70"
+                    : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold text-[#d6deff] truncate">{baseName}</span>
-                <span className="text-[10px] shrink-0" style={{ color: lc }}>Lv {lv}</span>
+                <span className="text-[10px] shrink-0" style={{ color: isPending ? "#7a84a8" : lc }}>
+                  {isPending ? pendingStatus : `Lv ${lv}`}
+                </span>
               </div>
               {c.properties?.race && (
                 <span className="text-[9px] capitalize text-[#7a84a8]">
                   {c.properties.race} {c.properties.class}
                 </span>
+              )}
+              {isPending && (
+                <p className="mt-1 text-[9px] uppercase tracking-wide text-[#ffcc00]">
+                  Character creation in progress
+                </p>
               )}
             </button>
           );
@@ -2870,13 +3112,18 @@ export function ChampionsPage(): React.ReactElement {
   const [entity, setEntity]                 = React.useState<LiveEntity | null>(null);
   const [zoneId, setZoneId]                 = React.useState<string | null>(null);
   const [professions, setProfessions]       = React.useState<string[]>([]);
+  const [profSkills, setProfSkills]         = React.useState<Record<string, { level: number; xp: number; actions: number; progress: number }>>({});
   const [diary, setDiary]                   = React.useState<DiaryEntry[]>([]);
   const [items, setItems]                   = React.useState<InventoryItem[]>([]);
   const [inventoryLoading, setInventoryLoading] = React.useState(false);
   const [loading, setLoading]               = React.useState(false);
   const [activeTab, setActiveTab]           = React.useState<Tab>("inventory");
   const [characters, setCharacters]         = React.useState<CharacterNft[]>([]);
-  const [selectedCharName, setSelectedCharName] = React.useState<string | null>(null);
+  const [selectedCharacterTokenId, setSelectedCharacterTokenId] = React.useState<string | null>(null);
+  const selectedCharacter = React.useMemo(
+    () => characters.find((character) => character.tokenId === selectedCharacterTokenId) ?? null,
+    [characters, selectedCharacterTokenId],
+  );
 
   // Step 1 — resolve custodial wallet + fetch all owned characters
   React.useEffect(() => {
@@ -2890,20 +3137,33 @@ export function ChampionsPage(): React.ReactElement {
       setAgentZoneId(agentData.zoneId ?? null);
       const chars: CharacterNft[] = charData.characters ?? [];
       setCharacters(chars);
-      // Auto-select first character if none selected
-      if (chars.length > 0 && !selectedCharName) {
-        const first = chars[0];
-        const baseName = first.name.includes(" the ") ? first.name.split(" the ")[0] : first.name;
-        setSelectedCharName(baseName);
+      if (chars.length === 0) {
+        setSelectedCharacterTokenId(null);
+        return;
       }
+
+      setSelectedCharacterTokenId((current) => {
+        if (current && chars.some((character) => character.tokenId === current)) return current;
+
+        const deployed =
+          chars.find((character) => agentData.characterTokenId && (character.characterTokenId ?? character.tokenId) === agentData.characterTokenId)
+          ?? chars.find((character) => agentData.agentId && character.agentId === agentData.agentId)
+          ?? chars[0];
+
+        return deployed?.tokenId ?? null;
+      });
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wallet]);
 
   // Step 2 — poll live entity from world state
   React.useEffect(() => {
     const searchWallet = (custodialWallet ?? wallet)?.toLowerCase();
     if (!searchWallet) return;
+    const selectedAgentId = selectedCharacter?.agentId ?? null;
+    const selectedCharacterToken = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? null;
+    const selectedBaseName = selectedCharacter?.name?.includes(" the ")
+      ? selectedCharacter.name.split(" the ")[0]
+      : selectedCharacter?.name ?? null;
 
     async function fetchLiveEntity() {
       try {
@@ -2914,22 +3174,42 @@ export function ChampionsPage(): React.ReactElement {
             const e = ent as any;
             if (e.type !== "player") continue;
             if (e.walletAddress?.toLowerCase() !== searchWallet) continue;
-            // If a specific character is selected, filter by name
-            if (selectedCharName && !e.name?.toLowerCase().startsWith(selectedCharName.toLowerCase())) continue;
-            setEntity({ name: e.name, level: e.level ?? 1, xp: e.xp ?? 0, hp: e.hp ?? 0, maxHp: e.maxHp ?? 100, agentId: e.agentId, raceId: e.raceId, classId: e.classId, kills: e.kills ?? 0, completedQuests: e.completedQuests ?? [], walletAddress: e.walletAddress, zoneId: zId });
+            if (selectedAgentId && String(e.agentId ?? "") !== selectedAgentId) continue;
+            if (!selectedAgentId && selectedCharacterToken && String(e.characterTokenId ?? "") !== selectedCharacterToken) {
+              if (!selectedBaseName || !e.name?.toLowerCase().startsWith(selectedBaseName.toLowerCase())) continue;
+            }
+            setAgentEntityId(e.id ?? null);
+            setAgentZoneId(zId);
+            setEntity({
+              name: e.name,
+              level: e.level ?? 1,
+              xp: e.xp ?? 0,
+              hp: e.hp ?? 0,
+              maxHp: e.maxHp ?? 100,
+              agentId: e.agentId != null ? String(e.agentId) : undefined,
+              characterTokenId: e.characterTokenId != null ? String(e.characterTokenId) : undefined,
+              raceId: e.raceId,
+              classId: e.classId,
+              kills: e.kills ?? 0,
+              completedQuests: e.completedQuests ?? [],
+              walletAddress: e.walletAddress,
+              zoneId: zId,
+            });
             setZoneId(zId);
             return;
           }
         }
         setEntity(null);
         setZoneId(null);
+        setAgentEntityId(null);
+        setAgentZoneId(null);
       } catch { /* non-fatal */ }
     }
 
     fetchLiveEntity();
     const interval = setInterval(fetchLiveEntity, 10_000);
     return () => clearInterval(interval);
-  }, [custodialWallet, wallet, selectedCharName]);
+  }, [custodialWallet, wallet, selectedCharacter]);
 
   // Step 3 — fetch professions, diary, inventory when custodial wallet is known
   React.useEffect(() => {
@@ -2945,7 +3225,7 @@ export function ChampionsPage(): React.ReactElement {
           fetch(`${API_URL}/professions/${profWallet}`),
           fetch(`${API_URL}/diary/${wallet}?limit=200`),
         ]);
-        if (profRes.ok)  { const pd = await profRes.json();  setProfessions(pd.professions ?? []); }
+        if (profRes.ok)  { const pd = await profRes.json();  setProfessions(pd.professions ?? []); setProfSkills(pd.skills ?? {}); }
         if (diaryRes.ok) { const dd = await diaryRes.json(); setDiary(dd.entries ?? []); }
       } catch { /* non-fatal */ }
       finally { setLoading(false); }
@@ -3005,7 +3285,11 @@ export function ChampionsPage(): React.ReactElement {
         <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
           {/* Sidebar */}
           <div className="w-full lg:w-72 lg:shrink-0 flex flex-col gap-3">
-            <CharacterSwitcher characters={characters} selectedName={selectedCharName} onSelect={setSelectedCharName} />
+            <CharacterSwitcher
+              characters={characters}
+              selectedCharacterTokenId={selectedCharacterTokenId}
+              onSelect={setSelectedCharacterTokenId}
+            />
             <ChampionSidebar entity={entity} wallet={wallet} zoneId={zoneId} kills={kills} deaths={deaths} />
           </div>
 
@@ -3020,13 +3304,19 @@ export function ChampionsPage(): React.ReactElement {
               }} />}
               {activeTab === "overview"    && <OverviewTab entity={entity} diary={diary} kills={kills} deaths={deaths} quests={quests} itemCount={items.length} />}
               {activeTab === "guild"       && <GuildTab custodialWallet={custodialWallet} ownerWallet={wallet} />}
-              {activeTab === "professions" && <ProfessionsTab learned={professions} />}
+              {activeTab === "professions" && <ProfessionsTab learned={professions} skills={profSkills} custodialWallet={custodialWallet} />}
               {activeTab === "quests"      && <QuestsTab diary={diary} />}
               {activeTab === "activity"    && <ActivityTab diary={diary} />}
               {activeTab === "inbox"       && <InboxTab wallet={wallet!} />}
-              {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
+              {activeTab === "party"       && <PartyTab custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} ownerWallet={wallet} />}
               {activeTab === "friends"     && <FriendsTab ownerWallet={wallet} custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
-              {activeTab === "reputation"  && <ReputationTab agentId={entity?.agentId ?? null} />}
+              {activeTab === "reputation"  && (
+                <ReputationTab
+                  agentId={entity?.agentId ?? selectedCharacter?.agentId ?? null}
+                  ownerWallet={wallet}
+                  selectedCharacter={selectedCharacter}
+                />
+              )}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}
               {activeTab === "plan"        && <PlanTab wallet={wallet} />}
             </div>

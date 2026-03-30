@@ -1,0 +1,472 @@
+{
+  "meta": {
+    "id": "dark-forest-thresholds",
+    "title": "Dark Forest Thresholds",
+    "summary": "Authored quest scenes for the dark forest's priestess, arcanist, remnant-keeper, and dwarven exile chains.",
+    "zoneIds": ["dark-forest"],
+    "tags": ["dark-forest", "authored", "thresholds", "lore"],
+    "startingSceneId": "selene_shadows"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "selene_shadows",
+        "npcName": "Priestess Selene",
+        "title": "Priestess Selene and the Dark Forest Trial",
+        "idleText": "The dark forest does not sleep, it only waits. If no rite is open with me, then your next test lies deeper in the trees.",
+        "stages": [
+          {
+            "stageId": "shadows_in_dark",
+            "questId": "shadows_in_dark",
+            "available": {
+              "promptText": "You've come far enough that light alone won't carry you. Shadow Wolves haunt this forest, and I need someone willing to send them back into silence.",
+              "acceptLabel": "I'll banish the shadow wolves.",
+              "acceptedText": "Five Shadow Wolves. Keep your nerve when the dark starts moving around you.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with the wolves?",
+              "detailsText": "Because they teach the first law of this place: fear gets faster when it smells hesitation.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask plainly. The dark has enough echoes without adding yours.",
+              "freeformPrompt": "Tell Selene what you need before the first dark forest hunt.",
+              "freeformPlaceholder": "Example: What should I be ready for out there?",
+              "freeformFallback": "Selene's eyes stay fixed on you. \"Accept the rite or ask a clear question.\""
+            },
+            "active": {
+              "promptText": "The shadows still prowl. Finish the wolf work before you ask for the next prayer.",
+              "primaryLabel": "The wolves are banished.",
+              "resultText": "Good. You didn't break at the threshold. Now the forest shows you its worshippers.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Five Shadow Wolves. Hold the line when they try to turn the fight into panic.",
+              "declineLabel": "I'll return.",
+              "declineText": "Return only when the shadows are thinner."
+            },
+            "completedText": "The shadow wolves have been culled. Selene has a darker rite waiting."
+          },
+          {
+            "stageId": "cult_cleansing",
+            "questId": "cult_cleansing",
+            "available": {
+              "promptText": "The wolves are only the teeth. Dark Cultists are the hands guiding the blasphemy deeper in these woods.",
+              "acceptLabel": "I'll stop the cultists.",
+              "acceptedText": "Four Dark Cultists. Break the ritualists before they feed anything else to the forest.",
+              "effectType": "start_quest",
+              "detailsLabel": "What are they trying to do?",
+              "detailsText": "Take essence meant to flow and force it into shapes that answer only hunger. Necromancy begins with theft before it becomes desecration.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Piety without precision is just fear dressed in ritual.",
+              "freeformPrompt": "Tell Selene what you want to know about the cultists.",
+              "freeformPlaceholder": "Example: What happens if their rituals keep spreading?",
+              "freeformFallback": "Selene lowers her voice. \"Ask with intent or take the task.\""
+            },
+            "active": {
+              "promptText": "The cult is still chanting somewhere under these branches. Finish the cleansing.",
+              "primaryLabel": "The cultists are dead.",
+              "resultText": "Then the forest is quieter for a moment. Unfortunately, the dead have started listening.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Four Dark Cultists. Break the rite before it settles into the ground.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how corruption becomes liturgy."
+            },
+            "completedText": "The cult's latest rite is broken. Selene's next task deals with what it woke."
+          },
+          {
+            "stageId": "undead_purge",
+            "questId": "undead_purge",
+            "available": {
+              "promptText": "The cult left enough rot behind to stir old dead things. Undead Knights are walking where no oath should still hold.",
+              "acceptLabel": "I'll put the dead down.",
+              "acceptedText": "Four Undead Knights. Grant them the silence their old vows were denied.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why call it a purge?",
+              "detailsText": "Because some defilements do not negotiate. You do not redeem a blade that keeps rising to serve corruption.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. But do not ask me to pity what keeps clawing back from the grave.",
+              "freeformPrompt": "Tell Selene what you need before facing the undead knights.",
+              "freeformPlaceholder": "Example: What should I expect from the dead here?",
+              "freeformFallback": "Selene makes the sign of warding. \"Ask clearly or take the burden.\""
+            },
+            "active": {
+              "promptText": "The dead are still walking. Finish the purge.",
+              "primaryLabel": "The undead are at rest.",
+              "resultText": "Good. The path opens a little farther now, and what waits there is heavier than bone.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Undead Knights. Keep them from locking you into their rhythm.",
+              "declineLabel": "I'll finish it.",
+              "declineText": "Do that."
+            },
+            "completedText": "The dead are quieter now. Selene's next trial is made of flesh and stone."
+          },
+          {
+            "stageId": "troll_slayer",
+            "questId": "troll_slayer",
+            "available": {
+              "promptText": "Forest Trolls have started blocking the old paths. They regenerate, they endure, and they mistake endurance for victory.",
+              "acceptLabel": "I'll clear the trolls.",
+              "acceptedText": "Three Forest Trolls. Hit hard enough that their stubbornness stops mattering.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the paths so important?",
+              "detailsText": "Because if the paths close, the dark forest stops being dangerous terrain and becomes a trap that decides who gets out at all.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. No blessing replaces preparation.",
+              "freeformPrompt": "Tell Selene what you need before fighting the trolls.",
+              "freeformPlaceholder": "Example: What breaks their momentum best?",
+              "freeformFallback": "Selene's answer is calm. \"Ask about the trial or take it.\""
+            },
+            "active": {
+              "promptText": "The paths remain blocked. Bring the trolls down and then come back to me.",
+              "primaryLabel": "The trolls are slain.",
+              "resultText": "Good. The way is open again, which means you are finally close to the old stone watchers.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Forest Trolls. If you let them dictate the pace, you'll never finish the fight.",
+              "declineLabel": "Later.",
+              "declineText": "Later serves the things that squat on broken roads."
+            },
+            "completedText": "The forest paths are open again. Selene's next enemies are older than the path itself."
+          },
+          {
+            "stageId": "golem_breaker",
+            "questId": "golem_breaker",
+            "available": {
+              "promptText": "Ancient Golems still keep watch over ruins no living hand remembers building. If we are to move deeper, they have to fall.",
+              "acceptLabel": "I'll shatter the golems.",
+              "acceptedText": "Two Ancient Golems. Break the stone before it decides you're part of the ruin.",
+              "effectType": "start_quest",
+              "detailsLabel": "What do they guard?",
+              "detailsText": "Old intention. Old wards. Old failures. Ruins rarely remember the difference.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask if you must. The old stone does not care either way.",
+              "freeformPrompt": "Tell Selene what you want to know about the golems and ruins.",
+              "freeformPlaceholder": "Example: What kind of place am I walking into?",
+              "freeformFallback": "Selene waits a beat. \"Take the task or ask something sharper.\""
+            },
+            "active": {
+              "promptText": "The stone watchers still stand. Finish the work and return.",
+              "primaryLabel": "The golems are broken.",
+              "resultText": "Then the ruins have lost their fists. Only the will behind this corruption remains.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Two Ancient Golems. Stay mobile and don't let the stone pin you in place.",
+              "declineLabel": "I'll finish it first.",
+              "declineText": "See that you do."
+            },
+            "completedText": "The stone watchers are down. Selene is ready to speak Valdris's name."
+          },
+          {
+            "stageId": "necromancer_end",
+            "questId": "necromancer_end",
+            "available": {
+              "promptText": "Now we stop pretending this corruption is diffuse. Valdris stands at the center of it. End the necromancer, and the dark forest finally loses its conductor.",
+              "acceptLabel": "I'll end Valdris.",
+              "acceptedText": "Then go with all the resolve you've earned. One necromancer. No mercy for the hand raising the dead.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is this the true center?",
+              "detailsText": "Because wolves, cultists, and undead all become pattern instead of chaos when one will is driving them. Kill the will and the pattern breaks.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final questions should sound like readiness, not escape.",
+              "freeformPrompt": "Tell Selene what you need before facing Valdris.",
+              "freeformPlaceholder": "Example: What matters most when I face the necromancer?",
+              "freeformFallback": "Selene's gaze hardens. \"Either face Valdris or ask me a real final question.\""
+            },
+            "active": {
+              "promptText": "Valdris still breathes, which means the forest still suffers his will. Finish it.",
+              "primaryLabel": "Valdris is dead.",
+              "resultText": "Then the center broke. You have earned the forest's last acknowledgment.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "Necromancer Valdris. Do not give him the time to turn your caution against you.",
+              "declineLabel": "I'll return after the kill.",
+              "declineText": "Return with certainty."
+            },
+            "completedText": "Valdris has fallen. Only Selene's final judgment remains."
+          },
+          {
+            "stageId": "dark_forest_master",
+            "questId": "dark_forest_master",
+            "available": {
+              "promptText": "You've survived the forest's pieces. Now prove you can bear the whole place. This last trial is not about one monster. It's about whether the dark forest can still overwhelm you when it comes all at once.",
+              "acceptLabel": "Give me the final dark forest trial.",
+              "acceptedText": "Then take the full trial and return when the forest itself has failed to break you.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does this final rite prove?",
+              "detailsText": "That you've moved beyond reacting to singular threats. Mastery begins when a cursed place stops controlling the pace of your fear.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. The last threshold should be crossed awake.",
+              "freeformPrompt": "Tell Selene how you're approaching the final dark forest trial.",
+              "freeformPlaceholder": "Example: I'm ready for the forest's last test.",
+              "freeformFallback": "Selene's voice is almost a whisper. \"Take the trial or ask one last sharp question.\""
+            },
+            "active": {
+              "promptText": "The dark forest's final trial is still open. Finish it and I'll call this path complete.",
+              "primaryLabel": "The final trial is complete.",
+              "resultText": "Then hear me clearly: the forest tested shadow, blasphemy, death, stone, and will against you, and you still stand. That is what mastery looks like here.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this proves.",
+              "secondaryText": "It proves the whole forest can no longer force you into panic by changing the shape of the threat.",
+              "declineLabel": "I'll return when it's finished.",
+              "declineText": "Do that. Final titles should be earned, not rehearsed."
+            },
+            "completedText": "Selene has already named what you became in the dark forest. The trees will remember."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "voss_unbound",
+        "npcName": "Arcanist Voss",
+        "title": "Arcanist Voss and the Modernist Gambit",
+        "idleText": "If you've exhausted my patience and my assignments, then go do something ambitious with what you've learned.",
+        "stages": [
+          {
+            "stageId": "modernists_gambit",
+            "questId": "modernists_gambit",
+            "available": {
+              "promptText": "Caelum sent you to hear the modernist case instead of the druid version. Good. At least one of you is willing to inspect the future without flinching.",
+              "acceptLabel": "Give me your argument.",
+              "acceptedText": "Then hear it plainly: Arcadia's decline is not proof that innovation failed. It's proof that hesitation did.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What is the modernist position?",
+              "detailsText": "That essence should be shaped, amplified, engineered, and scaled. Tradition preserves memory; it does not build reactors, sky-cities, or survival at continental scale.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask with enough precision that I don't mistake you for a tourist.",
+              "freeformPrompt": "Ask Voss what you want to understand about Arcadian modernists.",
+              "freeformPlaceholder": "Example: Why do you think the druids are wrong?",
+              "freeformFallback": "Voss folds his arms. \"Ask one worthwhile question.\""
+            },
+            "completedText": "You've heard Voss's argument. Now he wants results instead of philosophy."
+          },
+          {
+            "stageId": "essence_unbound",
+            "questId": "essence_unbound",
+            "available": {
+              "promptText": "Theory is cheap. Dark Cultists are siphoning essence into necromancy right now. Even Caelum and I agree that has to end.",
+              "acceptLabel": "I'll stop the cult siphons.",
+              "acceptedText": "Four Dark Cultists. Consider it fieldwork in applied philosophy.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does this prove?",
+              "detailsText": "That power itself is not the sin. Indifference, cowardice, and misuse are. If you can't distinguish them, you'll never build anything worth keeping.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. But don't ask me to make the answer smaller just because it's inconvenient.",
+              "freeformPrompt": "Tell Voss what you need before stopping the cultists.",
+              "freeformPlaceholder": "Example: What am I really proving by taking this job?",
+              "freeformFallback": "Voss lifts a brow. \"Ask sharply or take the contract.\""
+            },
+            "active": {
+              "promptText": "The cultists are still draining essence into rot. Finish the work and then we'll speak like adults.",
+              "primaryLabel": "The cult siphons are broken.",
+              "resultText": "Good. Results matter. You've heard the druid and the arcanist now. The harder part is deciding what Arcadia should become.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the objective.",
+              "secondaryText": "Four Dark Cultists. End the siphoning before they anchor it into the forest.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "Then return with results."
+            },
+            "completedText": "Voss has already made his case and tested it in the field through you."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "durgan_depths",
+        "npcName": "Stonekeeper Durgan",
+        "title": "Stonekeeper Durgan and the Gemloch Depths",
+        "idleText": "The deep still sings whether surface folk listen or not. If I've no work for you, then keep Felsrock in the back of your mind.",
+        "stages": [
+          {
+            "stageId": "dwarven_exile",
+            "questId": "dwarven_exile",
+            "available": {
+              "promptText": "You look like someone who can still listen to a ruined people without pitying them to death. Sit. I'll tell you what Felsrock lost.",
+              "acceptLabel": "Tell me about Felsrock.",
+              "acceptedText": "Then listen close. The Gemloch depths remember everything we sealed beneath them.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why speak of exile now?",
+              "detailsText": "Because exile is not only losing a home. It's surviving long enough to know what should still have been there when you returned.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask proper. Dwarves can smell weak curiosity like bad ore.",
+              "freeformPrompt": "Ask Durgan what you want to know about Felsrock and exile.",
+              "freeformPlaceholder": "Example: What really happened to the citadel?",
+              "freeformFallback": "Durgan grunts. \"Ask like you mean to remember the answer.\""
+            },
+            "completedText": "Durgan has given you his first history. The deeper story comes with blood on it."
+          },
+          {
+            "stageId": "shadows_of_the_chasm",
+            "questId": "shadows_of_the_chasm",
+            "available": {
+              "promptText": "The Azurshard Chasm does not like being remembered. Shadow Wolves followed that old terror out toward my camp. Help me thin them and I'll tell you what still sleeps below.",
+              "acceptLabel": "I'll thin the wolves.",
+              "acceptedText": "Four Shadow Wolves. Put them down and then we'll talk about older dangers.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the chasm matter?",
+              "detailsText": "Because some places are not just deep. They're foundational. The chasm may be older than any map that ever tried to claim it.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. But don't ask me to make the deep sound safe.",
+              "freeformPrompt": "Tell Durgan what you need to know before hunting the wolves.",
+              "freeformPlaceholder": "Example: What came out of the chasm with them?",
+              "freeformFallback": "Durgan taps ash from the fire. \"Ask clear or take the hunt.\""
+            },
+            "active": {
+              "promptText": "The wolves are still ranging too close to camp. Finish the work.",
+              "primaryLabel": "The wolves are down.",
+              "resultText": "Good. Now you've earned a little more truth about what Felsrock used to forge from living stone.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Four Shadow Wolves. Thin the ones circling the forest edge before they settle into the camp paths.",
+              "declineLabel": "Later.",
+              "declineText": "Aye. Later, then. Just don't expect the wolves to wait polite."
+            },
+            "completedText": "The wolves are off Durgan's trail. He's ready to speak of Felsrock's old craft."
+          },
+          {
+            "stageId": "felsrock_memories",
+            "questId": "felsrock_memories",
+            "available": {
+              "promptText": "You did the work. Now hear this: azurshards once lit whole halls in Felsrock, and the stone itself used to sing under a proper hammer.",
+              "acceptLabel": "Tell me the old craft.",
+              "acceptedText": "Then remember it properly. What the deep made possible, surface kingdoms barely learned to imitate.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What was resonance forging?",
+              "detailsText": "A craft that listened as much as it struck. Gem, alloy, pressure, and essence all tuned until the weapon answered back.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Good craft deserves better than vague admiration.",
+              "freeformPrompt": "Ask Durgan what you want to know about Felsrock's forging tradition.",
+              "freeformPlaceholder": "Example: What did the citadel know that others lost?",
+              "freeformFallback": "Durgan snorts. \"Ask about the forge, not the mist around it.\""
+            },
+            "completedText": "You've heard Durgan's memory of Felsrock's craft. The next lesson is uglier."
+          },
+          {
+            "stageId": "undead_in_the_deep",
+            "questId": "undead_in_the_deep",
+            "available": {
+              "promptText": "Craft wasn't the only thing sealed in the deep. Undead Knights walking this forest are cousins to what we fought beneath Felsrock. I want them down.",
+              "acceptLabel": "I'll clear the undead.",
+              "acceptedText": "Four Undead Knights. Put them to rest before they make a camp of this whole cursed wood.",
+              "effectType": "start_quest",
+              "detailsLabel": "What made the dead rise there?",
+              "detailsText": "Essence bleed without flow. Too much power, no release, and the deep starts imitating life badly enough to make a warrior weep.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. I've no patience for soft stomachs pretending to be curious.",
+              "freeformPrompt": "Tell Durgan what you need before facing the undead knights.",
+              "freeformPlaceholder": "Example: What should I understand about what raised them?",
+              "freeformFallback": "Durgan's stare is level. \"Ask proper or swing proper. Those are the options.\""
+            },
+            "active": {
+              "promptText": "The unliving are still walking. End that insult and return.",
+              "primaryLabel": "The undead are down.",
+              "resultText": "Aye. Good. That's one more old shame buried where it belongs. One oath remains between me and the deep.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Undead Knights. Don't let the rhythm of their advance pin you down.",
+              "declineLabel": "I'll return after the purge.",
+              "declineText": "Then return with cleaner steel."
+            },
+            "completedText": "The unliving threat is thinner now. Durgan's last oath is waiting."
+          },
+          {
+            "stageId": "durgans_oath",
+            "questId": "durgans_oath",
+            "available": {
+              "promptText": "You've heard enough and bled enough to earn the final thing I can offer: the promise that Felsrock is not gone forever, only waiting on the right kind of mad courage.",
+              "acceptLabel": "Speak the oath.",
+              "acceptedText": "Then hear it and keep it. Someday those gates will open, and I would rather see your back beside me than someone softer.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What does the oath really ask?",
+              "detailsText": "Memory first. Then readiness. A sealed citadel is still a summons if the right people remember where to knock.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, then. Oaths deserve plain words.",
+              "freeformPrompt": "Ask Durgan what he wants remembered about Felsrock's future.",
+              "freeformPlaceholder": "Example: Why do you still believe the citadel can be reclaimed?",
+              "freeformFallback": "Durgan grips his cup. \"Ask with some iron in your voice.\""
+            },
+            "completedText": "Durgan has already trusted you with his oath. The deep will call again when it's ready."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "nyx_selerion",
+        "npcName": "Remnant Keeper Nyx",
+        "title": "Remnant Keeper Nyx and the Selerion Fragments",
+        "idleText": "Fragments survive because someone decides they must. If you have no business with me, leave the chest closed and the fire tended.",
+        "stages": [
+          {
+            "stageId": "waning_power",
+            "questId": "waning_power",
+            "available": {
+              "promptText": "Thessaly sent you with talk of Arcadia's decline. Good. Most people only care once the ceiling actually falls. I care earlier than that.",
+              "acceptLabel": "Show me what still remains.",
+              "acceptedText": "Then understand this first: fragments are not leftovers. They're coordinates for whatever future Arcadia still deserves.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why guard fragments instead of rebuilding outright?",
+              "detailsText": "Because civilizations do not rise from slogans. They rise from preserved knowledge, protected long enough to become usable again.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask well. I do not open Selerion's memory for shallow curiosity.",
+              "freeformPrompt": "Ask Nyx what you want to know about Arcadia's waning power.",
+              "freeformPlaceholder": "Example: Why do these fragments matter more than old stories?",
+              "freeformFallback": "Nyx's eyes narrow. \"Ask one serious question.\""
+            },
+            "completedText": "Nyx has given you the first measure of what still survives. Now she needs those remains defended."
+          },
+          {
+            "stageId": "selerion_fragments",
+            "questId": "selerion_fragments",
+            "available": {
+              "promptText": "The fragments cannot wait on philosophy alone. Forest Trolls have been raiding my camp for firewood and kindling. Help me keep the past from becoming someone else's campfire.",
+              "acceptLabel": "I'll defend the fragments.",
+              "acceptedText": "Three Forest Trolls. Clear them out and the archive breathes a little easier.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are these pieces so important?",
+              "detailsText": "Because the Library of Selerion recorded origins, methods, maps, and failures that no living institution remembers whole anymore.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask, but don't waste the question on romance. Preservation is labor.",
+              "freeformPrompt": "Tell Nyx what you need to know before defending the fragments.",
+              "freeformPlaceholder": "Example: What am I protecting besides parchment and crystal?",
+              "freeformFallback": "Nyx taps the locked chest once. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The trolls are still too close to the archive. Finish the defense and return.",
+              "primaryLabel": "The fragments are secure.",
+              "resultText": "Good. You defended more than a camp. You defended a future too many people have already written off.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the task.",
+              "secondaryText": "Three Forest Trolls threatening Nyx's camp and the Selerion fragments within it.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "Return with the fragments still intact."
+            },
+            "completedText": "Nyx's archive is safe for now. Her last words are about what that safety might buy."
+          },
+          {
+            "stageId": "arcadias_dawn",
+            "questId": "arcadias_dawn",
+            "available": {
+              "promptText": "You've walked enough of Arcadia to understand what most people miss: decline is real, but so is inheritance. Sit. I'll show you the fragment that points toward something more than survival.",
+              "acceptLabel": "Show me Arcadia's dawn.",
+              "acceptedText": "Then take this truth with care: rediscovery is not nostalgia. It is a form of courage.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What does the fragment promise?",
+              "detailsText": "Not salvation by itself. Direction. Cache locations, old networks, pieces of an Arcadia that can still be reassembled by people willing to do the work.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask, and make the question worthy of what the answer could start.",
+              "freeformPrompt": "Ask Nyx what she believes Arcadia can become next.",
+              "freeformPlaceholder": "Example: Why do you think rediscovery matters more than mourning?",
+              "freeformFallback": "Nyx waits in silence. \"Ask a question that looks forward.\""
+            },
+            "completedText": "Nyx has already handed you her vision of Arcadia's dawn. What comes next belongs to the roads beyond this forest."
+          }
+        ]
+      }
+    }
+  ]
+}

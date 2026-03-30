@@ -10,6 +10,7 @@ export interface Entity {
   shopItems?: number[];
   walletAddress?: string;
   agentId?: string;
+  characterTokenId?: string;
   level?: number;
   xp?: number;
   raceId?: string;
@@ -111,7 +112,7 @@ export interface RaceInfo {
 
 export interface CharacterCreateResponse {
   ok: boolean;
-  txHash: string;
+  txHash?: string;
   character: {
     name: string;
     description: string;
@@ -121,10 +122,48 @@ export interface CharacterCreateResponse {
     xp: number;
     stats: CharacterStats;
   };
+  bootstrap?: {
+    status:
+      | "queued"
+      | "pending_mint"
+      | "mint_confirmed"
+      | "identity_pending"
+      | "completed"
+      | "failed_retryable"
+      | "failed_permanent";
+    sourceOfTruth?: string;
+    chainRegistrationStatus?:
+      | "unregistered"
+      | "pending_mint"
+      | "mint_confirmed"
+      | "identity_pending"
+      | "registered"
+      | "failed_retryable"
+      | "failed_permanent";
+  };
 }
 
 export interface OwnedCharacter {
   tokenId: string;
+  characterTokenId?: string | null;
+  agentId?: string | null;
+  chainRegistrationStatus?:
+    | "unregistered"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "registered"
+    | "failed_retryable"
+    | "failed_permanent";
+  bootstrapStatus?:
+    | "queued"
+    | "pending_mint"
+    | "mint_confirmed"
+    | "identity_pending"
+    | "completed"
+    | "failed_retryable"
+    | "failed_permanent"
+    | null;
   name: string;
   description: string;
   properties: {

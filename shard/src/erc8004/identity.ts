@@ -1,19 +1,24 @@
 import {
   getA2AEndpoint as getA2AEndpointFromBlockchain,
-  getAgentWallet as getAgentWalletFromBlockchain,
+  getIdentityOwner as getIdentityOwnerFromBlockchain,
   registerIdentity as registerIdentityFromBlockchain,
   setA2AEndpoint as setA2AEndpointFromBlockchain,
+  type IdentityRegistrationOptions,
   type IdentityRegistrationResult,
 } from "../blockchain/blockchain.js";
 
-export type { IdentityRegistrationResult } from "../blockchain/blockchain.js";
+export type {
+  IdentityRegistrationOptions,
+  IdentityRegistrationResult,
+} from "../blockchain/blockchain.js";
 
 export async function registerAgentIdentity(
   characterTokenId: bigint,
   ownerAddress: string,
-  metadataURI: string
+  metadataURI: string,
+  options?: IdentityRegistrationOptions
 ): Promise<IdentityRegistrationResult> {
-  return registerIdentityFromBlockchain(characterTokenId, ownerAddress, metadataURI);
+  return registerIdentityFromBlockchain(characterTokenId, ownerAddress, metadataURI, options);
 }
 
 export async function getAgentEndpoint(agentId: bigint): Promise<string | null> {
@@ -25,5 +30,5 @@ export async function setAgentEndpoint(agentId: bigint, endpointUrl: string): Pr
 }
 
 export async function getAgentOwnerWallet(agentId: bigint): Promise<string | null> {
-  return getAgentWalletFromBlockchain(agentId);
+  return getIdentityOwnerFromBlockchain(agentId);
 }

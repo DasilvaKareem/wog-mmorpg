@@ -2,6 +2,15 @@ import type { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
 import "dotenv/config";
 
+const LOCAL_RPC_URL = process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
+const DEPLOYER_ACCOUNTS = process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : [];
+const LOCALHOST_ACCOUNTS = process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : undefined;
+const SKALE_BASE_MAINNET_RPC_URL =
+  process.env.SKALE_BASE_MAINNET_RPC_URL || "https://skale-base.skalenodes.com/v1/base";
+const SKALE_BASE_SEPOLIA_RPC_URL =
+  process.env.SKALE_BASE_SEPOLIA_RPC_URL ||
+  "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha";
+
 const config: HardhatUserConfig = {
   solidity: {
     compilers: [
@@ -30,8 +39,18 @@ const config: HardhatUserConfig = {
   networks: {
     hardhat: {},
     localhost: {
-      url: process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545",
-      accounts: process.env.DEPLOYER_PRIVATE_KEY ? [process.env.DEPLOYER_PRIVATE_KEY] : undefined,
+      url: LOCAL_RPC_URL,
+      accounts: LOCALHOST_ACCOUNTS,
+    },
+    skale: {
+      url: SKALE_BASE_MAINNET_RPC_URL,
+      chainId: 1187947933,
+      accounts: DEPLOYER_ACCOUNTS,
+    },
+    skaleSepolia: {
+      url: SKALE_BASE_SEPOLIA_RPC_URL,
+      chainId: 324705682,
+      accounts: DEPLOYER_ACCOUNTS,
     },
   },
   paths: {

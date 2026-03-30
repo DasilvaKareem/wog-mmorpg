@@ -6,7 +6,7 @@ import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/block
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
-import { type ProfessionType, getLearnedProfessions } from "../professions/professions.js";
+import { type ProfessionType, getLearnedProfessions, restoreProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
 import { CROP_CATALOG, GROWTH_MULTIPLIERS, type CropType } from "../farming/cropCatalog.js";
 import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
@@ -20,6 +20,7 @@ import {
   clampToZoneBounds,
   ZONE_LEVEL_REQUIREMENTS,
   getRegionAtPosition,
+  getWorldLayout,
   getZoneOffset,
 } from "./worldLayout.js";
 import { getActiveXpMultiplier } from "../professions/potionEffects.js";
@@ -30,6 +31,8 @@ import { recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 import { transferFromTreasury } from "../blockchain/wallet.js";
 import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
+import { getRedis } from "../redis.js";
+import { reputationManager } from "../economy/reputationManager.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -37,10 +40,38 @@ export interface ZoneState {
   tick: number;
 }
 
+export type VisibleIntentCategory = "attack" | "heal" | "buff" | "debuff";
+export type VisibleIntentDelivery = "melee" | "projectile" | "area" | "channel" | "instant";
+export type VisibleIntentSeverity = "normal" | "dangerous";
+export type VisibleIntentState = "queued" | "casting";
+
+export interface VisibleIntent {
+  id: string;
+  sourceId: string;
+  sourceName: string;
+  sourceType: string;
+  targetId: string;
+  targetName: string;
+  targetType: string;
+  category: VisibleIntentCategory;
+  delivery: VisibleIntentDelivery;
+  severity: VisibleIntentSeverity;
+  state: VisibleIntentState;
+  techniqueId?: string;
+  techniqueName?: string;
+}
+
 export type Order =
   | { action: "move"; x: number; y: number }
   | { action: "attack"; targetId: string }
-  | { action: "technique"; targetId: string; techniqueId: string };
+  | { action: "technique"; targetId: string; techniqueId: string; resolving?: boolean };
+
+export interface CastingIntent {
+  targetId: string;
+  techniqueId: string;
+  startedAtTick: number;
+  resolveAtTick: number;
+}
 
 export interface EquippedItemState {
   tokenId: number;
@@ -156,6 +187,8 @@ export interface Entity {
   activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
   /** Completed quest IDs (players only) - used for quest chain prerequisites. */
   completedQuests?: string[];
+  /** Persistent story/dialogue flags (players only). */
+  storyFlags?: string[];
   /** Learned techniques (players only). */
   learnedTechniques?: string[]; // Array of technique IDs
   /** Cumulative kill count (players only). */
@@ -192,6 +225,8 @@ export interface Entity {
   pendingQuestApprovals?: string[];
   /** Entity ID of party leader to follow when idle (rented characters). */
   followLeaderId?: string;
+  /** In-flight technique windup state for pre-resolution telegraphing. */
+  castingIntent?: CastingIntent;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -432,6 +467,7 @@ export function getSpawnedWallets(): Map<string, SpawnedEntry> {
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
+const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
 const MOVE_SPEED = 30; // units per tick
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
@@ -446,6 +482,131 @@ interface PartyTargetLock {
 }
 
 const partyTargetLocks = new Map<string, PartyTargetLock>();
+const LIVE_PLAYER_IDS_KEY = "world:live-players";
+const LIVE_PLAYER_KEY_PREFIX = "world:live-player:";
+
+interface PersistedLivePlayer {
+  entity: Record<string, unknown>;
+  professions: string[];
+  savedAt: number;
+}
+
+function livePlayerKey(walletAddress: string): string {
+  return `${LIVE_PLAYER_KEY_PREFIX}${walletAddress.toLowerCase()}`;
+}
+
+function serializeLivePlayerEntity(entity: Entity): Record<string, unknown> {
+  return {
+    ...entity,
+    ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
+    ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+    ...(entity.cooldowns instanceof Map && { cooldowns: Object.fromEntries(entity.cooldowns) }),
+  };
+}
+
+function hydrateLivePlayerEntity(raw: Record<string, unknown>): Entity {
+  const entity = { ...raw } as Entity & { cooldowns?: Record<string, number> | Map<string, number> };
+  if (typeof raw.characterTokenId === "string" && /^\d+$/.test(raw.characterTokenId)) {
+    entity.characterTokenId = BigInt(raw.characterTokenId);
+  }
+  if (typeof raw.agentId === "string" && /^\d+$/.test(raw.agentId)) {
+    entity.agentId = BigInt(raw.agentId);
+  }
+  if (raw.cooldowns && !(raw.cooldowns instanceof Map)) {
+    entity.cooldowns = new Map(
+      Object.entries(raw.cooldowns as Record<string, number>).map(([techniqueId, expiresAt]) => [
+        techniqueId,
+        Number(expiresAt) || 0,
+      ])
+    );
+  }
+  return entity;
+}
+
+async function persistLivePlayerEntity(entity: Entity): Promise<void> {
+  if (entity.type !== "player" || !entity.walletAddress) return;
+  const redis = getRedis();
+  if (!redis) return;
+
+  const payload: PersistedLivePlayer = {
+    entity: serializeLivePlayerEntity(entity),
+    professions: getLearnedProfessions(entity.walletAddress),
+    savedAt: Date.now(),
+  };
+
+  const tx = redis.multi();
+  tx.sadd(LIVE_PLAYER_IDS_KEY, entity.walletAddress.toLowerCase());
+  tx.set(livePlayerKey(entity.walletAddress), JSON.stringify(payload));
+  await tx.exec();
+}
+
+async function removeLivePlayerEntity(walletAddress: string): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  const tx = redis.multi();
+  tx.srem(LIVE_PLAYER_IDS_KEY, walletAddress.toLowerCase());
+  tx.del(livePlayerKey(walletAddress));
+  await tx.exec();
+}
+
+export async function restoreLivePlayersFromRedis(): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
+
+  const wallets: string[] = await redis.smembers(LIVE_PLAYER_IDS_KEY);
+  if (!Array.isArray(wallets) || wallets.length === 0) return 0;
+
+  let restored = 0;
+  for (const wallet of wallets) {
+    const raw = await redis.get(livePlayerKey(wallet));
+    if (!raw) continue;
+
+    try {
+      const parsed = JSON.parse(raw) as PersistedLivePlayer;
+      const entity = hydrateLivePlayerEntity(parsed.entity);
+      if (entity.type !== "player" || !entity.walletAddress) continue;
+      if (isWalletSpawned(entity.walletAddress) || world.entities.has(entity.id)) continue;
+
+      if (entity.stats) {
+        recalculateEntityVitals(entity);
+      } else if (entity.raceId && entity.classId) {
+        entity.stats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level ?? 1);
+        recalculateEntityVitals(entity);
+      }
+
+      const zoneId = entity.region ?? "village-square";
+      getOrCreateZone(zoneId).entities.set(entity.id, entity);
+      registerSpawnedWallet(entity.walletAddress, entity.id, zoneId);
+      if (parsed.professions.length > 0) {
+        restoreProfessions(entity.walletAddress, parsed.professions);
+      }
+      if (entity.agentId != null) {
+        reputationManager.ensureInitialized(entity.agentId);
+      }
+      restored++;
+    } catch (err) {
+      console.warn("[live-player] Failed to restore player from Redis:", err);
+    }
+  }
+
+  if (restored > 0) {
+    console.log(`[live-player] Restored ${restored} active player session(s) from Redis`);
+  }
+
+  return restored;
+}
+
+export function persistLivePlayerEntityEventually(entity: Entity, context: string): void {
+  void persistLivePlayerEntity(entity).catch((err) => {
+    console.warn(`[live-player] Failed to persist ${entity.name} after ${context}:`, err);
+  });
+}
+
+export function removeLivePlayerEntityEventually(walletAddress: string, context: string): void {
+  void removeLivePlayerEntity(walletAddress).catch((err) => {
+    console.warn(`[live-player] Failed to remove ${walletAddress} after ${context}:`, err);
+  });
+}
 
 /** Return the attack range for an entity based on its class definition. */
 function getEntityAttackRange(entity: Entity): number {
@@ -461,6 +622,116 @@ const RANGED_CLASSES = new Set(["mage", "warlock", "ranger", "cleric"]);
 /** Return the animStyle for a basic auto-attack: "projectile" for ranged, "melee" for melee. */
 function getBasicAttackAnimStyle(entity: Entity): "melee" | "projectile" {
   return RANGED_CLASSES.has(entity.classId ?? "") ? "projectile" : "melee";
+}
+
+function getVisibleIntentCategory(order: Order, technique?: TechniqueDefinition): VisibleIntentCategory {
+  if (order.action === "attack") return "attack";
+
+  switch (technique?.type) {
+    case "healing":
+      return "heal";
+    case "buff":
+      return "buff";
+    case "debuff":
+      return "debuff";
+    default:
+      return "attack";
+  }
+}
+
+function getVisibleIntentDelivery(order: Order, source: Entity, technique?: TechniqueDefinition): VisibleIntentDelivery {
+  if (order.action === "attack") {
+    return getBasicAttackAnimStyle(source);
+  }
+
+  return technique?.animStyle ?? "instant";
+}
+
+function getVisibleIntentSeverity(
+  source: Entity,
+  category: VisibleIntentCategory,
+  delivery: VisibleIntentDelivery,
+): VisibleIntentSeverity {
+  if (source.type === "boss") return "dangerous";
+  if (category === "attack" && (delivery === "area" || delivery === "channel")) return "dangerous";
+  if (category === "debuff" && delivery !== "instant") return "dangerous";
+  return "normal";
+}
+
+function getTechniqueWindupTicks(technique: TechniqueDefinition): number {
+  if (technique.animStyle === "projectile" || technique.animStyle === "area" || technique.animStyle === "channel") {
+    return 1;
+  }
+  return 0;
+}
+
+function buildVisibleIntents(zone: ZoneState): VisibleIntent[] {
+  const intents: VisibleIntent[] = [];
+
+  for (const entity of zone.entities.values()) {
+    if (entity.castingIntent) {
+      const technique = getTechniqueById(entity.castingIntent.techniqueId);
+      const target = getEntity(entity.castingIntent.targetId);
+      if (technique && target && target.hp > 0) {
+        const castingOrder: Order = {
+          action: "technique",
+          targetId: target.id,
+          techniqueId: technique.id,
+        };
+        const category = getVisibleIntentCategory(castingOrder, technique);
+        const delivery = getVisibleIntentDelivery(castingOrder, entity, technique);
+        const severity = getVisibleIntentSeverity(entity, category, delivery);
+
+        intents.push({
+          id: `intent:${zone.zoneId}:${entity.id}:casting:${technique.id}`,
+          sourceId: entity.id,
+          sourceName: entity.name,
+          sourceType: entity.type,
+          targetId: target.id,
+          targetName: target.name,
+          targetType: target.type,
+          category,
+          delivery,
+          severity,
+          state: "casting",
+          techniqueId: technique.id,
+          techniqueName: technique.name,
+        });
+      }
+      continue;
+    }
+
+    const order = entity.order;
+    if (!order || order.action === "move") continue;
+
+    const target = getEntity(order.targetId);
+    if (!target || target.hp <= 0) continue;
+
+    const technique = order.action === "technique"
+      ? getTechniqueById(order.techniqueId)
+      : undefined;
+    const category = getVisibleIntentCategory(order, technique);
+    const delivery = getVisibleIntentDelivery(order, entity, technique);
+    const severity = getVisibleIntentSeverity(entity, category, delivery);
+
+    intents.push({
+      id: `intent:${zone.zoneId}:${entity.id}:${order.action}:${order.action === "technique" ? order.techniqueId : target.id}`,
+      sourceId: entity.id,
+      sourceName: entity.name,
+      sourceType: entity.type,
+      targetId: target.id,
+      targetName: target.name,
+      targetType: target.type,
+      category,
+      delivery,
+      severity,
+      state: "queued",
+      ...(order.action === "technique" && { techniqueId: order.techniqueId }),
+      ...(technique?.name && { techniqueName: technique.name }),
+    });
+  }
+
+  return intents;
 }
 
 // ── Stat-based combat mechanics (players only) ────────────────────────
@@ -762,17 +1033,24 @@ function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number
 
   const partyMemberIds = getPartyMembers(xpRecipient.id);
 
-  // Filter to alive, player-type members (use global entity map so cross-zone party members get XP)
+  // Filter to alive, player-type members in the SAME ZONE as the kill
   const eligibleMembers: Entity[] = [];
   for (const memberId of partyMemberIds) {
     const member = world.entities.get(memberId);
-    if (member && member.type === "player" && member.hp > 0 && member.level != null) {
-      eligibleMembers.push(member);
-    } else if (member) {
-      console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
-    } else {
+    if (!member) {
       console.warn(`[xp-debug] MEMBER NOT FOUND: memberId=${memberId}`);
+      continue;
     }
+    if (member.type !== "player" || member.hp <= 0 || member.level == null) {
+      console.warn(`[xp-debug] FILTERED OUT: ${member.name} type=${member.type} hp=${member.hp} level=${member.level}`);
+      continue;
+    }
+    // Must be in the same zone as the kill — no free XP from another zone
+    if (member.region !== zone.zoneId) {
+      console.log(`[xp-debug] WRONG ZONE: ${member.name} in ${member.region} (kill in ${zone.zoneId}) — no XP`);
+      continue;
+    }
+    eligibleMembers.push(member);
   }
 
   // Fallback: if somehow no eligible members, give to tagger directly
@@ -1876,7 +2154,29 @@ async function worldTick() {
     }
 
     for (const entity of zone.entities.values()) {
+      if (!entity.castingIntent) continue;
+
+      const target = getEntity(entity.castingIntent.targetId);
+      const technique = getTechniqueById(entity.castingIntent.techniqueId);
+      if (!target || target.hp <= 0 || !technique) {
+        entity.castingIntent = undefined;
+        continue;
+      }
+
+      if (zone.tick >= entity.castingIntent.resolveAtTick) {
+        entity.order = {
+          action: "technique",
+          targetId: entity.castingIntent.targetId,
+          techniqueId: entity.castingIntent.techniqueId,
+          resolving: true,
+        };
+        entity.castingIntent = undefined;
+      }
+    }
+
+    for (const entity of zone.entities.values()) {
       if (!entity.order) continue;
+      if (entity.castingIntent) continue;
 
       if (entity.order.action === "move") {
         const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
@@ -2161,13 +2461,31 @@ async function worldTick() {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
           }
-          // Deduct essence
-          const currentEssence = entity.essence ?? 0;
-          entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+          const windupTicks = getTechniqueWindupTicks(technique);
+          if (windupTicks > 0 && !entity.order.resolving) {
+            const currentEssence = entity.essence ?? 0;
+            entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+            if (!entity.cooldowns) entity.cooldowns = new Map();
+            entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+            entity.castingIntent = {
+              targetId: target.id,
+              techniqueId: technique.id,
+              startedAtTick: zone.tick,
+              resolveAtTick: zone.tick + windupTicks,
+            };
+            entity.order = undefined;
+            continue;
+          }
 
-          // Set cooldown
-          if (!entity.cooldowns) entity.cooldowns = new Map();
-          entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+          if (!entity.order.resolving) {
+            // Deduct essence
+            const currentEssence = entity.essence ?? 0;
+            entity.essence = Math.max(0, currentEssence - technique.essenceCost);
+
+            // Set cooldown
+            if (!entity.cooldowns) entity.cooldowns = new Map();
+            entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+          }
 
           // Apply technique effects inline (mirrors techniqueRoutes logic)
           const techResult = applyTechniqueInCombat(entity, target, technique, zone);
@@ -2501,6 +2819,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.leashing) continue;
       if (entity.spawnX == null || entity.spawnY == null) continue;
@@ -2522,6 +2841,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.leashing) continue; // Don't re-aggro while walking home
 
@@ -2569,6 +2889,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (!entity.followLeaderId) continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.travelTargetZone) continue;
 
@@ -2605,6 +2926,7 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (entity.type !== "player") continue;
       if (entity.order) continue;
+      if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       // Skip players that are traveling to another zone
       if (entity.travelTargetZone) continue;
@@ -2754,19 +3076,29 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,
+        ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
+        ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
         raceId: entity.raceId ?? "human",
         classId: entity.classId ?? "warrior",
         calling: entity.calling,
         gender: entity.gender,
+        skinColor: entity.skinColor,
+        hairStyle: entity.hairStyle,
+        eyeColor: entity.eyeColor,
+        origin: entity.origin,
         zone: entity.region ?? "village-square",
         x: entity.x,
         y: entity.y,
         kills: entity.kills ?? 0,
+        activeQuests: entity.activeQuests ?? [],
         completedQuests: entity.completedQuests ?? [],
+        storyFlags: entity.storyFlags ?? [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: getLearnedProfessions(entity.walletAddress),
+        pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
         equipment: entity.equipment ?? undefined,
       });
+      await persistLivePlayerEntity(entity);
       count++;
     } catch (err) {
       console.error(`[auto-save] Failed to save ${entity.name}:`, err);
@@ -2778,15 +3110,20 @@ export async function saveAllOnlinePlayers(): Promise<void> {
 }
 
 export function registerZoneRuntime(server: FastifyInstance) {
+  const configuredZoneIds = Object.keys(getWorldLayout().zones);
+  for (const zoneId of configuredZoneIds) {
+    getOrCreateZone(zoneId);
+  }
+
   // Start the tick loop
   tickInterval = setInterval(worldTick, TICK_MS);
 
-  // Periodic auto-save every 60 seconds
+  // Periodic online-player checkpointing.
   autoSaveInterval = setInterval(() => {
     saveAllOnlinePlayers().catch((err) =>
       console.error("[auto-save] Periodic save error:", err)
     );
-  }, 60_000);
+  }, PLAYER_PERSIST_INTERVAL_MS);
 
   server.addHook("onClose", async () => {
     if (autoSaveInterval) clearInterval(autoSaveInterval);
@@ -2796,9 +3133,12 @@ export function registerZoneRuntime(server: FastifyInstance) {
     console.log("[shutdown] All online players saved");
   });
 
+  console.log(`[auto-save] Online player checkpoints every ${PLAYER_PERSIST_INTERVAL_MS}ms`);
+
   server.get("/zones", async () => {
     const result: Record<string, { entityCount: number; tick: number }> = {};
-    for (const [id, zone] of getAllZones()) {
+    for (const id of configuredZoneIds) {
+      const zone = getOrCreateZone(id);
       result[id] = { entityCount: zone.entities.size, tick: zone.tick };
     }
     return result;
@@ -2837,7 +3177,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
     "/zones/:zoneId",
     async (request, reply) => {
       const zoneId = request.params.zoneId;
-      if (!knownRegions.has(zoneId)) {
+      if (!configuredZoneIds.includes(zoneId)) {
         reply.code(404);
         return { error: "Zone not found" };
       }
@@ -2853,6 +3193,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
             toSerializableEntity(entity),
           ])
         ),
+        visibleIntents: buildVisibleIntents(zone),
         recentEvents,
       };
     }

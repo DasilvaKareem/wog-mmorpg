@@ -21,7 +21,7 @@ export function registerCombatTools(server: McpServer): void {
       const { token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/command",
-        { entityId, zoneId, action: "move", x, z: zCoord },
+        { entityId, zoneId, action: "move", x, y: zCoord },
         token
       );
       return {

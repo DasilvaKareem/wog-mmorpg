@@ -26,11 +26,11 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
   free: {
     supervisorEnabled: false,
     sessionLimitMs: 6 * 3600_000,       // 6 hours
-    allowedZones: ["village-square", "wild-meadow", "dark-forest"],
+    allowedZones: "all",
     retreatEnabled: false,
     techniquesEnabled: true,
     selfAdaptationEnabled: false,
-    marketTradingEnabled: false,
+    marketTradingEnabled: true,
   },
   starter: {
     supervisorEnabled: true,
@@ -39,7 +39,7 @@ export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
     retreatEnabled: true,
     techniquesEnabled: true,
     selfAdaptationEnabled: true,
-    marketTradingEnabled: false,
+    marketTradingEnabled: true,
   },
   pro: {
     supervisorEnabled: true,

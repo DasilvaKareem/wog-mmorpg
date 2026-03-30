@@ -7,6 +7,8 @@ import {
   isWalletSpawned,
   registerSpawnedWallet,
   unregisterSpawnedWallet,
+  persistLivePlayerEntityEventually,
+  removeLivePlayerEntityEventually,
   type Entity,
 } from "./zoneRuntime.js";
 import { randomUUID } from "crypto";
@@ -15,6 +17,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { restoreProfessions } from "../professions/professions.js";
+import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
 import { getWorldLayout, getZoneOffset } from "./worldLayout.js";
@@ -181,8 +184,11 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedOrigin != null && { origin: resolvedOrigin }),
       ...(derivedStats != null && { stats: derivedStats }),
       kills: saved?.kills ?? 0,
+      activeQuests: saved?.activeQuests ?? [],
       completedQuests: saved?.completedQuests ?? [],
+      storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
+      pendingQuestApprovals: saved?.pendingQuestApprovals ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
@@ -201,6 +207,14 @@ export function registerSpawnOrders(server: FastifyInstance) {
       restored = true;
       server.log.info(
         `[persistence] Restored character "${entity.name}" from spawn name "${name}" L${entity.level}`
+      );
+    }
+
+    // Restore per-profession skill XP/levels
+    if (saved?.professionSkills && walletAddress) {
+      restoreProfessionSkills(walletAddress, saved.professionSkills);
+      server.log.info(
+        `[persistence] Restored profession skills for "${entity.name}": ${Object.entries(saved.professionSkills).map(([p, d]) => `${p} L${d.level}`).join(", ")}`
       );
     }
 
@@ -224,9 +238,12 @@ export function registerSpawnOrders(server: FastifyInstance) {
         x: entity.x,
         y: entity.y,
         kills: 0,
+        activeQuests: [],
         completedQuests: [],
+        storyFlags: [],
         learnedTechniques: [],
         professions: [],
+        pendingQuestApprovals: [],
       });
     }
 
@@ -235,6 +252,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
     // Register wallet in spawn registry (one player per shard)
     if (type === "player" && walletAddress) {
       registerSpawnedWallet(walletAddress, entity.id, spawnZoneId);
+      persistLivePlayerEntityEventually(entity, "spawn");
       // Re-link to persisted party (survives server restarts)
       rehydratePartyMembership(entity.id, walletAddress).catch((err) =>
         server.log.error(`[party] Rehydration error for ${entity.name}: ${err}`)
@@ -297,7 +315,10 @@ export function registerSpawnOrders(server: FastifyInstance) {
       return { error: "Not authorized to despawn this entity" };
     }
 
-    if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
+    if (entity.walletAddress) {
+      unregisterSpawnedWallet(entity.walletAddress);
+      removeLivePlayerEntityEventually(entity.walletAddress, "despawn");
+    }
     getAllEntities().delete(entityId);
     return { deleted: entityId };
   };

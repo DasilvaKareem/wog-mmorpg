@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { WorldManager } from "./scene/WorldManager.js";
 import { EntityManager } from "./scene/EntityManager.js";
 import { EffectsManager } from "./scene/EffectsManager.js";
+import { IntentLinesManager } from "./scene/IntentLinesManager.js";
 import { SkyRenderer } from "./scene/SkyRenderer.js";
 import { ToonPipeline } from "./scene/ToonPipeline.js";
 import { DesktopControls } from "./input/DesktopControls.js";
@@ -17,22 +18,26 @@ import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
 type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
+import { IntentModeBadge } from "./hud/IntentModeBadge.js";
+import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { ChatLog } from "./hud/ChatLog.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
+import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
-import type { ActivePlayer, Entity, ZoneResponse } from "./types.js";
+import { AnimationLab } from "./scene/AnimationLab.js";
+import type { ActivePlayer, Entity, VisibleIntent, ZoneResponse } from "./types.js";
+
+const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
-equipTuner.setOnChange((slot, pos, rot) => {
-  entities.applyEquipmentTuning(slot, pos, rot);
-});
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const POLL_INTERVAL = 1000;
+const ZONE_POLL_INTERVAL = 500;
+const ACTIVE_PLAYERS_POLL_INTERVAL = 1000;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
 const POLL_RADIUS = 90;
@@ -78,12 +83,41 @@ effects.setElevationProvider(world);
 effects.setCamera(camera);
 scene.add(effects.group);
 
+const intentLines = new IntentLinesManager(entities);
+scene.add(intentLines.group);
+
 const sky = new SkyRenderer(scene);
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
 const inspector = new EntityInspector();
+const intentModeBadge = new IntentModeBadge();
+const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const chatLog = new ChatLog();
+const animationLab = isAnimationLab ? new AnimationLab(scene, camera, renderer.domElement) : null;
+const animationLabPanel = isAnimationLab && animationLab
+  ? new AnimationLabPanel(animationLab, {
+    applyPreset: (preset) => animationLab.applyCameraPreset(preset, camera),
+  })
+  : null;
+void animationLabPanel;
+
+if (isAnimationLab) {
+  const equipTunerEl = document.getElementById("equip-tuner");
+  if (equipTunerEl) {
+    equipTunerEl.style.left = "12px";
+    equipTunerEl.style.right = "auto";
+    equipTunerEl.style.top = "12px";
+  }
+}
+
+equipTuner.setOnChange((slot, pos, rot) => {
+  if (animationLab) {
+    animationLab.applyEquipmentTuning(slot, pos, rot);
+    return;
+  }
+  entities.applyEquipmentTuning(slot, pos, rot);
+});
 
 // XR — camera must be child of cameraRig for VR locomotion
 const xrSession = new XRSessionManager(renderer, scene, camera);
@@ -101,6 +135,8 @@ const hudLock = document.getElementById("lock-indicator")!;
 let lockedEntityId: string | null = null;
 let pendingTrackedPlayerId: string | null = null;
 let pendingTrackedPlayerName: string | null = null;
+let isPollingNearbyZones = false;
+let isPollingActivePlayers = false;
 
 // ── Lock-on mode ────────────────────────────────────────────────────
 
@@ -110,6 +146,7 @@ function lockOn(entityId: string) {
   lockedEntityId = entityId;
   pendingTrackedPlayerId = null;
   pendingTrackedPlayerName = null;
+  intentLines.setFocusEntity(entityId);
   hudLock.textContent = `LOCKED: ${ent.name}`;
   hudLock.style.display = "block";
   inspector.setLocked(true);
@@ -119,6 +156,7 @@ function unlockCamera() {
   lockedEntityId = null;
   pendingTrackedPlayerId = null;
   pendingTrackedPlayerName = null;
+  intentLines.setFocusEntity(null);
   hudLock.style.display = "none";
   inspector.setLocked(false);
 }
@@ -169,77 +207,97 @@ async function pickInitialZone(): Promise<string> {
 // ── Multi-zone polling ──────────────────────────────────────────────
 
 async function pollNearbyZones() {
-  const target = controls.getTarget();
-  const nearbyIds = world.getNearbyZoneIds(target.x, target.z, POLL_RADIUS);
-  if (nearbyIds.length === 0) return;
+  if (isPollingNearbyZones) return;
+  isPollingNearbyZones = true;
 
-  // Fetch all nearby zones in parallel
-  const results = await Promise.all(
-    nearbyIds.map((id) => fetchZone(id).then((data) => ({ id, data })))
-  );
+  try {
+    const target = controls.getTarget();
+    const nearbyIds = world.getNearbyZoneIds(target.x, target.z, POLL_RADIUS);
+    if (nearbyIds.length === 0) return;
 
-  // Merge entities from all zones
-  const merged: Record<string, Entity> = {};
-  let gameTime: ZoneResponse["gameTime"] = undefined;
-  let totalEntities = 0;
-  const allEvents: NonNullable<ZoneResponse["recentEvents"]> = [];
+    // Fetch all nearby zones in parallel
+    const results = await Promise.all(
+      nearbyIds.map((id) => fetchZone(id).then((data) => ({ id, data })))
+    );
 
-  for (const { id, data } of results) {
-    if (!data) continue;
-    for (const [eid, ent] of Object.entries(data.entities)) {
-      merged[eid] = ent;
+    // Merge entities from all zones
+    const merged: Record<string, Entity> = {};
+    let gameTime: ZoneResponse["gameTime"] = undefined;
+    let totalEntities = 0;
+    const mergedIntents = new Map<string, VisibleIntent>();
+    const allEvents: NonNullable<ZoneResponse["recentEvents"]> = [];
+
+    for (const { id, data } of results) {
+      if (!data) continue;
+      for (const [eid, ent] of Object.entries(data.entities)) {
+        merged[eid] = ent;
+      }
+      for (const intent of data.visibleIntents ?? []) {
+        mergedIntents.set(intent.id, intent);
+      }
+      totalEntities += Object.keys(data.entities).length;
+      if (data.gameTime) gameTime = data.gameTime;
+      if (data.recentEvents) allEvents.push(...data.recentEvents);
     }
-    totalEntities += Object.keys(data.entities).length;
-    if (data.gameTime) gameTime = data.gameTime;
-    if (data.recentEvents) allEvents.push(...data.recentEvents);
-  }
 
-  entities.sync(merged);
+    entities.sync(merged);
+    intentLines.sync(merged, Array.from(mergedIntents.values()));
+    intentTooltip.setText(intentLines.getPrimaryIntentLabel());
 
-  // HUD
-  hudEntities.textContent = String(totalEntities);
+    // HUD
+    hudEntities.textContent = String(totalEntities);
 
-  if (gameTime) {
-    minimap.setGameTime(gameTime);
-  }
-
-  sky.update(gameTime);
-
-  if (allEvents.length > 0) {
-    chatLog.addEvents(allEvents);
-    effects.processEvents(allEvents);
-    entities.processEvents(allEvents);
-  }
-
-  effects.syncActiveEffects(merged);
-
-  if (pendingTrackedPlayerId && merged[pendingTrackedPlayerId]) {
-    const entityId = pendingTrackedPlayerId;
-    pendingTrackedPlayerId = null;
-    pendingTrackedPlayerName = null;
-    lockOn(entityId);
-  }
-
-  // Update lock indicator
-  if (lockedEntityId) {
-    if (merged[lockedEntityId]) {
-      hudLock.textContent = `LOCKED: ${merged[lockedEntityId].name}`;
-    } else {
-      unlockCamera();
+    if (gameTime) {
+      minimap.setGameTime(gameTime);
     }
-  } else if (pendingTrackedPlayerId) {
-    hudLock.textContent = `TRACKING: ${pendingTrackedPlayerName ?? "Player"}`;
-    hudLock.style.display = "block";
-  }
 
-  // Minimap — pass camera in server coords
-  minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+    sky.update(gameTime);
+
+    if (allEvents.length > 0) {
+      chatLog.addEvents(allEvents);
+      effects.processEvents(allEvents);
+      entities.processEvents(allEvents);
+    }
+
+    effects.syncActiveEffects(merged);
+
+    if (pendingTrackedPlayerId && merged[pendingTrackedPlayerId]) {
+      const entityId = pendingTrackedPlayerId;
+      pendingTrackedPlayerId = null;
+      pendingTrackedPlayerName = null;
+      lockOn(entityId);
+    }
+
+    // Update lock indicator
+    if (lockedEntityId) {
+      if (merged[lockedEntityId]) {
+        hudLock.textContent = `LOCKED: ${merged[lockedEntityId].name}`;
+      } else {
+        unlockCamera();
+      }
+    } else if (pendingTrackedPlayerId) {
+      hudLock.textContent = `TRACKING: ${pendingTrackedPlayerName ?? "Player"}`;
+      hudLock.style.display = "block";
+    }
+
+    // Minimap — pass camera in server coords
+    minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+  } finally {
+    isPollingNearbyZones = false;
+  }
 }
 
 async function pollActivePlayers() {
-  const data = await fetchActivePlayers();
-  if (!data) return;
-  playerPanel.update(data.players);
+  if (isPollingActivePlayers) return;
+  isPollingActivePlayers = true;
+
+  try {
+    const data = await fetchActivePlayers();
+    if (!data) return;
+    playerPanel.update(data.players);
+  } finally {
+    isPollingActivePlayers = false;
+  }
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -248,6 +306,7 @@ const raycaster = new THREE.Raycaster();
 const ndcMouse = new THREE.Vector2();
 
 renderer.domElement.addEventListener("click", (e) => {
+  if (isAnimationLab) return;
   ndcMouse.set(
     (e.clientX / window.innerWidth) * 2 - 1,
     -(e.clientY / window.innerHeight) * 2 + 1
@@ -312,7 +371,10 @@ if (navigator.xr) {
             };
             xrControllers.onSelect = (_ctrl, hits) => {
               const ent = entities.getEntityAt(hits);
-              if (ent) console.log("VR select:", ent.name, ent.type);
+              if (ent) {
+                console.log("VR select:", ent.name, ent.type);
+                lockOn(ent.id);
+              }
             };
           },
           onEnd: () => {
@@ -337,6 +399,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     unlockCamera();
     inspector.hide();
+    return;
+  }
+  if (e.key === "v" || e.key === "V") {
+    const mode = intentLines.cycleVisibilityMode();
+    intentModeBadge.setMode(mode);
   }
 });
 
@@ -354,6 +421,12 @@ function animate() {
     hudFps.textContent = String(frameCount);
     frameCount = 0;
     fpsTimer = 0;
+  }
+
+  if (isAnimationLab) {
+    animationLab?.update(dt);
+    toonPipeline.render();
+    return;
   }
 
   if (xrSession.isPresenting) {
@@ -377,6 +450,7 @@ function animate() {
 
   entities.update(dt, camera);
   effects.update(dt);
+  intentLines.update(dt);
   world.updateAnimations(dt);
   chatLog.update();
 
@@ -391,6 +465,22 @@ function animate() {
 // ── Start ───────────────────────────────────────────────────────────
 
 async function init() {
+  if (isAnimationLab) {
+    console.log("WoG XR Animation Lab starting...");
+    hudEntities.style.display = "none";
+    hudFps.style.display = "none";
+    hudLock.style.display = "none";
+    vrButton.style.display = "none";
+    document.getElementById("player-panel")?.style.setProperty("display", "none");
+    document.getElementById("panel-toggle")?.style.setProperty("display", "none");
+    document.getElementById("chat-log")?.style.setProperty("display", "none");
+    document.getElementById("minimap")?.style.setProperty("display", "none");
+    document.getElementById("intent-tooltip")?.style.setProperty("display", "none");
+    document.getElementById("intent-mode-badge")?.style.setProperty("display", "none");
+    renderer.setAnimationLoop(animate);
+    return;
+  }
+
   console.log("WoG XR Client starting (unified world)...");
 
   // Load world layout + pick initial zone in parallel
@@ -420,8 +510,8 @@ async function init() {
   await pollActivePlayers();
 
   // Poll loop
-  setInterval(pollNearbyZones, POLL_INTERVAL);
-  setInterval(pollActivePlayers, POLL_INTERVAL);
+  setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
+  setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
 
   // Render loop
   renderer.setAnimationLoop(animate);

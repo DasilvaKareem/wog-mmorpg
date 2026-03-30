@@ -1,13 +1,24 @@
 import * as React from "react";
-import { useGameBridge } from "@/hooks/useGameBridge";
-import { API_URL } from "@/config";
-import { useWalletContext } from "@/context/WalletContext";
-import { gameBus } from "@/lib/eventBus";
-import { formatCopperString } from "@/lib/currency";
-import type { Entity } from "@/types";
-import type { AvailableQuestEntry } from "@/hooks/useQuestLog";
 
-/* ── 8-bit retro palette ──────────────────────────────────── */
+import { API_URL } from "@/config";
+import { fetchZone } from "@/ShardClient";
+import { SCOUT_KAELA_BRIEFED_FLAG } from "@/dialogue/data/questDialogueData";
+import { useDialogueRunner } from "@/dialogue/runtime";
+import { buildNpcQuestDialogueScript, buildScoutKaelaDialogueScript } from "@/dialogue/questScripts";
+import type { DialogueChoice, DialogueEffect, DialoguePortrait, DialogueScript } from "@/dialogue/types";
+import type { ActiveQuestEntry, AvailableQuestEntry } from "@/hooks/useQuestLog";
+import { useGameBridge } from "@/hooks/useGameBridge";
+import { useWalletContext } from "@/context/WalletContext";
+import { getAuthToken } from "@/lib/agentAuth";
+import { gameBus } from "@/lib/eventBus";
+import { playSoundEffect } from "@/lib/soundEffects";
+import { WalletManager } from "@/lib/walletManager";
+import type { Entity } from "@/types";
+import { NpcServiceTabs, getAvailableTabs, type NpcTab } from "@/components/npc-tabs/NpcServiceTabs";
+import { NpcTrainingTab } from "@/components/npc-tabs/NpcTrainingTab";
+import { NpcProfessionTab } from "@/components/npc-tabs/NpcProfessionTab";
+import { NpcShopTab } from "@/components/npc-tabs/NpcShopTab";
+
 const BG = "#11182b";
 const BG_DARK = "#0a0e18";
 const BORDER = "#29334d";
@@ -16,9 +27,477 @@ const DIM = "#6b7a9e";
 const ACCENT = "#54f28b";
 const GOLD = "#f2c854";
 const CHAMPION_COLOR = "#44ddff";
+const WARN = "#e0af68";
+const DANGER = "#f25454";
 
-/* ── Typewriter hook ──────────────────────────────────────── */
-function useTypewriter(text: string, speed = 25) {
+const sentQuestIds = new Set<string>();
+
+interface NpcAmbientDialogueAction {
+  label: string;
+  prompt: string;
+}
+
+interface NpcAmbientDialogueResponse {
+  provider: "deterministic" | "llm";
+  reply: string;
+  intent: string;
+  referencesQuestId?: string;
+  suggestedActions: NpcAmbientDialogueAction[];
+  persona: {
+    id: string;
+    role: string;
+    archetype: string;
+    tone: string;
+  };
+}
+
+interface QuestGraphRenderableChoice {
+  id: string;
+  label: string;
+  style?: "primary" | "secondary" | "danger";
+}
+
+interface QuestGraphRenderableFreeformRoute {
+  id: string;
+  label: string;
+}
+
+type QuestGraphRenderableNode =
+  | {
+      id: string;
+      type: "line";
+      speaker: "npc" | "player" | "system";
+      text: string;
+    }
+  | {
+      id: string;
+      type: "choice";
+      speaker: "npc" | "player" | "system";
+      text: string;
+      choices: QuestGraphRenderableChoice[];
+    }
+  | {
+      id: string;
+      type: "freeform";
+      speaker: "npc" | "player" | "system";
+      text: string;
+      prompt: string;
+      placeholder?: string;
+      routes: QuestGraphRenderableFreeformRoute[];
+      fallbackText?: string;
+    }
+  | {
+      id: string;
+      type: "end";
+      text?: string;
+    };
+
+interface QuestGraphSession {
+  arcId: string;
+  sceneId: string;
+  sceneTitle: string;
+  node: QuestGraphRenderableNode;
+}
+
+interface QuestGraphResponse {
+  arcId: string;
+  sceneId: string;
+  sceneTitle?: string;
+  node: QuestGraphRenderableNode;
+}
+
+interface AuthoredQuestGraphSceneTarget {
+  arcId: string;
+  sceneId: string;
+  sceneTitle: string;
+  primaryQuestIds?: string[];
+}
+
+const AUTHORED_QUEST_GRAPH_SCENES: Record<string, { arcId: string; sceneId: string; sceneTitle: string }> = {
+  "Scout Kaela": {
+    arcId: "village-square-onboarding",
+    sceneId: "kaela_briefing",
+    sceneTitle: "Scout Kaela Briefing",
+  },
+  "Guard Captain Marcus": {
+    arcId: "village-square-onboarding",
+    sceneId: "marcus_arrival",
+    sceneTitle: "Guard Captain Marcus Arrival",
+  },
+  "Guard Captain Marcus Contracts": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "marcus_contracts",
+    sceneTitle: "Guard Captain Marcus Contracts",
+  },
+  "Grimwald the Trader": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "grimwald_trade_intro",
+    sceneTitle: "Grimwald's First Bargain",
+  },
+  "Bron the Blacksmith": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "bron_forge_handoff",
+    sceneTitle: "Bron's Forge Handoff",
+  },
+  "Thrain Ironforge - Warrior Trainer": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "thrain_training_counsel",
+    sceneTitle: "Thrain's Training Counsel",
+  },
+  "Herbalist Willow": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "willow_foragers_counsel",
+    sceneTitle: "Willow's Forager Counsel",
+  },
+  "Chef Gastron": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "gastron_campfire_welcome",
+    sceneTitle: "Gastron's Campfire Welcome",
+  },
+  "Grizzled Miner Torvik": {
+    arcId: "village-square-welcome-tour",
+    sceneId: "torvik_miner_briefing",
+    sceneTitle: "Torvik's Miner Briefing",
+  },
+  "Ranger Thornwood": {
+    arcId: "wild-meadow-frontiers",
+    sceneId: "thornwood_frontier",
+    sceneTitle: "Ranger Thornwood Frontier Orders",
+  },
+  "Druid Caelum": {
+    arcId: "wild-meadow-frontiers",
+    sceneId: "caelum_essence",
+    sceneTitle: "Druid Caelum and the Living Flow",
+  },
+  "Warden Sylvara": {
+    arcId: "wild-meadow-frontiers",
+    sceneId: "sylvara_guardians",
+    sceneTitle: "Warden Sylvara and the Emerald Woods",
+  },
+  "Sage Thessaly": {
+    arcId: "wild-meadow-frontiers",
+    sceneId: "thessaly_aurundel",
+    sceneTitle: "Sage Thessaly and Aurundel's Burden",
+  },
+  "Priestess Selene": {
+    arcId: "dark-forest-thresholds",
+    sceneId: "selene_shadows",
+    sceneTitle: "Priestess Selene and the Dark Forest Trial",
+  },
+  "Arcanist Voss": {
+    arcId: "dark-forest-thresholds",
+    sceneId: "voss_unbound",
+    sceneTitle: "Arcanist Voss and the Modernist Gambit",
+  },
+  "Stonekeeper Durgan": {
+    arcId: "dark-forest-thresholds",
+    sceneId: "durgan_depths",
+    sceneTitle: "Stonekeeper Durgan and the Gemloch Depths",
+  },
+  "Remnant Keeper Nyx": {
+    arcId: "dark-forest-thresholds",
+    sceneId: "nyx_selerion",
+    sceneTitle: "Remnant Keeper Nyx and the Selerion Fragments",
+  },
+  "Windcaller Aelara": {
+    arcId: "auroral-plains-tempests",
+    sceneId: "aelara_tempests",
+    sceneTitle: "Windcaller Aelara and the Auroral Tempests",
+  },
+  "Gemloch Overseer Barak": {
+    arcId: "dwarven-strongholds",
+    sceneId: "barak_range",
+    sceneTitle: "Gemloch Overseer Barak and the High Pass",
+  },
+  "Forgeguard Captain Haldor": {
+    arcId: "dwarven-strongholds",
+    sceneId: "haldor_citadel",
+    sceneTitle: "Forgeguard Captain Haldor and the Broken Citadel",
+  },
+  "Runesmith Korra": {
+    arcId: "dwarven-strongholds",
+    sceneId: "korra_reforge",
+    sceneTitle: "Runesmith Korra and the Reforging Effort",
+  },
+  "Verdant Warden Sylva": {
+    arcId: "emerald-woods-canopy",
+    sceneId: "sylva_canopy",
+    sceneTitle: "Verdant Warden Sylva and the Canopy Watch",
+  },
+  "Herbalist Fern": {
+    arcId: "emerald-woods-canopy",
+    sceneId: "fern_grove",
+    sceneTitle: "Herbalist Fern and the Deep Grove",
+  },
+  "Lumen Priestess Aurelia": {
+    arcId: "lake-lumina-reflections",
+    sceneId: "aurelia_lake",
+    sceneTitle: "Lumen Priestess Aurelia and the Drowned Light",
+  },
+  "Tide Alchemist Nereus": {
+    arcId: "lake-lumina-reflections",
+    sceneId: "nereus_tides",
+    sceneTitle: "Tide Alchemist Nereus and the Purification Work",
+  },
+  "Dragonkin Watcher Azael": {
+    arcId: "azurshard-abyss",
+    sceneId: "azael_watch",
+    sceneTitle: "Dragonkin Watcher Azael and the Chasm's Law",
+  },
+  "Crystal Sage Velara": {
+    arcId: "azurshard-abyss",
+    sceneId: "velara_resonance",
+    sceneTitle: "Crystal Sage Velara and the Harmonic Work",
+  },
+  "Elder Druid Moonwhisper": {
+    arcId: "moondancer-glade-rites",
+    sceneId: "moonwhisper_rites",
+    sceneTitle: "Elder Druid Moonwhisper and the Broken Pact",
+  },
+  "Moonherb Gatherer Lirien": {
+    arcId: "moondancer-glade-rites",
+    sceneId: "lirien_moonherbs",
+    sceneTitle: "Moonherb Gatherer Lirien and the Salvage Work",
+  },
+  "Prospector Helga": {
+    arcId: "viridian-prospects",
+    sceneId: "helga_prospect",
+    sceneTitle: "Prospector Helga and the Upper Veins",
+  },
+};
+
+const AUTHORED_PROGRESSIVE_QUEST_SCENES: Record<string, AuthoredQuestGraphSceneTarget[]> = {
+  "Guard Captain Marcus": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "marcus_contracts",
+    sceneTitle: "Guard Captain Marcus Contracts",
+    primaryQuestIds: ["welcome_adventurer", "ready_for_battle"],
+  }],
+  "Grimwald the Trader": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "grimwald_trade_intro",
+    sceneTitle: "Grimwald's First Bargain",
+    primaryQuestIds: ["traders_bargain"],
+  }],
+  "Bron the Blacksmith": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "bron_forge_handoff",
+    sceneTitle: "Bron's Forge Handoff",
+    primaryQuestIds: ["blacksmiths_offer"],
+  }],
+  "Thrain Ironforge - Warrior Trainer": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "thrain_training_counsel",
+    sceneTitle: "Thrain's Training Counsel",
+    primaryQuestIds: ["warriors_wisdom"],
+  }],
+  "Herbalist Willow": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "willow_foragers_counsel",
+    sceneTitle: "Willow's Forager Counsel",
+    primaryQuestIds: ["foragers_knowledge"],
+  }],
+  "Chef Gastron": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "gastron_campfire_welcome",
+    sceneTitle: "Gastron's Campfire Welcome",
+    primaryQuestIds: ["cooks_secret"],
+  }],
+  "Grizzled Miner Torvik": [{
+    arcId: "village-square-welcome-tour",
+    sceneId: "torvik_miner_briefing",
+    sceneTitle: "Torvik's Miner Briefing",
+    primaryQuestIds: ["miners_greeting"],
+  }],
+  "Farmhand Amos": [
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_mining",
+      sceneTitle: "Farmhand Amos and Stone Foundations",
+      primaryQuestIds: ["farm_mining_foundation", "farm_mining_claim"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_herbalism",
+      sceneTitle: "Farmhand Amos and Green Acres",
+      primaryQuestIds: ["farm_herb_first_harvest", "farm_herb_green_acres"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_skinning",
+      sceneTitle: "Farmhand Amos and Pest Control",
+      primaryQuestIds: ["farm_skin_pest_control", "farm_skin_homesteader"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_smithing",
+      sceneTitle: "Farmhand Amos and Nails for the Cause",
+      primaryQuestIds: ["farm_smith_nails", "farm_smith_real_estate"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_alchemy",
+      sceneTitle: "Farmhand Amos and Field Remedies",
+      primaryQuestIds: ["farm_alch_field_remedy", "farm_alch_apothecary"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_cooking",
+      sceneTitle: "Farmhand Amos and the Harvest Feast",
+      primaryQuestIds: ["farm_cook_harvest_feast", "farm_cook_kitchen_dreams"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_leather",
+      sceneTitle: "Farmhand Amos and Ranch Work",
+      primaryQuestIds: ["farm_leather_saddles", "farm_leather_ranch"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "amos_jewel",
+      sceneTitle: "Farmhand Amos and Sunstone Prospects",
+      primaryQuestIds: ["farm_jewel_sunstone", "farm_jewel_gem_estate"],
+    },
+  ],
+  "Plot Registrar Helga": [
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_mining_claim",
+      sceneTitle: "Plot Registrar Helga and the Mason's Claim",
+      primaryQuestIds: ["farm_mining_claim"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_herb_claim",
+      sceneTitle: "Plot Registrar Helga and Green Acres",
+      primaryQuestIds: ["farm_herb_green_acres"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_skin_claim",
+      sceneTitle: "Plot Registrar Helga and the Homesteader's Way",
+      primaryQuestIds: ["farm_skin_homesteader"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_smith_claim",
+      sceneTitle: "Plot Registrar Helga and Built-to-Last Ground",
+      primaryQuestIds: ["farm_smith_real_estate"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_alch_claim",
+      sceneTitle: "Plot Registrar Helga and the Farm Apothecary",
+      primaryQuestIds: ["farm_alch_apothecary"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_cook_claim",
+      sceneTitle: "Plot Registrar Helga and a Kitchen of Your Own",
+      primaryQuestIds: ["farm_cook_kitchen_dreams"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_leather_claim",
+      sceneTitle: "Plot Registrar Helga and Ranch Ground",
+      primaryQuestIds: ["farm_leather_ranch"],
+    },
+    {
+      arcId: "sunflower-fields-homesteads",
+      sceneId: "helga_jewel_claim",
+      sceneTitle: "Plot Registrar Helga and the Gem Estate",
+      primaryQuestIds: ["farm_jewel_gem_estate"],
+    },
+  ],
+};
+
+function pickProgressiveScene(
+  scenes: AuthoredQuestGraphSceneTarget[],
+  activeQuestIds: string[],
+  completedQuestIds: string[],
+  availableQuestIds: string[],
+): AuthoredQuestGraphSceneTarget | null {
+  const byPriority = [
+    activeQuestIds,
+    availableQuestIds,
+    completedQuestIds,
+  ];
+
+  for (const questIds of byPriority) {
+    const matched = scenes.find((scene) => {
+      const relevantQuestIds = scene.primaryQuestIds ?? [];
+      return relevantQuestIds.some((questId) => questIds.includes(questId));
+    });
+    if (matched) return matched;
+  }
+
+  return null;
+}
+
+function questGiverArcId(name: string): string {
+  return `questgiver-${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")}`;
+}
+
+function isScoutKaela(name: string | null | undefined): boolean {
+  return name === "Scout Kaela";
+}
+
+function getQuestGraphScene(
+  name: string | null | undefined,
+  storyFlags: string[],
+  activeQuestIds: string[],
+  completedQuestIds: string[],
+  availableQuestIds: string[],
+): { arcId: string; sceneId: string; sceneTitle: string } | null {
+  if (!name) return null;
+
+  if (name === "Scout Kaela") {
+    return AUTHORED_QUEST_GRAPH_SCENES[name];
+  }
+
+  if (name === "Guard Captain Marcus") {
+    const welcomeQuestTouched = activeQuestIds.includes("welcome_adventurer")
+      || completedQuestIds.includes("welcome_adventurer");
+    if (!storyFlags.includes(SCOUT_KAELA_BRIEFED_FLAG) || !welcomeQuestTouched) {
+      return AUTHORED_QUEST_GRAPH_SCENES[name];
+    }
+  }
+
+  const authoredScene = AUTHORED_QUEST_GRAPH_SCENES[name];
+  if (authoredScene && name !== "Guard Captain Marcus") {
+    return authoredScene;
+  }
+
+  const progressiveScenes = AUTHORED_PROGRESSIVE_QUEST_SCENES[name];
+  if (progressiveScenes) {
+    const matchedScene = pickProgressiveScene(progressiveScenes, activeQuestIds, completedQuestIds, availableQuestIds);
+    if (matchedScene) {
+      return matchedScene;
+    }
+  }
+
+  return {
+    arcId: questGiverArcId(name),
+    sceneId: "root",
+    sceneTitle: `${name} Contract Board`,
+  };
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON" || target.isContentEditable;
+}
+
+function useTypewriter(text: string, speed = 20): {
+  displayed: string;
+  done: boolean;
+  skip: () => void;
+} {
   const [displayed, setDisplayed] = React.useState("");
   const [done, setDone] = React.useState(false);
   const indexRef = React.useRef(0);
@@ -27,18 +506,21 @@ function useTypewriter(text: string, speed = 25) {
     setDisplayed("");
     setDone(false);
     indexRef.current = 0;
-    if (!text) { setDone(true); return; }
-    const interval = setInterval(() => {
-      indexRef.current++;
+    if (!text) {
+      setDone(true);
+      return;
+    }
+    const interval = window.setInterval(() => {
+      indexRef.current += 1;
       if (indexRef.current >= text.length) {
         setDisplayed(text);
         setDone(true);
-        clearInterval(interval);
+        window.clearInterval(interval);
       } else {
         setDisplayed(text.slice(0, indexRef.current));
       }
     }, speed);
-    return () => clearInterval(interval);
+    return () => window.clearInterval(interval);
   }, [text, speed]);
 
   const skip = React.useCallback(() => {
@@ -50,413 +532,616 @@ function useTypewriter(text: string, speed = 25) {
   return { displayed, done, skip };
 }
 
-/* ── Objective label ──────────────────────────────────────── */
-function objectiveLabel(obj: AvailableQuestEntry["objective"]): string {
-  if (obj.type === "kill") return `Slay ${obj.count} ${obj.targetMobName ?? "enemies"}`;
-  if (obj.type === "gather") return `Gather ${obj.count} ${obj.targetItemName ?? "items"}`;
-  if (obj.type === "craft") return `Craft ${obj.count} ${obj.targetItemName ?? "items"}`;
-  if (obj.type === "talk") return `Speak with ${obj.targetNpcName ?? "NPC"}`;
-  return `${obj.type} x${obj.count}`;
+function choiceColors(choice: Pick<DialogueChoice, "variant"> | Pick<QuestGraphRenderableChoice, "style">): {
+  border: string;
+  text: string;
+  background: string;
+} {
+  const variant = (choice as Pick<DialogueChoice, "variant">).variant
+    ?? (choice as Pick<QuestGraphRenderableChoice, "style">).style;
+  if (variant === "primary") {
+    return { border: ACCENT, text: "#0a0e18", background: ACCENT };
+  }
+  if (variant === "danger") {
+    return { border: DANGER, text: DANGER, background: "transparent" };
+  }
+  return { border: BORDER, text: DIM, background: "transparent" };
 }
 
-/* ── Dialogue phases ──────────────────────────────────────── */
-// Flow: greeting(NPC) → greeting_reply(champion) → quest(NPC) → quest_reply(champion) → rewards(NPC)
-type DialoguePhase = "greeting" | "greeting_reply" | "quest" | "quest_reply" | "rewards" | "active" | "idle";
-
-function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
-
-const NPC_GREETINGS = [
-  "Ah, a brave soul approaches. I have need of your strength.",
-  "Well met, champion. I've been waiting for someone capable.",
-  "You look like you can handle yourself. Listen closely.",
-  "The winds whisper of your deeds. Perhaps you can help me.",
-  "Finally, someone who doesn't run at the first sign of danger.",
-];
-
-/* ── Origin-based dialogue lines ──────────────────────────── */
-// Each origin has a distinct personality tone
-
-const GREETING_REPLIES: Record<string, string[]> = {
-  sunforged: [
-    "By the light of Aurandel, I stand ready. What threatens this land?",
-    "I swore an oath to defend the weak. Tell me what must be done.",
-    "The righteous do not hesitate. Speak, and I shall act.",
-    "My shield arm is steady. What evil needs purging?",
-  ],
-  veilborn: [
-    "...I'm listening. But know that my help comes at a price.",
-    "Interesting. And what's in it for me, exactly?",
-    "I've heard whispers about trouble here. Let's see if they're true.",
-    "Trust is earned, not given. But you have my attention.",
-  ],
-  dawnkeeper: [
-    "I sense pain in your words. Let me help carry this burden.",
-    "Every soul deserves aid. Tell me how I can bring light here.",
-    "The Ember Communes taught me that all suffering can be healed. What do you need?",
-    "Peace comes through action. I'm here to help, friend.",
-  ],
-  ironvow: [
-    "Skip the pleasantries. What needs killing?",
-    "I didn't crawl out of the pits for small talk. Get to the point.",
-    "You want something done right? You came to the right person.",
-    "Words are cheap. Point me at the problem.",
-  ],
-};
-
-const QUEST_REPLIES_KILL: Record<string, string[]> = {
-  sunforged: [
-    "These creatures threaten the innocent. By my oath, they will fall.",
-    "Justice demands their end. I'll strike them down with honor.",
-    "No beast shall prey upon the defenseless while I draw breath.",
-  ],
-  veilborn: [
-    "I know their patterns. They won't see me coming.",
-    "Efficient. Clean. No witnesses. Consider it handled.",
-    "I'll study their weaknesses first. Then... silence.",
-  ],
-  dawnkeeper: [
-    "I take no joy in this, but the balance must be restored.",
-    "May their spirits find peace in the next life. It must be done.",
-    "I'll end their suffering swiftly. Every life has meaning.",
-  ],
-  ironvow: [
-    "Finally, some real work. They're already dead, they just don't know it.",
-    "Only ${count}? I was hoping for a challenge.",
-    "Blood and steel. The only language worth speaking.",
-  ],
-};
-
-const QUEST_REPLIES_GATHER: Record<string, string[]> = {
-  sunforged: [
-    "A noble task. I'll search every corner of this land for what you need.",
-    "Resources to aid the cause? I'll gather them with purpose.",
-  ],
-  veilborn: [
-    "I know places others don't. I'll have them before dawn.",
-    "Procurement is one of my... specialties. Leave it to me.",
-  ],
-  dawnkeeper: [
-    "The land provides for those who ask gently. I'll find them.",
-    "Nature's gifts are meant to be shared. I'm on it.",
-  ],
-  ironvow: [
-    "Errands. Fine. But you owe me one.",
-    "Not exactly glory work, but a job's a job. I'll get it done.",
-  ],
-};
-
-const QUEST_REPLIES_CRAFT: Record<string, string[]> = {
-  sunforged: [
-    "My hands serve creation as well as destruction. I'll forge what you need.",
-    "Aurandel's smiths taught me well. I'll craft them with care.",
-  ],
-  veilborn: [
-    "Precision work? Finally, something that requires finesse.",
-    "I've crafted tools in the shadow markets. This should be trivial.",
-  ],
-  dawnkeeper: [
-    "To create is to heal the world. I'll put my heart into it.",
-    "The Ember Communes value craftsmanship above all. Watch me work.",
-  ],
-  ironvow: [
-    "Forge work. Good. There's honesty in shaping metal with your hands.",
-    "I learned to make weapons before I learned to read. Easy.",
-  ],
-};
-
-const QUEST_REPLIES_TALK: Record<string, string[]> = {
-  sunforged: [
-    "I'll seek them out. Knowledge strengthens the righteous.",
-    "Words can be as powerful as swords. I'll hear what they say.",
-  ],
-  veilborn: [
-    "Information is currency. I'll extract what we need.",
-    "I'll listen... and read between the lines.",
-  ],
-  dawnkeeper: [
-    "Every voice deserves to be heard. I'll find them and listen.",
-    "Connection and understanding. That's what I do best.",
-  ],
-  ironvow: [
-    "Talking. Not my strength, but I'll manage.",
-    "Fine. But if they waste my time, we're done.",
-  ],
-};
-
-const FALLBACK_GREETINGS = [
-  "I'm listening. What do you need?",
-  "You have my attention. Tell me what's going on.",
-  "My blade is ready. Speak your mind.",
-  "Sounds serious. Go on, I'm here to help.",
-];
-
-function getGreetingReply(origin: string | null): string {
-  const lines = (origin && GREETING_REPLIES[origin]) || FALLBACK_GREETINGS;
-  return pick(lines);
+function speakerMeta(speaker: "npc" | "champion" | "player" | "system", npcName: string, championName: string): {
+  name: string;
+  color: string;
+  icon: string;
+} {
+  if (speaker === "champion" || speaker === "player") {
+    return { name: championName, color: CHAMPION_COLOR, icon: "\u2694" };
+  }
+  if (speaker === "system") {
+    return { name: "System", color: ACCENT, icon: "*" };
+  }
+  return { name: npcName, color: GOLD, icon: "!" };
 }
 
-function getChampionQuestReply(obj: AvailableQuestEntry["objective"], origin: string | null): string {
-  const o = origin ?? "sunforged";
-  const target = obj.targetMobName ?? obj.targetItemName ?? obj.targetNpcName ?? "them";
+function PortraitPanel({ portrait }: { portrait: DialoguePortrait }): React.ReactElement {
+  const sharedStyle: React.CSSProperties = {
+    bottom: 0,
+    [portrait.side]: "max(1vw, calc(50% - 520px))",
+    zIndex: 51,
+  };
 
-  if (obj.type === "kill") {
-    const lines = QUEST_REPLIES_KILL[o] ?? QUEST_REPLIES_KILL.sunforged;
-    return pick(lines).replace("${count}", String(obj.count));
-  }
-  if (obj.type === "gather") {
-    const lines = QUEST_REPLIES_GATHER[o] ?? QUEST_REPLIES_GATHER.sunforged;
-    return pick(lines);
-  }
-  if (obj.type === "craft") {
-    const lines = QUEST_REPLIES_CRAFT[o] ?? QUEST_REPLIES_CRAFT.sunforged;
-    return pick(lines);
-  }
-  if (obj.type === "talk") {
-    const lines = QUEST_REPLIES_TALK[o] ?? QUEST_REPLIES_TALK.sunforged;
-    return pick(lines);
-  }
-  return "Understood. I'll get it done.";
+  // Only render if an actual portrait image exists — skip the dev placeholder
+  if (!portrait.src) return null as unknown as React.ReactElement;
+
+  return (
+    <img
+      alt={portrait.alt}
+      className="absolute pointer-events-none select-none hidden sm:block"
+      src={portrait.src}
+      style={{
+        ...sharedStyle,
+        height: "min(55vh, 440px)",
+        objectFit: "contain",
+        objectPosition: "bottom",
+        filter: "drop-shadow(4px 4px 12px rgba(0,0,0,0.7))",
+      }}
+    />
+  );
 }
 
-/* ── Component ────────────────────────────────────────────── */
+async function resolveLivePlayerIdentity(
+  ownerAddress: string,
+  zoneHints: Array<string | null | undefined>,
+): Promise<{ entityId: string; championName: string } | null> {
+  const walletManager = WalletManager.getInstance();
+  const trackedWallet = await walletManager.getTrackedWalletAddress();
+  const custodialWallet = walletManager.custodialAddress;
+  const walletsToMatch = new Set(
+    [ownerAddress, trackedWallet, custodialWallet]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toLowerCase()),
+  );
 
-// Track quest IDs that have been sent to the agent (persists across re-opens within session)
-const sentQuestIds = new Set<string>();
+  const zonesToSearch = Array.from(
+    new Set(zoneHints.filter((value): value is string => Boolean(value))),
+  );
 
-interface ActiveQuestInfo {
-  questId: string;
-  title: string;
-  progress: number;
-  required: number;
-  complete: boolean;
-  objective: { type: string; targetMobName?: string; targetItemName?: string; targetNpcName?: string; count: number };
-}
+  for (const zoneId of zonesToSearch) {
+    const zone = await fetchZone(zoneId);
+    if (!zone) continue;
+    for (const entity of Object.values(zone.entities)) {
+      if (entity.type !== "player") continue;
+      const entityWallet = entity.walletAddress?.toLowerCase();
+      if (!entityWallet || !walletsToMatch.has(entityWallet)) continue;
+      return {
+        entityId: entity.id,
+        championName: entity.name,
+      };
+    }
+  }
 
-const NPC_FOLLOWUP_LINES = [
-  "You're back. Your champion is already working on the tasks I gave. Keep at it.",
-  "I see you've returned. Your agent is making progress — check the quest log for details.",
-  "Patience, friend. Your champion hasn't finished yet. These things take time.",
-  "Still here? Your agent is in the field. Come back when the job is done.",
-];
-
-function activeQuestSummary(aq: ActiveQuestInfo): string {
-  const pct = aq.required > 0 ? Math.round((aq.progress / aq.required) * 100) : 0;
-  if (aq.complete) return `"${aq.title}" is complete! Send your agent to turn it in.`;
-  const target = aq.objective.targetMobName ?? aq.objective.targetItemName ?? aq.objective.targetNpcName ?? "targets";
-  return `"${aq.title}" — ${aq.progress}/${aq.required} ${target} (${pct}%). Keep going.`;
+  return null;
 }
 
 export function NpcDialogueOverlay(): React.ReactElement | null {
   const { address } = useWalletContext();
   const [open, setOpen] = React.useState(false);
   const [npc, setNpc] = React.useState<Entity | null>(null);
-  const [quests, setQuests] = React.useState<AvailableQuestEntry[]>([]);
-  const [activeQuests, setActiveQuests] = React.useState<ActiveQuestInfo[]>([]);
-  const [selectedIdx, setSelectedIdx] = React.useState(0);
-  const [phase, setPhase] = React.useState<DialoguePhase>("greeting");
-  const [greetingText, setGreetingText] = React.useState(() => pick(NPC_GREETINGS));
-  const [championOrigin, setChampionOrigin] = React.useState<string | null>(null);
-  const [greetingReply, setGreetingReply] = React.useState(() => pick(FALLBACK_GREETINGS));
-  const [questReply, setQuestReply] = React.useState("");
-  const [accepted, setAccepted] = React.useState(false);
+  const [script, setScript] = React.useState<DialogueScript | null>(null);
+  const [graphSession, setGraphSession] = React.useState<QuestGraphSession | null>(null);
   const [championName, setChampionName] = React.useState("Champion");
-  const [championEntityId, setChampionEntityId] = React.useState<string | null>(null);
-  const [activeIdx, setActiveIdx] = React.useState(0);
+  const [playerEntityId, setPlayerEntityId] = React.useState<string | null>(null);
+  const [askValue, setAskValue] = React.useState("");
+  const [graphInputValue, setGraphInputValue] = React.useState("");
+  const [graphError, setGraphError] = React.useState<string | null>(null);
+  const [graphLoading, setGraphLoading] = React.useState(false);
+  const [ambientReply, setAmbientReply] = React.useState<NpcAmbientDialogueResponse | null>(null);
+  const [ambientLoading, setAmbientLoading] = React.useState(false);
+  const [ambientError, setAmbientError] = React.useState<string | null>(null);
+  const [activeTab, setActiveTab] = React.useState<NpcTab>("dialogue");
+  const [currentZoneId, setCurrentZoneId] = React.useState("village-square");
 
-  // Is the current speaker the champion?
-  const isChampionSpeaking = phase === "greeting_reply" || phase === "quest_reply";
+  useGameBridge("zoneChanged", ({ zoneId }) => setCurrentZoneId(zoneId));
 
-  // Current text to display based on phase
-  const currentText = React.useMemo(() => {
-    if (phase === "greeting") return greetingText;
-    if (phase === "greeting_reply") return greetingReply;
-    if (phase === "active") {
-      const aq = activeQuests[activeIdx];
-      return aq ? activeQuestSummary(aq) : "I have nothing for you right now. Return later.";
-    }
-    const q = quests[selectedIdx];
-    if (!q) return "I have nothing for you right now. Return later.";
-    if (phase === "quest") return q.description;
-    if (phase === "quest_reply") return questReply;
-    if (phase === "rewards") return `Your reward: ${formatCopperString(q.rewards.copper)} gold and ${q.rewards.xp} XP. Shall I send your champion?`;
-    return "";
-  }, [phase, greetingText, greetingReply, questReply, quests, selectedIdx, activeQuests, activeIdx]);
+  React.useEffect(() => {
+    if (!open || !npc || !address || playerEntityId) return;
 
+    let cancelled = false;
+
+    void (async () => {
+      let resolvedChampionName: string | null = null;
+      let nextPlayerId: string | null = null;
+
+      try {
+        const logRes = await fetch(`${API_URL}/questlog/${address}`);
+        if (logRes.ok) {
+          const logData = await logRes.json();
+          resolvedChampionName = logData.playerName ?? null;
+          nextPlayerId = logData.entityId ?? null;
+        }
+      } catch {
+        // Ignore quest log failures and fall back to live entity resolution.
+      }
+
+      if (!nextPlayerId) {
+        try {
+          const liveIdentity = await resolveLivePlayerIdentity(address, [
+            npc.zoneId,
+            currentZoneId,
+          ]);
+          if (liveIdentity) {
+            nextPlayerId = liveIdentity.entityId;
+            resolvedChampionName = liveIdentity.championName;
+          }
+        } catch {
+          // Ignore live entity failures and keep the chat locked.
+        }
+      }
+
+      if (cancelled || !nextPlayerId) return;
+
+      setPlayerEntityId(nextPlayerId);
+      if (resolvedChampionName) {
+        setChampionName(resolvedChampionName);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, currentZoneId, npc, open, playerEntityId]);
+
+  const handleClose = React.useCallback(() => {
+    playSoundEffect("ui_dialog_close");
+    setOpen(false);
+    setNpc(null);
+    setScript(null);
+    setGraphSession(null);
+    setAskValue("");
+    setGraphInputValue("");
+    setGraphError(null);
+    setGraphLoading(false);
+    setAmbientReply(null);
+    setAmbientError(null);
+    setAmbientLoading(false);
+    setActiveTab("dialogue");
+  }, []);
+
+  const handleEffects = React.useCallback((effects: DialogueEffect[]) => {
+    void (async () => {
+      for (const effect of effects) {
+        if (effect.type === "acceptQuest") {
+          sentQuestIds.add(effect.quest.questId);
+          gameBus.emit("agentGoToNpc", {
+            entityId: effect.npc.id,
+            zoneId: effect.npc.zoneId ?? "",
+            name: effect.npc.name,
+            type: "quest-giver",
+            action: "accept-quest",
+            questId: effect.quest.questId,
+            questTitle: effect.quest.title,
+          });
+          continue;
+        }
+
+        if (effect.type === "turnInQuest") {
+          gameBus.emit("agentGoToNpc", {
+            entityId: effect.npc.id,
+            zoneId: effect.npc.zoneId ?? "",
+            name: effect.npc.name,
+            type: "quest-giver",
+            action: "complete-quest",
+            questId: effect.quest.questId,
+            questTitle: effect.quest.title,
+          });
+          continue;
+        }
+
+        if (effect.type === "setStoryFlag") {
+          if (!address || !playerEntityId) {
+            console.warn("[dialogue] Missing wallet or player entity for story flag", effect.flag);
+            continue;
+          }
+
+          try {
+            const token = await getAuthToken(address);
+            if (!token) {
+              console.warn("[dialogue] Failed to acquire auth token for story flag", effect.flag);
+              continue;
+            }
+
+            const res = await fetch(`${API_URL}/story/flags`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ entityId: playerEntityId, flag: effect.flag }),
+            });
+
+            if (res.ok) {
+              await res.json().catch(() => null);
+            }
+          } catch (error) {
+            console.warn("[dialogue] Failed to persist story flag", effect.flag, error);
+          }
+          continue;
+        }
+
+        if (effect.type === "close") {
+          handleClose();
+        }
+      }
+    })();
+  }, [address, handleClose, playerEntityId]);
+
+  const { node, history, advance, choose } = useDialogueRunner(open ? script : null, {
+    onEffects: handleEffects,
+    onClose: handleClose,
+  });
+
+  const legacyNode = graphSession ? null : node;
+  const graphNode = graphSession?.node ?? null;
+  const activeNode = graphNode ?? legacyNode;
+  const currentText = activeNode?.text ?? "";
   const { displayed, done, skip } = useTypewriter(currentText, 20);
 
-  // Fetch quests + player info when NPC is clicked
+  const runQuestGraphStart = React.useCallback(async (
+    target: { arcId: string; sceneId: string; sceneTitle: string },
+    nextPlayerId: string,
+    walletAddress: string,
+  ): Promise<boolean> => {
+    try {
+      const token = await getAuthToken(walletAddress);
+      if (!token) return false;
+
+      const res = await fetch(`${API_URL}/quest-arcs/${target.arcId}/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entityId: nextPlayerId,
+          sceneId: target.sceneId,
+          commit: true,
+        }),
+      });
+
+      if (!res.ok) return false;
+      const data = await res.json() as QuestGraphResponse;
+      setGraphSession({
+        arcId: data.arcId,
+        sceneId: data.sceneId,
+        sceneTitle: data.sceneTitle ?? target.sceneTitle,
+        node: data.node,
+      });
+      setScript(null);
+      setGraphInputValue("");
+      setGraphError(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const advanceQuestGraph = React.useCallback(async (input?: { choiceId?: string; freeformInput?: string }) => {
+    if (!graphSession || !npc || !address || !playerEntityId || graphLoading) return;
+
+    setGraphLoading(true);
+    setGraphError(null);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) {
+        setGraphError("Wallet auth failed. Reconnect and try again.");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/quest-arcs/${graphSession.arcId}/advance`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entityId: playerEntityId,
+          sceneId: graphSession.sceneId,
+          nodeId: graphSession.node.id,
+          choiceId: input?.choiceId,
+          freeformInput: input?.freeformInput,
+          commit: true,
+        }),
+      });
+
+      const data = await res.json().catch(() => null) as
+        | (QuestGraphResponse & { resolution?: { fallbackText?: string } })
+        | null;
+
+      if (!res.ok || !data) {
+        setGraphError((data as { error?: string } | null)?.error ?? "Quest graph request failed.");
+        return;
+      }
+
+      setGraphSession((prev) => prev ? {
+        ...prev,
+        sceneTitle: data.sceneTitle ?? prev.sceneTitle,
+        node: data.node,
+      } : prev);
+      setGraphInputValue("");
+      setGraphError(data.resolution?.fallbackText ?? null);
+    } catch {
+      setGraphError("Failed to reach quest graph service.");
+    } finally {
+      setGraphLoading(false);
+    }
+  }, [address, graphLoading, graphSession, npc, playerEntityId]);
+
+  const handleAdvance = React.useCallback(() => {
+    if (!done) {
+      skip();
+      return;
+    }
+    if (graphSession) {
+      if (graphSession.node.type === "choice" || graphSession.node.type === "freeform") return;
+      if (graphSession.node.type === "end") {
+        handleClose();
+        return;
+      }
+      void advanceQuestGraph();
+      return;
+    }
+    if (node?.choices?.length) return;
+    advance();
+  }, [advance, advanceQuestGraph, done, graphSession, handleClose, node?.choices, skip]);
+
+  const handleChoice = React.useCallback((choiceId: string) => {
+    if (!done) {
+      skip();
+      return;
+    }
+    if (graphSession) {
+      void advanceQuestGraph({ choiceId });
+      return;
+    }
+    choose(choiceId);
+  }, [advanceQuestGraph, choose, done, graphSession, skip]);
+
+  const submitAmbientPrompt = React.useCallback(async (prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed || !npc || !address || !playerEntityId || ambientLoading) return;
+
+    setAmbientLoading(true);
+    setAmbientError(null);
+    try {
+      const token = await getAuthToken(address);
+      if (!token) {
+        setAmbientError("Wallet auth failed. Reconnect and try again.");
+        return;
+      }
+
+      const res = await fetch(`${API_URL}/npc/dialogue`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          entityId: playerEntityId,
+          npcEntityId: npc.id,
+          message: trimmed,
+          recentHistory: history.slice(-6).map((entry) => ({
+            role: entry.speaker === "npc" ? "npc" : "player",
+            content: entry.text,
+          })),
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        setAmbientError(errorData?.error ?? "NPC dialogue request failed.");
+        return;
+      }
+
+      const data = await res.json();
+      setAmbientReply(data);
+      setAskValue("");
+    } catch {
+      setAmbientError("Failed to reach NPC dialogue service.");
+    } finally {
+      setAmbientLoading(false);
+    }
+  }, [address, ambientLoading, history, npc, playerEntityId]);
+
   useGameBridge("questNpcClick", async (entity: Entity) => {
-    setNpc(entity);
-    setSelectedIdx(0);
-    setActiveIdx(0);
-    setAccepted(false);
+    if (entity.type === "quest-giver" && !address) return;
+    playSoundEffect("ui_dialog_open");
     setOpen(true);
+    setNpc(entity);
+    setPlayerEntityId(null);
+    setScript(null);
+    setGraphSession(null);
+    setAskValue("");
+    setGraphInputValue("");
+    setGraphError(null);
+    setGraphLoading(false);
+    setAmbientReply(null);
+    setAmbientError(null);
+    setAmbientLoading(false);
+    setActiveTab("dialogue");
 
-    let pid: string | null = championEntityId;
-    let origin: string | null = championOrigin;
-    let npcActiveQuests: ActiveQuestInfo[] = [];
+    if (isScoutKaela(entity.name)) {
+      setChampionName("Champion");
+    }
 
-    // Fetch player info for name + entityId + active quests
+    let resolvedChampionName = "Champion";
+    let resolvedChampionOrigin: string | null = null;
+    let playerId: string | null = null;
+    let resolvedStoryFlags: string[] = [];
+    let activeQuests: ActiveQuestEntry[] = [];
+    let completedQuestIds: string[] = [];
+    let availableQuests: AvailableQuestEntry[] = [];
+
     if (address) {
       try {
         const logRes = await fetch(`${API_URL}/questlog/${address}`);
         if (logRes.ok) {
           const logData = await logRes.json();
-          if (logData.playerName) setChampionName(logData.playerName);
-          if (logData.entityId) { pid = logData.entityId; setChampionEntityId(logData.entityId); }
-          if (logData.origin) { origin = logData.origin; setChampionOrigin(logData.origin); }
-
-          // Filter active quests that belong to THIS NPC
-          npcActiveQuests = (logData.activeQuests ?? []).filter(
-            (aq: any) => aq.npcEntityId === entity.id
+          resolvedChampionName = logData.playerName ?? resolvedChampionName;
+          resolvedChampionOrigin = logData.origin ?? resolvedChampionOrigin;
+          playerId = logData.entityId ?? null;
+          resolvedStoryFlags = Array.isArray(logData.storyFlags) ? logData.storyFlags : [];
+          activeQuests = (logData.activeQuests ?? []).filter(
+            (quest: ActiveQuestEntry) => quest.npcEntityId === entity.id,
           );
-          setActiveQuests(npcActiveQuests);
+          completedQuestIds = Array.isArray(logData.completedQuests)
+            ? logData.completedQuests.map((quest: { questId: string }) => quest.questId)
+            : [];
         }
-      } catch { /* ignore */ }
+      } catch {
+        // Ignore quest log failures and still open the dialogue shell.
+      }
+
+      if (!playerId) {
+        try {
+          const liveIdentity = await resolveLivePlayerIdentity(address, [
+            entity.zoneId,
+            currentZoneId,
+          ]);
+          if (liveIdentity) {
+            playerId = liveIdentity.entityId;
+            resolvedChampionName = liveIdentity.championName || resolvedChampionName;
+          }
+        } catch {
+          // Ignore live zone fallback failures and leave dialogue shell open.
+        }
+      }
     }
 
-    // Fetch available quests from this NPC (filtered by player progress)
-    let availableQuests: AvailableQuestEntry[] = [];
     try {
-      const url = pid
-        ? `${API_URL}/quests/npc/${entity.id}?playerId=${pid}`
+      const url = playerId
+        ? `${API_URL}/quests/npc/${entity.id}?playerId=${playerId}`
         : `${API_URL}/quests/npc/${entity.id}`;
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
         availableQuests = (data.quests ?? [])
-          .map((q: any) => ({
-            questId: q.id,
-            title: q.title,
-            description: q.description,
+          .map((quest: any) => ({
+            questId: quest.id,
+            title: quest.title,
+            description: quest.description,
             npcEntityId: entity.id,
             npcName: entity.name,
-            objective: q.objective,
-            rewards: q.rewards,
+            objective: quest.objective,
+            rewards: quest.rewards,
           }))
-          // Filter out quests already sent to the agent
-          .filter((q: AvailableQuestEntry) => !sentQuestIds.has(q.questId));
+          .filter((quest: AvailableQuestEntry) => !sentQuestIds.has(quest.questId));
       }
-    } catch { /* ignore */ }
-
-    setQuests(availableQuests);
-
-    // Decide opening phase based on what's available
-    if (availableQuests.length > 0) {
-      // New quests to offer
-      setGreetingText(pick(NPC_GREETINGS));
-      setGreetingReply(getGreetingReply(origin));
-      setPhase("greeting");
-    } else if (npcActiveQuests.length > 0) {
-      // No new quests but has active ones — show progress
-      setGreetingText(pick(NPC_FOLLOWUP_LINES));
-      setPhase("greeting");
-    } else {
-      // Nothing at all
-      setGreetingText("I have nothing for you right now. Return later, champion.");
-      setPhase("greeting");
+    } catch {
+      // Ignore availability failures and fall back to whichever dialogue path still works.
     }
+
+    setChampionName(resolvedChampionName);
+    setPlayerEntityId(playerId);
+
+    const graphTarget = getQuestGraphScene(
+      entity.name,
+      resolvedStoryFlags,
+      activeQuests.map((quest) => quest.questId),
+      completedQuestIds,
+      availableQuests.map((quest) => quest.questId),
+    );
+    if (graphTarget && address && playerId) {
+      const started = await runQuestGraphStart(graphTarget, playerId, address);
+      if (started) return;
+    }
+
+    if (isScoutKaela(entity.name)) {
+      setScript(buildScoutKaelaDialogueScript({
+        alreadyBriefed: resolvedStoryFlags.includes(SCOUT_KAELA_BRIEFED_FLAG),
+        canPersistProgress: Boolean(address && playerId),
+      }));
+      return;
+    }
+
+    setScript(buildNpcQuestDialogueScript({
+      npc: entity,
+      quests: availableQuests,
+      activeQuests,
+      championName: resolvedChampionName,
+      championOrigin: resolvedChampionOrigin,
+    }));
   });
 
-  const handleNext = React.useCallback(() => {
-    if (!done) { skip(); return; }
-
-    if (phase === "greeting") {
-      if (quests.length > 0) {
-        setPhase("greeting_reply");
-      } else if (activeQuests.length > 0) {
-        // Skip to active quest progress
-        setPhase("active");
-      } else {
-        setOpen(false);
-      }
-    } else if (phase === "greeting_reply") {
-      if (quests.length > 0) {
-        setPhase("quest");
-      } else {
-        setOpen(false);
-      }
-    } else if (phase === "quest") {
-      const q = quests[selectedIdx];
-      if (q) setQuestReply(getChampionQuestReply(q.objective, championOrigin));
-      setPhase("quest_reply");
-    } else if (phase === "quest_reply") {
-      setPhase("rewards");
-    } else if (phase === "rewards") {
-      if (selectedIdx < quests.length - 1) {
-        setSelectedIdx((i) => i + 1);
-        setPhase("quest");
-        setAccepted(false);
-      } else if (activeQuests.length > 0) {
-        // After all new quests, show active quest progress
-        setPhase("active");
-      } else {
-        setOpen(false);
-      }
-    } else if (phase === "active") {
-      if (activeIdx < activeQuests.length - 1) {
-        setActiveIdx((i) => i + 1);
-      } else {
-        setOpen(false);
-      }
-    }
-  }, [done, skip, phase, quests, selectedIdx, activeQuests, activeIdx, championOrigin]);
-
-  const handleAccept = React.useCallback(() => {
-    const q = quests[selectedIdx];
-    if (!q || !npc) return;
-
-    // Track this quest as sent so it won't re-appear
-    sentQuestIds.add(q.questId);
-
-    gameBus.emit("agentGoToNpc", {
-      entityId: npc.id,
-      zoneId: npc.zoneId ?? "",
-      name: npc.name,
-      type: "quest-giver",
-      action: "accept-quest",
-      questId: q.questId,
-      questTitle: q.title,
-    });
-
-    setAccepted(true);
-    setQuests((prev) => prev.filter((_, i) => i !== selectedIdx));
-  }, [quests, selectedIdx, npc]);
-
-  const handleClose = React.useCallback(() => { setOpen(false); }, []);
-
-  // Keyboard handler
   React.useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
-      else if (e.key === " " || e.key === "Enter") {
-        e.preventDefault();
-        if (phase === "rewards" && !accepted) handleAccept();
-        else handleNext();
+    if (!open || !activeNode) return;
+    const handler = (event: KeyboardEvent) => {
+      if (isInteractiveTarget(event.target)) return;
+
+      if (event.key === "Escape") {
+        handleClose();
+        return;
+      }
+
+      // Only handle dialogue-specific shortcuts on the dialogue tab
+      if (activeTab !== "dialogue") return;
+
+      if (
+        /^[1-9]$/.test(event.key)
+        && done
+        && (
+          (graphSession?.node.type === "choice" && graphSession.node.choices.length > 0)
+          || (!!node?.choices?.length)
+        )
+      ) {
+        const index = Number(event.key) - 1;
+        const choice = graphSession?.node.type === "choice"
+          ? graphSession.node.choices[index]
+          : node?.choices?.[index];
+        if (choice) {
+          event.preventDefault();
+          handleChoice(choice.id);
+        }
+        return;
+      }
+
+      if (event.key === " " || event.key === "Enter") {
+        event.preventDefault();
+        if (
+          (graphSession?.node.type === "choice" && graphSession.node.choices.length > 0)
+          || (!!node?.choices?.length)
+        ) {
+          if (!done) skip();
+          return;
+        }
+        handleAdvance();
       }
     };
+
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [open, handleClose, handleNext, handleAccept, phase, accepted]);
+  }, [activeNode, done, graphSession, handleAdvance, handleChoice, handleClose, node, open, skip]);
 
-  if (!open || !npc) return null;
+  if (!open || !npc || !activeNode) return null;
 
-  const q = quests[selectedIdx];
-  const speakerName = isChampionSpeaking ? championName : npc.name;
-  const speakerColor = isChampionSpeaking ? CHAMPION_COLOR : GOLD;
-  const speakerIcon = isChampionSpeaking ? "\u2694" : "!";
+  const activeSpeaker = graphNode
+    ? graphNode.type === "end" ? "system" : graphNode.speaker
+    : legacyNode?.speaker ?? "system";
+  const speaker = speakerMeta(activeSpeaker, npc.name, championName);
+  const isChampionSpeaking = activeSpeaker === "champion" || activeSpeaker === "player";
+  const activeTitle = graphSession?.sceneTitle ?? legacyNode?.title;
+  const activeChoices = graphNode?.type === "choice" ? graphNode.choices : legacyNode?.choices;
+  const isQuestGiver = npc.type === "quest-giver";
+  const showAmbientPanel = !graphSession && !(isQuestGiver && !playerEntityId);
+  const showGraphFreeformPanel = graphNode?.type === "freeform";
 
   return (
-    <div
-      className="fixed inset-x-0 bottom-0 z-50 flex justify-center"
-      style={{ pointerEvents: "none" }}
-    >
+    <div className="fixed inset-x-0 bottom-0 z-50 flex justify-center" style={{ pointerEvents: "none" }}>
       <div
         className="fixed inset-0"
-        style={{ background: "rgba(0,0,0,0.35)", pointerEvents: "auto" }}
         onClick={handleClose}
+        style={{ background: "rgba(0,0,0,0.45)", pointerEvents: "auto" }}
       />
+
+      {legacyNode?.portrait && <PortraitPanel portrait={legacyNode.portrait} />}
 
       <div
         className="relative border-2 shadow-2xl select-none"
@@ -465,12 +1150,11 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
           borderColor: isChampionSpeaking ? "#1a3a4a" : BORDER,
           fontFamily: "monospace",
           color: TEXT,
-          width: "min(680px, 95vw)",
+          width: "min(760px, 95vw)",
           marginBottom: 24,
           pointerEvents: "auto",
         }}
       >
-        {/* Speaker name plate */}
         <div
           className="flex items-center gap-2 px-4 py-2 border-b"
           style={{ borderColor: BORDER, background: BG_DARK }}
@@ -478,29 +1162,24 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
           <div
             className="flex items-center justify-center border-2 text-sm font-bold"
             style={{
-              width: 28, height: 28,
-              borderColor: speakerColor, color: speakerColor,
+              width: 28,
+              height: 28,
+              borderColor: speaker.color,
+              color: speaker.color,
               background: isChampionSpeaking ? "#0a1a2a" : "#1a1520",
             }}
           >
-            {speakerIcon}
+            {speaker.icon}
           </div>
-          <span className="text-[13px] font-bold" style={{ color: speakerColor }}>
-            {speakerName}
+          <span className="text-[13px] font-bold" style={{ color: speaker.color }}>
+            {speaker.name}
           </span>
           {isChampionSpeaking && (
-            <span className="text-[9px] font-bold px-1.5 py-0.5 border" style={{ borderColor: "#1a3a4a", color: CHAMPION_COLOR, background: "#0a1520" }}>
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 border"
+              style={{ borderColor: "#1a3a4a", color: CHAMPION_COLOR, background: "#0a1520" }}
+            >
               YOUR CHAMPION
-            </span>
-          )}
-          {q && !["greeting", "greeting_reply", "active"].includes(phase) && (
-            <span className="ml-auto text-[10px] font-bold px-2 py-0.5 border" style={{ borderColor: "#1e2842", color: DIM }}>
-              Quest {selectedIdx + 1}/{quests.length + (accepted ? 1 : 0)}
-            </span>
-          )}
-          {phase === "active" && activeQuests.length > 1 && (
-            <span className="ml-auto text-[10px] font-bold px-2 py-0.5 border" style={{ borderColor: "#1e2842", color: "#e0af68" }}>
-              Active {activeIdx + 1}/{activeQuests.length}
             </span>
           )}
           <button
@@ -512,127 +1191,325 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
           </button>
         </div>
 
-        {/* Quest title bar — for new quests */}
-        {q && !["greeting", "greeting_reply", "active"].includes(phase) && (
-          <div className="px-4 py-1.5 border-b" style={{ borderColor: "#1a2035", background: "#0d1322" }}>
+        {/* Service tabs — only shown when NPC has multiple services */}
+        {npc && <NpcServiceTabs entity={npc} activeTab={activeTab} onTabChange={setActiveTab} />}
+
+        {/* Non-dialogue tabs */}
+        {activeTab === "training" && npc?.teachesClass && (
+          <NpcTrainingTab entity={npc} onClose={handleClose} />
+        )}
+        {activeTab === "professions" && npc?.teachesProfession && (
+          <NpcProfessionTab entity={npc} onClose={handleClose} />
+        )}
+        {activeTab === "shop" && npc?.shopItems?.length && (
+          <NpcShopTab entity={npc} zoneId={npc.zoneId ?? currentZoneId} />
+        )}
+
+        {/* Dialogue tab content (everything below is the existing dialogue UI) */}
+        {activeTab === "dialogue" && activeTitle && (
+          <div className="px-4 py-1.5 border-b flex items-center gap-2" style={{ borderColor: "#1a2035", background: "#0d1322" }}>
             <span className="text-[12px] font-bold" style={{ color: TEXT }}>
-              {q.title}
+              {activeTitle}
             </span>
-            <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5" style={{
-              color: q.objective.type === "kill" ? "#f25454" : q.objective.type === "gather" ? ACCENT : "#5dadec",
-              background: "#0a0e18",
-              border: `1px solid ${BORDER}`,
-            }}>
-              {q.objective.type.toUpperCase()}
-            </span>
+            {legacyNode?.badge && (
+              <span
+                className="text-[9px] font-bold px-1.5 py-0.5"
+                style={{
+                  color: legacyNode.badge.color,
+                  background: "#0a0e18",
+                  border: `1px solid ${BORDER}`,
+                }}
+              >
+                {legacyNode.badge.label}
+              </span>
+            )}
           </div>
         )}
 
-        {/* Active quest title bar — for in-progress quests */}
-        {phase === "active" && activeQuests[activeIdx] && (
-          <div className="px-4 py-1.5 border-b" style={{ borderColor: "#1a2035", background: "#0d1322" }}>
-            <span className="text-[12px] font-bold" style={{ color: TEXT }}>
-              {activeQuests[activeIdx].title}
-            </span>
-            <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5" style={{
-              color: activeQuests[activeIdx].complete ? ACCENT : "#e0af68",
-              background: "#0a0e18",
-              border: `1px solid ${BORDER}`,
-            }}>
-              {activeQuests[activeIdx].complete ? "READY" : "IN PROGRESS"}
-            </span>
-          </div>
-        )}
-
-        {/* Dialogue text area */}
-        <div className="px-4 py-4" style={{ minHeight: 80 }}>
-          <p className="text-[12px] leading-[1.6]" style={{ color: isChampionSpeaking ? CHAMPION_COLOR : TEXT, whiteSpace: "pre-wrap" }}>
+        {activeTab === "dialogue" && (<>
+        <div className="px-4 py-4" style={{ minHeight: 112 }}>
+          <p className="text-[12px] leading-[1.7]" style={{ color: isChampionSpeaking ? CHAMPION_COLOR : TEXT, whiteSpace: "pre-wrap" }}>
             {displayed}
-            {!done && <span className="animate-pulse" style={{ color: speakerColor }}>|</span>}
+            {!done && <span className="animate-pulse" style={{ color: speaker.color }}>|</span>}
           </p>
         </div>
 
-        {/* Objective + Rewards panel */}
-        {phase === "rewards" && q && (
-          <div className="px-4 pb-3 flex gap-4">
-            <div className="flex-1 border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
-              <div className="text-[8px] font-bold uppercase tracking-wider mb-1" style={{ color: DIM }}>Objective</div>
-              <div className="text-[11px]" style={{ color: TEXT }}>{objectiveLabel(q.objective)}</div>
-            </div>
-            <div className="flex-1 border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
-              <div className="text-[8px] font-bold uppercase tracking-wider mb-1" style={{ color: DIM }}>Rewards</div>
-              <div className="text-[11px]" style={{ color: GOLD }}>{formatCopperString(q.rewards.copper)} gold</div>
-              <div className="text-[11px]" style={{ color: "#5dadec" }}>{q.rewards.xp} XP</div>
+        {!graphSession && (legacyNode?.objective || legacyNode?.rewards) && (
+          <div className="px-4 pb-3 flex flex-col sm:flex-row gap-3">
+            {legacyNode?.objective && (
+              <div className="flex-1 border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
+                <div className="text-[8px] font-bold uppercase tracking-wider mb-1" style={{ color: DIM }}>
+                  Objective
+                </div>
+                <div className="text-[11px]" style={{ color: TEXT }}>
+                  {legacyNode.objective.label}
+                </div>
+              </div>
+            )}
+            {legacyNode?.rewards && (
+              <div className="flex-1 border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
+                <div className="text-[8px] font-bold uppercase tracking-wider mb-1" style={{ color: DIM }}>
+                  Rewards
+                </div>
+                <div className="text-[11px]" style={{ color: GOLD }}>
+                  {legacyNode.rewards.copperLabel}
+                </div>
+                <div className="text-[11px]" style={{ color: "#5dadec" }}>
+                  {legacyNode.rewards.xp} XP
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!graphSession && legacyNode?.progress && (
+          <div className="px-4 pb-3">
+            <div className="border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
+              <div className="flex justify-between mb-1">
+                <span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>
+                  Progress
+                </span>
+                <span className="text-[9px] font-bold" style={{ color: legacyNode.progress.complete ? ACCENT : WARN }}>
+                  {legacyNode.progress.value}/{legacyNode.progress.max}
+                </span>
+              </div>
+              <div className="h-[8px] border rounded-sm overflow-hidden" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+                <div
+                  className="h-full rounded-sm transition-all"
+                  style={{
+                    width: `${legacyNode.progress.max > 0 ? Math.min(100, Math.round((legacyNode.progress.value / legacyNode.progress.max) * 100)) : 0}%`,
+                    background: legacyNode.progress.complete ? ACCENT : WARN,
+                  }}
+                />
+              </div>
             </div>
           </div>
         )}
 
-        {/* Active quest progress bar */}
-        {phase === "active" && activeQuests[activeIdx] && (() => {
-          const aq = activeQuests[activeIdx];
-          const pct = aq.required > 0 ? Math.min(100, Math.round((aq.progress / aq.required) * 100)) : 0;
-          return (
-            <div className="px-4 pb-3">
-              <div className="border p-2" style={{ borderColor: "#1e2842", background: BG_DARK }}>
-                <div className="flex justify-between mb-1">
-                  <span className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>Progress</span>
-                  <span className="text-[9px] font-bold" style={{ color: aq.complete ? ACCENT : "#e0af68" }}>
-                    {aq.progress}/{aq.required}
-                  </span>
+        {showGraphFreeformPanel && graphNode?.type === "freeform" && (
+          <div className="px-4 pb-3">
+            <div className="border p-3" style={{ borderColor: "#1e2842", background: BG_DARK }}>
+              <div className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>
+                {graphNode.prompt}
+              </div>
+              <div className="mt-1 text-[10px]" style={{ color: DIM }}>
+                Respond in your own words or tap a route below.
+              </div>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <textarea
+                  value={graphInputValue}
+                  onChange={(event) => setGraphInputValue(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void advanceQuestGraph({ freeformInput: graphInputValue });
+                    }
+                  }}
+                  placeholder={graphNode.placeholder ?? "Tell the NPC what you want."}
+                  disabled={graphLoading}
+                  rows={2}
+                  className="flex-1 border px-3 py-2 text-[11px] resize-none outline-none disabled:opacity-50"
+                  style={{
+                    borderColor: BORDER,
+                    background: "#0a0e18",
+                    color: TEXT,
+                  }}
+                />
+                <button
+                  onClick={() => void advanceQuestGraph({ freeformInput: graphInputValue })}
+                  disabled={!graphInputValue.trim() || graphLoading}
+                  className="px-4 py-2 text-[11px] font-bold border-2 disabled:opacity-50"
+                  style={{
+                    borderColor: ACCENT,
+                    color: "#0a0e18",
+                    background: ACCENT,
+                    minWidth: 120,
+                    cursor: "pointer",
+                  }}
+                >
+                  {graphLoading ? "THINKING" : "SEND"}
+                </button>
+              </div>
+              {graphError && (
+                <div className="mt-2 text-[10px]" style={{ color: WARN }}>
+                  {graphError}
                 </div>
-                <div className="h-[8px] border rounded-sm overflow-hidden" style={{ borderColor: BORDER, background: "#0a0e18" }}>
-                  <div
-                    className="h-full rounded-sm transition-all"
-                    style={{ width: `${pct}%`, background: aq.complete ? ACCENT : "#e0af68" }}
-                  />
+              )}
+              {graphNode.routes.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {graphNode.routes.map((route: QuestGraphRenderableFreeformRoute) => (
+                    <button
+                      key={route.id}
+                      onClick={() => {
+                        setGraphInputValue(route.label);
+                        void advanceQuestGraph({ freeformInput: route.label });
+                      }}
+                      className="text-[10px] font-bold px-2.5 py-1 border"
+                      style={{
+                        borderColor: "#1e2842",
+                        color: ACCENT,
+                        background: "transparent",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {route.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {showAmbientPanel && (
+          <div className="px-4 pb-3">
+          <div className="border p-3" style={{ borderColor: "#1e2842", background: BG_DARK }}>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <div className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>
+                  Ask {npc.name}
+                </div>
+                <div className="text-[10px]" style={{ color: DIM }}>
+                  Freeform flavor chat stays guided by quest state and NPC persona.
                 </div>
               </div>
+              {ambientReply && (
+                <div className="text-[8px] uppercase tracking-wider" style={{ color: ambientReply.provider === "llm" ? ACCENT : WARN }}>
+                  {ambientReply.provider === "llm" ? "LLM Reply" : "Fallback Reply"}
+                </div>
+              )}
             </div>
-          );
-        })()}
 
-        {/* Action buttons */}
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <textarea
+                value={askValue}
+                onChange={(event) => setAskValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    void submitAmbientPrompt(askValue);
+                  }
+                }}
+                placeholder={
+                  address && playerEntityId
+                    ? `Ask ${npc.name} about the job, the area, or your next step...`
+                    : "Connect wallet and deploy a champion to unlock NPC chat."
+                }
+                disabled={!address || !playerEntityId || ambientLoading}
+                rows={2}
+                className="flex-1 border px-3 py-2 text-[11px] resize-none outline-none disabled:opacity-50"
+                style={{
+                  borderColor: BORDER,
+                  background: "#0a0e18",
+                  color: TEXT,
+                }}
+              />
+              <button
+                onClick={() => void submitAmbientPrompt(askValue)}
+                disabled={!askValue.trim() || !address || !playerEntityId || ambientLoading}
+                className="px-4 py-2 text-[11px] font-bold border-2 disabled:opacity-50"
+                style={{
+                  borderColor: ACCENT,
+                  color: "#0a0e18",
+                  background: ACCENT,
+                  minWidth: 120,
+                  cursor: "pointer",
+                }}
+              >
+                {ambientLoading ? "THINKING" : "ASK"}
+              </button>
+            </div>
+
+            {ambientError && (
+              <div className="mt-2 text-[10px]" style={{ color: DANGER }}>
+                {ambientError}
+              </div>
+            )}
+
+            {ambientReply && (
+              <div className="mt-3 border px-3 py-2" style={{ borderColor: "#1e2842", background: "#0a0e18" }}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: GOLD }}>
+                    {npc.name}
+                  </span>
+                  <span className="text-[8px] uppercase tracking-wider" style={{ color: DIM }}>
+                    {ambientReply.persona.role}
+                  </span>
+                  <span className="text-[8px] uppercase tracking-wider" style={{ color: DIM }}>
+                    {ambientReply.intent.replace(/_/g, " ")}
+                  </span>
+                </div>
+                <p className="mt-2 text-[11px] leading-[1.6]" style={{ color: TEXT, whiteSpace: "pre-wrap" }}>
+                  {ambientReply.reply}
+                </p>
+                {ambientReply.suggestedActions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {ambientReply.suggestedActions.map((action) => (
+                      <button
+                        key={`${action.label}:${action.prompt}`}
+                        onClick={() => {
+                          setAskValue(action.prompt);
+                          void submitAmbientPrompt(action.prompt);
+                        }}
+                        className="text-[10px] font-bold px-2.5 py-1 border"
+                        style={{
+                          borderColor: "#1e2842",
+                          color: ACCENT,
+                          background: "transparent",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          </div>
+        )}
+
         <div
           className="flex items-center justify-between px-4 py-2 border-t"
           style={{ borderColor: BORDER, background: BG_DARK }}
         >
           <span className="text-[9px]" style={{ color: DIM }}>
-            {!done ? "Click to skip" : phase === "rewards" ? "Space to send agent" : "Space to continue"}
+            {!done
+              ? "Click to finish the line"
+              : activeChoices?.length
+              ? "Press 1-9 or click a choice"
+              : showGraphFreeformPanel
+              ? "Use the prompt above"
+              : "Space to continue"}
           </span>
 
-          <div className="flex gap-2">
-            {phase === "rewards" && q && !accepted && (
-              <button
-                onClick={handleAccept}
-                className="text-[11px] font-bold px-4 py-1.5 border-2 hover:brightness-110"
-                style={{
-                  borderColor: ACCENT, color: "#0a0e18", background: ACCENT,
-                  cursor: "pointer",
-                }}
-              >
-                SEND AGENT
-              </button>
-            )}
+          <div className="flex flex-wrap justify-end gap-2">
+            {done && activeChoices?.map((choice, index) => {
+              const colors = choiceColors(choice);
+              return (
+                <button
+                  key={choice.id}
+                  onClick={() => handleChoice(choice.id)}
+                  className="text-[11px] font-bold px-3 py-1.5 border-2 hover:brightness-110"
+                  disabled={"disabled" in choice ? choice.disabled : false}
+                  style={{
+                    borderColor: colors.border,
+                    color: colors.text,
+                    background: colors.background,
+                    cursor: "disabled" in choice && choice.disabled ? "not-allowed" : "pointer",
+                    opacity: "disabled" in choice && choice.disabled ? 0.5 : 1,
+                  }}
+                >
+                  {activeChoices.length > 1 ? `${index + 1}. ` : ""}
+                  {choice.label}
+                </button>
+              );
+            })}
 
-            {accepted && (
-              <span className="text-[11px] font-bold px-4 py-1.5" style={{ color: ACCENT }}>
-                AGENT DISPATCHED
-              </span>
-            )}
-
-            {phase === "rewards" && !accepted && (
+            {!activeChoices?.length && !showGraphFreeformPanel && (
               <button
-                onClick={handleNext}
-                className="text-[11px] font-bold px-3 py-1.5 border hover:opacity-80"
-                style={{ borderColor: BORDER, color: DIM, background: "transparent", cursor: "pointer" }}
-              >
-                {selectedIdx < quests.length - 1 ? "SKIP" : "DECLINE"}
-              </button>
-            )}
-
-            {(phase !== "rewards" || accepted) && (
-              <button
-                onClick={handleNext}
+                onClick={handleAdvance}
                 className="text-[11px] font-bold px-4 py-1.5 border-2 hover:brightness-110"
                 style={{
                   borderColor: isChampionSpeaking ? CHAMPION_COLOR : GOLD,
@@ -641,11 +1518,14 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
                   cursor: "pointer",
                 }}
               >
-                {!done ? "SKIP" : phase === "greeting" && quests.length === 0 ? "CLOSE" : "NEXT"}
+                {!done ? "SKIP" : graphSession
+                  ? graphSession.node.type === "end" ? "CLOSE" : "NEXT"
+                  : node?.next ? "NEXT" : "CLOSE"}
               </button>
             )}
           </div>
         </div>
+        </>)}
       </div>
     </div>
   );

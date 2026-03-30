@@ -17,6 +17,9 @@ export interface CharacterSaveData {
   xp: number;
   characterTokenId?: string;
   agentId?: string;
+  agentRegistrationTxHash?: string;
+  chainRegistrationStatus?: "unregistered" | "pending_mint" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
+  chainRegistrationLastError?: string;
   raceId: string;
   classId: string;
   calling?: CharacterCalling;
@@ -29,13 +32,22 @@ export interface CharacterSaveData {
   x: number;
   y: number;
   kills: number;
+  activeQuests?: Array<{
+    questId: string;
+    progress: number;
+    startedAt: number;
+  }>;
   completedQuests: string[];
+  storyFlags: string[];
   learnedTechniques: string[];
   professions: string[];
+  pendingQuestApprovals?: string[];
   signatureTechniqueId?: string;
   ultimateTechniqueId?: string;
   /** Serialized equipment map — persisted as JSON string in Redis */
   equipment?: Record<string, unknown>;
+  /** Per-profession skill XP/level/actions */
+  professionSkills?: Record<string, { xp: number; level: number; actions: number }>;
 }
 
 // In-memory fallback (always available)
@@ -95,6 +107,26 @@ function parseStringArray(value: string | undefined): string[] {
   }
 }
 
+function parseActiveQuests(
+  value: string | undefined
+): Array<{ questId: string; progress: number; startedAt: number }> {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry) => entry && typeof entry === "object")
+      .map((entry) => ({
+        questId: String((entry as any).questId ?? ""),
+        progress: Number((entry as any).progress ?? 0) || 0,
+        startedAt: Number((entry as any).startedAt ?? 0) || 0,
+      }))
+      .filter((entry) => entry.questId.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 function parseCharacter(raw: Record<string, string>): CharacterSaveData {
   return {
     name: raw.name ?? "Unknown",
@@ -102,6 +134,9 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     xp: parseInt(raw.xp ?? "0", 10) || 0,
     characterTokenId: raw.characterTokenId || undefined,
     agentId: raw.agentId || undefined,
+    agentRegistrationTxHash: raw.agentRegistrationTxHash || undefined,
+    chainRegistrationStatus: (raw.chainRegistrationStatus as CharacterSaveData["chainRegistrationStatus"]) || undefined,
+    chainRegistrationLastError: raw.chainRegistrationLastError || undefined,
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
     gender: raw.gender,
@@ -113,9 +148,12 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     x: parseFloat(raw.x ?? "0"),
     y: parseFloat(raw.y ?? "0"),
     kills: parseInt(raw.kills ?? "0", 10),
+    activeQuests: parseActiveQuests(raw.activeQuests),
     completedQuests: parseStringArray(raw.completedQuests),
+    storyFlags: parseStringArray(raw.storyFlags),
     learnedTechniques: parseStringArray(raw.learnedTechniques),
     professions: parseStringArray(raw.professions),
+    pendingQuestApprovals: parseStringArray(raw.pendingQuestApprovals),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,

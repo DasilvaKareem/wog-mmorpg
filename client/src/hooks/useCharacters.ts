@@ -63,7 +63,9 @@ export function useCharacters(): UseCharactersResult {
     if ("ok" in result && result.ok) {
       setCharacters((prev) => [
         {
-          tokenId: "pending",
+          tokenId: `pending:${payload.name.toLowerCase()}:${payload.className}`,
+          chainRegistrationStatus: result.bootstrap?.chainRegistrationStatus,
+          bootstrapStatus: result.bootstrap?.status ?? "queued",
           name: result.character.name,
           description: result.character.description,
           properties: {

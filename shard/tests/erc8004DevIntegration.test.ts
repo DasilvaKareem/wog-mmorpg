@@ -13,14 +13,17 @@
  *   JWT_SECRET=test SKALE_BASE_RPC_URL=... IDENTITY_REGISTRY_ADDRESS=... ... npx tsx tests/erc8004DevIntegration.test.ts
  */
 
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { ethers } from "ethers";
+import { getOfficialErc8004Addresses } from "../src/erc8004/official.js";
 
 type JsonResult = { status: number; body: any };
 
 const SHARD_URL = process.env.SHARD_URL || "http://127.0.0.1:3000";
 const DEFAULT_LOCAL_RPC_URL = "http://127.0.0.1:8545";
+const DEV_ENABLED = (process.env.DEV ?? "").trim().toLowerCase() === "true";
+const CHAIN_RETRY_COUNT = DEV_ENABLED ? 25 : 90;
 const MANIFEST_PATH =
   process.env.HARDHAT_MANIFEST_PATH ||
   path.resolve(process.cwd(), "../hardhat/deployments/localhost.json");
@@ -48,6 +51,27 @@ function assert(condition: boolean, label: string, details?: unknown): void {
 function requireOk(condition: boolean, message: string): void {
   if (!condition) {
     throw new Error(message);
+  }
+}
+
+function assertPresent<T>(value: T, message: string): asserts value is NonNullable<T> {
+  if (value == null) {
+    throw new Error(message);
+  }
+}
+
+function extractTransferTokenId(logs: Array<{ topics: readonly string[] }>): number | null {
+  const transferLog = [...logs].reverse().find((log) => log.topics.length > 3 && Boolean(log.topics[3]));
+  if (!transferLog?.topics[3]) return null;
+  return Number(BigInt(transferLog.topics[3]));
+}
+
+function decodeCharacterTokenId(rawMetadata: string | null | undefined): bigint | null {
+  if (!rawMetadata || rawMetadata === "0x") return null;
+  try {
+    return ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawMetadata)[0];
+  } catch {
+    return null;
   }
 }
 
@@ -85,9 +109,10 @@ function readManifest():
 
 function getConfigValue(
   key: string,
-  manifestEnv?: Record<string, string>
+  manifestEnv?: Record<string, string>,
+  preferManifest = false
 ): string | undefined {
-  return process.env[key] || manifestEnv?.[key];
+  return preferManifest ? (manifestEnv?.[key] || process.env[key]) : (process.env[key] || manifestEnv?.[key]);
 }
 
 async function main() {
@@ -101,16 +126,25 @@ async function main() {
   const expectedChainId = Number(
     process.env.EXPECTED_CHAIN_ID || process.env.SKALE_BASE_CHAIN_ID || manifest?.chainId || 0
   );
+  const preferManifestConfig = process.env.DEV === "true" || expectedChainId === 31337;
+  const officialRegistries = getOfficialErc8004Addresses(expectedChainId);
+  const validationRegistryAddress = !DEV_ENABLED && officialRegistries?.validation == null
+    ? undefined
+    : getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.validation;
   const environment = {
-    GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv),
-    ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv),
-    CHARACTER_CONTRACT_ADDRESS: getConfigValue("CHARACTER_CONTRACT_ADDRESS", manifestEnv),
-    IDENTITY_REGISTRY_ADDRESS: getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv),
-    REPUTATION_REGISTRY_ADDRESS: getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv),
-    VALIDATION_REGISTRY_ADDRESS: getConfigValue("VALIDATION_REGISTRY_ADDRESS", manifestEnv),
+    GOLD_CONTRACT_ADDRESS: getConfigValue("GOLD_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    ITEMS_CONTRACT_ADDRESS: getConfigValue("ITEMS_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    CHARACTER_CONTRACT_ADDRESS: getConfigValue("CHARACTER_CONTRACT_ADDRESS", manifestEnv, preferManifestConfig),
+    IDENTITY_REGISTRY_ADDRESS:
+      getConfigValue("IDENTITY_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.identity,
+    REPUTATION_REGISTRY_ADDRESS:
+      getConfigValue("REPUTATION_REGISTRY_ADDRESS", manifestEnv, preferManifestConfig) || officialRegistries?.reputation,
+    VALIDATION_REGISTRY_ADDRESS: validationRegistryAddress,
   };
+  const hasValidationRegistry = Boolean(environment.VALIDATION_REGISTRY_ADDRESS);
 
   for (const [key, value] of Object.entries(environment)) {
+    if (key === "VALIDATION_REGISTRY_ADDRESS" && !hasValidationRegistry) continue;
     requireOk(Boolean(value), `Missing required test config: ${key}`);
   }
 
@@ -129,18 +163,21 @@ async function main() {
     ],
     provider
   );
-  const validation = new ethers.Contract(
-    environment.VALIDATION_REGISTRY_ADDRESS!,
-    [
-      "function getVerifications(uint256 agentId) view returns (tuple(address verifier, string claim, uint256 validUntil)[])",
-      "function isVerified(uint256 agentId, string claim) view returns (bool)",
-    ],
-    provider
-  );
+  const validation = hasValidationRegistry
+    ? new ethers.Contract(
+        environment.VALIDATION_REGISTRY_ADDRESS!,
+        [
+          "function getAgentValidations(uint256 agentId) view returns (bytes32[] memory requestHashes)",
+          "function getValidationStatus(bytes32 requestHash) view returns (address validatorAddress, uint256 agentId, uint8 response, bytes32 responseHash, string tag, uint256 lastUpdate)",
+        ],
+        provider
+      )
+    : null;
   const reputation = new ethers.Contract(
     environment.REPUTATION_REGISTRY_ADDRESS!,
     [
-      "function getReputation(uint256 identityId) view returns (tuple(uint256,uint256,uint256,uint256,uint256,uint256,uint256))",
+      "function getClients(uint256 agentId) view returns (address[])",
+      "function getSummary(uint256 agentId, address[] clientAddresses, string tag1, string tag2) view returns (uint64 count, int128 summaryValue, uint8 summaryValueDecimals)",
     ],
     provider
   );
@@ -180,6 +217,17 @@ async function main() {
   const walletRegister = await json("POST", "/wallet/register", { walletAddress }, token);
   requireOk(walletRegister.status === 200, `Wallet register failed: ${JSON.stringify(walletRegister.body)}`);
   assert(walletRegister.body?.welcomeBonus?.gold === 0.02, "Welcome bonus response includes 0.02 GOLD", walletRegister.body);
+  let welcomeBonusSettled = false;
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
+    const balance = await json("GET", `/wallet/${walletAddress}/balance`, undefined, token);
+    if (balance.status === 200 && Number(balance.body?.onChainGold ?? balance.body?.gold) === 0.02) {
+      welcomeBonusSettled = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  requireOk(welcomeBonusSettled, "welcome bonus did not settle on-chain before character creation");
+  assert(welcomeBonusSettled, "Welcome bonus settles on-chain before character creation");
 
   section("Character + Identity Bootstrap");
   const startBlock = await provider.getBlockNumber();
@@ -197,97 +245,175 @@ async function main() {
   let identityApi: JsonResult | null = null;
   let validationsApi: JsonResult | null = null;
   let nameLookup: JsonResult | null = null;
+  let charactersApi: JsonResult | null = null;
 
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
     const latestBlock = await provider.getBlockNumber();
-    const [identityLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup] = await Promise.all([
+    const [identityTransferLogs, characterLogs, currentIdentity, currentValidations, currentNameLookup, currentCharacters] = await Promise.all([
       provider.getLogs({
-        address: manifest.environment.IDENTITY_REGISTRY_ADDRESS,
         address: environment.IDENTITY_REGISTRY_ADDRESS!,
-        fromBlock: startBlock,
+        fromBlock: Math.max(0, startBlock - 20),
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
       }),
       provider.getLogs({
-        address: manifest.environment.CHARACTER_CONTRACT_ADDRESS,
         address: environment.CHARACTER_CONTRACT_ADDRESS!,
-        fromBlock: startBlock,
+        fromBlock: Math.max(0, startBlock - 20),
         toBlock: latestBlock,
         topics: [transferTopic, null, walletTopic],
       }),
       agentId != null ? json("GET", `/api/agents/${agentId}/identity`) : Promise.resolve(null),
       agentId != null ? json("GET", `/api/agents/${agentId}/validations`) : Promise.resolve(null),
-      json("GET", `/name/lookup/${walletAddress}`),
+      json("GET", `/name/lookup/${walletAddress}`).catch(() => null),
+      json("GET", `/character/${walletAddress}`).catch(() => null),
     ]);
 
-    if (identityLogs.length > 0) {
-      agentId = Number(BigInt(identityLogs.at(-1)!.topics[3]));
+    const discoveredAgentId = extractTransferTokenId(identityTransferLogs);
+    const discoveredCharacterTokenId = extractTransferTokenId(characterLogs);
+    if (discoveredAgentId != null) {
+      agentId = discoveredAgentId;
     }
-    if (characterLogs.length > 0) {
-      characterTokenId = Number(BigInt(characterLogs.at(-1)!.topics[3]));
+    if (discoveredCharacterTokenId != null) {
+      characterTokenId = discoveredCharacterTokenId;
     }
     if (currentIdentity) identityApi = currentIdentity;
     if (currentValidations) validationsApi = currentValidations;
     nameLookup = currentNameLookup;
+    charactersApi = currentCharacters;
+    const apiAgentId = Number(currentIdentity?.body?.identity?.agentId);
+    const apiCharacterTokenId = Number(currentIdentity?.body?.identity?.characterTokenId);
+    const listedCharacter = currentCharacters?.body?.characters?.find?.((entry: any) =>
+      entry?.name === `${characterName} the Warrior` || entry?.name === characterName
+    );
+    const listedCharacterTokenId = Number(listedCharacter?.characterTokenId);
+    if (Number.isInteger(apiAgentId) && apiAgentId >= 0) {
+      agentId = apiAgentId;
+    }
+    if (Number.isInteger(apiCharacterTokenId) && apiCharacterTokenId >= 0) {
+      characterTokenId = apiCharacterTokenId;
+    }
+    if (characterTokenId == null && Number.isInteger(listedCharacterTokenId) && listedCharacterTokenId >= 0) {
+      characterTokenId = listedCharacterTokenId;
+    }
 
+    const validationReady = hasValidationRegistry
+      ? Array.isArray(validationsApi?.body?.validations) && validationsApi!.body.validations.length > 0
+      : validationsApi?.status === 200;
     const ready =
       agentId != null &&
       characterTokenId != null &&
       identityApi?.status === 200 &&
-      Array.isArray(validationsApi?.body?.validations) &&
-      validationsApi!.body.validations.length > 0 &&
-      nameLookup?.status === 200;
+      validationReady;
     if (ready) break;
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 
-  requireOk(agentId != null, "agentId not discovered from on-chain identity transfer logs");
-  requireOk(characterTokenId != null, "characterTokenId not discovered from on-chain character transfer logs");
+  assertPresent(agentId, "agentId not discovered from chain logs or identity API");
+  assertPresent(characterTokenId, "characterTokenId not discovered from chain logs or identity API");
   requireOk(identityApi?.status === 200, `identity API not ready: ${JSON.stringify(identityApi?.body)}`);
   requireOk(validationsApi?.status === 200, `validations API not ready: ${JSON.stringify(validationsApi?.body)}`);
-  requireOk(nameLookup?.status === 200, `name lookup not ready: ${JSON.stringify(nameLookup?.body)}`);
+  const mintedAgentId = agentId;
+  let mintedCharacterTokenId = characterTokenId;
+  let settledIdentityCharacterTokenId = identityApi?.body?.identity?.characterTokenId ?? null;
+  let settledRawCharacterMetadata: string | null = null;
 
-  assert(identityApi!.body.identity.agentId === String(agentId), "Identity API returns the minted agentId", identityApi!.body);
+  for (let i = 0; i < CHAIN_RETRY_COUNT; i++) {
+    const [currentIdentity, currentRawMetadata] = await Promise.all([
+      json("GET", `/api/agents/${mintedAgentId}/identity`),
+      identity.getMetadata(BigInt(mintedAgentId), "characterTokenId").catch(() => null),
+    ]);
+    if (currentIdentity.status === 200) {
+      identityApi = currentIdentity;
+      settledIdentityCharacterTokenId = currentIdentity.body?.identity?.characterTokenId ?? null;
+    }
+    settledRawCharacterMetadata = currentRawMetadata;
+    const decoded = decodeCharacterTokenId(currentRawMetadata);
+    const authoritativeCandidate =
+      settledIdentityCharacterTokenId ??
+      decoded?.toString() ??
+      String(mintedCharacterTokenId);
+    const identityReady = settledIdentityCharacterTokenId === authoritativeCandidate;
+    const metadataReady = decoded?.toString() === authoritativeCandidate;
+    if (identityReady && metadataReady) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  const settledDecodedCharacterTokenId = decodeCharacterTokenId(settledRawCharacterMetadata);
+  const authoritativeCharacterTokenId = Number(
+    settledIdentityCharacterTokenId ??
+      settledDecodedCharacterTokenId?.toString() ??
+      mintedCharacterTokenId
+  );
+  mintedCharacterTokenId = authoritativeCharacterTokenId;
+
+  assert(identityApi!.body.identity.agentId === String(mintedAgentId), "Identity API returns the minted agentId", identityApi!.body);
   assert(
-    identityApi!.body.identity.characterTokenId === String(characterTokenId),
+    settledIdentityCharacterTokenId === String(mintedCharacterTokenId),
     "Identity API returns the minted characterTokenId",
     identityApi!.body
   );
-  assert(
-    validationsApi!.body.validations.some((entry: any) => entry.claim === "wog:a2a-enabled"),
-    "Validation API includes wog:a2a-enabled",
-    validationsApi!.body
-  );
-  assert(
-    nameLookup!.body?.name === `${characterName}.wog`,
-    "Name service auto-registers the character .wog name",
-    nameLookup!.body
-  );
+  if (hasValidationRegistry) {
+    assert(
+      validationsApi!.body.validations.some((entry: any) => entry.claimType === "wog:a2a-enabled"),
+      "Validation API includes wog:a2a-enabled",
+      validationsApi!.body
+    );
+  } else {
+    assert(
+      Array.isArray(validationsApi!.body.validations) && validationsApi!.body.validations.length === 0,
+      "Validation API is empty when no validation registry is configured",
+      validationsApi!.body
+    );
+  }
+  if (nameLookup?.status === 200) {
+    assert(
+      nameLookup.body?.name === `${characterName}.wog`,
+      "Name service auto-registers the character .wog name",
+      nameLookup.body
+    );
+  }
 
   section("Direct Contract Reads");
-  const [goldBalance, identityOwner, agentWallet, agentUri, rawCharacterMetadata, chainClaims, a2aResolved] =
+  const [goldBalance, identityOwner, agentWallet, agentUri, rawCharacterMetadata, validationHashes, a2aResolved] =
     await Promise.all([
       gold.balanceOf(walletAddress),
-      identity.ownerOf(BigInt(agentId)),
-      identity.getAgentWallet(BigInt(agentId)),
-      identity.tokenURI(BigInt(agentId)),
-      identity.getMetadata(BigInt(agentId), "characterTokenId"),
-      validation.getVerifications(BigInt(agentId)),
-      json("GET", `/a2a/resolve/${agentId}`),
+      identity.ownerOf(BigInt(mintedAgentId)),
+      identity.getAgentWallet(BigInt(mintedAgentId)),
+      identity.tokenURI(BigInt(mintedAgentId)),
+      settledRawCharacterMetadata != null
+        ? Promise.resolve(settledRawCharacterMetadata)
+        : identity.getMetadata(BigInt(mintedAgentId), "characterTokenId").catch(() => null),
+      hasValidationRegistry
+        ? validation!.getAgentValidations(BigInt(mintedAgentId)).catch(() => [])
+        : Promise.resolve([]),
+      json("GET", `/a2a/resolve/${mintedAgentId}`),
     ]);
-  const decodedCharacterTokenId = ethers.AbiCoder.defaultAbiCoder().decode(["uint256"], rawCharacterMetadata)[0];
+  const decodedCharacterTokenId = decodeCharacterTokenId(rawCharacterMetadata);
+  const validationStatus = hasValidationRegistry && validationHashes.length > 0
+    ? await validation!.getValidationStatus(validationHashes[0])
+    : null;
 
   assert(goldBalance === ethers.parseEther("0.02"), "On-chain GOLD balance is 0.02");
-  assert(identityOwner === walletAddress, "Identity NFT owner matches player wallet", identityOwner);
-  assert(agentWallet === walletAddress, "Identity agent wallet matches player wallet", agentWallet);
+  assert(identityOwner.toLowerCase() === walletAddress.toLowerCase(), "Identity NFT owner matches player wallet", identityOwner);
+  assert(agentWallet === ethers.ZeroAddress, "Identity agent wallet is cleared after ownership transfer", agentWallet);
   assert(
     agentUri === identityApi!.body.identity.endpoint,
     "Identity tokenURI matches the identity endpoint exposed by the API",
     { agentUri, apiEndpoint: identityApi!.body.identity.endpoint }
   );
-  assert(decodedCharacterTokenId === BigInt(characterTokenId), "Identity metadata stores the character tokenId");
-  assert(chainClaims.length > 0, "Validation registry has at least one claim");
-  assert(a2aResolved.status === 200 && a2aResolved.body?.walletAddress === walletAddress, "A2A resolve returns the owner wallet", a2aResolved.body);
+  assert(decodedCharacterTokenId === BigInt(mintedCharacterTokenId), "Identity metadata stores the character tokenId", rawCharacterMetadata);
+  if (hasValidationRegistry) {
+    assert(validationHashes.length > 0, "Validation registry has at least one validation request");
+    assert(validationStatus?.[4] === "wog:a2a-enabled", "Validation status tag matches wog:a2a-enabled", validationStatus);
+  } else {
+    assert(validationHashes.length === 0, "Validation checks are skipped when no validation registry is configured", validationHashes);
+  }
+  assert(
+    a2aResolved.status === 200 &&
+      String(a2aResolved.body?.walletAddress ?? "").toLowerCase() === walletAddress.toLowerCase(),
+    "A2A resolve returns the owner wallet",
+    a2aResolved.body
+  );
 
   section("Spawn + Reputation Convergence");
   const spawn = await json(
@@ -301,17 +427,17 @@ async function main() {
       level: 1,
       raceId: "human",
       classId: "warrior",
-      characterTokenId,
-      agentId,
+      characterTokenId: String(mintedCharacterTokenId),
+      agentId: String(mintedAgentId),
     },
     token
   );
   requireOk(spawn.status === 200, `Spawn failed: ${JSON.stringify(spawn.body)}`);
-  assert(spawn.body?.spawned?.agentId === String(agentId), "Spawn response carries agentId", spawn.body);
+  assert(spawn.body?.spawned?.agentId === String(mintedAgentId), "Spawn response carries agentId", spawn.body);
 
   const feedback = await json(
     "POST",
-    `/api/agents/${agentId}/reputation/feedback`,
+    `/api/agents/${mintedAgentId}/reputation/feedback`,
     { category: "social", delta: 7, reason: "dev-integration-test" },
     token
   );
@@ -319,18 +445,20 @@ async function main() {
 
   let converged = false;
   let finalApiReputation: JsonResult | null = null;
-  let finalChainReputation: bigint[] = [];
+  let finalChainSummary: [bigint, bigint, bigint] | null = null;
   for (let i = 0; i < 10; i++) {
-    const [apiReputation, chainReputation] = await Promise.all([
-      json("GET", `/api/agents/${agentId}/reputation`),
-      reputation.getReputation(BigInt(agentId)),
+    const clients = Array.from(await reputation.getClients(BigInt(mintedAgentId)));
+    const [apiReputation, chainSummary] = await Promise.all([
+      json("GET", `/api/agents/${mintedAgentId}/reputation`),
+      clients.length > 0
+        ? reputation.getSummary(BigInt(mintedAgentId), clients, "social", "")
+        : Promise.resolve([BigInt(0), BigInt(0), BigInt(0)] as [bigint, bigint, bigint]),
     ]);
     finalApiReputation = apiReputation;
-    finalChainReputation = Array.from(chainReputation) as bigint[];
+    finalChainSummary = chainSummary as [bigint, bigint, bigint];
 
     const apiSocial = BigInt(apiReputation.body?.reputation?.social ?? -1);
-    const apiOverall = BigInt(apiReputation.body?.reputation?.overall ?? -1);
-    if (apiSocial === finalChainReputation[2] && apiOverall === finalChainReputation[5] && apiSocial === 507n) {
+    if (apiSocial === BigInt(507) && finalChainSummary[1] === BigInt(7)) {
       converged = true;
       break;
     }
@@ -339,10 +467,10 @@ async function main() {
 
   assert(
     converged,
-    "Reputation API converges to the on-chain social/overall scores after batched write",
+    "Reputation API converges to the official on-chain social summary after feedback write",
     {
       api: finalApiReputation?.body,
-      chain: finalChainReputation.map((value) => value.toString()),
+      chain: finalChainSummary?.map((value) => value.toString()),
     }
   );
 

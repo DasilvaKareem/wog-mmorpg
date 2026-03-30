@@ -8,6 +8,7 @@ import {
   getAgentCustodialWallet,
   getAgentEntityRef,
   patchAgentConfig,
+  clearAgentRuntimeState,
 } from "./agentConfigStore.js";
 import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { getRedis } from "../redis.js";
@@ -66,6 +67,7 @@ class AgentManager {
     }
     // Persist disabled state
     await patchAgentConfig(key, { enabled: false });
+    await clearAgentRuntimeState(key);
     console.log(`[AgentManager] Stopped agent for ${key.slice(0, 8)}`);
   }
 

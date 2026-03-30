@@ -7,8 +7,8 @@
  */
 
 import { ethers } from "ethers";
-import { biteWallet } from "../blockchain/biteChain.js";
-import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import { biteSigner, biteWallet } from "../blockchain/biteChain.js";
+import { queueBiteTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "../blockchain/biteTxQueue.js";
 import { traceTx } from "../blockchain/txTracer.js";
 
 const LAND_REGISTRY_ADDRESS = process.env.LAND_REGISTRY_CONTRACT_ADDRESS;
@@ -29,14 +29,34 @@ const LAND_REGISTRY_ABI = [
 ];
 
 const landRegistryContract =
-  LAND_REGISTRY_ADDRESS && biteWallet
-    ? new ethers.Contract(LAND_REGISTRY_ADDRESS, LAND_REGISTRY_ABI, biteWallet)
+  LAND_REGISTRY_ADDRESS && (biteSigner ?? biteWallet)
+    ? new ethers.Contract(LAND_REGISTRY_ADDRESS, LAND_REGISTRY_ABI, biteSigner ?? biteWallet)
     : null;
 
 if (LAND_REGISTRY_ADDRESS) {
   console.log(`[plotChain] Land registry at ${LAND_REGISTRY_ADDRESS}`);
 } else {
   console.warn("[plotChain] LAND_REGISTRY_CONTRACT_ADDRESS not set — on-chain land registration disabled");
+}
+
+async function currentPlotOwner(plotId: string): Promise<string | null> {
+  if (!landRegistryContract) return null;
+  try {
+    const [, owner] = await landRegistryContract.getPlotByPlotId(plotId);
+    return owner === ethers.ZeroAddress ? null : String(owner);
+  } catch {
+    return null;
+  }
+}
+
+async function ownerHasPlot(ownerAddress: string): Promise<boolean> {
+  if (!landRegistryContract) return false;
+  try {
+    const tokenId: bigint = await landRegistryContract.ownerPlot(ownerAddress);
+    return tokenId !== 0n;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -51,11 +71,24 @@ export async function claimPlotOnChain(
 ): Promise<boolean> {
   if (!landRegistryContract) return false;
   try {
+    const existingOwner = await currentPlotOwner(plotId);
+    if (existingOwner?.toLowerCase() === ownerAddress.toLowerCase()) {
+      return true;
+    }
     return await traceTx("plot-claim", "claimPlotOnChain", { plotId, zoneId, owner: ownerAddress }, "bite", async () => {
-      await queueBiteTransaction(`plot-claim:${plotId}:${ownerAddress}`, async () => {
-        const tx = await landRegistryContract.claimPlot(plotId, zoneId, x, y, ownerAddress);
-        await tx.wait();
-      });
+      try {
+        await queueBiteTransaction(`plot-claim:${plotId}:${ownerAddress}`, async () => {
+          const tx = await waitForBiteSubmission(
+            landRegistryContract.claimPlot(plotId, zoneId, x, y, ownerAddress, { nonce: await reserveServerNonce() ?? undefined })
+          );
+          await waitForBiteReceipt(tx.wait());
+        });
+      } catch (err) {
+        const ownerAfterError = await currentPlotOwner(plotId);
+        if (ownerAfterError?.toLowerCase() !== ownerAddress.toLowerCase()) {
+          throw err;
+        }
+      }
       console.log(`[plotChain] Claimed "${plotId}" for ${ownerAddress}`);
       return true;
     });
@@ -71,11 +104,22 @@ export async function claimPlotOnChain(
 export async function releasePlotOnChain(ownerAddress: string): Promise<boolean> {
   if (!landRegistryContract) return false;
   try {
+    if (!(await ownerHasPlot(ownerAddress))) {
+      return true;
+    }
     return await traceTx("plot-release", "releasePlotOnChain", { owner: ownerAddress }, "bite", async () => {
-      await queueBiteTransaction(`plot-release:${ownerAddress}`, async () => {
-        const tx = await landRegistryContract.releasePlot(ownerAddress);
-        await tx.wait();
-      });
+      try {
+        await queueBiteTransaction(`plot-release:${ownerAddress}`, async () => {
+          const tx = await waitForBiteSubmission(
+            landRegistryContract.releasePlot(ownerAddress, { nonce: await reserveServerNonce() ?? undefined })
+          );
+          await waitForBiteReceipt(tx.wait());
+        });
+      } catch (err) {
+        if (await ownerHasPlot(ownerAddress)) {
+          throw err;
+        }
+      }
       console.log(`[plotChain] Released plot for ${ownerAddress}`);
       return true;
     });
@@ -94,11 +138,23 @@ export async function transferPlotOnChain(
 ): Promise<boolean> {
   if (!landRegistryContract) return false;
   try {
+    if (await ownerHasPlot(toAddress)) {
+      return true;
+    }
     return await traceTx("plot-transfer", "transferPlotOnChain", { from: fromAddress, to: toAddress }, "bite", async () => {
-      await queueBiteTransaction(`plot-transfer:${fromAddress}:${toAddress}`, async () => {
-        const tx = await landRegistryContract.transferPlot(fromAddress, toAddress);
-        await tx.wait();
-      });
+      try {
+        await queueBiteTransaction(`plot-transfer:${fromAddress}:${toAddress}`, async () => {
+          const tx = await waitForBiteSubmission(
+            landRegistryContract.transferPlot(fromAddress, toAddress, { nonce: await reserveServerNonce() ?? undefined })
+          );
+          await waitForBiteReceipt(tx.wait());
+        });
+      } catch (err) {
+        if (await ownerHasPlot(toAddress) && !(await ownerHasPlot(fromAddress))) {
+          return true;
+        }
+        throw err;
+      }
       console.log(`[plotChain] Transferred plot ${fromAddress} → ${toAddress}`);
       return true;
     });
@@ -128,8 +184,10 @@ export async function updateBuildingOnChain(
 
     return await traceTx("plot-building", "updateBuildingOnChain", { plotId, buildingType, stage }, "bite", async () => {
       await queueBiteTransaction(`plot-building:${plotId}:${buildingType}:${stage}`, async () => {
-        const tx = await landRegistryContract.updateBuilding(tokenId, buildingType, stage);
-        await tx.wait();
+        const tx = await waitForBiteSubmission(
+          landRegistryContract.updateBuilding(tokenId, buildingType, stage, { nonce: await reserveServerNonce() ?? undefined })
+        );
+        await waitForBiteReceipt(tx.wait());
       });
       console.log(`[plotChain] Updated building on "${plotId}": ${buildingType} stage ${stage}`);
       return true;

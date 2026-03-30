@@ -2,10 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { NPC_DEFS, type NpcDef } from "./npcSpawner.js";
 import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { mintGold, mintItem, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGold } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getEntitiesInRegion, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
+import { getRedis } from "../redis.js";
 
 // ── Data Structures ──────────────────────────────────────────────
 
@@ -51,6 +52,23 @@ const MAX_PRICE_MULTIPLIER = 2.0;
 // ── State ────────────────────────────────────────────────────────
 
 const merchantStates = new Map<string, MerchantState>();
+const merchantEntityAliases = new Map<string, string>();
+const MERCHANT_STATE_KEY_PREFIX = "merchant:state:";
+const MERCHANT_STATE_IDS_KEY = "merchant:states";
+
+interface PersistedMerchantState {
+  entityId: string;
+  npcName: string;
+  zoneId: string;
+  walletAddress: string;
+  shopItems: number[];
+  inventory: MerchantInventoryEntry[];
+  goldBalance: number;
+  lastInventorySyncAt: number;
+  lastPriceUpdateAt: number;
+  lastAnnouncementAt: number;
+  lastRestockAt: number;
+}
 
 // ── Helpers (consumed by shop.ts) ────────────────────────────────
 
@@ -58,48 +76,157 @@ export function getMerchantCount(): number {
   return merchantStates.size;
 }
 
+export function resolveMerchantEntityId(entityId: string): string {
+  return merchantEntityAliases.get(entityId) ?? entityId;
+}
+
 export function getMerchantState(entityId: string): MerchantState | undefined {
-  return merchantStates.get(entityId);
+  const resolvedId = resolveMerchantEntityId(entityId);
+  return merchantStates.get(resolvedId);
 }
 
 export function getMerchantPrice(entityId: string, tokenId: number): number | undefined {
-  const state = merchantStates.get(entityId);
+  const state = getMerchantState(entityId);
   if (!state) return undefined;
   const entry = state.inventory.get(tokenId);
   return entry?.currentPrice;
 }
 
 export function getMerchantStock(entityId: string, tokenId: number): number | undefined {
-  const state = merchantStates.get(entityId);
+  const state = getMerchantState(entityId);
   if (!state) return undefined;
   const entry = state.inventory.get(tokenId);
   return entry?.quantity;
 }
 
 export function getMerchantBuyPrice(entityId: string, tokenId: number): number | undefined {
-  const state = merchantStates.get(entityId);
+  const state = getMerchantState(entityId);
   if (!state) return undefined;
   const entry = state.inventory.get(tokenId);
   if (!entry) return undefined;
   return Math.floor(Math.min(entry.currentPrice, entry.basePrice) * BUY_MARKDOWN);
 }
 
-export function recordMerchantSale(entityId: string, tokenId: number, quantity: number): void {
-  const state = merchantStates.get(entityId);
+function serializeMerchantState(state: MerchantState): PersistedMerchantState {
+  return {
+    entityId: state.entityId,
+    npcName: state.npcName,
+    zoneId: state.zoneId,
+    walletAddress: state.walletAddress,
+    shopItems: [...state.shopItems],
+    inventory: Array.from(state.inventory.values()).map((entry) => ({ ...entry })),
+    goldBalance: state.goldBalance,
+    lastInventorySyncAt: state.lastInventorySyncAt,
+    lastPriceUpdateAt: state.lastPriceUpdateAt,
+    lastAnnouncementAt: state.lastAnnouncementAt,
+    lastRestockAt: state.lastRestockAt,
+  };
+}
+
+function merchantStableId(zoneId: string, npcName: string): string {
+  const safeName = npcName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${zoneId.toLowerCase()}:${safeName}`;
+}
+
+function merchantStateKey(stableId: string): string {
+  return `${MERCHANT_STATE_KEY_PREFIX}${stableId}`;
+}
+
+function hydrateMerchantState(state: PersistedMerchantState): MerchantState {
+  return {
+    ...state,
+    inventory: new Map(state.inventory.map((entry) => [entry.tokenId, entry])),
+  };
+}
+
+async function persistMerchantState(state: MerchantState): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+
+  const stableId = merchantStableId(state.zoneId, state.npcName);
+  const key = merchantStateKey(stableId);
+  const payload = JSON.stringify(serializeMerchantState(state));
+  const tx = redis.multi();
+  tx.sadd(MERCHANT_STATE_IDS_KEY, stableId);
+  tx.set(key, payload);
+  await tx.exec();
+}
+
+function persistMerchantStateEventually(state: MerchantState, context: string): void {
+  void persistMerchantState(state).catch((err) => {
+    console.warn(`[merchant] Failed to persist ${state.npcName} after ${context}:`, err);
+  });
+}
+
+export async function restoreMerchantStatesFromRedis(): Promise<number> {
+  const redis = getRedis();
+  if (!redis) return 0;
+
+  const ids: string[] = await redis.smembers(MERCHANT_STATE_IDS_KEY);
+  if (!Array.isArray(ids) || ids.length === 0) return 0;
+
+  let restored = 0;
+  const seenStableIds = new Set<string>();
+  for (const id of ids) {
+    const raw = await redis.get(merchantStateKey(id));
+    if (!raw) continue;
+
+    try {
+      const persistedState = hydrateMerchantState(JSON.parse(raw) as PersistedMerchantState);
+      const stableId = merchantStableId(persistedState.zoneId, persistedState.npcName);
+      if (seenStableIds.has(stableId)) continue;
+      seenStableIds.add(stableId);
+
+      const entity = getEntitiesInRegion(persistedState.zoneId).find(
+        (candidate) =>
+          candidate.type === "merchant"
+          && (candidate.id === persistedState.entityId || candidate.name === persistedState.npcName)
+      );
+      if (!entity || entity.type !== "merchant") continue;
+
+      const previousEntityId = persistedState.entityId;
+      const state: MerchantState = {
+        ...persistedState,
+        entityId: entity.id,
+      };
+      entity.walletAddress = state.walletAddress;
+      merchantStates.set(entity.id, state);
+      merchantEntityAliases.set(previousEntityId, entity.id);
+      merchantEntityAliases.set(entity.id, entity.id);
+      if (previousEntityId !== entity.id) {
+        await persistMerchantState(state);
+      }
+      restored++;
+    } catch (err) {
+      console.warn(`[merchant] Failed to restore state for ${id}:`, err);
+    }
+  }
+
+  if (restored > 0) {
+    console.log(`[merchant] Restored ${restored} merchant state(s) from Redis`);
+  }
+
+  return restored;
+}
+
+export async function recordMerchantSale(entityId: string, tokenId: number, quantity: number): Promise<void> {
+  const state = getMerchantState(entityId);
   if (!state) return;
   const entry = state.inventory.get(tokenId);
   if (!entry) return;
   entry.quantity = Math.max(0, entry.quantity - quantity);
   entry.totalSold += quantity;
+  await persistMerchantState(state);
 }
 
-export function recordMerchantPurchase(entityId: string, tokenId: number, quantity: number): void {
-  const state = merchantStates.get(entityId);
+export async function recordMerchantPurchase(entityId: string, tokenId: number, quantity: number): Promise<void> {
+  const state = getMerchantState(entityId);
   if (!state) return;
   const entry = state.inventory.get(tokenId);
   if (!entry) return;
   entry.quantity += quantity;
   entry.totalBought += quantity;
+  await persistMerchantState(state);
 }
 
 // ── Dynamic Pricing ──────────────────────────────────────────────
@@ -139,6 +266,7 @@ function findEntityByNpcDef(def: NpcDef): Entity | undefined {
 export async function initMerchantWallets(): Promise<void> {
   const merchantDefs = NPC_DEFS.filter((d) => d.type === "merchant" && d.shopItems && d.shopItems.length > 0);
   const failedDefs: typeof merchantDefs = [];
+  const redis = getRedis();
 
   for (const def of merchantDefs) {
     const entity = findEntityByNpcDef(def);
@@ -148,6 +276,22 @@ export async function initMerchantWallets(): Promise<void> {
     }
 
     try {
+      const stableId = merchantStableId(def.zoneId, def.name);
+      const restoredState = getMerchantState(entity.id) ?? merchantStates.get(entity.id);
+      if (restoredState) {
+        merchantEntityAliases.set(entity.id, restoredState.entityId);
+        continue;
+      }
+
+      const existingRaw = redis ? await redis.get(merchantStateKey(stableId)) : null;
+      if (existingRaw) {
+        continue;
+      }
+
+      if (merchantStates.has(entity.id)) {
+        continue;
+      }
+
       // Create custodial wallet
       const walletInfo = await createCustodialWallet();
       entity.walletAddress = walletInfo.address;
@@ -190,6 +334,8 @@ export async function initMerchantWallets(): Promise<void> {
       };
 
       merchantStates.set(entity.id, state);
+      merchantEntityAliases.set(entity.id, entity.id);
+      await persistMerchantState(state);
       console.log(
         `[merchant] Initialized ${def.name} in ${def.zoneId} — wallet ${walletInfo.address}, ${def.shopItems!.length} items stocked`
       );
@@ -240,6 +386,7 @@ async function retryFailedMerchants(defs: NpcDef[], attempt = 1): Promise<void> 
         inventory, goldBalance: INITIAL_GOLD_SEED, lastInventorySyncAt: Date.now(),
         lastPriceUpdateAt: Date.now(), lastAnnouncementAt: 0, lastRestockAt: Date.now(),
       });
+      persistMerchantStateEventually(merchantStates.get(entity.id)!, "retry-init");
       console.log(`[merchant] Retry OK: ${def.name} initialized on attempt ${attempt}`);
     } catch {
       stillFailed.push(def);
@@ -270,6 +417,7 @@ async function syncInventory(state: MerchantState): Promise<void> {
     }
 
     state.lastInventorySyncAt = Date.now();
+    await persistMerchantState(state);
   } catch (err) {
     console.error(`[merchant] Inventory sync failed for ${state.npcName}:`, err);
   }
@@ -280,6 +428,7 @@ function updatePrices(state: MerchantState): void {
     entry.currentPrice = calculateDynamicPrice(entry.basePrice, entry.quantity, entry.targetStock);
   }
   state.lastPriceUpdateAt = Date.now();
+  persistMerchantStateEventually(state, "price-update");
 }
 
 async function restockItems(state: MerchantState): Promise<void> {
@@ -305,6 +454,7 @@ async function restockItems(state: MerchantState): Promise<void> {
     }
   }
   state.lastRestockAt = now;
+  await persistMerchantState(state);
 }
 
 function announceDeals(state: MerchantState): void {
@@ -347,6 +497,7 @@ function announceDeals(state: MerchantState): void {
   });
 
   state.lastAnnouncementAt = Date.now();
+  persistMerchantStateEventually(state, "announcement");
 }
 
 // ── Tick Loop ────────────────────────────────────────────────────

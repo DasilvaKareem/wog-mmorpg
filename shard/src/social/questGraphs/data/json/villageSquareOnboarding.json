@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "id": "village-square-onboarding",
+    "title": "Village Square Onboarding",
+    "summary": "A graph-authored onboarding arc that demonstrates gating, multiple choice, and freeform routing.",
+    "zoneIds": ["village-square"],
+    "tags": ["tutorial", "onboarding", "village-square"],
+    "startingSceneId": "kaela_briefing"
+  },
+  "scenes": [
+    {
+      "template": "kaela_briefing",
+      "config": {
+        "sceneId": "kaela_briefing",
+        "npcName": "Scout Kaela",
+        "title": "Scout Kaela Briefing",
+        "briefingFlag": "tutorial:scout_kaela_briefed",
+        "introLines": [
+          "New arrivals survive longer when they understand the rhythm of Geneva. Listen once, remember it well.",
+          "Your champion acts in the world. You direct from the quest log, the map, and the command bridge."
+        ],
+        "readyPrompt": "Are you ready to move from briefing to action?",
+        "readyLabel": "I understand. Send me to Marcus.",
+        "repeatLabel": "Repeat the essentials.",
+        "completionText": "Good. Guard Captain Marcus handles the first real work in the square. He will judge whether you're ready.",
+        "alreadyBriefedText": "You've already had my briefing. Marcus is still your first stop."
+      }
+    },
+    {
+      "template": "marcus_onboarding",
+      "config": {
+        "sceneId": "marcus_arrival",
+        "npcName": "Guard Captain Marcus",
+        "title": "Guard Captain Marcus Arrival",
+        "requiredFlag": "tutorial:scout_kaela_briefed",
+        "welcomeQuestId": "welcome_adventurer",
+        "blockedText": "Kaela hasn't cleared you yet. Get the briefing, then come back when you're ready to serve.",
+        "introText": "If Kaela sent you, then speak plainly. The meadow is restless and I need hands that follow orders.",
+        "optionsPrompt": "Choose your next move.",
+        "acceptLabel": "Give me the first assignment.",
+        "contextLabel": "What should I know before I go?",
+        "freeformLabel": "Let me ask in my own words.",
+        "declineLabel": "Not now.",
+        "hintText": "Keep it simple. Start with the square, learn the meadow, and do not wander off before you can survive a mistake.",
+        "freeformText": "Then ask. I have patience for clarity, not rambling.",
+        "freeformPrompt": "Tell Marcus what you want.",
+        "freeformPlaceholder": "Example: I'm ready for work. What's first?",
+        "freeformFallback": "Marcus narrows his eyes. \"That wasn't an answer. Speak clearly.\"",
+        "acceptedText": "Then listen: start with the square and prove you can follow a chain of orders. Report back when the introductions are done.",
+        "declineText": "Then stay out of my way until you're ready to act with purpose.",
+        "zoneEventMessage": "Guard Captain Marcus briefed a new arrival and assigned their first welcome task."
+      }
+    }
+  ]
+}

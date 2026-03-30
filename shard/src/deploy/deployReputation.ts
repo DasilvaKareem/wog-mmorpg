@@ -1,5 +1,5 @@
 /**
- * One-time deploy script for the WoGReputationRegistry contract on the BITE v2 Sandbox chain.
+ * One-time deploy script for the WoGMockReputationRegistry contract.
  *
  * Usage:
  *   npx tsx shard/src/deployReputation.ts
@@ -30,17 +30,17 @@ async function main() {
   // 1. Read Solidity source
   const solPath = resolve(
     import.meta.dirname,
-    "../../contracts/WoGReputationRegistry.sol"
+    "../../../hardhat/contracts/WoGMockReputationRegistry.sol"
   );
   const source = readFileSync(solPath, "utf-8");
 
-  console.log("Compiling WoGReputationRegistry.sol...");
+  console.log("Compiling WoGMockReputationRegistry.sol...");
 
   // 2. Compile with solc + OZ import resolver
   const input = {
     language: "Solidity",
     sources: {
-      "WoGReputationRegistry.sol": { content: source },
+      "WoGMockReputationRegistry.sol": { content: source },
     },
     settings: {
       outputSelection: {
@@ -77,7 +77,7 @@ async function main() {
   }
 
   const compiled =
-    output.contracts["WoGReputationRegistry.sol"]["WoGReputationRegistry"];
+    output.contracts["WoGMockReputationRegistry.sol"]["WoGMockReputationRegistry"];
   const abi = compiled.abi;
   const bytecode = "0x" + compiled.evm.bytecode.object;
 
@@ -100,7 +100,7 @@ async function main() {
   await contract.waitForDeployment();
 
   const address = await contract.getAddress();
-  console.log(`\nWoGReputationRegistry deployed at: ${address}`);
+  console.log(`\nWoGMockReputationRegistry deployed at: ${address}`);
   console.log(`\nAdd to your .env:`);
   console.log(`  REPUTATION_REGISTRY_ADDRESS=${address}`);
 

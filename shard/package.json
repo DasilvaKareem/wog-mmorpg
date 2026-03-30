@@ -7,8 +7,13 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "pnpm run build && node dist/server.js",
+    "test": "tsx tests/runLocalFullFlowAuto.ts",
     "test:erc8004": "tsx tests/erc8004DevIntegration.test.ts",
-    "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts"
+    "test:erc8004:dev": "tsx tests/erc8004DevIntegration.test.ts",
+    "test:character-bootstrap": "tsx tests/characterBootstrapOutbox.test.ts",
+    "test:chain-ops": "tsx tests/chainOperationStoreRecovery.test.ts",
+    "test:chain-recovery": "tsx tests/chainReconciliationRecovery.test.ts",
+    "test:blockchain-writes": "tsx tests/blockchainWriteProcessorRecovery.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.77.0",
@@ -22,7 +27,6 @@
     "fastify": "^5.2.1",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
-    "mppx": "^0.4.7",
     "thirdweb": "^5.118.1",
     "viem": "^2.45.3",
     "web-push": "^3.6.7"

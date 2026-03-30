@@ -8,7 +8,7 @@ import { WalletProvider, useWalletContext } from "@/context/WalletContext";
 import { PushNotificationBanner } from "@/components/PushNotificationBanner";
 import { gameBus } from "@/lib/eventBus";
 import { OPEN_ONBOARDING_EVENT, type OnboardingStartMode } from "@/lib/onboarding";
-import { consumeTutorialMasterIntro } from "@/lib/tutorialMaster";
+import { playSoundEffect } from "@/lib/soundEffects";
 
 
 import { WalletManager } from "@/lib/walletManager";
@@ -36,9 +36,6 @@ const QuestLogDialog = React.lazy(() =>
 const GameCanvas = React.lazy(() =>
   import("@/components/GameCanvas").then((mod) => ({ default: mod.GameCanvas }))
 );
-const ShopDialog = React.lazy(() =>
-  import("@/components/ShopDialog").then((mod) => ({ default: mod.ShopDialog }))
-);
 const GuildDialog = React.lazy(() =>
   import("@/components/GuildDialog").then((mod) => ({ default: mod.GuildDialog }))
 );
@@ -59,9 +56,6 @@ const HotkeyBar = React.lazy(() =>
 );
 const OnboardingFlow = React.lazy(() =>
   import("@/components/OnboardingFlow").then((mod) => ({ default: mod.OnboardingFlow }))
-);
-const TutorialMasterModal = React.lazy(() =>
-  import("@/components/TutorialMasterModal").then((mod) => ({ default: mod.TutorialMasterModal }))
 );
 const SettingsDialog = React.lazy(() =>
   import("@/components/SettingsDialog").then((mod) => ({ default: mod.SettingsDialog }))
@@ -129,6 +123,47 @@ function RouteFallback(): React.ReactElement {
   );
 }
 
+function WorldConnectPrompt({
+  title,
+  shortcut,
+  description,
+}: {
+  title: string;
+  shortcut?: string;
+  description: string;
+}): React.ReactElement {
+  return (
+    <div className="pointer-events-auto flex h-full w-full flex-col overflow-hidden border-2 border-[#24314d] bg-[#0a0f1a]/92 shadow-[4px_4px_0_0_#000] backdrop-blur-sm">
+      <div className="flex items-center gap-2 border-b border-[#24314d] px-3 py-2">
+        <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#ffcc00]">
+          {title}
+        </span>
+        {shortcut ? (
+          <span className="ml-auto text-[9px] font-bold text-[#556b8a]">{shortcut}</span>
+        ) : null}
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+        <p className="max-w-[20rem] text-[11px] leading-relaxed text-[#8b9abc]">
+          {description}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent(OPEN_ONBOARDING_EVENT, {
+                detail: { mode: "sign-in" satisfies OnboardingStartMode },
+              }),
+            );
+          }}
+          className="border-2 border-[#ffcc00] bg-[#2a2210] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218]"
+        >
+          Connect Wallet
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Zone-aware PWA theming ────────────────────────────────────────────── */
 const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "village-square":   { color: "#1a1408", label: "Village Square" },
@@ -143,6 +178,14 @@ const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "azurshard-chasm":  { color: "#060a14", label: "Azurshard Chasm" },
 };
 const DEFAULT_THEME = { color: "#060d12", label: "World of Geneva" };
+const DOCK_STORAGE_PREFIX = "wog:world-dock:v4";
+const MIN_DOCK_WIDTH = 240;
+const MAX_DOCK_WIDTH = 560;
+const MIN_DOCK_PANEL_HEIGHT = 220;
+const DOCK_PANEL_GAP = 12;
+const LEFT_DOCK_TOP_OFFSET = 56;
+const RIGHT_DOCK_TOP_OFFSET = 16;
+const DOCK_BOTTOM_OFFSET = 64;
 
 function useZoneTheme(zoneId: string | null) {
   React.useEffect(() => {
@@ -160,6 +203,47 @@ function useZoneTheme(zoneId: string | null) {
   }, [zoneId]);
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function usePersistentNumber(key: string, initialValue: number): [number, React.Dispatch<React.SetStateAction<number>>] {
+  const [value, setValue] = React.useState(() => {
+    if (typeof window === "undefined") return initialValue;
+    const raw = Number(window.localStorage.getItem(key));
+    return Number.isFinite(raw) ? raw : initialValue;
+  });
+
+  React.useEffect(() => {
+    try {
+      window.localStorage.setItem(key, String(value));
+    } catch {
+      // noop
+    }
+  }, [key, value]);
+
+  return [value, setValue];
+}
+
+function useViewportSize(): { width: number; height: number } {
+  const [size, setSize] = React.useState(() => ({
+    width: typeof window === "undefined" ? 1440 : window.innerWidth,
+    height: typeof window === "undefined" ? 900 : window.innerHeight,
+  }));
+
+  React.useEffect(() => {
+    const update = () => {
+      setSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return size;
+}
+
 function resolveOnboardingMode(event: Event): OnboardingStartMode {
   const customEvent = event as CustomEvent<{ mode?: OnboardingStartMode }>;
   return customEvent.detail?.mode ?? "create-character";
@@ -173,7 +257,6 @@ function GameWorld(): React.ReactElement {
   const [questLogOpen, setQuestLogOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [inboxOpen, setInboxOpen] = React.useState(false);
-  const [tutorialMasterOpen, setTutorialMasterOpen] = React.useState(false);
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
@@ -184,10 +267,211 @@ function GameWorld(): React.ReactElement {
   const [ranksVisible, setRanksVisible] = React.useState<boolean | null>(null);
   const [walletVisible, setWalletVisible] = React.useState<boolean | null>(null);
   const [professionsVisible, setProfessionsVisible] = React.useState(false);
+  const viewport = useViewportSize();
 
   const showChat = chatVisible ?? !isCompactWorldUI;
   const showRanks = ranksVisible ?? !isCompactWorldUI;
   const showWallet = walletVisible ?? !isCompactWorldUI;
+  const showLeftDock = professionsVisible || showRanks;
+  const showRightDock = showWallet || showChat;
+
+  const minWorldStageWidth = Math.max(360, Math.floor(viewport.width * 0.32));
+  const singleDockMaxWidth = Math.max(MIN_DOCK_WIDTH, Math.min(MAX_DOCK_WIDTH, Math.floor(viewport.width * 0.36)));
+  const dualDockWidthBudget = Math.max(
+    MIN_DOCK_WIDTH * 2,
+    viewport.width - minWorldStageWidth - 48,
+  );
+  const sharedDockMaxWidth = Math.max(
+    MIN_DOCK_WIDTH,
+    Math.min(MAX_DOCK_WIDTH, Math.floor(dualDockWidthBudget / 2)),
+  );
+  const leftDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
+  const rightDockMaxWidth = showLeftDock && showRightDock ? sharedDockMaxWidth : singleDockMaxWidth;
+  const leftAvailableHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_PANEL_GAP,
+    viewport.height - LEFT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
+  );
+  const rightAvailableHeight = Math.max(
+    MIN_DOCK_PANEL_HEIGHT * 2 + DOCK_PANEL_GAP,
+    viewport.height - RIGHT_DOCK_TOP_OFFSET - DOCK_BOTTOM_OFFSET,
+  );
+  const defaultLeftTopWidth = clamp(
+    Math.round(viewport.width * (showRightDock ? 0.19 : 0.21)),
+    MIN_DOCK_WIDTH,
+    Math.min(320, leftDockMaxWidth),
+  );
+  const defaultLeftBottomWidth = clamp(
+    Math.round(viewport.width * (showRightDock ? 0.22 : 0.24)),
+    MIN_DOCK_WIDTH,
+    Math.min(360, leftDockMaxWidth),
+  );
+  const defaultRightTopWidth = clamp(
+    Math.round(viewport.width * (showLeftDock ? 0.27 : 0.31)),
+    Math.max(MIN_DOCK_WIDTH + 40, 320),
+    Math.min(440, rightDockMaxWidth),
+  );
+  const defaultRightBottomWidth = clamp(
+    Math.round(viewport.width * (showLeftDock ? 0.24 : 0.27)),
+    Math.max(MIN_DOCK_WIDTH + 20, 300),
+    Math.min(400, rightDockMaxWidth),
+  );
+  const defaultLeftTopHeight = clamp(
+    Math.round(leftAvailableHeight * 0.36),
+    240,
+    leftAvailableHeight,
+  );
+  const defaultLeftBottomHeight = clamp(
+    Math.round(leftAvailableHeight * 0.46),
+    260,
+    leftAvailableHeight,
+  );
+  const defaultRightTopHeight = clamp(
+    Math.round(rightAvailableHeight * 0.52),
+    320,
+    rightAvailableHeight,
+  );
+  const defaultRightBottomHeight = clamp(
+    Math.round(rightAvailableHeight * 0.38),
+    260,
+    rightAvailableHeight,
+  );
+
+  const [leftTopWidthRaw, setLeftTopWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-width`, defaultLeftTopWidth);
+  const [leftBottomWidthRaw, setLeftBottomWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-bottom-width`, defaultLeftBottomWidth);
+  const [rightTopWidthRaw, setRightTopWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-width`, defaultRightTopWidth);
+  const [rightBottomWidthRaw, setRightBottomWidthRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-bottom-width`, defaultRightBottomWidth);
+  const [leftTopHeightRaw, setLeftTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-top-height`, defaultLeftTopHeight);
+  const [leftBottomHeightRaw, setLeftBottomHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:left-bottom-height`, defaultLeftBottomHeight);
+  const [rightTopHeightRaw, setRightTopHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-top-height`, defaultRightTopHeight);
+  const [rightBottomHeightRaw, setRightBottomHeightRaw] = usePersistentNumber(`${DOCK_STORAGE_PREFIX}:right-bottom-height`, defaultRightBottomHeight);
+
+  const leftTopWidth = clamp(leftTopWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
+  const leftBottomWidth = clamp(leftBottomWidthRaw, MIN_DOCK_WIDTH, leftDockMaxWidth);
+  const rightTopWidth = clamp(rightTopWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
+  const rightBottomWidth = clamp(rightBottomWidthRaw, MIN_DOCK_WIDTH, rightDockMaxWidth);
+
+  const leftTopHeight = professionsVisible
+    ? clamp(
+        leftTopHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        professionsVisible && showRanks
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_PANEL_GAP)
+          : leftAvailableHeight,
+      )
+    : 0;
+  const leftBottomHeight = showRanks
+    ? clamp(
+        leftBottomHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        professionsVisible
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftTopHeight - DOCK_PANEL_GAP)
+          : leftAvailableHeight,
+      )
+    : 0;
+  const rightTopHeight = showWallet
+    ? clamp(
+        rightTopHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        showWallet && showChat
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - MIN_DOCK_PANEL_HEIGHT - DOCK_PANEL_GAP)
+          : rightAvailableHeight,
+      )
+    : 0;
+  const rightBottomHeight = showChat
+    ? clamp(
+        rightBottomHeightRaw,
+        MIN_DOCK_PANEL_HEIGHT,
+        showWallet
+          ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightTopHeight - DOCK_PANEL_GAP)
+          : rightAvailableHeight,
+      )
+    : 0;
+
+  const startLeftWidthResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startWidth: number,
+    setWidth: React.Dispatch<React.SetStateAction<number>>,
+  ) => {
+    event.preventDefault();
+    const startX = event.clientX;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setWidth(clamp(startWidth + (moveEvent.clientX - startX), MIN_DOCK_WIDTH, leftDockMaxWidth));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [leftDockMaxWidth]);
+
+  const startRightWidthResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startWidth: number,
+    setWidth: React.Dispatch<React.SetStateAction<number>>,
+  ) => {
+    event.preventDefault();
+    const startX = event.clientX;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setWidth(clamp(startWidth - (moveEvent.clientX - startX), MIN_DOCK_WIDTH, rightDockMaxWidth));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [rightDockMaxWidth]);
+
+  const startTopHeightResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startHeight: number,
+    setHeight: React.Dispatch<React.SetStateAction<number>>,
+    maxHeight: number,
+  ) => {
+    event.preventDefault();
+    const startY = event.clientY;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setHeight(clamp(startHeight + (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, maxHeight));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
+
+  const startBottomHeightResize = React.useCallback((
+    event: React.PointerEvent<HTMLDivElement>,
+    startHeight: number,
+    setHeight: React.Dispatch<React.SetStateAction<number>>,
+    maxHeight: number,
+  ) => {
+    event.preventDefault();
+    const startY = event.clientY;
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setHeight(clamp(startHeight - (moveEvent.clientY - startY), MIN_DOCK_PANEL_HEIGHT, maxHeight));
+    };
+
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
 
   const focusOwnedCharacter = React.useCallback((zoneId?: string) => {
     if (!address) return;
@@ -230,7 +514,7 @@ function GameWorld(): React.ReactElement {
       if (key === "c") {
         setCharacterOpen((current) => !current);
       } else if (key === "m") {
-        setMapOpen((current) => !current);
+        setMapOpen((current) => { if (!current) playSoundEffect("ui_map_open"); return !current; });
       } else if (key === "q") {
         setQuestLogOpen((current) => !current);
       } else if (key === "i" && address && currentZone) {
@@ -264,7 +548,7 @@ function GameWorld(): React.ReactElement {
     const unsub2 = gameBus.on("inboxOpen", () => setInboxOpen(true));
     const unsub3 = gameBus.on("settingsOpen", () => setSettingsOpen(true));
     const unsub4 = gameBus.on("characterOpen", () => setCharacterOpen(true));
-    const unsub5 = gameBus.on("mapOpen", () => setMapOpen(true));
+    const unsub5 = gameBus.on("mapOpen", () => { playSoundEffect("ui_map_open"); setMapOpen(true); });
     const unsub6 = gameBus.on("questLogOpen", () => setQuestLogOpen(true));
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
   }, []);
@@ -330,10 +614,9 @@ function GameWorld(): React.ReactElement {
 
   // Lock camera to connected player's agent entity
   React.useEffect(() => {
-    if (address) {
-      focusOwnedCharacter();
-    }
-  }, [address, focusOwnedCharacter]);
+    if (!address) return;
+    focusOwnedCharacter(characterProgress?.zoneId);
+  }, [address, characterProgress?.zoneId, focusOwnedCharacter]);
 
   // Track open_game once per mount
   React.useEffect(() => {
@@ -350,26 +633,125 @@ function GameWorld(): React.ReactElement {
         <GameCanvas />
       </React.Suspense>
       <React.Suspense fallback={null}>
-        {showWallet && <WalletPanel />}
-        {professionsVisible && (
-          <ProfessionsPanel className="absolute top-14 left-2 md:left-4 z-30" />
+        {showLeftDock && (
+          <div className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 md:left-4">
+            {professionsVisible && (
+              <div
+                className="absolute left-0 top-0 min-h-0"
+                style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
+              >
+                <ProfessionsPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
+                <div
+                  onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
+                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize professions panel"
+                />
+                <div
+                  onPointerDown={(event) => startTopHeightResize(
+                    event,
+                    leftTopHeight,
+                    setLeftTopHeightRaw,
+                    showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize professions panel"
+                />
+              </div>
+            )}
+            {showRanks && (
+              <div
+                className="absolute bottom-0 left-0 min-h-0"
+                style={{ width: `${leftBottomWidth}px`, height: `${leftBottomHeight}px` }}
+              >
+                <PlayerPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
+                <div
+                  onPointerDown={(event) => startLeftWidthResize(event, leftBottomWidth, setLeftBottomWidthRaw)}
+                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize lobby panel"
+                />
+                <div
+                  onPointerDown={(event) => startBottomHeightResize(
+                    event,
+                    leftBottomHeight,
+                    setLeftBottomHeightRaw,
+                    professionsVisible ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftTopHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -top-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize lobby panel"
+                />
+              </div>
+            )}
+          </div>
         )}
-        {showRanks && (
-          <PlayerPanel className="absolute bottom-16 left-2 md:left-4 z-30 w-56 sm:w-64 md:w-72 lg:w-80 max-w-[45vw] max-h-[55vh] overflow-auto" />
-        )}
-        {showChat && (
-          address ? (
-            <AgentChatPanel
-              walletAddress={address}
-              currentZone={currentZone}
-              className="absolute bottom-16 right-2 md:right-4 z-30"
-            />
-          ) : (
-            <ChatLog
-              zoneId={currentZone}
-              className="absolute bottom-16 right-2 md:right-4 z-30 w-80 lg:w-96 max-w-[45vw] max-h-[45vh] overflow-auto"
-            />
-          )
+        {showRightDock && (
+          <div className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 md:right-4">
+            {showWallet && (
+              <div
+                className="absolute right-0 top-0 min-h-0"
+                style={{ width: `${rightTopWidth}px`, height: `${rightTopHeight}px` }}
+              >
+                {address ? (
+                  <>
+                    <WalletPanel className="pointer-events-auto h-full w-full max-w-none max-h-full" />
+                    <div
+                      onPointerDown={(event) => startRightWidthResize(event, rightTopWidth, setRightTopWidthRaw)}
+                      className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                      title="Resize inventory panel"
+                    />
+                    <div
+                      onPointerDown={(event) => startTopHeightResize(
+                        event,
+                        rightTopHeight,
+                        setRightTopHeightRaw,
+                        showChat ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightBottomHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
+                      )}
+                      className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                      title="Resize inventory panel"
+                    />
+                  </>
+                ) : (
+                  <WorldConnectPrompt
+                    title="Summon Champion"
+                    description="Connect your wallet to open your champion panel, inventory, and account controls."
+                  />
+                )}
+              </div>
+            )}
+            {showChat && (address || !showWallet) && (
+              <div
+                className="absolute bottom-0 right-0 min-h-0"
+                style={{ width: `${rightBottomWidth}px`, height: `${rightBottomHeight}px` }}
+              >
+                {address ? (
+                  <AgentChatPanel
+                    walletAddress={address}
+                    currentZone={currentZone}
+                    className="pointer-events-auto h-full max-h-full w-full max-w-none"
+                  />
+                ) : (
+                  <ChatLog
+                    zoneId={currentZone}
+                    className="pointer-events-auto h-full max-h-full w-full max-w-none overflow-auto"
+                  />
+                )}
+                <div
+                  onPointerDown={(event) => startRightWidthResize(event, rightBottomWidth, setRightBottomWidthRaw)}
+                  className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize console panel"
+                />
+                <div
+                  onPointerDown={(event) => startBottomHeightResize(
+                    event,
+                    rightBottomHeight,
+                    setRightBottomHeightRaw,
+                    showWallet ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightTopHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
+                  )}
+                  className="pointer-events-auto absolute inset-x-4 -top-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                  title="Resize console panel"
+                />
+              </div>
+            )}
+          </div>
         )}
         {deferredDialogsReady && <DeferredWorldDialogs />}
         {questLogOpen && (
@@ -391,22 +773,8 @@ function GameWorld(): React.ReactElement {
             initialMode={onboardingMode}
             onClose={() => {
               setOnboardingOpen(false);
-              if (consumeTutorialMasterIntro()) {
-                setTutorialMasterOpen(true);
-              }
             }}
           />
-        )}
-        {tutorialMasterOpen && (
-          <React.Suspense fallback={null}>
-            <TutorialMasterModal
-              open={tutorialMasterOpen}
-              onClose={() => setTutorialMasterOpen(false)}
-              onShowChat={() => setChatVisible(true)}
-              onShowRanks={() => setRanksVisible(true)}
-              onShowWallet={() => setWalletVisible(true)}
-            />
-          </React.Suspense>
         )}
         {settingsOpen && <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />}
         {inboxOpen && <InboxDialog open={inboxOpen} onClose={() => setInboxOpen(false)} />}

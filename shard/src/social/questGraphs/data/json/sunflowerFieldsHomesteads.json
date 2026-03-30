@@ -1,0 +1,644 @@
+{
+  "meta": {
+    "id": "sunflower-fields-homesteads",
+    "title": "Sunflower Fields Homesteads",
+    "summary": "Authored homestead and claim scenes for Farmhand Amos and Plot Registrar Helga in Sunflower Fields.",
+    "zoneIds": ["sunflower-fields"],
+    "tags": ["sunflower-fields", "authored", "homestead", "property"],
+    "startingSceneId": "amos_mining"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_mining",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Stone Foundations",
+        "idleText": "Every homestead starts with work, not daydreaming. If I have nothing for you, then you've either done your share or you need to decide what kind of landowner you mean to become.",
+        "stages": [
+          {
+            "stageId": "mining_foundation",
+            "questId": "farm_mining_foundation",
+            "available": {
+              "promptText": "If you know Mining, start like every good homestead does: with stone underfoot and enough sense to think about a foundation before a roof.",
+              "acceptLabel": "I'll quarry the stone.",
+              "acceptedText": "Five Stone Blocks. Bring them back and we'll talk about making this land yours instead of borrowed.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with stone?",
+              "detailsText": "Because a field can forgive optimism. A house cannot. Foundations are where fantasies either harden into plans or fall apart early.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Building work deserves plain speech.",
+              "freeformPrompt": "Ask Amos what matters first about laying a homestead foundation.",
+              "freeformPlaceholder": "Example: What makes the foundation work worth doing right?",
+              "freeformFallback": "Amos shrugs. \"Ask clearly or go get the stone.\""
+            },
+            "active": {
+              "promptText": "The foundation work isn't done. Bring me the Stone Blocks and then we'll talk property instead of theory.",
+              "primaryLabel": "The stone is ready.",
+              "resultText": "Good. You've got the makings of a foundation. Next stop is Helga at the registrar if you mean to stake the claim properly.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Stone Blocks from the ore nodes for a real foundation start.",
+              "declineLabel": "Later.",
+              "declineText": "Houses built later usually become somebody else's first."
+            },
+            "completedText": "You already proved you can think in foundations. If you haven't seen Helga yet, that's the missing piece."
+          },
+          {
+            "stageId": "mining_claim",
+            "questId": "farm_mining_claim",
+            "active": {
+              "promptText": "You've got stone and lumber. Good. That means you're past talking and ready for the registrar. Helga can formalize the claim from here.",
+              "primaryLabel": "I'll go see Helga.",
+              "resultText": "Do that. Bring builder's intent, not tourist energy.",
+              "secondaryLabel": "Why send me to Helga now?",
+              "secondaryText": "Because raw materials don't become property until someone marks the land, writes the claim, and makes the promise official.",
+              "declineLabel": "Later.",
+              "declineText": "Claims drift toward people who actually sign for them."
+            },
+            "completedText": "You've already taken the mining path into a real claim. Keep building."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_herbalism",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Green Acres",
+        "idleText": "Good soil notices who pays attention. If I have nothing for you, the fields are either satisfied or waiting for a better idea than yours.",
+        "stages": [
+          {
+            "stageId": "herb_first_harvest",
+            "questId": "farm_herb_first_harvest",
+            "available": {
+              "promptText": "If you've got Herbalism in your bones, start with Wheat. Landowners around here earn their keep by understanding what grows and when.",
+              "acceptLabel": "I'll bring in the harvest.",
+              "acceptedText": "Five Wheat. Bring it back and we'll see if you've got the touch for more than wandering.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why start with Wheat?",
+              "detailsText": "Because easy crops still teach timing, yield, and humility. Miss the basics and the fancy plants just punish you harder later.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Fields answer patience better than swagger.",
+              "freeformPrompt": "Ask Amos what matters about a first harvest.",
+              "freeformPlaceholder": "Example: What makes someone fit to run land out here?",
+              "freeformFallback": "Amos glances across the field. \"Ask one practical thing or go harvest.\""
+            },
+            "active": {
+              "promptText": "The Wheat run isn't done. Finish the harvest and then Helga can start talking plots.",
+              "primaryLabel": "The Wheat is gathered.",
+              "resultText": "Good. You've got the beginnings of a field hand's sense. Helga can turn that into acreage if you mean it.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Wheat from the crop nodes as your first step toward land of your own.",
+              "declineLabel": "Later.",
+              "declineText": "Harvest windows close faster than excuses do."
+            },
+            "completedText": "You already proved you can work the field. Helga handles the acreage from here."
+          },
+          {
+            "stageId": "herb_claim",
+            "questId": "farm_herb_green_acres",
+            "active": {
+              "promptText": "You've got the harvester's touch. If you want land beside these fields, take that instinct to Helga and make it official.",
+              "primaryLabel": "I'll claim the plot.",
+              "resultText": "Good. Green thumbs deserve real ground under them.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because skill gets you ready for land. Registration is what stops it being someone else's dream instead of yours.",
+              "declineLabel": "Later.",
+              "declineText": "Fields don't stay empty just because you're still deciding."
+            },
+            "completedText": "You've already stepped from harvest into ownership. That's the right kind of growth."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_skinning",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Pest Control",
+        "idleText": "Farmland stays civilized only because somebody keeps proving it can. If I have nothing for you, then the pests are thinner or you finally handled your part of the fence line.",
+        "stages": [
+          {
+            "stageId": "skin_pest_control",
+            "questId": "farm_skin_pest_control",
+            "available": {
+              "promptText": "Wild Chickens and Field Mice don't sound heroic, but losing crops to pests is how farms die in embarrassing ways. Clear them out.",
+              "acceptLabel": "I'll protect the fields.",
+              "acceptedText": "Five pests. Keep the farmland edible and we'll talk about making some of it yours.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does this matter so much?",
+              "detailsText": "Because protection isn't glamorous until the fields vanish without it. Homesteads are built on boring victories more often than grand ones.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Pest control is still stewardship.",
+              "freeformPrompt": "Ask Amos what matters about protecting the farmland.",
+              "freeformPlaceholder": "Example: Why start a homestead path with pests?",
+              "freeformFallback": "Amos folds his arms. \"Ask clearly or go clear the fields.\""
+            },
+            "active": {
+              "promptText": "The fields still need protecting. Finish the pest work and Helga can start taking you seriously as a homesteader.",
+              "primaryLabel": "The pests are handled.",
+              "resultText": "Good. Safer fields make better neighbors. Helga's the next stop if you want a roof over that instinct.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Clear five field pests so the farmland can breathe again.",
+              "declineLabel": "Later.",
+              "declineText": "Pests don't pause because you're undecided."
+            },
+            "completedText": "You already did the unglamorous work. That's usually who deserves land most."
+          },
+          {
+            "stageId": "skin_claim",
+            "questId": "farm_skin_homesteader",
+            "active": {
+              "promptText": "You've helped the fields stand up straight again. If you want a plot of your own, Helga can set the claim in motion.",
+              "primaryLabel": "I'll talk to Helga.",
+              "resultText": "Do it. Good hands ought to have their own roof line eventually.",
+              "secondaryLabel": "Why send me to Helga now?",
+              "secondaryText": "Because proving you can protect land is one thing. Being trusted to hold it is another, and that's a registrar's business.",
+              "declineLabel": "Later.",
+              "declineText": "Claims favor people who actually show up for them."
+            },
+            "completedText": "You've already turned field work into a homesteader's first real step."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_smithing",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Nails for the Cause",
+        "idleText": "Every wall out here remembers who forged its fasteners. If I have nothing for you, then either the fence line is holding or you've already proved you can build something worth staying in.",
+        "stages": [
+          {
+            "stageId": "smith_nails",
+            "questId": "farm_smith_nails",
+            "available": {
+              "promptText": "We're always short on Iron Nails because out here everything eventually wants repair. Forge eight and prove you think in structures, not just sparks.",
+              "acceptLabel": "I'll forge the nails.",
+              "acceptedText": "Eight Iron Nails. Bring them back and we'll talk about what kind of walls you might deserve to raise for yourself.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why nails?",
+              "detailsText": "Because every homestead is held together by small decisions done right often enough to matter.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Good builders respect the small parts first.",
+              "freeformPrompt": "Ask Amos what matters about smithing for a homestead.",
+              "freeformPlaceholder": "Example: Why start with nails instead of something larger?",
+              "freeformFallback": "Amos taps a fence post. \"Ask one useful thing or get to the forge.\""
+            },
+            "active": {
+              "promptText": "The nail work isn't done. Finish it and Helga can start talking real estate instead of raw materials.",
+              "primaryLabel": "The nails are finished.",
+              "resultText": "Good. That's how places stop being temporary. Helga can help you stake the rest.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Forge eight Iron Nails for the farm's repair and build work.",
+              "declineLabel": "Later.",
+              "declineText": "Structures don't stay patient just because smiths do."
+            },
+            "completedText": "You already proved you can build the small things right. Land follows that kind of craft well."
+          },
+          {
+            "stageId": "smith_claim",
+            "questId": "farm_smith_real_estate",
+            "active": {
+              "promptText": "You can build things that last. If you want land to build them on, Helga is the next person who matters.",
+              "primaryLabel": "I'll see the registrar.",
+              "resultText": "Good. Builders should know where their walls start.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because tools and materials mean potential. A claim is what turns potential into responsibility.",
+              "declineLabel": "Later.",
+              "declineText": "Plots rarely admire indecision."
+            },
+            "completedText": "You've already carried smithing sense into ownership. That's how towns happen."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_alchemy",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Field Remedies",
+        "idleText": "Farm work hurts in predictable ways, which is still better than most kinds of hurt. If I have nothing for you, then the workers are stocked or you've already learned what usefulness looks like out here.",
+        "stages": [
+          {
+            "stageId": "alch_field_remedy",
+            "questId": "farm_alch_field_remedy",
+            "available": {
+              "promptText": "Field hands don't get heroic injuries, just constant ones. Brew the Health Potions and prove you know the kind of usefulness that keeps a settlement upright.",
+              "acceptLabel": "I'll brew the remedies.",
+              "acceptedText": "Three Health Potions. Keep the workers standing and then we'll talk about the kind of place you could run yourself.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are potions such a big deal here?",
+              "detailsText": "Because productivity is just health stretched over a long enough day. An alchemist who understands that becomes infrastructure.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Practical alchemy deserves practical questions.",
+              "freeformPrompt": "Ask Amos what matters about brewing for a farmstead.",
+              "freeformPlaceholder": "Example: Why does remedy work lead to land here?",
+              "freeformFallback": "Amos nods at the fields. \"Ask clearly or get to brewing.\""
+            },
+            "active": {
+              "promptText": "The remedies aren't ready. Finish the potions and Helga can start talking shopfronts instead of wishful thinking.",
+              "primaryLabel": "The potions are done.",
+              "resultText": "Good. That's the kind of help people remember. Helga can turn that into a real address if you want one.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Brew three Health Potions for the field hands.",
+              "declineLabel": "Later.",
+              "declineText": "Sunstroke doesn't wait for confidence."
+            },
+            "completedText": "You already proved you can keep people standing. That's a strong argument for owning a place of your own."
+          },
+          {
+            "stageId": "alch_claim",
+            "questId": "farm_alch_apothecary",
+            "active": {
+              "promptText": "You can keep a workforce alive. That's enough reason to talk property with Helga if you want an apothecary here instead of somewhere else.",
+              "primaryLabel": "I'll talk to Helga.",
+              "resultText": "Do it. Settlements always need a good apothecary sooner than they admit.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because usefulness deserves fixed ground and a door people know how to knock on.",
+              "declineLabel": "Later.",
+              "declineText": "Shops don't open themselves."
+            },
+            "completedText": "You've already carried alchemy into ownership. That's how service becomes a livelihood."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_cooking",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and the Harvest Feast",
+        "idleText": "People work better with a full belly and a reason to come back. If I have nothing for you, then either the campfire is happy or you've already cooked your way toward a real place here.",
+        "stages": [
+          {
+            "stageId": "cook_harvest_feast",
+            "questId": "farm_cook_harvest_feast",
+            "available": {
+              "promptText": "Morale around here is always one hot meal away from improving. Cook the stew and prove you understand how settlements hold together after sundown.",
+              "acceptLabel": "I'll feed the workers.",
+              "acceptedText": "Three Hearty Stews. Bring the smell of competence back to camp.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is cooking part of homesteading?",
+              "detailsText": "Because homes are not only walls and fields. They're places people choose to gather around, and food is usually the first reason.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Kitchens built on purpose start with good questions.",
+              "freeformPrompt": "Ask Amos what matters about cooking for a homestead.",
+              "freeformPlaceholder": "Example: Why does a good meal matter this much out here?",
+              "freeformFallback": "Amos grins once. \"Ask clearly or get the stew going.\""
+            },
+            "active": {
+              "promptText": "The stew isn't ready. Feed the workers and Helga can start talking kitchens instead of empty rooms.",
+              "primaryLabel": "The feast is ready.",
+              "resultText": "Good. A place that feeds people earns memory fast. Helga can help you give that memory an address.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Cook three Hearty Stews for the field camp.",
+              "declineLabel": "Later.",
+              "declineText": "Hungry camps are poor places to postpone kindness."
+            },
+            "completedText": "You already proved you can cook for more than yourself. That's real homestead thinking."
+          },
+          {
+            "stageId": "cook_claim",
+            "questId": "farm_cook_kitchen_dreams",
+            "active": {
+              "promptText": "If you want a proper kitchen of your own, Helga's the one who can point at a plot and say it might actually become yours.",
+              "primaryLabel": "I'll talk to Helga.",
+              "resultText": "Good. Best taverns start as one person finally claiming some ground and a hearth.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because good food deserves a place people can return to on purpose.",
+              "declineLabel": "Later.",
+              "declineText": "Dream kitchens stay dreams if no one signs for the land."
+            },
+            "completedText": "You've already taken the cooking path into ownership. That's how hearths get started."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_leather",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Ranch Work",
+        "idleText": "Leather keeps more of this countryside in one piece than most people notice. If I have nothing for you, then the tack is holding or you've already earned a rancher's first real step.",
+        "stages": [
+          {
+            "stageId": "leather_saddles",
+            "questId": "farm_leather_saddles",
+            "available": {
+              "promptText": "Everything out here runs on leather somewhere: saddles, straps, harnesses, boots. Craft the gear and show me you know how settlements move.",
+              "acceptLabel": "I'll craft the leatherwork.",
+              "acceptedText": "Three pieces of leather gear. Bring back work that can survive weather and bad habits.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is leather so central here?",
+              "detailsText": "Because farms are full of movement. Leather is what turns motion into something guided instead of chaotic.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Good tack starts with respect for how things wear out.",
+              "freeformPrompt": "Ask Amos what matters about leatherwork for a ranch.",
+              "freeformPlaceholder": "Example: Why does this craft lead naturally to a homestead?",
+              "freeformFallback": "Amos adjusts his belt. \"Ask clearly or go make the gear.\""
+            },
+            "active": {
+              "promptText": "The leatherwork isn't done. Finish it and Helga can start talking plots and fences instead of just possibility.",
+              "primaryLabel": "The leatherwork is done.",
+              "resultText": "Good. That's the kind of craftsmanship ranch land actually notices. Helga can take it from there.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Craft three pieces of leather gear fit for ranch work.",
+              "declineLabel": "Later.",
+              "declineText": "Wear and weather don't pause because you do."
+            },
+            "completedText": "You already proved you can craft for a working ranch. That's landowner material out here."
+          },
+          {
+            "stageId": "leather_claim",
+            "questId": "farm_leather_ranch",
+            "active": {
+              "promptText": "If you want a workshop and a home in one, Helga's the next conversation that matters.",
+              "primaryLabel": "I'll see Helga.",
+              "resultText": "Do that. Ranch life starts with a plot line before it starts with cattle.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because good craftsmanship deserves real ground to operate from, not just borrowed corners.",
+              "declineLabel": "Later.",
+              "declineText": "Ranches don't claim themselves."
+            },
+            "completedText": "You've already carried leatherwork into a real claim path. That's how ranches begin."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "amos_jewel",
+        "npcName": "Farmhand Amos",
+        "title": "Farmhand Amos and Sunstone Prospects",
+        "idleText": "Farmland hides more value than most people deserve to notice. If I have nothing for you, then the soil is keeping its secrets or you've already proved you can make a studio out of open ground.",
+        "stages": [
+          {
+            "stageId": "jewel_sunstone",
+            "questId": "farm_jewel_sunstone",
+            "available": {
+              "promptText": "Soil rich with minerals makes better fields and better fortunes. Gather the rough gems and show me you can see more in this land than crops.",
+              "acceptLabel": "I'll find the gems.",
+              "acceptedText": "Three Rough Gems. Bring back something the sunlight actually argues with.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why jewelcrafting out here?",
+              "detailsText": "Because land value isn't only what grows from it. Sometimes it's what sleeps under it until someone with better eyes shows up.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Gem work deserves sharper imagination than most trades.",
+              "freeformPrompt": "Ask Amos what matters about jewelcrafting in the farmlands.",
+              "freeformPlaceholder": "Example: Why does farmland make sense for a gem studio?",
+              "freeformFallback": "Amos rolls a rough stone in his palm. \"Ask clearly or go prospect.\""
+            },
+            "active": {
+              "promptText": "The gem prospecting isn't done. Finish it and Helga can start talking about estate lines instead of empty plots.",
+              "primaryLabel": "The gems are found.",
+              "resultText": "Good. You've got an eye for hidden value. Helga can help you put walls around it.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Gather three Rough Gems from the ore nodes around the farmlands.",
+              "declineLabel": "Later.",
+              "declineText": "Prospects don't improve by waiting for certainty."
+            },
+            "completedText": "You already proved you can read value out of the soil. That's exactly how estates start."
+          },
+          {
+            "stageId": "jewel_claim",
+            "questId": "farm_jewel_gem_estate",
+            "active": {
+              "promptText": "If you want a proper studio instead of a traveling satchel, Helga can set you on the land that makes the rest plausible.",
+              "primaryLabel": "I'll speak to Helga.",
+              "resultText": "Good. Estates start as claims someone was bold enough to sign.",
+              "secondaryLabel": "Why Helga now?",
+              "secondaryText": "Because a gem craft without a fixed place stays a hustle. A claim turns it into an establishment.",
+              "declineLabel": "Later.",
+              "declineText": "Studios built later are usually built by somebody else."
+            },
+            "completedText": "You've already stepped from prospecting into estate-building. That's the right kind of ambition."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_mining_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and the Mason's Claim",
+        "idleText": "Claims move on paper first and lumber second. If I have nothing for you, then either your plot is already filed or you haven't brought me enough intent to be worth the ink.",
+        "stages": [
+          {
+            "stageId": "mining_claim_turnin",
+            "questId": "farm_mining_claim",
+            "active": {
+              "promptText": "Stone, lumber, and enough sense to think about a foundation first. That's a decent start. Ready to stake the plot?",
+              "primaryLabel": "Claim the land.",
+              "resultText": "Then it's done. You've moved from raw materials to actual property.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What does this registration mean?",
+              "secondaryText": "It means your homestead stops being an idea and starts being a line the town recognizes.",
+              "declineLabel": "Later.",
+              "declineText": "Plots don't admire hesitation."
+            },
+            "completedText": "Your first claim is already filed. Build something worthy of the paperwork."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_herb_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and Green Acres",
+        "idleText": "Good plots go to people who know what they want to grow there. If I have nothing for you, then your field is already yours or your plan still needs roots.",
+        "stages": [
+          {
+            "stageId": "herb_claim_turnin",
+            "questId": "farm_herb_green_acres",
+            "active": {
+              "promptText": "You brought harvester's proof. Ready to claim the green acres that go with it?",
+              "primaryLabel": "Register the plot.",
+              "resultText": "Done. The ground has your name on it now, which means the work gets more interesting from here.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Why does this matter?",
+              "secondaryText": "Because tending land hits differently once the yield, the mistakes, and the long season all belong to you.",
+              "declineLabel": "Later.",
+              "declineText": "Fields fill with someone else's plans quickly."
+            },
+            "completedText": "Your field claim is already on file. Make it earn the ink."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_skin_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and the Homesteader's Way",
+        "idleText": "Roofs hold best over people who've already done the ugly work. If I have nothing for you, then the claim is settled or you're still acting like land is decorative.",
+        "stages": [
+          {
+            "stageId": "skin_claim_turnin",
+            "questId": "farm_skin_homesteader",
+            "active": {
+              "promptText": "You helped keep the fields alive. Ready to claim a homestead the hard way instead of the pretty way?",
+              "primaryLabel": "Stake the claim.",
+              "resultText": "Then the land is yours to prove worthy of.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What changes once I claim it?",
+              "secondaryText": "Everything. Protection stops being a favor and becomes daily maintenance with your name attached.",
+              "declineLabel": "Later.",
+              "declineText": "Homesteads reward commitment, not flirting."
+            },
+            "completedText": "Your homestead claim is already settled. Now make it defensible."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_smith_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and Built-to-Last Ground",
+        "idleText": "Builders usually decide faster than this. If I have nothing for you, then the plot is already yours or you still haven't admitted you want permanence.",
+        "stages": [
+          {
+            "stageId": "smith_claim_turnin",
+            "questId": "farm_smith_real_estate",
+            "active": {
+              "promptText": "You can make things that last. Ready to claim land that expects the same of you?",
+              "primaryLabel": "File the real estate claim.",
+              "resultText": "Done. Now you have somewhere permanent enough to justify all that craftsmanship.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Why does this claim fit a smith?",
+              "secondaryText": "Because good builders eventually need fixed ground, recurring work, and walls that don't move when they look away.",
+              "declineLabel": "Later.",
+              "declineText": "Permanent ground tends to prefer decisive people."
+            },
+            "completedText": "Your build-site claim is already filed. The rest is labor and standards."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_alch_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and the Farm Apothecary",
+        "idleText": "People always think remedies come after the house. Usually they come before it. If I have nothing for you, then your apothecary claim is already filed or you're still undecided about being useful here.",
+        "stages": [
+          {
+            "stageId": "alch_claim_turnin",
+            "questId": "farm_alch_apothecary",
+            "active": {
+              "promptText": "You can keep workers standing. Ready to claim the kind of plot a proper farm apothecary deserves?",
+              "primaryLabel": "Register the apothecary plot.",
+              "resultText": "Done. Now people can actually find your remedies instead of hoping they run into you.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What does the claim change?",
+              "secondaryText": "It turns skill into service with an address, which is usually where livelihoods start.",
+              "declineLabel": "Later.",
+              "declineText": "Remedies without roots stay temporary."
+            },
+            "completedText": "Your apothecary plot is already registered. Keep the shelves stocked."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_cook_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and a Kitchen of Your Own",
+        "idleText": "A hearth means more once it's yours. If I have nothing for you, then the kitchen claim is already filed or you're still pretending a campfire is enough forever.",
+        "stages": [
+          {
+            "stageId": "cook_claim_turnin",
+            "questId": "farm_cook_kitchen_dreams",
+            "active": {
+              "promptText": "Ready to claim a plot big enough for a proper hearth and the kind of kitchen people would come back for?",
+              "primaryLabel": "Register the kitchen plot.",
+              "resultText": "Done. Every good tavern or farmhouse starts with somebody signing for a hearth.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Why does a cook need land?",
+              "secondaryText": "Because food gets better when people know where to return for it, and kitchens get better when they stop being temporary.",
+              "declineLabel": "Later.",
+              "declineText": "Hearths don't light themselves."
+            },
+            "completedText": "Your kitchen plot is already yours. Now make it smell worth crossing the fields for."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_leather_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and Ranch Ground",
+        "idleText": "Ranches start with boundaries and somebody willing to maintain them. If I have nothing for you, then the plot is already yours or you're still treating land like a suggestion.",
+        "stages": [
+          {
+            "stageId": "leather_claim_turnin",
+            "questId": "farm_leather_ranch",
+            "active": {
+              "promptText": "Ready to claim a plot fit for a leatherworker's workshop and a rancher's patience?",
+              "primaryLabel": "Claim the ranch plot.",
+              "resultText": "Done. Now you've got the ground to match the gear.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Why does this fit a leatherworker?",
+              "secondaryText": "Because a ranch is wear, weather, repair, and repetition. Leatherworkers understand all four better than most.",
+              "declineLabel": "Later.",
+              "declineText": "Ranches dislike indecision."
+            },
+            "completedText": "Your ranch plot is already on file. Make the fences mean something."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "helga_jewel_claim",
+        "npcName": "Plot Registrar Helga",
+        "title": "Plot Registrar Helga and the Gem Estate",
+        "idleText": "People laugh at gem estates until the first studio actually starts turning profit. If I have nothing for you, then the claim is settled or your ambition still hasn't caught up to your talent.",
+        "stages": [
+          {
+            "stageId": "jewel_claim_turnin",
+            "questId": "farm_jewel_gem_estate",
+            "active": {
+              "promptText": "Ready to claim the plot that turns your prospecting into a proper estate instead of a lucky streak?",
+              "primaryLabel": "File the estate claim.",
+              "resultText": "Done. Now you've got land fit for turning rough finds into a real business.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Why call it an estate?",
+              "secondaryText": "Because some ambitions need room, glass, and the confidence to stop pretending they're only temporary.",
+              "declineLabel": "Later.",
+              "declineText": "Estates are usually claimed by people willing to sound ambitious out loud."
+            },
+            "completedText": "Your estate claim is already filed. Make the place worthy of the title."
+          }
+        ]
+      }
+    }
+  ]
+}

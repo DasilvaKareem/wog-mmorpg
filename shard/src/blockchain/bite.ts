@@ -2,6 +2,11 @@ import { ethers } from "ethers";
 import { bite, biteWallet, biteProvider } from "./biteChain.js";
 import { queueBiteTransaction } from "./biteTxQueue.js";
 import { traceTx } from "./txTracer.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "./chainOperationStore.js";
 
 const TRADE_CONTRACT_ADDRESS = process.env.TRADE_CONTRACT_ADDRESS!;
 
@@ -60,35 +65,47 @@ export async function createTradeOnChain(
   quantity: number,
   seller: string
 ): Promise<{ tradeId: number; txHash: string }> {
-  return traceTx("trade-create", "createTradeOnChain", { tokenId, quantity, seller }, "bite", async () => {
-    const receipt = await queueBiteTransaction(`trade-create:${seller}:${tokenId}`, async () => {
+  return executeRegisteredChainOperation("trade-create", `${seller.toLowerCase()}:${tokenId}:${quantity}`, {
+    encryptedAskPrice,
+    tokenId,
+    quantity,
+    seller,
+  });
+}
+
+async function processTradeCreate(record: ChainOperationRecord): Promise<{ result: { tradeId: number; txHash: string }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { encryptedAskPrice: string; tokenId: number; quantity: number; seller: string };
+  return traceTx("trade-create", "createTradeOnChain", { tokenId: payload.tokenId, quantity: payload.quantity, seller: payload.seller }, "bite", async () => {
+    const receipt = await queueBiteTransaction(`trade-create:${payload.seller}:${payload.tokenId}`, async () => {
       const tx = await tradeContract.createTrade(
-        encryptedAskPrice,
-        tokenId,
-        quantity,
-        seller
+        payload.encryptedAskPrice,
+        payload.tokenId,
+        payload.quantity,
+        payload.seller
       );
       return tx.wait();
     });
 
-    // Parse TradeCreated event to extract the tradeId
     for (const log of receipt.logs) {
       try {
         const parsed = tradeContract.interface.parseLog(log);
         if (parsed?.name === "TradeCreated") {
           return {
-            tradeId: Number(parsed.args.tradeId),
+            result: {
+              tradeId: Number(parsed.args.tradeId),
+              txHash: receipt.hash,
+            },
             txHash: receipt.hash,
           };
         }
-      } catch {
-        // Not our event, skip
-      }
+      } catch {}
     }
 
     throw new Error("TradeCreated event not found in receipt");
   });
 }
+
+registerChainOperationProcessor("trade-create", processTradeCreate);
 
 /**
  * Submit an encrypted bid for a trade. This triggers the BITE v2 CTX
@@ -100,19 +117,30 @@ export async function submitOfferOnChain(
   encryptedBidPrice: string,
   buyer: string
 ): Promise<{ txHash: string }> {
-  return traceTx("trade-offer", "submitOfferOnChain", { tradeId, buyer }, "bite", async () => {
-    const receipt = await queueBiteTransaction(`trade-offer:${tradeId}:${buyer}`, async () => {
+  return executeRegisteredChainOperation("trade-offer", `${tradeId}:${buyer.toLowerCase()}`, {
+    tradeId,
+    encryptedBidPrice,
+    buyer,
+  });
+}
+
+async function processTradeOffer(record: ChainOperationRecord): Promise<{ result: { txHash: string }; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { tradeId: number; encryptedBidPrice: string; buyer: string };
+  return traceTx("trade-offer", "submitOfferOnChain", { tradeId: payload.tradeId, buyer: payload.buyer }, "bite", async () => {
+    const receipt = await queueBiteTransaction(`trade-offer:${payload.tradeId}:${payload.buyer}`, async () => {
       const tx = await tradeContract.submitOffer(
-        tradeId,
-        encryptedBidPrice,
-        buyer,
+        payload.tradeId,
+        payload.encryptedBidPrice,
+        payload.buyer,
         { value: ethers.parseEther("0.00001") }
       );
       return tx.wait();
     });
-    return { txHash: receipt.hash };
+    return { result: { txHash: receipt.hash }, txHash: receipt.hash };
   });
 }
+
+registerChainOperationProcessor("trade-offer", processTradeOffer);
 
 /**
  * Poll the contract until the trade resolves (status changes from Pending).
@@ -136,14 +164,21 @@ export async function waitForTradeResolution(
 
 /** Cancel a trade that hasn't received an offer yet. */
 export async function cancelTradeOnChain(tradeId: number): Promise<string> {
-  return traceTx("trade-cancel", "cancelTradeOnChain", { tradeId }, "bite", async () => {
-    const receipt = await queueBiteTransaction(`trade-cancel:${tradeId}`, async () => {
-      const tx = await tradeContract.cancelTrade(tradeId);
+  return executeRegisteredChainOperation("trade-cancel", String(tradeId), { tradeId });
+}
+
+async function processTradeCancel(record: ChainOperationRecord): Promise<{ result: string; txHash: string }> {
+  const payload = JSON.parse(record.payload) as { tradeId: number };
+  return traceTx("trade-cancel", "cancelTradeOnChain", { tradeId: payload.tradeId }, "bite", async () => {
+    const receipt = await queueBiteTransaction(`trade-cancel:${payload.tradeId}`, async () => {
+      const tx = await tradeContract.cancelTrade(payload.tradeId);
       return tx.wait();
     });
-    return receipt.hash;
+    return { result: receipt.hash, txHash: receipt.hash };
   });
 }
+
+registerChainOperationProcessor("trade-cancel", processTradeCancel);
 
 /** Read trade details from the contract. */
 export async function getTradeFromChain(tradeId: number): Promise<TradeResult> {

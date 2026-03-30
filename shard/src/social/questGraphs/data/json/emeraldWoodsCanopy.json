@@ -1,0 +1,350 @@
+{
+  "meta": {
+    "id": "emerald-woods-canopy",
+    "title": "Emerald Woods Canopy",
+    "summary": "Authored quest scenes for Verdant Warden Sylva and Herbalist Fern in the Emerald Woods.",
+    "zoneIds": ["emerald-woods"],
+    "tags": ["emerald-woods", "authored", "canopy", "wardens"],
+    "startingSceneId": "sylva_canopy"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "sylva_canopy",
+        "npcName": "Verdant Warden Sylva",
+        "title": "Verdant Warden Sylva and the Canopy Watch",
+        "idleText": "The Woods are listening. If I have nothing for you, then either the roots are quiet or you have already earned the right to walk them without my voice in your ear.",
+        "stages": [
+          {
+            "stageId": "emerald_wardens_call",
+            "questId": "emerald_wardens_call",
+            "available": {
+              "promptText": "The Emerald Woods still look beautiful enough to fool the careless. That's always the first mistake. If you would help me, start by hearing what the roots are trying to say.",
+              "acceptLabel": "I'll hear the warden's call.",
+              "acceptedText": "Then listen: these woods are ancient, proud, and wounded. Every task after this begins there.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What is wrong beneath the roots?",
+              "detailsText": "Corruption without spectacle. Pressure in the rootline, restlessness in the old growth, and guardians forgetting what they were shaped to protect.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask properly. Old forests deserve better than rushed curiosity.",
+              "freeformPrompt": "Ask Sylva what you want to understand about the Emerald Woods.",
+              "freeformPlaceholder": "Example: What should I notice first in the old growth?",
+              "freeformFallback": "Sylva watches the canopy before she answers. \"Ask one true question and I'll answer it.\""
+            },
+            "completedText": "Sylva has given you the first warning. Now the woods start testing whether you were listening."
+          },
+          {
+            "stageId": "emerald_treant_menace",
+            "questId": "emerald_treant_menace",
+            "available": {
+              "promptText": "Thorned Treants are tearing at the pathways. When the woods' own bodies begin resisting passage, you do not wait for a committee.",
+              "acceptLabel": "I'll cut down the Treants.",
+              "acceptedText": "Four Thorned Treants. Clear the paths before the roots decide travelers are no longer worth tolerating.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the pathways matter so much?",
+              "detailsText": "Because pathing is trust made physical. Once an old forest denies movement, every camp, route, and rescue grows more fragile.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. The old growth is patient, but not endlessly.",
+              "freeformPrompt": "Tell Sylva what you need before facing the Thorned Treants.",
+              "freeformPlaceholder": "Example: What kind of terrain do they use best?",
+              "freeformFallback": "Sylva tightens her grip on the spearshaft. \"Ask clearly or take the task.\""
+            },
+            "active": {
+              "promptText": "The pathways are still being torn apart. Finish the Treant work.",
+              "primaryLabel": "The Treants are down.",
+              "resultText": "Good. The Woods can breathe through their own paths again. The next threat moves faster and lower.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Thorned Treants. Don't let the paths become their weapon before you do.",
+              "declineLabel": "Later.",
+              "declineText": "Later is how trail rot becomes isolation."
+            },
+            "completedText": "The paths are reopened. Sylva's next warning left scales in the hollow logs."
+          },
+          {
+            "stageId": "emerald_serpent_strike",
+            "questId": "emerald_serpent_strike",
+            "available": {
+              "promptText": "Emerald Serpents have made the hollows theirs. Venom in a place this green feels almost insulting.",
+              "acceptLabel": "I'll clear the Serpents.",
+              "acceptedText": "Four Emerald Serpents. Thin the nests before the next clutch makes the understory unusable.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are the serpents urgent?",
+              "detailsText": "Because poison spreads through routines faster than through battles. One tainted route turns into ten abandoned ones.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Venom punishes assumptions more than bravery.",
+              "freeformPrompt": "Tell Sylva what you need before dealing with the Emerald Serpents.",
+              "freeformPlaceholder": "Example: What makes them harder to handle here?",
+              "freeformFallback": "Sylva's voice stays level. \"Ask about the nests or take the strike.\""
+            },
+            "active": {
+              "promptText": "The serpent nests still hold. Finish the strike.",
+              "primaryLabel": "The Serpents are dealt with.",
+              "resultText": "Good. With the hollows quieter, we can finally gather what the fire-touched groves still offer and confront what hunts the night routes.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Four Emerald Serpents in the hollow logs. Watch your footing and the retreat path.",
+              "declineLabel": "I'll return when it's done.",
+              "declineText": "Do that."
+            },
+            "completedText": "The nests are thinned. Sylva now asks you to take from the woods carefully and defend them more harshly."
+          },
+          {
+            "stageId": "emerald_rare_bloom",
+            "questId": "emerald_rare_bloom",
+            "available": {
+              "promptText": "Dragon's Breath blooms where old fire magic lingers under the roots. I need it if we're going to ward the spreading corruption before it learns new ground.",
+              "acceptLabel": "I'll gather the blooms.",
+              "acceptedText": "Five Dragon's Breath. Gather cleanly; some things are medicine only if taken before they become obsession.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does the bloom matter now?",
+              "detailsText": "Because wards require living material that still remembers the right kind of heat. These blooms do.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Gathering from a wounded forest is still a moral act.",
+              "freeformPrompt": "Tell Sylva what you need before gathering Dragon's Breath.",
+              "freeformPlaceholder": "Example: What should I respect while harvesting it?",
+              "freeformFallback": "Sylva glances toward the deeper groves. \"Ask with care or take the assignment.\""
+            },
+            "active": {
+              "promptText": "The Dragon's Breath is still uncollected. Bring it back before the window closes.",
+              "primaryLabel": "The blooms are gathered.",
+              "resultText": "Good. That gives us warding material. Now we can focus on the predators taking advantage of the confusion.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Five Dragon's Breath blooms from the fire-touched groves.",
+              "declineLabel": "Later.",
+              "declineText": "Rare blooms do not wait for the undecided."
+            },
+            "completedText": "The warding blooms are secured. Sylva's next concern hunts in packs."
+          },
+          {
+            "stageId": "emerald_worg_pack",
+            "questId": "emerald_worg_pack",
+            "available": {
+              "promptText": "Feral Worgs are establishing a den line through the night trails. If they settle properly, the Woods lose another layer of safe movement.",
+              "acceptLabel": "I'll break the pack.",
+              "acceptedText": "Three Feral Worgs. Thin them before instinct becomes territory.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why are they worse than ordinary wolves?",
+              "detailsText": "Because they organize around denial. They don't just kill. They make places too costly to use.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask. Packs punish poor exits.",
+              "freeformPrompt": "Tell Sylva what you need before facing the Feral Worgs.",
+              "freeformPlaceholder": "Example: What mistake do they capitalize on first?",
+              "freeformFallback": "Sylva's answer is quick. \"Ask about the pack or go break it.\""
+            },
+            "active": {
+              "promptText": "The Worgs are still claiming night ground. Finish the hunt.",
+              "primaryLabel": "The pack is broken.",
+              "resultText": "Good. The deeper groves breathe easier for a moment. That moment won't last; the dead memory in this place is starting to move.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Feral Worgs. Control the retreat routes before they do.",
+              "declineLabel": "I'll return after the hunt.",
+              "declineText": "Then return with the denline broken."
+            },
+            "completedText": "The pack is broken. Sylva's next enemy is older than the trail it walks."
+          },
+          {
+            "stageId": "emerald_specter_hunt",
+            "questId": "emerald_specter_hunt",
+            "available": {
+              "promptText": "Selerion Specters are phasing through the trunks like the forest itself is remembering a civilization it hasn't forgiven.",
+              "acceptLabel": "I'll hunt the Specters.",
+              "acceptedText": "Three Selerion Specters. Bring down the remnants before memory becomes ambush.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why do the specters matter?",
+              "detailsText": "Because ruins become ecology if left alone long enough. These specters turn history into active terrain hazard.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Phasing things reward prepared minds, not louder blades.",
+              "freeformPrompt": "Tell Sylva what you need before hunting the Selerion Specters.",
+              "freeformPlaceholder": "Example: What should I expect from the way they move?",
+              "freeformFallback": "Sylva gives a terse nod. \"Ask one clear thing or take the hunt.\""
+            },
+            "active": {
+              "promptText": "The Specters still haunt the groves. Finish the hunt and return.",
+              "primaryLabel": "The Specters are gone.",
+              "resultText": "Good. The old memory just lost its claws. Now we face the corrupted sentinel still pretending it knows what protection means.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the target.",
+              "secondaryText": "Three Selerion Specters. Don't let a ruined line of sight become your whole mistake.",
+              "declineLabel": "Later.",
+              "declineText": "History is dangerous enough without postponement."
+            },
+            "completedText": "The haunting is reduced. Sylva's next target is the fallen guardian itself."
+          },
+          {
+            "stageId": "emerald_sentinel_fall",
+            "questId": "emerald_sentinel_fall",
+            "available": {
+              "promptText": "The Grom Sentinel was built to protect this forest. Now it destroys indiscriminately and dares us to call that duty. It falls here.",
+              "acceptLabel": "I'll bring down the Sentinel.",
+              "acceptedText": "One Grom Sentinel. End the old guardian's mistake before the Woods accept it as normal.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why is the Sentinel so important?",
+              "detailsText": "Because corrupted authority teaches the worst lesson of all: that protection and violence are the same thing if the structure is old enough.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final guardians deserve precision, not theatrics.",
+              "freeformPrompt": "Tell Sylva what you need before facing the Grom Sentinel.",
+              "freeformPlaceholder": "Example: What kind of mistake gets people crushed against it?",
+              "freeformFallback": "Sylva plants her spear. \"Ask with intent or go end it.\""
+            },
+            "active": {
+              "promptText": "The Sentinel still stands. Break it and return.",
+              "primaryLabel": "The Sentinel has fallen.",
+              "resultText": "Good. That was the old Woods' loudest failure. One last trial remains, and it belongs to the living guardians now.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the enemy.",
+              "secondaryText": "The Grom Sentinel. Don't fight its size; fight the assumptions it wants to force on your footing.",
+              "declineLabel": "I'll return after the fall.",
+              "declineText": "Return only when the stone is quiet."
+            },
+            "completedText": "The Sentinel is down. Sylva's final trial measures not survival, but guardianship."
+          },
+          {
+            "stageId": "emerald_guardian_trial",
+            "questId": "emerald_guardian_trial",
+            "available": {
+              "promptText": "You have dealt with rot, venom, hunger, memory, and corrupted authority. Now prove you can stand in defense, not only response. Ancient Guardians still patrol the deepest groves.",
+              "acceptLabel": "Give me the final guardian trial.",
+              "acceptedText": "Eight Ancient Guardians. If you complete this, the Woods will have tested your stance from every angle that matters.",
+              "effectType": "start_quest",
+              "detailsLabel": "What does the final trial prove?",
+              "detailsText": "That you can protect a place whose history, beauty, and danger all ask for different instincts at once.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then do it. Final questions should sound like stewardship, not ego.",
+              "freeformPrompt": "Tell Sylva how you're approaching the deepest-grove trial.",
+              "freeformPlaceholder": "Example: I'm ready for the final test. What matters most?",
+              "freeformFallback": "Sylva's voice softens slightly. \"Ask one worthy final question, or take the trial.\""
+            },
+            "active": {
+              "promptText": "The deepest-grove trial is still open. Finish it and return.",
+              "primaryLabel": "The guardian trial is complete.",
+              "resultText": "Then hear it from me: the Woods no longer test whether you can endure them. They are testing whether you remember them well enough to defend them. That matters more.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me what this trial proves.",
+              "secondaryText": "That you can survive and protect the old growth without flattening it into just another battlefield.",
+              "declineLabel": "Later.",
+              "declineText": "Guardianship delayed is often guardianship denied."
+            },
+            "completedText": "Sylva has already judged your trial. The Woods will keep the rest of that verdict to themselves."
+          }
+        ]
+      }
+    },
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "fern_grove",
+        "npcName": "Herbalist Fern",
+        "title": "Herbalist Fern and the Deep Grove",
+        "idleText": "The grove still grows if we let it. If I have nothing for you, then either the herbs are safe for a moment or you finally learned how to harvest without bruising the place.",
+        "stages": [
+          {
+            "stageId": "emerald_fern_intro",
+            "questId": "emerald_fern_intro",
+            "available": {
+              "promptText": "These woods still carry remedies no city apothecary deserves. But corruption is killing the rare stock first, and that means careful hands matter more than loud ones.",
+              "acceptLabel": "Tell me what you need saved.",
+              "acceptedText": "Then start with this: preservation is not sentimental work. It's triage with roots attached.",
+              "effectType": "complete_quest",
+              "detailsLabel": "Why are the herbs so urgent?",
+              "detailsText": "Because rare plants vanish quietly. By the time warriors notice, the medicine is already gone.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Ask gently if you can. Harvest begins with attention.",
+              "freeformPrompt": "Ask Fern what she needs protected in the deep grove.",
+              "freeformPlaceholder": "Example: What kind of plants are we trying to save first?",
+              "freeformFallback": "Fern brushes dirt from her gloves. \"Ask one careful question.\""
+            },
+            "completedText": "Fern has told you what is at stake. Now she needs living proof you can gather with care."
+          },
+          {
+            "stageId": "emerald_fern_gather",
+            "questId": "emerald_fern_gather",
+            "available": {
+              "promptText": "Silverleaf only grows where ancient roots still drink deeply and the soil hasn't forgotten its old chemistry. Gather it before corruption gets there first.",
+              "acceptLabel": "I'll gather the Silverleaf.",
+              "acceptedText": "Four bundles of Silverleaf. Cut cleanly and leave the patch able to come back stronger.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why Silverleaf first?",
+              "detailsText": "Because it's both medicine and indicator. If Silverleaf fails, the grove is telling us the deeper chemistry is turning.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Good gatherers think before they cut.",
+              "freeformPrompt": "Tell Fern what you need before gathering Silverleaf.",
+              "freeformPlaceholder": "Example: What should I be careful not to damage in the patch?",
+              "freeformFallback": "Fern looks back toward the grove. \"Ask clearly or go gather.\""
+            },
+            "active": {
+              "promptText": "The Silverleaf run isn't done. Bring me the bundles before the window closes.",
+              "primaryLabel": "The Silverleaf is gathered.",
+              "resultText": "Good. That keeps our medicine line alive. Next I need proof you can turn that care into actual preparation.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Four bundles of Silverleaf from the older groves, gathered without stripping the patch bare.",
+              "declineLabel": "Later.",
+              "declineText": "Rare leaves don't wait for confidence."
+            },
+            "completedText": "The Silverleaf is secured. Fern's next task moves from gathering to actual treatment."
+          },
+          {
+            "stageId": "emerald_fern_brew",
+            "questId": "emerald_fern_brew",
+            "available": {
+              "promptText": "Corruption sickness is spreading through the wildlife. I need Healing Potions brewed now, before the wardens start losing good bodies to preventable rot.",
+              "acceptLabel": "I'll brew the antidotes.",
+              "acceptedText": "Two Healing Potions. Brew them cleanly; medicine made in panic usually carries panic with it.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why brew now instead of gathering more?",
+              "detailsText": "Because at some point preservation has to become distribution. A satchel full of ingredients is not the same thing as readiness.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Brewing is where patience becomes accountability.",
+              "freeformPrompt": "Tell Fern what you need before brewing the Healing Potions.",
+              "freeformPlaceholder": "Example: What makes a rushed batch fail?",
+              "freeformFallback": "Fern gives a small nod. \"Ask one practical thing, or get to the station.\""
+            },
+            "active": {
+              "promptText": "The potions still aren't brewed. Finish them and then we can reopen the deepest grove path safely.",
+              "primaryLabel": "The potions are ready.",
+              "resultText": "Good. Now the wardens have what they need to survive the next push. Which means I can ask you for the one thing still blocking access entirely.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Two Healing Potions brewed cleanly for Fern's distribution effort.",
+              "declineLabel": "Later.",
+              "declineText": "Medicine delayed is just an apology waiting for a body."
+            },
+            "completedText": "The medicines are ready. Fern's last obstacle stands between gatherers and the deep grove."
+          },
+          {
+            "stageId": "emerald_fern_guardian",
+            "questId": "emerald_fern_guardian",
+            "available": {
+              "promptText": "One Thorned Treant is still blocking the path into the deepest grove. I need that route opened without turning the whole grove into collateral.",
+              "acceptLabel": "I'll clear the path.",
+              "acceptedText": "Two Thorned Treants. Open the grove and leave something worth opening it to.",
+              "effectType": "start_quest",
+              "detailsLabel": "Why does this last path matter so much?",
+              "detailsText": "Because the rarest herbs are always in the places access fails first. Reopening a path can be the difference between renewal and extinction.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then ask. Final access questions are always about balance.",
+              "freeformPrompt": "Tell Fern what you need before reopening the deep grove path.",
+              "freeformPlaceholder": "Example: What should I protect while I clear the path?",
+              "freeformFallback": "Fern looks you over once. \"Ask with care, or go make the path usable.\""
+            },
+            "active": {
+              "promptText": "The deep grove path is still blocked. Finish the clear-out and return.",
+              "primaryLabel": "The path is open.",
+              "resultText": "Good. That's not just a path reopened. That's a future for every gatherer who comes after you.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "Remind me of the work.",
+              "secondaryText": "Clear the blocking Thorned Treants without turning the grove itself into the casualty.",
+              "declineLabel": "Later.",
+              "declineText": "Deep groves do not stay available by accident."
+            },
+            "completedText": "Fern has already accepted the grove as reopened. The herbs will remember lighter footsteps there."
+          }
+        ]
+      }
+    }
+  ]
+}

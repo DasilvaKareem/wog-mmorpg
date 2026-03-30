@@ -16,7 +16,7 @@ import {
 } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
-import { getItemInstance, isItemInstanceOwnedBy, upsertItemInstanceFromEquipment } from "./itemRng.js";
+import { getItemInstance, getWalletInstances, isItemInstanceOwnedBy, upsertItemInstanceFromEquipment } from "./itemRng.js";
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { hasActiveRentalRight } from "../marketplace/rentService.js";
@@ -324,7 +324,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const maxDurability = itemInstance?.currentMaxDurability ?? itemInstance?.rolledMaxDurability ?? item.maxDurability;
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
-      name: item.name,
+      name: itemInstance?.displayName ?? item.name,
       durability,
       maxDurability,
       broken: false,
@@ -614,6 +614,15 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
 
       const equippedCounts = await getEquippedItemCounts(walletAddress);
 
+      // Build a map of tokenId → crafted instances for this wallet
+      const walletInstances = getWalletInstances(walletAddress);
+      const instancesByToken = new Map<number, typeof walletInstances>();
+      for (const inst of walletInstances) {
+        const arr = instancesByToken.get(inst.baseTokenId) ?? [];
+        arr.push(inst);
+        instancesByToken.set(inst.baseTokenId, arr);
+      }
+
       // Fetch all on-chain balances in parallel
       const balances = await Promise.all(
         ITEM_CATALOG.map(async (item) => {
@@ -629,9 +638,13 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
           const equipped = equippedByTokenId[tokenId];
           const equippedCount = equippedCounts.get(tokenId) ?? 0;
           const recyclableQuantity = getRecyclableQuantity(qty, equippedCount);
+          const instances = instancesByToken.get(tokenId);
+          // Use crafted display name if this item has instances
+          const displayName = instances?.[0]?.displayName ?? null;
           return {
             tokenId,
             name: def.name,
+            displayName,
             description: def.description,
             category: def.category,
             equipSlot: def.equipSlot ?? null,
@@ -644,6 +657,12 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
             maxDurability: equipped?.maxDurability ?? null,
             recyclableQuantity,
             recycleCopperValue: getItemRecycleCopperValue(def),
+            instances: instances?.map((inst) => ({
+              instanceId: inst.instanceId,
+              displayName: inst.displayName,
+              quality: inst.quality.tier,
+              qualityColor: inst.quality.color,
+            })) ?? null,
           };
         });
 

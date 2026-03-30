@@ -1,6 +1,11 @@
 import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
+import {
+  executeRegisteredChainOperation,
+  registerChainOperationProcessor,
+  type ChainOperationRecord,
+} from "../blockchain/chainOperationStore.js";
 
 const GUILD_VAULT_CONTRACT_ADDRESS = process.env.GUILD_VAULT_CONTRACT_ADDRESS;
 
@@ -22,6 +27,11 @@ const GUILD_VAULT_ABI = [
 const vaultContract = GUILD_VAULT_CONTRACT_ADDRESS
   ? new ethers.Contract(GUILD_VAULT_CONTRACT_ADDRESS, GUILD_VAULT_ABI, biteWallet)
   : null;
+
+function ensureVaultContract(): ethers.Contract {
+  if (!vaultContract) throw new Error("Vault contract not initialized");
+  return vaultContract;
+}
 
 // -- Types --
 
@@ -59,14 +69,16 @@ export async function depositItemOnChain(
   quantity: number,
   depositor: string
 ): Promise<string> {
-  if (!vaultContract) throw new Error("Vault contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-vault-deposit:${guildId}:${depositor}:${tokenId}`, async () => {
-    const tx = await vaultContract.depositItem(guildId, tokenId, quantity, depositor);
+  return executeRegisteredChainOperation("guild-vault-deposit", `${guildId}:${depositor.toLowerCase()}:${tokenId}:${quantity}`, { guildId, tokenId, quantity, depositor });
+}
+registerChainOperationProcessor("guild-vault-deposit", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; tokenId: number; quantity: number; depositor: string };
+  const receipt = await queueBiteTransaction(`guild-vault-deposit:${payload.guildId}:${payload.depositor}:${payload.tokenId}`, async () => {
+    const tx = await ensureVaultContract().depositItem(payload.guildId, payload.tokenId, payload.quantity, payload.depositor);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Withdraw item from guild vault.
@@ -77,14 +89,16 @@ export async function withdrawItemOnChain(
   quantity: number,
   recipient: string
 ): Promise<string> {
-  if (!vaultContract) throw new Error("Vault contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-vault-withdraw:${guildId}:${recipient}:${tokenId}`, async () => {
-    const tx = await vaultContract.withdrawItem(guildId, tokenId, quantity, recipient);
+  return executeRegisteredChainOperation("guild-vault-withdraw", `${guildId}:${recipient.toLowerCase()}:${tokenId}:${quantity}`, { guildId, tokenId, quantity, recipient });
+}
+registerChainOperationProcessor("guild-vault-withdraw", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; tokenId: number; quantity: number; recipient: string };
+  const receipt = await queueBiteTransaction(`guild-vault-withdraw:${payload.guildId}:${payload.recipient}:${payload.tokenId}`, async () => {
+    const tx = await ensureVaultContract().withdrawItem(payload.guildId, payload.tokenId, payload.quantity, payload.recipient);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Lend item to guild member.
@@ -96,30 +110,25 @@ export async function lendItemOnChain(
   borrower: string,
   durationDays: number
 ): Promise<{ loanId: number; txHash: string }> {
-  if (!vaultContract) throw new Error("Vault contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-vault-lend:${guildId}:${borrower}:${tokenId}`, async () => {
-    const tx = await vaultContract.lendItem(guildId, tokenId, quantity, borrower, durationDays);
+  return executeRegisteredChainOperation("guild-vault-lend", `${guildId}:${borrower.toLowerCase()}:${tokenId}:${quantity}:${durationDays}`, { guildId, tokenId, quantity, borrower, durationDays });
+}
+registerChainOperationProcessor("guild-vault-lend", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { guildId: number; tokenId: number; quantity: number; borrower: string; durationDays: number };
+  const contract = ensureVaultContract();
+  const receipt = await queueBiteTransaction(`guild-vault-lend:${payload.guildId}:${payload.borrower}:${payload.tokenId}`, async () => {
+    const tx = await contract.lendItem(payload.guildId, payload.tokenId, payload.quantity, payload.borrower, payload.durationDays);
     return tx.wait();
   });
-
-  // Parse ItemLent event
   for (const log of receipt.logs) {
     try {
-      const parsed = vaultContract.interface.parseLog(log);
+      const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "ItemLent") {
-        return {
-          loanId: Number(parsed.args.loanId),
-          txHash: receipt.hash,
-        };
+        return { result: { loanId: Number(parsed.args.loanId), txHash: receipt.hash }, txHash: receipt.hash };
       }
-    } catch {
-      // Not our event, skip
-    }
+    } catch {}
   }
-
   throw new Error("ItemLent event not found in receipt");
-}
+});
 
 /**
  * Return borrowed item to vault.
@@ -128,14 +137,16 @@ export async function returnItemOnChain(
   loanId: number,
   borrower: string
 ): Promise<string> {
-  if (!vaultContract) throw new Error("Vault contract not initialized");
-
-  const receipt = await queueBiteTransaction(`guild-vault-return:${loanId}:${borrower}`, async () => {
-    const tx = await vaultContract.returnItem(loanId, borrower);
+  return executeRegisteredChainOperation("guild-vault-return", `${loanId}:${borrower.toLowerCase()}`, { loanId, borrower });
+}
+registerChainOperationProcessor("guild-vault-return", async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as { loanId: number; borrower: string };
+  const receipt = await queueBiteTransaction(`guild-vault-return:${payload.loanId}:${payload.borrower}`, async () => {
+    const tx = await ensureVaultContract().returnItem(payload.loanId, payload.borrower);
     return tx.wait();
   });
-  return receipt.hash;
-}
+  return { result: receipt.hash, txHash: receipt.hash };
+});
 
 /**
  * Get all items in guild vault.

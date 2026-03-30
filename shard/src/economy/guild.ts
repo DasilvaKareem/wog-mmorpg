@@ -35,6 +35,7 @@ import {
 import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { addActiveProposal } from "./guildTick.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 
 const RANK_NAMES = ["Member", "Officer", "Founder"];
 const STATUS_NAMES = ["active", "disbanded"];
@@ -158,7 +159,15 @@ export function registerGuildRoutes(server: FastifyInstance) {
       return { error: "Invalid founder address" };
     }
 
-    if (founderAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    // Accept direct match OR custodial wallet ownership (owner wallet auth → custodial wallet)
+    const founderLower = founderAddress.toLowerCase();
+    const authLower = authenticatedWallet.toLowerCase();
+    let guildAuthorized = founderLower === authLower;
+    if (!guildAuthorized) {
+      const custodial = await getAgentCustodialWallet(authenticatedWallet);
+      guildAuthorized = !!custodial && founderLower === custodial.toLowerCase();
+    }
+    if (!guildAuthorized) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

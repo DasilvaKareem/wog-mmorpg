@@ -11,10 +11,6 @@ import { API_URL } from "@/config";
 import { gameBus } from "@/lib/eventBus";
 import type { OnboardingStartMode } from "@/lib/onboarding";
 import {
-  queueTutorialMasterIntro,
-  warmTutorialMasterPortraitCache,
-} from "@/lib/tutorialMaster";
-import {
   trackUserSignedUp,
   trackCharacterCreated,
   trackAgentTaskStarted,
@@ -333,11 +329,7 @@ export function OnboardingFlow({
     };
   }, [connectedAddress, navigate, onClose, step, successData?.agentZoneId]);
 
-  React.useEffect(() => {
-    if (step !== "success" || !successData?.agentEntityId) return;
-    const timeout = window.setTimeout(() => setStep("done"), 600);
-    return () => window.clearTimeout(timeout);
-  }, [step, successData?.agentEntityId]);
+  // No auto-advance — let the user click Continue at their own pace.
 
   async function connectSocial(strategy: SocialStrategy) {
     setError(null);
@@ -485,8 +477,7 @@ export function OnboardingFlow({
         origin,
         walletAddress: targetAddress!,
       });
-      queueTutorialMasterIntro();
-      void warmTutorialMasterPortraitCache();
+      gameBus.emit("charactersChanged", { walletAddress: targetAddress });
       setSuccessData(successBase);
       setStep("success");
 
@@ -1128,9 +1119,8 @@ export function OnboardingFlow({
               <button
                 onClick={() => setStep("telegram-signup")}
                 className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
-                disabled={successData.agentDeploying}
               >
-                {successData.agentDeploying ? "..." : "Continue →"}
+                Continue →
               </button>
 
               <button

@@ -19,7 +19,12 @@ import {
   updateOperationStatus,
   OperationStatus,
 } from "./operationRegistry.js";
-import { handleMppCharge } from "./marketplacePayments.js";
+import {
+  createMarketplacePaymentIntent,
+  deleteMarketplacePayment,
+  validateMarketplacePayment,
+  MARKETPLACE_PAYMENT_RAIL,
+} from "./marketplacePayments.js";
 import { activateCharacterRental, getRentalEntityRecord } from "./characterRentalService.js";
 import { addEntityToParty } from "../social/partySystem.js";
 import { isWalletSpawned } from "../world/zoneRuntime.js";
@@ -104,7 +109,7 @@ export function registerRentalRoutes(server: FastifyInstance) {
   );
 
   // ── POST /rentals/listings/:rentalId/rent ─────────────────────────
-  // MPP 402 flow: pay to rent
+  // Direct thirdweb Pay flow: initiate payment, then confirm separately
   server.post<{
     Params: { rentalId: string };
     Body: { wallet: string; usageMode?: string };
@@ -132,16 +137,61 @@ export function registerRentalRoutes(server: FastifyInstance) {
         return reply.code(400).send({ error: "Maximum concurrent rentals reached" });
       }
 
-      // MPP charge
-      const chargeResult = await handleMppCharge({
-        req: request.raw,
-        res: reply.raw,
+      const paymentIntent = await createMarketplacePaymentIntent({
+        wallet,
         amountCents: listing.priceUsdCents,
-        operationId: `rent-${rentalId}-${wallet}`,
         description: `WoG rental: ${rentalId}`,
       });
 
-      if (chargeResult.status === 402) return; // 402 written
+      return reply.send({
+        ok: true,
+        status: "payment_required",
+        rentalId,
+        ...paymentIntent,
+      });
+    }
+  );
+
+  server.post<{
+    Params: { rentalId: string };
+    Body: { wallet: string; usageMode?: string; paymentId: string; transactionHash?: string };
+  }>(
+    "/rentals/listings/:rentalId/rent/confirm",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = getAuthenticatedWallet(request);
+      const { wallet, usageMode, paymentId, transactionHash } = request.body;
+      const { rentalId } = request.params;
+
+      if (!authWallet || authWallet.toLowerCase() !== wallet?.toLowerCase()) {
+        return reply.code(403).send({ error: "Wallet mismatch" });
+      }
+      if (!paymentId) {
+        return reply.code(400).send({ error: "paymentId is required" });
+      }
+
+      const listing = await getRentalListing(rentalId);
+      if (!listing) return reply.code(404).send({ error: "Rental listing not found" });
+      if (listing.status !== "active") {
+        return reply.code(400).send({ error: `Listing is ${listing.status}` });
+      }
+      if (listing.ownerWallet === wallet.toLowerCase()) {
+        return reply.code(400).send({ error: "Cannot rent your own asset" });
+      }
+      if (listing.maxRentals > 0 && listing.activeRentals >= listing.maxRentals) {
+        return reply.code(400).send({ error: "Maximum concurrent rentals reached" });
+      }
+
+      const receipt = await validateMarketplacePayment({
+        paymentId,
+        wallet,
+        transactionHash,
+      }).catch((err: Error) =>
+        reply.code(400).send({ error: err.message })
+      );
+      if (!receipt || "statusCode" in receipt) {
+        return;
+      }
 
       // Payment confirmed — create operation + grant
       const op = await createOperation({
@@ -154,8 +204,8 @@ export function registerRentalRoutes(server: FastifyInstance) {
         instanceId: listing.instanceId,
         ownerWallet: listing.ownerWallet,
         buyerWallet: wallet,
-        paymentRail: "tempo_mpp",
-        paymentReference: chargeResult.receipt.receiptId,
+        paymentRail: MARKETPLACE_PAYMENT_RAIL,
+        paymentReference: receipt.transactionHash ?? receipt.receiptId,
         rentalId,
         status: OperationStatus.PAYMENT_CONFIRMED,
       });
@@ -175,6 +225,8 @@ export function registerRentalRoutes(server: FastifyInstance) {
       await updateOperationStatus(op.operationId, OperationStatus.RENTAL_ACTIVE, {
         grantId: grant.grantId,
       });
+
+      await deleteMarketplacePayment(paymentId);
 
       return reply.send({
         ok: true,
@@ -294,19 +346,68 @@ export function registerRentalRoutes(server: FastifyInstance) {
         return reply.code(400).send({ error: "This rental is not renewable" });
       }
 
-      // MPP charge for renewal
-      const chargeResult = await handleMppCharge({
-        req: request.raw,
-        res: reply.raw,
+      const paymentIntent = await createMarketplacePaymentIntent({
+        wallet,
         amountCents: listing.priceUsdCents,
-        operationId: `renew-${grantId}`,
         description: `WoG rental renewal: ${grantId}`,
       });
 
-      if (chargeResult.status === 402) return;
+      return reply.send({
+        ok: true,
+        status: "payment_required",
+        grantId,
+        ...paymentIntent,
+      });
+    }
+  );
+
+  server.post<{
+    Params: { grantId: string };
+    Body: { wallet: string; paymentId: string; transactionHash?: string };
+  }>(
+    "/rentals/grants/:grantId/renew/confirm",
+    { preHandler: authenticateRequest },
+    async (request, reply) => {
+      const authWallet = getAuthenticatedWallet(request);
+      const { wallet, paymentId, transactionHash } = request.body;
+      const { grantId } = request.params;
+
+      if (!authWallet || authWallet.toLowerCase() !== wallet?.toLowerCase()) {
+        return reply.code(403).send({ error: "Wallet mismatch" });
+      }
+      if (!paymentId) {
+        return reply.code(400).send({ error: "paymentId is required" });
+      }
+
+      const grant = await getRentalGrant(grantId);
+      if (!grant) return reply.code(404).send({ error: "Grant not found" });
+      if (grant.renterWallet !== wallet.toLowerCase()) {
+        return reply.code(403).send({ error: "Not your rental" });
+      }
+      if (grant.status !== "active") {
+        return reply.code(400).send({ error: `Grant is ${grant.status}` });
+      }
+
+      const listing = await getRentalListing(grant.rentalId);
+      if (!listing || !listing.renewable) {
+        return reply.code(400).send({ error: "This rental is not renewable" });
+      }
+
+      await validateMarketplacePayment({
+        paymentId,
+        wallet,
+        transactionHash,
+      }).catch((err: Error) =>
+        reply.code(400).send({ error: err.message })
+      );
+      if (reply.sent) {
+        return;
+      }
 
       const renewed = await renewRentalGrant(grantId);
       if (!renewed) return reply.code(500).send({ error: "Renewal failed" });
+
+      await deleteMarketplacePayment(paymentId);
 
       return reply.send({
         ok: true,

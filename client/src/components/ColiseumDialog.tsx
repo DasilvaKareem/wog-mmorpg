@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useWogNames } from "@/hooks/useWogNames";
+import { playSoundEffect } from "@/lib/soundEffects";
 import type { Entity } from "@/types";
 import { ColiseumViewer } from "./ColiseumViewer";
 import { MatchmakingQueue } from "./MatchmakingQueue";
+
 
 interface ActiveBattle {
   battleId: string;
@@ -55,6 +57,7 @@ export function ColiseumDialog(): React.ReactElement {
 
   useGameBridge("arenaMasterClick", (entity: Entity) => {
     if (entity.type !== "arena-master") return;
+    playSoundEffect("ui_dialog_open");
     setNpc(entity);
     setOpen(true);
     setSelectedBattleId(null);
@@ -91,6 +94,11 @@ export function ColiseumDialog(): React.ReactElement {
     const interval = setInterval(fetchBattlesAndLeaderboard, 3000);
     return () => clearInterval(interval);
   }, [open, selectedBattleId, fetchBattlesAndLeaderboard]);
+
+  // Auto-close dialog when a match is found (player transitions to BattleScene)
+  useGameBridge("matchFound", () => {
+    setOpen(false);
+  });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>

@@ -5,7 +5,7 @@ Agent-facing and developer-facing implementation docs live in this folder.
 Current docs:
 
 - [ERC8004_ARCHITECTURE_AND_TESTING_README.md](ERC8004_ARCHITECTURE_AND_TESTING_README.md)
-  - current ERC-8004 architecture, local Hardhat wiring, test layout, and eventual-consistency model
+  - current official-vs-local ERC-8004 architecture, network mapping, validation-optional mode, and test matrix
 - [HARDHAT_WORKSPACE_README.md](HARDHAT_WORKSPACE_README.md)
   - Hardhat workspace usage, local deploy flow, and contract test coverage
 - [AUTHENTICATION.md](AUTHENTICATION.md)
@@ -22,6 +22,7 @@ Current docs:
 - [ZONE_TRANSITIONS.md](ZONE_TRANSITIONS.md)
 - [ZONE_TRANSITIONS_SUMMARY.md](ZONE_TRANSITIONS_SUMMARY.md)
 - [ERC8004_REPUTATION_SYSTEM.md](ERC8004_REPUTATION_SYSTEM.md)
+  - agentId-keyed reputation model, chain bridge behavior, API surface, and current compatibility status
 - [REPUTATION_QUICK_START.md](REPUTATION_QUICK_START.md)
 - [PVP_PREDICTION_MARKET_ARCHITECTURE.md](PVP_PREDICTION_MARKET_ARCHITECTURE.md)
 - [CHAT_LOG.md](CHAT_LOG.md)

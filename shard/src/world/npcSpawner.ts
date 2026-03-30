@@ -1280,6 +1280,14 @@ export const NPC_DEFS: NpcDef[] = [
     y: 520,
     hp: 9999,
   },
+  {
+    zoneId: "auroral-plains",
+    type: "enchanting-altar",
+    name: "Windswept Enchanting Altar",
+    x: 340,
+    y: 520,
+    hp: 9999,
+  },
 
   // Arena Master
   {
@@ -1542,6 +1550,14 @@ export const NPC_DEFS: NpcDef[] = [
     y: 550,
     hp: 9999,
   },
+  {
+    zoneId: "emerald-woods",
+    type: "enchanting-altar",
+    name: "Grove Enchanting Altar",
+    x: 360,
+    y: 550,
+    hp: 9999,
+  },
 
   // Arena Master
   {
@@ -1801,6 +1817,14 @@ export const NPC_DEFS: NpcDef[] = [
     type: "alchemy-lab",
     name: "Alpine Alchemy Station",
     x: 220,
+    y: 520,
+    hp: 9999,
+  },
+  {
+    zoneId: "viridian-range",
+    type: "enchanting-altar",
+    name: "Summit Enchanting Altar",
+    x: 320,
     y: 520,
     hp: 9999,
   },
@@ -2071,6 +2095,14 @@ export const NPC_DEFS: NpcDef[] = [
     type: "alchemy-lab",
     name: "Druidic Brewing Stand",
     x: 200,
+    y: 560,
+    hp: 9999,
+  },
+  {
+    zoneId: "moondancer-glade",
+    type: "enchanting-altar",
+    name: "Moonlit Enchanting Altar",
+    x: 300,
     y: 560,
     hp: 9999,
   },
@@ -2619,6 +2651,14 @@ export const NPC_DEFS: NpcDef[] = [
     type: "alchemy-lab",
     name: "Crystal Alchemy Basin",
     x: 200,
+    y: 100,
+    hp: 9999,
+  },
+  {
+    zoneId: "lake-lumina",
+    type: "enchanting-altar",
+    name: "Luminous Enchanting Altar",
+    x: 300,
     y: 100,
     hp: 9999,
   },

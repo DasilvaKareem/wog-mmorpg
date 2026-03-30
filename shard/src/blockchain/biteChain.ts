@@ -12,11 +12,15 @@ const SKALE_BASE_RPC =
 /** JSON-RPC provider for SKALE Base mainnet. */
 export const biteProvider = new ethers.JsonRpcProvider(SKALE_BASE_RPC);
 
+export const biteSigner = process.env.SERVER_PRIVATE_KEY
+  ? new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, biteProvider)
+  : null;
+
 /** Server wallet on SKALE Base mainnet.
  *  Wrapped in NonceManager to prevent nonce collisions from concurrent transactions
  *  (auction house, guild, reputation all share this signer). */
-export const biteWallet = process.env.SERVER_PRIVATE_KEY
-  ? new ethers.NonceManager(new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, biteProvider))
+export const biteWallet = biteSigner
+  ? new ethers.NonceManager(biteSigner)
   : null;
 
 if (!biteWallet) {

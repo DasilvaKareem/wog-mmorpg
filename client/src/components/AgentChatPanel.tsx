@@ -64,6 +64,8 @@ interface AgentStatusData {
   } | null;
   entityId: string | null;
   zoneId: string | null;
+  agentId?: string | null;
+  characterTokenId?: string | null;
   custodialWallet: string | null;
   entity: {
     name: string;
@@ -71,6 +73,7 @@ interface AgentStatusData {
     hp: number;
     maxHp: number;
   } | null;
+  entitySource?: "live" | "saved" | null;
   currentActivity: string | null;
   currentScript: { type: string; reason?: string } | null;
   telemetry: {
@@ -122,6 +125,7 @@ const SLASH_COMMANDS = [
   { cmd: "/party",    desc: "Party members" },
   { cmd: "/travel",   desc: "Travel to a zone" },
   { cmd: "/where",    desc: "Current position" },
+  { cmd: "/speak",    desc: "Speak publicly as your champion" },
 ];
 
 const CMD_COLOR = "#c792ea";
@@ -397,10 +401,20 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               );
             });
           }
-        } else if (res.status === 401) {
+          return;
+        }
+
+        if (!cancelled) {
+          setStatus(null);
+        }
+        if (res.status === 401) {
           clearCachedToken();
         }
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setStatus(null);
+        }
+      }
     }
 
     pollStatus();
@@ -492,6 +506,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         if (data.custodialWallet) {
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
+        gameBus.emit("charactersChanged", { walletAddress });
         trackAgentTaskCompleted({ walletAddress, entityId: data.entityId, zoneId: data.zoneId });
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
         if (data.zoneId) {
@@ -519,6 +534,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ walletAddress }),
       });
+      gameBus.emit("charactersChanged", { walletAddress });
       addSystemMsg("Agent stopped.");
     } catch {}
   }
@@ -530,6 +546,45 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setInput("");
     setSending(true);
     const ts = Date.now();
+
+    const speakMatch = !replyTarget ? msg.match(/^\/(?:speak|say)\s+(.+)$/is) : null;
+    if (speakMatch) {
+      const spokenText = speakMatch[1]?.trim().slice(0, 200) ?? "";
+      setMessages((prev) => mergeConsoleMessages(prev, [toChatMessage("user", msg, ts)]));
+
+      if (!spokenText) {
+        addSystemMsg("[ERR] Usage: /speak <message>");
+        setSending(false);
+        return;
+      }
+
+      if (!status?.entityId) {
+        addSystemMsg("[ERR] Deploy your champion before using /speak.");
+        setSending(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_URL}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId: status.entityId, message: spokenText }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          setMessages((prev) => mergeConsoleMessages(prev, [
+            toChatMessage("activity", `✓ Spoke publicly: "${spokenText}"`, Date.now()),
+          ]));
+        } else {
+          addSystemMsg(`[ERR] ${data.error ?? "Speak failed"}`);
+        }
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
 
     if (replyTarget) {
       try {
@@ -671,9 +726,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   // ── Derived state ───────────────────────────────────────────────────────
 
   const isRunning = status?.running ?? false;
-  const isDeployed = isRunning || (status?.config?.enabled === true && status?.entityId != null);
+  const hasLiveEntity = status?.entitySource === "live" && status?.entityId != null;
+  const isDeployed = isRunning || hasLiveEntity;
   const entityName = status?.entity?.name ?? "Agent";
-  const entityLevel = status?.entity?.level ?? 1;
   const focus = status?.config?.focus ?? "idle";
   const focusColor = FOCUS_COLORS[focus] ?? "#8b9abc";
   const hp = status?.entity?.hp;
@@ -689,7 +744,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   return (
     <div
       data-tutorial-id="agent-chat-panel"
-      className={`flex flex-col border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] w-96 lg:w-[28rem] max-w-[50vw] ${collapsed ? "" : "h-[45vh] max-h-[400px]"} ${className}`}
+      className={`flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${collapsed ? "" : "h-full"} ${className}`}
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
@@ -703,8 +758,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </button>
           <span className="text-[11px] text-[#54f28b] uppercase tracking-widest">
             {">> "}
-            <span className="text-[#ffcc00]">{entityName}</span>
-            {entityLevel > 1 && <span className="text-[#9aa7cc]"> Lv{entityLevel}</span>}
+            <span className="text-[#ffcc00]">Console</span>
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1072,8 +1126,9 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       {/* ── Stop confirmation ──────────────────────────────────────── */}
       {/* ── Send-agent-here confirmation ─────────────────────────── */}
       {pendingGoto && (
-        <div className="absolute bottom-[56px] left-0 right-0 z-40 border-t border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono flex items-center justify-between gap-2">
-          <span className="text-[11px] text-[#e0af68] truncate">
+        <div className="absolute bottom-[56px] left-2 right-2 z-40 rounded border border-[#e0af68] bg-[#0d0c07] px-3 py-2 font-mono shadow-[4px_4px_0_0_#000]">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-w-0 break-words text-[10px] leading-relaxed text-[#e0af68] sm:text-[11px]">
             {pendingGoto.action === "accept-quest" && pendingGoto.questTitle
               ? <>Accept <span className="text-[#ffcc00]">"{pendingGoto.questTitle}"</span> from {pendingGoto.name}?</>
               : pendingGoto.action === "complete-quest" && pendingGoto.questTitle
@@ -1082,50 +1137,51 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               ? <>Learn <span className="text-[#ffcc00]">{pendingGoto.teachesProfession}</span> from {pendingGoto.name}?</>
               : <>→ Send agent to <span className="text-[#ffcc00]">{pendingGoto.name}</span>?</>
             }
-          </span>
-          <div className="flex gap-2 shrink-0">
-            {pendingGoto.action === "accept-quest" && (
+            </span>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {pendingGoto.action === "accept-quest" && (
+                <button
+                  onClick={() => void confirmGoto("accept-quest")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#54f28b] px-2 py-0.5 text-[10px] text-[#54f28b] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                >
+                  Accept
+                </button>
+              )}
+              {pendingGoto.action === "complete-quest" && (
+                <button
+                  onClick={() => void confirmGoto("complete-quest")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#f2c854] px-2 py-0.5 text-[10px] text-[#f2c854] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+                >
+                  Turn In
+                </button>
+              )}
+              {pendingGoto.teachesProfession && (
+                <button
+                  onClick={() => void confirmGoto("learn-profession")}
+                  disabled={!token || !isRunning}
+                  className="border border-[#00ff9d] px-2 py-0.5 text-[10px] text-[#00ff9d] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                >
+                  Learn
+                </button>
+              )}
+              {!pendingGoto.action && (
+                <button
+                  onClick={() => void confirmGoto()}
+                  disabled={!token || !isRunning}
+                  className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
+                >
+                  Go
+                </button>
+              )}
               <button
-                onClick={() => void confirmGoto("accept-quest")}
-                disabled={!token || !isRunning}
-                className="border border-[#54f28b] px-2 py-0.5 text-[10px] text-[#54f28b] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
+                onClick={() => setPendingGoto(null)}
+                className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
               >
-                Accept Quest
+                ✕
               </button>
-            )}
-            {pendingGoto.action === "complete-quest" && (
-              <button
-                onClick={() => void confirmGoto("complete-quest")}
-                disabled={!token || !isRunning}
-                className="border border-[#f2c854] px-2 py-0.5 text-[10px] text-[#f2c854] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
-              >
-                Turn In
-              </button>
-            )}
-            {pendingGoto.teachesProfession && (
-              <button
-                onClick={() => void confirmGoto("learn-profession")}
-                disabled={!token || !isRunning}
-                className="border border-[#00ff9d] px-2 py-0.5 text-[10px] text-[#00ff9d] uppercase tracking-widest hover:bg-[#001a0d] disabled:opacity-40"
-              >
-                Learn
-              </button>
-            )}
-            {!pendingGoto.action && (
-              <button
-                onClick={() => void confirmGoto()}
-                disabled={!token || !isRunning}
-                className="border border-[#e0af68] px-2 py-0.5 text-[10px] text-[#e0af68] uppercase tracking-widest hover:bg-[#1a1600] disabled:opacity-40"
-              >
-                Go
-              </button>
-            )}
-            <button
-              onClick={() => setPendingGoto(null)}
-              className="border border-[#6b7394] px-2 py-0.5 text-[10px] text-[#8b9abc] uppercase tracking-widest hover:bg-[#0a0e14]"
-            >
-              ✕
-            </button>
+            </div>
           </div>
         </div>
       )}

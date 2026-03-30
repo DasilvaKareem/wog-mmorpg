@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "id": "village-square-welcome-tour",
+    "title": "Village Square Welcome Tour",
+    "summary": "Authored dialogue scenes for the village-square newcomer chain.",
+    "zoneIds": ["village-square"],
+    "tags": ["tutorial", "welcome-tour", "village-square", "authored"],
+    "startingSceneId": "marcus_contracts"
+  },
+  "scenes": [
+    {
+      "template": "staged_contracts",
+      "config": {
+        "sceneId": "marcus_contracts",
+        "npcName": "Guard Captain Marcus",
+        "title": "Guard Captain Marcus Contracts",
+        "idleText": "Kaela gave you the briefing. The rest is discipline. If no contract is open with me, then your next lesson is outside these walls.",
+        "stages": [
+          {
+            "stageId": "battle_ready",
+            "questId": "ready_for_battle",
+            "available": {
+              "promptText": "Now you look like someone who can survive beyond the square. Ready to close the welcome tour and take your final reward?",
+              "acceptLabel": "Finish the tour.",
+              "acceptedText": "Good. Take your shoulders, take your potions, and stop thinking like a tourist. The meadow is your real instructor now.",
+              "effectType": "complete_quest",
+              "detailsLabel": "What comes after this?",
+              "detailsText": "Once this is settled, the meadow stops being a guided walk and starts being your responsibility. You'll fight, gather, and learn without me holding the line for you.",
+              "freeformLabel": "Let me ask directly.",
+              "freeformText": "Then speak plainly.",
+              "freeformPrompt": "Tell Marcus how you want to proceed.",
+              "freeformPlaceholder": "Example: I'm ready. Finish the tour and send me out.",
+              "freeformFallback": "Marcus studies you for a beat. \"Either finish the tour or ask a clear question.\""
+            },
+            "active": {
+              "promptText": "You're standing at the end of the welcome chain already. Report cleanly and we'll settle your final square reward.",
+              "primaryLabel": "Settle it now.",
+              "resultText": "Good. Take your shoulders, take your potions, and stop thinking like a tourist. The meadow is your real instructor now.",
+              "resultEffectType": "complete_quest",
+              "declineLabel": "Later.",
+              "declineText": "Then don't linger. Come back when you're ready to be judged by the field instead of the square."
+            },
+            "completedText": "You've had your square tour and your final blessing. Whatever comes next, earn it in the field."
+          },
+          {
+            "stageId": "welcome",
+            "questId": "welcome_adventurer",
+            "active": {
+              "promptText": "Back already. If you came to report in properly, we can finish your welcome here.",
+              "primaryLabel": "Report in.",
+              "resultText": "Good. Grimwald waits near the market and he owes every new arrival a practical start. Hear him out and keep moving.",
+              "resultEffectType": "complete_quest",
+              "secondaryLabel": "What exactly was this meant to teach?",
+              "secondaryText": "That first stop teaches the chain of command. You take an order, carry it through the square, and return ready for field work."
+            },
+            "completedText": "You've handled my first introduction. Finish the rest of the square's tour, then return when you're actually equipped for a fight."
+          }
+        ]
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "grimwald_trade_intro",
+        "npcName": "Grimwald the Trader",
+        "title": "Grimwald's First Bargain",
+        "questId": "traders_bargain",
+        "introLine": "Ah, Marcus sent fresh boots my way. Good. A new arrival with a weapon is a customer who lives long enough to come back.",
+        "detailLine": "This is simple: take Grimwald's bargain, hear the market's lesson, and walk away with steel worth more than your current luck.",
+        "freeformText": "Ask, but make it worth the breath.",
+        "freeformPrompt": "Tell Grimwald what you want from the bargain.",
+        "freeformPlaceholder": "Example: Marcus sent me. What's the deal?",
+        "freeformFallback": "Grimwald smiles thinly. \"That wasn't a bargain, friend. Try again with intent.\"",
+        "completionLine": "There. Steel in hand and a market lesson besides. Bron at the anvil has the next piece of your kit waiting.",
+        "revisitLine": "We've already done business. If you're still wandering the square, Bron should be your next stop.",
+        "idleLine": "No new bargain from me just now. The square still has work for you elsewhere."
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "bron_forge_handoff",
+        "npcName": "Bron the Blacksmith",
+        "title": "Bron's Forge Handoff",
+        "questId": "blacksmiths_offer",
+        "introLine": "If Grimwald sent you, then hold still and listen. Gear matters more than confidence, and confidence burns faster.",
+        "detailLine": "The point is the vest, not the ceremony. Put proper leather on your chest before the meadow teaches you why iron alone is not enough.",
+        "freeformText": "Speak over the hammer if you must.",
+        "freeformPrompt": "Tell Bron what you need from the forge.",
+        "freeformPlaceholder": "Example: I'm here for the kit you set aside.",
+        "freeformFallback": "Bron snorts. \"Use forge words, not fog. Ask clearly or move aside.\"",
+        "completionLine": "Take the vest and stop looking half-finished. Thrain at the training ground has the next lesson, and he hates wasted motion.",
+        "revisitLine": "Your forge stop is done. If your feet are still in the square, Thrain should be sharpening your habits next.",
+        "idleLine": "I've no fresh forge work for you. Keep the chain moving."
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "thrain_training_counsel",
+        "npcName": "Thrain Ironforge - Warrior Trainer",
+        "title": "Thrain's Training Counsel",
+        "questId": "warriors_wisdom",
+        "introLine": "So Bron has you armored enough to survive embarrassment. Fine. Then you can afford to hear what a real fight demands.",
+        "detailLine": "Strength is not panic and bravery is not noise. The lesson is simple: stay planted, strike with intent, and stop confusing chaos for skill.",
+        "freeformText": "If you have a question, ask it like a recruit who expects an answer.",
+        "freeformPrompt": "Tell Thrain what you want to learn.",
+        "freeformPlaceholder": "Example: Give me the lesson Marcus thinks I need.",
+        "freeformFallback": "Thrain folds his arms. \"Ask with a spine, recruit.\"",
+        "completionLine": "Good. Keep the helm and the discipline. Herbalist Willow knows how to keep a body intact when steel alone won't save it.",
+        "revisitLine": "You've had my lesson already. Willow is the wiser stop if you're still following the square's chain.",
+        "idleLine": "I've said what I needed to say. Train or move on."
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "willow_foragers_counsel",
+        "npcName": "Herbalist Willow",
+        "title": "Willow's Forager Counsel",
+        "questId": "foragers_knowledge",
+        "introLine": "Thrain teaches how to hold the line. I teach how to last after the line breaks. Both matter more than pride.",
+        "detailLine": "Every path beyond the square is made of things that can hurt you or heal you. Learn the difference early and the meadow becomes a teacher instead of a grave.",
+        "freeformText": "Ask gently if you can. Plants answer patience better than force.",
+        "freeformPrompt": "Tell Willow what you hope to understand.",
+        "freeformPlaceholder": "Example: Thrain sent me. What should I notice out there?",
+        "freeformFallback": "Willow tilts her head. \"Slow down. Ask one thing clearly.\"",
+        "completionLine": "Take the leggings and remember this: survival is often prepared long before danger appears. Chef Gastron has your next stop near the fire.",
+        "revisitLine": "We've already spoken. If you still smell of the square, Chef Gastron is waiting with the next piece of your road kit.",
+        "idleLine": "No fresh lesson from me right now. Follow the chain and keep your eyes open."
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "gastron_campfire_welcome",
+        "npcName": "Chef Gastron",
+        "title": "Gastron's Campfire Welcome",
+        "questId": "cooks_secret",
+        "introLine": "A warrior who forgets food and boots becomes a story told by someone better prepared. Sit, breathe, and take what I saved for you.",
+        "detailLine": "Good boots and a fed body solve more problems than swagger ever will. This stop is about readiness that looks humble until it keeps you alive.",
+        "freeformText": "Ask quickly before the stew turns on me.",
+        "freeformPrompt": "Tell Gastron what you want to know.",
+        "freeformPlaceholder": "Example: I'm on the square tour. What's your part in it?",
+        "freeformFallback": "Gastron laughs once. \"That question wandered off halfway through. Try again.\"",
+        "completionLine": "Boots on, stomach settled, and still breathing. That's a promising start. Torvik in the mine mouth has the last square stop before Marcus judges you again.",
+        "revisitLine": "You already have what I set aside. Torvik is the next voice worth hearing.",
+        "idleLine": "Nothing new from the fire today. Keep the square's chain moving."
+      }
+    },
+    {
+      "template": "talk_quest",
+      "config": {
+        "sceneId": "torvik_miner_briefing",
+        "npcName": "Grizzled Miner Torvik",
+        "title": "Torvik's Miner Briefing",
+        "questId": "miners_greeting",
+        "introLine": "If you made it this far, then the square hasn't broken your attention span yet. Good. The deep teaches harder lessons than the market.",
+        "detailLine": "Mines reward patience and punish noise. Gloves, belt, and a bit of caution will carry you farther underground than courage alone ever will.",
+        "freeformText": "Say what you mean. Rock has no patience for decoration.",
+        "freeformPrompt": "Tell Torvik what you need from him.",
+        "freeformPlaceholder": "Example: Gastron sent me. What should I take into the deep?",
+        "freeformFallback": "Torvik grunts. \"Try again without the extra dust.\"",
+        "completionLine": "Take the gloves and belt. That's the last square courtesy you'll get. Marcus can decide whether you're finally ready for the meadow.",
+        "revisitLine": "Your mining welcome is done. Marcus is the only stop left in this chain.",
+        "idleLine": "I've no new contract for you. If you've finished with me, Marcus is the one who closes the circle."
+      }
+    }
+  ]
+}
