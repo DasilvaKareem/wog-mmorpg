@@ -184,7 +184,7 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
               {identity.registrationTxHash && (
                 registrationTxUrl ? (
                   <a href={registrationTxUrl} target="_blank" rel="noreferrer" className="text-blue-500 underline underline-offset-2">
-                    View registration tx
+                    {registrationTxUrl}
                   </a>
                 ) : (
                   <span>Registration TX recorded</span>

@@ -2519,7 +2519,7 @@ function ReputationTab({
                     rel="noreferrer"
                     className="text-[#5dadec] underline underline-offset-2"
                   >
-                    View Registration TX
+                    {registrationTxUrl}
                   </a>
                 ) : (
                   "Registration TX recorded"
