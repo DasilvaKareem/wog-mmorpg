@@ -12,6 +12,76 @@ type DeploymentManifest = {
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const DEV_ENABLED = TRUE_VALUES.has((process.env.DEV ?? "").trim().toLowerCase());
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+const SHARD_CHAIN_ENV = (process.env.SHARD_CHAIN_ENV ?? "").trim().toLowerCase();
+
+type PresetEnvironment = Record<string, string>;
+type ChainPreset = {
+  chainId: string;
+  rpcUrl: string;
+  environment: PresetEnvironment;
+};
+
+const LOCAL_PRESET: ChainPreset = {
+  chainId: "31337",
+  rpcUrl: "http://127.0.0.1:8545",
+  environment: {
+    GOLD_CONTRACT_ADDRESS: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+    ITEMS_CONTRACT_ADDRESS: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    CHARACTER_CONTRACT_ADDRESS: "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    IDENTITY_REGISTRY_ADDRESS: "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
+    REPUTATION_REGISTRY_ADDRESS: "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
+    VALIDATION_REGISTRY_ADDRESS: "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
+    AUCTION_HOUSE_CONTRACT_ADDRESS: "0x0165878A594ca255338adfa4d48449f69242Eb8F",
+    TRADE_CONTRACT_ADDRESS: "0xa513E6E4b8f2a923D98304ec87F64353C4D5C853",
+    GUILD_CONTRACT_ADDRESS: "0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6",
+    GUILD_VAULT_CONTRACT_ADDRESS: "0x8A791620dd6260079BF849Dc5567aDC3F2FdC318",
+    LAND_REGISTRY_CONTRACT_ADDRESS: "0x610178dA211FEF7D417bC0e6FeD39F05609AD788",
+    NAME_SERVICE_CONTRACT_ADDRESS: "0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e",
+    PREDICTION_CONTRACT_ADDRESS: "0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0",
+  },
+};
+
+const TESTNET_PRESET: ChainPreset = {
+  chainId: "324705682",
+  rpcUrl: "https://base-sepolia-testnet.skalenodes.com/v1/jubilant-horrible-ancha",
+  environment: {
+    GOLD_CONTRACT_ADDRESS: "0x64DCbBa18873Cff6D82b01Be48C4A71530907599",
+    ITEMS_CONTRACT_ADDRESS: "0x8310879324ab014d37Ff00e7cE4f9BA997Ac1a3b",
+    CHARACTER_CONTRACT_ADDRESS: "0x84c8De907404a040696d84E2f446B8124B39A3B1",
+    IDENTITY_REGISTRY_ADDRESS: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    REPUTATION_REGISTRY_ADDRESS: "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+    VALIDATION_REGISTRY_ADDRESS: "0x695606de050d828F650a2bDbbb480653900ee001",
+    AUCTION_HOUSE_CONTRACT_ADDRESS: "0xd4BbB7af25D1E789e53118CFFF28BA7887D35733",
+    TRADE_CONTRACT_ADDRESS: "0xBfC9d52DC609e3Ab97f5402FAae2818d5652F0aD",
+    GUILD_CONTRACT_ADDRESS: "0xCDd016eb73C8Ea9463eA51F9e697731FE1fB90Dc",
+    GUILD_VAULT_CONTRACT_ADDRESS: "0x918706F16C438383aee6e883302942ba779877B9",
+    LAND_REGISTRY_CONTRACT_ADDRESS: "0x229a6672D42b52767327632240e6E674273e3097",
+    NAME_SERVICE_CONTRACT_ADDRESS: "0x87b75cAa9B05b9BE941651Bb092c16272A563836",
+    PREDICTION_CONTRACT_ADDRESS: "0x7F1Eed8d0FFDf225552c7Cb64C495A83AB839b2d",
+  },
+};
+
+const MAINNET_PRESET: ChainPreset = {
+  chainId: "1187947933",
+  rpcUrl: "https://skale-base.skalenodes.com/v1/base",
+  environment: {
+    IDENTITY_REGISTRY_ADDRESS: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
+    REPUTATION_REGISTRY_ADDRESS: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
+    AUCTION_HOUSE_CONTRACT_ADDRESS: "0x8FBcA728a8B904587CE6220dfA05F2c0DE3060B6",
+    TRADE_CONTRACT_ADDRESS: "0x2c803D0583C6314d8937357B44b26E2513Bbb1d7",
+    GUILD_CONTRACT_ADDRESS: "0x5e37f36D1B757CcE81dcCC93f240732D777CA375",
+    GUILD_VAULT_CONTRACT_ADDRESS: "0xF902D5D039d85E5A57736a553C17DB90C211080e",
+    LAND_REGISTRY_CONTRACT_ADDRESS: "0xf31A72d1A4Bab4559Db6BEf8a172c9344683873e",
+    NAME_SERVICE_CONTRACT_ADDRESS: "0x1d582561C4295526f9DB6CB94748e3Bb324a9cEF",
+    PREDICTION_CONTRACT_ADDRESS: "0xfDcD63CC9857fa6061Dc3e0d25836a251e4a45BE",
+  },
+};
+
+const CHAIN_PRESETS: Record<string, ChainPreset> = {
+  local: LOCAL_PRESET,
+  testnet: TESTNET_PRESET,
+  mainnet: MAINNET_PRESET,
+};
 
 function shouldOverrideWithManifest(key: string, currentValue: string | undefined): boolean {
   if (!currentValue) return true;
@@ -72,12 +142,36 @@ function applyOfficialRegistryFallback(chainIdRaw: string | undefined): void {
   }
 }
 
+function applyChainPreset(presetName: string): void {
+  const preset = CHAIN_PRESETS[presetName];
+  if (!preset) return;
+
+  if (shouldOverrideWithManifest("SKALE_BASE_CHAIN_ID", process.env.SKALE_BASE_CHAIN_ID)) {
+    process.env.SKALE_BASE_CHAIN_ID = preset.chainId;
+  }
+  if (shouldOverrideWithManifest("SKALE_BASE_RPC_URL", process.env.SKALE_BASE_RPC_URL)) {
+    process.env.SKALE_BASE_RPC_URL = preset.rpcUrl;
+  }
+
+  for (const [key, value] of Object.entries(preset.environment)) {
+    if (shouldOverrideWithManifest(key, process.env[key])) {
+      process.env[key] = value;
+    }
+  }
+}
+
+if (SHARD_CHAIN_ENV && CHAIN_PRESETS[SHARD_CHAIN_ENV]) {
+  applyChainPreset(SHARD_CHAIN_ENV);
+}
+
 if (DEV_ENABLED) {
-  process.env.SKALE_BASE_CHAIN_ID ??= "31337";
-  process.env.SKALE_BASE_RPC_URL ??= process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
+  if (!SHARD_CHAIN_ENV || SHARD_CHAIN_ENV === "local") {
+    process.env.SKALE_BASE_CHAIN_ID ??= "31337";
+    process.env.SKALE_BASE_RPC_URL ??= process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
+  }
 
   const manifest = readLocalManifest();
-  if (manifest?.environment) {
+  if (manifest?.environment && (!SHARD_CHAIN_ENV || SHARD_CHAIN_ENV === "local")) {
     for (const [key, value] of Object.entries(manifest.environment)) {
       if (value && shouldOverrideWithManifest(key, process.env[key])) {
         process.env[key] = value;
@@ -89,7 +183,7 @@ if (DEV_ENABLED) {
     console.log(
       `[dev] Loaded local contract addresses from Hardhat ${manifest.network ?? "deployment"} manifest`
     );
-  } else {
+  } else if (!SHARD_CHAIN_ENV || SHARD_CHAIN_ENV === "local") {
     console.warn(
       "[dev] DEV=true but no Hardhat deployment manifest was found. Run the local Hardhat deploy before starting shard."
     );

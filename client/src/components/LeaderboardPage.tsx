@@ -14,14 +14,14 @@ interface GuildEntry {
 }
 
 interface PlayerEntry {
+  entityId: string;
   name: string;
-  walletAddress: string;
   level: number;
-  race: string;
-  class: string;
+  raceId: string | null;
+  classId: string | null;
   zoneId: string;
   kills: number;
-  gold: number;
+  powerScore: number;
 }
 
 export function LeaderboardPage(): React.ReactElement {
@@ -31,8 +31,8 @@ export function LeaderboardPage(): React.ReactElement {
   const [lastUpdate, setLastUpdate] = React.useState<Date>(new Date());
 
   const leaderboardAddresses = React.useMemo(
-    () => [...guilds.map((g) => g.founder), ...players.map((p) => p.walletAddress)],
-    [guilds, players]
+    () => guilds.map((g) => g.founder),
+    [guilds]
   );
   const { dn } = useWogNames(leaderboardAddresses);
 
@@ -52,10 +52,10 @@ export function LeaderboardPage(): React.ReactElement {
 
     const fetchPlayers = async () => {
       try {
-        const res = await fetch(`${API_URL}/stats`);
+        const res = await fetch(`${API_URL}/leaderboard?limit=100&sortBy=level`);
         if (res.ok) {
           const data = await res.json();
-          const playerList: PlayerEntry[] = data.players ?? [];
+          const playerList: PlayerEntry[] = Array.isArray(data.entries) ? data.entries : [];
           playerList.sort((a, b) => b.level - a.level);
           setPlayers(playerList);
         }
@@ -277,7 +277,7 @@ export function LeaderboardPage(): React.ReactElement {
                     p.level >= 50 ? "#aa44ff" : p.level >= 30 ? "#5dadec" : p.level >= 15 ? "#54f28b" : "#9aa7cc";
                   return (
                     <div
-                      key={p.walletAddress}
+                      key={p.entityId}
                       className={`flex items-center border-b border-[#1e2842] px-4 py-3 last:border-b-0 transition hover:bg-[#1a2240]/50 ${
                         isTop3 ? "bg-[#1a2240]/30" : ""
                       }`}
@@ -300,15 +300,12 @@ export function LeaderboardPage(): React.ReactElement {
                             </span>
                           )}
                         </div>
-                        <div className="text-[7px] text-[#3a4260] truncate">
-                          {dn(p.walletAddress)}
-                        </div>
                       </div>
                       <span className="w-20 text-right text-[9px] text-[#d6deff] capitalize">
-                        {p.race}
+                        {p.raceId ?? "--"}
                       </span>
                       <span className="w-20 text-right text-[9px] text-[#d6deff] capitalize">
-                        {p.class}
+                        {p.classId ?? "--"}
                       </span>
                       <span className="w-20 text-right text-[8px] text-[#9aa7cc] truncate">
                         {p.zoneId?.replace("-", " ").replace(/\b\w/g, (l: string) => l.toUpperCase()).split(" ").slice(0, 2).join(" ")}

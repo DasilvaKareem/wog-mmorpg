@@ -308,7 +308,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
         const agentRef = await getAgentEntityRef(walletAddress);
         const deployedCharacterName = agentRef?.characterName ?? null;
-        let liveEntity: { level: number; xp: number; hp: number; maxHp: number; zoneId: string; name: string } | null = null;
+        let liveEntity: {
+          level: number;
+          xp: number;
+          hp: number;
+          maxHp: number;
+          zoneId: string;
+          name: string;
+          agentId: string | null;
+        } | null = null;
         for (const entity of getAllEntities().values()) {
           if (entity.type !== "player") continue;
           const ew = entity.walletAddress?.toLowerCase();
@@ -320,6 +328,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             maxHp: entity.maxHp,
             zoneId: entity.region ?? "unknown",
             name: entity.name,
+            agentId: entity.agentId != null ? String(entity.agentId) : null,
           };
           break;
         }
@@ -368,7 +377,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                 return {
                   tokenId: nft.id.toString(),
                   characterTokenId: nft.id.toString(),
-                  agentId: null,
+                  agentId: liveEntity.agentId,
                   name: String(nft.metadata.name ?? nft.id.toString()),
                   description: String(nft.metadata.description ?? ""),
                   properties: {
