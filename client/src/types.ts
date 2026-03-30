@@ -112,7 +112,7 @@ export interface RaceInfo {
 
 export interface CharacterCreateResponse {
   ok: boolean;
-  txHash: string;
+  txHash?: string;
   character: {
     name: string;
     description: string;
@@ -121,6 +121,25 @@ export interface CharacterCreateResponse {
     level: number;
     xp: number;
     stats: CharacterStats;
+  };
+  bootstrap?: {
+    status:
+      | "queued"
+      | "pending_mint"
+      | "mint_confirmed"
+      | "identity_pending"
+      | "completed"
+      | "failed_retryable"
+      | "failed_permanent";
+    sourceOfTruth?: string;
+    chainRegistrationStatus?:
+      | "unregistered"
+      | "pending_mint"
+      | "mint_confirmed"
+      | "identity_pending"
+      | "registered"
+      | "failed_retryable"
+      | "failed_permanent";
   };
 }
 

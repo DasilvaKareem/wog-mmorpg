@@ -3055,24 +3055,41 @@ function CharacterSwitcher({
           const lv = c.properties?.level ?? 1;
           const lc = levelColor(lv);
           const isActive = selectedCharacterTokenId === c.tokenId || (!selectedCharacterTokenId && characters[0]?.tokenId === c.tokenId);
+          const pendingStatus =
+            c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+              ? "Minting..."
+              : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                ? "Registering..."
+                : null;
+          const isPending = pendingStatus != null;
           return (
             <button
               key={c.tokenId}
               onClick={() => onSelect(c.tokenId)}
+              disabled={isPending}
               className={`text-left px-3 py-2 border-2 transition ${
                 isActive
                   ? "border-[#ffcc00]/60 bg-[#2a2210]"
-                  : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
+                  : isPending
+                    ? "border-[#2a3450] bg-[#10162a] opacity-70"
+                    : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold text-[#d6deff] truncate">{baseName}</span>
-                <span className="text-[10px] shrink-0" style={{ color: lc }}>Lv {lv}</span>
+                <span className="text-[10px] shrink-0" style={{ color: isPending ? "#7a84a8" : lc }}>
+                  {isPending ? pendingStatus : `Lv ${lv}`}
+                </span>
               </div>
               {c.properties?.race && (
                 <span className="text-[9px] capitalize text-[#7a84a8]">
                   {c.properties.race} {c.properties.class}
                 </span>
+              )}
+              {isPending && (
+                <p className="mt-1 text-[9px] uppercase tracking-wide text-[#ffcc00]">
+                  Character creation in progress
+                </p>
               )}
             </button>
           );

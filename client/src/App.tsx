@@ -123,6 +123,47 @@ function RouteFallback(): React.ReactElement {
   );
 }
 
+function WorldConnectPrompt({
+  title,
+  shortcut,
+  description,
+}: {
+  title: string;
+  shortcut?: string;
+  description: string;
+}): React.ReactElement {
+  return (
+    <div className="pointer-events-auto flex h-full w-full flex-col overflow-hidden border-2 border-[#24314d] bg-[#0a0f1a]/92 shadow-[4px_4px_0_0_#000] backdrop-blur-sm">
+      <div className="flex items-center gap-2 border-b border-[#24314d] px-3 py-2">
+        <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#ffcc00]">
+          {title}
+        </span>
+        {shortcut ? (
+          <span className="ml-auto text-[9px] font-bold text-[#556b8a]">{shortcut}</span>
+        ) : null}
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+        <p className="max-w-[20rem] text-[11px] leading-relaxed text-[#8b9abc]">
+          {description}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            window.dispatchEvent(
+              new CustomEvent(OPEN_ONBOARDING_EVENT, {
+                detail: { mode: "sign-in" satisfies OnboardingStartMode },
+              }),
+            );
+          }}
+          className="border-2 border-[#ffcc00] bg-[#2a2210] px-4 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ffcc00] shadow-[2px_2px_0_0_#000] transition hover:bg-[#3d3218]"
+        >
+          Connect Wallet
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Zone-aware PWA theming ────────────────────────────────────────────── */
 const ZONE_THEMES: Record<string, { color: string; label: string }> = {
   "village-square":   { color: "#1a1408", label: "Village Square" },
@@ -573,10 +614,9 @@ function GameWorld(): React.ReactElement {
 
   // Lock camera to connected player's agent entity
   React.useEffect(() => {
-    if (address) {
-      focusOwnedCharacter();
-    }
-  }, [address, focusOwnedCharacter]);
+    if (!address) return;
+    focusOwnedCharacter(characterProgress?.zoneId);
+  }, [address, characterProgress?.zoneId, focusOwnedCharacter]);
 
   // Track open_game once per mount
   React.useEffect(() => {
@@ -650,25 +690,34 @@ function GameWorld(): React.ReactElement {
                 className="absolute right-0 top-0 min-h-0"
                 style={{ width: `${rightTopWidth}px`, height: `${rightTopHeight}px` }}
               >
-                <WalletPanel className="pointer-events-auto h-full w-full max-w-none max-h-full" />
-                <div
-                  onPointerDown={(event) => startRightWidthResize(event, rightTopWidth, setRightTopWidthRaw)}
-                  className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize inventory panel"
-                />
-                <div
-                  onPointerDown={(event) => startTopHeightResize(
-                    event,
-                    rightTopHeight,
-                    setRightTopHeightRaw,
-                    showChat ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightBottomHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
-                  )}
-                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize inventory panel"
-                />
+                {address ? (
+                  <>
+                    <WalletPanel className="pointer-events-auto h-full w-full max-w-none max-h-full" />
+                    <div
+                      onPointerDown={(event) => startRightWidthResize(event, rightTopWidth, setRightTopWidthRaw)}
+                      className="pointer-events-auto absolute -left-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                      title="Resize inventory panel"
+                    />
+                    <div
+                      onPointerDown={(event) => startTopHeightResize(
+                        event,
+                        rightTopHeight,
+                        setRightTopHeightRaw,
+                        showChat ? Math.max(MIN_DOCK_PANEL_HEIGHT, rightAvailableHeight - rightBottomHeight - DOCK_PANEL_GAP) : rightAvailableHeight,
+                      )}
+                      className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                      title="Resize inventory panel"
+                    />
+                  </>
+                ) : (
+                  <WorldConnectPrompt
+                    title="Summon Champion"
+                    description="Connect your wallet to open your champion panel, inventory, and account controls."
+                  />
+                )}
               </div>
             )}
-            {showChat && (
+            {showChat && (address || !showWallet) && (
               <div
                 className="absolute bottom-0 right-0 min-h-0"
                 style={{ width: `${rightBottomWidth}px`, height: `${rightBottomHeight}px` }}

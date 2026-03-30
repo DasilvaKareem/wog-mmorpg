@@ -45,25 +45,46 @@ function CharacterSection({
 }): React.ReactElement {
   const [switching, setSwitching] = React.useState(false);
   const [showSwapMenu, setShowSwapMenu] = React.useState(false);
+  const liveCharacterTokenId =
+    characterProgress?.source === "live"
+      ? characterProgress.characterTokenId ??
+        characters.find((c) => {
+          const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
+          const liveBaseName = characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim();
+          return baseName === liveBaseName || c.name === characterProgress.name;
+        })?.tokenId ??
+        null
+      : null;
+  const liveCharacterBaseName =
+    characterProgress?.source === "live"
+      ? characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim()
+      : deployedCharacterName;
 
   const activeCharacter = React.useMemo(() => {
+    if (liveCharacterTokenId) {
+      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
+      if (liveCharacter) return liveCharacter;
+    }
+
     if (selectedCharacterTokenId) {
       const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
       if (selected) return selected;
     }
 
-    if (deployedCharacterName) {
+    if (liveCharacterBaseName) {
       const deployed = characters.find((c) => {
         const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-        return baseName === deployedCharacterName || c.name === deployedCharacterName;
+        return baseName === liveCharacterBaseName || c.name === liveCharacterBaseName;
       });
       if (deployed) return deployed;
     }
 
     return characters[0] ?? null;
-  }, [characters, deployedCharacterName, selectedCharacterTokenId]);
+  }, [characters, liveCharacterBaseName, liveCharacterTokenId, selectedCharacterTokenId]);
 
-  const activeCharacterName = activeCharacter?.name ?? deployedCharacterName ?? "No character";
+  const selectionValue = liveCharacterTokenId ?? selectedCharacterTokenId ?? "";
+
+  const activeCharacterName = activeCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
   const activeCharacterLevel = characterProgress?.level ?? activeCharacter?.properties.level ?? null;
   const activeCharacterRace = activeCharacter?.properties.race ?? null;
   const activeCharacterClass = activeCharacter?.properties.class ?? null;
@@ -115,6 +136,9 @@ function CharacterSection({
       // Focus camera on the new character's zone + lock to them
       if (res.ok && data.zoneId) {
         gameBus.emit("switchZone", { zoneId: data.zoneId });
+      }
+      if (res.ok) {
+        gameBus.emit("charactersChanged", { walletAddress });
       }
       gameBus.emit("lockToPlayer", { walletAddress });
     } catch {
@@ -184,7 +208,7 @@ function CharacterSection({
           {showSwapMenu && characters.length > 1 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
-              value={selectedCharacterTokenId ?? ""}
+              value={selectionValue}
               disabled={switching}
               onChange={(e) => {
                 const tokenId = e.target.value || null;
@@ -202,10 +226,16 @@ function CharacterSection({
               )}
               {characters.map((c) => {
                 const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = deployedCharacterName && (baseName === deployedCharacterName || c.name === deployedCharacterName);
+                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const pendingStatus =
+                  c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+                    ? "Minting"
+                    : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                      ? "Registering"
+                      : null;
                 return (
                   <option key={c.tokenId} value={c.tokenId}>
-                    {isDeployed ? "[LIVE] " : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
+                    {isDeployed ? "[LIVE] " : ""}{pendingStatus ? `[${pendingStatus}] ` : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
                   </option>
                 );
               })}
@@ -245,7 +275,7 @@ function CharacterSection({
           {showSwapMenu && characters.length > 1 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
-              value={selectedCharacterTokenId ?? ""}
+              value={selectionValue}
               disabled={switching}
               onChange={(e) => {
                 const tokenId = e.target.value || null;
@@ -263,10 +293,16 @@ function CharacterSection({
               )}
               {characters.map((c) => {
                 const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = deployedCharacterName && (baseName === deployedCharacterName || c.name === deployedCharacterName);
+                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const pendingStatus =
+                  c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
+                    ? "Minting"
+                    : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
+                      ? "Registering"
+                      : null;
                 return (
                   <option key={c.tokenId} value={c.tokenId}>
-                    {isDeployed ? "[LIVE] " : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
+                    {isDeployed ? "[LIVE] " : ""}{pendingStatus ? `[${pendingStatus}] ` : ""}{c.name} — L{c.properties.level} {c.properties.race} {c.properties.class}
                   </option>
                 );
               })}

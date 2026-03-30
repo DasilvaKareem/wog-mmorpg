@@ -73,6 +73,7 @@ interface AgentStatusData {
     hp: number;
     maxHp: number;
   } | null;
+  entitySource?: "live" | "saved" | null;
   currentActivity: string | null;
   currentScript: { type: string; reason?: string } | null;
   telemetry: {
@@ -400,10 +401,20 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               );
             });
           }
-        } else if (res.status === 401) {
+          return;
+        }
+
+        if (!cancelled) {
+          setStatus(null);
+        }
+        if (res.status === 401) {
           clearCachedToken();
         }
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setStatus(null);
+        }
+      }
     }
 
     pollStatus();
@@ -495,6 +506,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         if (data.custodialWallet) {
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
+        gameBus.emit("charactersChanged", { walletAddress });
         trackAgentTaskCompleted({ walletAddress, entityId: data.entityId, zoneId: data.zoneId });
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
         if (data.zoneId) {
@@ -522,6 +534,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ walletAddress }),
       });
+      gameBus.emit("charactersChanged", { walletAddress });
       addSystemMsg("Agent stopped.");
     } catch {}
   }
@@ -713,7 +726,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   // ── Derived state ───────────────────────────────────────────────────────
 
   const isRunning = status?.running ?? false;
-  const isDeployed = isRunning || (status?.config?.enabled === true && status?.entityId != null);
+  const hasLiveEntity = status?.entitySource === "live" && status?.entityId != null;
+  const isDeployed = isRunning || hasLiveEntity;
   const entityName = status?.entity?.name ?? "Agent";
   const focus = status?.config?.focus ?? "idle";
   const focusColor = FOCUS_COLORS[focus] ?? "#8b9abc";

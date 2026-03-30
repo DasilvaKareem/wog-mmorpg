@@ -71,6 +71,46 @@ function compareCharacterEntries(left: CharacterListEntry, right: CharacterListE
   return 0;
 }
 
+function buildCharacterEntryFromSaved(
+  saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
+  bootstrapStatus: CharacterListEntry["bootstrapStatus"],
+  tokenId: string,
+  liveEntity?: {
+    level: number;
+    xp: number;
+    hp: number;
+    maxHp: number;
+    zoneId: string;
+    name: string;
+    agentId: string | null;
+    characterTokenId: string | null;
+  } | null
+): CharacterListEntry {
+  const name = saved.name;
+  const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
+  const fullName = classDef ? `${name} the ${classDef.name}` : name;
+  const liveMatches = liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name));
+  const level = liveMatches ? liveEntity.level : saved.level;
+  const xp = liveMatches ? liveEntity.xp : saved.xp;
+
+  return {
+    tokenId,
+    characterTokenId: saved.characterTokenId ?? null,
+    agentId: liveMatches ? liveEntity.agentId : saved.agentId ?? null,
+    chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
+    bootstrapStatus,
+    name: fullName,
+    description: `Level ${level} ${saved.raceId} ${saved.classId}`,
+    properties: {
+      race: saved.raceId,
+      class: saved.classId,
+      level,
+      xp,
+      stats: computeStatsAtLevel(saved.raceId, saved.classId, level),
+    },
+  };
+}
+
 function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
   const deduped = new Map<string, CharacterListEntry>();
 
@@ -453,7 +493,6 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         const normalizedWallet = walletAddress.toLowerCase();
         const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
         const agentRef = await getAgentEntityRef(walletAddress);
-        const deployedCharacterName = agentRef?.characterName ?? null;
         let liveEntity: {
           level: number;
           xp: number;
@@ -464,22 +503,27 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           agentId: string | null;
           characterTokenId: string | null;
         } | null = null;
-        for (const entity of getAllEntities().values()) {
-          if (entity.type !== "player") continue;
-          const ew = entity.walletAddress?.toLowerCase();
-          if (ew !== normalizedWallet && ew !== custodialWallet) continue;
-          liveEntity = {
-            level: entity.level ?? 1,
-            xp: entity.xp ?? 0,
-            hp: entity.hp,
-            maxHp: entity.maxHp,
-            zoneId: entity.region ?? "unknown",
-            name: entity.name,
-            agentId: entity.agentId != null ? String(entity.agentId) : null,
-            characterTokenId: entity.characterTokenId != null ? entity.characterTokenId.toString() : null,
-          };
-          break;
+        if (agentRef?.entityId) {
+          const entity = getAllEntities().get(agentRef.entityId);
+          if (entity?.type === "player") {
+            const ew = entity.walletAddress?.toLowerCase();
+            if (ew === normalizedWallet || ew === custodialWallet) {
+              liveEntity = {
+                level: entity.level ?? 1,
+                xp: entity.xp ?? 0,
+                hp: entity.hp,
+                maxHp: entity.maxHp,
+                zoneId: entity.region ?? agentRef.zoneId ?? "unknown",
+                name: entity.name,
+                agentId: entity.agentId != null ? String(entity.agentId) : agentRef.agentId ?? null,
+                characterTokenId: entity.characterTokenId != null ? entity.characterTokenId.toString() : agentRef.characterTokenId ?? null,
+              };
+            }
+          }
         }
+        const deployedCharacterName = liveEntity
+          ? liveEntity.name.replace(/\s+the\s+\w+$/i, "").trim()
+          : null;
 
         // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)
         // Query both the owner wallet and the custodial wallet (characters are minted to custodial)
@@ -588,11 +632,49 @@ export function registerCharacterRoutes(server: FastifyInstance) {
             })
           );
 
+          const savedCharacters = [
+            ...(await loadAllCharactersForWallet(walletAddress)),
+            ...(custodialWallet && custodialWallet !== normalizedWallet
+              ? await loadAllCharactersForWallet(custodialWallet)
+              : []),
+          ];
+          const seenSavedKeys = new Set<string>();
+          const mergedSavedCharacters = savedCharacters.filter((saved) => {
+            const dedupeKey = normalizeCharacterKey(saved.name, saved.classId);
+            if (seenSavedKeys.has(dedupeKey)) return false;
+            seenSavedKeys.add(dedupeKey);
+            return true;
+          });
+
+          const existingKeys = new Set(
+            (characters as CharacterListEntry[]).map((character) =>
+              normalizeCharacterKey(character.name, character.properties.class)
+            )
+          );
+
+          const pendingSavedCharacters = await Promise.all(
+            mergedSavedCharacters
+              .filter((saved) => !existingKeys.has(normalizeCharacterKey(saved.name, saved.classId)))
+              .map(async (saved, index) => {
+                const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, saved.name);
+                const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, saved.name);
+                return buildCharacterEntryFromSaved(
+                  saved,
+                  bootstrapJob?.status ?? null,
+                  `pending-${saved.characterTokenId ?? normalizeCharacterKey(saved.name, saved.classId)}-${index}`,
+                  liveEntity
+                );
+              })
+          );
+
           return {
             walletAddress,
             liveEntity,
             deployedCharacterName,
-            characters: dedupeCharacterEntries(characters as CharacterListEntry[]),
+            characters: dedupeCharacterEntries([
+              ...(characters as CharacterListEntry[]),
+              ...pendingSavedCharacters,
+            ]),
           };
         }
 
@@ -608,48 +690,9 @@ export function registerCharacterRoutes(server: FastifyInstance) {
 
         const characters = await Promise.all(savedChars.map(async (saved, i) => {
           const name = saved.name;
-          const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
-          const fullName = classDef ? `${name} the ${classDef.name}` : name;
-          const stats = computeStatsAtLevel(saved.raceId, saved.classId, saved.level);
           const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, name);
           const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, name);
-
-          // Overlay live entity data if available
-          if (liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name))) {
-            return {
-              tokenId: `redis-${i}`,
-              characterTokenId: saved.characterTokenId ?? null,
-              agentId: saved.agentId ?? null,
-              chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
-              bootstrapStatus: bootstrapJob?.status ?? null,
-              name: fullName,
-              description: `Level ${liveEntity.level} ${saved.raceId} ${saved.classId}`,
-              properties: {
-                race: saved.raceId,
-                class: saved.classId,
-                level: liveEntity.level,
-                xp: liveEntity.xp,
-                stats: computeStatsAtLevel(saved.raceId, saved.classId, liveEntity.level),
-              },
-            };
-          }
-
-          return {
-            tokenId: `redis-${i}`,
-            characterTokenId: saved.characterTokenId ?? null,
-            agentId: saved.agentId ?? null,
-            chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
-            bootstrapStatus: bootstrapJob?.status ?? null,
-            name: fullName,
-            description: `Level ${saved.level} ${saved.raceId} ${saved.classId}`,
-            properties: {
-              race: saved.raceId,
-              class: saved.classId,
-              level: saved.level,
-              xp: saved.xp,
-              stats,
-            },
-          };
+          return buildCharacterEntryFromSaved(saved, bootstrapJob?.status ?? null, `redis-${i}`, liveEntity);
         }));
 
         return {

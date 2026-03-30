@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { API_URL } from "../config.js";
 
 export interface LeaderboardEntry {
@@ -27,6 +27,7 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const failureCountRef = useRef(0);
 
   const fetchLeaderboard = useCallback(async () => {
     try {
@@ -35,22 +36,44 @@ export function useLeaderboard(options: UseLeaderboardOptions = {}) {
       const data = await res.json();
       setEntries(data.entries);
       setError(null);
+      failureCountRef.current = 0;
     } catch (err) {
+      setEntries([]);
       setError(err instanceof Error ? err : new Error(String(err)));
+      failureCountRef.current += 1;
     } finally {
       setLoading(false);
     }
   }, [limit, sortBy]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchLeaderboard();
-  }, [fetchLeaderboard]);
+    let cancelled = false;
+    let timeoutId: number | null = null;
 
-  useEffect(() => {
-    const interval = setInterval(fetchLeaderboard, pollInterval);
-    return () => clearInterval(interval);
-  }, [pollInterval, fetchLeaderboard]);
+    async function poll() {
+      if (cancelled) return;
+      await fetchLeaderboard();
+      if (cancelled) return;
+
+      const failureCount = failureCountRef.current;
+      const nextDelay =
+        failureCount === 0
+          ? pollInterval
+          : Math.min(30000, pollInterval * 2 ** Math.min(failureCount, 3));
+
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, nextDelay);
+    }
+
+    setLoading(true);
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+  }, [fetchLeaderboard, pollInterval]);
 
   return { entries, loading, error, refresh: fetchLeaderboard };
 }

@@ -60,11 +60,7 @@ function PlayerRow({ player, zoneId }: { player: PlayerInfo; zoneId: string }): 
 
   function handleClick() {
     if (!player.walletAddress) return;
-    // Switch to player's zone first, then lock camera after zone loads
-    gameBus.emit("switchZone", { zoneId });
-    setTimeout(() => {
-      gameBus.emit("lockToPlayer", { walletAddress: player.walletAddress! });
-    }, 300);
+    gameBus.emit("followPlayer", { zoneId, walletAddress: player.walletAddress });
   }
 
   return (
@@ -190,8 +186,8 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
   const [collapsed, setCollapsed] = React.useState(false);
   const [sortBy, setSortBy] = React.useState<SortBy>("power");
 
-  const { lobbies, gameTime, loading: lobbyLoading } = useZonePlayers({ pollInterval: 3000 });
-  const { entries, loading: lbLoading } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
+  const { lobbies, gameTime, loading: lobbyLoading, error: lobbyError } = useZonePlayers({ pollInterval: 3000 });
+  const { entries, loading: lbLoading, error: leaderboardError } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
 
   const totalPlayers = lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0);
 
@@ -246,7 +242,9 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
                   {String(gameTime.hour).padStart(2, "0")}:{String(gameTime.minute).padStart(2, "0")}
                 </span>
               )}
-              <Badge variant="success">{totalPlayers} online</Badge>
+              <Badge variant={lobbyError ? "danger" : "success"}>
+                {lobbyError ? "offline" : `${totalPlayers} online`}
+              </Badge>
             </div>
           ) : (
             <div className="flex gap-1">
@@ -275,7 +273,10 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
           {lobbyLoading && lobbies.length === 0 && (
             <p className="text-[8px] text-[#9aa7cc]">Loading lobbies...</p>
           )}
-          {!lobbyLoading && lobbies.length === 0 && (
+          {!lobbyLoading && lobbyError && (
+            <p className="text-[8px] text-[#ff8f8f]">Shard unavailable. Live lobby data is offline.</p>
+          )}
+          {!lobbyLoading && !lobbyError && lobbies.length === 0 && (
             <p className="text-[8px] text-[#9aa7cc]">No zones found.</p>
           )}
           {lobbies.map((lobby) => (
@@ -297,7 +298,10 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
           {lbLoading && entries.length === 0 && (
             <p className="text-[8px] text-[#9aa7cc] py-4 text-center">Loading...</p>
           )}
-          {!lbLoading && entries.length === 0 && (
+          {!lbLoading && leaderboardError && entries.length === 0 && (
+            <p className="text-[8px] text-[#ff8f8f] py-4 text-center">Shard unavailable.</p>
+          )}
+          {!lbLoading && !leaderboardError && entries.length === 0 && (
             <p className="text-[8px] text-[#9aa7cc] py-4 text-center">No players yet.</p>
           )}
           {entries.map((entry) => (

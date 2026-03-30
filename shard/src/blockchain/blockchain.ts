@@ -486,7 +486,17 @@ export async function getGoldBalance(address: string): Promise<string> {
         return result.displayValue;
       } catch (err: any) {
         const msg = String(err?.message ?? "");
-        const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
+        const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
+        const isTransient =
+          msg.includes("zero data") ||
+          msg.includes("AbiDecoding") ||
+          msg.includes("0x") ||
+          msg.includes("fetch failed") ||
+          msg.includes("UND_ERR_SOCKET") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("ETIMEDOUT") ||
+          msg.includes("socket hang up") ||
+          code === "UND_ERR_SOCKET";
         if (isTransient && attempt < 3) {
           await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
           continue;
@@ -510,7 +520,10 @@ export async function getGoldBalance(address: string): Promise<string> {
   })();
 
   inflightGold.set(cacheKey, promise);
-  promise.finally(() => inflightGold.delete(cacheKey));
+  void promise.then(
+    () => inflightGold.delete(cacheKey),
+    () => inflightGold.delete(cacheKey)
+  );
   return promise;
 }
 
@@ -557,27 +570,53 @@ export async function getItemBalance(
   if (inflight) return inflight;
 
   const promise = (async (): Promise<bigint> => {
-    try {
-      const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
-      const balance = await balanceOfERC1155({
-        contract: itemsContract,
-        owner: address,
-        tokenId: chainTokenId,
-      });
-      itemCache.set(cacheKey, balance);
-      return balance;
-    } catch (err: any) {
-      const msg = String(err?.message ?? "");
-      // SKALE RPC sometimes returns 0x (empty data) — treat as 0
-      if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
-        return 0n;
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
+        const balance = await balanceOfERC1155({
+          contract: itemsContract,
+          owner: address,
+          tokenId: chainTokenId,
+        });
+        itemCache.set(cacheKey, balance);
+        return balance;
+      } catch (err: any) {
+        const msg = String(err?.message ?? "");
+        const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
+        const isTransient =
+          msg.includes("zero data") ||
+          msg.includes("AbiDecoding") ||
+          msg.includes("0x") ||
+          msg.includes("fetch failed") ||
+          msg.includes("UND_ERR_SOCKET") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("ETIMEDOUT") ||
+          msg.includes("socket hang up") ||
+          code === "UND_ERR_SOCKET";
+
+        if (isTransient && attempt < 3) {
+          await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+          continue;
+        }
+        if (isTransient) {
+          const stale = itemCache.getStale(cacheKey);
+          if (stale !== undefined) {
+            itemCache.set(cacheKey, stale);
+            return stale;
+          }
+          return 0n;
+        }
+        throw err;
       }
-      throw err;
     }
+    return itemCache.getStale(cacheKey) ?? 0n;
   })();
 
   inflightItem.set(cacheKey, promise);
-  promise.finally(() => inflightItem.delete(cacheKey));
+  void promise.then(
+    () => inflightItem.delete(cacheKey),
+    () => inflightItem.delete(cacheKey)
+  );
   return promise;
 }
 

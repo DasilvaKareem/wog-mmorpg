@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { API_URL } from "../config.js";
 import type { GameTime } from "@/types";
 
@@ -35,6 +35,7 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
   const [gameTime, setGameTime] = useState<GameTime | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const failureCountRef = useRef(0);
 
   const fetchZonePlayers = useCallback(async () => {
     try {
@@ -101,24 +102,45 @@ export function useZonePlayers(options: UseZonePlayersOptions = {}) {
 
       setLobbies(validLobbies);
       setError(null);
+      failureCountRef.current = 0;
     } catch (err) {
+      setLobbies([]);
+      setGameTime(null);
       setError(err instanceof Error ? err : new Error(String(err)));
+      failureCountRef.current += 1;
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Initial fetch
   useEffect(() => {
-    setLoading(true);
-    fetchZonePlayers();
-  }, [fetchZonePlayers]);
+    let cancelled = false;
+    let timeoutId: number | null = null;
 
-  // Poll for updates
-  useEffect(() => {
-    const interval = setInterval(fetchZonePlayers, pollInterval);
-    return () => clearInterval(interval);
-  }, [pollInterval, fetchZonePlayers]);
+    async function poll() {
+      if (cancelled) return;
+      await fetchZonePlayers();
+      if (cancelled) return;
+
+      const failureCount = failureCountRef.current;
+      const nextDelay =
+        failureCount === 0
+          ? pollInterval
+          : Math.min(30000, pollInterval * 2 ** Math.min(failureCount, 3));
+
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, nextDelay);
+    }
+
+    setLoading(true);
+    void poll();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) window.clearTimeout(timeoutId);
+    };
+  }, [fetchZonePlayers, pollInterval]);
 
   return { lobbies, gameTime, loading, error, refresh: fetchZonePlayers };
 }

@@ -25,6 +25,7 @@ export interface AgentStatus {
     hp: number;
     maxHp: number;
   } | null;
+  entitySource?: "live" | "saved" | null;
 }
 
 export function useAgentStatus(
@@ -32,11 +33,16 @@ export function useAgentStatus(
   token: string | null | undefined
 ): AgentStatus | null {
   const [status, setStatus] = React.useState<AgentStatus | null>(null);
+  const failureCountRef = React.useRef(0);
 
   React.useEffect(() => {
-    if (!walletAddress || !token) return;
+    if (!walletAddress || !token) {
+      setStatus(null);
+      return;
+    }
 
     let cancelled = false;
+    let timeoutId: number | null = null;
 
     async function poll() {
       if (cancelled || !walletAddress || !token) return;
@@ -46,15 +52,34 @@ export function useAgentStatus(
         });
         if (res.ok && !cancelled) {
           setStatus(await res.json());
+          failureCountRef.current = 0;
+        } else if (!cancelled) {
+          setStatus(null);
+          failureCountRef.current += 1;
         }
-      } catch {}
+      } catch {
+        if (!cancelled) {
+          setStatus(null);
+          failureCountRef.current += 1;
+        }
+      }
+
+      if (cancelled) return;
+      const failureCount = failureCountRef.current;
+      const nextDelay =
+        failureCount === 0
+          ? 3000
+          : Math.min(30000, 3000 * 2 ** Math.min(failureCount, 3));
+
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, nextDelay);
     }
 
-    poll();
-    const id = setInterval(poll, 3000);
+    void poll();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timeoutId != null) window.clearTimeout(timeoutId);
     };
   }, [walletAddress, token]);
 

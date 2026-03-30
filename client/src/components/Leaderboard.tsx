@@ -68,7 +68,7 @@ function LeaderboardRow({ entry }: { entry: LeaderboardEntry }): React.ReactElem
 export function Leaderboard({ className }: LeaderboardProps): React.ReactElement {
   const [sortBy, setSortBy] = React.useState<SortBy>("power");
   const [collapsed, setCollapsed] = React.useState(false);
-  const { entries, loading } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
+  const { entries, loading, error } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
 
   return (
     <Card className={cn("pointer-events-auto", className)}>
@@ -119,7 +119,11 @@ export function Leaderboard({ className }: LeaderboardProps): React.ReactElement
             <p className="text-[8px] text-[#9aa7cc] py-4 text-center">Loading...</p>
           )}
 
-          {!loading && entries.length === 0 && (
+          {!loading && error && entries.length === 0 && (
+            <p className="text-[8px] text-[#ff8f8f] py-4 text-center">Shard unavailable.</p>
+          )}
+
+          {!loading && !error && entries.length === 0 && (
             <p className="text-[8px] text-[#9aa7cc] py-4 text-center">No players yet.</p>
           )}
 

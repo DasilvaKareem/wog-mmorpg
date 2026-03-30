@@ -181,6 +181,7 @@ export async function fetchCharactersWithLive(
         hp: le.hp,
         maxHp: le.maxHp,
         zoneId: le.zoneId,
+        characterTokenId: le.characterTokenId ?? null,
         source: "live",
       };
     }
@@ -207,6 +208,7 @@ export interface WalletCharacterProgress {
   hp: number;
   maxHp: number;
   zoneId?: string;
+  characterTokenId?: string | null;
   source: "live" | "nft";
 }
 

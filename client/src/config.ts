@@ -1,5 +1,6 @@
-/** API URL - use environment variable, or empty string for local dev (Vite proxy) */
-export const API_URL = import.meta.env.VITE_API_URL || "";
+/** API URL - use env when provided, otherwise hit the local shard directly in dev. */
+export const API_URL =
+  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:3000" : "");
 
 /** Asset CDN base URL — Cloudflare R2 in prod, local fallback in dev */
 export const ASSET_BASE_URL = import.meta.env.VITE_ASSET_BASE_URL || "";

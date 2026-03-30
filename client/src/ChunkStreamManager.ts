@@ -51,6 +51,7 @@ export class ChunkStreamManager {
   /** Last camera chunk coord (used to detect movement across chunk boundaries) */
   private lastCameraCx = -9999;
   private lastCameraCz = -9999;
+  private lastRecheckAt = 0;
 
   constructor(worldLayout: WorldLayoutData, tileSize: number, streamRadius = STREAM_RADIUS) {
     this.tileSize = tileSize;
@@ -89,11 +90,17 @@ export class ChunkStreamManager {
     const chunkWorldSize = CHUNK_SIZE * this.tileSize;
     const cameraCx = Math.floor(cameraWorldX / chunkWorldSize);
     const cameraCz = Math.floor(cameraWorldZ / chunkWorldSize);
+    const now = Date.now();
 
     // Only re-evaluate if camera moved to a different chunk
-    if (cameraCx === this.lastCameraCx && cameraCz === this.lastCameraCz) return;
+    if (
+      cameraCx === this.lastCameraCx &&
+      cameraCz === this.lastCameraCz &&
+      now - this.lastRecheckAt < 1500
+    ) return;
     this.lastCameraCx = cameraCx;
     this.lastCameraCz = cameraCz;
+    this.lastRecheckAt = now;
 
     // Collect all needed chunk keys across nearby zones only
     const needed = new Set<string>();
