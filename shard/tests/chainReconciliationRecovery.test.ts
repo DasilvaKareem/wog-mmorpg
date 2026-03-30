@@ -1,38 +1,19 @@
 import "dotenv/config";
 
-process.env.DEV ??= "true";
-process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
-process.env.SERVER_PRIVATE_KEY ??= "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const HARDHAT_ACCOUNT_0_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+process.env.DEV = "true";
+process.env.SHARD_CHAIN_ENV = "local";
+process.env.REDIS_URL = "redis://127.0.0.1:6379";
+process.env.HARDHAT_RPC_URL = "http://127.0.0.1:8545";
+process.env.SKALE_BASE_RPC_URL = "http://127.0.0.1:8545";
+process.env.SKALE_BASE_CHAIN_ID = "31337";
+process.env.SERVER_PRIVATE_KEY = HARDHAT_ACCOUNT_0_PRIVATE_KEY;
 
 await import("../src/config/devLocalContracts.ts");
 
 import Redis from "ioredis";
 import { ethers } from "ethers";
-import {
-  createChainOperation,
-  getChainOperation,
-  updateChainOperation,
-} from "../src/blockchain/chainOperationStore.js";
-import {
-  processPendingWalletRegistrations,
-} from "../src/blockchain/wallet.js";
-import {
-  processPendingNameOperations,
-  reverseLookupOnChain,
-} from "../src/blockchain/nameServiceChain.js";
-import {
-  getAllPlotDefs,
-  getOwnedPlot,
-  getPlotById,
-  initializePlotsFromRedis,
-  processPendingPlotOperations,
-  releasePlot,
-} from "../src/farming/plotSystem.js";
-import {
-  getReputationOnChain,
-  processPendingReputationOperations,
-} from "../src/economy/reputationChain.js";
-import { mintCharacterWithIdentity } from "../src/blockchain/blockchain.js";
 
 const REDIS_URL = process.env.REDIS_URL;
 
@@ -132,6 +113,32 @@ async function writePlotRedis(plotId: string, zoneId: string, wallet: string, ow
 }
 
 async function main() {
+  const {
+    createChainOperation,
+    getChainOperation,
+    updateChainOperation,
+  } = await import("../src/blockchain/chainOperationStore.js");
+  const {
+    processPendingWalletRegistrations,
+  } = await import("../src/blockchain/wallet.js");
+  const {
+    processPendingNameOperations,
+    reverseLookupOnChain,
+  } = await import("../src/blockchain/nameServiceChain.js");
+  const {
+    getAllPlotDefs,
+    getOwnedPlot,
+    getPlotById,
+    initializePlotsFromRedis,
+    processPendingPlotOperations,
+    releasePlot,
+  } = await import("../src/farming/plotSystem.js");
+  const {
+    getReputationOnChain,
+    processPendingReputationOperations,
+  } = await import("../src/economy/reputationChain.js");
+  const { mintCharacterWithIdentity } = await import("../src/blockchain/blockchain.js");
+
   console.log("\n── Chain Reconciliation Recovery ──");
 
   await initializePlotsFromRedis();
@@ -351,7 +358,7 @@ async function main() {
     description: "Recovery reputation test",
     properties: { race: "human", class: "warrior", level: 1, xp: 0 },
   });
-  requireOk(Boolean(minted.identity?.agentId), "expected minted identity agentId");
+  requireOk(minted.identity?.agentId != null, "expected minted identity agentId");
   const agentId = minted.identity!.agentId!.toString();
 
   const repSuccessOp = await createChainOperation("reputation-feedback", agentId, {

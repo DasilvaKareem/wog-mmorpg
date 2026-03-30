@@ -18,7 +18,7 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteSigner, biteWallet } from "./biteChain.js";
-import { isTransientRpcSendError, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
+import { bumpServerNonceFloor, isLocalServerNonceMode, isTransientRpcSendError, queueAccountTransaction, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, resetServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
@@ -263,8 +263,10 @@ export function getTxStats(): TxStats & { uptime: string; txPerMinute: string } 
 
 const MAX_RETRIES = 3;
 
-async function queueTransaction<T>(label: string, fn: () => Promise<T>): Promise<T> {
-  return queueServerWalletTransaction(label, fn);
+async function queueTransaction<T>(account: Account, label: string, fn: () => Promise<T>): Promise<T> {
+  return isServerSignerAccount(account)
+    ? queueServerWalletTransaction(label, fn)
+    : queueAccountTransaction(account.address, label, fn);
 }
 
 function isServerSignerAccount(account: Account): boolean {
@@ -330,7 +332,7 @@ async function ensureItemTokenIdExists(targetChainTokenId: bigint): Promise<void
         );
       }
 
-      const receipt = await queueTransaction(`item-seed:${item.tokenId.toString()}:${nextId.toString()}`, async () => {
+      const receipt = await queueTransaction(serverAccount, `item-seed:${item.tokenId.toString()}:${nextId.toString()}`, async () => {
         const nftMetadata = {
           name: item.name,
           description: item.description,
@@ -410,11 +412,11 @@ async function sendTransactionWithManagedGas(
   transaction: any,
   account: Account
 ): Promise<Awaited<ReturnType<typeof sendTransaction>>> {
-  const managedNonce = isServerSignerAccount(account)
-    ? await reserveServerNonce()
-    : null;
   let lastError: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const managedNonce = isServerSignerAccount(account)
+      ? await reserveServerNonce()
+      : null;
     try {
       const gasPrice = await resolveManagedGasPrice();
       const tx = {
@@ -428,6 +430,16 @@ async function sendTransactionWithManagedGas(
       return await sendTransaction({ transaction: tx, account });
     } catch (err: any) {
       lastError = err;
+      if (managedNonce != null) {
+        err.attemptedNonce = managedNonce;
+        if (String(err?.message ?? err ?? "").toLowerCase().includes("nonce")) {
+          if (isLocalServerNonceMode()) {
+            resetServerNonce();
+          } else {
+            bumpServerNonceFloor(managedNonce + 1);
+          }
+        }
+      }
       if (!isTransientRpcSendError(err) || attempt >= MAX_RETRIES) {
         throw err;
       }
@@ -1359,7 +1371,7 @@ registerChainOperationProcessor("sfuel-distribute", async (record: ChainOperatio
       chain: skaleBase,
       client: thirdwebClient,
     });
-    const receipt = await queueTransaction(`sfuel-distribute:${payload.toAddress.toLowerCase()}`, async () =>
+    const receipt = await queueTransaction(serverAccount, `sfuel-distribute:${payload.toAddress.toLowerCase()}`, async () =>
       sendTransactionWithManagedGas(tx, serverAccount)
     );
     txStats.sfuelDistributions++;
@@ -1372,7 +1384,7 @@ registerChainOperationProcessor("gold-mint", async (record: ChainOperationRecord
   const payload = JSON.parse(record.payload) as { toAddress: string; amount: string };
   return traceTx("gold-mint", "mintGold", { to: payload.toAddress, amount: payload.amount }, "skale", async () => {
     const tx = mintERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
-    const receipt = await queueTransaction(`gold-mint:${payload.toAddress.toLowerCase()}:${payload.amount}`, async () =>
+    const receipt = await queueTransaction(serverAccount, `gold-mint:${payload.toAddress.toLowerCase()}:${payload.amount}`, async () =>
       sendTransactionWithManagedGas(tx, serverAccount)
     );
     txStats.goldMints++;
@@ -1394,12 +1406,11 @@ registerChainOperationProcessor("gold-transfer", async (record: ChainOperationRe
       }
     }
     const tx = transferERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
-    const receipt = isServerSignerAccount(signer)
-      ? await queueTransaction(
-          `gold-transfer:${payload.fromAddress.toLowerCase()}:${payload.toAddress.toLowerCase()}:${payload.amount}`,
-          async () => sendTransactionWithManagedGas(tx, signer)
-        )
-      : await sendTransactionWithManagedGas(tx, signer);
+    const receipt = await queueTransaction(
+      signer,
+      `gold-transfer:${payload.fromAddress.toLowerCase()}:${payload.toAddress.toLowerCase()}:${payload.amount}`,
+      async () => sendTransactionWithManagedGas(tx, signer)
+    );
     txStats.goldTransfers++;
     recordTx("gold-transfer", receipt.transactionHash);
     goldCache.invalidate(payload.fromAddress.toLowerCase());
@@ -1420,6 +1431,7 @@ registerChainOperationProcessor("item-mint", async (record: ChainOperationRecord
       supply: BigInt(payload.quantity),
     });
     const receipt = await queueTransaction(
+      serverAccount,
       `item-mint:${payload.toAddress.toLowerCase()}:${payload.tokenId}:${payload.quantity}`,
       async () => sendTransactionWithManagedGas(tx, serverAccount)
     );
@@ -1451,12 +1463,11 @@ registerChainOperationProcessor("item-burn", async (record: ChainOperationRecord
       id: chainTokenId,
       value: BigInt(payload.quantity),
     });
-    const receipt = signer === serverAccount
-      ? await queueTransaction(
-          `item-burn:${payload.fromAddress.toLowerCase()}:${payload.tokenId}:${payload.quantity}`,
-          async () => sendTransactionWithManagedGas(tx, signer)
-        )
-      : await sendTransactionWithManagedGas(tx, signer);
+    const receipt = await queueTransaction(
+      signer,
+      `item-burn:${payload.fromAddress.toLowerCase()}:${payload.tokenId}:${payload.quantity}`,
+      async () => sendTransactionWithManagedGas(tx, signer)
+    );
     txStats.itemBurns++;
     recordTx("item-burn", receipt.transactionHash);
     itemCache.invalidate(payload.fromAddress.toLowerCase());

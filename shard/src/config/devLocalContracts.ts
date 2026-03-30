@@ -13,6 +13,8 @@ const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const DEV_ENABLED = TRUE_VALUES.has((process.env.DEV ?? "").trim().toLowerCase());
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const SHARD_CHAIN_ENV = (process.env.SHARD_CHAIN_ENV ?? "").trim().toLowerCase();
+const HARDHAT_ACCOUNT_0_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 type PresetEnvironment = Record<string, string>;
 type ChainPreset = {
@@ -65,6 +67,9 @@ const MAINNET_PRESET: ChainPreset = {
   chainId: "1187947933",
   rpcUrl: "https://skale-base.skalenodes.com/v1/base",
   environment: {
+    GOLD_CONTRACT_ADDRESS: "0x421699e71bBeC7d05FCbc79C690afD5D8585f182",
+    ITEMS_CONTRACT_ADDRESS: "0xAe68cdA079fd699780506cc49381EE732837Ec35",
+    CHARACTER_CONTRACT_ADDRESS: "0x331dAdFFFFC8A126a739CA5CCAd847c29973B642",
     IDENTITY_REGISTRY_ADDRESS: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
     REPUTATION_REGISTRY_ADDRESS: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
     AUCTION_HOUSE_CONTRACT_ADDRESS: "0x8FBcA728a8B904587CE6220dfA05F2c0DE3060B6",
@@ -157,6 +162,13 @@ function applyChainPreset(presetName: string): void {
     if (shouldOverrideWithManifest(key, process.env[key])) {
       process.env[key] = value;
     }
+  }
+
+  if (presetName === "local") {
+    process.env.SERVER_PRIVATE_KEY =
+      process.env.LOCAL_SERVER_PRIVATE_KEY ||
+      process.env.HARDHAT_LOCAL_SERVER_PRIVATE_KEY ||
+      HARDHAT_ACCOUNT_0_PRIVATE_KEY;
   }
 }
 
