@@ -1,4 +1,5 @@
 import "dotenv/config";
+import "../config/devLocalContracts.js";
 import { getContract, prepareTransaction, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import type { Account } from "thirdweb/wallets";
@@ -17,7 +18,7 @@ import { toWei } from "thirdweb/utils";
 import { upload } from "thirdweb/storage";
 import { thirdwebClient, skaleBase } from "./chain.js";
 import { biteProvider, biteSigner, biteWallet } from "./biteChain.js";
-import { isTransientRpcSendError, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
+import { bumpServerNonceFloor, isLocalServerNonceMode, isTransientRpcSendError, queueAccountTransaction, queueBiteTransaction, queueServerWalletTransaction, reserveServerNonce, resetServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "./biteTxQueue.js";
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
@@ -91,7 +92,8 @@ const inflightGold = new Map<string, Promise<string>>();
 const inflightItem = new Map<string, Promise<bigint>>();
 
 const ERC721_TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
-const IDENTITY_RECEIPT_TIMEOUT_MS = DEV_ENABLED ? 10_000 : 60_000;
+const IDENTITY_RECEIPT_TIMEOUT_MS = DEV_ENABLED ? 10_000 : 20_000;
+const IDENTITY_POST_SUBMIT_RECOVERY_TIMEOUT_MS = DEV_ENABLED ? 10_000 : 30_000;
 const CHARACTER_WRITE_ABI = [
   "function mintTo(address to, string tokenUri) returns (uint256)",
   "function setTokenURI(uint256 tokenId, string tokenUri)",
@@ -261,8 +263,14 @@ export function getTxStats(): TxStats & { uptime: string; txPerMinute: string } 
 
 const MAX_RETRIES = 3;
 
-async function queueTransaction<T>(fn: () => Promise<T>): Promise<T> {
-  return queueServerWalletTransaction("thirdweb-server-tx", fn);
+async function queueTransaction<T>(account: Account, label: string, fn: () => Promise<T>): Promise<T> {
+  return isServerSignerAccount(account)
+    ? queueServerWalletTransaction(label, fn)
+    : queueAccountTransaction(account.address, label, fn);
+}
+
+function isServerSignerAccount(account: Account): boolean {
+  return account.address.toLowerCase() === serverAccount.address.toLowerCase();
 }
 
 const goldContract = getContract({
@@ -324,7 +332,7 @@ async function ensureItemTokenIdExists(targetChainTokenId: bigint): Promise<void
         );
       }
 
-      const receipt = await queueTransaction(async () => {
+      const receipt = await queueTransaction(serverAccount, `item-seed:${item.tokenId.toString()}:${nextId.toString()}`, async () => {
         const nftMetadata = {
           name: item.name,
           description: item.description,
@@ -406,6 +414,9 @@ async function sendTransactionWithManagedGas(
 ): Promise<Awaited<ReturnType<typeof sendTransaction>>> {
   let lastError: unknown;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const managedNonce = isServerSignerAccount(account)
+      ? await reserveServerNonce()
+      : null;
     try {
       const gasPrice = await resolveManagedGasPrice();
       const tx = {
@@ -414,10 +425,21 @@ async function sendTransactionWithManagedGas(
         maxFeePerGas: undefined,
         maxPriorityFeePerGas: undefined,
         type: "legacy" as const,
+        nonce: managedNonce ?? undefined,
       };
       return await sendTransaction({ transaction: tx, account });
     } catch (err: any) {
       lastError = err;
+      if (managedNonce != null) {
+        err.attemptedNonce = managedNonce;
+        if (String(err?.message ?? err ?? "").toLowerCase().includes("nonce")) {
+          if (isLocalServerNonceMode()) {
+            resetServerNonce();
+          } else {
+            bumpServerNonceFloor(managedNonce + 1);
+          }
+        }
+      }
       if (!isTransientRpcSendError(err) || attempt >= MAX_RETRIES) {
         throw err;
       }
@@ -464,7 +486,17 @@ export async function getGoldBalance(address: string): Promise<string> {
         return result.displayValue;
       } catch (err: any) {
         const msg = String(err?.message ?? "");
-        const isTransient = msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x");
+        const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
+        const isTransient =
+          msg.includes("zero data") ||
+          msg.includes("AbiDecoding") ||
+          msg.includes("0x") ||
+          msg.includes("fetch failed") ||
+          msg.includes("UND_ERR_SOCKET") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("ETIMEDOUT") ||
+          msg.includes("socket hang up") ||
+          code === "UND_ERR_SOCKET";
         if (isTransient && attempt < 3) {
           await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
           continue;
@@ -488,7 +520,10 @@ export async function getGoldBalance(address: string): Promise<string> {
   })();
 
   inflightGold.set(cacheKey, promise);
-  promise.finally(() => inflightGold.delete(cacheKey));
+  void promise.then(
+    () => inflightGold.delete(cacheKey),
+    () => inflightGold.delete(cacheKey)
+  );
   return promise;
 }
 
@@ -535,27 +570,53 @@ export async function getItemBalance(
   if (inflight) return inflight;
 
   const promise = (async (): Promise<bigint> => {
-    try {
-      const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
-      const balance = await balanceOfERC1155({
-        contract: itemsContract,
-        owner: address,
-        tokenId: chainTokenId,
-      });
-      itemCache.set(cacheKey, balance);
-      return balance;
-    } catch (err: any) {
-      const msg = String(err?.message ?? "");
-      // SKALE RPC sometimes returns 0x (empty data) — treat as 0
-      if (msg.includes("zero data") || msg.includes("AbiDecoding") || msg.includes("0x")) {
-        return 0n;
+    for (let attempt = 0; attempt <= 3; attempt++) {
+      try {
+        const chainTokenId = await getChainTokenIdForGameTokenId(tokenId);
+        const balance = await balanceOfERC1155({
+          contract: itemsContract,
+          owner: address,
+          tokenId: chainTokenId,
+        });
+        itemCache.set(cacheKey, balance);
+        return balance;
+      } catch (err: any) {
+        const msg = String(err?.message ?? "");
+        const code = String(err?.code ?? err?.cause?.code ?? err?.data?.code ?? "");
+        const isTransient =
+          msg.includes("zero data") ||
+          msg.includes("AbiDecoding") ||
+          msg.includes("0x") ||
+          msg.includes("fetch failed") ||
+          msg.includes("UND_ERR_SOCKET") ||
+          msg.includes("ECONNRESET") ||
+          msg.includes("ETIMEDOUT") ||
+          msg.includes("socket hang up") ||
+          code === "UND_ERR_SOCKET";
+
+        if (isTransient && attempt < 3) {
+          await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
+          continue;
+        }
+        if (isTransient) {
+          const stale = itemCache.getStale(cacheKey);
+          if (stale !== undefined) {
+            itemCache.set(cacheKey, stale);
+            return stale;
+          }
+          return 0n;
+        }
+        throw err;
       }
-      throw err;
     }
+    return itemCache.getStale(cacheKey) ?? 0n;
   })();
 
   inflightItem.set(cacheKey, promise);
-  promise.finally(() => inflightItem.delete(cacheKey));
+  void promise.then(
+    () => inflightItem.delete(cacheKey),
+    () => inflightItem.delete(cacheKey)
+  );
   return promise;
 }
 
@@ -762,6 +823,21 @@ async function processIdentityRegistrationPayload(
     };
   };
 
+  const waitForExistingIdentity = async (
+    timeoutMs = IDENTITY_POST_SUBMIT_RECOVERY_TIMEOUT_MS,
+    intervalMs = 1_500
+  ): Promise<IdentityRegistrationProcessorResult | null> => {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      const recovered = await reuseExistingIdentity();
+      if (recovered) {
+        return recovered;
+      }
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+    return null;
+  };
+
   const alreadyOwned = await reuseExistingIdentity();
   if (alreadyOwned) {
     return alreadyOwned;
@@ -790,7 +866,7 @@ async function processIdentityRegistrationPayload(
     }
     receipt = await waitForBiteReceipt(registerTx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS).catch(() => null);
   } catch (err) {
-    const recovered = await reuseExistingIdentity();
+    const recovered = await waitForExistingIdentity();
     if (recovered) {
       return recovered;
     }
@@ -798,7 +874,7 @@ async function processIdentityRegistrationPayload(
   }
 
   if (!receipt) {
-    const recovered = await reuseExistingIdentity();
+    const recovered = await waitForExistingIdentity();
     if (recovered) {
       return recovered;
     }
@@ -811,7 +887,7 @@ async function processIdentityRegistrationPayload(
   const agentId = registeredEvent?.args?.[0] ?? (registeredEvent?.topics?.[1] ? BigInt(registeredEvent.topics[1]) : null);
 
   if (agentId == null) {
-    const recovered = await reuseExistingIdentity();
+    const recovered = await waitForExistingIdentity();
     if (recovered) {
       return recovered;
     }
@@ -1334,7 +1410,9 @@ registerChainOperationProcessor("sfuel-distribute", async (record: ChainOperatio
       chain: skaleBase,
       client: thirdwebClient,
     });
-    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    const receipt = await queueTransaction(serverAccount, `sfuel-distribute:${payload.toAddress.toLowerCase()}`, async () =>
+      sendTransactionWithManagedGas(tx, serverAccount)
+    );
     txStats.sfuelDistributions++;
     recordTx("sfuel", receipt.transactionHash);
     return { result: receipt.transactionHash, txHash: receipt.transactionHash };
@@ -1345,7 +1423,9 @@ registerChainOperationProcessor("gold-mint", async (record: ChainOperationRecord
   const payload = JSON.parse(record.payload) as { toAddress: string; amount: string };
   return traceTx("gold-mint", "mintGold", { to: payload.toAddress, amount: payload.amount }, "skale", async () => {
     const tx = mintERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
-    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    const receipt = await queueTransaction(serverAccount, `gold-mint:${payload.toAddress.toLowerCase()}:${payload.amount}`, async () =>
+      sendTransactionWithManagedGas(tx, serverAccount)
+    );
     txStats.goldMints++;
     recordTx("gold-mint", receipt.transactionHash);
     goldCache.invalidate(payload.toAddress.toLowerCase());
@@ -1365,7 +1445,11 @@ registerChainOperationProcessor("gold-transfer", async (record: ChainOperationRe
       }
     }
     const tx = transferERC20({ contract: goldContract, to: payload.toAddress, amount: payload.amount });
-    const receipt = await sendTransactionWithManagedGas(tx, signer);
+    const receipt = await queueTransaction(
+      signer,
+      `gold-transfer:${payload.fromAddress.toLowerCase()}:${payload.toAddress.toLowerCase()}:${payload.amount}`,
+      async () => sendTransactionWithManagedGas(tx, signer)
+    );
     txStats.goldTransfers++;
     recordTx("gold-transfer", receipt.transactionHash);
     goldCache.invalidate(payload.fromAddress.toLowerCase());
@@ -1385,7 +1469,11 @@ registerChainOperationProcessor("item-mint", async (record: ChainOperationRecord
       tokenId: chainTokenId,
       supply: BigInt(payload.quantity),
     });
-    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, serverAccount));
+    const receipt = await queueTransaction(
+      serverAccount,
+      `item-mint:${payload.toAddress.toLowerCase()}:${payload.tokenId}:${payload.quantity}`,
+      async () => sendTransactionWithManagedGas(tx, serverAccount)
+    );
     txStats.itemMints++;
     recordTx("item-mint", receipt.transactionHash);
     itemCache.invalidate(payload.toAddress.toLowerCase());
@@ -1414,7 +1502,11 @@ registerChainOperationProcessor("item-burn", async (record: ChainOperationRecord
       id: chainTokenId,
       value: BigInt(payload.quantity),
     });
-    const receipt = await queueTransaction(async () => sendTransactionWithManagedGas(tx, signer));
+    const receipt = await queueTransaction(
+      signer,
+      `item-burn:${payload.fromAddress.toLowerCase()}:${payload.tokenId}:${payload.quantity}`,
+      async () => sendTransactionWithManagedGas(tx, signer)
+    );
     txStats.itemBurns++;
     recordTx("item-burn", receipt.transactionHash);
     itemCache.invalidate(payload.fromAddress.toLowerCase());

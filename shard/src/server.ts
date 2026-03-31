@@ -88,7 +88,7 @@ import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersF
 import { saveCharacter } from "./character/characterStore.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
-import { biteProvider, SKALE_BASE_CHAIN_ID } from "./blockchain/biteChain.js";
+import { biteProvider, probeBiteRpc, SKALE_BASE_CHAIN_ID, SKALE_BASE_RPC_URL } from "./blockchain/biteChain.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "./redis.js";
 import { pvpBattleManager } from "./combat/pvpBattleManager.js";
 import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js";
@@ -188,26 +188,56 @@ function enforceRateLimit(ip: string, path: string, rule: RateLimitRule): { ok: 
   return { ok: true, retryAfterSeconds: 0 };
 }
 
+function isTransientRpcError(err: unknown): boolean {
+  const code = typeof err === "object" && err && "code" in err ? String((err as { code?: unknown }).code ?? "") : "";
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const haystack = `${code} ${message}`.toLowerCase();
+  return (
+    haystack.includes("timeout") ||
+    haystack.includes("network") ||
+    haystack.includes("socket") ||
+    haystack.includes("econnreset") ||
+    haystack.includes("econnrefused") ||
+    haystack.includes("etimedout") ||
+    haystack.includes("failed to detect network") ||
+    haystack.includes("missing response") ||
+    haystack.includes("server error")
+  );
+}
+
 async function assertConfiguredRpc(): Promise<void> {
-  const network = await biteProvider.getNetwork();
-  const chainId = Number(network.chainId);
-  if (chainId !== SKALE_BASE_CHAIN_ID) {
+  const probe = await probeBiteRpc();
+  if (!probe.ok) {
+    server.log.warn(`[chain] RPC verification skipped due to probe failure: ${String(probe.error ?? "unknown error").slice(0, 160)}`);
+    return;
+  }
+  if (probe.chainId !== SKALE_BASE_CHAIN_ID) {
     throw new Error(
-      `RPC chainId mismatch: expected ${SKALE_BASE_CHAIN_ID}, got ${chainId}`
+      `RPC chainId mismatch: expected ${SKALE_BASE_CHAIN_ID}, got ${probe.chainId}`
     );
   }
 }
 
 // Health check — GCP and you use this to know the shard is alive
-server.get("/health", async () => ({
-  ok: true,
-  uptime: process.uptime(),
-  persistence: {
-    redisConnected: Boolean(getRedis()),
-    redisRequired: REQUIRE_REDIS_PERSISTENCE,
-    memoryFallbackAllowed: isMemoryFallbackAllowed(),
-  },
-}));
+server.get("/health", async () => {
+  const rpc = await probeBiteRpc().catch(() => ({
+    ok: false,
+    rpcUrl: SKALE_BASE_RPC_URL,
+    chainId: null,
+    latestBlock: null,
+    error: "probe failed",
+  }));
+  return {
+    ok: true,
+    uptime: process.uptime(),
+    persistence: {
+      redisConnected: Boolean(getRedis()),
+      redisRequired: REQUIRE_REDIS_PERSISTENCE,
+      memoryFallbackAllowed: isMemoryFallbackAllowed(),
+    },
+    rpc,
+  };
+});
 
 // Agent discovery — how AI agents find and join the game
 server.get("/.well-known/ai-plugin.json", async (_req, reply) => {
@@ -562,13 +592,15 @@ server.get("/admin/dashboard", async () => {
     perZone.push({ zoneId, entities: counts.entities, players: counts.players, mobs: counts.mobs, npcs: counts.npcs, tick: 0 });
   }
 
-  let rpcHealthy = false;
-  let lastBlockNumber: number | null = null;
-  try {
-    const bn = await biteProvider.getBlockNumber();
-    lastBlockNumber = Number(bn);
-    rpcHealthy = lastBlockNumber > 0;
-  } catch { /* RPC down */ }
+  const rpcProbe = await probeBiteRpc().catch(() => ({
+    ok: false,
+    rpcUrl: SKALE_BASE_RPC_URL,
+    chainId: null,
+    latestBlock: null,
+    error: "probe failed",
+  }));
+  const rpcHealthy = rpcProbe.ok;
+  const lastBlockNumber = rpcProbe.latestBlock;
 
   const activeAuctions = getAllAuctionsFromCache(0);
   const endedAuctions = getAllAuctionsFromCache(1);
@@ -579,7 +611,14 @@ server.get("/admin/dashboard", async () => {
 
   return {
     server: { uptime: process.uptime(), startedAt: Date.now() - process.uptime() * 1000, memoryMB: Math.round(mem.rss / 1048576) },
-    blockchain: { rpcHealthy, lastBlockNumber, chainId: SKALE_BASE_CHAIN_ID, txStats: getTxStats() },
+    blockchain: {
+      rpcHealthy,
+      lastBlockNumber,
+      chainId: SKALE_BASE_CHAIN_ID,
+      rpcUrl: SKALE_BASE_RPC_URL,
+      rpcError: rpcProbe.error,
+      txStats: getTxStats(),
+    },
     zones: { count: regionCounts.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
     agents: { active: agentSnapshots.length, list: agentSnapshots },
     merchants: { initialized: getMerchantCount(), total: perZone.reduce((s, z) => s + z.npcs, 0) },
@@ -865,6 +904,7 @@ const start = async () => {
     server.log.warn(`[worldMapStore] Init failed (non-fatal): ${err.message}`);
   });
 
+  server.log.info(`[chain] RPC target ${SKALE_BASE_RPC_URL} (expected chainId=${SKALE_BASE_CHAIN_ID})`);
   await assertConfiguredRpc();
   server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
 
@@ -890,6 +930,14 @@ process.on("SIGINT", async () => {
   await agentManager.stopAll();
   await server.close();
   process.exit(0);
+});
+process.on("unhandledRejection", (reason) => {
+  if (isTransientRpcError(reason)) {
+    server.log.warn(`[rpc] Suppressed transient unhandled rejection: ${String((reason as Error)?.message ?? reason).slice(0, 160)}`);
+    return;
+  }
+  server.log.error(reason, "Unhandled promise rejection");
+  process.exit(1);
 });
 
 start();

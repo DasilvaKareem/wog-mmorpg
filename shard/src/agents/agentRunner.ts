@@ -1537,7 +1537,13 @@ export class AgentRunner {
         void this.logActivity(`Region transition: ${this.currentRegion} -> ${newRegion}`);
       }
       this.currentRegion = newRegion;
-      await setAgentEntityRef(this.userWallet, { entityId: this.entityId, zoneId: newRegion, characterName: ref.characterName });
+      await setAgentEntityRef(this.userWallet, {
+        entityId: this.entityId,
+        zoneId: newRegion,
+        characterName: ref.characterName,
+        agentId: ref.agentId,
+        characterTokenId: ref.characterTokenId,
+      });
       return true;
     }
 
@@ -1570,7 +1576,13 @@ export class AgentRunner {
           this.entityId = newEntityId;
           const spawnZone: string = spawnResult.zone || this.currentRegion || "village-square";
           this.currentRegion = spawnZone;
-          await setAgentEntityRef(this.userWallet, { entityId: newEntityId, zoneId: spawnZone, characterName: ref.characterName });
+          await setAgentEntityRef(this.userWallet, {
+            entityId: newEntityId,
+            zoneId: spawnZone,
+            characterName: ref.characterName,
+            agentId: ref.agentId,
+            characterTokenId: ref.characterTokenId,
+          });
           console.log(`[agent:${this.walletTag}] Respawned entity ${this.entityId} in ${spawnZone}`);
           return true;
         }

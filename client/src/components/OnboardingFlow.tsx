@@ -531,6 +531,7 @@ export function OnboardingFlow({
         origin,
         walletAddress: targetAddress!,
       });
+      gameBus.emit("charactersChanged", { walletAddress: targetAddress });
       setSuccessData(successBase);
       setStep("success");
 

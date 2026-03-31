@@ -159,6 +159,7 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
         if (data.custodialWallet) {
           WalletManager.getInstance().setCustodialAddress(data.custodialWallet);
         }
+        gameBus.emit("charactersChanged", { walletAddress: address });
         trackAgentTaskCompleted({ walletAddress: address, entityId: data.entityId, zoneId: data.zoneId });
         setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
         if (data.zoneId) {

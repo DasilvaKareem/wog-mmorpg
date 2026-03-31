@@ -17,6 +17,8 @@ import {
 } from "./agentConfigStore.js";
 import { authenticateWithWallet } from "../auth/authHelper.js";
 import { loadCharacter } from "../character/characterStore.js";
+import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
+import { extractRawCharacterName } from "./agentUtils.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -49,6 +51,8 @@ export interface CharacterSetupResult {
   entityId: string;
   zoneId: string;
   characterName: string;
+  agentId?: string;
+  characterTokenId?: string;
   alreadyExisted: boolean;
 }
 
@@ -89,6 +93,8 @@ export async function setupAgentCharacter(
           entityId: existingRef.entityId,
           zoneId: existingRef.zoneId,
           characterName,
+          agentId: existingRef.agentId,
+          characterTokenId: existingRef.characterTokenId,
           alreadyExisted: true,
         };
       }
@@ -98,6 +104,46 @@ export async function setupAgentCharacter(
     // Entity ref exists but entity is gone — clear stale ref
     await clearAgentEntityRef(userWallet);
     console.log(`[agentSetup] Cleared stale entity ref for ${userWallet.slice(0, 8)}`);
+  }
+
+  // If the shard still has a live player entity for this custodial wallet but the
+  // Redis agent ref was lost, reattach to it instead of failing a fresh spawn.
+  const spawnedEntry = isWalletSpawned(custodialAddress);
+  if (spawnedEntry) {
+    const liveEntity = getAllEntities().get(spawnedEntry.entityId);
+    if (liveEntity?.type === "player") {
+      const recoveredTokenId =
+        typeof liveEntity.characterTokenId === "bigint"
+          ? liveEntity.characterTokenId.toString()
+          : typeof liveEntity.characterTokenId === "number"
+            ? Math.trunc(liveEntity.characterTokenId).toString()
+            : undefined;
+      const recoveredAgentId =
+        typeof liveEntity.agentId === "bigint"
+          ? liveEntity.agentId.toString()
+          : typeof liveEntity.agentId === "number"
+            ? Math.trunc(liveEntity.agentId).toString()
+            : undefined;
+
+      await setAgentEntityRef(userWallet, {
+        entityId: spawnedEntry.entityId,
+        zoneId: spawnedEntry.zoneId,
+        characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
+        ...(recoveredAgentId ? { agentId: recoveredAgentId } : {}),
+        ...(recoveredTokenId ? { characterTokenId: recoveredTokenId } : {}),
+      });
+
+      console.log(`[agentSetup] Reattached to live shard entity ${spawnedEntry.entityId} for ${userWallet}`);
+      return {
+        custodialWallet: custodialAddress,
+        entityId: spawnedEntry.entityId,
+        zoneId: spawnedEntry.zoneId,
+        characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
+        agentId: recoveredAgentId,
+        characterTokenId: recoveredTokenId,
+        alreadyExisted: true,
+      };
+    }
   }
 
   // ── Step 3: Mint character NFT (only if no saved character exists) ────
@@ -144,7 +190,10 @@ export async function setupAgentCharacter(
   const spawnXp = character?.properties?.xp ?? 0;
   const spawnRace = character?.properties?.race ?? raceId;
   const spawnClass = character?.properties?.class ?? classId;
-  const spawnTokenId = normalizeOnChainTokenId(character?.tokenId);
+  const spawnTokenId = normalizeOnChainTokenId(character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId);
+  const spawnAgentId = typeof character?.agentId === "string" && character.agentId.trim().length > 0
+    ? character.agentId.trim()
+    : existingSave?.agentId;
 
   // ── Step 6: Spawn into last known zone (or village-square for new agents) ──
   const startZone = existingRef?.zoneId ?? "village-square";
@@ -167,7 +216,13 @@ export async function setupAgentCharacter(
   const resolvedZoneId: string = spawnResult.zone ?? startZone;
 
   // ── Step 7: Persist entity ref ────────────────────────────────────────
-  await setAgentEntityRef(userWallet, { entityId, zoneId: resolvedZoneId, characterName: spawnName });
+  await setAgentEntityRef(userWallet, {
+    entityId,
+    zoneId: resolvedZoneId,
+    characterName: spawnName,
+    ...(spawnAgentId ? { agentId: spawnAgentId } : {}),
+    ...(spawnTokenId ? { characterTokenId: spawnTokenId } : {}),
+  });
 
   // ── Step 8: Init config if not already set ────────────────────────────
   const existingConfig = await getAgentConfig(userWallet);
@@ -188,6 +243,8 @@ export async function setupAgentCharacter(
     entityId,
     zoneId: resolvedZoneId,
     characterName: spawnName,
+    agentId: spawnAgentId,
+    characterTokenId: spawnTokenId,
     alreadyExisted: false,
   };
 }

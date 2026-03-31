@@ -11,6 +11,7 @@ import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
 import { getValidationClaims } from "../erc8004/validation.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
+import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
 
 export async function registerReputationRoutes(app: FastifyInstance) {
   /**
@@ -62,6 +63,8 @@ export async function registerReputationRoutes(app: FastifyInstance) {
           savedCharacter?.characterTokenId ??
           liveEntity?.characterTokenId?.toString() ??
           null,
+        registrationTxHash: savedCharacter?.agentRegistrationTxHash ?? null,
+        chainId: SKALE_BASE_CHAIN_ID,
         name: savedCharacter?.name ?? liveEntity?.name ?? null,
         classId: savedCharacter?.classId ?? liveEntity?.classId ?? null,
         raceId: savedCharacter?.raceId ?? liveEntity?.raceId ?? null,

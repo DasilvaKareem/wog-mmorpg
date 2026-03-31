@@ -33,14 +33,14 @@ const KEY_TYPE = (type: string) => `chainop:type:${type}`;
 const KEY_PENDING = "chainop:pending";
 const KEY_LOCK = (id: string) => `chainop:lock:${id}`;
 const CHAIN_OPERATION_LOCK_TTL_MS = Math.max(
-  30_000,
-  Number.parseInt(process.env.CHAIN_OPERATION_LOCK_TTL_MS ?? "120000", 10) || 120_000
+  10_000,
+  Number.parseInt(process.env.CHAIN_OPERATION_LOCK_TTL_MS ?? "30000", 10) || 30_000
 );
 const CHAIN_OPERATION_LOCK_HEARTBEAT_MS = Math.max(
   5_000,
   Math.min(
     CHAIN_OPERATION_LOCK_TTL_MS - 5_000,
-    Number.parseInt(process.env.CHAIN_OPERATION_LOCK_HEARTBEAT_MS ?? "30000", 10) || 30_000
+    Number.parseInt(process.env.CHAIN_OPERATION_LOCK_HEARTBEAT_MS ?? "10000", 10) || 10_000
   )
 );
 const CHAIN_OPERATION_MAX_RETRIES = Math.max(

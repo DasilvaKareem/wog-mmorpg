@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { API_URL } from "../config.js";
+import { API_URL, getSkaleExplorerTxUrl } from "../config.js";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
 
@@ -27,6 +27,8 @@ interface IdentityData {
   ownerWallet: string | null;
   endpoint: string | null;
   characterTokenId: string | null;
+  registrationTxHash: string | null;
+  chainId?: number | string | null;
   onChainRegistered: boolean;
 }
 
@@ -151,6 +153,8 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
     return "danger";
   };
 
+  const registrationTxUrl = getSkaleExplorerTxUrl(identity?.registrationTxHash, identity?.chainId);
+
   return (
     <Card className="p-6 space-y-4">
       {/* Header */}
@@ -177,6 +181,15 @@ export function ReputationPanel({ agentId }: ReputationPanelProps) {
                 {identity.onChainRegistered ? "On-chain identity active" : "Identity registration pending"}
               </span>
               {identity.characterTokenId && <span>Character #{identity.characterTokenId}</span>}
+              {identity.registrationTxHash && (
+                registrationTxUrl ? (
+                  <a href={registrationTxUrl} target="_blank" rel="noreferrer" className="text-blue-500 underline underline-offset-2">
+                    {registrationTxUrl}
+                  </a>
+                ) : (
+                  <span>Registration TX recorded</span>
+                )
+              )}
             </div>
           )}
           {validations.length > 0 && (

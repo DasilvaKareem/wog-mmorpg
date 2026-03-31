@@ -3,7 +3,6 @@ import { useActiveWallet, useConnectModal, useDisconnect } from "thirdweb/react"
 
 import {
   fetchCharactersWithLive,
-  fetchWalletCharacterInZone,
   fetchProfessions,
   type WalletCharacterProgress,
   type ProfessionsResponse,
@@ -68,6 +67,7 @@ function pickPrimaryCharacterProgress(
     xp: primary.properties.xp ?? 0,
     hp: maxHp, // NFT fallback has no live HP — show as full (max)
     maxHp,
+    characterTokenId: primary.characterTokenId ?? primary.tokenId,
     source: "nft",
   };
 }
@@ -101,6 +101,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     if (!walletManager.address) {
       setCharacterProgress(null);
       setCharacters([]);
+      setDeployedCharacterName(null);
       return;
     }
 
@@ -115,24 +116,26 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     if (isFirstFetch) setCharacterLoading(true);
     try {
       // Single API call returns both NFT characters and live entity data
-      const [liveCharacter, { characters: ownedCharacters, liveEntity: liveCharacterGlobal, deployedCharacterName: deployed }] = await Promise.all([
-        fetchWalletCharacterInZone(walletManager.address, zoneId),
-        fetchCharactersWithLive(walletManager.address),
-      ]);
+      const { characters: ownedCharacters, liveEntity: liveCharacterGlobal, deployedCharacterName: deployed } =
+        await fetchCharactersWithLive(walletManager.address);
 
       // Always store all characters for the selector
       setCharacters(ownedCharacters);
       setDeployedCharacterName(deployed);
 
-      // If a live agent is in the current zone, show that
-      if (liveCharacter) {
-        setCharacterProgress(liveCharacter);
-        lastCharacterFetchRef.current = now;
-        return;
-      }
-
       // If a live agent exists in any zone, show that
       if (liveCharacterGlobal) {
+        const liveTokenId =
+          liveCharacterGlobal.characterTokenId ??
+          ownedCharacters.find((character) => {
+            const baseName = character.name.replace(/\s+the\s+\w+$/i, "").trim();
+            const liveBaseName = liveCharacterGlobal.name.replace(/\s+the\s+\w+$/i, "").trim();
+            return character.tokenId === liveCharacterGlobal.characterTokenId || baseName === liveBaseName || character.name === liveCharacterGlobal.name;
+          })?.tokenId ??
+          null;
+        if (liveTokenId && selectedCharacterTokenId !== liveTokenId) {
+          setSelectedCharacterTokenId(liveTokenId);
+        }
         setCharacterProgress(liveCharacterGlobal);
         lastCharacterFetchRef.current = now;
         return;
@@ -148,6 +151,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
             xp: selected.properties.xp,
             hp: selected.properties.stats.hp,
             maxHp: selected.properties.stats.hp,
+            characterTokenId: selected.characterTokenId ?? selected.tokenId,
             source: "nft",
           });
           lastCharacterFetchRef.current = now;
@@ -198,6 +202,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
           xp: selected.properties.xp,
           hp: selected.properties.stats.hp,
           maxHp: selected.properties.stats.hp,
+          characterTokenId: selected.characterTokenId ?? selected.tokenId,
           source: "nft",
         });
         return;
@@ -261,6 +266,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
     setBalance(null);
     setCharacterProgress(null);
     setCharacters([]);
+    setDeployedCharacterName(null);
     setSelectedCharacterTokenId(null);
     setProfessions(null);
   }, [activeWallet, disconnectActiveWallet, walletManager]);
@@ -337,14 +343,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
   React.useEffect(() => {
     const unsubscribe = gameBus.on("zoneChanged", ({ zoneId: nextZoneId }) => {
       setZoneId(nextZoneId);
+      lastCharacterFetchRef.current = 0;
     });
     return unsubscribe;
   }, []);
 
   React.useEffect(() => {
+    const unsubscribe = gameBus.on("charactersChanged", ({ walletAddress }) => {
+      if (!address || walletAddress.toLowerCase() !== address.toLowerCase()) return;
+      lastCharacterFetchRef.current = 0;
+      void refreshCharacterProgress(true);
+    });
+    return unsubscribe;
+  }, [address, refreshCharacterProgress]);
+
+  React.useEffect(() => {
     if (!address) {
       setCharacterProgress(null);
       setCharacters([]);
+      setDeployedCharacterName(null);
       setSelectedCharacterTokenId(null);
       setProfessions(null);
       return;

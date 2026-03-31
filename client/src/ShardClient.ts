@@ -116,8 +116,25 @@ export async function fetchCharactersWithLive(
       return { characters: [], liveEntity: null, deployedCharacterName: null };
     }
     const data: {
-      characters: Array<Partial<OwnedCharacter> & { tokenId?: string; name?: string; description?: string }>;
-      liveEntity?: { name: string; level: number; xp: number; hp: number; maxHp: number; zoneId: string };
+      characters: Array<Partial<OwnedCharacter> & {
+        tokenId?: string;
+        characterTokenId?: string | null;
+        agentId?: string | null;
+        chainRegistrationStatus?: OwnedCharacter["chainRegistrationStatus"];
+        bootstrapStatus?: OwnedCharacter["bootstrapStatus"];
+        name?: string;
+        description?: string;
+      }>;
+      liveEntity?: {
+        name: string;
+        level: number;
+        xp: number;
+        hp: number;
+        maxHp: number;
+        zoneId: string;
+        agentId?: string | null;
+        characterTokenId?: string | null;
+      };
       deployedCharacterName?: string | null;
     } = await res.json();
 
@@ -128,26 +145,30 @@ export async function fetchCharactersWithLive(
       const realLevel = descMatch ? parseInt(descMatch[1]) : (character.properties?.level ?? 1);
 
       return {
-      tokenId: character.tokenId ?? "unknown",
-      name: character.name ?? "Unnamed Character",
-      description: character.description ?? "",
-      properties: {
-        race: character.properties?.race ?? "unknown",
-        class: character.properties?.class ?? "unknown",
-        level: realLevel,
-        xp: character.properties?.xp ?? 0,
-        stats: {
-          str: character.properties?.stats?.str ?? 0,
-          def: character.properties?.stats?.def ?? 0,
-          hp: character.properties?.stats?.hp ?? 0,
-          agi: character.properties?.stats?.agi ?? 0,
-          int: character.properties?.stats?.int ?? 0,
-          mp: character.properties?.stats?.mp ?? 0,
-          faith: character.properties?.stats?.faith ?? 0,
-          luck: character.properties?.stats?.luck ?? 0,
+        tokenId: character.tokenId ?? "unknown",
+        characterTokenId: character.characterTokenId ?? character.tokenId ?? null,
+        agentId: character.agentId ?? null,
+        chainRegistrationStatus: character.chainRegistrationStatus ?? undefined,
+        bootstrapStatus: character.bootstrapStatus ?? null,
+        name: character.name ?? "Unnamed Character",
+        description: character.description ?? "",
+        properties: {
+          race: character.properties?.race ?? "unknown",
+          class: character.properties?.class ?? "unknown",
+          level: realLevel,
+          xp: character.properties?.xp ?? 0,
+          stats: {
+            str: character.properties?.stats?.str ?? 0,
+            def: character.properties?.stats?.def ?? 0,
+            hp: character.properties?.stats?.hp ?? 0,
+            agi: character.properties?.stats?.agi ?? 0,
+            int: character.properties?.stats?.int ?? 0,
+            mp: character.properties?.stats?.mp ?? 0,
+            faith: character.properties?.stats?.faith ?? 0,
+            luck: character.properties?.stats?.luck ?? 0,
+          },
         },
-      },
-    };
+      };
     });
 
     let liveEntity: WalletCharacterProgress | null = null;
@@ -160,6 +181,7 @@ export async function fetchCharactersWithLive(
         hp: le.hp,
         maxHp: le.maxHp,
         zoneId: le.zoneId,
+        characterTokenId: le.characterTokenId ?? null,
         source: "live",
       };
     }
@@ -186,6 +208,7 @@ export interface WalletCharacterProgress {
   hp: number;
   maxHp: number;
   zoneId?: string;
+  characterTokenId?: string | null;
   source: "live" | "nft";
 }
 

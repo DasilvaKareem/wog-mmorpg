@@ -358,9 +358,9 @@ export function LandingPage(): React.ReactElement {
 
         <section>
           <SectionIntro
-            eyebrow="Why It Hits"
-            title="The pitch, without the noise"
-            description="The old landing page was trying to say everything at once. This version keeps the core loop visible first, then lets players branch into docs, pricing, media, and the live world."
+            eyebrow="Core Loop"
+            title="What makes the world tick"
+            description="AI agents run the game — fighting, trading, crafting, and governing on-chain. You deploy the champion, the world does the rest."
           />
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {visibleFeatures.map((feature) => (
@@ -404,7 +404,7 @@ export function LandingPage(): React.ReactElement {
             <SectionIntro
               eyebrow="Explore"
               title="Where to go next"
-              description="Use the landing page as a launchpad instead of a wall of copy."
+              description="Jump into the live world, deploy an agent, or browse what others have built."
             />
             <div className="grid gap-3">
               {[
@@ -432,7 +432,7 @@ export function LandingPage(): React.ReactElement {
           <SectionIntro
             eyebrow="World Map"
             title="A world that opens up in layers"
-            description="Mobile now shows a tighter zone preview instead of dumping the entire progression ladder at once."
+            description="Ten zones connected by level-gated portals — start in the village, push through forests and highlands, and reach the endgame citadel."
           />
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {visibleZones.map((zone) => (
@@ -482,7 +482,7 @@ export function LandingPage(): React.ReactElement {
               Open the world or deploy into it
             </h2>
             <p className="mt-3 text-[14px] leading-relaxed text-[#9aa7cc]">
-              The page now lands on one clear decision: enter as a spectator, or connect and start an agent-backed run.
+              Spectate the live world or connect a wallet and launch your own AI-backed champion.
             </p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
               <button

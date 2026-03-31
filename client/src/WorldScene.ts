@@ -105,6 +105,7 @@ export class WorldScene extends Phaser.Scene {
   private lockedWalletAddress: string | null = null;
   private unsubscribeLockToPlayer: (() => void) | null = null;
   private unsubscribeFocusEntity: (() => void) | null = null;
+  private unsubscribeFollowPlayer: (() => void) | null = null;
   private touchMode = false;
   private mobileMode = false;
   private lastPinchDistance: number | null = null;
@@ -370,6 +371,20 @@ export class WorldScene extends Phaser.Scene {
       }
     });
 
+    this.unsubscribeFollowPlayer = gameBus.on("followPlayer", ({ zoneId, walletAddress }) => {
+      playSoundEffect("move_zone_transition");
+      if (this.worldLayout.loaded) {
+        const center = this.worldLayout.getZonePixelCenter(zoneId);
+        this.cameras.main.centerOn(center.x, center.z);
+      }
+      this.currentZoneLabel = zoneId;
+      this.lockedWalletAddress = walletAddress.toLowerCase();
+      this.followTarget = null;
+      this.isDragging = false;
+      gameBus.emit("zoneChanged", { zoneId });
+      this.lockToPlayerWallet(walletAddress);
+    });
+
     if (typeof window !== "undefined") {
       this.audioUnlockListener = () => {
         void this.ensureAudioReady();
@@ -398,6 +413,8 @@ export class WorldScene extends Phaser.Scene {
       this.unsubscribeLockToPlayer = null;
       this.unsubscribeFocusEntity?.();
       this.unsubscribeFocusEntity = null;
+      this.unsubscribeFollowPlayer?.();
+      this.unsubscribeFollowPlayer = null;
       if (typeof window !== "undefined") {
         if (this.audioUnlockListener) {
           window.removeEventListener("pointerdown", this.audioUnlockListener, true);
@@ -979,20 +996,26 @@ export class WorldScene extends Phaser.Scene {
     this.cameras.main.removeBounds();
     this.minZoom = this.mobileMode ? 0.2 : 0.15;
 
-    // Center camera on world center
-    const worldCenter = this.worldLayout.getWorldPixelCenter();
+    // Start in an actual zone instead of the geometric world midpoint, which can
+    // land in empty space between zones during cold boots and hard reloads.
+    const initialZoneId = this.worldLayout.getZone("village-square")
+      ? "village-square"
+      : this.worldLayout.getZoneIds()[0];
+    const initialCenter = initialZoneId
+      ? this.worldLayout.getZonePixelCenter(initialZoneId)
+      : this.worldLayout.getWorldPixelCenter();
     const cam = this.cameras.main;
     const startZoom = this.mobileMode ? 1.7 : ZOOM_DEFAULT;
     cam.setZoom(Phaser.Math.Clamp(startZoom, this.minZoom, ZOOM_MAX));
-    cam.centerOn(worldCenter.x, worldCenter.z);
+    cam.centerOn(initialCenter.x, initialCenter.z);
 
-    // Initial chunk load at world center
-    const worldCenterGameX = worldCenter.x / this.tilemapRenderer.coordScale;
-    const worldCenterGameZ = worldCenter.z / this.tilemapRenderer.coordScale;
-    this.chunkManager.update(worldCenterGameX, worldCenterGameZ);
+    // Initial chunk load at the chosen startup zone.
+    const initialGameX = initialCenter.x / this.tilemapRenderer.coordScale;
+    const initialGameZ = initialCenter.z / this.tilemapRenderer.coordScale;
+    this.chunkManager.update(initialGameX, initialGameZ);
 
     this.terrainLoaded = true;
-    this.currentZoneLabel = this.worldLayout.pixelToZone(worldCenter.x, worldCenter.z) ?? "world";
+    this.currentZoneLabel = this.worldLayout.pixelToZone(initialCenter.x, initialCenter.z) ?? initialZoneId ?? "world";
 
     gameBus.emit("zoneChanged", { zoneId: this.currentZoneLabel });
     console.log(

@@ -1,24 +1,18 @@
 import "dotenv/config";
 
-process.env.DEV ??= "true";
-process.env.REDIS_URL ??= "redis://127.0.0.1:6379";
-process.env.SERVER_PRIVATE_KEY ??= "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const HARDHAT_ACCOUNT_0_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+process.env.DEV = "true";
+process.env.SHARD_CHAIN_ENV = "local";
+process.env.REDIS_URL = "redis://127.0.0.1:6379";
+process.env.HARDHAT_RPC_URL = "http://127.0.0.1:8545";
+process.env.SKALE_BASE_RPC_URL = "http://127.0.0.1:8545";
+process.env.SKALE_BASE_CHAIN_ID = "31337";
+process.env.SERVER_PRIVATE_KEY = HARDHAT_ACCOUNT_0_PRIVATE_KEY;
 
 await import("../src/config/devLocalContracts.ts");
 
 import { ethers } from "ethers";
-import {
-  createChainOperation,
-  getChainOperation,
-  processPendingTrackedChainOperations,
-  updateChainOperation,
-} from "../src/blockchain/chainOperationStore.js";
-import {
-  findIdentityByCharacterTokenId,
-  getOwnedCharacters,
-  updateCharacterMetadata,
-} from "../src/blockchain/blockchain.js";
-import { getValidationClaims } from "../src/erc8004/validation.js";
 
 type LoggerLike = {
   error: (err: unknown, msg?: string) => void;
@@ -67,6 +61,19 @@ async function poll<T>(
 }
 
 async function main() {
+  const {
+    createChainOperation,
+    getChainOperation,
+    processPendingTrackedChainOperations,
+    updateChainOperation,
+  } = await import("../src/blockchain/chainOperationStore.js");
+  const {
+    findIdentityByCharacterTokenId,
+    getOwnedCharacters,
+    updateCharacterMetadata,
+  } = await import("../src/blockchain/blockchain.js");
+  const { getValidationClaims } = await import("../src/erc8004/validation.js");
+
   console.log("\n── Blockchain Write Processor Recovery ──");
 
   console.log("\n── Character Mint Recovery ──");

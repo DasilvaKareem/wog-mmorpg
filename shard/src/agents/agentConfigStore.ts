@@ -3,7 +3,7 @@
  * Keys:
  *   agent:config:{userWallet}  → JSON AgentConfig
  *   agent:wallet:{userWallet}  → custodialWalletAddress
- *   agent:entity:{userWallet}  → JSON { entityId, zoneId }
+ *   agent:entity:{userWallet}  → JSON { entityId, zoneId, characterName?, agentId?, characterTokenId? }
  */
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
@@ -91,6 +91,8 @@ export interface AgentEntityRef {
   entityId: string;
   zoneId: string;
   characterName?: string;
+  agentId?: string;
+  characterTokenId?: string;
 }
 
 export interface AgentRuntimeState {
@@ -298,7 +300,18 @@ export async function getAgentEntityRef(userWallet: string): Promise<AgentEntity
   if (redis) {
     try {
       const raw = await redis.get(entityKey(userWallet));
-      if (raw) return JSON.parse(raw) as AgentEntityRef;
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<AgentEntityRef> | null;
+        if (parsed && typeof parsed.entityId === "string" && typeof parsed.zoneId === "string") {
+          return {
+            entityId: parsed.entityId,
+            zoneId: parsed.zoneId,
+            ...(typeof parsed.characterName === "string" ? { characterName: parsed.characterName } : {}),
+            ...(typeof parsed.agentId === "string" ? { agentId: parsed.agentId } : {}),
+            ...(typeof parsed.characterTokenId === "string" ? { characterTokenId: parsed.characterTokenId } : {}),
+          };
+        }
+      }
       return null;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;

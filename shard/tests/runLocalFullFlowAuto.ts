@@ -14,6 +14,10 @@ const HARDHAT_RPC = process.env.HARDHAT_RPC_URL || "http://127.0.0.1:8545";
 const REDIS_URL = process.env.REDIS_URL || "redis://127.0.0.1:6379/15";
 const VERBOSE = process.env.FULL_FLOW_VERBOSE === "true";
 const REDIS_CONTAINER_NAME = process.env.TEST_REDIS_CONTAINER_NAME || "wog-test-redis";
+const HARDHAT_ACCOUNT_0_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const FULL_FLOW_REMOTE = TRUE_VALUES.has((process.env.FULL_FLOW_REMOTE ?? "").trim().toLowerCase());
+const FULL_FLOW_FORCE_LOCAL = TRUE_VALUES.has((process.env.FULL_FLOW_FORCE_LOCAL ?? "").trim().toLowerCase());
 
 const SHARD_DEFAULT_ENV: Record<string, string> = {
   REDIS_URL,
@@ -21,7 +25,7 @@ const SHARD_DEFAULT_ENV: Record<string, string> = {
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || "0123456789abcdef0123456789abcdef",
   SERVER_PRIVATE_KEY:
     process.env.SERVER_PRIVATE_KEY ||
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    HARDHAT_ACCOUNT_0_PRIVATE_KEY,
 };
 
 const DEFAULT_ENV: Record<string, string> = DEV_ENABLED
@@ -33,14 +37,53 @@ const DEFAULT_ENV: Record<string, string> = DEV_ENABLED
       PORT: TEST_SHARD_PORT,
       TEST_SHARD_PORT,
       LOCAL_TEST_MODE: "core",
+      SHARD_CHAIN_ENV: "local",
       HARDHAT_RPC_URL: HARDHAT_RPC,
       SKALE_BASE_RPC_URL: HARDHAT_RPC,
       SKALE_BASE_CHAIN_ID: "31337",
+      DEPLOYER_PRIVATE_KEY: process.env.DEPLOYER_PRIVATE_KEY || SHARD_DEFAULT_ENV.SERVER_PRIVATE_KEY,
       SFUEL_DISTRIBUTION_AMOUNT: process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.0001",
     }
   : {
       ...SHARD_DEFAULT_ENV,
     };
+
+function isExplicitRemoteMode(env: NodeJS.ProcessEnv): boolean {
+  if (FULL_FLOW_FORCE_LOCAL) {
+    return false;
+  }
+  if (FULL_FLOW_REMOTE) {
+    return true;
+  }
+  const shardChainEnv = (env.SHARD_CHAIN_ENV ?? "").trim().toLowerCase();
+  if (shardChainEnv === "testnet" || shardChainEnv === "mainnet") {
+    return true;
+  }
+  return false;
+}
+
+function applyLocalFullFlowEnv(env: NodeJS.ProcessEnv, shardPort: string): NodeJS.ProcessEnv {
+  const localServerPrivateKey =
+    env.LOCAL_SERVER_PRIVATE_KEY ||
+    env.HARDHAT_LOCAL_SERVER_PRIVATE_KEY ||
+    HARDHAT_ACCOUNT_0_PRIVATE_KEY;
+  return {
+    ...env,
+    DEV: "true",
+    SHARD_CHAIN_ENV: "local",
+    SHARD_URL: `http://127.0.0.1:${shardPort}`,
+    WOG_SHARD_URL: `http://127.0.0.1:${shardPort}`,
+    PORT: shardPort,
+    TEST_SHARD_PORT: shardPort,
+    LOCAL_TEST_MODE: "core",
+    HARDHAT_RPC_URL: HARDHAT_RPC,
+    SKALE_BASE_RPC_URL: HARDHAT_RPC,
+    SKALE_BASE_CHAIN_ID: "31337",
+    SERVER_PRIVATE_KEY: localServerPrivateKey,
+    DEPLOYER_PRIVATE_KEY: localServerPrivateKey,
+    SFUEL_DISTRIBUTION_AMOUNT: env.SFUEL_DISTRIBUTION_AMOUNT || "0.0001",
+  };
+}
 
 type ServiceHandle = {
   child: ChildProcess | null;
@@ -277,9 +320,12 @@ async function main(): Promise<void> {
   const shardDir = process.cwd();
   const repoRoot = path.resolve(shardDir, "..");
   const hardhatDir = path.join(repoRoot, "hardhat");
-  const env = { ...process.env, ...DEFAULT_ENV };
+  const explicitRemoteMode = isExplicitRemoteMode(process.env);
+  const env = explicitRemoteMode
+    ? { ...process.env, ...DEFAULT_ENV }
+    : applyLocalFullFlowEnv({ ...process.env, ...DEFAULT_ENV }, TEST_SHARD_PORT);
 
-  if (!DEV_ENABLED) {
+  if (!DEV_ENABLED && explicitRemoteMode) {
     console.log("[full-flow] DEV is false; using existing env-backed services only.");
     if (!env.REDIS_URL) {
       throw new Error("[full-flow] REDIS_URL is required when DEV is false");
@@ -312,22 +358,16 @@ async function main(): Promise<void> {
         ...testEnv,
         REDIS_ALLOW_MEMORY_FALLBACK: testEnv.REDIS_ALLOW_MEMORY_FALLBACK || "true",
       });
-
-      console.log("[full-flow] Stopping shard before isolated reconciliation replay suite...");
-      await stopShard(shardHandle);
-      shardHandle = { child: null, startedByRunner: false };
-
-      console.log("[full-flow] Running isolated chain reconciliation recovery suite...");
-      await run("pnpm", ["run", "test:chain-recovery"], shardDir, testEnv);
-
-      console.log("[full-flow] Running isolated blockchain write processor recovery suite...");
-      await run("pnpm", ["run", "test:blockchain-writes"], shardDir, testEnv);
-
+      console.log("[full-flow] Skipping local-only recovery suites in explicit remote mode.");
       console.log("[full-flow] Env-backed core shard suite passed.");
       return;
     } finally {
       await stopShard(shardHandle);
     }
+  }
+
+  if (!DEV_ENABLED && !explicitRemoteMode) {
+    console.log("[full-flow] DEV is false but no explicit remote chain config was provided; forcing local Hardhat full-flow mode.");
   }
 
   let redisHandle: ServiceHandle = { child: null, startedByRunner: false };
