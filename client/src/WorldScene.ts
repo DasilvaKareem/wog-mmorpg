@@ -188,6 +188,8 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("auctioneerClick", entity);
       } else if (entity.type === "arena-master") {
         gameBus.emit("arenaMasterClick", entity);
+      } else if (entity.type === "dungeon-gate") {
+        gameBus.emit("dungeonGateClick", entity);
       }
 
       // Inspect: open inspect panel for players, mobs, and bosses
@@ -886,6 +888,11 @@ export class WorldScene extends Phaser.Scene {
       lines.push("", "[Click] Auction house");
     } else if (e.type === "arena-master") {
       lines.push("", "[Click] PvP Coliseum");
+    } else if (e.type === "dungeon-gate") {
+      const rank = e.gateRank ? `Rank ${e.gateRank}` : "Dungeon";
+      const danger = e.isDangerGate ? " DANGER" : "";
+      lines.push("", `${rank}${danger} Gate`);
+      lines.push("[Click] Open dungeon gate");
     } else if (e.type === "mob" || e.type === "boss") {
       lines.push("");
       if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
@@ -908,6 +915,7 @@ export class WorldScene extends Phaser.Scene {
       "guild-registrar": "[GUILD]",
       auctioneer: "[AUCTIONEER]",
       "arena-master": "[ARENA]",
+      "dungeon-gate": "[DUNGEON]",
       "ore-node": "[ORE]",
       "herb-node": "[HERB]",
     };

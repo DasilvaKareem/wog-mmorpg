@@ -51,6 +51,9 @@ const AgentChatPanel = React.lazy(() =>
 const DeferredWorldDialogs = React.lazy(() =>
   import("@/components/DeferredWorldDialogs").then((mod) => ({ default: mod.DeferredWorldDialogs }))
 );
+const DungeonGateDialog = React.lazy(() =>
+  import("@/components/DungeonGateDialog").then((mod) => ({ default: mod.DungeonGateDialog }))
+);
 const HotkeyBar = React.lazy(() =>
   import("@/components/HotkeyBar").then((mod) => ({ default: mod.HotkeyBar }))
 );
@@ -772,6 +775,7 @@ function GameWorld(): React.ReactElement {
             )}
           </div>
         )}
+        <DungeonGateDialog />
         {deferredDialogsReady && <DeferredWorldDialogs />}
         {questLogOpen && (
           <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
@@ -836,6 +840,7 @@ function GameWorld(): React.ReactElement {
 function AppShell(): React.ReactElement {
   const location = useLocation();
   const isWorldRoute = location.pathname === "/world";
+  const isMobileRoute = location.pathname === "/mobile";
   const [onboardingOpen, setOnboardingOpen] = React.useState(false);
   const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
   const { address } = useWalletContext();
@@ -852,8 +857,8 @@ function AppShell(): React.ReactElement {
   }, [isWorldRoute]);
 
   return (
-    <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
-      <Navbar />
+    <div className={`relative h-full w-full ${isWorldRoute || isMobileRoute ? "" : "flex flex-col"}`}>
+      {!isMobileRoute && <Navbar />}
       {/* <PushNotificationBanner walletAddress={address} /> */}
       {isWorldRoute ? (
         <div className="h-full w-full pt-0">

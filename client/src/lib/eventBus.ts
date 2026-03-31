@@ -4,6 +4,7 @@ export interface GameEventMap {
   guildRegistrarClick: Entity;
   auctioneerClick: Entity;
   arenaMasterClick: Entity;
+  dungeonGateClick: Entity;
   entityInspect: { entityId: string; zoneId: string };
   inspectSelf: { zoneId: string; walletAddress: string };
   switchZone: { zoneId: string };

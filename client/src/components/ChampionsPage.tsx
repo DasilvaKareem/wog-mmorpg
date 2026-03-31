@@ -1959,7 +1959,7 @@ function GuildTab({ custodialWallet, ownerWallet }: { custodialWallet: string | 
     async function fetchGuild() {
       try {
         const res = await fetch(`${API_URL}/guild/wallet/${custodialWallet}`);
-        if (!res.ok) return;
+        if (!res.ok) { if (!cancelled) setLoading(false); return; }
         const data = await res.json();
         if (cancelled) return;
         setInGuild(data.inGuild ?? false);

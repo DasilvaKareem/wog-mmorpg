@@ -53,6 +53,7 @@ export const ENTITY_COLORS: Record<string, number> = {
   trainer: 0x88ff44,
   "profession-trainer": 0x44ff88,
   boss: 0xaa44ff,
+  "dungeon-gate": 0xb46cff,
 };
 
 export const DEFAULT_ENTITY_COLOR = 0xcccccc;
@@ -84,6 +85,7 @@ export const ENTITY_SPRITE_PALETTES: Record<string, { body: number[]; outline: n
   auctioneer:          { body: [180, 130, 50],  outline: [100, 70, 20],   detail: [240, 210, 150] },
   "arena-master":      { body: [200, 60, 60],   outline: [120, 30, 30],   detail: [255, 160, 160] },
   "quest-giver":       { body: [100, 180, 255], outline: [40, 90, 150],   detail: [200, 230, 255] },
+  "dungeon-gate":      { body: [140, 80, 220],  outline: [75, 35, 130],   detail: [225, 190, 255] },
 };
 
 /** Mob category palettes — matched by keyword in mob name.

@@ -40,6 +40,10 @@ export interface Entity {
   teachesClass?: string;
   activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
   completedQuests?: string[];
+  gateRank?: "E" | "D" | "C" | "B" | "A" | "S";
+  isDangerGate?: boolean;
+  gateExpiresAt?: number;
+  gateOpened?: boolean;
 }
 
 export interface ActiveEffect {
