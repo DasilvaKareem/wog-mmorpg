@@ -5,7 +5,7 @@ import { useGameContext } from "@/context/GameContext";
 import { WorldScene } from "@/WorldScene";
 import { BattleScene } from "@/BattleScene";
 
-export function GameCanvas(): React.ReactElement {
+export const GameCanvas = React.memo(function GameCanvas(): React.ReactElement {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const { gameRef } = useGameContext();
   const isLowPowerDevice = React.useMemo(() => {
@@ -50,4 +50,4 @@ export function GameCanvas(): React.ReactElement {
   }, [gameRef, isLowPowerDevice]);
 
   return <div className="world-canvas-container h-full w-full" data-tutorial-id="world-canvas" ref={containerRef} />;
-}
+});

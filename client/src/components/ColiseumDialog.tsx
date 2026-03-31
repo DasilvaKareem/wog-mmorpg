@@ -102,7 +102,7 @@ export function ColiseumDialog(): React.ReactElement {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] max-w-5xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
+      <DialogContent className="max-h-[85dvh] max-w-5xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
         <DialogHeader className="border-b-2 border-[#29334d] bg-[#1a2340] p-4">
           <DialogTitle className="font-mono text-sm text-[#00ff88]">
             {npc ? `${npc.name} - PvP Coliseum` : "PvP Coliseum"}

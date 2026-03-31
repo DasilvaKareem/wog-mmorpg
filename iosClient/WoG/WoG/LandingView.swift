@@ -10,7 +10,7 @@ struct LandingView: View {
 
     var body: some View {
         if showGame {
-            GameWebView(url: URL(string: "https://worldofgeneva.com")!)
+            GameWebView(url: URL(string: "https://worldofgeneva.com/mobile")!)
                 .ignoresSafeArea(.container, edges: .bottom)
         } else {
             landingContent

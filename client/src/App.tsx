@@ -75,6 +75,9 @@ const WorldMap = React.lazy(() =>
 const LandingPage = React.lazy(() =>
   import("@/components/LandingPage").then((mod) => ({ default: mod.LandingPage }))
 );
+const MobileLoginPage = React.lazy(() =>
+  import("@/components/MobileLoginPage").then((mod) => ({ default: mod.MobileLoginPage }))
+);
 const LeaderboardPage = React.lazy(() =>
   import("@/components/LeaderboardPage").then((mod) => ({ default: mod.LeaderboardPage }))
 );
@@ -266,7 +269,7 @@ function GameWorld(): React.ReactElement {
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
-  const { address, characterProgress } = useWalletContext();
+  const { address, characterProgress, refreshCharacterProgress, refreshProfessions } = useWalletContext();
 
   // Toggleable panel visibility: null = use default (shown on desktop, hidden on mobile)
   const [chatVisible, setChatVisible] = React.useState<boolean | null>(null);
@@ -485,20 +488,25 @@ function GameWorld(): React.ReactElement {
     void (async () => {
       const trackedWallet = await WalletManager.getInstance().getTrackedWalletAddress();
       const walletToFocus = trackedWallet ?? address;
-      let attempts = 0;
-      const maxAttempts = 8;
+      const latestProgress = await refreshCharacterProgress(true);
+      const targetZoneId = latestProgress?.zoneId ?? zoneId;
 
-      const retry = window.setInterval(() => {
-        if (zoneId) {
-          gameBus.emit("switchZone", { zoneId });
-        }
-        gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
-        if (++attempts >= maxAttempts) {
-          window.clearInterval(retry);
-        }
-      }, 350);
+      if (targetZoneId) {
+        gameBus.emit("followPlayer", { zoneId: targetZoneId, walletAddress: walletToFocus });
+        return;
+      }
+
+      gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
     })();
-  }, [address]);
+  }, [address, refreshCharacterProgress]);
+
+  const toggleProfessions = React.useCallback(() => {
+    const nextVisible = !professionsVisible;
+    setProfessionsVisible(nextVisible);
+    if (nextVisible) {
+      void refreshProfessions();
+    }
+  }, [professionsVisible, refreshProfessions]);
 
   // Listen for global "open onboarding" event (from Navbar sign-in button)
   React.useEffect(() => {
@@ -534,7 +542,7 @@ function GameWorld(): React.ReactElement {
       } else if (key === "b") {
         gameBus.emit("inventoryOpen", undefined as never);
       } else if (key === "p") {
-        setProfessionsVisible((v) => !v);
+        toggleProfessions();
       } else if (key === "n") {
         setInboxOpen((c) => !c);
       } else if (event.code === "Space" && address) {
@@ -545,7 +553,7 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI]);
+  }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI, toggleProfessions]);
 
   React.useEffect(() => {
     const unsub1 = gameBus.on("zoneChanged", ({ zoneId }) => {
@@ -641,29 +649,34 @@ function GameWorld(): React.ReactElement {
       <React.Suspense fallback={null}>
         {showLeftDock && (
           <div className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 md:left-4">
-            {professionsVisible && (
-              <div
-                className="absolute left-0 top-0 min-h-0"
-                style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
-              >
-                <ProfessionsPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
-                <div
-                  onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
-                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize professions panel"
-                />
-                <div
-                  onPointerDown={(event) => startTopHeightResize(
-                    event,
-                    leftTopHeight,
-                    setLeftTopHeightRaw,
-                    showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
-                  )}
-                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize professions panel"
-                />
-              </div>
-            )}
+            <div
+              aria-hidden={!professionsVisible}
+              className={`absolute left-0 top-0 min-h-0 overflow-hidden transition-opacity ${
+                professionsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+              }`}
+              style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
+            >
+              <ProfessionsPanel className="h-full w-full max-w-none max-h-full overflow-auto" />
+              {professionsVisible && (
+                <>
+                  <div
+                    onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
+                    className="absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                    title="Resize professions panel"
+                  />
+                  <div
+                    onPointerDown={(event) => startTopHeightResize(
+                      event,
+                      leftTopHeight,
+                      setLeftTopHeightRaw,
+                      showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                    )}
+                    className="absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                    title="Resize professions panel"
+                  />
+                </>
+              )}
+            </div>
             {showRanks && (
               <div
                 className="absolute bottom-0 left-0 min-h-0"
@@ -805,7 +818,7 @@ function GameWorld(): React.ReactElement {
             onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
             onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
             onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
-            onProfessions={() => setProfessionsVisible((v) => !v)}
+            onProfessions={toggleProfessions}
             onSettings={() => setSettingsOpen((s) => !s)}
             inboxActive={inboxOpen}
             chatActive={showChat}
@@ -851,6 +864,7 @@ function AppShell(): React.ReactElement {
           <React.Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/mobile" element={<MobileLoginPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/market" element={<RealMoneyMarketPage />} />
               <Route path="/x402" element={<X402AgentPage />} />

@@ -1,4 +1,4 @@
-import { createContext, useContext, useRef } from "react";
+import { createContext, useContext, useMemo, useRef } from "react";
 import type { MutableRefObject, ReactNode, ReactElement } from "react";
 import type Phaser from "phaser";
 
@@ -13,9 +13,10 @@ const GameContext = createContext<GameContextValue | null>(null);
 
 export function GameProvider({ children }: { children: ReactNode }): ReactElement {
   const gameRef = useRef<Phaser.Game | null>(null);
+  const value = useMemo(() => ({ gameRef, eventBus: gameBus }), []);
 
   return (
-    <GameContext.Provider value={{ gameRef, eventBus: gameBus }}>
+    <GameContext.Provider value={value}>
       {children}
     </GameContext.Provider>
   );

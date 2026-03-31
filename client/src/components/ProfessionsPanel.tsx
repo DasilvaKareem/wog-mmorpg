@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { fetchProfessions, type ProfessionSkillDetail } from "@/ShardClient";
 import { useWalletContext } from "@/context/WalletContext";
+import type { ProfessionSkillDetail } from "@/ShardClient";
 
 /** All 8 professions with display info + category */
 const ALL_PROFESSIONS: { id: string; name: string; icon: string; category: "gathering" | "crafting" }[] = [
@@ -37,38 +37,10 @@ interface ProfessionsPanelProps {
 }
 
 export function ProfessionsPanel({ className }: ProfessionsPanelProps): React.ReactElement {
-  const { address } = useWalletContext();
-  const [learned, setLearned] = React.useState<string[]>([]);
-  const [skills, setSkills] = React.useState<Record<string, ProfessionSkillDetail>>({});
-  const [loading, setLoading] = React.useState(true);
-
-  React.useEffect(() => {
-    if (!address) {
-      setLearned([]);
-      setSkills({});
-      setLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    fetchProfessions(address).then((res) => {
-      if (!cancelled) {
-        setLearned(res.learned);
-        setSkills(res.skills);
-        setLoading(false);
-      }
-    });
-    // Re-poll every 10s to show live progress
-    const interval = setInterval(() => {
-      fetchProfessions(address).then((res) => {
-        if (!cancelled) {
-          setLearned(res.learned);
-          setSkills(res.skills);
-        }
-      });
-    }, 10_000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [address]);
+  const { address, professions, professionsLoading } = useWalletContext();
+  const learned = professions?.learned ?? [];
+  const skills = (professions?.skills ?? {}) as Record<string, ProfessionSkillDetail>;
+  const loading = professionsLoading && !professions;
 
   const gathering = ALL_PROFESSIONS.filter((p) => p.category === "gathering");
   const crafting = ALL_PROFESSIONS.filter((p) => p.category === "crafting");

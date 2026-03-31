@@ -510,9 +510,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         trackAgentTaskCompleted({ walletAddress, entityId: data.entityId, zoneId: data.zoneId });
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
         if (data.zoneId) {
-          gameBus.emit("switchZone", { zoneId: data.zoneId });
-        }
-        if (walletAddress) {
+          gameBus.emit("followPlayer", { zoneId: data.zoneId, walletAddress });
+        } else if (walletAddress) {
           gameBus.emit("lockToPlayer", { walletAddress });
         }
       } else {

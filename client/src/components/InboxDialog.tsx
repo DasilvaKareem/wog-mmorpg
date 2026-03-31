@@ -240,6 +240,7 @@ export function InboxDialog({
   const [messages, setMessages] = React.useState<InboxMessage[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [total, setTotal] = React.useState(0);
+  const prevOpen = React.useRef(false);
 
   const fetchMessages = React.useCallback(async () => {
     if (!address) return;
@@ -257,14 +258,18 @@ export function InboxDialog({
     }
   }, [address]);
 
+  // Fetch fresh messages every time dialog opens (not just on open state change)
   React.useEffect(() => {
     if (open && address) {
-      fetchMessages();
+      // Clear stale messages on fresh open so user doesn't see old data
+      if (!prevOpen.current) setMessages([]);
+      void fetchMessages();
     }
+    prevOpen.current = open;
   }, [open, address, fetchMessages]);
 
-  // Listen for gameBus inboxOpen events (unused here since parent controls open, but keeps pattern)
-  useGameBridge("inboxOpen", () => {});
+  // Refetch when gameBus fires inboxOpen (covers re-open while already open)
+  useGameBridge("inboxOpen", () => { if (address) void fetchMessages(); });
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>

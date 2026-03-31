@@ -48,7 +48,7 @@ function DialogContent({
       />
       <div
         className={cn(
-          "relative z-10 w-full max-w-2xl border-4 border-black bg-[linear-gradient(180deg,#18213a,#0a1021)] p-4 text-[#edf2ff] shadow-[8px_8px_0_0_#000]",
+          "relative z-10 w-full max-w-2xl max-h-[85dvh] border-4 border-black bg-[linear-gradient(180deg,#18213a,#0a1021)] p-4 text-[#edf2ff] shadow-[8px_8px_0_0_#000]",
           className
         )}
       >

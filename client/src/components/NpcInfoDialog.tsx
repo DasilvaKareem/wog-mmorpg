@@ -157,11 +157,11 @@ export function NpcInfoDialog(): React.ReactElement | null {
         borderColor: BORDER,
         fontFamily: "monospace",
         color: TEXT,
-        width: 340,
+        width: "min(340px, 92vw)",
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        maxHeight: "85vh",
+        maxHeight: "85dvh",
         overflow: "auto",
       }}
     >

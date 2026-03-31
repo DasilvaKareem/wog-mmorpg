@@ -203,11 +203,11 @@ export function InspectDialog(): React.ReactElement | null {
         borderColor: BORDER,
         fontFamily: "monospace",
         color: TEXT,
-        width: 360,
+        width: "min(360px, 92vw)",
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        maxHeight: "90vh",
+        maxHeight: "85dvh",
         overflow: "auto",
       }}
     >

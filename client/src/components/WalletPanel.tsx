@@ -92,7 +92,8 @@ function CharacterSection({
   function focusCharacter() {
     if (!characterProgress) return;
     if (characterProgress.zoneId) {
-      gameBus.emit("switchZone", { zoneId: characterProgress.zoneId });
+      gameBus.emit("followPlayer", { zoneId: characterProgress.zoneId, walletAddress });
+      return;
     }
     gameBus.emit("lockToPlayer", { walletAddress });
   }
@@ -135,12 +136,13 @@ function CharacterSection({
 
       // Focus camera on the new character's zone + lock to them
       if (res.ok && data.zoneId) {
-        gameBus.emit("switchZone", { zoneId: data.zoneId });
+        gameBus.emit("followPlayer", { zoneId: data.zoneId, walletAddress });
+      } else if (res.ok) {
+        gameBus.emit("lockToPlayer", { walletAddress });
       }
       if (res.ok) {
         gameBus.emit("charactersChanged", { walletAddress });
       }
-      gameBus.emit("lockToPlayer", { walletAddress });
     } catch {
       // silent
     } finally {

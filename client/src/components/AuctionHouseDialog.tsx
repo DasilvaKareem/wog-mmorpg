@@ -270,7 +270,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[80vh] max-w-4xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
+      <DialogContent className="max-h-[80dvh] max-w-4xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
         <DialogHeader className="border-b-2 border-[#29334d] bg-[#1a2340] p-4">
           <DialogTitle className="font-mono text-sm text-[#00ff88]">
             {npcInfo ? `${npcInfo.npcName} - Auction House` : "Auction House"}

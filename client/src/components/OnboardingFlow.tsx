@@ -30,7 +30,7 @@ type Step =
   | "payment-char"
   | "minting"
   | "success"
-  | "telegram-signup"
+  | "select-plan"
   | "done";
 
 type CreateCharacterStep = "identity" | "appearance" | "review";
@@ -130,43 +130,44 @@ const ORIGINS = [
 const PLANS = [
   {
     id: "free" as const,
-    name: "Free",
-    price: "$0",
+    name: "Low Intelligence",
+    price: "Free",
     period: "",
     border: "#54f28b",
     perks: [
-      "4-hour activity summaries",
-      "Level-up & death alerts",
-      "Basic agent commands",
+      "Basic combat & gathering AI",
+      "Simple quest completion",
+      "Slower decision-making",
+      "Limited strategy adaptation",
     ],
   },
   {
     id: "adventurer" as const,
-    name: "Adventurer",
+    name: "Medium Intelligence",
     price: "$4.99",
     period: "/mo",
     border: "#5dadec",
     perks: [
-      "Everything in Free",
-      "Real-time combat alerts",
-      "Loot drop notifications",
-      "Daily strategy tips from AI",
-      "Priority agent response",
+      "Smarter combat tactics",
+      "Multi-step quest planning",
+      "Market-aware trading",
+      "Adapts to zone threats",
+      "Faster reaction time",
     ],
   },
   {
     id: "champion" as const,
-    name: "Champion",
+    name: "High Intelligence",
     price: "$9.99",
     period: "/mo",
     border: "#ffcc00",
     perks: [
-      "Everything in Adventurer",
-      "Live minute-by-minute feed",
-      "AI strategy coaching",
-      "Legendary item drop alerts",
-      "Custom alert filters",
-      "Early access to new zones",
+      "Elite strategic reasoning",
+      "Optimal build & gear planning",
+      "Economy manipulation",
+      "PvP prediction & counterplay",
+      "Cross-zone long-term goals",
+      "Fastest decision-making",
     ],
   },
 ];
@@ -228,45 +229,11 @@ export function OnboardingFlow({
   const [origin, setOrigin] = React.useState("");
   const [successData, setSuccessData] = React.useState<SuccessData | null>(null);
 
-  // Telegram signup + plan selection
-  const [telegramLinked, setTelegramLinked] = React.useState(false);
-  const [botLinkUrl, setBotLinkUrl] = React.useState<string | null>(null);
   const [selectedPlan, setSelectedPlan] = React.useState<"free" | "adventurer" | "champion">("free");
-
-  // PWA install prompt
-  const [pwaInstalled, setPwaInstalled] = React.useState(() =>
-    typeof window !== "undefined" &&
-    (window.matchMedia("(display-mode: standalone)").matches ||
-      (window.navigator as any).standalone === true)
-  );
-  const [pwaPrompt, setPwaPrompt] = React.useState<any>(null);
   const [isCompactLayout, setIsCompactLayout] = React.useState(() =>
     typeof window !== "undefined" &&
     window.matchMedia("(max-width: 767px), (pointer: coarse)").matches
   );
-  const isIosPwa = typeof navigator !== "undefined" &&
-    (/iphone|ipad|ipod/i.test(navigator.userAgent) ||
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
-
-  React.useEffect(() => {
-    const handler = (e: Event) => { e.preventDefault(); setPwaPrompt(e); };
-    window.addEventListener("beforeinstallprompt", handler);
-    const mq = window.matchMedia("(display-mode: standalone)");
-    const mqHandler = () => setPwaInstalled(mq.matches);
-    if (mq.addEventListener) {
-      mq.addEventListener("change", mqHandler);
-    } else {
-      mq.addListener(mqHandler);
-    }
-    return () => {
-      window.removeEventListener("beforeinstallprompt", handler);
-      if (mq.removeEventListener) {
-        mq.removeEventListener("change", mqHandler);
-      } else {
-        mq.removeListener(mqHandler);
-      }
-    };
-  }, []);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -304,32 +271,6 @@ export function OnboardingFlow({
       setClasses(c);
     });
   }, [step]);
-
-  // Fetch bot link URL when entering telegram-signup
-  React.useEffect(() => {
-    if (step !== "telegram-signup" || !connectedAddress) return;
-    fetch(`${API_URL}/notifications/telegram/bot-link/${connectedAddress}`)
-      .then((r) => r.json())
-      .then((data) => setBotLinkUrl(data.url ?? null))
-      .catch(() => {});
-  }, [step, connectedAddress]);
-
-  // Poll for Telegram link status (every 2s, auto-skip after 2 min)
-  React.useEffect(() => {
-    if (step !== "telegram-signup" || !connectedAddress) return;
-    const poll = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_URL}/notifications/telegram/status/${connectedAddress}`);
-        const { linked } = await res.json();
-        if (linked) setTelegramLinked(true);
-      } catch { /* non-fatal */ }
-    }, 2000);
-    const timeout = setTimeout(() => {
-      clearInterval(poll);
-      setStep("done");
-    }, 120_000);
-    return () => { clearInterval(poll); clearTimeout(timeout); };
-  }, [step, connectedAddress]);
 
   // "done" step — close modal and enter world
   React.useEffect(() => {
@@ -621,8 +562,8 @@ export function OnboardingFlow({
       ? ">> CHARACTER MINT"
       : step === "minting"
       ? ">> MINTING NFT..."
-      : step === "telegram-signup"
-      ? ">> TELEGRAM UPDATES"
+      : step === "select-plan"
+      ? ">> CHOOSE AI TIER"
       : ">> CHARACTER CREATED!";
 
   const panelCls = [
@@ -1364,26 +1305,18 @@ export function OnboardingFlow({
               )}
 
               <button
-                onClick={() => setStep("telegram-signup")}
+                onClick={() => setStep("select-plan")}
                 className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
               >
                 Continue →
               </button>
-
-              <button
-                onClick={() => setStep("done")}
-                className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
-              >
-                Skip &amp; Enter World
-              </button>
             </div>
           )}
-          {/* ── STEP: TELEGRAM SIGNUP + PLAN ── */}
-          {step === "telegram-signup" && (
+          {/* ── STEP: SELECT AI PLAN ── */}
+          {step === "select-plan" && (
             <div className="flex flex-col gap-3">
-              {/* Plan selection */}
               <p className="text-[12px] leading-relaxed text-[#9aa7cc]">
-                Choose your Telegram alerts plan. Upgrade anytime.
+                Choose how smart your AI agent will be. Upgrade anytime.
               </p>
 
               <div className={`grid gap-2 ${isCompactLayout ? "grid-cols-1" : "grid-cols-3"}`}>
@@ -1393,36 +1326,36 @@ export function OnboardingFlow({
                     <button
                       key={plan.id}
                       onClick={() => setSelectedPlan(plan.id)}
-                      className={`border-2 px-2 py-2 text-left transition flex flex-col ${
+                      className={`border-2 px-3 py-3 text-left transition flex flex-col ${
                         isSelected
-                          ? "bg-[#0a1a0e] shadow-[3px_3px_0_0_#000]"
-                          : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
+                          ? "bg-[#101e14] shadow-[3px_3px_0_0_#000]"
+                          : "border-[#3d4f6e] bg-[#141e30] hover:border-[#7bf5a8] hover:bg-[#182438]"
                       }`}
                       style={isSelected ? { borderColor: plan.border } : undefined}
                     >
                       <div className="flex items-baseline gap-1 mb-1">
                         <span
-                          className="text-[13px] font-bold"
-                          style={{ color: isSelected ? plan.border : "#d6deff" }}
+                          className="text-[14px] font-bold"
+                          style={{ color: isSelected ? plan.border : "#e8eeff" }}
                         >
                           {plan.price}
                         </span>
                         {plan.period && (
-                          <span className="text-[9px] text-[#6d77a3]">{plan.period}</span>
+                          <span className="text-[10px] text-[#8b95c2]">{plan.period}</span>
                         )}
                       </div>
                       <span
-                        className="text-[10px] font-bold mb-1.5"
-                        style={{ color: isSelected ? plan.border : "#9aa7cc" }}
+                        className="text-[11px] font-bold mb-2"
+                        style={{ color: isSelected ? plan.border : "#c8d4f0" }}
                       >
                         {plan.name}
                       </span>
-                      <div className="flex flex-col gap-0.5">
+                      <div className="flex flex-col gap-1">
                         {plan.perks.map((perk, i) => (
                           <span
                             key={i}
-                            className={`text-[8px] leading-tight ${
-                              isSelected ? "text-[#9aa7cc]" : "text-[#6d77a3]"
+                            className={`text-[9px] leading-tight ${
+                              isSelected ? "text-[#c8d4f0]" : "text-[#8b95c2]"
                             }`}
                           >
                             {perk}
@@ -1431,7 +1364,7 @@ export function OnboardingFlow({
                       </div>
                       {isSelected && (
                         <div
-                          className="mt-2 text-[8px] font-bold uppercase tracking-wider text-center py-0.5 border-t"
+                          className="mt-2 text-[9px] font-bold uppercase tracking-wider text-center py-0.5 border-t"
                           style={{ color: plan.border, borderColor: plan.border + "40" }}
                         >
                           Selected
@@ -1442,127 +1375,21 @@ export function OnboardingFlow({
                 })}
               </div>
 
-              {/* Telegram connection */}
-              {!telegramLinked ? (
-                <>
-                  {botLinkUrl ? (
-                    <a
-                      href={botLinkUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex w-full items-center justify-center gap-2 border-2 border-[#26a5e4] bg-[#0a1020] px-4 py-3 text-[14px] text-[#26a5e4] shadow-[3px_3px_0_0_#000] transition hover:bg-[#0e1830] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
-                    >
-                      <span className="flex h-5 w-5 items-center justify-center border border-[#26a5e4] text-[13px] font-bold">T</span>
-                      Connect Telegram
-                      <span className="ml-auto text-[11px] text-[#6d77a3]">[→]</span>
-                    </a>
-                  ) : (
-                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-4 py-3 text-[12px] text-[#8b95c2] text-center">
-                      Telegram bot not configured
-                    </div>
-                  )}
+              <button
+                onClick={() => setStep("done")}
+                className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
+              >
+                {selectedPlan === "free"
+                  ? "Enter World →"
+                  : `Subscribe & Enter — ${PLANS.find((p) => p.id === selectedPlan)?.price}/mo`}
+              </button>
 
-                  <div className="flex items-center gap-2 text-[11px] text-[#8b95c2]">
-                    <span className="animate-pulse">&bull;</span>
-                    <span className="animate-pulse" style={{ animationDelay: "0.3s" }}>&bull;</span>
-                    <span className="opacity-30">&bull;</span>
-                    <span className="ml-1">Waiting for connection...</span>
-                  </div>
-
-                  {/* ── PWA Install CTA ── */}
-                  {!pwaInstalled && isIosPwa && (
-                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-3">
-                      <p className="text-[11px] text-[#ffcc00] font-bold mb-1">[ INSTALL APP ]</p>
-                      <p className="text-[10px] text-[#9aa7cc] leading-relaxed mb-2">
-                        Get push alerts for level-ups &amp; deaths. Tap{" "}
-                        <span className="text-white font-bold">Share ⬆</span> then{" "}
-                        <span className="text-white font-bold">Add to Home Screen</span>.
-                      </p>
-                      <div className="flex items-center gap-2 text-[10px] text-[#6d77a3]">
-                        <span className="text-[16px]">⬆</span>
-                        <span>Safari → Share → Add to Home Screen</span>
-                      </div>
-                    </div>
-                  )}
-                  {pwaInstalled ? (
-                    <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2 flex items-center gap-2">
-                      <span className="text-[#54f28b] text-[12px]">[✓]</span>
-                      <p className="text-[11px] text-[#54f28b]">App installed — push notifications enabled</p>
-                    </div>
-                  ) : !isIosPwa && (
-                    <button
-                      onClick={async () => {
-                        if (!pwaPrompt) return;
-                        pwaPrompt.prompt();
-                        const { outcome } = await pwaPrompt.userChoice;
-                        if (outcome === "accepted") { setPwaInstalled(true); setPwaPrompt(null); }
-                      }}
-                      disabled={!pwaPrompt}
-                      className={`w-full border-2 px-4 py-2.5 text-[12px] uppercase tracking-wide font-bold transition flex items-center justify-center gap-2 ${
-                        pwaPrompt
-                          ? "border-[#ffcc00] bg-[#0f1a08] text-[#ffcc00] hover:bg-[#1a2a10] shadow-[3px_3px_0_0_#000] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000]"
-                          : "border-[#2a3450] bg-[#0b1020] text-[#3d4a6a] cursor-not-allowed"
-                      }`}
-                    >
-                      <span className="text-[16px]">⬇</span>
-                      {pwaPrompt ? "Install App for Notifications" : "Open in Chrome/Edge to Install"}
-                    </button>
-                  )}
-
-                  <button
-                    onClick={() => setStep("done")}
-                    className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
-                  >
-                    Skip →
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2">
-                    <p className="text-[12px] text-[#54f28b]">[✓] Telegram Connected</p>
-                  </div>
-
-                  {/* ── PWA Install CTA (after Telegram connected) ── */}
-                  {!pwaInstalled && isIosPwa && (
-                    <div className="border-2 border-[#2a3450] bg-[#0b1020] px-3 py-3">
-                      <p className="text-[11px] text-[#ffcc00] font-bold mb-1">[ INSTALL APP ]</p>
-                      <p className="text-[10px] text-[#9aa7cc] leading-relaxed mb-2">
-                        Also install the app for push alerts even when offline. Tap{" "}
-                        <span className="text-white font-bold">Share ⬆</span> →{" "}
-                        <span className="text-white font-bold">Add to Home Screen</span>.
-                      </p>
-                    </div>
-                  )}
-                  {!pwaInstalled && !isIosPwa && pwaPrompt && (
-                    <button
-                      onClick={async () => {
-                        pwaPrompt.prompt();
-                        const { outcome } = await pwaPrompt.userChoice;
-                        if (outcome === "accepted") { setPwaInstalled(true); setPwaPrompt(null); }
-                      }}
-                      className="w-full border-2 border-[#ffcc00] bg-[#0f1a08] px-4 py-2.5 text-[12px] uppercase tracking-wide font-bold text-[#ffcc00] shadow-[3px_3px_0_0_#000] transition hover:bg-[#1a2a10] active:translate-x-[1px] active:translate-y-[1px] active:shadow-[1px_1px_0_0_#000] flex items-center justify-center gap-2"
-                    >
-                      <span className="text-[16px]">⬇</span>
-                      Install App for Push Notifications
-                    </button>
-                  )}
-                  {pwaInstalled && (
-                    <div className="border-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-2 flex items-center gap-2">
-                      <span className="text-[#54f28b] text-[12px]">[✓]</span>
-                      <p className="text-[11px] text-[#54f28b]">App installed — push notifications ready</p>
-                    </div>
-                  )}
-
-                  <button
-                    onClick={() => setStep("done")}
-                    className="w-full border-4 border-black bg-[#54f28b] px-4 py-3 text-[13px] uppercase tracking-wide text-[#060d12] shadow-[4px_4px_0_0_#000] transition hover:bg-[#7bf5a8] active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000] font-bold"
-                  >
-                    {selectedPlan === "free"
-                      ? "Enter World →"
-                      : `Subscribe & Enter — ${PLANS.find((p) => p.id === selectedPlan)?.price}/mo`}
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => setStep("done")}
+                className="text-[12px] text-[#6d77a3] hover:text-[#9aa7cc] transition-colors text-center"
+              >
+                Skip →
+              </button>
             </div>
           )}
         </div>

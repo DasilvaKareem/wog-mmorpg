@@ -317,11 +317,11 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
         borderColor: BORDER,
         fontFamily: "monospace",
         color: TEXT,
-        width: 400,
+        width: "min(400px, 92vw)",
         top: "50%",
         left: "50%",
         transform: "translate(-50%, -50%)",
-        maxHeight: "80vh",
+        maxHeight: "80dvh",
         display: "flex",
         flexDirection: "column",
       }}
@@ -382,7 +382,7 @@ export function QuestLogDialog({ open, onClose, walletAddress }: QuestLogDialogP
       )}
 
       {/* Content */}
-      <div className="px-3 py-2 overflow-y-auto" style={{ minHeight: 120, maxHeight: "60vh" }}>
+      <div className="px-3 py-2 overflow-y-auto" style={{ minHeight: 120, maxHeight: "60dvh" }}>
         {(loading || availLoading) && !data && (
           <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>
         )}
