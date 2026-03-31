@@ -6,9 +6,11 @@ import { mintItem, burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+
+const lastCraftTime = new Map<string, number>();
 
 export interface JewelcraftingRecipe {
   recipeId: string;
@@ -16,6 +18,7 @@ export interface JewelcraftingRecipe {
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
   copperCost: number;
+  requiredSkillLevel: number; // jewelcrafting skill level (1-300) needed to craft
   craftingTime: number;
 }
 
@@ -29,7 +32,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
     ],
     copperCost: 100,
-    craftingTime: 12,
+    requiredSkillLevel: 1,
+    craftingTime: 24,
   },
   {
     recipeId: "sapphire-ring",
@@ -40,7 +44,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 89n, quantity: 1 }, // 1x Gold Bar
     ],
     copperCost: 100,
-    craftingTime: 12,
+    requiredSkillLevel: 10,
+    craftingTime: 24,
   },
   {
     recipeId: "emerald-ring",
@@ -51,7 +56,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
     copperCost: 110,
-    craftingTime: 14,
+    requiredSkillLevel: 25,
+    craftingTime: 28,
   },
   {
     recipeId: "diamond-amulet",
@@ -62,7 +68,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 89n, quantity: 2 }, // 2x Gold Bar
     ],
     copperCost: 200,
-    craftingTime: 20,
+    requiredSkillLevel: 50,
+    craftingTime: 40,
   },
   {
     recipeId: "shadow-opal-amulet",
@@ -74,7 +81,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
     copperCost: 220,
-    craftingTime: 18,
+    requiredSkillLevel: 75,
+    craftingTime: 36,
   },
   {
     recipeId: "arcane-crystal-amulet",
@@ -86,7 +94,8 @@ export const JEWELCRAFTING_RECIPES: JewelcraftingRecipe[] = [
       { tokenId: 88n, quantity: 1 }, // 1x Silver Bar
     ],
     copperCost: 280,
-    craftingTime: 24,
+    requiredSkillLevel: 100,
+    craftingTime: 48,
   },
 ];
 
@@ -117,6 +126,7 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
           };
         }),
         copperCost: recipe.copperCost,
+        requiredSkillLevel: recipe.requiredSkillLevel,
         craftingTime: recipe.craftingTime,
       };
     });
@@ -155,10 +165,49 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check skill level requirement
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["jewelcrafting"]?.level ?? 1;
+    if (currentSkillLevel < recipe.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Jewelcrafting skill too low for this recipe`,
+        requiredSkillLevel: recipe.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Craft simpler recipes to raise your skill from ${currentSkillLevel} to ${recipe.requiredSkillLevel}`,
+      };
+    }
+
     const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+
+    // Enforce crafting cooldown
+    const cooldownMs = recipe.craftingTime * 1000;
+    const lastCraft = lastCraftTime.get(walletAddress.toLowerCase());
+    if (lastCraft && Date.now() - lastCraft < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - lastCraft)) / 1000);
+      reply.code(429);
+      return { error: "Crafting too fast", cooldownRemaining: remaining };
+    }
+
+    // Roll for failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, recipe.requiredSkillLevel);
+    if (failed) {
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
+      const halfXp = recipeId.includes("amulet")
+        ? Math.floor(PROFESSION_XP.JEWEL_AMULET / 2)
+        : Math.floor(PROFESSION_XP.JEWEL_RING / 2);
+      awardProfessionXp(entity, zoneId, halfXp, "jewelcrafting");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        recipeId: recipe.recipeId,
+        message: "The gem shattered during setting. No materials consumed.",
+      };
     }
 
     const station = getEntity(stationId);
@@ -221,17 +270,23 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
         craftedBy: walletAddress,
       });
 
-      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
-        logZoneEvent({
-          zoneId,
-          type: "loot",
-          tick: 0,
-          message: `${entity.name} crafted a ${instance.quality.tier} item: ${instance.displayName}!`,
-          entityId: entity.id,
-          entityName: entity.name,
-          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
-        });
-      }
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")
+          ? `${entity.name} crafted a ${instance.quality.tier} item: ${instance.displayName}!`
+          : `${entity.name}: Crafted ${outputItem?.name ?? "an item"}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          craftType: "jewelcrafting",
+          itemName: instance?.displayName ?? outputItem?.name ?? "an item",
+          recipeId,
+          ...(instance && { quality: instance.quality.tier, instanceId: instance.instanceId }),
+        },
+      });
 
       // Award profession XP (ring = 35, amulet = 45)
       const jcXp = recipeId.includes("amulet")
@@ -247,6 +302,8 @@ export function registerJewelcraftingRoutes(server: FastifyInstance) {
       server.log.info(
         `[jewelcrafting] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );
+
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
 
       return {
         ok: true,

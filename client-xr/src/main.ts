@@ -21,15 +21,18 @@ import { EntityInspector } from "./hud/EntityInspector.js";
 import { IntentModeBadge } from "./hud/IntentModeBadge.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
-import { ChatLog } from "./hud/ChatLog.js";
+import { AgentChat } from "./hud/AgentChat.js";
+import { LandingPage } from "./hud/LandingPage.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
+import { getAuthToken } from "./auth.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import type { ActivePlayer, Entity, VisibleIntent, ZoneResponse } from "./types.js";
 
 const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
+const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
@@ -41,6 +44,7 @@ const ACTIVE_PLAYERS_POLL_INTERVAL = 1000;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
 const POLL_RADIUS = 90;
+const EVENT_DEDUPE_RETENTION_MS = 10_000;
 
 // ── Renderer ────────────────────────────────────────────────────────
 
@@ -93,7 +97,22 @@ const inspector = new EntityInspector();
 const intentModeBadge = new IntentModeBadge();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
-const chatLog = new ChatLog();
+const agentChat = new AgentChat();
+const landing = !isAnimationLab
+  ? new LandingPage({
+    onEnterWorld: ({ walletAddress }) => {
+      ownWalletAddress = walletAddress?.toLowerCase() ?? null;
+      agentChat.setWallet(ownWalletAddress);
+      controls.setLandingMode(false);
+      setGameplayHudVisible(true);
+      console.log("[enter] Wallet:", ownWalletAddress);
+      // Immediately try to find and lock to own character
+      if (ownWalletAddress) {
+        void findAndLockOwnCharacter();
+      }
+    },
+  })
+  : null;
 const animationLab = isAnimationLab ? new AnimationLab(scene, camera, renderer.domElement) : null;
 const animationLabPanel = isAnimationLab && animationLab
   ? new AnimationLabPanel(animationLab, {
@@ -130,64 +149,175 @@ const hudEntities = document.getElementById("hud-entities")!;
 const hudFps = document.getElementById("hud-fps")!;
 const hudLock = document.getElementById("lock-indicator")!;
 
+function setGameplayHudVisible(visible: boolean) {
+  const ids = [
+    "hud",
+    "lock-indicator",
+    "controls-help",
+    "vr-button",
+    "player-panel",
+    "panel-toggle",
+    "agent-chat",
+    "minimap",
+    "intent-tooltip",
+    "intent-mode-badge",
+  ];
+
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.style.visibility = visible ? "visible" : "hidden";
+    el.style.opacity = visible ? "1" : "0";
+    el.style.pointerEvents = visible ? "" : "none";
+  }
+}
+
 // ── State ───────────────────────────────────────────────────────────
 
 let lockedEntityId: string | null = null;
-let pendingTrackedPlayerId: string | null = null;
-let pendingTrackedPlayerName: string | null = null;
+let ownWalletAddress: string | null = null;
+let ownEntityId: string | null = null;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
+const processedRecentEventIds = new Map<string, number>();
+
+function filterNewZoneEvents(events: NonNullable<ZoneResponse["recentEvents"]>) {
+  const now = Date.now();
+  for (const [eventId, seenAt] of processedRecentEventIds) {
+    if (now - seenAt > EVENT_DEDUPE_RETENTION_MS) {
+      processedRecentEventIds.delete(eventId);
+    }
+  }
+
+  const freshEvents: NonNullable<ZoneResponse["recentEvents"]> = [];
+  for (const event of events) {
+    if (processedRecentEventIds.has(event.id)) continue;
+    processedRecentEventIds.set(event.id, now);
+    freshEvents.push(event);
+  }
+  return freshEvents;
+}
 
 // ── Lock-on mode ────────────────────────────────────────────────────
 
+/** Lock camera to a character entity */
 function lockOn(entityId: string) {
   const ent = entities.getEntity(entityId);
   if (!ent) return;
   lockedEntityId = entityId;
-  pendingTrackedPlayerId = null;
-  pendingTrackedPlayerName = null;
+  controls.locked = true;
   intentLines.setFocusEntity(entityId);
-  hudLock.textContent = `LOCKED: ${ent.name}`;
+  hudLock.textContent = ent.name;
   hudLock.style.display = "block";
-  inspector.setLocked(true);
+  console.log("[lock] Locked to:", ent.name, entityId);
 }
 
 function unlockCamera() {
   lockedEntityId = null;
-  pendingTrackedPlayerId = null;
-  pendingTrackedPlayerName = null;
+  controls.locked = false;
   intentLines.setFocusEntity(null);
   hudLock.style.display = "none";
-  inspector.setLocked(false);
 }
 
-function trackPlayer(player: ActivePlayer) {
-  const pos = entities.getEntityPosition(player.id);
+/** Try to find and lock onto the player's own character by wallet address */
+function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
+  if (!ownWalletAddress) return;
+  if (lockedEntityId && entities.getEntity(lockedEntityId)) return;
+
+  const me = activePlayers.find(
+    (p) => p.walletAddress?.toLowerCase() === ownWalletAddress
+  );
+  if (!me) return;
+
+  ownEntityId = me.id;
+
+  // Move camera to the player's zone so zone polling picks it up
+  const zoneCenter = world.getZoneCenter(me.zoneId);
+  if (zoneCenter) {
+    controls.setTarget(zoneCenter.x, 0, zoneCenter.z);
+  }
+
+  // If entity is already loaded in scene, lock on immediately
+  const pos = entities.getEntityPosition(me.id);
   if (pos) {
-    lockOn(player.id);
+    lockOn(me.id);
     controls.setTarget(pos.x, pos.y, pos.z);
+  }
+}
+
+/**
+ * Full sequence: call /agent/status to get entityId + zoneId,
+ * move camera to their zone, poll that zone, then lock on.
+ */
+async function findAndLockOwnCharacter() {
+  if (!ownWalletAddress) return;
+
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    console.log("[autolock] No auth token");
     return;
   }
 
-  pendingTrackedPlayerId = player.id;
-  pendingTrackedPlayerName = player.name;
-  hudLock.textContent = `TRACKING: ${player.name}`;
-  hudLock.style.display = "block";
-  inspector.setLocked(true);
-  controls.setTarget(player.x * COORD_SCALE, 0, player.y * COORD_SCALE);
+  // 1. Get entity ID + zone from agent status endpoint
+  try {
+    const res = await fetch(`${API_BASE}/agent/status/${ownWalletAddress}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.log("[autolock] agent/status failed:", res.status);
+      return;
+    }
+    const status = await res.json();
+    if (!status.entityId || !status.zoneId) {
+      console.log("[autolock] No character deployed. entityId:", status.entityId, "zoneId:", status.zoneId);
+      return;
+    }
+
+    console.log("[autolock] Found entity:", status.entityId, "zone:", status.zoneId, "name:", status.entity?.name);
+    ownEntityId = status.entityId;
+    agentChat.setEntityId(status.entityId);
+    hudLock.textContent = `FINDING: ${status.entity?.name ?? "character"}`;
+    hudLock.style.display = "block";
+
+    // 2. Move camera to their zone
+    const zoneCenter = world.getZoneCenter(status.zoneId);
+    if (zoneCenter) {
+      controls.setTarget(zoneCenter.x, 0, zoneCenter.z);
+      world.updateLoading(zoneCenter.x, zoneCenter.z);
+    }
+
+    // 3. Poll that zone to load the entity
+    await pollNearbyZones();
+
+    // 4. Lock on now that the entity should be in scene
+    const pos = entities.getEntityPosition(status.entityId);
+    if (pos) {
+      lockOn(status.entityId);
+      controls.setTarget(pos.x, pos.y, pos.z);
+      console.log("[autolock] Locked to", status.entity?.name);
+    } else {
+      console.log("[autolock] Entity not in scene yet, poll loop will retry");
+    }
+  } catch (err) {
+    console.log("[autolock] Error:", err);
+  }
 }
 
 // ── Player panel (leaderboard + zone lobby) ─────────────────────────
 
 const playerPanel = new PlayerPanel({
-  onPlayerClick: (player) => {
-    trackPlayer(player);
+  onPlayerClick: (_player) => {
+    // No-op — camera stays locked on own character
   },
-  onZoneClick: (zoneId) => {
-    const center = world.getZoneCenter(zoneId);
-    if (center) controls.setTarget(center.x, 0, center.z);
+  onZoneClick: (_zoneId) => {
+    // No-op — camera stays locked on own character
   },
 });
+
+if (landing) {
+  controls.setLandingMode(true);
+  setGameplayHudVisible(false);
+}
 
 // ── Find initial zone with most entities ────────────────────────────
 
@@ -240,8 +370,9 @@ async function pollNearbyZones() {
       if (data.recentEvents) allEvents.push(...data.recentEvents);
     }
 
-    entities.sync(merged);
-    intentLines.sync(merged, Array.from(mergedIntents.values()));
+    const visibleIntents = Array.from(mergedIntents.values());
+    entities.sync(merged, visibleIntents);
+    intentLines.sync(merged, visibleIntents);
     intentTooltip.setText(intentLines.getPrimaryIntentLabel());
 
     // HUD
@@ -253,31 +384,27 @@ async function pollNearbyZones() {
 
     sky.update(gameTime);
 
-    if (allEvents.length > 0) {
-      chatLog.addEvents(allEvents);
-      effects.processEvents(allEvents);
-      entities.processEvents(allEvents);
+    const newEvents = filterNewZoneEvents(allEvents);
+    if (newEvents.length > 0) {
+      agentChat.addEvents(newEvents);
+      effects.processEvents(newEvents);
+      entities.processEvents(newEvents);
     }
 
     effects.syncActiveEffects(merged);
 
-    if (pendingTrackedPlayerId && merged[pendingTrackedPlayerId]) {
-      const entityId = pendingTrackedPlayerId;
-      pendingTrackedPlayerId = null;
-      pendingTrackedPlayerName = null;
-      lockOn(entityId);
+    // Auto-lock to own character once it appears in scene
+    if (ownEntityId && !lockedEntityId && merged[ownEntityId]) {
+      lockOn(ownEntityId);
     }
 
     // Update lock indicator
     if (lockedEntityId) {
       if (merged[lockedEntityId]) {
-        hudLock.textContent = `LOCKED: ${merged[lockedEntityId].name}`;
+        hudLock.textContent = merged[lockedEntityId].name;
       } else {
         unlockCamera();
       }
-    } else if (pendingTrackedPlayerId) {
-      hudLock.textContent = `TRACKING: ${pendingTrackedPlayerName ?? "Player"}`;
-      hudLock.style.display = "block";
     }
 
     // Minimap — pass camera in server coords
@@ -295,6 +422,8 @@ async function pollActivePlayers() {
     const data = await fetchActivePlayers();
     if (!data) return;
     playerPanel.update(data.players);
+    landing?.setOnlineCount(data.count);
+    tryLockOwnCharacter(data.players);
   } finally {
     isPollingActivePlayers = false;
   }
@@ -306,6 +435,7 @@ const raycaster = new THREE.Raycaster();
 const ndcMouse = new THREE.Vector2();
 
 renderer.domElement.addEventListener("click", (e) => {
+  if (landing?.isActive()) return;
   if (isAnimationLab) return;
   ndcMouse.set(
     (e.clientX / window.innerWidth) * 2 - 1,
@@ -313,7 +443,7 @@ renderer.domElement.addEventListener("click", (e) => {
   );
   raycaster.setFromCamera(ndcMouse, camera);
 
-  // Check entities first
+  // Click entity — show inspector and lock camera to it
   const entityHits = raycaster.intersectObjects(entities.group.children, true);
   const entity = entities.getEntityAt(entityHits);
   if (entity) {
@@ -324,13 +454,7 @@ renderer.domElement.addEventListener("click", (e) => {
 
   // Ground click — unlock camera
   unlockCamera();
-  const groundHit = controls.getGroundHit(e.clientX, e.clientY);
-  if (groundHit) {
-    const sx = Math.round(groundHit.x / COORD_SCALE);
-    const sz = Math.round(groundHit.z / COORD_SCALE);
-    console.log(`Ground → server (${sx}, ${sz})`);
-    inspector.hide();
-  }
+  inspector.hide();
 });
 
 // ── Resize ──────────────────────────────────────────────────────────
@@ -373,7 +497,6 @@ if (navigator.xr) {
               const ent = entities.getEntityAt(hits);
               if (ent) {
                 console.log("VR select:", ent.name, ent.type);
-                lockOn(ent.id);
               }
             };
           },
@@ -394,11 +517,19 @@ if (navigator.xr) {
 
 
 
-// Keyboard: Escape = unlock camera
+// Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
+  if (landing?.isActive()) return;
+  // Don't intercept keys while typing in agent chat
+  if (agentChat.isFocused()) return;
   if (e.key === "Escape") {
     unlockCamera();
     inspector.hide();
+    return;
+  }
+  if (e.key === "Enter" || e.key === "t" || e.key === "T") {
+    e.preventDefault();
+    agentChat.expand();
     return;
   }
   if (e.key === "v" || e.key === "V") {
@@ -432,13 +563,11 @@ function animate() {
   if (xrSession.isPresenting) {
     xrControllers?.update();
   } else {
-    // Follow locked entity
+    // Follow own character
     if (lockedEntityId) {
       const pos = entities.getEntityPosition(lockedEntityId);
       if (pos) {
         controls.setTarget(pos.x, pos.y, pos.z);
-      } else {
-        unlockCamera();
       }
     }
     controls.update(dt);
@@ -452,7 +581,7 @@ function animate() {
   effects.update(dt);
   intentLines.update(dt);
   world.updateAnimations(dt);
-  chatLog.update();
+  // agentChat is event-driven, no per-frame update needed
 
   // Post-processing doesn't work with WebXR — use plain render in VR
   if (xrSession.isPresenting) {
@@ -473,7 +602,7 @@ async function init() {
     vrButton.style.display = "none";
     document.getElementById("player-panel")?.style.setProperty("display", "none");
     document.getElementById("panel-toggle")?.style.setProperty("display", "none");
-    document.getElementById("chat-log")?.style.setProperty("display", "none");
+    document.getElementById("agent-chat")?.style.setProperty("display", "none");
     document.getElementById("minimap")?.style.setProperty("display", "none");
     document.getElementById("intent-tooltip")?.style.setProperty("display", "none");
     document.getElementById("intent-mode-badge")?.style.setProperty("display", "none");
@@ -494,6 +623,7 @@ async function init() {
   }
 
   world.setLayout(layout);
+  landing?.setFeaturedZone(initialZone);
 
   // Center camera at the initial zone
   const center = world.getZoneCenter(initialZone);
@@ -508,6 +638,7 @@ async function init() {
   );
   await pollNearbyZones();
   await pollActivePlayers();
+  landing?.setReady(true);
 
   // Poll loop
   setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);

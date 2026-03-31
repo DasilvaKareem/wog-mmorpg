@@ -1,13 +1,14 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
+import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
 import { mintItem } from "../blockchain/blockchain.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeSkin } from "../social/diary.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 const SKINNING_RANGE = 50;
 
@@ -37,6 +38,8 @@ export function registerSkinningRoutes(server: FastifyInstance) {
           x: e.x,
           y: e.y,
           mobName: e.mobName,
+          level: e.level ?? 1,
+          requiredSkillLevel: Math.max(1, (e.level ?? 1) * 2),
           skinnableUntil: e.skinnableUntil,
           timeRemaining: e.skinnableUntil ? Math.max(0, e.skinnableUntil - Date.now()) : 0,
           region: e.region,
@@ -140,6 +143,47 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       return { error: "Equipped tool is not a skinning knife" };
     }
 
+    // Check skinning skill level (derived from corpse mob level)
+    const corpseLevel = corpse.level ?? 1;
+    const requiredSkillLevel = Math.max(1, corpseLevel * 2);
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["skinning"]?.level ?? 1;
+    if (currentSkillLevel < requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Skinning skill too low for this corpse (level ${corpseLevel})`,
+        requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Skin lower-level corpses to raise your skill from ${currentSkillLevel} to ${requiredSkillLevel}`,
+      };
+    }
+
+    // Roll for skinning failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, requiredSkillLevel);
+    if (failed) {
+      // Consume knife durability but don't mark corpse as skinned
+      weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
+      if (weaponEquipped.durability === 0) {
+        weaponEquipped.broken = true;
+        if (entity.equipment) delete entity.equipment.weapon;
+      }
+      const region = zoneId ?? entity.region ?? "unknown";
+      awardProfessionXp(entity, region, Math.floor(PROFESSION_XP.SKIN / 2), "skinning");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        corpse: corpse.name,
+        message: "Your knife slipped and ruined the cut. Corpse still available.",
+        knife: {
+          name: knifeItem.name,
+          durability: weaponEquipped.durability,
+          maxDurability: weaponEquipped.maxDurability,
+          broken: weaponEquipped.broken,
+        },
+      };
+    }
+
     // Get loot table for corpse
     const lootTable = corpse.mobName ? getLootTable(corpse.mobName) : undefined;
     if (!lootTable || lootTable.skinningDrops.length === 0) {
@@ -190,6 +234,17 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       server.log.info(
         `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
       );
+
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId: region,
+        type: "loot",
+        tick: getWorldTick(),
+        message: `${entity.name}: Skinned ${corpse.name}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: { gatherType: "skinning", itemName: corpse.name, corpseId },
+      });
 
       // Advance gather quest progress (skinning quests use "corpse" as targetItemName)
       advanceGatherQuests(entity, "corpse");

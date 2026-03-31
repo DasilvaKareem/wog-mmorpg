@@ -6,7 +6,7 @@ import type {
 } from "./types.js";
 
 // In dev, Vite proxy handles /zones etc. In prod (GCS), call shard directly.
-const BASE = import.meta.env.VITE_API_URL || "";
+const BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   try {

@@ -17,6 +17,7 @@ export interface FlowerProperties {
   tokenId: bigint;
   respawnTicks: number;
   requiredSickleTier: number; // Minimum sickle tier needed
+  requiredSkillLevel: number; // Minimum herbalism skill level (1-300) needed
 }
 
 export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
@@ -28,6 +29,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 31n,
     respawnTicks: 100,
     requiredSickleTier: 1,
+    requiredSkillLevel: 1,
   },
   "wild-rose": {
     label: "Wild Rose Bush",
@@ -36,6 +38,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 32n,
     respawnTicks: 100,
     requiredSickleTier: 1,
+    requiredSkillLevel: 1,
   },
   dandelion: {
     label: "Dandelion Cluster",
@@ -44,6 +47,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 33n,
     respawnTicks: 80,
     requiredSickleTier: 1,
+    requiredSkillLevel: 1,
   },
   clover: {
     label: "Clover Field",
@@ -52,6 +56,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 34n,
     respawnTicks: 90,
     requiredSickleTier: 1,
+    requiredSkillLevel: 5,
   },
 
   // Uncommon Flowers (Tier 2)
@@ -62,6 +67,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 35n,
     respawnTicks: 150,
     requiredSickleTier: 2,
+    requiredSkillLevel: 25,
   },
   sage: {
     label: "Sage Shrub",
@@ -70,6 +76,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 36n,
     respawnTicks: 160,
     requiredSickleTier: 2,
+    requiredSkillLevel: 25,
   },
   mint: {
     label: "Wild Mint Patch",
@@ -78,6 +85,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 37n,
     respawnTicks: 140,
     requiredSickleTier: 2,
+    requiredSkillLevel: 30,
   },
 
   // Rare Flowers (Tier 3)
@@ -88,6 +96,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 38n,
     respawnTicks: 220,
     requiredSickleTier: 3,
+    requiredSkillLevel: 50,
   },
   starbloom: {
     label: "Starbloom Blossom",
@@ -96,6 +105,7 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 39n,
     respawnTicks: 240,
     requiredSickleTier: 3,
+    requiredSkillLevel: 60,
   },
 
   // Epic Flower (Tier 4)
@@ -106,5 +116,6 @@ export const FLOWER_CATALOG: Record<FlowerType, FlowerProperties> = {
     tokenId: 40n,
     respawnTicks: 300,
     requiredSickleTier: 4,
+    requiredSkillLevel: 75,
   },
 };

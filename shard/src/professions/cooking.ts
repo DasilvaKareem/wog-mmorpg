@@ -7,11 +7,12 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeCook, narrativeConsume } from "../social/diary.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 
 const COOKING_RANGE = 50;
+const lastCookTime = new Map<string, number>();
 
 export interface CookingRecipe {
   recipeId: string;
@@ -19,6 +20,7 @@ export interface CookingRecipe {
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
+  requiredSkillLevel: number; // cooking skill level (1-300) needed to cook
   cookingTime: number; // seconds
   hpRestoration: number;
 }
@@ -30,7 +32,8 @@ export const COOKING_RECIPES: CookingRecipe[] = [
     outputTokenId: 81n,
     outputQuantity: 1,
     requiredMaterials: [{ tokenId: 1n, quantity: 1 }], // Raw Meat x1
-    cookingTime: 3,
+    requiredSkillLevel: 1,
+    cookingTime: 6,
     hpRestoration: 30,
   },
   {
@@ -42,7 +45,8 @@ export const COOKING_RECIPES: CookingRecipe[] = [
       { tokenId: 1n, quantity: 3 }, // Raw Meat x3
       { tokenId: 31n, quantity: 1 }, // Meadow Lily x1 (herbs)
     ],
-    cookingTime: 5,
+    requiredSkillLevel: 15,
+    cookingTime: 10,
     hpRestoration: 60,
   },
   {
@@ -51,7 +55,8 @@ export const COOKING_RECIPES: CookingRecipe[] = [
     outputTokenId: 83n,
     outputQuantity: 1,
     requiredMaterials: [{ tokenId: 1n, quantity: 5 }], // Raw Meat x5
-    cookingTime: 8,
+    requiredSkillLevel: 35,
+    cookingTime: 16,
     hpRestoration: 100,
   },
   {
@@ -63,7 +68,8 @@ export const COOKING_RECIPES: CookingRecipe[] = [
       { tokenId: 1n, quantity: 8 }, // Raw Meat x8
       { tokenId: 35n, quantity: 2 }, // Lavender x2 (spices)
     ],
-    cookingTime: 12,
+    requiredSkillLevel: 60,
+    cookingTime: 24,
     hpRestoration: 150,
   },
   {
@@ -75,7 +81,8 @@ export const COOKING_RECIPES: CookingRecipe[] = [
       { tokenId: 1n, quantity: 15 }, // Raw Meat x15
       { tokenId: 40n, quantity: 3 }, // Dragon's Breath x3 (rare spice)
     ],
-    cookingTime: 20,
+    requiredSkillLevel: 100,
+    cookingTime: 40,
     hpRestoration: 250,
   },
 ];
@@ -94,6 +101,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
           quantity: m.quantity,
           itemName: getItemByTokenId(m.tokenId)?.name ?? "Unknown",
         })),
+        requiredSkillLevel: r.requiredSkillLevel,
         cookingTime: r.cookingTime,
         hpRestoration: r.hpRestoration,
       })),
@@ -165,6 +173,47 @@ export function registerCookingRoutes(server: FastifyInstance) {
       return { error: "Recipe not found" };
     }
 
+    // Check skill level requirement
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["cooking"]?.level ?? 1;
+    if (currentSkillLevel < recipe.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Cooking skill too low for this recipe`,
+        requiredSkillLevel: recipe.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Cook simpler recipes to raise your skill from ${currentSkillLevel} to ${recipe.requiredSkillLevel}`,
+      };
+    }
+
+    // Enforce cooking cooldown
+    const cooldownMs = recipe.cookingTime * 1000;
+    const lastCook = lastCookTime.get(walletAddress.toLowerCase());
+    if (lastCook && Date.now() - lastCook < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - lastCook)) / 1000);
+      reply.code(429);
+      return { error: "Cooking too fast", cooldownRemaining: remaining };
+    }
+
+    // Roll for failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, recipe.requiredSkillLevel);
+    if (failed) {
+      lastCookTime.set(walletAddress.toLowerCase(), Date.now());
+      const halfXp = recipeId === "cooked_meat"
+        ? Math.floor(PROFESSION_XP.COOK_TIER1 / 2)
+        : recipeId === "hearty_stew"
+          ? Math.floor(PROFESSION_XP.COOK_TIER2 / 2)
+          : Math.floor(PROFESSION_XP.COOK_TIER3 / 2);
+      awardProfessionXp(entity, zoneId, halfXp, "cooking");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        recipeId: recipe.recipeId,
+        message: "The food burned on the fire. No ingredients consumed.",
+      };
+    }
+
     // Check material balances
     for (const mat of recipe.requiredMaterials) {
       const balance = await getItemBalance(walletAddress, mat.tokenId);
@@ -216,6 +265,17 @@ export function registerCookingRoutes(server: FastifyInstance) {
         `[cooking] ${entity.name} cooked ${recipe.name} at ${campfire.name} → ${cookTx}`
       );
 
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: `${entity.name}: Cooked ${recipe.name}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: { craftType: "cooking", itemName: recipe.name, recipeId },
+      });
+
       // Log cook diary entry
       if (walletAddress) {
         const { headline, narrative } = narrativeCook(entity.name, entity.raceId, entity.classId, zoneId, recipe.name, campfire.name);
@@ -225,6 +285,8 @@ export function registerCookingRoutes(server: FastifyInstance) {
           hpRestoration: recipe.hpRestoration,
         });
       }
+
+      lastCookTime.set(walletAddress.toLowerCase(), Date.now());
 
       return {
         ok: true,

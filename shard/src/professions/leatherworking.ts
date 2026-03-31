@@ -6,9 +6,11 @@ import { mintItem, burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+
+const lastCraftTime = new Map<string, number>();
 
 export interface LeatherworkingRecipe {
   recipeId: string;
@@ -16,6 +18,7 @@ export interface LeatherworkingRecipe {
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
   copperCost: number;
+  requiredSkillLevel: number; // leatherworking skill level (1-300) needed to craft
   craftingTime: number;
 }
 
@@ -31,7 +34,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 68n, quantity: 2 }, // 2x Small Bone
     ],
     copperCost: 25,
-    craftingTime: 10,
+    requiredSkillLevel: 1,
+    craftingTime: 20,
   },
   {
     recipeId: "tanned-leggings",
@@ -43,7 +47,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 65n, quantity: 1 }, // 1x Wolf Pelt
     ],
     copperCost: 22,
-    craftingTime: 8,
+    requiredSkillLevel: 5,
+    craftingTime: 16,
   },
   {
     recipeId: "tanned-boots",
@@ -54,7 +59,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 62n, quantity: 2 }, // 2x Scrap Leather
     ],
     copperCost: 18,
-    craftingTime: 6,
+    requiredSkillLevel: 1,
+    craftingTime: 12,
   },
   {
     recipeId: "tanned-helm",
@@ -65,7 +71,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 68n, quantity: 2 }, // 2x Small Bone
     ],
     copperCost: 18,
-    craftingTime: 6,
+    requiredSkillLevel: 10,
+    craftingTime: 12,
   },
   {
     recipeId: "tanned-shoulders",
@@ -77,7 +84,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 68n, quantity: 1 }, // 1x Small Bone
     ],
     copperCost: 20,
-    craftingTime: 7,
+    requiredSkillLevel: 15,
+    craftingTime: 14,
   },
   {
     recipeId: "tanned-gloves",
@@ -88,7 +96,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 62n, quantity: 1 }, // 1x Scrap Leather
     ],
     copperCost: 15,
-    craftingTime: 5,
+    requiredSkillLevel: 5,
+    craftingTime: 10,
   },
   {
     recipeId: "tanned-belt",
@@ -100,7 +109,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 68n, quantity: 1 }, // 1x Small Bone
     ],
     copperCost: 15,
-    craftingTime: 5,
+    requiredSkillLevel: 10,
+    craftingTime: 10,
   },
 
   // --- Reinforced Hide Set ---
@@ -115,7 +125,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
     copperCost: 65,
-    craftingTime: 18,
+    requiredSkillLevel: 50,
+    craftingTime: 36,
   },
   {
     recipeId: "reinforced-leggings",
@@ -127,7 +138,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
     copperCost: 55,
-    craftingTime: 14,
+    requiredSkillLevel: 55,
+    craftingTime: 28,
   },
   {
     recipeId: "reinforced-boots",
@@ -139,7 +151,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 69n, quantity: 1 }, // 1x Thick Bone
     ],
     copperCost: 50,
-    craftingTime: 10,
+    requiredSkillLevel: 50,
+    craftingTime: 20,
   },
   {
     recipeId: "reinforced-helm",
@@ -150,7 +163,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 69n, quantity: 3 }, // 3x Thick Bone
     ],
     copperCost: 50,
-    craftingTime: 10,
+    requiredSkillLevel: 60,
+    craftingTime: 20,
   },
   {
     recipeId: "reinforced-shoulders",
@@ -162,7 +176,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 69n, quantity: 2 }, // 2x Thick Bone
     ],
     copperCost: 55,
-    craftingTime: 12,
+    requiredSkillLevel: 65,
+    craftingTime: 24,
   },
   {
     recipeId: "reinforced-gloves",
@@ -174,7 +189,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 73n, quantity: 1 }, // 1x Troll Hide
     ],
     copperCost: 60,
-    craftingTime: 10,
+    requiredSkillLevel: 60,
+    craftingTime: 20,
   },
   {
     recipeId: "reinforced-belt",
@@ -186,7 +202,8 @@ export const LEATHERWORKING_RECIPES: LeatherworkingRecipe[] = [
       { tokenId: 72n, quantity: 2 }, // 2x Ancient Bone
     ],
     copperCost: 55,
-    craftingTime: 10,
+    requiredSkillLevel: 55,
+    craftingTime: 20,
   },
 ];
 
@@ -217,6 +234,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
           };
         }),
         copperCost: recipe.copperCost,
+        requiredSkillLevel: recipe.requiredSkillLevel,
         craftingTime: recipe.craftingTime,
       };
     });
@@ -255,10 +273,49 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check skill level requirement
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["leatherworking"]?.level ?? 1;
+    if (currentSkillLevel < recipe.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Leatherworking skill too low for this recipe`,
+        requiredSkillLevel: recipe.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Craft simpler recipes to raise your skill from ${currentSkillLevel} to ${recipe.requiredSkillLevel}`,
+      };
+    }
+
     const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+
+    // Enforce crafting cooldown
+    const cooldownMs = recipe.craftingTime * 1000;
+    const lastCraft = lastCraftTime.get(walletAddress.toLowerCase());
+    if (lastCraft && Date.now() - lastCraft < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - lastCraft)) / 1000);
+      reply.code(429);
+      return { error: "Crafting too fast", cooldownRemaining: remaining };
+    }
+
+    // Roll for failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, recipe.requiredSkillLevel);
+    if (failed) {
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
+      const halfXp = recipeId.startsWith("reinforced-")
+        ? Math.floor(PROFESSION_XP.LEATHER_ADVANCED / 2)
+        : Math.floor(PROFESSION_XP.LEATHER_BASIC / 2);
+      awardProfessionXp(entity, zoneId, halfXp, "leatherworking");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        recipeId: recipe.recipeId,
+        message: "The leather cracked during shaping. No materials consumed.",
+      };
     }
 
     const station = getEntity(stationId);
@@ -317,17 +374,23 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
         craftedBy: walletAddress,
       });
 
-      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
-        logZoneEvent({
-          zoneId,
-          type: "loot",
-          tick: 0,
-          message: `${entity.name} crafted a ${instance.quality.tier} item: ${instance.displayName}!`,
-          entityId: entity.id,
-          entityName: entity.name,
-          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
-        });
-      }
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")
+          ? `${entity.name} crafted a ${instance.quality.tier} item: ${instance.displayName}!`
+          : `${entity.name}: Crafted ${outputItem?.name ?? "an item"}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          craftType: "leatherworking",
+          itemName: instance?.displayName ?? outputItem?.name ?? "an item",
+          recipeId,
+          ...(instance && { quality: instance.quality.tier, instanceId: instance.instanceId }),
+        },
+      });
 
       // Award profession XP (basic tanned = 30, reinforced = 40)
       const lwXp = recipeId.startsWith("reinforced-")
@@ -343,6 +406,8 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
       server.log.info(
         `[leatherworking] ${entity.name} crafted ${instance?.displayName ?? outputItem?.name} (${instance?.quality.tier ?? "n/a"}) at ${station.name} → ${craftTx}`
       );
+
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
 
       return {
         ok: true,

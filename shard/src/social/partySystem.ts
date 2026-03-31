@@ -789,7 +789,7 @@ export async function restorePartiesFromRedis(): Promise<number> {
   let partyIds = await redis.smembers(PARTY_IDS_KEY);
   if (!Array.isArray(partyIds) || partyIds.length === 0) {
     const legacyKeys = await redis.keys(`${PARTY_KEY_PREFIX}party_*`);
-    partyIds = legacyKeys.map((key) => key.slice(PARTY_KEY_PREFIX.length));
+    partyIds = legacyKeys.map((key: string) => key.slice(PARTY_KEY_PREFIX.length));
   }
   if (!Array.isArray(partyIds) || partyIds.length === 0) return 0;
 

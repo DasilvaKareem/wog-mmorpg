@@ -1,11 +1,12 @@
 import type { FastifyInstance } from "fastify";
-import { getEntity, recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { getEntity, recalculateEntityVitals, getWorldTick } from "../world/zoneRuntime.js";
 import { burnItem } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { saveCharacter } from "../character/characterStore.js";
+import { logZoneEvent } from "../world/zoneEvents.js";
 
 export type EnchantmentType =
   | "fire"
@@ -255,6 +256,17 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
       if (entity.walletAddress) {
         saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
       }
+
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: getWorldTick(),
+        message: `${entity.name}: Enchanted ${itemInfo.name} with ${enchantment.name}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: { craftType: "enchanting", itemName: itemInfo.name, enchantmentName: enchantment.name },
+      });
 
       if (entity.agentId != null) {
         reputationManager.submitFeedback(entity.agentId, ReputationCategory.Crafting, 3, `Enchanted: ${itemInfo.name} with ${enchantment.name}`);

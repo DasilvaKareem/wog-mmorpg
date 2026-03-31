@@ -269,7 +269,8 @@ contract PvPPredictionMarket is ReentrancyGuard, Ownable {
 
         // Transfer platform fee
         if (platformFee > 0) {
-            payable(feeCollector).transfer(platformFee);
+            (bool sent, ) = payable(feeCollector).call{value: platformFee}("");
+            require(sent, "Fee transfer failed");
         }
 
         emit PoolSettled(poolId, winner, totalPayout, platformFee);
@@ -293,7 +294,8 @@ contract PvPPredictionMarket is ReentrancyGuard, Ownable {
 
         pos.claimed = true;
 
-        payable(msg.sender).transfer(pos.payout);
+        (bool sent, ) = payable(msg.sender).call{value: pos.payout}("");
+        require(sent, "Payout transfer failed");
 
         emit WinningsClaimed(poolId, msg.sender, pos.payout);
     }
@@ -322,7 +324,8 @@ contract PvPPredictionMarket is ReentrancyGuard, Ownable {
 
             if (pos.amount > 0 && !pos.claimed) {
                 pos.claimed = true;
-                payable(participant).transfer(pos.amount);
+                (bool sent, ) = payable(participant).call{value: pos.amount}("");
+                require(sent, "Refund transfer failed");
             }
         }
 
@@ -442,6 +445,9 @@ contract PvPPredictionMarket is ReentrancyGuard, Ownable {
      * @notice Emergency withdraw (only if contract has excess funds)
      */
     function emergencyWithdraw() external onlyOwner {
-        payable(owner()).transfer(address(this).balance);
+        (bool sent, ) = payable(owner()).call{value: address(this).balance}("");
+        require(sent, "Emergency withdraw failed");
     }
+
+    receive() external payable {}
 }

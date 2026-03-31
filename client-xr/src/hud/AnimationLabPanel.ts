@@ -4,7 +4,18 @@ import type {
   AnimationLabState,
   PreviewArmorStyle,
   PreviewWeaponType,
+  RigTuning,
+  PreviewRace,
+  PreviewClass,
+  PreviewHair,
+  PreviewSkin,
 } from "../scene/AnimationLab.js";
+import { DEFAULT_RIG_TUNING } from "../scene/AnimationLab.js";
+
+const RACE_OPTIONS: PreviewRace[] = ["human", "elf", "dwarf", "beastkin"];
+const CLASS_OPTIONS: PreviewClass[] = ["warrior", "mage", "cleric", "ranger", "rogue", "warlock", "paladin", "monk"];
+const HAIR_OPTIONS: PreviewHair[] = ["short", "long", "mohawk", "ponytail", "braided", "afro", "bald"];
+const SKIN_OPTIONS: PreviewSkin[] = ["light", "medium", "tan", "brown", "dark"];
 
 const CAMERA_PRESETS: AnimationLabCameraPreset[] = ["front", "side", "three-quarter"];
 const WEAPON_OPTIONS: PreviewWeaponType[] = ["none", "sword", "axe", "mace", "dagger", "staff", "bow", "pickaxe", "sickle"];
@@ -29,6 +40,7 @@ export class AnimationLabPanel {
   private cameraButtons = new Map<AnimationLabCameraPreset, HTMLButtonElement>();
   private keyTimesWrap!: HTMLDivElement;
   private suppressSlider = false;
+  private rigSliders = new Map<keyof RigTuning, { slider: HTMLInputElement; label: HTMLSpanElement }>();
 
   constructor(
     private lab: AnimationLab,
@@ -132,6 +144,37 @@ export class AnimationLabPanel {
       </div>
 
       <div style="margin-bottom:12px">
+        <div style="margin-bottom:6px;color:#cab394">Character</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Race</div>
+            <select id="al-race" style="${this.selectCss()}">${RACE_OPTIONS.map(r => `<option value="${r}">${r}</option>`).join("")}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Class</div>
+            <select id="al-class" style="${this.selectCss()}">${CLASS_OPTIONS.map(c => `<option value="${c}">${c}</option>`).join("")}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Hair</div>
+            <select id="al-hair" style="${this.selectCss()}">${HAIR_OPTIONS.map(h => `<option value="${h}">${h}</option>`).join("")}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Skin</div>
+            <select id="al-skin" style="${this.selectCss()}">${SKIN_OPTIONS.map(s => `<option value="${s}">${s}</option>`).join("")}</select>
+          </label>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <div style="margin-bottom:6px;color:#cab394;cursor:pointer" id="al-rig-toggle">Rig Tuning &#9660;</div>
+        <div id="al-rig-section" style="display:none">
+          <label style="display:flex;align-items:center;gap:6px;margin-bottom:8px"><input id="al-female" type="checkbox"> Female</label>
+          <div id="al-rig-sliders"></div>
+          <button id="al-rig-reset" style="${this.buttonCss("#4a2a2a")}; margin-top:6px">Reset Defaults</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
         <div style="margin-bottom:6px;color:#cab394">Camera</div>
         <div id="al-camera-wrap" style="display:flex;gap:6px"></div>
       </div>
@@ -166,6 +209,50 @@ export class AnimationLabPanel {
       button.addEventListener("click", () => this.camera.applyPreset(preset));
       cameraWrap.appendChild(button);
       this.cameraButtons.set(preset, button);
+    }
+
+    // Rig tuning section
+    const rigToggle = this.root.querySelector("#al-rig-toggle") as HTMLDivElement;
+    const rigSection = this.root.querySelector("#al-rig-section") as HTMLDivElement;
+    rigToggle.addEventListener("click", () => {
+      const open = rigSection.style.display === "none";
+      rigSection.style.display = open ? "block" : "none";
+      rigToggle.innerHTML = `Rig Tuning ${open ? "&#9650;" : "&#9660;"}`;
+    });
+
+    const sliderDefs: { key: keyof RigTuning; label: string; min: number; max: number; step: number }[] = [
+      { key: "scale",         label: "Scale",          min: 0.5, max: 2.0,  step: 0.05 },
+      { key: "shoulderWidth", label: "Shoulder Width",  min: 0.1, max: 0.6,  step: 0.01 },
+      { key: "hipWidth",      label: "Hip Width",       min: 0.05, max: 0.4, step: 0.01 },
+      { key: "torsoHeight",   label: "Torso Height",    min: 0.4, max: 1.2,  step: 0.02 },
+      { key: "legLength",     label: "Leg Length",       min: 0.2, max: 0.8,  step: 0.02 },
+      { key: "armLength",     label: "Arm Length",       min: 0.2, max: 0.8,  step: 0.02 },
+    ];
+
+    const rigSlidersWrap = this.root.querySelector("#al-rig-sliders") as HTMLDivElement;
+    for (const def of sliderDefs) {
+      const row = document.createElement("div");
+      row.style.cssText = "margin-bottom:8px";
+      const header = document.createElement("div");
+      header.style.cssText = "display:flex;justify-content:space-between;margin-bottom:2px";
+      const nameSpan = document.createElement("span");
+      nameSpan.style.color = "#a89275";
+      nameSpan.textContent = def.label;
+      const valSpan = document.createElement("span");
+      valSpan.textContent = String(DEFAULT_RIG_TUNING[def.key]);
+      header.appendChild(nameSpan);
+      header.appendChild(valSpan);
+      const slider = document.createElement("input");
+      slider.type = "range";
+      slider.min = String(def.min);
+      slider.max = String(def.max);
+      slider.step = String(def.step);
+      slider.value = String(DEFAULT_RIG_TUNING[def.key]);
+      slider.style.cssText = "width:100%;accent-color:#d7a45a";
+      row.appendChild(header);
+      row.appendChild(slider);
+      rigSlidersWrap.appendChild(row);
+      this.rigSliders.set(def.key, { slider, label: valSpan });
     }
   }
 
@@ -219,6 +306,35 @@ export class AnimationLabPanel {
     this.bootsSelect.addEventListener("change", () => {
       this.lab.setArmorStyle("boots", this.bootsSelect.value as PreviewArmorStyle);
     });
+
+    // Rig tuning events
+    const femaleToggle = this.root.querySelector("#al-female") as HTMLInputElement;
+    femaleToggle.addEventListener("change", () => {
+      this.lab.setRigTuning({ isFemale: femaleToggle.checked });
+    });
+
+    for (const [key, { slider, label }] of this.rigSliders) {
+      slider.addEventListener("input", () => {
+        const val = parseFloat(slider.value);
+        label.textContent = val.toFixed(2);
+        this.lab.setRigTuning({ [key]: val });
+      });
+    }
+
+    const resetBtn = this.root.querySelector("#al-rig-reset") as HTMLButtonElement;
+    resetBtn.addEventListener("click", () => {
+      this.lab.setRigTuning({ ...DEFAULT_RIG_TUNING });
+    });
+
+    // Character appearance events
+    const raceSelect = this.root.querySelector("#al-race") as HTMLSelectElement;
+    raceSelect.addEventListener("change", () => this.lab.setAppearance({ race: raceSelect.value as PreviewRace }));
+    const classSelect = this.root.querySelector("#al-class") as HTMLSelectElement;
+    classSelect.addEventListener("change", () => this.lab.setAppearance({ classId: classSelect.value as PreviewClass }));
+    const hairSelect = this.root.querySelector("#al-hair") as HTMLSelectElement;
+    hairSelect.addEventListener("change", () => this.lab.setAppearance({ hairStyle: hairSelect.value as PreviewHair }));
+    const skinSelect = this.root.querySelector("#al-skin") as HTMLSelectElement;
+    skinSelect.addEventListener("change", () => this.lab.setAppearance({ skinColor: skinSelect.value as PreviewSkin }));
   }
 
   private sync(state: AnimationLabState) {
@@ -245,6 +361,27 @@ export class AnimationLabPanel {
     for (const [preset, button] of this.cameraButtons) {
       button.style.opacity = preset === state.cameraPreset ? "1" : "0.7";
       button.style.borderColor = preset === state.cameraPreset ? "#f6d39b" : "rgba(255,255,255,0.18)";
+    }
+
+    // Sync appearance selectors
+    const raceSelect = this.root.querySelector("#al-race") as HTMLSelectElement | null;
+    if (raceSelect) raceSelect.value = state.appearance.race;
+    const classSelect = this.root.querySelector("#al-class") as HTMLSelectElement | null;
+    if (classSelect) classSelect.value = state.appearance.classId;
+    const hairSelect = this.root.querySelector("#al-hair") as HTMLSelectElement | null;
+    if (hairSelect) hairSelect.value = state.appearance.hairStyle;
+    const skinSelect = this.root.querySelector("#al-skin") as HTMLSelectElement | null;
+    if (skinSelect) skinSelect.value = state.appearance.skinColor;
+
+    // Sync rig tuning sliders
+    const femaleToggle = this.root.querySelector("#al-female") as HTMLInputElement | null;
+    if (femaleToggle) femaleToggle.checked = state.rigTuning.isFemale;
+    for (const [key, { slider, label }] of this.rigSliders) {
+      const val = state.rigTuning[key];
+      if (typeof val === "number") {
+        slider.value = val.toFixed(3);
+        label.textContent = val.toFixed(2);
+      }
     }
 
     this.renderKeyTimes(state.keyTimes, state.time);

@@ -227,6 +227,9 @@ export interface Entity {
   followLeaderId?: string;
   /** In-flight technique windup state for pre-resolution telegraphing. */
   castingIntent?: CastingIntent;
+  /** Most recently committed technique for AI variety. */
+  lastTechniqueId?: string;
+  lastTechniqueTick?: number;
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -505,7 +508,7 @@ function serializeLivePlayerEntity(entity: Entity): Record<string, unknown> {
 }
 
 function hydrateLivePlayerEntity(raw: Record<string, unknown>): Entity {
-  const entity = { ...raw } as Entity & { cooldowns?: Record<string, number> | Map<string, number> };
+  const entity = { ...raw } as unknown as Entity & { cooldowns?: Record<string, number> | Map<string, number> };
   if (typeof raw.characterTokenId === "string" && /^\d+$/.test(raw.characterTokenId)) {
     entity.characterTokenId = BigInt(raw.characterTokenId);
   }
@@ -1620,14 +1623,105 @@ function pickTechnique(
     if (debuff) return debuff;
   }
 
-  // 4. Attack technique — pick highest damage multiplier
-  const attacks = usable
-    .filter(t => t.type === "attack")
-    .sort((a, b) => (b.effects.damageMultiplier ?? 0) - (a.effects.damageMultiplier ?? 0));
-  if (attacks.length > 0) return attacks[0];
+  // 4. Attack technique — score for variety and situation, not just raw multiplier
+  const attacks = usable.filter(t => t.type === "attack");
+  if (attacks.length > 0) {
+    const dx = target.x - entity.x;
+    const dy = target.y - entity.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const nearbyTargets = countNearbyTechniqueTargets(target, zone, entity.id, 70);
+    const attackRange = getEntityAttackRange(entity);
+    let best: TechniqueDefinition | null = null;
+    let bestScore = Number.NEGATIVE_INFINITY;
+
+    for (const attack of attacks) {
+      const score = scoreAttackTechnique(entity, attack, {
+        tick,
+        distance,
+        attackRange,
+        nearbyTargets,
+      });
+      if (score > bestScore) {
+        best = attack;
+        bestScore = score;
+      }
+    }
+
+    if (best) return best;
+  }
 
   // 5. Nothing good — basic attack
   return null;
+}
+
+function countNearbyTechniqueTargets(
+  primaryTarget: Entity,
+  zone: ZoneState,
+  sourceEntityId: string,
+  radius: number,
+): number {
+  let count = 0;
+  for (const other of zone.entities.values()) {
+    if (other.id === sourceEntityId) continue;
+    if (other.type !== "mob" && other.type !== "boss") continue;
+    if (other.hp <= 0 || other.leashing) continue;
+    const dx = other.x - primaryTarget.x;
+    const dy = other.y - primaryTarget.y;
+    if (Math.sqrt(dx * dx + dy * dy) <= radius) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function scoreAttackTechnique(
+  entity: Entity,
+  technique: TechniqueDefinition,
+  context: {
+    tick: number;
+    distance: number;
+    attackRange: number;
+    nearbyTargets: number;
+  },
+): number {
+  let score = technique.effects.damageMultiplier ?? 1;
+
+  const isRepeat = entity.lastTechniqueId === technique.id
+    && entity.lastTechniqueTick != null
+    && context.tick - entity.lastTechniqueTick < 18;
+  if (isRepeat) {
+    score -= 0.45;
+  }
+
+  if (technique.targetType === "area" || (technique.effects.maxTargets ?? 1) > 1) {
+    score += Math.min(0.45, Math.max(0, context.nearbyTargets - 1) * 0.18);
+  }
+
+  if (technique.animStyle === "projectile" && context.distance > context.attackRange) {
+    score += 0.22;
+  }
+
+  if ((technique.effects.lunge ?? 0) > 0 && context.distance > context.attackRange * 0.7) {
+    score += 0.2;
+  }
+
+  if (entity.classId === "monk") {
+    if (technique.id === "monk_flying_kick" && context.distance > context.attackRange * 0.65) {
+      score += 0.28;
+    }
+    if (technique.id === "monk_whirlwind_kick" && context.nearbyTargets >= 2) {
+      score += 0.35;
+    }
+    if (technique.id === "monk_chi_burst" && context.distance > context.attackRange) {
+      score += 0.18;
+    }
+  }
+
+  if (entity.lastTechniqueId && entity.lastTechniqueId !== technique.id) {
+    score += 0.05;
+  }
+
+  return score;
 }
 
 function isAliveAutoCombatTarget(entity: Entity | undefined): entity is Entity {
@@ -1778,6 +1872,13 @@ function getPartyFocusTarget(
   return taggedTarget;
 }
 
+function isTrivialAutoCombatTarget(entity: Entity, target: Entity): boolean {
+  if (entity.type !== "player") return false;
+  if (target.type !== "mob" && target.type !== "boss") return false;
+  if (entity.level == null || target.level == null) return false;
+  return getLevelGapMultiplier(entity.level, target.level) <= 0;
+}
+
 export function pickAutoCombatTarget(
   entity: Entity,
   zone: ZoneState,
@@ -1798,6 +1899,7 @@ export function pickAutoCombatTarget(
   for (const other of zone.entities.values()) {
     if (!isAliveAutoCombatTarget(other)) continue;
     if (shouldRespectPartyAnchor && !isTargetWithinPartyAnchorRange(entity, other, zone, partyLeaderIdOverride)) continue;
+    if (isTrivialAutoCombatTarget(entity, other)) continue;
     const dist = getDistanceBetween(entity, other);
     if (dist < nearestDist) {
       nearestDist = dist;
@@ -2467,6 +2569,8 @@ async function worldTick() {
             entity.essence = Math.max(0, currentEssence - technique.essenceCost);
             if (!entity.cooldowns) entity.cooldowns = new Map();
             entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+            entity.lastTechniqueId = technique.id;
+            entity.lastTechniqueTick = zone.tick;
             entity.castingIntent = {
               targetId: target.id,
               techniqueId: technique.id,
@@ -2485,6 +2589,8 @@ async function worldTick() {
             // Set cooldown
             if (!entity.cooldowns) entity.cooldowns = new Map();
             entity.cooldowns.set(technique.id, zone.tick + technique.cooldown);
+            entity.lastTechniqueId = technique.id;
+            entity.lastTechniqueTick = zone.tick;
           }
 
           // Apply technique effects inline (mirrors techniqueRoutes logic)

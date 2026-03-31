@@ -33,6 +33,8 @@ type Step =
   | "telegram-signup"
   | "done";
 
+type CreateCharacterStep = "identity" | "appearance" | "review";
+
 interface SuccessData {
   name: string;
   race: string;
@@ -169,6 +171,12 @@ const PLANS = [
   },
 ];
 
+const CREATE_CHARACTER_STEPS: { id: CreateCharacterStep; label: string; shortLabel: string }[] = [
+  { id: "identity", label: "Identity", shortLabel: "1" },
+  { id: "appearance", label: "Appearance", shortLabel: "2" },
+  { id: "review", label: "Origin + Review", shortLabel: "3" },
+];
+
 function StatRow({ label, value }: { label: string; value: number }) {
   return (
     <div className="flex items-center justify-between text-[12px]">
@@ -194,8 +202,10 @@ export function OnboardingFlow({
   const navigate = useNavigate();
   const { syncAddress, address: walletAddress, connect } = useWalletContext();
   const signInOnly = initialMode === "sign-in";
+  const contentRef = React.useRef<HTMLDivElement | null>(null);
 
   const [step, setStep] = React.useState<Step>(() => modeToStep(initialMode));
+  const [createCharacterStep, setCreateCharacterStep] = React.useState<CreateCharacterStep>("identity");
   const [error, setError] = React.useState<string | null>(null);
   const [connectedAddress, setConnectedAddress] = React.useState<string | null>(walletAddress);
   const [pendingMintAfterAuth, setPendingMintAfterAuth] = React.useState(false);
@@ -230,6 +240,10 @@ export function OnboardingFlow({
       (window.navigator as any).standalone === true)
   );
   const [pwaPrompt, setPwaPrompt] = React.useState<any>(null);
+  const [isCompactLayout, setIsCompactLayout] = React.useState(() =>
+    typeof window !== "undefined" &&
+    window.matchMedia("(max-width: 767px), (pointer: coarse)").matches
+  );
   const isIosPwa = typeof navigator !== "undefined" &&
     (/iphone|ipad|ipod/i.test(navigator.userAgent) ||
       (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
@@ -253,6 +267,27 @@ export function OnboardingFlow({
       }
     };
   }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const query = window.matchMedia("(max-width: 767px), (pointer: coarse)");
+    const onChange = () => setIsCompactLayout(query.matches);
+    onChange();
+
+    if (query.addEventListener) {
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    }
+
+    query.addListener(onChange);
+    return () => query.removeListener(onChange);
+  }, []);
+
+  React.useEffect(() => {
+    if (!isCompactLayout || step !== "create-char") return;
+    contentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [createCharacterStep, isCompactLayout, step]);
 
   // Sync wallet address into local state when it arrives (e.g. after Connect Wallet)
   React.useEffect(() => {
@@ -417,6 +452,25 @@ export function OnboardingFlow({
   if (!eyeColor) missingFields.push("Eyes");
   if (!origin) missingFields.push("Origin");
 
+  const identityMissing: string[] = [];
+  if (!charName.trim()) identityMissing.push("Name");
+  else if (nameValidationError) identityMissing.push("Valid Name");
+  if (!selectedRace) identityMissing.push("Race");
+  if (!selectedClass) identityMissing.push("Class");
+  if (!gender) identityMissing.push("Gender");
+
+  const appearanceMissing: string[] = [];
+  if (!skinColor) appearanceMissing.push("Skin");
+  if (!hairStyle) appearanceMissing.push("Hair");
+  if (!eyeColor) appearanceMissing.push("Eyes");
+
+  const reviewMissing: string[] = [];
+  if (!origin) reviewMissing.push("Origin");
+
+  const identityComplete = identityMissing.length === 0;
+  const appearanceComplete = appearanceMissing.length === 0;
+  const reviewComplete = reviewMissing.length === 0;
+
   React.useEffect(() => {
     if (!pendingMintAfterAuth || !connectedAddress || !canCreate || step !== "create-char") return;
     void handleCreate(connectedAddress);
@@ -539,44 +593,73 @@ export function OnboardingFlow({
     }
   }
 
-  // Shared wrapper style
-  const panelCls =
-    "w-full max-w-2xl border-4 border-[#54f28b] bg-[#060d12] shadow-[8px_8px_0_0_#000] font-mono";
+  const remainingSelections = missingFields.length;
+  const currentCreateCharacterStepIndex = CREATE_CHARACTER_STEPS.findIndex((item) => item.id === createCharacterStep);
+  const currentCreateCharacterStep = CREATE_CHARACTER_STEPS[currentCreateCharacterStepIndex] ?? CREATE_CHARACTER_STEPS[0];
+  const currentStepMissing =
+    createCharacterStep === "identity"
+      ? identityMissing
+      : createCharacterStep === "appearance"
+      ? appearanceMissing
+      : reviewMissing;
+  const currentStepComplete =
+    createCharacterStep === "identity"
+      ? identityComplete
+      : createCharacterStep === "appearance"
+      ? appearanceComplete
+      : reviewComplete;
+  const nextCreateCharacterStep = CREATE_CHARACTER_STEPS[currentCreateCharacterStepIndex + 1] ?? null;
+  const title =
+    step === "login" || step === "email-input" || step === "email-otp"
+      ? ">> SUMMON CHAMPION <<"
+      : step === "connecting"
+      ? ">> AUTHENTICATING..."
+      : step === "create-char"
+      ? ">> CREATE CHARACTER"
+      : step === "payment-char"
+      ? ">> CHARACTER MINT"
+      : step === "minting"
+      ? ">> MINTING NFT..."
+      : step === "telegram-signup"
+      ? ">> TELEGRAM UPDATES"
+      : ">> CHARACTER CREATED!";
+
+  const panelCls = [
+    "w-full border-4 border-[#54f28b] bg-[#060d12] font-mono shadow-[8px_8px_0_0_#000]",
+    isCompactLayout
+      ? "h-[100dvh] max-w-none rounded-none border-x-0 border-b-0 shadow-none"
+      : "max-w-2xl max-h-[90vh]",
+  ].join(" ");
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 px-4"
+      className={`fixed inset-0 z-[200] flex bg-black/80 ${isCompactLayout ? "items-end justify-stretch px-0" : "items-center justify-center px-4"}`}
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className={`${panelCls} max-h-[90vh] flex flex-col`}>
+      <div className={`${panelCls} flex flex-col`}>
         {/* Header bar */}
-        <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-2 shrink-0">
-          <span className="text-[13px] uppercase tracking-widest text-[#54f28b]">
-            {step === "login" || step === "email-input" || step === "email-otp"
-              ? ">> SUMMON CHAMPION <<"
-              : step === "connecting"
-              ? ">> AUTHENTICATING..."
-              : step === "create-char"
-              ? ">> CREATE CHARACTER"
-              : step === "payment-char"
-              ? ">> CHARACTER MINT"
-              : step === "minting"
-              ? ">> MINTING NFT..."
-              : step === "telegram-signup"
-              ? ">> TELEGRAM UPDATES"
-              : ">> CHARACTER CREATED!"}
-          </span>
+        <div className={`flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] shrink-0 ${isCompactLayout ? "sticky top-0 z-20 px-3 py-3" : "px-4 py-2"}`}>
+          <div className="min-w-0">
+            <span className={`${isCompactLayout ? "text-[12px]" : "text-[13px]"} block truncate uppercase tracking-widest text-[#54f28b]`}>
+              {title}
+            </span>
+            {step === "create-char" && isCompactLayout ? (
+              <span className="mt-1 block text-[10px] uppercase tracking-[0.18em] text-[#6d77a3]">
+                Step {currentCreateCharacterStepIndex + 1} of {CREATE_CHARACTER_STEPS.length} · {remainingSelections === 0 ? "Ready to mint" : `${remainingSelections} selections left`}
+              </span>
+            ) : null}
+          </div>
           <button
             onClick={onClose}
-            className="text-[14px] text-[#54f28b] hover:text-[#ffcc00] transition-colors"
+            className={`shrink-0 text-[#54f28b] transition-colors hover:text-[#ffcc00] ${isCompactLayout ? "ml-3 text-[16px]" : "text-[14px]"}`}
           >
             [X]
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto flex-1">
+        <div ref={contentRef} className={`flex-1 overflow-y-auto overscroll-contain ${isCompactLayout ? "px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3" : "p-5"}`}>
           {/* ── STEP: LOGIN ── */}
           {(step === "login") && (
             <div className="flex flex-col gap-3">
@@ -776,18 +859,66 @@ export function OnboardingFlow({
 
           {/* ── STEP: CREATE CHARACTER ── */}
           {step === "create-char" && (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-4">
               {connectedAddress && (
-                <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-2 py-1">
+                <div className="text-[11px] text-[#54f28b] border border-[#1a3a22] bg-[#0a1a0e] px-3 py-2">
                   [AUTH] {connectedAddress.slice(0, 8)}...{connectedAddress.slice(-6)}
                 </div>
               )}
 
+              {isCompactLayout ? (
+                <div className="grid grid-cols-3 gap-2">
+                  {CREATE_CHARACTER_STEPS.map((item, index) => {
+                    const isActive = createCharacterStep === item.id;
+                    const isDone =
+                      item.id === "identity"
+                        ? identityComplete
+                        : item.id === "appearance"
+                        ? appearanceComplete
+                        : reviewComplete;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => setCreateCharacterStep(item.id)}
+                        className={`border px-2 py-2 text-left transition ${
+                          isActive
+                            ? "border-[#54f28b] bg-[#0a1a0e]"
+                            : isDone
+                            ? "border-[#ffcc00] bg-[#2a2210]"
+                            : "border-[#2a3450] bg-[#0b1020]"
+                        }`}
+                      >
+                        <span
+                          className={`block text-[10px] font-bold uppercase tracking-[0.18em] ${
+                            isActive ? "text-[#54f28b]" : isDone ? "text-[#ffcc00]" : "text-[#6d77a3]"
+                          }`}
+                        >
+                          {item.shortLabel}
+                        </span>
+                        <span className="mt-1 block text-[10px] leading-tight text-[#d6deff]">
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3 text-[12px] leading-relaxed text-[#9aa7cc]">
+                {isCompactLayout
+                  ? createCharacterStep === "identity"
+                    ? "Step 1: pick the core character details first."
+                    : createCharacterStep === "appearance"
+                    ? "Step 2: choose the look. Bigger touch targets make the color and hair picks easier on phones."
+                    : "Step 3: pick an origin, review the build, then mint from the sticky footer."
+                  : "Build the character from top to bottom. On mobile the mint action stays pinned at the bottom so you can move through the form without losing your place."}
+              </div>
+
               {/* Top row: Preview + Name/Race/Class */}
-              <div className="flex gap-3">
+              <div className={`gap-3 ${isCompactLayout ? "flex flex-col" : "flex"}`}>
                 {/* Character preview with zone frame */}
                 <div className="shrink-0 flex flex-col items-center">
-                  <div className="border-2 border-[#2a3450] bg-gradient-to-b from-[#0f1a2e] via-[#0b1424] to-[#162210] p-3 relative">
+                  <div className="relative border-2 border-[#2a3450] bg-gradient-to-b from-[#0f1a2e] via-[#0b1424] to-[#162210] p-3">
                     <CharacterPreview
                       skinColor={skinColor || "medium"}
                       eyeColor={eyeColor || "brown"}
@@ -804,225 +935,278 @@ export function OnboardingFlow({
                   </div>
                 </div>
 
-                {/* Right side: Name + Race/Class */}
-                <div className="flex-1 flex flex-col gap-2 min-w-0">
-                  {/* Name */}
-                  <div>
-                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                      Character Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="2–24 characters"
-                      value={charName}
-                      maxLength={24}
-                      onChange={(e) => {
-                        setCharName(e.target.value);
-                        if (error) setError(null);
-                      }}
-                      className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[13px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
-                      autoFocus
-                    />
-                    {nameValidationError && charName.trim().length > 0 && (
-                      <p className="mt-1 text-[11px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
-                    )}
-                  </div>
+                {(!isCompactLayout || createCharacterStep === "identity") ? (
+                  <div className="min-w-0 flex-1 flex flex-col gap-3">
+                    {/* Name */}
+                    <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                        Character Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="2–24 characters"
+                        value={charName}
+                        maxLength={24}
+                        onChange={(e) => {
+                          setCharName(e.target.value);
+                          if (error) setError(null);
+                        }}
+                        className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[13px] text-[#d6deff] placeholder-[#6d77a3] outline-none focus:border-[#ffcc00]"
+                        autoFocus
+                      />
+                      {nameValidationError && charName.trim().length > 0 && (
+                        <p className="mt-1 text-[11px] text-[#ff4d6d]">[ERR] {nameValidationError}</p>
+                      )}
+                    </div>
 
-                  {/* Race */}
-                  <div>
-                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                      Race
-                    </label>
-                    <div className="grid grid-cols-2 gap-1">
-                      {races.map((r) => (
-                        <button
-                          key={r.id}
-                          onClick={() => setRaceId(r.id)}
-                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
-                            raceId === r.id
-                              ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                          }`}
-                        >
-                          {r.name}
-                        </button>
-                      ))}
+                    {/* Race */}
+                    <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                        Race
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        {races.map((r) => (
+                          <button
+                            key={r.id}
+                            onClick={() => setRaceId(r.id)}
+                            className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                              raceId === r.id
+                                ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                                : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                            }`}
+                          >
+                            {r.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Class */}
+                    <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                        Class
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        {classes.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => setClassId(c.id)}
+                            className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                              classId === c.id
+                                ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
+                                : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                            }`}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Gender */}
+                    <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                        Gender
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        {GENDERS.map((option) => (
+                          <button
+                            key={option.id}
+                            onClick={() => setGender(option.id)}
+                            className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
+                              gender === option.id
+                                ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                                : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
-
-                  {/* Class */}
-                  <div>
-                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                      Class
-                    </label>
-                    <div className="grid grid-cols-2 gap-1">
-                      {classes.map((c) => (
-                        <button
-                          key={c.id}
-                          onClick={() => setClassId(c.id)}
-                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
-                            classId === c.id
-                              ? "border-[#54f28b] bg-[#0a1a0e] text-[#54f28b]"
-                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                          }`}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
+                ) : (
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3 text-[12px] text-[#9aa7cc]">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-[#6d77a3]">Current Build</p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[#6d77a3]">Name</p>
+                        <p className="mt-1 text-[#d6deff]">{charName.trim() || "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[#6d77a3]">Race</p>
+                        <p className="mt-1 text-[#d6deff]">{selectedRace?.name ?? "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[#6d77a3]">Class</p>
+                        <p className="mt-1 text-[#d6deff]">{selectedClass?.name ?? "Not set"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.16em] text-[#6d77a3]">Gender</p>
+                        <p className="mt-1 text-[#d6deff]">{gender ?? "Not set"}</p>
+                      </div>
                     </div>
                   </div>
-
-                  {/* Gender */}
-                  <div>
-                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                      Gender
-                    </label>
-                    <div className="grid grid-cols-2 gap-1">
-                      {GENDERS.map((option) => (
-                        <button
-                          key={option.id}
-                          onClick={() => setGender(option.id)}
-                          className={`border-2 px-2 py-1 text-left text-[11px] transition shadow-[2px_2px_0_0_#000] ${
-                            gender === option.id
-                              ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                )}
               </div>
 
               {/* Selected class/race description */}
               {(selectedClass || selectedRace) && (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-1.5 text-[10px] text-[#8b95c2]">
+                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-2 text-[11px] leading-relaxed text-[#8b95c2]">
                   {selectedRace && <p><span className="text-[#ffcc00]">{selectedRace.name}:</span> {selectedRace.description}</p>}
                   {selectedClass && <p className={selectedRace ? "mt-1" : ""}><span className="text-[#54f28b]">{selectedClass.name}:</span> {selectedClass.description}</p>}
                 </div>
               )}
 
               {/* Appearance row: Skin + Eyes + Hair */}
-              <div className="grid grid-cols-3 gap-3">
-                {/* Skin Color */}
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Skin
-                  </label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {SKIN_COLORS.map((s) => (
-                      <button
-                        key={s.id}
-                        onClick={() => setSkinColor(s.id)}
-                        className={`h-8 border-2 transition flex items-end justify-center pb-0.5 ${
-                          skinColor === s.id
-                            ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
-                            : "border-[#2a3450] hover:border-[#54f28b]"
-                        }`}
-                        style={{ backgroundColor: s.hex }}
-                      >
-                        <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
-                          {s.label}
-                        </span>
-                      </button>
-                    ))}
+              {(!isCompactLayout || createCharacterStep === "appearance") ? (
+                <div className={`gap-3 ${isCompactLayout ? "grid grid-cols-1" : "grid grid-cols-3"}`}>
+                  {/* Skin Color */}
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Skin
+                    </label>
+                    <div className={`grid gap-1 ${isCompactLayout ? "grid-cols-2" : "grid-cols-3"}`}>
+                      {SKIN_COLORS.map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => setSkinColor(s.id)}
+                          className={`h-10 border-2 transition flex items-end justify-center pb-0.5 ${
+                            skinColor === s.id
+                              ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
+                              : "border-[#2a3450] hover:border-[#54f28b]"
+                          }`}
+                          style={{ backgroundColor: s.hex }}
+                        >
+                          <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                            {s.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Eye Color */}
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Eyes
+                    </label>
+                    <div className={`grid gap-1 ${isCompactLayout ? "grid-cols-2" : "grid-cols-3"}`}>
+                      {EYE_COLORS.map((e) => (
+                        <button
+                          key={e.id}
+                          onClick={() => setEyeColor(e.id)}
+                          className={`h-10 border-2 transition flex items-end justify-center pb-0.5 ${
+                            eyeColor === e.id
+                              ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
+                              : "border-[#2a3450] hover:border-[#54f28b]"
+                          }`}
+                          style={{ backgroundColor: e.hex }}
+                        >
+                          <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                            {e.label}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Hair Style */}
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Hair
+                    </label>
+                    <div className={`grid gap-1 pr-0.5 ${isCompactLayout ? "grid-cols-2 max-h-[200px]" : "grid-cols-2 max-h-[136px]"} overflow-y-auto`}>
+                      {HAIR_STYLES.map((h) => (
+                        <button
+                          key={h.id}
+                          onClick={() => setHairStyle(h.id)}
+                          className={`border-2 px-2 py-1.5 text-center ${isCompactLayout ? "text-[10px]" : "text-[9px]"} transition ${
+                            hairStyle === h.id
+                              ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
+                              : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
+                          }`}
+                        >
+                          {h.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
+              ) : null}
 
-                {/* Eye Color */}
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Eyes
-                  </label>
-                  <div className="grid grid-cols-3 gap-1">
-                    {EYE_COLORS.map((e) => (
-                      <button
-                        key={e.id}
-                        onClick={() => setEyeColor(e.id)}
-                        className={`h-8 border-2 transition flex items-end justify-center pb-0.5 ${
-                          eyeColor === e.id
-                            ? "border-[#ffcc00] ring-1 ring-[#ffcc00]"
-                            : "border-[#2a3450] hover:border-[#54f28b]"
-                        }`}
-                        style={{ backgroundColor: e.hex }}
-                      >
-                        <span className="text-[8px] font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
-                          {e.label}
-                        </span>
-                      </button>
-                    ))}
+              {(!isCompactLayout || createCharacterStep === "review") ? (
+                <>
+                  {/* Origin */}
+                  <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                    <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
+                      Origin
+                    </label>
+                    <div className={`grid gap-2 ${isCompactLayout ? "grid-cols-1" : "grid-cols-2"}`}>
+                      {ORIGINS.map((o) => (
+                        <button
+                          key={o.id}
+                          onClick={() => setOrigin(o.id)}
+                          className={`border-2 px-2 py-1.5 text-left transition ${
+                            origin === o.id
+                              ? "border-[#ffcc00] bg-[#2a2210]"
+                              : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
+                          }`}
+                        >
+                          <span className={`text-[11px] font-bold ${origin === o.id ? "text-[#ffcc00]" : "text-[#d6deff]"}`}>
+                            {o.label}
+                          </span>
+                          <span className="text-[9px] text-[#6d77a3] ml-1">/ {o.tone}</span>
+                          {origin === o.id && (
+                            <p className="text-[9px] text-[#8b95c2] mt-0.5 leading-tight">{o.desc}</p>
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                {/* Hair Style */}
-                <div>
-                  <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                    Hair
-                  </label>
-                  <div className="grid grid-cols-2 gap-1 max-h-[136px] overflow-y-auto pr-0.5">
-                    {HAIR_STYLES.map((h) => (
-                      <button
-                        key={h.id}
-                        onClick={() => setHairStyle(h.id)}
-                        className={`border-2 px-1 py-0.5 text-center text-[9px] transition ${
-                          hairStyle === h.id
-                            ? "border-[#ffcc00] bg-[#2a2210] text-[#ffcc00]"
-                            : "border-[#2a3450] bg-[#0e1628] text-[#9aa7cc] hover:border-[#54f28b] hover:text-[#54f28b]"
-                        }`}
-                      >
-                        {h.label}
-                      </button>
-                    ))}
+                  <div className={`gap-3 ${isCompactLayout ? "grid grid-cols-1" : "grid grid-cols-2"}`}>
+                    <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                      <p className="mb-2 text-[10px] uppercase tracking-wider text-[#6d77a3]">Review</p>
+                      <div className="grid grid-cols-2 gap-2 text-[11px]">
+                        <div>
+                          <span className="text-[#6d77a3]">Name</span>
+                          <p className="mt-1 text-[#d6deff]">{charName.trim() || "Not set"}</p>
+                        </div>
+                        <div>
+                          <span className="text-[#6d77a3]">Race</span>
+                          <p className="mt-1 text-[#d6deff]">{selectedRace?.name ?? "Not set"}</p>
+                        </div>
+                        <div>
+                          <span className="text-[#6d77a3]">Class</span>
+                          <p className="mt-1 text-[#d6deff]">{selectedClass?.name ?? "Not set"}</p>
+                        </div>
+                        <div>
+                          <span className="text-[#6d77a3]">Origin</span>
+                          <p className="mt-1 text-[#d6deff]">{ORIGINS.find((item) => item.id === origin)?.label ?? "Not set"}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stat preview */}
+                    {previewStats ? (
+                      <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-3">
+                        <p className="mb-1 text-[10px] uppercase tracking-wider text-[#6d77a3]">
+                          Stats — {selectedRace?.name} {selectedClass?.name}
+                        </p>
+                        <div className={`grid gap-x-3 gap-y-0 ${isCompactLayout ? "grid-cols-2" : "grid-cols-3"}`}>
+                          <StatRow label="STR" value={previewStats.str ?? 0} />
+                          <StatRow label="DEF" value={previewStats.def ?? 0} />
+                          <StatRow label="HP" value={previewStats.hp ?? 0} />
+                          <StatRow label="AGI" value={previewStats.agi ?? 0} />
+                          <StatRow label="INT" value={previewStats.int ?? 0} />
+                          <StatRow label="LUCK" value={previewStats.luck ?? 0} />
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              </div>
-
-              {/* Origin */}
-              <div>
-                <label className="mb-1 block text-[11px] text-[#9aa7cc] uppercase tracking-wider">
-                  Origin
-                </label>
-                <div className="grid grid-cols-2 gap-1">
-                  {ORIGINS.map((o) => (
-                    <button
-                      key={o.id}
-                      onClick={() => setOrigin(o.id)}
-                      className={`border-2 px-2 py-1.5 text-left transition ${
-                        origin === o.id
-                          ? "border-[#ffcc00] bg-[#2a2210]"
-                          : "border-[#2a3450] bg-[#0e1628] hover:border-[#54f28b]"
-                      }`}
-                    >
-                      <span className={`text-[11px] font-bold ${origin === o.id ? "text-[#ffcc00]" : "text-[#d6deff]"}`}>
-                        {o.label}
-                      </span>
-                      <span className="text-[9px] text-[#6d77a3] ml-1">/ {o.tone}</span>
-                      {origin === o.id && (
-                        <p className="text-[9px] text-[#8b95c2] mt-0.5 leading-tight">{o.desc}</p>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Stat preview */}
-              {previewStats && (
-                <div className="border border-[#2a3450] bg-[#0b1020] px-3 py-1.5">
-                  <p className="mb-1 text-[10px] uppercase tracking-wider text-[#6d77a3]">
-                    Stats — {selectedRace?.name} {selectedClass?.name}
-                  </p>
-                  <div className="grid grid-cols-3 gap-x-3 gap-y-0">
-                    <StatRow label="STR" value={previewStats.str ?? 0} />
-                    <StatRow label="DEF" value={previewStats.def ?? 0} />
-                    <StatRow label="HP" value={previewStats.hp ?? 0} />
-                    <StatRow label="AGI" value={previewStats.agi ?? 0} />
-                    <StatRow label="INT" value={previewStats.int ?? 0} />
-                    <StatRow label="LUCK" value={previewStats.luck ?? 0} />
-                  </div>
-                </div>
-              )}
+                </>
+              ) : null}
 
               {error && (
                 <p className="text-[12px] text-[#ff4d6d] border border-[#ff4d6d] px-3 py-2 bg-[#1a0a0e]">
@@ -1030,17 +1214,80 @@ export function OnboardingFlow({
                 </p>
               )}
 
-              <button
-                onClick={handleRequestMint}
-                disabled={!canCreate}
-                className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-2.5 text-[13px] uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:opacity-40 disabled:cursor-not-allowed active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
-              >
-                {canCreate
-                  ? connectedAddress
-                    ? "[→] Mint Character — $0.00"
-                    : "[→] Sign In to Mint Character"
-                  : `Select: ${missingFields.join(", ")}`}
-              </button>
+              <div className={`sticky bottom-0 z-10 -mx-3 border-t-2 border-[#24314d] bg-[#060d12f2] px-3 pt-3 ${isCompactLayout ? "pb-[max(0.75rem,env(safe-area-inset-bottom))]" : "pb-0"}`}>
+                <div className="mb-3 flex items-center justify-between gap-3 text-[11px]">
+                  {isCompactLayout ? (
+                    <>
+                      <span className="text-[#6d77a3]">
+                        {currentCreateCharacterStep.label}
+                      </span>
+                      <span className="truncate text-right text-[#9aa7cc]">
+                        {currentStepComplete ? "Ready" : currentStepMissing.join(", ")}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[#6d77a3]">
+                        {canCreate ? "All sections complete" : `${remainingSelections} step${remainingSelections === 1 ? "" : "s"} left`}
+                      </span>
+                      {!canCreate ? (
+                        <span className="truncate text-right text-[#9aa7cc]">
+                          {missingFields.join(", ")}
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+                {isCompactLayout ? (
+                  <div className={`grid gap-2 ${createCharacterStep === "identity" ? "grid-cols-1" : "grid-cols-2"}`}>
+                    {createCharacterStep !== "identity" ? (
+                      <button
+                        onClick={() => setCreateCharacterStep(CREATE_CHARACTER_STEPS[Math.max(0, currentCreateCharacterStepIndex - 1)].id)}
+                        className="w-full border-2 border-[#2a3450] bg-[#0b1020] px-4 py-3 text-[12px] font-bold uppercase tracking-wide text-[#9aa7cc] transition hover:border-[#54f28b] hover:text-[#54f28b]"
+                      >
+                        Back
+                      </button>
+                    ) : null}
+
+                    {createCharacterStep === "review" ? (
+                      <button
+                        onClick={handleRequestMint}
+                        disabled={!canCreate}
+                        className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] font-bold uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:cursor-not-allowed disabled:opacity-40 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+                      >
+                        {canCreate
+                          ? connectedAddress
+                            ? "[→] Mint Character — $0.00"
+                            : "[→] Sign In to Mint Character"
+                          : "Complete required selections"}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (!nextCreateCharacterStep || !currentStepComplete) return;
+                          setCreateCharacterStep(nextCreateCharacterStep.id);
+                        }}
+                        disabled={!currentStepComplete || !nextCreateCharacterStep}
+                        className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] font-bold uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:cursor-not-allowed disabled:opacity-40 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+                      >
+                        {nextCreateCharacterStep ? `Next: ${nextCreateCharacterStep.label}` : "Continue"}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleRequestMint}
+                    disabled={!canCreate}
+                    className="w-full border-4 border-black bg-[#0a1a0e] px-4 py-3 text-[13px] font-bold uppercase tracking-wide text-[#54f28b] shadow-[4px_4px_0_0_#000] transition hover:bg-[#112a1b] disabled:cursor-not-allowed disabled:opacity-40 active:translate-x-[2px] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#000]"
+                  >
+                    {canCreate
+                      ? connectedAddress
+                        ? "[→] Mint Character — $0.00"
+                        : "[→] Sign In to Mint Character"
+                      : "Complete required selections"}
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
@@ -1138,7 +1385,7 @@ export function OnboardingFlow({
                 Choose your Telegram alerts plan. Upgrade anytime.
               </p>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid gap-2 ${isCompactLayout ? "grid-cols-1" : "grid-cols-3"}`}>
                 {PLANS.map((plan) => {
                   const isSelected = selectedPlan === plan.id;
                   return (

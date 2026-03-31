@@ -1,7 +1,7 @@
 import * as THREE from "three";
 
 /**
- * Third-person orbit camera + WASD/click movement for desktop mode.
+ * Third-person orbit camera for desktop mode (orbit + zoom around target).
  * No dependency on OrbitControls — hand-rolled for simplicity.
  */
 export class DesktopControls {
@@ -9,8 +9,11 @@ export class DesktopControls {
   private pitch = 0.6; // radians from horizontal
   private distance = 15;
   private target = new THREE.Vector3(0, 0, 0);
+  private landingMode = false;
+  private autoOrbitSpeed = 0;
 
   private isDragging = false;
+  private dragButton: number | null = null;
   private lastMouse = { x: 0, y: 0 };
   private keys = new Set<string>();
 
@@ -45,32 +48,47 @@ export class DesktopControls {
     return this.target;
   }
 
-  /** Per-frame update: handle WASD camera movement with collision */
+  setLandingMode(enabled: boolean) {
+    this.landingMode = enabled;
+    this.autoOrbitSpeed = enabled ? 0.1 : 0;
+    this.isDragging = false;
+    this.dragButton = null;
+    this.keys.clear();
+  }
+
+  /** When true, WASD is disabled (camera follows a locked entity) */
+  locked = false;
+
+  /** Per-frame update: WASD movement when unlocked, orbit-only when locked */
   update(dt: number) {
-    const speed = 20 * dt;
-    const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
-    const right = new THREE.Vector3(-forward.z, 0, forward.x);
+    if (!this.landingMode && !this.locked) {
+      const speed = 20 * dt;
+      const forward = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+      const right = new THREE.Vector3(-forward.z, 0, forward.x);
 
-    // Accumulate desired movement
-    let moveX = 0;
-    let moveZ = 0;
+      let moveX = 0;
+      let moveZ = 0;
 
-    if (this.keys.has("w") || this.keys.has("arrowup")) { moveX += forward.x * speed; moveZ += forward.z * speed; }
-    if (this.keys.has("s") || this.keys.has("arrowdown")) { moveX -= forward.x * speed; moveZ -= forward.z * speed; }
-    if (this.keys.has("a") || this.keys.has("arrowleft")) { moveX -= right.x * speed; moveZ -= right.z * speed; }
-    if (this.keys.has("d") || this.keys.has("arrowright")) { moveX += right.x * speed; moveZ += right.z * speed; }
+      if (this.keys.has("w") || this.keys.has("arrowup")) { moveX += forward.x * speed; moveZ += forward.z * speed; }
+      if (this.keys.has("s") || this.keys.has("arrowdown")) { moveX -= forward.x * speed; moveZ -= forward.z * speed; }
+      if (this.keys.has("a") || this.keys.has("arrowleft")) { moveX -= right.x * speed; moveZ -= right.z * speed; }
+      if (this.keys.has("d") || this.keys.has("arrowright")) { moveX += right.x * speed; moveZ += right.z * speed; }
 
-    if (moveX !== 0 || moveZ !== 0) {
-      if (this.collisionCheck) {
-        // Try X and Z independently for wall sliding
-        const canX = this.collisionCheck(this.target.x + moveX, this.target.z);
-        const canZ = this.collisionCheck(this.target.x, this.target.z + moveZ);
-        if (canX) this.target.x += moveX;
-        if (canZ) this.target.z += moveZ;
-      } else {
-        this.target.x += moveX;
-        this.target.z += moveZ;
+      if (moveX !== 0 || moveZ !== 0) {
+        if (this.collisionCheck) {
+          const canX = this.collisionCheck(this.target.x + moveX, this.target.z);
+          const canZ = this.collisionCheck(this.target.x, this.target.z + moveZ);
+          if (canX) this.target.x += moveX;
+          if (canZ) this.target.z += moveZ;
+        } else {
+          this.target.x += moveX;
+          this.target.z += moveZ;
+        }
       }
+    }
+
+    if (this.landingMode && !this.isDragging) {
+      this.yaw += this.autoOrbitSpeed * dt;
     }
 
     this.updateCamera();
@@ -106,9 +124,10 @@ export class DesktopControls {
   // ── Event handlers ──
 
   private onMouseDown = (e: MouseEvent) => {
+    if (this.landingMode) return;
     if (e.button === 2) {
-      // Right click → start orbit drag
       this.isDragging = true;
+      this.dragButton = e.button;
       this.lastMouse = { x: e.clientX, y: e.clientY };
     }
   };
@@ -125,20 +144,26 @@ export class DesktopControls {
   };
 
   private onMouseUp = (e: MouseEvent) => {
-    if (e.button === 2) this.isDragging = false;
+    if (e.button === this.dragButton) {
+      this.isDragging = false;
+      this.dragButton = null;
+    }
   };
 
   private onWheel = (e: WheelEvent) => {
+    if (this.landingMode) return;
     e.preventDefault();
     this.distance = Math.max(5, Math.min(50, this.distance + e.deltaY * 0.02));
     this.updateCamera();
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (this.landingMode) return;
     this.keys.add(e.key.toLowerCase());
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
+    if (this.landingMode) return;
     this.keys.delete(e.key.toLowerCase());
   };
 

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Entity, ElevationProvider } from "../types.js";
+import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { getGradientMap } from "./ToonPipeline.js";
 
@@ -58,6 +58,8 @@ const QUALITY_EMISSIVE: Record<string, number> = {
   common: 0x000000, uncommon: 0x000000, rare: 0x112244,
   epic: 0x220044, legendary: 0x442200,
 };
+
+const MELEE_ANIM_RANGE = 4.4;
 
 // Shared weapon geometries (pre-allocated, reused)
 // -- Sword: flat blade + handle
@@ -156,18 +158,20 @@ const pauldronRimGeo = new THREE.TorusGeometry(0.12, 0.02, 4, 8);
 const pauldronPadGeo = new THREE.CapsuleGeometry(0.08, 0.1, 3, 5);
 
 // Legs
-const greaveGeo = new THREE.CapsuleGeometry(0.1, 0.3, 3, 6);
-const leatherPantsGeo = new THREE.CapsuleGeometry(0.09, 0.32, 3, 6);
+const greaveGeo = new THREE.CapsuleGeometry(0.09, 0.32, 3, 6);
+const leatherPantsGeo = new THREE.CapsuleGeometry(0.085, 0.34, 3, 6);
 
-// Boots
-const bootPlateGeo = new THREE.BoxGeometry(0.12, 0.15, 0.2);
-const bootCuffGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.06, 6);
-const bootLeatherGeo = new THREE.CapsuleGeometry(0.06, 0.12, 3, 6);
+// Boots — chunky fantasy style, much bigger than bare feet
+const bootPlateGeo = new THREE.BoxGeometry(0.16, 0.18, 0.28);         // armored boot — big stompers
+const bootPlateSoleGeo = new THREE.BoxGeometry(0.17, 0.04, 0.30);     // thick sole overhang
+const bootCuffGeo = new THREE.CylinderGeometry(0.10, 0.09, 0.08, 6);  // shin cuff
+const bootLeatherGeo = new THREE.CapsuleGeometry(0.08, 0.14, 4, 6);   // leather boot — rounder
+const bootLeatherSoleGeo = new THREE.BoxGeometry(0.14, 0.03, 0.26);   // leather sole
 
-// Gloves (full arm coverage — must fully enclose armGeo 0.055r × 0.3h + handGeo 0.06r)
-const gauntletGeo = new THREE.CapsuleGeometry(0.09, 0.40, 4, 6);
+// Gloves (full arm coverage — must fully enclose armGeo 0.05r × 0.46h + handGeo 0.055r)
+const gauntletGeo = new THREE.CapsuleGeometry(0.09, 0.53, 4, 6);
 const gauntletCuffGeo = new THREE.CylinderGeometry(0.11, 0.09, 0.07, 6);
-const gloveLeatherGeo = new THREE.CapsuleGeometry(0.08, 0.36, 4, 6);
+const gloveLeatherGeo = new THREE.CapsuleGeometry(0.08, 0.49, 4, 6);
 
 // Belt
 const beltGeo = new THREE.TorusGeometry(0.20, 0.02, 4, 12);
@@ -343,26 +347,53 @@ function addArmorPieces(
     }
   }
 
-  // ── Boots — wrap around lower shin + foot area ──
+  // ── Boots — chunky fantasy boots that replace default footwear ──
   if (eq.boots) {
     const mt = inferArmorMaterial(eq.boots.name ?? "");
     const mat = makeArmorMat(mt, eq.boots.quality);
+    const darkMat = makeArmorMat(mt, eq.boots.quality);
+    darkMat.color.multiplyScalar(0.7); // darker sole
     if (rig) {
-      for (const kneeBone of [rig.lKnee, rig.rKnee]) {
+      // Hide default boot meshes on foot bones
+      for (const footBone of [rig.lFoot, rig.rFoot]) {
+        footBone.children.forEach(c => { if (c instanceof THREE.Mesh) c.visible = false; });
+      }
+      for (let i = 0; i < 2; i++) {
+        const kneeBone = i === 0 ? rig.lKnee : rig.rKnee;
+        const footBone = i === 0 ? rig.lFoot : rig.rFoot;
         if (mt === "plate") {
-          const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.18), mat);
-          boot.position.set(0.010, -0.290, 0.070); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
-          const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.08, 6), mat);
-          cuff.position.set(0.010, -0.200, 0.070); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
+          // Armored stomper: boot body on knee + sole on foot
+          const boot = new THREE.Mesh(bootPlateGeo, mat);
+          boot.position.set(0, -0.28, 0.04); boot.userData.equipSlot = "bootPlate"; kneeBone.add(boot);
+          const sole = new THREE.Mesh(bootPlateSoleGeo, darkMat);
+          sole.position.set(0, -0.05, 0.04); sole.userData.equipSlot = "bootPlate"; footBone.add(sole);
+          const cuff = new THREE.Mesh(bootCuffGeo, mat);
+          cuff.position.set(0, -0.18, 0.03); cuff.userData.equipSlot = "bootPlate"; kneeBone.add(cuff);
+          // Toe cap
+          const toeCap = new THREE.Mesh(toeGeo, mat);
+          toeCap.scale.set(1.3, 0.9, 1.2);
+          toeCap.position.set(0, -0.03, 0.14); toeCap.userData.equipSlot = "bootPlate"; footBone.add(toeCap);
+        } else if (mt === "chain") {
+          const boot = new THREE.Mesh(bootLeatherGeo, mat);
+          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootChain"; kneeBone.add(boot);
+          const sole = new THREE.Mesh(bootLeatherSoleGeo, darkMat);
+          sole.position.set(0, -0.04, 0.03); sole.userData.equipSlot = "bootChain"; footBone.add(sole);
+          const cuff = new THREE.Mesh(bootCuffGeo, mat);
+          cuff.position.set(0, -0.14, 0.02); cuff.userData.equipSlot = "bootChain"; kneeBone.add(cuff);
         } else {
-          const boot = new THREE.Mesh(new THREE.CapsuleGeometry(0.065, 0.14, 4, 6), mat);
-          boot.position.set(0, -0.18, 0.01); boot.userData.equipSlot = "bootLeather"; kneeBone.add(boot);
+          // Leather — rounded adventure boots
+          const boot = new THREE.Mesh(bootLeatherGeo, mat);
+          boot.position.set(0, -0.22, 0.02); boot.userData.equipSlot = "bootLeather"; kneeBone.add(boot);
+          const sole = new THREE.Mesh(bootLeatherSoleGeo, darkMat);
+          sole.position.set(0, -0.04, 0.03); sole.userData.equipSlot = "bootLeather"; footBone.add(sole);
+          const toe = new THREE.Mesh(toeGeo, mat);
+          toe.position.set(0, -0.02, 0.12); toe.userData.equipSlot = "bootLeather"; footBone.add(toe);
         }
       }
     } else {
       // Fallback: absolute position
-      for (const dx of [-0.1, 0.1]) {
-        const boot = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.18), mat);
+      for (const dx of [-0.16, 0.16]) {
+        const boot = new THREE.Mesh(bootPlateGeo, mat);
         boot.position.set(dx, 0.06, 0.02); group.add(boot);
       }
     }
@@ -389,32 +420,34 @@ function addArmorPieces(
     }
   }
 
-  // ── Belt ──
+  // ── Belt — always anchored to hip bone (top of hip = natural waistline) ──
   if (eq.belt) {
     const mt = inferArmorMaterial(eq.belt.name ?? "");
     const mat = makeArmorMat(mt, eq.belt.quality);
 
-    const beltTarget = rig?.spine ?? group;
-    const beltOffY = rig ? 0.02 : 0.52;
+    // Belt sits at top of hip bone — fixed Y offset relative to hip
+    const beltTarget = rig?.hip ?? group;
+    const beltY = rig ? 0.12 : 0.52; // just above hip joint where waist meets torso
+    const beltRadius = 0.18 * cls.sx;
     if (mt === "plate") {
       const ring = new THREE.Mesh(beltGeo, mat);
-      ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
+      ring.position.y = beltY; ring.rotation.x = Math.PI / 2;
       ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltPlate"; beltTarget.add(ring);
       const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, beltOffY, 0.27 * cls.sz); buckle.userData.equipSlot = "beltPlate"; beltTarget.add(buckle);
+      buckle.position.set(0, beltY, beltRadius + 0.03); buckle.userData.equipSlot = "beltPlate"; beltTarget.add(buckle);
     } else {
       const ring = new THREE.Mesh(beltThinGeo, mat);
-      ring.position.y = beltOffY; ring.rotation.x = Math.PI / 2;
+      ring.position.y = beltY; ring.rotation.x = Math.PI / 2;
       ring.scale.set(cls.sx, cls.sz, 1); ring.userData.equipSlot = "beltLeather"; beltTarget.add(ring);
       if (mt === "leather") {
         const pouchMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x6B5533 });
         for (const side of [-1, 1]) {
           const pouch = new THREE.Mesh(beltPouchGeo, pouchMat);
-          pouch.position.set(side * 0.22 * cls.sx, beltOffY - 0.04, 0.05); beltTarget.add(pouch);
+          pouch.position.set(side * beltRadius, beltY - 0.04, 0.05); beltTarget.add(pouch);
         }
       }
       const buckle = new THREE.Mesh(beltBuckleGeo, mat);
-      buckle.position.set(0, beltOffY, 0.26 * cls.sz); beltTarget.add(buckle);
+      buckle.position.set(0, beltY, beltRadius + 0.02); beltTarget.add(buckle);
     }
   }
 }
@@ -543,35 +576,62 @@ const ENTITY_STYLE: Record<string, { color: number; style: "humanoid" | "object"
 
 const COORD_SCALE = 1 / 10;
 
-// ── Shared geometries ──────────────────────────────────────────────
+// ── Shared geometries ───────────────────────────────��──────────────
 
-const bodyGeo = new THREE.CapsuleGeometry(0.25, 0.6, 4, 8);
+// Two-part torso: wider chest tapering to narrower waist
+const chestGeo = new THREE.CapsuleGeometry(0.24, 0.32, 4, 8);     // upper torso — broad
+const waistGeo = new THREE.CylinderGeometry(0.14, 0.19, 0.22, 8); // lower torso — tapered
+const neckGeo = new THREE.CylinderGeometry(0.06, 0.09, 0.18, 6);  // visible neck bridge
+const bodyGeo = chestGeo; // alias so armor recolor still targets the chest mesh
 const headGeo = new THREE.SphereGeometry(0.2, 8, 6);
-const eyeGeo = new THREE.SphereGeometry(0.04, 4, 4);
+const scleraGeo = new THREE.SphereGeometry(0.06, 5, 4);          // white of the eye
+const eyeGeo = new THREE.SphereGeometry(0.055, 5, 4);            // iris — bigger than before
+const pupilGeo = new THREE.SphereGeometry(0.025, 4, 3);          // dark pupil dot
+const browGeo = new THREE.BoxGeometry(0.07, 0.015, 0.03);        // eyebrow
+const noseGeo = new THREE.ConeGeometry(0.025, 0.04, 3);          // tiny triangular nose
+const mouthGeo = new THREE.BoxGeometry(0.08, 0.008, 0.01);       // simple mouth line
+const cheekGeo = new THREE.SphereGeometry(0.04, 4, 4);           // cheek tint spot
 const hairShortGeo = new THREE.SphereGeometry(0.22, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.6);
-const hairLongGeo = new THREE.CapsuleGeometry(0.15, 0.3, 4, 6);
+const hairLongGeo = new THREE.CapsuleGeometry(0.16, 0.35, 4, 6);   // longer, wider drape
+const hairSideDrapeGeo = new THREE.CapsuleGeometry(0.08, 0.28, 3, 5); // side hair panels
 const hairMohawkGeo = new THREE.BoxGeometry(0.06, 0.25, 0.3);
-const hairBraidedGeo = new THREE.CylinderGeometry(0.06, 0.04, 0.5, 5);
-// New hair styles
+const hairBraidGeo = new THREE.CylinderGeometry(0.04, 0.03, 0.5, 5);  // thicker braids
+const hairBraidTipGeo = new THREE.SphereGeometry(0.035, 4, 3);         // braid end bead
+// Textured styles
 const hairAfroGeo = new THREE.SphereGeometry(0.32, 8, 6);
-const hairLocGeo = new THREE.CylinderGeometry(0.03, 0.025, 0.45, 5);
+const hairLocGeo = new THREE.CylinderGeometry(0.03, 0.022, 0.45, 5);
 const hairCornrowGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.35, 4);
 const hairKnotGeo = new THREE.SphereGeometry(0.07, 5, 4);
 const hairBangsGeo = new THREE.BoxGeometry(0.38, 0.08, 0.15);
 const hairTopknotGeo = new THREE.CylinderGeometry(0.04, 0.08, 0.2, 6);
 const hairTopknotBunGeo = new THREE.SphereGeometry(0.08, 6, 5);
+// Female styles
+const hairBunGeo = new THREE.SphereGeometry(0.10, 6, 5);              // hair bun ball
+const hairBunBaseGeo = new THREE.CylinderGeometry(0.08, 0.06, 0.06, 6); // bun base wrap
+const hairPigtailGeo = new THREE.CapsuleGeometry(0.05, 0.25, 3, 5);  // pigtail strand
+const hairSideSweptGeo = new THREE.SphereGeometry(0.23, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.55); // asymmetric cap
 const shieldGeo = new THREE.BoxGeometry(0.04, 0.35, 0.25);
-const mobBodyGeo = new THREE.CapsuleGeometry(0.3, 0.5, 4, 8);
-const npcBodyGeo = new THREE.CapsuleGeometry(0.22, 0.65, 4, 8);
+const mobBodyGeo = new THREE.CapsuleGeometry(0.28, 0.35, 4, 8);
+const mobWaistGeo = new THREE.CylinderGeometry(0.16, 0.20, 0.20, 8);
+const npcBodyGeo = new THREE.CapsuleGeometry(0.21, 0.32, 4, 8);
+const npcWaistGeo = new THREE.CylinderGeometry(0.13, 0.17, 0.20, 8);
 const oreGeo = new THREE.DodecahedronGeometry(0.35, 0);
 const flowerGeo = new THREE.ConeGeometry(0.2, 0.5, 5);
 const stationGeo = new THREE.BoxGeometry(0.6, 0.5, 0.6);
 const gateGeo = new THREE.BoxGeometry(0.8, 1.8, 0.3);
-const legGeo = new THREE.CapsuleGeometry(0.08, 0.35, 3, 6);
-const thighGeo = new THREE.CapsuleGeometry(0.09, 0.15, 3, 6);
-const armGeo = new THREE.CapsuleGeometry(0.055, 0.3, 3, 6);
-const shoulderJointGeo = new THREE.SphereGeometry(0.07, 5, 4);
-const handGeo = new THREE.SphereGeometry(0.06, 5, 4);
+const legGeo = new THREE.CapsuleGeometry(0.07, 0.35, 3, 6);
+const thighGeo = new THREE.CapsuleGeometry(0.085, 0.18, 3, 6);
+const armGeo = new THREE.CapsuleGeometry(0.05, 0.46, 3, 6);        // lengthened to bridge shoulder→hand
+const shoulderJointGeo = new THREE.SphereGeometry(0.12, 5, 4);     // larger to bridge chest→arm gap
+// Hands — chunky mitten shape: main palm + finger bump
+const handGeo = new THREE.SphereGeometry(0.055, 5, 4);           // palm core
+const fingerGeo = new THREE.BoxGeometry(0.08, 0.04, 0.06);       // finger block extending forward
+// Feet — default bare foot (replaced by boots when equipped)
+const footGeo = new THREE.BoxGeometry(0.12, 0.08, 0.22);         // chunkier bare foot
+const toeGeo = new THREE.SphereGeometry(0.05, 4, 3);             // rounded toe cap
+// Default boot (everyone gets basic boots even without equipment — grounds the character)
+const defaultBootGeo = new THREE.CapsuleGeometry(0.07, 0.10, 4, 6);  // ankle section
+const defaultSoleGeo = new THREE.BoxGeometry(0.13, 0.05, 0.16);      // flat sole under ankle
 const hpBarBgGeo = new THREE.PlaneGeometry(0.6, 0.06);
 const hpBarFgGeo = new THREE.PlaneGeometry(0.58, 0.04);
 
@@ -703,11 +763,29 @@ type HumanoidRigLike = CharacterRig;
 
 // ── Animation types ─────────────────────────────────────────────────
 
-type AnimName = "walk" | "idle" | "attack"
+type AnimName = "walk" | "idle" | "attack" | "magicbolt" | "bowshot"
   | "heroicstrike" | "cleave" | "shieldwall" | "battlerage" | "intimidatingshout" | "rallyingcry" | "rendingstrike"
   | "spellcast" | "darkcast" | "holycast"
   | "palmstrike" | "flyingkick" | "whirlwindkick"
-  | "damage" | "heal" | "death" | "gather" | "craft";
+  | "damage" | "heal" | "death" | "gather" | "craft"
+  | "mine" | "forage" | "skin" | "brew" | "cook" | "enchant" | "carve";
+
+/** Map gatherType → profession-specific gather animation */
+const GATHER_ANIM: Record<string, AnimName> = {
+  mining: "mine",
+  herbalism: "forage",
+  skinning: "skin",
+};
+
+/** Map craftType → profession-specific craft animation */
+const CRAFT_ANIM: Record<string, AnimName> = {
+  alchemy: "brew",
+  cooking: "cook",
+  crafting: "craft",     // existing hammer/forge clip
+  enchanting: "enchant",
+  leatherworking: "carve",
+  jewelcrafting: "carve",
+};
 
 /** Map technique IDs to specific animation clips (ranked versions share base clip) */
 const TECHNIQUE_ANIM: Record<string, AnimName> = {
@@ -739,10 +817,10 @@ const TECHNIQUE_ANIM: Record<string, AnimName> = {
   rogue_stealth: "idle",
   rogue_evasion: "idle",
   // Ranger
-  ranger_aimed_shot: "attack", ranger_aimed_shot_r2: "attack", ranger_aimed_shot_r3: "attack",
-  ranger_hunters_mark: "attack", ranger_hunters_mark_r2: "attack",
-  ranger_quick_shot: "attack",
-  ranger_multi_shot: "cleave", ranger_multi_shot_r2: "cleave",
+  ranger_aimed_shot: "bowshot", ranger_aimed_shot_r2: "bowshot", ranger_aimed_shot_r3: "bowshot",
+  ranger_hunters_mark: "bowshot", ranger_hunters_mark_r2: "bowshot",
+  ranger_quick_shot: "bowshot",
+  ranger_multi_shot: "bowshot", ranger_multi_shot_r2: "bowshot",
   ranger_entangling_roots: "spellcast",
   ranger_volley: "spellcast",
   ranger_natures_blessing: "holycast",
@@ -783,17 +861,30 @@ const TECHNIQUE_ANIM: Record<string, AnimName> = {
 /** Pick the right attack animation clip based on class (fallback when no technique ID) */
 function attackAnimForClass(classId: string | undefined): AnimName {
   switch (classId) {
-    case "mage": return "spellcast";
-    case "warlock": return "darkcast";
-    case "cleric": return "holycast";
+    case "mage": return "magicbolt";
+    case "warlock": return "magicbolt";
+    case "cleric": return "magicbolt";
+    case "ranger": return "bowshot";
     case "monk": return "palmstrike";
-    default: return "attack";
+    default:
+      return "attack";
   }
 }
 
-function shouldUseSwordShieldAttack(ent: Entity): boolean {
-  if (!ent.equipment?.weapon || !ent.equipment?.offhand) return false;
-  return inferWeaponType(ent.equipment.weapon.name ?? "sword") === "sword";
+const PROFESSION_ANIMS: Set<AnimName> = new Set([
+  "gather", "craft", "mine", "forage", "skin", "brew", "cook", "enchant", "carve",
+]);
+
+function isCombatAnimation(name: AnimName | null): boolean {
+  return name != null && name !== "walk" && name !== "idle" && name !== "damage" && name !== "heal" && name !== "death"
+    && !PROFESSION_ANIMS.has(name);
+}
+
+function getIntentAnimForEntity(entity: Entity, intent: Pick<VisibleIntent, "techniqueId">): AnimName {
+  if (intent.techniqueId && TECHNIQUE_ANIM[intent.techniqueId]) {
+    return TECHNIQUE_ANIM[intent.techniqueId];
+  }
+  return attackAnimForClass(entity.classId);
 }
 
 interface FloatingText {
@@ -841,8 +932,14 @@ interface EntityObject {
   hasGlbModel: boolean;
   /** Timer for simple GLB attack animation (lunge + pulse) */
   glbAttackTimer: number;
+  combatAnimHold: number;
+  /** When the current one-shot animation started (performance.now ms), 0 if looping */
+  oneShotStart: number;
+  lastCombatIntentKey: string | null;
   lifeState: EntityLifeState;
   lifeToken: number;
+  /** Timestamp when death animation started — prevents premature respawn */
+  dyingSince: number;
 }
 
 export class EntityManager {
@@ -877,8 +974,16 @@ export class EntityManager {
   }
 
   /** Sync scene with latest zone entity data */
-  sync(entities: Record<string, Entity>) {
+  sync(entities: Record<string, Entity>, intents: VisibleIntent[] = []) {
     const seen = new Set<string>();
+    const preferredIntentBySource = new Map<string, VisibleIntent>();
+
+    for (const intent of intents) {
+      const existing = preferredIntentBySource.get(intent.sourceId);
+      if (!existing || this.shouldReplaceCombatIntent(existing, intent)) {
+        preferredIntentBySource.set(intent.sourceId, intent);
+      }
+    }
 
     for (const [id, ent] of Object.entries(entities)) {
       seen.add(id);
@@ -888,8 +993,11 @@ export class EntityManager {
       if (existing) {
         const wasAlive = existing.lifeState === "alive";
         const isRespawning = existing.lifeState !== "alive" && ent.hp > 0;
+        // Don't cut death animation short — wait at least 1.8s before respawning
+        const MIN_DEATH_DURATION_MS = 1800;
+        const deathElapsed = existing.dyingSince > 0 ? performance.now() - existing.dyingSince : Infinity;
 
-        if (isRespawning) {
+        if (isRespawning && deathElapsed >= MIN_DEATH_DURATION_MS) {
           this.triggerRespawn(existing, ent, pos);
         } else if (wasAlive) {
           const dx = pos.x - existing.targetX;
@@ -920,10 +1028,12 @@ export class EntityManager {
 
         existing.prevHp = ent.hp;
         existing.entity = ent;
+        this.refreshCombatAnimation(existing, preferredIntentBySource.get(id), entities);
 
         this.updateHpBar(existing, ent);
       } else {
         const obj = this.createEntity(ent);
+        this.refreshCombatAnimation(obj, preferredIntentBySource.get(id), entities);
         this.entities.set(id, obj);
         this.group.add(obj.group);
       }
@@ -948,6 +1058,7 @@ export class EntityManager {
       const g = obj.group;
       const isAlive = obj.lifeState === "alive";
       obj.targetAge += dt;
+      obj.combatAnimHold = Math.max(0, obj.combatAnimHold - dt);
 
       if (isAlive) {
         // ── Smooth constant-speed interpolation ──
@@ -1010,15 +1121,32 @@ export class EntityManager {
 
       // ── Animation blending via mixer ──
       if (obj.mixer && obj.rig) {
-        // Pick the right locomotion animation
         const curAnim = obj.currentAnim;
         const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "idle";
+
+        // Safety valve: force return to locomotion if one-shot stuck > 1.5s
+        if (isAlive && isOneShot && obj.oneShotStart > 0) {
+          const elapsed = performance.now() - obj.oneShotStart;
+          if (elapsed > 1500) {
+            obj.oneShotStart = 0;
+            obj.combatAnimHold = 0;
+            this.playAnimation(obj, obj.movingSmooth > 0.1 ? "walk" : "idle", true);
+          }
+        }
+
+        // Return from combat anim once hold timer expires
+        if (isAlive && isCombatAnimation(curAnim) && obj.combatAnimHold <= 0) {
+          this.playAnimation(obj, obj.movingSmooth > 0.1 ? "walk" : "idle", true);
+        }
+
+        // Normal locomotion blend (only when not in a one-shot)
         if (isAlive && !isOneShot) {
           const wantAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
           if (curAnim !== wantAnim) {
             this.playAnimation(obj, wantAnim, true);
           }
         }
+
         obj.mixer.update(dt);
       }
 
@@ -1138,6 +1266,7 @@ export class EntityManager {
       action.stop();
     }
     obj.mixer?.stopAllAction();
+    obj.oneShotStart = 0;
   }
 
   private getClipForEntity(obj: EntityObject, name: AnimName): THREE.AnimationClip | null {
@@ -1188,16 +1317,23 @@ export class EntityManager {
 
     obj.currentAnim = name;
 
-    // One-shot: return to idle/walk when done
-    if (!loop) {
+    if (loop) {
+      obj.oneShotStart = 0;
+    } else {
+      obj.oneShotStart = performance.now();
+      // One-shot: return to idle/walk when done
       const mixer = obj.mixer;
+      const startToken = obj.oneShotStart; // capture to detect superseded animations
       const handler = (e: { action: THREE.AnimationAction }) => {
         if (e.action !== action) return;
         mixer.removeEventListener("finished", handler);
-        onFinish?.();
-        // Return to locomotion
-        const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
-        this.playAnimation(obj, nextAnim, true);
+        // Only transition if this one-shot hasn't been superseded
+        if (obj.oneShotStart === startToken) {
+          obj.oneShotStart = 0;
+          onFinish?.();
+          const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          this.playAnimation(obj, nextAnim, true);
+        }
       };
       mixer.addEventListener("finished", handler);
     }
@@ -1205,6 +1341,93 @@ export class EntityManager {
 
   private playOneShot(obj: EntityObject, name: AnimName, onFinish?: () => void) {
     this.playAnimation(obj, name, false, onFinish);
+  }
+
+  private shouldReplaceCombatIntent(current: VisibleIntent, next: VisibleIntent): boolean {
+    const currentRank = this.rankCombatIntent(current);
+    const nextRank = this.rankCombatIntent(next);
+    if (nextRank !== currentRank) return nextRank > currentRank;
+    return next.id.localeCompare(current.id) < 0;
+  }
+
+  private rankCombatIntent(intent: VisibleIntent): number {
+    let score = 0;
+    if (intent.state === "casting") score += 100;
+    if (intent.severity === "dangerous") score += 20;
+    if (intent.category === "attack" || intent.category === "debuff") score += 10;
+    return score;
+  }
+
+  private refreshCombatAnimation(
+    obj: EntityObject,
+    intent: VisibleIntent | undefined,
+    entities: Record<string, Entity>,
+  ) {
+    if (obj.lifeState !== "alive") {
+      obj.combatAnimHold = 0;
+      obj.lastCombatIntentKey = null;
+      return;
+    }
+
+    if (!intent) {
+      this.clearCombatAnimation(obj);
+      return;
+    }
+
+    const target = entities[intent.targetId];
+    if (!target || target.hp <= 0) {
+      this.clearCombatAnimation(obj);
+      return;
+    }
+
+    if (intent.state !== "casting" && intent.delivery === "melee" && !this.isEntityWithinMeleeAnimRange(obj.entity, target)) {
+      this.clearCombatAnimation(obj);
+      return;
+    }
+
+    const targetObj = this.entities.get(target.id);
+    if (targetObj) {
+      obj.targetYaw = Math.atan2(
+        targetObj.group.position.x - obj.group.position.x,
+        targetObj.group.position.z - obj.group.position.z,
+      );
+    }
+
+    const anim = getIntentAnimForEntity(obj.entity, intent);
+    obj.combatAnimHold = intent.state === "casting" ? 0.9 : 0.45;
+
+    // Don't restart the same animation if it's still playing — prevents
+    // choppy restarts every 500ms poll when the intent ID changes
+    if (obj.currentAnim === anim && obj.oneShotStart > 0) {
+      return;
+    }
+
+    const intentKey = `${intent.id}:${intent.state}:${anim}`;
+    if (obj.lastCombatIntentKey === intentKey) return;
+    obj.lastCombatIntentKey = intentKey;
+
+    if (obj.hasGlbModel) {
+      obj.glbAttackTimer = 0.35;
+      return;
+    }
+
+    if (!obj.rig) return;
+    this.playOneShot(obj, anim);
+  }
+
+  private clearCombatAnimation(obj: EntityObject) {
+    obj.combatAnimHold = 0;
+    obj.lastCombatIntentKey = null;
+    obj.glbAttackTimer = 0;
+    if (obj.mixer && isCombatAnimation(obj.currentAnim)) {
+      this.playAnimation(obj, obj.movingSmooth > 0.1 ? "walk" : "idle", true);
+    }
+  }
+
+  private isEntityWithinMeleeAnimRange(source: Entity, target: Entity): boolean {
+    const dx = (target.x - source.x) * COORD_SCALE;
+    const dz = (target.y - source.y) * COORD_SCALE;
+    return Math.hypot(dx, dz) <= MELEE_ANIM_RANGE;
   }
 
   getEntityAt(intersects: THREE.Intersection[]): Entity | null {
@@ -1273,29 +1496,6 @@ export class EntityManager {
     obj.group.add(ft);
     this.floatingTexts.push({ sprite: ft, elapsed: 0, startY: 2.0 });
 
-    // If attacker nearby, trigger their attack anim (class-specific)
-    for (const other of this.entities.values()) {
-      if (other === obj) continue;
-      if (other.entity.type !== "player" && other.entity.type !== "mob" && other.entity.type !== "boss") continue;
-      const dx = other.group.position.x - obj.group.position.x;
-      const dz = other.group.position.z - obj.group.position.z;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      const atkAnim = attackAnimForClass(other.entity.classId);
-      if (dist < 3 && other.currentAnim !== atkAnim) {
-        // Face target then attack
-        other.targetYaw = Math.atan2(
-          obj.group.position.x - other.group.position.x,
-          obj.group.position.z - other.group.position.z,
-        );
-        if (other.hasGlbModel) {
-          // GLB mob: simple lunge + pulse attack
-          other.glbAttackTimer = 0.4;
-        } else {
-          this.playOneShot(other, atkAnim);
-        }
-        break;
-      }
-    }
   }
 
   private triggerHeal(obj: EntityObject, amount: number) {
@@ -1326,6 +1526,7 @@ export class EntityManager {
 
   private triggerDeath(obj: EntityObject) {
     obj.lifeState = "dying";
+    obj.dyingSince = performance.now();
     obj.lifeToken += 1;
     const deathToken = obj.lifeToken;
     obj.isMoving = false;
@@ -1374,6 +1575,7 @@ export class EntityManager {
 
   private triggerRespawn(obj: EntityObject, ent: Entity, pos: { x: number; z: number }) {
     obj.lifeState = "alive";
+    obj.dyingSince = 0;
     obj.lifeToken += 1;
     obj.group.visible = true;
     obj.glbAttackTimer = 0;
@@ -1404,19 +1606,21 @@ export class EntityManager {
     this.updateHpBar(obj, ent);
   }
 
-  /** Trigger gather/craft anims from zone events */
+  /** Trigger profession-specific anims from zone events */
   processEvents(events: import("../types.js").ZoneEvent[]) {
     for (const ev of events) {
       if (ev.type === "loot" && ev.entityId && ev.data?.gatherType) {
         const obj = this.entities.get(ev.entityId);
-        if (obj && obj.currentAnim !== "gather") {
-          this.playOneShot(obj, "gather");
+        const anim = GATHER_ANIM[ev.data.gatherType as string] ?? "gather";
+        if (obj && obj.currentAnim !== anim) {
+          this.playOneShot(obj, anim);
         }
       }
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
-        if (obj && obj.currentAnim !== "craft") {
-          this.playOneShot(obj, "craft");
+        const anim = CRAFT_ANIM[ev.data.craftType as string] ?? "craft";
+        if (obj && obj.currentAnim !== anim) {
+          this.playOneShot(obj, anim);
         }
       }
       // Chat events: show speech bubble above entity
@@ -1450,7 +1654,17 @@ export class EntityManager {
               }
             }
             this.playOneShot(attacker, atkAnim);
+            attacker.combatAnimHold = 0.35;
+            attacker.lastCombatIntentKey = null;
           }
+        }
+      }
+      // Death events: trigger death animation from server event (reliable for players
+      // whose HP is restored within the same tick by handlePlayerDeath)
+      if (ev.type === "death" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj && obj.lifeState === "alive") {
+          this.triggerDeath(obj);
         }
       }
       // Ability events: play technique-specific animation on the caster
@@ -1477,6 +1691,8 @@ export class EntityManager {
             }
           }
           this.playOneShot(obj, anim);
+          obj.combatAnimHold = 0.6;
+          obj.lastCombatIntentKey = null;
         }
       }
     }
@@ -1548,7 +1764,7 @@ export class EntityManager {
     let hpBarFg: THREE.Mesh | null = null;
     let hpBarBg: THREE.Mesh | null = null;
     if (info.style === "humanoid" || info.style === "mob") {
-      const labelY = info.style === "mob" && ent.type === "boss" ? 2.5 : 2.1;
+      const labelY = info.style === "mob" && ent.type === "boss" ? 2.35 : 1.95;
 
       hpBarBg = new THREE.Mesh(hpBarBgGeo, new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false }));
       hpBarBg.position.y = labelY;
@@ -1585,8 +1801,12 @@ export class EntityManager {
       leftLeg, rightLeg, leftArm, rightArm,
       hasGlbModel: !!(group as any)._hasGlbModel,
       glbAttackTimer: 0,
+      combatAnimHold: 0,
+      oneShotStart: 0,
+      lastCombatIntentKey: null,
       lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
       lifeToken: 0,
+      dyingSince: 0,
     };
 
     if (ent.hp <= 0) {
@@ -1596,6 +1816,120 @@ export class EntityManager {
     return obj;
   }
 
+  // ── Face builder (bone-relative: Y=0 is head center) ──────────────
+
+  private buildFace(
+    headBone: THREE.Bone,
+    hs: number, // headScale
+    eyeHex: number,
+    skinHex: number,
+    race: { isElf: boolean; isDwarf: boolean; isBeastkin: boolean; isFemale: boolean },
+  ) {
+    const fz = 0.17 * hs; // face Z — front of head
+    const fem = race.isFemale;
+
+    // ── Eyes: sclera (white) → iris (color) → pupil (dark) ──
+    // Female: ~15% larger eyes, slightly higher on face (reads as youthful/expressive)
+    const eyeScale = fem ? 1.15 : 1.0;
+    const scleraMat = new THREE.MeshBasicMaterial({ color: 0xf8f4f0 });
+    const irisMat = new THREE.MeshBasicMaterial({ color: eyeHex });
+    const pupilMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+    const eyeSpacing = (race.isElf ? 0.085 : race.isDwarf ? 0.075 : 0.08) * hs;
+    const eyeY = fem ? 0.04 : 0.03;
+    for (const dx of [-1, 1]) {
+      const sclera = new THREE.Mesh(scleraGeo, scleraMat);
+      sclera.position.set(dx * eyeSpacing, eyeY, fz - 0.01);
+      sclera.scale.set(eyeScale, eyeScale, 0.5);
+      headBone.add(sclera);
+
+      const iris = new THREE.Mesh(eyeGeo, irisMat);
+      iris.position.set(dx * eyeSpacing, eyeY, fz + 0.005);
+      iris.scale.set(eyeScale, eyeScale, 0.5);
+      headBone.add(iris);
+
+      const pupil = new THREE.Mesh(pupilGeo, pupilMat);
+      pupil.position.set(dx * eyeSpacing, eyeY, fz + 0.02);
+      pupil.scale.set(eyeScale, eyeScale, 0.4);
+      headBone.add(pupil);
+    }
+
+    // ── Eyelashes (female only) — thin dark line above each eye ──
+    if (fem) {
+      const lashMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+      for (const dx of [-1, 1]) {
+        const lash = new THREE.Mesh(new THREE.BoxGeometry(0.065, 0.006, 0.01), lashMat);
+        lash.position.set(dx * eyeSpacing, eyeY + 0.04 * hs, fz + 0.01);
+        headBone.add(lash);
+      }
+    }
+
+    // ── Eyebrows ──
+    // Female: thinner, higher arched; Male: thicker, straighter
+    // Dwarf: skip (brow ridge); Beastkin: angled; Elf: thin/arched
+    if (!race.isDwarf) {
+      const browColor = new THREE.Color(skinHex).multiplyScalar(fem ? 0.5 : 0.45).getHex();
+      const browMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: browColor });
+      const browWidth = race.isElf ? 0.055 : race.isBeastkin ? 0.065 : fem ? 0.06 : 0.07;
+      const browThick = race.isElf ? 0.010 : fem ? 0.008 : 0.015;
+      const browLift = fem ? 0.065 : 0.055;
+      for (const dx of [-1, 1]) {
+        const brow = new THREE.Mesh(browGeo, browMat);
+        brow.scale.set(browWidth / 0.07, browThick / 0.015, 1);
+        brow.position.set(dx * eyeSpacing, eyeY + browLift * hs, fz + 0.005);
+        if (race.isElf || fem) brow.rotation.z = dx * -0.18; // arched
+        else if (race.isBeastkin) brow.rotation.z = dx * 0.2;
+        headBone.add(brow);
+      }
+    }
+
+    // ── Nose ── (skip for beastkin — they have a snout)
+    if (!race.isBeastkin) {
+      const noseTint = new THREE.Color(skinHex).multiplyScalar(0.9).getHex();
+      const noseMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: noseTint });
+      const nose = new THREE.Mesh(noseGeo, noseMat);
+      // Female: smaller, more delicate; Dwarf: big; Elf: narrow
+      const noseScale = race.isDwarf ? 1.3 : race.isElf ? 0.8 : fem ? 0.75 : 1.0;
+      nose.scale.setScalar(noseScale);
+      nose.position.set(0, -0.02, fz + 0.02);
+      nose.rotation.x = -0.3;
+      headBone.add(nose);
+    }
+
+    // ── Mouth ── (skip for beastkin — snout covers it)
+    if (!race.isBeastkin) {
+      // Female: smaller, slightly fuller (tinted toward lip color)
+      const mouthBase = fem
+        ? new THREE.Color(skinHex).lerp(new THREE.Color(0xcc6666), 0.3) // rosier lips
+        : new THREE.Color(skinHex).multiplyScalar(0.55);
+      const mouthMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: mouthBase.getHex() });
+      const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+      const mouthWidth = race.isDwarf ? 1.2 : race.isElf ? 0.85 : fem ? 0.82 : 1.0;
+      const mouthThick = fem ? 1.5 : 1.0; // female lips slightly fuller
+      mouth.scale.set(mouthWidth, mouthThick, 1);
+      mouth.position.set(0, fem ? -0.075 : -0.08, fz + 0.005);
+      headBone.add(mouth);
+    }
+
+    // ── Cheek tint — warm blush spots ──
+    // Female: stronger blush; Male: subtle warmth
+    const blushStrength = fem ? 0.35 : 0.2;
+    const cheekTintColor = new THREE.Color(skinHex)
+      .lerp(new THREE.Color(0xff8888), blushStrength)
+      .getHex();
+    const cheekMat = new THREE.MeshBasicMaterial({
+      color: cheekTintColor,
+      transparent: true,
+      opacity: race.isBeastkin ? 0 : fem ? 0.4 : 0.25,
+      depthWrite: false,
+    });
+    for (const dx of [-1, 1]) {
+      const cheek = new THREE.Mesh(cheekGeo, cheekMat);
+      cheek.position.set(dx * 0.10 * hs, -0.03, fz - 0.01);
+      cheek.scale.set(fem ? 1.3 : 1.2, fem ? 0.9 : 0.8, 0.4);
+      headBone.add(cheek);
+    }
+  }
+
   // ── Hair builder (bone-relative: Y=0 is head center) ─────────────
 
   private buildHairOnBone(bone: THREE.Bone, style: string, mat: THREE.MeshToonMaterial) {
@@ -1603,9 +1937,13 @@ export class EntityManager {
     this.buildHair(bone, style, mat, 0);
   }
 
-  // ── Hair builder (all 12 styles) ─────────────────────────────────
+  // ── Hair builder (15 styles — all headScale-aware) ──────────────
 
   private buildHair(group: THREE.Object3D, style: string, mat: THREE.MeshToonMaterial, headY: number) {
+    // Create a darker shade for hair tips / inner layers
+    const tipMat = mat.clone();
+    tipMat.color.multiplyScalar(0.75);
+
     switch (style) {
       case "short": {
         const h = new THREE.Mesh(hairShortGeo, mat);
@@ -1614,11 +1952,18 @@ export class EntityManager {
         break;
       }
       case "long": {
-        // Full cap + back drape
+        // Full cap + back drape + side panels for volume
         const cap = new THREE.Mesh(hairShortGeo, mat);
         cap.position.set(0, headY + 0.1, 0); group.add(cap);
         const drape = new THREE.Mesh(hairLongGeo, mat);
-        drape.position.set(0, headY + 0.05, -0.12); group.add(drape);
+        drape.position.set(0, headY - 0.02, -0.10); group.add(drape);
+        // Side drapes — hair framing the face
+        for (const dx of [-1, 1]) {
+          const side = new THREE.Mesh(hairSideDrapeGeo, tipMat);
+          side.position.set(dx * 0.16, headY - 0.05, 0.02);
+          side.rotation.z = dx * 0.12; // slight outward angle
+          group.add(side);
+        }
         break;
       }
       case "mohawk": {
@@ -1628,39 +1973,50 @@ export class EntityManager {
         break;
       }
       case "ponytail": {
-        const top = new THREE.Mesh(hairShortGeo, mat);
-        top.position.set(0, headY + 0.1, 0); group.add(top);
+        // Tight cap + pulled-back tail with volume
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.85, 1);
+        group.add(cap);
+        // Tie point
+        const tie = new THREE.Mesh(hairKnotGeo, tipMat);
+        tie.position.set(0, headY + 0.05, -0.18); tie.scale.setScalar(0.7);
+        group.add(tie);
+        // Tail hanging down from tie
         const tail = new THREE.Mesh(hairLongGeo, mat);
-        tail.position.set(0, headY - 0.15, -0.2); tail.rotation.x = 0.3;
+        tail.position.set(0, headY - 0.18, -0.20); tail.rotation.x = 0.25;
         group.add(tail);
         break;
       }
       case "braided": {
-        const top = new THREE.Mesh(hairShortGeo, mat);
-        top.position.set(0, headY + 0.1, 0); group.add(top);
-        // Two braids hanging down
-        for (const dx of [-0.12, 0.12]) {
-          const b = new THREE.Mesh(hairBraidedGeo, mat);
-          b.position.set(dx, headY - 0.25, -0.1); group.add(b);
+        // Cap + two thick braids with end beads
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); group.add(cap);
+        for (const dx of [-0.13, 0.13]) {
+          const braid = new THREE.Mesh(hairBraidGeo, mat);
+          braid.position.set(dx, headY - 0.20, -0.06);
+          braid.rotation.x = 0.15; braid.rotation.z = dx > 0 ? -0.1 : 0.1;
+          group.add(braid);
+          const bead = new THREE.Mesh(hairBraidTipGeo, tipMat);
+          bead.position.set(dx, headY - 0.47, -0.04);
+          group.add(bead);
         }
         break;
       }
       case "locs": {
-        // Many thin cylindrical locs hanging from scalp
+        // Scalp cap + many locs at varying lengths
         const cap = new THREE.Mesh(hairShortGeo, mat);
-        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.6, 1);
+        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.5, 1);
         group.add(cap);
-        const angles = [0, 0.7, 1.4, 2.1, 2.8, 3.5, 4.2, 4.9, 5.6];
-        for (const a of angles) {
-          const loc = new THREE.Mesh(hairLocGeo, mat);
+        const angles = [0, 0.65, 1.3, 1.95, 2.6, 3.25, 3.9, 4.55, 5.2, 5.85];
+        for (let i = 0; i < angles.length; i++) {
+          const a = angles[i];
           const r = 0.16;
-          loc.position.set(
-            Math.sin(a) * r,
-            headY - 0.1,
-            Math.cos(a) * r - 0.03,
-          );
-          loc.rotation.x = Math.cos(a) * 0.15;
-          loc.rotation.z = Math.sin(a) * 0.15;
+          const lenScale = 0.8 + (i % 3) * 0.15; // varied lengths
+          const loc = new THREE.Mesh(hairLocGeo, i % 2 === 0 ? mat : tipMat);
+          loc.position.set(Math.sin(a) * r, headY - 0.1, Math.cos(a) * r - 0.03);
+          loc.rotation.x = Math.cos(a) * 0.2;
+          loc.rotation.z = Math.sin(a) * 0.2;
+          loc.scale.y = lenScale;
           group.add(loc);
         }
         break;
@@ -1672,24 +2028,22 @@ export class EntityManager {
         break;
       }
       case "cornrows": {
-        // Parallel rows running front to back
+        // Curved rows front-to-back + nape tails
         for (const dx of [-0.12, -0.06, 0, 0.06, 0.12]) {
           const row = new THREE.Mesh(hairCornrowGeo, mat);
           row.position.set(dx, headY + 0.08, -0.05);
-          row.rotation.x = Math.PI / 2 * 0.3; // slight tilt back
+          row.rotation.x = Math.PI / 2 * 0.3;
           group.add(row);
         }
-        // Back nape extension
         for (const dx of [-0.09, -0.03, 0.03, 0.09]) {
-          const tail = new THREE.Mesh(hairCornrowGeo, mat);
+          const tail = new THREE.Mesh(hairCornrowGeo, tipMat);
           tail.position.set(dx, headY - 0.12, -0.15);
-          tail.scale.set(1, 0.6, 1);
+          tail.scale.set(1, 0.7, 1);
           group.add(tail);
         }
         break;
       }
       case "bantu-knots": {
-        // 5-7 small spherical knots arranged on top of head
         const positions: [number, number, number][] = [
           [0, headY + 0.22, 0],
           [-0.13, headY + 0.15, 0.05],
@@ -1698,34 +2052,84 @@ export class EntityManager {
           [0.1, headY + 0.15, -0.1],
           [0, headY + 0.12, -0.14],
         ];
-        for (const [kx, ky, kz] of positions) {
-          const knot = new THREE.Mesh(hairKnotGeo, mat);
+        for (let i = 0; i < positions.length; i++) {
+          const [kx, ky, kz] = positions[i];
+          const knot = new THREE.Mesh(hairKnotGeo, i % 2 === 0 ? mat : tipMat);
           knot.position.set(kx, ky, kz);
           group.add(knot);
         }
         break;
       }
       case "bangs": {
-        // Full cap + front bangs piece
+        // Full cap + thick front fringe + side drapes
         const cap = new THREE.Mesh(hairShortGeo, mat);
         cap.position.set(0, headY + 0.1, 0); group.add(cap);
         const fringe = new THREE.Mesh(hairBangsGeo, mat);
         fringe.position.set(0, headY + 0.02, 0.16); group.add(fringe);
-        // Side drape
-        const drape = new THREE.Mesh(hairLongGeo, mat);
-        drape.position.set(0, headY + 0.02, -0.1); group.add(drape);
+        const drape = new THREE.Mesh(hairLongGeo, tipMat);
+        drape.position.set(0, headY - 0.02, -0.10); group.add(drape);
+        for (const dx of [-1, 1]) {
+          const side = new THREE.Mesh(hairSideDrapeGeo, tipMat);
+          side.position.set(dx * 0.15, headY - 0.03, 0.04);
+          group.add(side);
+        }
         break;
       }
       case "topknot": {
-        // Shaved sides + tied bun on top
         const base = new THREE.Mesh(hairTopknotGeo, mat);
         base.position.set(0, headY + 0.18, 0); group.add(base);
         const bun = new THREE.Mesh(hairTopknotBunGeo, mat);
         bun.position.set(0, headY + 0.3, 0); group.add(bun);
         break;
       }
+      // ── New female-leaning styles ──
+      case "side-swept": {
+        // Asymmetric — cap shifted to one side + long side drape on other
+        const cap = new THREE.Mesh(hairSideSweptGeo, mat);
+        cap.position.set(0.04, headY + 0.1, 0); group.add(cap);
+        // Heavy drape on left side
+        const drape = new THREE.Mesh(hairLongGeo, mat);
+        drape.position.set(-0.14, headY - 0.05, 0.02); drape.rotation.z = 0.15;
+        group.add(drape);
+        // Short wisp on right side
+        const wisp = new THREE.Mesh(hairSideDrapeGeo, tipMat);
+        wisp.position.set(0.15, headY + 0.0, 0.02); wisp.scale.y = 0.6;
+        group.add(wisp);
+        break;
+      }
+      case "pigtails": {
+        // Short cap + two high-set pigtails
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.7, 1);
+        group.add(cap);
+        for (const dx of [-1, 1]) {
+          // Tie point (small knot)
+          const tie = new THREE.Mesh(hairKnotGeo, tipMat);
+          tie.position.set(dx * 0.15, headY + 0.08, -0.08); tie.scale.setScalar(0.6);
+          group.add(tie);
+          // Hanging tail
+          const tail = new THREE.Mesh(hairPigtailGeo, mat);
+          tail.position.set(dx * 0.17, headY - 0.12, -0.10);
+          tail.rotation.z = dx * -0.15;
+          group.add(tail);
+          const tip = new THREE.Mesh(hairBraidTipGeo, tipMat);
+          tip.position.set(dx * 0.18, headY - 0.38, -0.10);
+          group.add(tip);
+        }
+        break;
+      }
+      case "bun": {
+        // Sleek pulled-back cap + high bun
+        const cap = new THREE.Mesh(hairShortGeo, mat);
+        cap.position.set(0, headY + 0.1, 0); cap.scale.set(1, 0.75, 0.95);
+        group.add(cap);
+        const bunBase = new THREE.Mesh(hairBunBaseGeo, tipMat);
+        bunBase.position.set(0, headY + 0.12, -0.14); group.add(bunBase);
+        const bun = new THREE.Mesh(hairBunGeo, mat);
+        bun.position.set(0, headY + 0.16, -0.14); group.add(bun);
+        break;
+      }
       default: {
-        // Fallback to short
         const h = new THREE.Mesh(hairShortGeo, mat);
         h.position.set(0, headY + 0.1, 0);
         group.add(h);
@@ -1734,9 +2138,9 @@ export class EntityManager {
     }
   }
 
-  private createHumanoidRig(scale = 1): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+  private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
     return {
-      rig: new CharacterRig({ scale }),
+      rig: new CharacterRig({ scale, isFemale }),
       clipOverrides: new Map(),
     };
   }
@@ -1748,36 +2152,70 @@ export class EntityManager {
     const cls = avatar.classBody;
     const { bodyScale, armScale, headScale, raceScale } = avatar.morphology;
     const { skinHex, hairHex, eyeHex } = avatar.colors;
-    const { isFemale, isElf, isDwarf, hairStyle } = avatar.features;
+    const { isFemale, isElf, isDwarf, hairStyle, race } = avatar.features;
+    const isBeastkin = race === "beastkin";
 
-    // ── Build skeleton ──
-    const { rig, clipOverrides } = this.createHumanoidRig(raceScale);
-    if (shouldUseSwordShieldAttack(ent)) {
-      clipOverrides.set("attack", AnimationLibrary.get("swordshieldattack"));
-    }
+    // ── Build skeleton (now gender-aware — wider hips, narrower shoulders for female) ──
+    const { rig, clipOverrides } = this.createHumanoidRig(raceScale, isFemale);
     group.add(rig.rootBone);
 
     // ── Attach visual meshes to bones ──
 
-    // Body → Chest bone
+    // Chest (upper torso) → Chest bone
+    // Male: broad, boxy. Female: narrower, slightly shorter
     const bodyMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: cls.color });
-    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    const body = new THREE.Mesh(chestGeo, bodyMat);
     body.scale.set(bodyScale.x, bodyScale.y, bodyScale.z);
     body.castShadow = true;
     rig.chest.add(body);
+
+    // Bust (female only) — subtle rounded shape on chest, scaled by race
+    if (isFemale) {
+      const bustScale = isDwarf ? 0.85 : isElf ? 0.9 : isBeastkin ? 0.8 : 1.0;
+      const bustMat = bodyMat; // same color as torso
+      for (const dx of [-0.08, 0.08]) {
+        const bust = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), bustMat);
+        bust.position.set(dx * bodyScale.x, -0.04, 0.18 * bodyScale.z);
+        bust.scale.set(1.0 * bustScale, 0.8 * bustScale, 0.7 * bustScale);
+        rig.chest.add(bust);
+      }
+    }
+
+    // Waist (lower torso) → Spine bone — creates the taper between chest and hips
+    // Female: narrower waist (stronger hourglass), wider hip flare
+    // Male: more uniform, slight V-taper from shoulders
+    const waist = new THREE.Mesh(waistGeo, bodyMat);
+    const waistNarrow = isFemale ? 0.88 : 1.0;   // female waist pinches more
+    const waistDepth = isFemale ? 1.0 : 1.0;
+    waist.scale.set(bodyScale.x * waistNarrow, bodyScale.y, bodyScale.z * waistDepth);
+    waist.castShadow = true;
+    rig.spine.add(waist);
+
+    // Hip flare (female only) — visible widening at the hip bone
+    if (isFemale) {
+      const hipFlareMat = bodyMat;
+      const hipFlare = new THREE.Mesh(new THREE.SphereGeometry(0.10, 6, 4, 0, Math.PI * 2, Math.PI * 0.3, Math.PI * 0.4), hipFlareMat);
+      hipFlare.scale.set(bodyScale.x * 1.3, 0.5, bodyScale.z * 1.1);
+      hipFlare.position.y = 0.06;
+      rig.hip.add(hipFlare);
+    }
+
+    // Neck → Neck bone
+    // Female: thinner and slightly taller; male: thicker
+    const neckMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
+    const neckMesh = new THREE.Mesh(neckGeo, neckMat);
+    neckMesh.position.y = -0.02;
+    if (isFemale) neckMesh.scale.set(0.85, 1.15, 0.85);
+    rig.neck.add(neckMesh);
 
     // Head → Head bone
     const head = new THREE.Mesh(headGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex }));
     head.scale.setScalar(headScale);
     rig.head.add(head);
 
-    // Eyes → Head bone
-    const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
-    for (const dx of [-0.08, 0.08]) {
-      const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(dx * headScale, 0.03, 0.17 * headScale);
-      rig.head.add(eye);
-    }
+    // Face features → Head bone (all positions relative to head center, scaled by headScale)
+    const hs = headScale;
+    this.buildFace(rig.head, hs, eyeHex, skinHex, { isElf, isDwarf, isBeastkin, isFemale });
 
     // Hair → Head bone
     if (hairStyle !== "bald") {
@@ -1785,7 +2223,7 @@ export class EntityManager {
       this.buildHairOnBone(rig.head, hairStyle, hairMat);
     }
 
-    // Race-specific ear features → Head bone
+    // Race-specific features → Head bone
     const earSkinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
     if (isElf) {
       // Pointed elf ears — long cones angled outward
@@ -1808,49 +2246,98 @@ export class EntityManager {
       const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.06), browMat);
       brow.position.set(0, 0.1, 0.14);
       rig.head.add(brow);
+    } else if (isBeastkin) {
+      // Beastkin — animal ears on top of head + snout
+      const furMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: new THREE.Color(skinHex).multiplyScalar(0.85).getHex() });
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(0.05, 0.14, 4), furMat);
+        ear.position.set(side * 0.12, 0.18, 0.0);
+        ear.rotation.z = side * -0.3;
+        rig.head.add(ear);
+      }
+      // Short muzzle/snout
+      const snout = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.06, 3, 5), furMat);
+      snout.position.set(0, -0.04, 0.18);
+      snout.rotation.x = Math.PI / 2;
+      rig.head.add(snout);
     }
 
     // Legs → thigh on hip bones, shin on knee bones
+    // Female: fuller thighs (wider, not narrower), tapered calves — creates curved silhouette
+    // Male: uniform cylinder legs
     const legMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
+    const thighScale = isFemale ? { x: 1.1, y: 1.05, z: 1.1 } : { x: 1, y: 1, z: 1 };
+    const shinScale = isFemale ? { x: 0.88, y: 1.05, z: 0.88 } : { x: 1, y: 1, z: 1 };
     const lThigh = new THREE.Mesh(thighGeo, legMat);
     lThigh.position.y = -0.10;
-    if (isFemale) lThigh.scale.set(0.95, 1.05, 0.95);
+    lThigh.scale.set(thighScale.x, thighScale.y, thighScale.z);
     rig.lHip.add(lThigh);
     const rThigh = new THREE.Mesh(thighGeo, legMat);
     rThigh.position.y = -0.10;
-    if (isFemale) rThigh.scale.set(0.95, 1.05, 0.95);
+    rThigh.scale.set(thighScale.x, thighScale.y, thighScale.z);
     rig.rHip.add(rThigh);
     const leftLeg = new THREE.Mesh(legGeo, legMat);
-    if (isFemale) leftLeg.scale.set(0.9, 1.05, 0.9);
+    leftLeg.scale.set(shinScale.x, shinScale.y, shinScale.z);
     leftLeg.position.y = -0.12;
     rig.lKnee.add(leftLeg);
     const rightLeg = new THREE.Mesh(legGeo, legMat);
-    if (isFemale) rightLeg.scale.set(0.9, 1.05, 0.9);
+    rightLeg.scale.set(shinScale.x, shinScale.y, shinScale.z);
     rightLeg.position.y = -0.12;
     rig.rKnee.add(rightLeg);
+
+    // Feet → foot bones — default boots
+    // Female: slightly slimmer, taller heel hint; Male: wider stompers
+    const bootMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x5a4a3a });
+    const bootScale = isFemale ? { x: 0.88, y: 1.0, z: 0.92 } : { x: 1, y: 1, z: 1 };
+    for (const footBone of [rig.lFoot, rig.rFoot]) {
+      const ankle = new THREE.Mesh(defaultBootGeo, bootMat);
+      ankle.position.set(0, 0.02, 0.01);
+      ankle.scale.set(bootScale.x, bootScale.y, bootScale.z);
+      footBone.add(ankle);
+      const sole = new THREE.Mesh(defaultSoleGeo, bootMat);
+      sole.position.set(0, -0.04, 0.01);
+      sole.scale.set(bootScale.x, bootScale.y, bootScale.z);
+      footBone.add(sole);
+      const toe = new THREE.Mesh(toeGeo, bootMat);
+      toe.position.set(0, -0.03, 0.08);
+      toe.scale.set(bootScale.x * 0.9, bootScale.y * 0.9, bootScale.z * 0.9);
+      footBone.add(toe);
+    }
 
     // Arms + hands → shoulder/hand bones
     const skinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
 
-    // Shoulder joints to bridge chest→arm gap
+    // Shoulder joints — nudge inward toward body to bridge chest→arm gap
     const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    lShoulderJoint.position.set(0.08, 0, 0);   // toward body center (positive X = toward center for left)
     rig.lShoulder.add(lShoulderJoint);
     const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rShoulderJoint.position.set(-0.08, 0, 0);  // toward body center (negative X = toward center for right)
     rig.rShoulder.add(rShoulderJoint);
 
     const lUpperArm = new THREE.Mesh(armGeo, skinMat);
-    lUpperArm.position.y = -0.15; lUpperArm.scale.setScalar(armScale);
+    lUpperArm.position.y = -0.24; lUpperArm.scale.setScalar(armScale);
     rig.lArm.add(lUpperArm);
-    const lHand = new THREE.Mesh(handGeo, skinMat);
-    lHand.scale.setScalar(armScale);
-    rig.lHand.add(lHand);
+    // Left hand — palm + finger block
+    const lPalm = new THREE.Mesh(handGeo, skinMat);
+    lPalm.scale.setScalar(armScale);
+    rig.lHand.add(lPalm);
+    const lFingers = new THREE.Mesh(fingerGeo, skinMat);
+    lFingers.position.set(0, -0.02, 0.04);
+    lFingers.scale.setScalar(armScale);
+    rig.lHand.add(lFingers);
 
     const rUpperArm = new THREE.Mesh(armGeo, skinMat);
-    rUpperArm.position.y = -0.15; rUpperArm.scale.setScalar(armScale);
+    rUpperArm.position.y = -0.24; rUpperArm.scale.setScalar(armScale);
     rig.rArm.add(rUpperArm);
-    const rHand = new THREE.Mesh(handGeo, skinMat);
-    rHand.scale.setScalar(armScale);
-    rig.rHand.add(rHand);
+    // Right hand — palm + finger block
+    const rPalm = new THREE.Mesh(handGeo, skinMat);
+    rPalm.scale.setScalar(armScale);
+    rig.rHand.add(rPalm);
+    const rFingers = new THREE.Mesh(fingerGeo, skinMat);
+    rFingers.position.set(0, -0.02, 0.04);
+    rFingers.scale.setScalar(armScale);
+    rig.rHand.add(rFingers);
 
     // Weapon → right hand bone
     if (ent.equipment?.weapon) {
@@ -1953,23 +2440,48 @@ export class EntityManager {
     });
     group.add(rig.rootBone);
 
-    // Body → Chest
+    // Chest (upper) → Chest bone
     const body = new THREE.Mesh(mobBodyGeo, mat);
     body.castShadow = true;
     rig.chest.add(body);
+
+    // Waist (lower) → Spine bone
+    const mobWaist = new THREE.Mesh(mobWaistGeo, mat);
+    mobWaist.castShadow = true;
+    rig.spine.add(mobWaist);
+
+    // Neck → Neck bone
+    const mobNeck = new THREE.Mesh(neckGeo, mat);
+    mobNeck.position.y = -0.02;
+    mobNeck.scale.set(1.1, 1, 1.1);
+    rig.neck.add(mobNeck);
 
     // Head → Head bone
     const head = new THREE.Mesh(headGeo, mat);
     head.scale.setScalar(0.9);
     rig.head.add(head);
 
-    // Eyes → Head bone
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+    // Mob eyes — menacing: dark sclera + red iris + bright pupil
+    const mobScleraMat = new THREE.MeshBasicMaterial({ color: 0x220000 });
+    const mobIrisMat = new THREE.MeshBasicMaterial({ color: 0xff3333 });
+    const mobPupilMat = new THREE.MeshBasicMaterial({ color: 0xff8800 });
     for (const dx of [-0.06, 0.06]) {
-      const eye = new THREE.Mesh(eyeGeo, eyeMat);
-      eye.position.set(dx, 0.03, 0.15);
-      rig.head.add(eye);
+      const sc = new THREE.Mesh(scleraGeo, mobScleraMat);
+      sc.position.set(dx, 0.03, 0.14); sc.scale.set(1, 1, 0.5);
+      rig.head.add(sc);
+      const iris = new THREE.Mesh(eyeGeo, mobIrisMat);
+      iris.position.set(dx, 0.03, 0.155); iris.scale.set(1, 1, 0.5);
+      rig.head.add(iris);
+      const pupil = new THREE.Mesh(pupilGeo, mobPupilMat);
+      pupil.position.set(dx, 0.03, 0.17); pupil.scale.set(1, 1, 0.4);
+      rig.head.add(pupil);
     }
+    // Mob mouth — angry snarl line
+    const mobMouthMat = new THREE.MeshBasicMaterial({ color: 0x330000 });
+    const mobMouth = new THREE.Mesh(mouthGeo, mobMouthMat);
+    mobMouth.scale.set(1.1, 1.5, 1);
+    mobMouth.position.set(0, -0.07, 0.16);
+    rig.head.add(mobMouth);
 
     // Legs → thigh on hip bones, shin on knee bones
     const lThigh = new THREE.Mesh(thighGeo, mat);
@@ -1985,22 +2497,46 @@ export class EntityManager {
     rightLeg.position.y = -0.12;
     rig.rKnee.add(rightLeg);
 
+    // Feet → foot bones — mob stompers (bigger, menacing)
+    const darkMobMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: new THREE.Color(color).multiplyScalar(0.6).getHex() });
+    for (const footBone of [rig.lFoot, rig.rFoot]) {
+      const foot = new THREE.Mesh(footGeo, mat);
+      foot.scale.set(1.1, 1, 1.1);
+      foot.position.set(0, -0.02, 0.01);
+      footBone.add(foot);
+      const sole = new THREE.Mesh(defaultSoleGeo, darkMobMat);
+      sole.scale.set(1.1, 1, 1.1);
+      sole.position.set(0, -0.05, 0.01);
+      footBone.add(sole);
+    }
+
     // Arms + claws → shoulder joint + arm/hand bones
     const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, mat);
+    lShoulderJoint.position.set(0.08, 0, 0);
     rig.lShoulder.add(lShoulderJoint);
     const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, mat);
+    rShoulderJoint.position.set(-0.08, 0, 0);
     rig.rShoulder.add(rShoulderJoint);
     const lArm = new THREE.Mesh(armGeo, mat);
-    lArm.position.y = -0.15;
+    lArm.position.y = -0.24;
     rig.lArm.add(lArm);
+    // Mob claws — palm + finger spikes
     const lClaw = new THREE.Mesh(handGeo, mat);
+    lClaw.scale.setScalar(1.1);
     rig.lHand.add(lClaw);
+    const lClawFingers = new THREE.Mesh(fingerGeo, mat);
+    lClawFingers.position.set(0, -0.02, 0.05); lClawFingers.scale.set(1.2, 1.2, 1.2);
+    rig.lHand.add(lClawFingers);
 
     const rArm = new THREE.Mesh(armGeo, mat);
-    rArm.position.y = -0.15;
+    rArm.position.y = -0.24;
     rig.rArm.add(rArm);
     const rClaw = new THREE.Mesh(handGeo, mat);
+    rClaw.scale.setScalar(1.1);
     rig.rHand.add(rClaw);
+    const rClawFingers = new THREE.Mesh(fingerGeo, mat);
+    rClawFingers.position.set(0, -0.02, 0.05); rClawFingers.scale.set(1.2, 1.2, 1.2);
+    rig.rHand.add(rClawFingers);
 
     if (isBoss) {
       const crown = new THREE.Mesh(new THREE.ConeGeometry(0.15, 0.25, 5), new THREE.MeshBasicMaterial({ color: 0xffdd00 }));
@@ -2023,9 +2559,6 @@ export class EntityManager {
     const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
 
     const { rig, clipOverrides } = this.createHumanoidRig(1);
-    if (shouldUseSwordShieldAttack(ent)) {
-      clipOverrides.set("attack", AnimationLibrary.get("swordshieldattack"));
-    }
     group.add(rig.rootBone);
 
     // Legs → thigh on hip bones, shin on knee bones
@@ -2043,24 +2576,43 @@ export class EntityManager {
     rightLeg.position.y = -0.12;
     rig.rKnee.add(rightLeg);
 
-    // Body → Chest bone
+    // Feet → foot bones — NPC boots (simple, neutral)
+    const npcBootMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0x555566 });
+    for (const footBone of [rig.lFoot, rig.rFoot]) {
+      const ankle = new THREE.Mesh(defaultBootGeo, npcBootMat);
+      ankle.position.set(0, 0.02, 0.01);
+      footBone.add(ankle);
+      const sole = new THREE.Mesh(defaultSoleGeo, npcBootMat);
+      sole.position.set(0, -0.04, 0.01);
+      footBone.add(sole);
+      const toe = new THREE.Mesh(toeGeo, npcBootMat);
+      toe.position.set(0, -0.03, 0.08);
+      footBone.add(toe);
+    }
+
+    // Chest (upper) → Chest bone
     const body = new THREE.Mesh(npcBodyGeo, mat);
     body.castShadow = true;
     rig.chest.add(body);
+
+    // Waist (lower) → Spine bone
+    const npcWaist = new THREE.Mesh(npcWaistGeo, mat);
+    npcWaist.castShadow = true;
+    rig.spine.add(npcWaist);
+
+    // Neck → Neck bone
+    const npcNeckMesh = new THREE.Mesh(neckGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex }));
+    npcNeckMesh.position.y = -0.02;
+    rig.neck.add(npcNeckMesh);
 
     // Head → Head bone
     const skinMat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: skinHex });
     const head = new THREE.Mesh(headGeo, skinMat);
     rig.head.add(head);
 
-    if (ent.eyeColor) {
-      const eyeMat = new THREE.MeshBasicMaterial({ color: eyeHex });
-      for (const dx of [-0.07, 0.07]) {
-        const eye = new THREE.Mesh(eyeGeo, eyeMat);
-        eye.position.set(dx, 0.03, 0.16);
-        rig.head.add(eye);
-      }
-    }
+    // NPC face — friendly: full face features (human-like, no race variation for NPCs)
+    this.buildFace(rig.head, 1.0, eyeHex || 0x6b3a1f, skinHex, { isElf: false, isDwarf: false, isBeastkin: false, isFemale: false });
+
     if (hairStyle !== "bald") {
       const h = new THREE.Mesh(hairShortGeo, new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: hairHex }));
       h.position.set(0, 0.1, 0);
@@ -2069,20 +2621,28 @@ export class EntityManager {
 
     // Arms + hands → shoulder joint + arm/hand bones
     const lShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    lShoulderJoint.position.set(0.08, 0, 0);
     rig.lShoulder.add(lShoulderJoint);
     const rShoulderJoint = new THREE.Mesh(shoulderJointGeo, skinMat);
+    rShoulderJoint.position.set(-0.08, 0, 0);
     rig.rShoulder.add(rShoulderJoint);
     const lArm = new THREE.Mesh(armGeo, skinMat);
-    lArm.position.y = -0.15;
+    lArm.position.y = -0.24;
     rig.lArm.add(lArm);
     const lHand = new THREE.Mesh(handGeo, skinMat);
     rig.lHand.add(lHand);
+    const lNpcFingers = new THREE.Mesh(fingerGeo, skinMat);
+    lNpcFingers.position.set(0, -0.02, 0.04);
+    rig.lHand.add(lNpcFingers);
 
     const rArm = new THREE.Mesh(armGeo, skinMat);
-    rArm.position.y = -0.15;
+    rArm.position.y = -0.24;
     rig.rArm.add(rArm);
     const rHand = new THREE.Mesh(handGeo, skinMat);
     rig.rHand.add(rHand);
+    const rNpcFingers = new THREE.Mesh(fingerGeo, skinMat);
+    rNpcFingers.position.set(0, -0.02, 0.04);
+    rig.rHand.add(rNpcFingers);
 
     if (ent.type === "quest-giver") {
       const q = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xffdd00 }));

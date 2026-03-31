@@ -6,7 +6,7 @@ import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/gol
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeBrew, narrativeConsume } from "../social/diary.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { copperToGold } from "../blockchain/currency.js";
@@ -14,12 +14,15 @@ import { getPotionEffect, type PotionEffect } from "./potionEffects.js";
 import { randomUUID } from "crypto";
 import { advanceGatherQuests } from "../social/questSystem.js";
 
+const lastBrewTime = new Map<string, number>();
+
 export interface AlchemyRecipe {
   recipeId: string;
   outputTokenId: bigint;
   outputQuantity: number;
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
   copperCost: number;
+  requiredSkillLevel: number; // alchemy skill level (1-300) needed to brew
   brewingTime: number; // seconds (for future use)
 }
 
@@ -34,7 +37,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 33n, quantity: 1 }, // 1x Dandelion
     ],
     copperCost: 5,
-    brewingTime: 10,
+    requiredSkillLevel: 1,
+    brewingTime: 20,
   },
   {
     recipeId: "minor-mana-potion",
@@ -45,7 +49,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 34n, quantity: 1 }, // 1x Clover
     ],
     copperCost: 5,
-    brewingTime: 10,
+    requiredSkillLevel: 1,
+    brewingTime: 20,
   },
 
   // --- Intermediate Elixirs (Tier 2) ---
@@ -58,7 +63,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 37n, quantity: 1 }, // 1x Mint
     ],
     copperCost: 15,
-    brewingTime: 15,
+    requiredSkillLevel: 25,
+    brewingTime: 30,
   },
   {
     recipeId: "wisdom-potion",
@@ -69,7 +75,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 1 }, // 1x Moonflower
     ],
     copperCost: 25,
-    brewingTime: 20,
+    requiredSkillLevel: 35,
+    brewingTime: 40,
   },
   {
     recipeId: "swift-step-potion",
@@ -80,7 +87,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 34n, quantity: 2 }, // 2x Clover
     ],
     copperCost: 12,
-    brewingTime: 12,
+    requiredSkillLevel: 15,
+    brewingTime: 24,
   },
 
   // --- Advanced Potions (Tier 3) ---
@@ -94,7 +102,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 1 }, // 1x Sage
     ],
     copperCost: 40,
-    brewingTime: 25,
+    requiredSkillLevel: 50,
+    brewingTime: 50,
   },
   {
     recipeId: "greater-mana-potion",
@@ -106,7 +115,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 1 }, // 1x Lavender
     ],
     copperCost: 50,
-    brewingTime: 30,
+    requiredSkillLevel: 60,
+    brewingTime: 60,
   },
 
   // --- Master Elixirs (Tier 4) ---
@@ -120,7 +130,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 1 }, // 1x Moonflower
     ],
     copperCost: 80,
-    brewingTime: 40,
+    requiredSkillLevel: 75,
+    brewingTime: 80,
   },
   {
     recipeId: "elixir-of-vitality",
@@ -132,7 +143,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 39n, quantity: 1 }, // 1x Starbloom
     ],
     copperCost: 100,
-    brewingTime: 45,
+    requiredSkillLevel: 100,
+    brewingTime: 90,
   },
   {
     recipeId: "philosophers-elixir",
@@ -144,7 +156,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 38n, quantity: 2 }, // 2x Moonflower
     ],
     copperCost: 200,
-    brewingTime: 60,
+    requiredSkillLevel: 150,
+    brewingTime: 120,
   },
 
   // --- Enchantment Elixirs (Special Tier) ---
@@ -157,7 +170,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 3 }, // 3x Lavender
     ],
     copperCost: 60,
-    brewingTime: 35,
+    requiredSkillLevel: 75,
+    brewingTime: 70,
   },
   {
     recipeId: "ice-enchantment",
@@ -168,7 +182,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 37n, quantity: 2 }, // 2x Mint
     ],
     copperCost: 55,
-    brewingTime: 32,
+    requiredSkillLevel: 75,
+    brewingTime: 64,
   },
   {
     recipeId: "lightning-enchantment",
@@ -180,7 +195,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 37n, quantity: 1 }, // 1x Mint
     ],
     copperCost: 65,
-    brewingTime: 38,
+    requiredSkillLevel: 85,
+    brewingTime: 76,
   },
   {
     recipeId: "holy-enchantment",
@@ -192,7 +208,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 1 }, // 1x Sage
     ],
     copperCost: 70,
-    brewingTime: 40,
+    requiredSkillLevel: 90,
+    brewingTime: 80,
   },
   {
     recipeId: "shadow-enchantment",
@@ -204,7 +221,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 36n, quantity: 2 }, // 2x Sage
     ],
     copperCost: 75,
-    brewingTime: 42,
+    requiredSkillLevel: 100,
+    brewingTime: 84,
   },
   {
     recipeId: "sharpness-elixir",
@@ -216,7 +234,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
     ],
     copperCost: 80,
-    brewingTime: 45,
+    requiredSkillLevel: 110,
+    brewingTime: 90,
   },
   {
     recipeId: "durability-elixir",
@@ -227,7 +246,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 35n, quantity: 2 }, // 2x Lavender
     ],
     copperCost: 70,
-    brewingTime: 38,
+    requiredSkillLevel: 100,
+    brewingTime: 76,
   },
   // --- Gate Reagents (Dungeon Key crafting pipeline) ---
   {
@@ -240,7 +260,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 22n, quantity: 2 }, // 2x Coal Ore
     ],
     copperCost: 15,
-    brewingTime: 20,
+    requiredSkillLevel: 10,
+    brewingTime: 40,
   },
   {
     recipeId: "lesser-gate-essence",
@@ -252,7 +273,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 23n, quantity: 3 }, // 3x Tin Ore
     ],
     copperCost: 30,
-    brewingTime: 25,
+    requiredSkillLevel: 30,
+    brewingTime: 50,
   },
   {
     recipeId: "gate-essence",
@@ -264,7 +286,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 24n, quantity: 3 }, // 3x Copper Ore
     ],
     copperCost: 60,
-    brewingTime: 35,
+    requiredSkillLevel: 60,
+    brewingTime: 70,
   },
   {
     recipeId: "greater-gate-essence",
@@ -276,7 +299,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 25n, quantity: 3 }, // 3x Silver Ore
     ],
     copperCost: 100,
-    brewingTime: 45,
+    requiredSkillLevel: 90,
+    brewingTime: 90,
   },
   {
     recipeId: "superior-gate-essence",
@@ -289,7 +313,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 121n, quantity: 1 }, // 1x Arcane Crystal
     ],
     copperCost: 180,
-    brewingTime: 55,
+    requiredSkillLevel: 125,
+    brewingTime: 110,
   },
   {
     recipeId: "supreme-gate-essence",
@@ -302,7 +327,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 121n, quantity: 2 }, // 2x Arcane Crystal
     ],
     copperCost: 300,
-    brewingTime: 60,
+    requiredSkillLevel: 175,
+    brewingTime: 120,
   },
 
   // --- Tonics (XP Boosts, Tier 5) ---
@@ -316,7 +342,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 150n, quantity: 1 }, // 1x Dew Nectar
     ],
     copperCost: 20,
-    brewingTime: 15,
+    requiredSkillLevel: 20,
+    brewingTime: 30,
   },
   {
     recipeId: "starbloom-tonic",
@@ -328,7 +355,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 152n, quantity: 2 }, // 2x Moonpetal Nectar
     ],
     copperCost: 60,
-    brewingTime: 25,
+    requiredSkillLevel: 60,
+    brewingTime: 50,
   },
   {
     recipeId: "dragons-breath-tonic",
@@ -340,7 +368,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 153n, quantity: 2 }, // 2x Emberveil Nectar
     ],
     copperCost: 120,
-    brewingTime: 40,
+    requiredSkillLevel: 125,
+    brewingTime: 80,
   },
   {
     recipeId: "apprentice-tonic",
@@ -352,7 +381,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 151n, quantity: 1 }, // 1x Suncrest Nectar
     ],
     copperCost: 35,
-    brewingTime: 20,
+    requiredSkillLevel: 40,
+    brewingTime: 40,
   },
 
   // --- Resistance Elixirs (required for L25+ zones, Tier 6) ---
@@ -366,7 +396,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 153n, quantity: 1 }, // 1x Emberveil Nectar
     ],
     copperCost: 45,
-    brewingTime: 25,
+    requiredSkillLevel: 50,
+    brewingTime: 50,
   },
   {
     recipeId: "shadow-resistance-elixir",
@@ -378,7 +409,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 154n, quantity: 1 }, // 1x Gloomveil Nectar
     ],
     copperCost: 45,
-    brewingTime: 25,
+    requiredSkillLevel: 50,
+    brewingTime: 50,
   },
   {
     recipeId: "ice-resistance-elixir",
@@ -390,7 +422,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 151n, quantity: 1 }, // 1x Suncrest Nectar
     ],
     copperCost: 55,
-    brewingTime: 30,
+    requiredSkillLevel: 65,
+    brewingTime: 60,
   },
   {
     recipeId: "lightning-resistance-elixir",
@@ -402,7 +435,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 155n, quantity: 1 }, // 1x Stormwell Nectar
     ],
     copperCost: 50,
-    brewingTime: 28,
+    requiredSkillLevel: 60,
+    brewingTime: 56,
   },
   {
     recipeId: "holy-resistance-elixir",
@@ -414,7 +448,8 @@ export const ALCHEMY_RECIPES: AlchemyRecipe[] = [
       { tokenId: 152n, quantity: 1 }, // 1x Moonpetal Nectar
     ],
     copperCost: 50,
-    brewingTime: 28,
+    requiredSkillLevel: 55,
+    brewingTime: 56,
   },
 ];
 
@@ -443,6 +478,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           };
         }),
         copperCost: recipe.copperCost,
+        requiredSkillLevel: recipe.requiredSkillLevel,
         brewingTime: recipe.brewingTime,
       };
     });
@@ -487,6 +523,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
             };
           }),
           copperCost: recipe.copperCost,
+          requiredSkillLevel: recipe.requiredSkillLevel,
           brewingTime: recipe.brewingTime,
         };
       });
@@ -536,10 +573,51 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check skill level requirement
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["alchemy"]?.level ?? 1;
+    if (currentSkillLevel < recipe.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Alchemy skill too low for this recipe`,
+        requiredSkillLevel: recipe.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Brew simpler potions to raise your skill from ${currentSkillLevel} to ${recipe.requiredSkillLevel}`,
+      };
+    }
+
     const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+
+    // Enforce brewing cooldown
+    const cooldownMs = recipe.brewingTime * 1000;
+    const lastBrew = lastBrewTime.get(walletAddress.toLowerCase());
+    if (lastBrew && Date.now() - lastBrew < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - lastBrew)) / 1000);
+      reply.code(429);
+      return { error: "Brewing too fast", cooldownRemaining: remaining };
+    }
+
+    // Roll for failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, recipe.requiredSkillLevel);
+    if (failed) {
+      lastBrewTime.set(walletAddress.toLowerCase(), Date.now());
+      const halfXp = recipe.copperCost <= 15
+        ? Math.floor(PROFESSION_XP.BREW_TIER1 / 2)
+        : recipe.copperCost <= 50
+          ? Math.floor(PROFESSION_XP.BREW_TIER2 / 2)
+          : Math.floor(PROFESSION_XP.BREW_TIER3 / 2);
+      awardProfessionXp(entity, zoneId, halfXp, "alchemy");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        recipeId: recipe.recipeId,
+        message: "The potion fizzled and evaporated. No materials consumed.",
+      };
     }
 
     const alchemyLab = getEntity(alchemyLabId);
@@ -639,6 +717,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
         message: `${entity.name}: Brewed ${outputItem?.name ?? "a potion"}`,
         entityId: entity.id,
         entityName: entity.name,
+        data: { craftType: "alchemy", itemName: outputItem?.name ?? "a potion", recipeId },
       });
 
       // Log brew diary entry
@@ -651,6 +730,8 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           labName: alchemyLab.name,
         });
       }
+
+      lastBrewTime.set(walletAddress.toLowerCase(), Date.now());
 
       return {
         ok: true,

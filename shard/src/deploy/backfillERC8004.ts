@@ -8,7 +8,6 @@
  * Uses its own wallet with nonce-collision retry to coexist with the running shard.
  */
 import "dotenv/config";
-import Redis from "ioredis";
 import { ethers } from "ethers";
 
 // ── Direct wallet setup ──
@@ -69,6 +68,7 @@ async function sendTx(
 // ── Redis ──
 const REDIS_URL = process.env.REDIS_URL;
 if (!REDIS_URL) { console.error("REDIS_URL not set"); process.exit(1); }
+const Redis = (await import("ioredis")).default as any;
 const redis = new Redis(REDIS_URL);
 
 interface CharacterRecord {

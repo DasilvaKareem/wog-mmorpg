@@ -9,9 +9,11 @@ import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { logDiary, narrativeCraft } from "../social/diary.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { awardProfessionXp, PROFESSION_XP } from "./professionXp.js";
+import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
+
+const lastCraftTime = new Map<string, number>();
 
 export interface CraftingRecipe {
   recipeId: string;
@@ -20,6 +22,7 @@ export interface CraftingRecipe {
   requiredMaterials: Array<{ tokenId: bigint; quantity: number }>;
   copperCost: number;
   requiredProfession: "blacksmithing" | "alchemy" | "leatherworking" | "jewelcrafting";
+  requiredSkillLevel: number; // profession skill level (1-300) needed to craft
   craftingTime: number; // seconds (for future use)
 }
 
@@ -35,7 +38,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 25,
     requiredProfession: "blacksmithing",
-    craftingTime: 5,
+    requiredSkillLevel: 1,
+    craftingTime: 10,
   },
   {
     recipeId: "steel-longsword",
@@ -47,7 +51,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 50,
     requiredProfession: "blacksmithing",
-    craftingTime: 10,
+    requiredSkillLevel: 15,
+    craftingTime: 20,
   },
   {
     recipeId: "hunters-bow",
@@ -58,7 +63,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 35,
     requiredProfession: "blacksmithing",
-    craftingTime: 8,
+    requiredSkillLevel: 10,
+    craftingTime: 16,
   },
   {
     recipeId: "battle-axe",
@@ -70,7 +76,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 100,
     requiredProfession: "blacksmithing",
-    craftingTime: 15,
+    requiredSkillLevel: 25,
+    craftingTime: 30,
   },
   {
     recipeId: "oak-shield",
@@ -82,7 +89,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 20,
     requiredProfession: "blacksmithing",
-    craftingTime: 6,
+    requiredSkillLevel: 5,
+    craftingTime: 12,
   },
   // --- Advanced Blacksmithing (Armor) ---
   {
@@ -95,7 +103,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 75,
     requiredProfession: "blacksmithing",
-    craftingTime: 20,
+    requiredSkillLevel: 30,
+    craftingTime: 40,
   },
   {
     recipeId: "iron-greaves",
@@ -107,7 +116,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 40,
     requiredProfession: "blacksmithing",
-    craftingTime: 12,
+    requiredSkillLevel: 20,
+    craftingTime: 24,
   },
   {
     recipeId: "steel-sabatons",
@@ -119,7 +129,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 60,
     requiredProfession: "blacksmithing",
-    craftingTime: 14,
+    requiredSkillLevel: 25,
+    craftingTime: 28,
   },
   // --- Master Blacksmithing (Legendary Items) ---
   {
@@ -133,7 +144,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 300,
     requiredProfession: "blacksmithing",
-    craftingTime: 30,
+    requiredSkillLevel: 75,
+    craftingTime: 60,
   },
 
   // --- Smelting Recipes (Ore → Bars) ---
@@ -147,7 +159,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 5,
     requiredProfession: "blacksmithing",
-    craftingTime: 3,
+    requiredSkillLevel: 1,
+    craftingTime: 6,
   },
   {
     recipeId: "smelt-copper-bar",
@@ -159,7 +172,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 8,
     requiredProfession: "blacksmithing",
-    craftingTime: 4,
+    requiredSkillLevel: 10,
+    craftingTime: 8,
   },
   {
     recipeId: "smelt-silver-bar",
@@ -171,7 +185,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 15,
     requiredProfession: "blacksmithing",
-    craftingTime: 6,
+    requiredSkillLevel: 25,
+    craftingTime: 12,
   },
   {
     recipeId: "smelt-gold-bar",
@@ -183,7 +198,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 30,
     requiredProfession: "blacksmithing",
-    craftingTime: 8,
+    requiredSkillLevel: 40,
+    craftingTime: 16,
   },
   {
     recipeId: "smelt-steel-alloy",
@@ -196,7 +212,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 40,
     requiredProfession: "blacksmithing",
-    craftingTime: 10,
+    requiredSkillLevel: 50,
+    craftingTime: 20,
   },
 
   // --- Bar-based Blacksmithing (advanced armor) ---
@@ -209,7 +226,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 15,
     requiredProfession: "blacksmithing",
-    craftingTime: 6,
+    requiredSkillLevel: 40,
+    craftingTime: 12,
   },
   {
     recipeId: "bar-bronze-shoulders",
@@ -221,7 +239,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 20,
     requiredProfession: "blacksmithing",
-    craftingTime: 8,
+    requiredSkillLevel: 45,
+    craftingTime: 16,
   },
   {
     recipeId: "bar-knight-gauntlets",
@@ -233,7 +252,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 50,
     requiredProfession: "blacksmithing",
-    craftingTime: 12,
+    requiredSkillLevel: 55,
+    craftingTime: 24,
   },
   {
     recipeId: "bar-steel-pauldrons",
@@ -245,7 +265,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 60,
     requiredProfession: "blacksmithing",
-    craftingTime: 14,
+    requiredSkillLevel: 65,
+    craftingTime: 28,
   },
   {
     recipeId: "bar-war-belt",
@@ -257,7 +278,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 45,
     requiredProfession: "blacksmithing",
-    craftingTime: 10,
+    requiredSkillLevel: 50,
+    craftingTime: 20,
   },
   {
     recipeId: "bar-chainmail-shirt",
@@ -269,7 +291,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 70,
     requiredProfession: "blacksmithing",
-    craftingTime: 18,
+    requiredSkillLevel: 60,
+    craftingTime: 36,
   },
   {
     recipeId: "bar-apprentice-staff",
@@ -281,7 +304,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 55,
     requiredProfession: "blacksmithing",
-    craftingTime: 12,
+    requiredSkillLevel: 55,
+    craftingTime: 24,
   },
 
   // --- Elite Blacksmithing (Weapons) ---
@@ -296,7 +320,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 300,
     requiredProfession: "blacksmithing",
-    craftingTime: 30,
+    requiredSkillLevel: 150,
+    craftingTime: 60,
   },
   {
     recipeId: "promic-warstaff",
@@ -308,7 +333,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 250,
     requiredProfession: "blacksmithing",
-    craftingTime: 28,
+    requiredSkillLevel: 140,
+    craftingTime: 56,
   },
   {
     recipeId: "caesaric-longbow",
@@ -320,7 +346,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 200,
     requiredProfession: "blacksmithing",
-    craftingTime: 25,
+    requiredSkillLevel: 125,
+    craftingTime: 50,
   },
   {
     recipeId: "neodynic-battleaxe",
@@ -333,7 +360,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 400,
     requiredProfession: "blacksmithing",
-    craftingTime: 35,
+    requiredSkillLevel: 175,
+    craftingTime: 70,
   },
   {
     recipeId: "lantharum-dagger",
@@ -346,7 +374,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 150,
     requiredProfession: "blacksmithing",
-    craftingTime: 20,
+    requiredSkillLevel: 100,
+    craftingTime: 40,
   },
 
   // --- Elite Blacksmithing (Armor) ---
@@ -361,7 +390,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 200,
     requiredProfession: "blacksmithing",
-    craftingTime: 30,
+    requiredSkillLevel: 150,
+    craftingTime: 60,
   },
   {
     recipeId: "prasic-warhelm",
@@ -373,7 +403,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 150,
     requiredProfession: "blacksmithing",
-    craftingTime: 22,
+    requiredSkillLevel: 110,
+    craftingTime: 44,
   },
   {
     recipeId: "samaronic-greaves",
@@ -385,7 +416,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 175,
     requiredProfession: "blacksmithing",
-    craftingTime: 25,
+    requiredSkillLevel: 130,
+    craftingTime: 50,
   },
   {
     recipeId: "barylian-warboots",
@@ -397,7 +429,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 125,
     requiredProfession: "blacksmithing",
-    craftingTime: 20,
+    requiredSkillLevel: 100,
+    craftingTime: 40,
   },
   {
     recipeId: "ceric-pauldrons",
@@ -410,7 +443,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 175,
     requiredProfession: "blacksmithing",
-    craftingTime: 25,
+    requiredSkillLevel: 140,
+    craftingTime: 50,
   },
   // --- Unique Weapons — Ore-forged (Tier 1) ---
   {
@@ -424,7 +458,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 30,
     requiredProfession: "blacksmithing",
-    craftingTime: 8,
+    requiredSkillLevel: 15,
+    craftingTime: 16,
   },
   {
     recipeId: "emberclaw-mace",
@@ -436,7 +471,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 35,
     requiredProfession: "blacksmithing",
-    craftingTime: 10,
+    requiredSkillLevel: 20,
+    craftingTime: 20,
   },
   {
     recipeId: "thornvine-whip",
@@ -449,7 +485,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 25,
     requiredProfession: "blacksmithing",
-    craftingTime: 7,
+    requiredSkillLevel: 10,
+    craftingTime: 14,
   },
   {
     recipeId: "gloomveil-wand",
@@ -461,7 +498,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 30,
     requiredProfession: "blacksmithing",
-    craftingTime: 6,
+    requiredSkillLevel: 15,
+    craftingTime: 12,
   },
 
   // --- Unique Weapons — Bar-forged (Tier 2) ---
@@ -476,7 +514,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 60,
     requiredProfession: "blacksmithing",
-    craftingTime: 14,
+    requiredSkillLevel: 50,
+    craftingTime: 28,
   },
   {
     recipeId: "duskhollow-warhammer",
@@ -488,7 +527,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 80,
     requiredProfession: "blacksmithing",
-    craftingTime: 18,
+    requiredSkillLevel: 60,
+    craftingTime: 36,
   },
   {
     recipeId: "serpentcoil-longbow",
@@ -501,7 +541,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 70,
     requiredProfession: "blacksmithing",
-    craftingTime: 16,
+    requiredSkillLevel: 55,
+    craftingTime: 32,
   },
   {
     recipeId: "starweaver-scepter",
@@ -514,7 +555,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 90,
     requiredProfession: "blacksmithing",
-    craftingTime: 18,
+    requiredSkillLevel: 70,
+    craftingTime: 36,
   },
 
   // --- Unique Weapons — Alloy-forged (Tier 3) ---
@@ -529,7 +571,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 150,
     requiredProfession: "blacksmithing",
-    craftingTime: 25,
+    requiredSkillLevel: 100,
+    craftingTime: 50,
   },
   {
     recipeId: "moonsilver-rapier",
@@ -542,7 +585,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 120,
     requiredProfession: "blacksmithing",
-    craftingTime: 22,
+    requiredSkillLevel: 85,
+    craftingTime: 44,
   },
   {
     recipeId: "stormcaller-arbalest",
@@ -555,7 +599,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 130,
     requiredProfession: "blacksmithing",
-    craftingTime: 24,
+    requiredSkillLevel: 90,
+    craftingTime: 48,
   },
   {
     recipeId: "oathkeeper-maul",
@@ -568,7 +613,8 @@ export const CRAFTING_RECIPES: CraftingRecipe[] = [
     ],
     copperCost: 160,
     requiredProfession: "blacksmithing",
-    craftingTime: 26,
+    requiredSkillLevel: 110,
+    craftingTime: 52,
   },
 ];
 
@@ -598,6 +644,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         }),
         copperCost: recipe.copperCost,
         requiredProfession: recipe.requiredProfession,
+        requiredSkillLevel: recipe.requiredSkillLevel,
         craftingTime: recipe.craftingTime,
       };
     });
@@ -636,6 +683,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
             };
           }),
           copperCost: recipe.copperCost,
+          requiredSkillLevel: recipe.requiredSkillLevel,
           craftingTime: recipe.craftingTime,
         };
       });
@@ -685,10 +733,51 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check skill level requirement
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["blacksmithing"]?.level ?? 1;
+    if (currentSkillLevel < recipe.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Blacksmithing skill too low for this recipe`,
+        requiredSkillLevel: recipe.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Craft simpler recipes to raise your skill from ${currentSkillLevel} to ${recipe.requiredSkillLevel}`,
+      };
+    }
+
     const entity = getEntity(entityId);
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+
+    // Enforce crafting cooldown
+    const cooldownMs = recipe.craftingTime * 1000;
+    const lastCraft = lastCraftTime.get(walletAddress.toLowerCase());
+    if (lastCraft && Date.now() - lastCraft < cooldownMs) {
+      const remaining = Math.ceil((cooldownMs - (Date.now() - lastCraft)) / 1000);
+      reply.code(429);
+      return { error: "Crafting too fast", cooldownRemaining: remaining };
+    }
+
+    // Roll for failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, recipe.requiredSkillLevel);
+    if (failed) {
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
+      const halfXp = recipeId.startsWith("smelt-")
+        ? Math.floor(PROFESSION_XP.FORGE_SMELT / 2)
+        : recipeId.startsWith("bar-")
+          ? Math.floor(PROFESSION_XP.FORGE_ADVANCED / 2)
+          : Math.floor(PROFESSION_XP.FORGE_WEAPON / 2);
+      awardProfessionXp(entity, zoneId, halfXp, "crafting");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        recipeId: recipe.recipeId,
+        message: "The metal warped during forging. No materials consumed.",
+      };
     }
 
     const forge = getEntity(forgeId);
@@ -782,18 +871,23 @@ export function registerCraftingRoutes(server: FastifyInstance) {
         craftedBy: walletAddress,
       });
 
-      // Log Rare+ crafts as zone events
-      if (instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")) {
-        logZoneEvent({
-          zoneId,
-          type: "loot",
-          tick: 0,
-          message: `${entity.name} forged a ${instance.quality.tier} item: ${instance.displayName}!`,
-          entityId: entity.id,
-          entityName: entity.name,
-          data: { quality: instance.quality.tier, instanceId: instance.instanceId },
-        });
-      }
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId,
+        type: "loot",
+        tick: 0,
+        message: instance && (instance.quality.tier === "rare" || instance.quality.tier === "epic")
+          ? `${entity.name} forged a ${instance.quality.tier} item: ${instance.displayName}!`
+          : `${entity.name}: Forged ${outputItem?.name ?? "an item"}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          craftType: "crafting",
+          itemName: instance?.displayName ?? outputItem?.name ?? "an item",
+          recipeId,
+          ...(instance && { quality: instance.quality.tier, instanceId: instance.instanceId }),
+        },
+      });
 
       advanceGatherQuests(entity, outputItem?.name ?? "Unknown");
 
@@ -823,6 +917,8 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           stationName: forge.name,
         });
       }
+
+      lastCraftTime.set(walletAddress.toLowerCase(), Date.now());
 
       return {
         ok: true,

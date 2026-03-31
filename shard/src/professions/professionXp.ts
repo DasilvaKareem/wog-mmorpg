@@ -271,3 +271,32 @@ export function xpForRarity(rarity: "common" | "uncommon" | "rare" | "epic"): nu
     case "epic": return PROFESSION_XP.GATHER_EPIC;
   }
 }
+
+// ── Failure chance ────────────────────────────────────────────────────
+
+const MAX_FAIL_RATE = 0.40; // 40% max failure when skill barely meets requirement
+const SKILL_BUFFER = 25;    // failure drops to 0% this many levels above requirement
+
+/**
+ * Calculate the chance of failing a profession action (craft, gather, etc.)
+ * based on how far the player's skill exceeds the requirement.
+ *
+ * - At exactly the required level: 40% failure
+ * - 12 levels above: ~20% failure
+ * - 25+ levels above: 0% failure
+ *
+ * Returns a number 0..1 representing failure probability.
+ */
+export function calculateFailChance(currentSkill: number, requiredSkill: number): number {
+  if (currentSkill >= requiredSkill + SKILL_BUFFER) return 0;
+  return Math.max(0, MAX_FAIL_RATE * (1 - (currentSkill - requiredSkill) / SKILL_BUFFER));
+}
+
+/**
+ * Roll against a failure chance. Returns true if the action fails.
+ */
+export function rollFailure(currentSkill: number, requiredSkill: number): { failed: boolean; failChance: number } {
+  const failChance = calculateFailChance(currentSkill, requiredSkill);
+  if (failChance <= 0) return { failed: false, failChance: 0 };
+  return { failed: Math.random() < failChance, failChance: Math.round(failChance * 100) };
+}

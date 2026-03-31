@@ -8,6 +8,45 @@ export type AnimationLabCameraPreset = "front" | "side" | "three-quarter";
 export type PreviewWeaponType = "none" | "sword" | "axe" | "staff" | "bow" | "dagger" | "mace" | "pickaxe" | "sickle";
 export type PreviewArmorStyle = "none" | "plate" | "chain" | "leather";
 
+export interface RigTuning {
+  scale: number;
+  shoulderWidth: number;
+  hipWidth: number;
+  torsoHeight: number;
+  legLength: number;
+  armLength: number;
+  isFemale: boolean;
+}
+
+export const DEFAULT_RIG_TUNING: RigTuning = {
+  scale: 1,
+  shoulderWidth: 0.34,
+  hipWidth: 0.16,
+  torsoHeight: 0.80,
+  legLength: 0.45,
+  armLength: 0.52,
+  isFemale: false,
+};
+
+export type PreviewRace = "human" | "elf" | "dwarf" | "beastkin";
+export type PreviewClass = "warrior" | "mage" | "cleric" | "ranger" | "rogue" | "warlock" | "paladin" | "monk";
+export type PreviewHair = "short" | "long" | "mohawk" | "ponytail" | "braided" | "afro" | "bald";
+export type PreviewSkin = "light" | "medium" | "tan" | "brown" | "dark";
+
+export interface CharacterAppearance {
+  race: PreviewRace;
+  classId: PreviewClass;
+  hairStyle: PreviewHair;
+  skinColor: PreviewSkin;
+}
+
+export const DEFAULT_APPEARANCE: CharacterAppearance = {
+  race: "human",
+  classId: "warrior",
+  hairStyle: "short",
+  skinColor: "medium",
+};
+
 export interface AnimationLabState {
   clipName: string;
   duration: number;
@@ -24,15 +63,17 @@ export interface AnimationLabState {
   shoulderStyle: PreviewArmorStyle;
   beltStyle: PreviewArmorStyle;
   bootStyle: PreviewArmorStyle;
+  rigTuning: RigTuning;
+  appearance: CharacterAppearance;
 }
 
 const BODY_GEO = new THREE.BoxGeometry(0.55, 0.8, 0.3);
 const HEAD_GEO = new THREE.SphereGeometry(0.19, 16, 12);
 const THIGH_GEO = new THREE.CapsuleGeometry(0.09, 0.2, 4, 8);
 const LEG_GEO = new THREE.CapsuleGeometry(0.08, 0.24, 4, 8);
-const ARM_GEO = new THREE.CapsuleGeometry(0.07, 0.22, 4, 8);
+const ARM_GEO = new THREE.CapsuleGeometry(0.07, 0.36, 4, 8);
 const HAND_GEO = new THREE.SphereGeometry(0.08, 10, 8);
-const SHOULDER_GEO = new THREE.SphereGeometry(0.09, 10, 8);
+const SHOULDER_GEO = new THREE.SphereGeometry(0.12, 10, 8);
 const SHIELD_GEO = new THREE.BoxGeometry(0.04, 0.35, 0.25);
 const HELM_DOME_GEO = new THREE.SphereGeometry(0.23, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.65);
 const HELM_NASAL_GEO = new THREE.BoxGeometry(0.03, 0.12, 0.06);
@@ -68,6 +109,43 @@ const PICK_BACK_GEO = new THREE.BoxGeometry(0.04, 0.04, 0.12);
 const SICKLE_HANDLE_GEO = new THREE.CylinderGeometry(0.025, 0.03, 0.3, 6);
 const SICKLE_BLADE_GEO = new THREE.TorusGeometry(0.15, 0.015, 4, 10, Math.PI * 0.6);
 
+// ── Character appearance geometries ──
+const CHEST_GEO = new THREE.CapsuleGeometry(0.24, 0.32, 4, 8);
+const WAIST_GEO = new THREE.CapsuleGeometry(0.20, 0.12, 4, 8);
+const HAIR_SHORT_GEO = new THREE.SphereGeometry(0.22, 6, 4, 0, Math.PI * 2, 0, Math.PI * 0.6);
+const HAIR_LONG_GEO = new THREE.CapsuleGeometry(0.15, 0.3, 4, 6);
+const HAIR_MOHAWK_GEO = new THREE.BoxGeometry(0.06, 0.25, 0.3);
+const HAIR_AFRO_GEO = new THREE.SphereGeometry(0.32, 8, 6);
+const HAIR_PONYTAIL_GEO = new THREE.CylinderGeometry(0.06, 0.04, 0.5, 5);
+const HAIR_BRAID_GEO = new THREE.CylinderGeometry(0.04, 0.03, 0.4, 5);
+const EYE_GEO = new THREE.SphereGeometry(0.035, 6, 5);
+const NOSE_GEO = new THREE.ConeGeometry(0.03, 0.06, 4);
+const MOUTH_GEO = new THREE.BoxGeometry(0.08, 0.015, 0.02);
+const FINGER_GEO = new THREE.BoxGeometry(0.08, 0.04, 0.06);
+const FOOT_SOLE_GEO = new THREE.BoxGeometry(0.13, 0.05, 0.16);
+const TOE_GEO = new THREE.SphereGeometry(0.04, 4, 3);
+const EAR_CONE_GEO = new THREE.ConeGeometry(0.04, 0.18, 4);
+const EAR_ROUND_GEO = new THREE.SphereGeometry(0.04, 5, 4);
+
+const SKIN_COLORS: Record<PreviewSkin, number> = {
+  light: 0xfadcb8,
+  medium: 0xd4a574,
+  tan: 0xc68c53,
+  brown: 0x8d5524,
+  dark: 0x5c3310,
+};
+
+const CLASS_COLORS: Record<PreviewClass, number> = {
+  warrior: 0xcc3333,
+  paladin: 0xe6c830,
+  mage: 0x3366dd,
+  cleric: 0xeeeeff,
+  ranger: 0x33aa44,
+  rogue: 0x8833bb,
+  warlock: 0x33bb66,
+  monk: 0xe69628,
+};
+
 const AXE_HEAD_GEO = (() => {
   const shape = new THREE.Shape();
   shape.moveTo(0, -0.12);
@@ -97,8 +175,8 @@ function makeEquipmentMat(color: number, emissive = 0x000000): THREE.MeshToonMat
 
 export class AnimationLab {
   readonly group = new THREE.Group();
-  readonly rig: CharacterRig;
-  readonly mixer: THREE.AnimationMixer;
+  rig: CharacterRig;
+  mixer: THREE.AnimationMixer;
   readonly orbit: OrbitControls;
 
   private action: THREE.AnimationAction | null = null;
@@ -115,6 +193,8 @@ export class AnimationLab {
   private shoulderStyle: PreviewArmorStyle = "none";
   private beltStyle: PreviewArmorStyle = "none";
   private bootStyle: PreviewArmorStyle = "none";
+  private rigTuning: RigTuning = { ...DEFAULT_RIG_TUNING };
+  private appearance: CharacterAppearance = { ...DEFAULT_APPEARANCE };
   private skeletonHelper: THREE.SkeletonHelper;
   private floor: THREE.GridHelper;
   private ambient: THREE.HemisphereLight;
@@ -196,6 +276,8 @@ export class AnimationLab {
       shoulderStyle: this.shoulderStyle,
       beltStyle: this.beltStyle,
       bootStyle: this.bootStyle,
+      rigTuning: { ...this.rigTuning },
+      appearance: { ...this.appearance },
     };
   }
 
@@ -268,6 +350,61 @@ export class AnimationLab {
     if (slot === "belt") this.beltStyle = style;
     if (slot === "boots") this.bootStyle = style;
     this.rebuildEquipment();
+  }
+
+  setRigTuning(partial: Partial<RigTuning>) {
+    Object.assign(this.rigTuning, partial);
+    // Tear down old rig
+    this.action?.stop();
+    this.group.remove(this.rig.rootBone);
+    this.group.remove(this.skeletonHelper);
+    // Build new rig with updated params
+    this.rig = new CharacterRig({
+      scale: this.rigTuning.scale,
+      shoulderWidth: this.rigTuning.shoulderWidth,
+      hipWidth: this.rigTuning.hipWidth,
+      torsoHeight: this.rigTuning.torsoHeight,
+      legLength: this.rigTuning.legLength,
+      armLength: this.rigTuning.armLength,
+      isFemale: this.rigTuning.isFemale,
+    });
+    this.group.add(this.rig.rootBone);
+    this.buildPreviewAvatar();
+    this.mixer = new THREE.AnimationMixer(this.rig.rootBone);
+    this.skeletonHelper = new THREE.SkeletonHelper(this.rig.rootBone);
+    this.skeletonHelper.visible = this.showSkeleton;
+    this.group.add(this.skeletonHelper);
+    // Restore clip
+    this.action = this.mixer.clipAction(this.clip);
+    this.configureAction();
+    this.applyPlayhead();
+    this.rebuildEquipment();
+    this.emit();
+  }
+
+  setAppearance(partial: Partial<CharacterAppearance>) {
+    Object.assign(this.appearance, partial);
+    // Rebuild avatar visuals (strip old meshes from bones, add new)
+    this.stripAvatarMeshes();
+    this.buildPreviewAvatar();
+    this.rebuildEquipment();
+    this.emit();
+  }
+
+  private stripAvatarMeshes() {
+    // Remove all non-bone children from every bone
+    for (const bone of this.rig.bones) {
+      const toRemove: THREE.Object3D[] = [];
+      for (const child of bone.children) {
+        if (!(child instanceof THREE.Bone)) {
+          toRemove.push(child);
+        }
+      }
+      for (const obj of toRemove) {
+        bone.remove(obj);
+        if ((obj as THREE.Mesh).geometry) (obj as THREE.Mesh).geometry?.dispose();
+      }
+    }
   }
 
   applyEquipmentTuning(slot: string, pos: { x: number; y: number; z: number }, rot: { x: number; y: number; z: number }) {
@@ -360,62 +497,213 @@ export class AnimationLab {
   }
 
   private buildPreviewAvatar() {
-    const body = new THREE.Mesh(BODY_GEO, makeBodyPart(0x2b6cb0));
+    const a = this.appearance;
+    const fem = this.rigTuning.isFemale;
+    const skinHex = SKIN_COLORS[a.skinColor];
+    const classHex = CLASS_COLORS[a.classId];
+    const skinMat = makeBodyPart(skinHex);
+    const classMat = makeBodyPart(classHex);
+    const legMat = makeBodyPart(new THREE.Color(skinHex).multiplyScalar(0.95).getHex());
+    const bootMat = makeBodyPart(0x5a4a3a);
+
+    // ── Chest (class-colored body) ──
+    const body = new THREE.Mesh(CHEST_GEO, classMat);
+    const bsx = fem ? 0.88 : 1.0;
+    body.scale.set(bsx, fem ? 0.95 : 1.0, fem ? 0.92 : 1.0);
     body.castShadow = true;
     this.rig.chest.add(body);
 
-    const head = new THREE.Mesh(HEAD_GEO, makeBodyPart(0xd0a078));
+    // Waist → Spine
+    const waist = new THREE.Mesh(WAIST_GEO, classMat);
+    waist.scale.set(bsx * (fem ? 0.88 : 1.0), 1, 1);
+    this.rig.spine.add(waist);
+
+    // ── Neck ──
+    const neckMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.09, 0.18, 6),
+      skinMat,
+    );
+    neckMesh.position.y = -0.02;
+    if (fem) neckMesh.scale.set(0.85, 1.15, 0.85);
+    this.rig.neck.add(neckMesh);
+
+    // ── Head (skin-colored) ──
+    const head = new THREE.Mesh(HEAD_GEO, skinMat);
     head.position.y = 0.02;
     this.rig.head.add(head);
 
+    // Eyes
+    const eyeMat = new THREE.MeshBasicMaterial({ color: 0x3a6b3a });
     for (const dx of [-0.07, 0.07]) {
-      const eye = new THREE.Mesh(
-        new THREE.SphereGeometry(0.015, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0x111111 }),
-      );
-      eye.position.set(dx, 0.02, 0.17);
+      const eye = new THREE.Mesh(EYE_GEO, eyeMat);
+      eye.position.set(dx, 0.02, 0.16);
       this.rig.head.add(eye);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.015, 4, 4), new THREE.MeshBasicMaterial({ color: 0x111111 }));
+      pupil.position.set(dx, 0.02, 0.18);
+      this.rig.head.add(pupil);
     }
 
-    const lShoulder = new THREE.Mesh(SHOULDER_GEO, makeBodyPart(0xd0a078));
-    const rShoulder = new THREE.Mesh(SHOULDER_GEO, makeBodyPart(0xd0a078));
+    // Nose
+    if (a.race !== "beastkin") {
+      const nose = new THREE.Mesh(NOSE_GEO, makeBodyPart(new THREE.Color(skinHex).multiplyScalar(0.9).getHex()));
+      const noseScale = a.race === "dwarf" ? 1.3 : a.race === "elf" ? 0.8 : fem ? 0.75 : 1.0;
+      nose.scale.setScalar(noseScale);
+      nose.position.set(0, -0.02, 0.19);
+      nose.rotation.x = -0.3;
+      this.rig.head.add(nose);
+    }
+
+    // Mouth
+    if (a.race !== "beastkin") {
+      const mouthColor = fem
+        ? new THREE.Color(skinHex).lerp(new THREE.Color(0xcc6666), 0.3).getHex()
+        : new THREE.Color(skinHex).multiplyScalar(0.55).getHex();
+      const mouth = new THREE.Mesh(MOUTH_GEO, makeBodyPart(mouthColor));
+      mouth.position.set(0, -0.075, 0.17);
+      this.rig.head.add(mouth);
+    }
+
+    // Race ears
+    if (a.race === "elf") {
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(EAR_CONE_GEO, skinMat);
+        ear.position.set(side * 0.17, 0.02, 0.04);
+        ear.rotation.z = side * -0.9;
+        ear.rotation.x = -0.15;
+        this.rig.head.add(ear);
+      }
+    } else if (a.race === "dwarf") {
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(EAR_ROUND_GEO, skinMat);
+        ear.position.set(side * 0.16, 0.0, 0.04);
+        this.rig.head.add(ear);
+      }
+      // Brow ridge
+      const brow = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.03, 0.06), makeBodyPart(new THREE.Color(skinHex).multiplyScalar(0.7).getHex()));
+      brow.position.set(0, 0.1, 0.14);
+      this.rig.head.add(brow);
+    } else if (a.race === "beastkin") {
+      // Snout
+      const snout = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.08, 4, 6), skinMat);
+      snout.position.set(0, -0.04, 0.18);
+      snout.rotation.x = Math.PI / 2;
+      this.rig.head.add(snout);
+      // Pointed ears
+      for (const side of [-1, 1]) {
+        const ear = new THREE.Mesh(EAR_CONE_GEO, skinMat);
+        ear.position.set(side * 0.14, 0.16, 0);
+        ear.rotation.z = side * -0.4;
+        this.rig.head.add(ear);
+      }
+    }
+
+    // ── Hair ──
+    if (a.hairStyle !== "bald") {
+      const hairColor = fem ? 0x4a2a0a : 0x3a2208;
+      const hairMat = makeBodyPart(hairColor);
+      switch (a.hairStyle) {
+        case "short": {
+          const h = new THREE.Mesh(HAIR_SHORT_GEO, hairMat);
+          h.position.set(0, 0.1, 0);
+          this.rig.head.add(h);
+          break;
+        }
+        case "long": {
+          const cap = new THREE.Mesh(HAIR_SHORT_GEO, hairMat);
+          cap.position.set(0, 0.1, 0);
+          this.rig.head.add(cap);
+          const drape = new THREE.Mesh(HAIR_LONG_GEO, hairMat);
+          drape.position.set(0, -0.02, -0.10);
+          this.rig.head.add(drape);
+          break;
+        }
+        case "mohawk": {
+          const h = new THREE.Mesh(HAIR_MOHAWK_GEO, hairMat);
+          h.position.set(0, 0.25, 0);
+          this.rig.head.add(h);
+          break;
+        }
+        case "ponytail": {
+          const cap = new THREE.Mesh(HAIR_SHORT_GEO, hairMat);
+          cap.position.set(0, 0.1, 0);
+          cap.scale.set(1, 0.85, 1);
+          this.rig.head.add(cap);
+          const tail = new THREE.Mesh(HAIR_PONYTAIL_GEO, hairMat);
+          tail.position.set(0, -0.18, -0.20);
+          tail.rotation.x = 0.25;
+          this.rig.head.add(tail);
+          break;
+        }
+        case "braided": {
+          const cap = new THREE.Mesh(HAIR_SHORT_GEO, hairMat);
+          cap.position.set(0, 0.1, 0);
+          this.rig.head.add(cap);
+          for (const dx of [-0.13, 0.13]) {
+            const braid = new THREE.Mesh(HAIR_BRAID_GEO, hairMat);
+            braid.position.set(dx, -0.20, -0.06);
+            this.rig.head.add(braid);
+          }
+          break;
+        }
+        case "afro": {
+          const h = new THREE.Mesh(HAIR_AFRO_GEO, hairMat);
+          h.position.set(0, 0.1, -0.02);
+          this.rig.head.add(h);
+          break;
+        }
+      }
+    }
+
+    // ── Shoulders + Arms (skin-colored) ──
+    const lShoulder = new THREE.Mesh(SHOULDER_GEO, skinMat);
+    lShoulder.position.set(0.08, 0, 0);
+    const rShoulder = new THREE.Mesh(SHOULDER_GEO, skinMat);
+    rShoulder.position.set(-0.08, 0, 0);
     this.rig.lShoulder.add(lShoulder);
     this.rig.rShoulder.add(rShoulder);
 
-    const lUpperArm = new THREE.Mesh(ARM_GEO, makeBodyPart(0xd0a078));
-    lUpperArm.position.y = -0.15;
-    const rUpperArm = new THREE.Mesh(ARM_GEO, makeBodyPart(0xd0a078));
-    rUpperArm.position.y = -0.15;
+    const lUpperArm = new THREE.Mesh(ARM_GEO, skinMat);
+    lUpperArm.position.y = -0.24;
+    const rUpperArm = new THREE.Mesh(ARM_GEO, skinMat);
+    rUpperArm.position.y = -0.24;
     this.rig.lArm.add(lUpperArm);
     this.rig.rArm.add(rUpperArm);
 
-    const lHand = new THREE.Mesh(HAND_GEO, makeBodyPart(0xd0a078));
-    const rHand = new THREE.Mesh(HAND_GEO, makeBodyPart(0xd0a078));
+    const lHand = new THREE.Mesh(HAND_GEO, skinMat);
+    const rHand = new THREE.Mesh(HAND_GEO, skinMat);
     this.rig.lHand.add(lHand);
     this.rig.rHand.add(rHand);
+    const lFingers = new THREE.Mesh(FINGER_GEO, skinMat);
+    lFingers.position.set(0, -0.02, 0.04);
+    this.rig.lHand.add(lFingers);
+    const rFingers = new THREE.Mesh(FINGER_GEO, skinMat);
+    rFingers.position.set(0, -0.02, 0.04);
+    this.rig.rHand.add(rFingers);
 
-    const lThigh = new THREE.Mesh(THIGH_GEO, makeBodyPart(0x4a5568));
+    // ── Legs (skin-colored) ──
+    const lThigh = new THREE.Mesh(THIGH_GEO, legMat);
     lThigh.position.y = -0.1;
-    const rThigh = new THREE.Mesh(THIGH_GEO, makeBodyPart(0x4a5568));
+    const rThigh = new THREE.Mesh(THIGH_GEO, legMat);
     rThigh.position.y = -0.1;
     this.rig.lHip.add(lThigh);
     this.rig.rHip.add(rThigh);
 
-    const lLeg = new THREE.Mesh(LEG_GEO, makeBodyPart(0x3a4557));
+    const lLeg = new THREE.Mesh(LEG_GEO, legMat);
     lLeg.position.y = -0.12;
-    const rLeg = new THREE.Mesh(LEG_GEO, makeBodyPart(0x3a4557));
+    const rLeg = new THREE.Mesh(LEG_GEO, legMat);
     rLeg.position.y = -0.12;
     this.rig.lKnee.add(lLeg);
     this.rig.rKnee.add(rLeg);
 
-    const lFoot = new THREE.Mesh(
-      new THREE.BoxGeometry(0.14, 0.06, 0.28),
-      makeBodyPart(0x2a2f3a),
-    );
-    lFoot.position.set(0, -0.03, 0.08);
-    const rFoot = lFoot.clone();
-    this.rig.lFoot.add(lFoot);
-    this.rig.rFoot.add(rFoot);
+    // ── Feet (boots) ──
+    for (const footBone of [this.rig.lFoot, this.rig.rFoot]) {
+      const sole = new THREE.Mesh(FOOT_SOLE_GEO, bootMat);
+      sole.position.set(0, -0.04, 0.01);
+      footBone.add(sole);
+      const toe = new THREE.Mesh(TOE_GEO, bootMat);
+      toe.position.set(0, -0.03, 0.08);
+      footBone.add(toe);
+    }
   }
 
   private rebuildEquipment() {
