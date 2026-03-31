@@ -1,12 +1,16 @@
-package com.example.myapplication
+package com.worldofgeneva.app
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.*
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.CircularProgressIndicator
@@ -18,23 +22,80 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.example.myapplication.ui.theme.*
+import androidx.core.content.ContextCompat
+import com.worldofgeneva.app.ui.theme.*
 
 class GameActivity : ComponentActivity() {
 
     private var webView: WebView? = null
+    private var pendingPermissionCallback: ((Boolean) -> Unit)? = null
+
+    private val permissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val allGranted = grants.values.all { it }
+        pendingPermissionCallback?.invoke(allGranted)
+        pendingPermissionCallback = null
+    }
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* granted or not, we don't block on it */ }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestNotificationPermission()
 
         val url = intent.getStringExtra("url") ?: getString(R.string.game_url)
 
         setContent {
             WoGTheme {
-                GameScreen(url = url, onWebViewCreated = { webView = it })
+                GameScreen(
+                    url = url,
+                    onWebViewCreated = { webView = it },
+                    onPermissionRequest = { resources, callback ->
+                        handleWebPermissions(resources, callback)
+                    },
+                )
             }
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
+
+    private fun handleWebPermissions(resources: Array<String>, callback: (Boolean) -> Unit) {
+        val androidPerms = mutableListOf<String>()
+        for (res in resources) {
+            when (res) {
+                PermissionRequest.RESOURCE_AUDIO_CAPTURE -> androidPerms.add(Manifest.permission.RECORD_AUDIO)
+                PermissionRequest.RESOURCE_VIDEO_CAPTURE -> androidPerms.add(Manifest.permission.CAMERA)
+            }
+        }
+
+        if (androidPerms.isEmpty()) {
+            callback(true)
+            return
+        }
+
+        val allGranted = androidPerms.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+
+        if (allGranted) {
+            callback(true)
+        } else {
+            pendingPermissionCallback = callback
+            permissionLauncher.launch(androidPerms.toTypedArray())
         }
     }
 
@@ -57,7 +118,11 @@ class GameActivity : ComponentActivity() {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun GameScreen(url: String, onWebViewCreated: (WebView) -> Unit) {
+fun GameScreen(
+    url: String,
+    onWebViewCreated: (WebView) -> Unit,
+    onPermissionRequest: (Array<String>, (Boolean) -> Unit) -> Unit,
+) {
     var loading by remember { mutableStateOf(true) }
     var progress by remember { mutableIntStateOf(0) }
 
@@ -100,9 +165,7 @@ fun GameScreen(url: String, onWebViewCreated: (WebView) -> Unit) {
                             request: WebResourceRequest?
                         ): Boolean {
                             val requestUrl = request?.url?.toString() ?: return false
-                            // Keep navigation within the app for WoG URLs
                             if (requestUrl.contains("worldofgeneva.com")) return false
-                            // Open external links in browser
                             val intent = android.content.Intent(
                                 android.content.Intent.ACTION_VIEW,
                                 android.net.Uri.parse(requestUrl)
@@ -117,6 +180,18 @@ fun GameScreen(url: String, onWebViewCreated: (WebView) -> Unit) {
                             progress = newProgress
                             if (newProgress >= 100) loading = false
                         }
+
+                        override fun onPermissionRequest(request: PermissionRequest?) {
+                            request ?: return
+                            val resources = request.resources
+                            onPermissionRequest(resources) { granted ->
+                                if (granted) {
+                                    request.grant(resources)
+                                } else {
+                                    request.deny()
+                                }
+                            }
+                        }
                     }
 
                     onWebViewCreated(this)
@@ -125,7 +200,6 @@ fun GameScreen(url: String, onWebViewCreated: (WebView) -> Unit) {
             },
         )
 
-        // Loading overlay
         if (loading) {
             Box(
                 modifier = Modifier

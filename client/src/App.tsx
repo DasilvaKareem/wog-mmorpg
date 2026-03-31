@@ -108,6 +108,12 @@ const PricingPage = React.lazy(() =>
 const AdminDashboardPage = React.lazy(() =>
   import("@/components/AdminDashboardPage").then((mod) => ({ default: mod.AdminDashboardPage }))
 );
+const PrivacyPolicyPage = React.lazy(() =>
+  import("@/components/PrivacyPolicyPage").then((mod) => ({ default: mod.PrivacyPolicyPage }))
+);
+const TermsOfUsePage = React.lazy(() =>
+  import("@/components/TermsOfUsePage").then((mod) => ({ default: mod.TermsOfUsePage }))
+);
 const FarcasterMiniApp = React.lazy(() =>
   import("@/pages/FarcasterMiniApp").then((mod) => ({ default: mod.FarcasterMiniApp }))
 );
@@ -856,6 +862,8 @@ function AppShell(): React.ReactElement {
               <Route path="/champions" element={<ChampionsPage />} />
               <Route path="/pricing" element={<PricingPage />} />
               <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsOfUsePage />} />
               <Route path="*" element={<LandingPage />} />
             </Routes>
           </React.Suspense>
