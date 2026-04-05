@@ -277,6 +277,13 @@ export class PvPBattleManager {
   }
 
   /**
+   * Return which formats an agent is currently queued in.
+   */
+  getQueuedFormats(agentId: string): PvPFormat[] {
+    return this.matchmaking.getQueuedFormats(agentId);
+  }
+
+  /**
    * Matchmaking ticker - tries to create matches
    */
   private async tickMatchmaking(): Promise<void> {

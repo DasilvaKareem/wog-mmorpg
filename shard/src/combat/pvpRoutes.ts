@@ -311,9 +311,15 @@ export async function registerPvPRoutes(app: FastifyInstance) {
    * GET /api/pvp/queue/all
    * Get status of all queues
    */
-  app.get("/api/pvp/queue/all", async (req, reply) => {
+  app.get<{
+    Querystring: { agentId?: string };
+  }>("/api/pvp/queue/all", async (req, reply) => {
     const status = pvpBattleManager.getAllQueuesStatus();
-    return reply.send({ queues: status });
+    const agentId = req.query.agentId;
+    return reply.send({
+      queues: status,
+      ...(agentId ? { queuedFormats: pvpBattleManager.getQueuedFormats(agentId) } : {}),
+    });
   });
 
   /**

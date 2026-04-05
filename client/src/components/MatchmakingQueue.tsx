@@ -45,6 +45,32 @@ export function MatchmakingQueue(): React.ReactElement {
   const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
   const { notify } = useToast();
 
+  // Resolve identity once and reuse it for queue checks
+  const agentIdRef = React.useRef<string | null>(null);
+
+  // On mount, resolve identity and check if already queued server-side
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const identity = await resolveQueueIdentity();
+        if (cancelled || !identity) return;
+        agentIdRef.current = identity.agentId;
+        // Check server for existing queue membership
+        const res = await fetch(`${API_URL}/api/pvp/queue/all?agentId=${encodeURIComponent(identity.agentId)}`);
+        if (cancelled || !res.ok) return;
+        const data = await res.json();
+        setQueues(data.queues);
+        if (data.queuedFormats?.length > 0) {
+          setInQueue(true);
+          setQueuedAgentId(identity.agentId);
+          setSelectedFormat(data.queuedFormats[0]);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [address]);
+
   React.useEffect(() => {
     fetchQueues();
     const interval = setInterval(fetchQueues, 3000);
@@ -86,9 +112,25 @@ export function MatchmakingQueue(): React.ReactElement {
 
   const fetchQueues = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/pvp/queue/all`);
+      const agentId = agentIdRef.current;
+      const url = agentId
+        ? `${API_URL}/api/pvp/queue/all?agentId=${encodeURIComponent(agentId)}`
+        : `${API_URL}/api/pvp/queue/all`;
+      const response = await fetch(url);
       const data = await response.json();
       setQueues(data.queues);
+      // Sync local queue state with server truth
+      if (agentId && data.queuedFormats) {
+        const serverQueued = data.queuedFormats.length > 0;
+        if (serverQueued && !inQueue) {
+          setInQueue(true);
+          setQueuedAgentId(agentId);
+          setSelectedFormat(data.queuedFormats[0]);
+        } else if (!serverQueued && inQueue) {
+          setInQueue(false);
+          setQueuedAgentId(null);
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch queues:", error);
     }
@@ -220,6 +262,7 @@ export function MatchmakingQueue(): React.ReactElement {
       });
 
       if (response.ok) {
+        agentIdRef.current = queueIdentity.agentId;
         setInQueue(true);
         setQueuedAgentId(queueIdentity.agentId);
         notify(`Joined ${selectedFormat} queue`, "success");

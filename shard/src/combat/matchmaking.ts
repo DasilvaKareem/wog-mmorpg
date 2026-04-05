@@ -81,6 +81,19 @@ export class MatchmakingSystem {
   }
 
   /**
+   * Return which formats an agent is currently queued in (empty if none).
+   */
+  getQueuedFormats(agentId: string): PvPFormat[] {
+    const formats: PvPFormat[] = [];
+    for (const [fmt, queue] of this.queues) {
+      if (queue.entries.some((e) => e.agentId === agentId)) {
+        formats.push(fmt);
+      }
+    }
+    return formats;
+  }
+
+  /**
    * Get queue status for a format
    */
   getQueueStatus(format: PvPFormat): {
