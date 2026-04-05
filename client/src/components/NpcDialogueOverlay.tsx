@@ -912,7 +912,15 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
 
   const submitAmbientPrompt = React.useCallback(async (prompt: string) => {
     const trimmed = prompt.trim();
-    if (!trimmed || !npc || !address || !playerEntityId || ambientLoading) return;
+    if (!trimmed || !npc || ambientLoading) return;
+    if (!address) {
+      setAmbientError("Connect your wallet to talk to NPCs.");
+      return;
+    }
+    if (!playerEntityId) {
+      setAmbientError("Deploy your champion first — no character found in the world.");
+      return;
+    }
 
     setAmbientLoading(true);
     setAmbientError(null);

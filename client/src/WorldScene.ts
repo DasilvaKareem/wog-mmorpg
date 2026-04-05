@@ -250,6 +250,7 @@ export class WorldScene extends Phaser.Scene {
 
       // Spectate: click any entity -> snap camera, then follow
       this.followTarget = entity.id;
+      this.lockedWalletAddress = null; // release wallet lock so poll doesn't override
       this.isDragging = false;
       const px = entity.x * this.tilemapRenderer.coordScale;
       const py = entity.y * this.tilemapRenderer.coordScale;

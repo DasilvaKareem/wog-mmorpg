@@ -4193,6 +4193,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
           required: quest?.objective.count ?? 0,
           complete: quest ? isQuestComplete(quest, aq.progress) : false,
           rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+          npcEntityId: quest ? (getNpcIdByName(quest.npcId) ?? null) : null,
         };
       });
 
