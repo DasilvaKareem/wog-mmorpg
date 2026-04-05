@@ -151,6 +151,7 @@ export interface OwnedCharacter {
   tokenId: string;
   characterTokenId?: string | null;
   agentId?: string | null;
+  agentRegistrationTxHash?: string | null;
   chainRegistrationStatus?:
     | "unregistered"
     | "pending_mint"

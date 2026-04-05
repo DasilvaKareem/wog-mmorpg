@@ -8,6 +8,7 @@ import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import {
   getAgentCustodialWallet,
   setAgentCustodialWallet,
+  clearAgentCustodialWallet,
   getAgentEntityRef,
   setAgentEntityRef,
   clearAgentEntityRef,
@@ -68,12 +69,31 @@ export async function setupAgentCharacter(
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman"
 ): Promise<CharacterSetupResult> {
   const existing = await getAgentCustodialWallet(userWallet);
+  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
 
   // ── Step 1: Get or create custodial wallet ─────────────────────────────
   let custodialAddress: string;
   if (existing) {
-    custodialAddress = existing;
-    console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
+    try {
+      await exportCustodialWallet(existing);
+      custodialAddress = existing;
+      console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "");
+      const staleCipher =
+        msg.includes("unable to authenticate data") ||
+        msg.includes("Unsupported state") ||
+        msg.includes("Custodial wallet not found");
+      if (!staleCipher) {
+        throw err;
+      }
+      console.warn(`[agentSetup] Stale custodial wallet mapping for ${userWallet}: ${existing} (${msg.slice(0, 120)})`);
+      await clearAgentCustodialWallet(userWallet);
+      const wallet = await createCustodialWallet();
+      custodialAddress = wallet.address.toLowerCase();
+      await setAgentCustodialWallet(userWallet, custodialAddress);
+      console.log(`[agentSetup] Replaced broken custodial wallet with ${custodialAddress} for ${userWallet}`);
+    }
   } else {
     const wallet = await createCustodialWallet();
     custodialAddress = wallet.address.toLowerCase();
@@ -149,7 +169,6 @@ export async function setupAgentCharacter(
   // ── Step 3: Mint character NFT (only if no saved character exists) ────
   // CRITICAL: /character/create used to overwrite Redis with level 1.
   // Skip it entirely when a saved character already exists to preserve progress.
-  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
   const rawPrivateKey = await exportCustodialWallet(custodialAddress);
   const token = await authenticateWithWallet(rawPrivateKey);
 

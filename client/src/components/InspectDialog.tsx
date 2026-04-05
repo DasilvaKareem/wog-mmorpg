@@ -1,5 +1,5 @@
 import * as React from "react";
-import { API_URL } from "@/config";
+import { API_URL, getSkaleExplorerTxUrl } from "@/config";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useItemCatalog, type CatalogItem } from "@/hooks/useItemCatalog";
 import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
@@ -20,6 +20,11 @@ const ACCENT = "#54f28b";
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function shortWallet(value?: string | null): string | null {
+  if (!value) return null;
+  return `${value.slice(0, 6)}...${value.slice(-4)}`;
 }
 
 /* ── Equipment Slot UI ────────────────────────────────────────── */
@@ -222,6 +227,13 @@ export function InspectDialog(): React.ReactElement | null {
             {entity.level ? `Lv.${entity.level}` : ""}
             {entity.kills !== undefined ? ` | ${entity.kills} kills` : ""}
           </div>
+          {(entity.walletAddress || entity.characterTokenId) && (
+            <div className="mt-1 text-[9px]" style={{ color: "#8fa0c9" }}>
+              {entity.walletAddress ? `Wallet ${shortWallet(entity.walletAddress)}` : ""}
+              {entity.walletAddress && entity.characterTokenId ? " | " : ""}
+              {entity.characterTokenId ? `Token #${entity.characterTokenId}` : ""}
+            </div>
+          )}
         </div>
         <button
           onClick={() => { playSoundEffect("ui_dialog_close"); setOpen(false); }}
@@ -793,72 +805,294 @@ const REP_CATEGORIES: { key: keyof Omit<RepData, "overall" | "rank">; label: str
 
 function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
   const [rep, setRep] = React.useState<RepData | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [identity, setIdentity] = React.useState<{
+    registrationTxHash?: string | null;
+    chainId?: number | string | null;
+    onChainRegistered?: boolean;
+    characterTokenId?: string | null;
+  } | null>(null);
+  const [reputationLoading, setReputationLoading] = React.useState(false);
+  const [identityLoading, setIdentityLoading] = React.useState(false);
+  const [resolvingCharacter, setResolvingCharacter] = React.useState(true);
+  const [reputationError, setReputationError] = React.useState<string | null>(null);
   const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(entity.agentId ?? null);
+  const [resolvedCharacter, setResolvedCharacter] = React.useState<{
+    agentId?: string | null;
+    agentRegistrationTxHash?: string | null;
+    chainRegistrationStatus?: string | null;
+    bootstrapStatus?: string | null;
+    characterTokenId?: string | null;
+  } | null>(null);
+
+  const entityBaseName = React.useMemo(
+    () => entity.name.replace(/\s+the\s+\w+$/i, "").trim().toLowerCase(),
+    [entity.name],
+  );
 
   React.useEffect(() => {
     setResolvedAgentId(entity.agentId ?? null);
-  }, [entity.agentId]);
+    setResolvedCharacter(null);
+    setIdentity(null);
+    setResolvingCharacter(true);
+  }, [entity.agentId, entity.characterTokenId]);
 
   React.useEffect(() => {
-    if (entity.agentId || !entity.walletAddress) return;
     let cancelled = false;
 
-    fetch(`${API_URL}/character/${entity.walletAddress}`)
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (cancelled || !data?.characters) return;
-        const characters = Array.isArray(data.characters) ? data.characters as Array<{
-          agentId?: string | null;
-          name?: string;
-        }> : [];
+    const walletManager = WalletManager.getInstance();
+    const candidateWallets = [entity.walletAddress, walletManager.custodialAddress, walletManager.address]
+      .filter((wallet): wallet is string => typeof wallet === "string" && wallet.length > 0)
+      .map((wallet) => wallet.toLowerCase())
+      .filter((wallet, index, all) => all.indexOf(wallet) === index);
+
+    if (candidateWallets.length === 0) {
+      setResolvingCharacter(false);
+      return;
+    }
+
+    Promise.all(
+      candidateWallets.map((wallet) =>
+        fetch(`${API_URL}/character/${wallet}`)
+          .then((res) => (res.ok ? res.json() : null))
+          .catch(() => null),
+      ),
+    )
+      .then((responses) => {
+        if (cancelled) return;
+        const characters = responses.flatMap((data) =>
+          Array.isArray(data?.characters)
+            ? (data.characters as Array<{
+                agentId?: string | null;
+                agentRegistrationTxHash?: string | null;
+                chainRegistrationStatus?: string | null;
+                bootstrapStatus?: string | null;
+                characterTokenId?: string | null;
+                tokenId?: string | null;
+                name?: string;
+              }>)
+            : [],
+        );
+
         const matched =
-          characters.find((character) => character.name === entity.name)
-          ?? characters.find((character) => typeof character.agentId === "string" && character.agentId.length > 0)
+          characters.find((character) => character.agentId && character.agentId === entity.agentId)
+          ?? characters.find((character) => {
+            const tokenId = character.characterTokenId ?? character.tokenId ?? null;
+            return Boolean(entity.characterTokenId && tokenId && tokenId === entity.characterTokenId);
+          })
+          ?? characters.find((character) => {
+            const characterBaseName = (character.name ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+            return Boolean(characterBaseName) && characterBaseName === entityBaseName;
+          })
           ?? null;
-        if (matched?.agentId) {
-          setResolvedAgentId(matched.agentId);
+
+        if (matched) {
+          setResolvedCharacter({
+            agentId: matched.agentId ?? null,
+            agentRegistrationTxHash: matched.agentRegistrationTxHash ?? null,
+            chainRegistrationStatus: matched.chainRegistrationStatus ?? null,
+            bootstrapStatus: matched.bootstrapStatus ?? null,
+            characterTokenId: matched.characterTokenId ?? matched.tokenId ?? null,
+          });
+          const matchedBootstrapActive = ["queued", "pending_mint", "mint_confirmed", "identity_pending", "failed_retryable"].includes(
+            matched.bootstrapStatus ?? "",
+          );
+          if (matched.agentId && !matchedBootstrapActive && matched.chainRegistrationStatus === "registered") {
+            setResolvedAgentId(matched.agentId);
+          } else if (entity.characterTokenId && matched.characterTokenId && matched.characterTokenId === entity.characterTokenId && matched.agentId) {
+            setResolvedAgentId(matched.agentId);
+          } else if (matchedBootstrapActive) {
+            setResolvedAgentId(null);
+          }
         }
+        setResolvingCharacter(false);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) {
+          setResolvingCharacter(false);
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [entity.agentId, entity.walletAddress, entity.name]);
+  }, [entity.agentId, entity.walletAddress, entity.characterTokenId, entityBaseName]);
+
+  const bootstrapActive = ["queued", "pending_mint", "mint_confirmed", "identity_pending", "failed_retryable"].includes(
+    resolvedCharacter?.bootstrapStatus ?? "",
+  );
+  const chainStatusLabel = resolvedCharacter?.bootstrapStatus
+    ?? resolvedCharacter?.chainRegistrationStatus
+    ?? null;
+  const characterLooksRegistered = Boolean(
+    resolvedCharacter
+    && resolvedCharacter.chainRegistrationStatus === "registered"
+    && !bootstrapActive
+    && (resolvedCharacter.agentRegistrationTxHash || resolvedCharacter.agentId),
+  );
 
   React.useEffect(() => {
     if (!resolvedAgentId) {
       setRep(null);
-      setLoading(false);
-      setError(entity.walletAddress ? "Identity registration pending" : "NPCs don't have reputation");
+      setIdentity(null);
+      setReputationLoading(false);
+      setIdentityLoading(false);
+      setReputationError(entity.walletAddress ? "No reputation data" : "NPCs don't have reputation");
       return;
     }
-    setLoading(true);
-    setError(null);
+    setReputationLoading(true);
+    setIdentityLoading(true);
+    setReputationError(null);
+
+    fetch(`${API_URL}/api/agents/${resolvedAgentId}/identity`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((identityData) => {
+        setIdentity(identityData?.identity ?? null);
+      })
+      .catch(() => {
+        setIdentity(null);
+      })
+      .finally(() => setIdentityLoading(false));
+
     fetch(`${API_URL}/api/agents/${resolvedAgentId}/reputation`)
       .then((res) => {
-        if (!res.ok) throw new Error("Not found");
+        if (!res.ok) throw new Error("No reputation data");
         return res.json();
       })
-      .then((data) => setRep(data.reputation))
-      .catch(() => setError("No reputation data"))
-      .finally(() => setLoading(false));
-  }, [resolvedAgentId, entity.walletAddress]);
+      .then((data) => {
+        setRep(data.reputation);
+      })
+      .catch(() => setReputationError(characterLooksRegistered ? "Reputation sync pending" : "No reputation data"))
+      .finally(() => setReputationLoading(false));
+  }, [resolvedAgentId, entity.walletAddress, characterLooksRegistered]);
 
-  if (!resolvedAgentId) {
-    return <div className="text-[11px]" style={{ color: DIM }}>{error ?? "Identity registration pending"}</div>;
-  }
-  if (loading) {
+  const registrationTxHash = characterLooksRegistered
+    ? (resolvedCharacter?.agentRegistrationTxHash ?? identity?.registrationTxHash ?? null)
+    : null;
+  const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
+  const onChainRegistered = characterLooksRegistered && (identity?.onChainRegistered ?? true);
+  const statusLabel = onChainRegistered
+    ? "Registered on-chain"
+    : chainStatusLabel
+      ? chainStatusLabel.replace(/_/g, " ")
+      : "Identity registration pending";
+
+  if (resolvingCharacter) {
     return <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>;
   }
-  if (error || !rep) {
-    return <div className="text-[11px]" style={{ color: DIM }}>{error ?? "No reputation data"}</div>;
+
+  if (!resolvedAgentId) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded border p-2 text-[10px]" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+          <div className="font-bold uppercase" style={{ color: onChainRegistered ? ACCENT : TEXT }}>
+            {identityLoading ? "Loading registration..." : statusLabel}
+          </div>
+          {identityLoading && (
+            <div className="mt-1 text-[10px]" style={{ color: DIM }}>Fetching identity status...</div>
+          )}
+          {!identityLoading && registrationTxUrl && (
+            <a
+              href={registrationTxUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block underline underline-offset-2"
+              style={{ color: "#5dadec" }}
+            >
+              View on explorer
+            </a>
+          )}
+        </div>
+        {reputationLoading ? (
+          <div className="text-[11px]" style={{ color: DIM }}>Loading reputation...</div>
+        ) : (
+          <div className="text-[11px]" style={{ color: DIM }}>{reputationError ?? "No reputation data"}</div>
+        )}
+        {(resolvedCharacter?.chainRegistrationStatus || registrationTxHash) && !identityLoading && (
+          <div className="rounded border p-2 text-[10px]" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+            <div className="font-bold uppercase" style={{ color: onChainRegistered ? ACCENT : TEXT }}>
+              {statusLabel}
+            </div>
+            {registrationTxUrl && (
+              <a
+                href={registrationTxUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-block underline underline-offset-2"
+                style={{ color: "#5dadec" }}
+              >
+                View on explorer
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (reputationLoading) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded border p-2 text-[10px]" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+          <div className="font-bold uppercase" style={{ color: onChainRegistered ? ACCENT : TEXT }}>
+            {identityLoading ? "Loading registration..." : statusLabel}
+          </div>
+          {!identityLoading && registrationTxUrl && (
+            <a
+              href={registrationTxUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block underline underline-offset-2"
+              style={{ color: "#5dadec" }}
+            >
+              View on explorer
+            </a>
+          )}
+        </div>
+        <div className="text-[11px]" style={{ color: DIM }}>Loading reputation...</div>
+      </div>
+    );
+  }
+  if (reputationError || !rep) {
+    return (
+      <div className="space-y-2">
+        <div className="rounded border p-2 text-[10px]" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+          <div className="font-bold uppercase" style={{ color: onChainRegistered ? ACCENT : TEXT }}>
+            {identityLoading ? "Loading registration..." : statusLabel}
+          </div>
+          {!identityLoading && registrationTxUrl && (
+            <a
+              href={registrationTxUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block underline underline-offset-2"
+              style={{ color: "#5dadec" }}
+            >
+              View on explorer
+            </a>
+          )}
+        </div>
+        <div className="text-[11px]" style={{ color: DIM }}>{reputationError ?? "No reputation data"}</div>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-2">
+      <div className="rounded border p-2 text-[10px]" style={{ borderColor: BORDER, background: "#0a0e18" }}>
+        <div className="font-bold uppercase" style={{ color: onChainRegistered ? ACCENT : TEXT }}>
+          {identityLoading ? "Loading registration..." : statusLabel}
+        </div>
+        {!identityLoading && registrationTxUrl && (
+          <a
+            href={registrationTxUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 inline-block underline underline-offset-2"
+            style={{ color: "#5dadec" }}
+          >
+            View on explorer
+          </a>
+        )}
+      </div>
       {/* Overall + Rank */}
       <div className="flex items-center justify-between">
         <span className="text-[11px] font-bold" style={{ color: TEXT }}>Overall: {rep.overall}</span>

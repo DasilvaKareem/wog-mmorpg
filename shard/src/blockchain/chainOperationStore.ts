@@ -159,6 +159,41 @@ export async function getChainOperation(operationId: string): Promise<ChainOpera
   return memoryStore.get(KEY(operationId)) ?? null;
 }
 
+export async function findLatestChainOperationByTypeAndSubject(
+  type: string,
+  subject: string,
+): Promise<ChainOperationRecord | null> {
+  const redis = getRedis();
+  if (redis) {
+    const ids = await redis.smembers(KEY_TYPE(type));
+    let latest: ChainOperationRecord | null = null;
+    for (const id of ids) {
+      const raw = await redis.hgetall(KEY(id));
+      if (!raw || Object.keys(raw).length === 0) continue;
+      const record = deserialize(raw);
+      if (!record || record.type !== type || record.subject !== subject) continue;
+      if (!latest || record.updatedAt > latest.updatedAt) {
+        latest = record;
+      }
+    }
+    return latest;
+  }
+
+  if (!isMemoryFallbackAllowed()) {
+    assertRedisAvailable("chainOperationStore.findLatestByTypeAndSubject");
+    return null;
+  }
+
+  let latest: ChainOperationRecord | null = null;
+  for (const record of memoryStore.values()) {
+    if (record.type !== type || record.subject !== subject) continue;
+    if (!latest || record.updatedAt > latest.updatedAt) {
+      latest = record;
+    }
+  }
+  return latest;
+}
+
 export async function updateChainOperation(
   operationId: string,
   patch: Partial<ChainOperationRecord>,

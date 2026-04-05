@@ -3,18 +3,20 @@ import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
-import { getOwnedCharacters } from "../blockchain/blockchain.js";
+import { getOwnedCharacters, resolveIdentityRegistrationTxHash } from "../blockchain/blockchain.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
+import { findLatestChainOperationByTypeAndSubject } from "../blockchain/chainOperationStore.js";
 
 type CharacterListEntry = {
   tokenId: string;
   characterTokenId?: string | null;
   agentId?: string | null;
+  agentRegistrationTxHash?: string | null;
   chainRegistrationStatus?:
     | "unregistered"
     | "pending_mint"
@@ -90,14 +92,23 @@ function buildCharacterEntryFromSaved(
   const name = saved.name;
   const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
   const fullName = classDef ? `${name} the ${classDef.name}` : name;
-  const liveMatches = liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name));
-  const level = liveMatches ? liveEntity.level : saved.level;
-  const xp = liveMatches ? liveEntity.xp : saved.xp;
+  const liveName = liveEntity?.name ? stripCharacterClassSuffix(liveEntity.name) : null;
+  const liveMatches = Boolean(
+    liveEntity
+    && saved.characterTokenId
+    && liveEntity.characterTokenId
+    && saved.characterTokenId === liveEntity.characterTokenId
+    && liveName
+    && stripCharacterClassSuffix(name).toLowerCase() === liveName.toLowerCase()
+  );
+  const level = liveMatches ? liveEntity!.level : saved.level;
+  const xp = liveMatches ? liveEntity!.xp : saved.xp;
 
   return {
     tokenId,
     characterTokenId: saved.characterTokenId ?? null,
-    agentId: liveMatches ? liveEntity.agentId : saved.agentId ?? null,
+    agentId: liveMatches ? liveEntity!.agentId : saved.agentId ?? null,
+    agentRegistrationTxHash: saved.agentRegistrationTxHash ?? null,
     chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
     chainRegistrationLastError: saved.chainRegistrationLastError ?? null,
     bootstrapStatus,
@@ -111,6 +122,44 @@ function buildCharacterEntryFromSaved(
       stats: computeStatsAtLevel(saved.raceId, saved.classId, level),
     },
   };
+}
+
+async function backfillAgentRegistrationTxHash(
+  walletAddress: string,
+  saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
+  entry: CharacterListEntry
+): Promise<CharacterListEntry> {
+  const registrationSettled = entry.chainRegistrationStatus === "registered" && entry.bootstrapStatus !== "identity_pending";
+
+  if (entry.agentRegistrationTxHash) {
+    return registrationSettled ? entry : { ...entry, agentRegistrationTxHash: null };
+  }
+
+  if (!saved.characterTokenId) {
+    return entry;
+  }
+
+  if (!registrationSettled) {
+    const pendingRecord = await findLatestChainOperationByTypeAndSubject(
+      "identity-register",
+      `${saved.characterTokenId}:${walletAddress.toLowerCase()}`
+    ).catch(() => null);
+    const pendingTxHash = pendingRecord?.txHash ?? null;
+    return pendingTxHash ? { ...entry, agentRegistrationTxHash: pendingTxHash } : { ...entry, agentRegistrationTxHash: null };
+  }
+
+  if (!saved.agentId) {
+    return entry;
+  }
+
+  try {
+    const txHash = await resolveIdentityRegistrationTxHash(BigInt(saved.agentId));
+    if (!txHash) return entry;
+    await saveCharacter(walletAddress, saved.name, { agentRegistrationTxHash: txHash });
+    return { ...entry, agentRegistrationTxHash: txHash };
+  } catch {
+    return entry;
+  }
 }
 
 function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
@@ -381,8 +430,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     };
 
     try {
-      // Guarantee onboarding grant is applied even if client skipped /wallet/register.
-      const registration = await registerWalletWithWelcomeBonus(server, walletAddress);
+      // Queue wallet onboarding, but don't block character creation on treasury setup.
+      void registerWalletWithWelcomeBonus(server, walletAddress).catch((err) => {
+        server.log.warn(
+          `[character] Wallet onboarding queue failed for ${walletAddress}: ${String((err as Error)?.message ?? err).slice(0, 160)}`
+        );
+      });
 
       // Seed character store so level/xp are always in Redis from the start.
       // IMPORTANT: Only seed if no existing save exists — never overwrite progress.
@@ -452,7 +505,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       return {
         ok: true,
         existing: Boolean(existingSave),
-        walletRegistration: registration,
+        walletRegistration: {
+          ok: true,
+          message: "Wallet registration queued asynchronously",
+        },
         character: {
           name: metadata.name,
           description: metadata.description,
@@ -583,11 +639,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                 }
               }
 
-              if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
-                return {
+              if (liveEntity && liveEntity.characterTokenId === nft.id.toString()) {
+                const entry = {
                   tokenId: nft.id.toString(),
                   characterTokenId: nft.id.toString(),
                   agentId: liveEntity.agentId,
+                  agentRegistrationTxHash: saved?.agentRegistrationTxHash ?? null,
                   chainRegistrationStatus: liveEntity.agentId ? "registered" : saved?.chainRegistrationStatus ?? "unregistered",
                   bootstrapStatus: bootstrapJob?.status ?? null,
                   name: String(nft.metadata.name ?? nft.id.toString()),
@@ -602,13 +659,17 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                     },
                   },
                 };
+                return saved
+                  ? await backfillAgentRegistrationTxHash(savedWallet ?? walletAddress, saved, entry)
+                  : entry;
               }
 
               if (saved) {
-                return {
+                return await backfillAgentRegistrationTxHash(savedWallet ?? walletAddress, saved, {
                   tokenId: nft.id.toString(),
                   characterTokenId: saved.characterTokenId ?? nft.id.toString(),
                   agentId: saved.agentId ?? null,
+                  agentRegistrationTxHash: saved.agentRegistrationTxHash ?? null,
                   chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
                   bootstrapStatus: bootstrapJob?.status ?? null,
                   name: String(nft.metadata.name ?? nft.id.toString()),
@@ -618,13 +679,14 @@ export function registerCharacterRoutes(server: FastifyInstance) {
                     level: saved.level,
                     xp: saved.xp,
                   },
-                };
+                });
               }
 
               return {
                 tokenId: nft.id.toString(),
                 characterTokenId: nft.id.toString(),
                 agentId: null,
+                agentRegistrationTxHash: null,
                 chainRegistrationStatus: "unregistered",
                 bootstrapStatus: null,
                 name: String(nft.metadata.name ?? nft.id.toString()),
@@ -660,11 +722,15 @@ export function registerCharacterRoutes(server: FastifyInstance) {
               .map(async (saved, index) => {
                 const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, saved.name);
                 const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, saved.name);
-                return buildCharacterEntryFromSaved(
+                return await backfillAgentRegistrationTxHash(
+                  savedWallet ?? walletAddress,
                   saved,
-                  bootstrapJob?.status ?? null,
-                  `pending-${saved.characterTokenId ?? normalizeCharacterKey(saved.name, saved.classId)}-${index}`,
-                  liveEntity
+                  buildCharacterEntryFromSaved(
+                    saved,
+                    bootstrapJob?.status ?? null,
+                    `pending-${saved.characterTokenId ?? normalizeCharacterKey(saved.name, saved.classId)}-${index}`,
+                    liveEntity
+                  )
                 );
               })
           );
@@ -694,7 +760,11 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           const name = saved.name;
           const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, name);
           const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, name);
-          return buildCharacterEntryFromSaved(saved, bootstrapJob?.status ?? null, `redis-${i}`, liveEntity);
+          return await backfillAgentRegistrationTxHash(
+            savedWallet ?? walletAddress,
+            saved,
+            buildCharacterEntryFromSaved(saved, bootstrapJob?.status ?? null, `redis-${i}`, liveEntity)
+          );
         }));
 
         return {

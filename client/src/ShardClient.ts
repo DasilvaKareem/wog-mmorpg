@@ -115,14 +115,15 @@ export async function fetchCharactersWithLive(
       console.error("Failed to fetch characters:", res.status, detail);
       return { characters: [], liveEntity: null, deployedCharacterName: null };
     }
-    const data: {
-      characters: Array<Partial<OwnedCharacter> & {
-        tokenId?: string;
-        characterTokenId?: string | null;
-        agentId?: string | null;
-        chainRegistrationStatus?: OwnedCharacter["chainRegistrationStatus"];
-        bootstrapStatus?: OwnedCharacter["bootstrapStatus"];
-        name?: string;
+      const data: {
+        characters: Array<Partial<OwnedCharacter> & {
+          tokenId?: string;
+          characterTokenId?: string | null;
+          agentId?: string | null;
+          agentRegistrationTxHash?: string | null;
+          chainRegistrationStatus?: OwnedCharacter["chainRegistrationStatus"];
+          bootstrapStatus?: OwnedCharacter["bootstrapStatus"];
+          name?: string;
         description?: string;
       }>;
       liveEntity?: {
@@ -148,6 +149,7 @@ export async function fetchCharactersWithLive(
         tokenId: character.tokenId ?? "unknown",
         characterTokenId: character.characterTokenId ?? character.tokenId ?? null,
         agentId: character.agentId ?? null,
+        agentRegistrationTxHash: character.agentRegistrationTxHash ?? null,
         chainRegistrationStatus: character.chainRegistrationStatus ?? undefined,
         bootstrapStatus: character.bootstrapStatus ?? null,
         name: character.name ?? "Unnamed Character",

@@ -252,6 +252,44 @@ function updateRuntimeProjection(walletAddress: string, characterName: string, t
   }
 }
 
+async function sanitizeSavedIdentityState(
+  walletAddress: string,
+  characterName: string,
+  saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
+): Promise<NonNullable<Awaited<ReturnType<typeof loadCharacter>>>> {
+  if (!saved.agentId) {
+    return saved;
+  }
+
+  let verified = false;
+  if (saved.characterTokenId) {
+    try {
+      const recovered = await findIdentityByCharacterTokenIdWithTimeout(BigInt(saved.characterTokenId), walletAddress, 5_000);
+      verified = recovered?.agentId?.toString() === saved.agentId;
+    } catch {
+      verified = false;
+    }
+  }
+
+  if (verified) {
+    return saved;
+  }
+
+  const fallbackStatus = saved.characterTokenId ? "mint_confirmed" : "unregistered";
+  await saveCharacter(walletAddress, characterName, {
+    agentId: null,
+    agentRegistrationTxHash: null,
+    chainRegistrationStatus: fallbackStatus,
+  });
+
+  return {
+    ...saved,
+    agentId: undefined,
+    agentRegistrationTxHash: undefined,
+    chainRegistrationStatus: fallbackStatus,
+  };
+}
+
 async function findIdentityByCharacterTokenIdWithTimeout(
   tokenId: bigint,
   walletAddress: string,
@@ -477,10 +515,11 @@ export async function processCharacterBootstrapJob(
   const heartbeat = startLockHeartbeat(walletAddress, characterName);
 
   try {
-    const saved = await loadCharacter(walletAddress, characterName);
-    if (!saved) {
+    const loaded = await loadCharacter(walletAddress, characterName);
+    if (!loaded) {
       return await markPermanent(job, "Character save missing");
     }
+    const saved = await sanitizeSavedIdentityState(walletAddress, characterName, loaded);
 
     const metadata = buildCharacterMetadata(saved);
     let tokenId = saved.characterTokenId ? BigInt(saved.characterTokenId) : null;
@@ -577,6 +616,11 @@ export async function processCharacterBootstrapJob(
         } else {
           agentId = identityResult.agentId;
         }
+      }
+
+      const verifiedIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress, 5_000);
+      if (!verifiedIdentity?.agentId || verifiedIdentity.agentId.toString() !== agentId.toString()) {
+        throw new Error(`Identity verification mismatch for characterTokenId=${tokenId.toString()}`);
       }
 
       await saveCharacter(walletAddress, characterName, {

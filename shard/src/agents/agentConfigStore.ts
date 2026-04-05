@@ -391,6 +391,25 @@ export async function setAgentCustodialWallet(userWallet: string, custodialAddre
   memWallet.set(key, normalized);
 }
 
+export async function clearAgentCustodialWallet(userWallet: string): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      await redis.del(custWalletKey(key));
+      if (isMemoryFallbackAllowed()) {
+        memWallet.delete(key);
+      }
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("clearAgentCustodialWallet");
+  }
+  memWallet.delete(key);
+}
+
 // ── Entity ref ───────────────────────────────────────────────────────────────
 
 export async function getAgentEntityRef(userWallet: string): Promise<AgentEntityRef | null> {

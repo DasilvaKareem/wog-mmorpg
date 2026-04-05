@@ -50,6 +50,10 @@ export interface CharacterSaveData {
   professionSkills?: Record<string, { xp: number; level: number; actions: number }>;
 }
 
+export type CharacterSavePatch = {
+  [K in keyof CharacterSaveData]?: CharacterSaveData[K] | null;
+};
+
 // In-memory fallback (always available)
 const memoryStore = new Map<string, Record<string, string>>();
 const CLASS_SUFFIXES = CLASS_DEFINITIONS.map((c) => c.name.toLowerCase());
@@ -160,6 +164,13 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
   };
 }
 
+function isRenderableCharacterRecord(raw: Record<string, string>): boolean {
+  const name = raw.name?.trim();
+  const raceId = raw.raceId?.trim();
+  const classId = raw.classId?.trim();
+  return Boolean(name && raceId && classId);
+}
+
 async function resolveFallbackKey(
   walletAddress: string,
   characterName: string,
@@ -205,23 +216,33 @@ async function resolveFallbackKey(
 export async function saveCharacter(
   walletAddress: string,
   characterName: string,
-  data: Partial<CharacterSaveData>
+  data: CharacterSavePatch
 ): Promise<void> {
   // Flatten to string values for Redis HSET
   const flat: Record<string, string> = {};
+  const fieldsToDelete: string[] = [];
   for (const [k, v] of Object.entries(data)) {
-    if (v === undefined || v === null) continue;
+    if (v === undefined) continue;
+    if (v === null) {
+      fieldsToDelete.push(k);
+      continue;
+    }
     flat[k] = (Array.isArray(v) || typeof v === "object") ? JSON.stringify(v) : String(v);
   }
 
-  if (Object.keys(flat).length === 0) return;
+  if (Object.keys(flat).length === 0 && fieldsToDelete.length === 0) return;
 
   const k = key(walletAddress, characterName);
   const redis = getRedis();
 
   if (redis) {
     try {
-      await redis.hset(k, flat);
+      if (Object.keys(flat).length > 0) {
+        await redis.hset(k, flat);
+      }
+      if (fieldsToDelete.length > 0) {
+        await redis.hdel(k, ...fieldsToDelete);
+      }
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
@@ -230,7 +251,11 @@ export async function saveCharacter(
 
   assertRedisAvailable("saveCharacter");
   const existing = memoryStore.get(k) ?? {};
-  memoryStore.set(k, { ...existing, ...flat });
+  const next = { ...existing, ...flat };
+  for (const field of fieldsToDelete) {
+    delete next[field];
+  }
+  memoryStore.set(k, next);
 }
 
 export async function loadCharacter(
@@ -281,6 +306,7 @@ export async function loadCharacter(
 
   // Empty hash = no saved character
   if (Object.keys(raw).length === 0) return null;
+  if (!isRenderableCharacterRecord(raw)) return null;
 
   return parseCharacter(raw);
 }
@@ -313,7 +339,7 @@ export async function loadAllCharactersForWallet(
       const keys: string[] = await redis.keys(`${prefix}*`);
       for (const k of keys) {
         const raw = await redis.hgetall(k);
-        if (raw && Object.keys(raw).length > 0) {
+        if (raw && Object.keys(raw).length > 0 && isRenderableCharacterRecord(raw)) {
           const parsed = parseCharacter(raw);
           seen.add(k);
           results.push(parsed);
@@ -329,7 +355,7 @@ export async function loadAllCharactersForWallet(
   if (isMemoryFallbackAllowed()) {
     for (const [k, raw] of memoryStore.entries()) {
       if (!k.startsWith(prefix) || seen.has(k)) continue;
-      if (raw && Object.keys(raw).length > 0) {
+      if (raw && Object.keys(raw).length > 0 && isRenderableCharacterRecord(raw)) {
         results.push(parseCharacter(raw));
       }
     }
