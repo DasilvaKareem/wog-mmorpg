@@ -1113,7 +1113,7 @@ RULES:
 9. Use send_message to talk to nearby players.
 10. After tool results, explain briefly as yourself. No bracket tags.
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, shopping, trading, traveling, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
 
     // Get MCP client from the runner if available
@@ -1129,7 +1129,7 @@ Strategy options: aggressive, balanced, defensive`;
           properties: {
             focus: {
               type: "STRING" as Type,
-              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
               description: "The new activity focus",
             },
             strategy: {
@@ -1847,7 +1847,7 @@ Strategy options: aggressive, balanced, defensive`;
                   properties: {
                     focus: {
                       type: "STRING" as Type,
-                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {

@@ -62,6 +62,7 @@ export function ArenaHUD(): React.ReactElement | null {
   const [battleId, setBattleId] = React.useState<string | null>(null);
   const [battle, setBattle] = React.useState<BattleState | null>(null);
   const [dismissed, setDismissed] = React.useState(false);
+  const [hidden, setHidden] = React.useState(false);
   const [agentId, setAgentId] = React.useState<string | null>(null);
   const [poolId, setPoolId] = React.useState<string | null>(null);
 
@@ -166,19 +167,23 @@ export function ArenaHUD(): React.ReactElement | null {
     return () => { cancelled = true; clearInterval(interval); };
   }, [battleId]);
 
-  // ESC key to dismiss after battle ends
+  // ESC key: toggle HUD visibility during battle, fully dismiss when over
   React.useEffect(() => {
     if (!battle) return;
-    const isOver = battle.status === "completed" || battle.status === "cancelled";
-    if (!isOver) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setDismissed(true);
-        setBattleId(null);
-        setBattle(null);
-        setPoolId(null);
-        gameBus.emit("battleEnded", { battleId: battle.battleId });
+        const isOver = battle.status === "completed" || battle.status === "cancelled";
+        if (isOver) {
+          setDismissed(true);
+          setHidden(false);
+          setBattleId(null);
+          setBattle(null);
+          setPoolId(null);
+          gameBus.emit("battleEnded", { battleId: battle.battleId });
+        } else {
+          setHidden((v) => !v);
+        }
       }
     };
 
@@ -186,8 +191,29 @@ export function ArenaHUD(): React.ReactElement | null {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [battle]);
 
+  // Auto-show HUD again when battle ends so you see the result
+  React.useEffect(() => {
+    if (!battle) return;
+    const isOver = battle.status === "completed" || battle.status === "cancelled";
+    if (isOver) setHidden(false);
+  }, [battle?.status]);
+
   // Nothing to show
   if (!battleId || !battle || dismissed) return null;
+
+  // Hidden — show a small pill to bring it back
+  if (hidden) {
+    return (
+      <div className="pointer-events-auto fixed left-1/2 top-3 z-[9999] -translate-x-1/2">
+        <button
+          className="border-2 border-[#29334d] bg-[#0a0f1a]/95 px-3 py-1 text-[8px] font-bold uppercase tracking-wide text-[#ffcc00] shadow-[2px_2px_0_0_#000] hover:text-[#fff] transition"
+          onClick={() => setHidden(false)}
+        >
+          Show PvP (ESC)
+        </button>
+      </div>
+    );
+  }
 
   const { status, config, winner, mvp, statistics, log } = battle;
   const isOver = status === "completed" || status === "cancelled";
@@ -229,20 +255,31 @@ export function ArenaHUD(): React.ReactElement | null {
   return (
     <div className="pointer-events-auto fixed left-1/2 top-3 z-[9999] -translate-x-1/2">
       <div className="border-2 border-[#29334d] bg-[#0a0f1a]/95 px-5 py-3 shadow-[4px_4px_0_0_#000] backdrop-blur-sm">
-        {/* Arena name + status */}
-        <div className="flex items-center justify-between gap-6">
+        {/* Arena name + status + hide */}
+        <div className="flex items-center justify-between gap-4">
           <span
             className="text-[11px] font-bold uppercase tracking-[0.15em] text-[#ffcc00]"
             style={{ textShadow: "2px 2px 0 #000" }}
           >
             {config.arena.name}
           </span>
-          <span
-            className={`text-[10px] font-bold uppercase tracking-wider ${statusColor}`}
-            style={{ textShadow: "1px 1px 0 #000" }}
-          >
-            {statusLabel}
-          </span>
+          <div className="flex items-center gap-3">
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider ${statusColor}`}
+              style={{ textShadow: "1px 1px 0 #000" }}
+            >
+              {statusLabel}
+            </span>
+            {!isOver && (
+              <button
+                className="text-[8px] font-bold uppercase text-[#565f89] hover:text-[#ff4d6d] transition"
+                onClick={() => setHidden(true)}
+                title="Hide PvP HUD (ESC)"
+              >
+                [HIDE]
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Timer */}

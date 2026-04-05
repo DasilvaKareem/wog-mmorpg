@@ -143,6 +143,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "learning":   return "Find a trainer NPC and learn new techniques/skills.";
     case "leatherworking": return "Craft leather armor at a tanning rack.";
     case "jewelcrafting": return "Craft jewelry — rings and amulets at a jeweler's bench.";
+    case "farming":    return "Harvest crops at farmland zones. Equip a hoe and gather produce.";
     case "dungeon":    return "Enter dungeon gates and clear all mobs inside for XP and loot.";
     case "idle":       return "Rest. Only act if something urgent happens.";
     default:           return "Be autonomous — quest and improve your character.";
@@ -172,6 +173,7 @@ function focusToScript(
     case "learning":   return { type: "learn",   reason: "User focus: learn techniques" };
     case "leatherworking": return { type: "leatherwork", reason: "User focus: leatherworking" };
     case "jewelcrafting": return { type: "jewelcraft", reason: "User focus: jewelcrafting" };
+    case "farming":    return { type: "farm",    reason: "User focus: farming" };
     case "dungeon":    return { type: "dungeon", reason: "User focus: dungeon" };
     case "idle":       return { type: "idle",    reason: "User focus: idle" };
     default:           return { type: "combat",  maxLevelOffset: levelOffset, reason: "Default" };
@@ -1324,6 +1326,7 @@ export class AgentRunner {
       case "enchant":      return behaviors.doEnchanting(ctx, strategy);
       case "leatherwork":  return behaviors.doLeatherworking(ctx, strategy);
       case "jewelcraft":   return behaviors.doJewelcrafting(ctx, strategy);
+      case "farm":         return behaviors.doFarming(ctx, strategy);
       case "dungeon": return behaviors.doDungeon(ctx, strategy, { gateEntityId: script.gateEntityId, gateRank: script.gateRank });
       case "idle":    return actionIdle("Idle");
     }
@@ -1954,7 +1957,7 @@ export class AgentRunner {
         // Self-adaptation (skip inside dungeons — stay focused on clearing)
         const allowAutoAdapt = this.currentCaps.selfAdaptationEnabled
           && !this.currentRegion.startsWith("dungeon-")
-          && (focus === "questing" || focus === "combat" || focus === "cooking" || focus === "shopping" || focus === "gathering" || focus === "crafting");
+          && (focus === "questing" || focus === "combat" || focus === "cooking" || focus === "shopping" || focus === "gathering" || focus === "crafting" || focus === "farming");
         if (allowAutoAdapt && this.ticksSinceFocusChange % 10 === 0 && this.ticksSinceFocusChange > 0 && ctx) {
           const adapted = await checkSelfAdaptation(ctx, entity, strategy, {
             currentFocus: focus,

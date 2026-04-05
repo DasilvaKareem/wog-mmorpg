@@ -106,7 +106,8 @@ Your job: Decide the next bot script to execute.
       * If inventory contains recyclable loot and funds are low, choose trade to recycle it into gold.
       * Has weapon + ≥ 100c: quest or combat based on zone and level.
   * If outleveled: travel to an easier zone.
-- DUNGEONS: Dungeon gates spawn every 5 minutes (gate surge). If you see a dungeon-gate entity in scan_zone, you can set script to "dungeon" with gateEntityId and gateRank. The agent will walk to it, form a party, and enter. Rank E needs L3+, D=L7+, C=L12+, B=L18+, A=L28+, S=L40+. Dungeons give excellent XP. You need a matching key (E-Key, D-Key, etc.) from forging gate essences.`.trim();
+- DUNGEONS: Dungeon gates spawn every 5 minutes (gate surge). If you see a dungeon-gate entity in scan_zone, you can set script to "dungeon" with gateEntityId and gateRank. The agent will walk to it, form a party, and enter. Rank E needs L3+, D=L7+, C=L12+, B=L18+, A=L28+, S=L40+. Dungeons give excellent XP. You need a matching key (E-Key, D-Key, etc.) from forging gate essences.
+- FARMING: Farmland zones (sunflower-fields, harvest-hollow, copperfield-meadow, etc.) have crop nodes. Set script to "farm" and travel to a farmland zone to harvest crops. Requires a hoe (buy from shop, cheapest is Wooden Hoe at 15c). Crops yield produce for cooking/alchemy/selling. Some crops are day-only or night-only.`.trim();
 }
 
 // ── set_script declaration (always present) ──────────────────────────────
@@ -119,8 +120,8 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
     properties: {
       type: {
         type: "STRING" as Type,
-        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon"],
-        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate.",
+        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon", "farm"],
+        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate, 'farm' to harvest crops in farmland zones.",
       },
       maxLevelOffset: {
         type: "NUMBER" as Type,

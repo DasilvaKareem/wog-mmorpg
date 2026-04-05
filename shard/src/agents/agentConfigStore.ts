@@ -26,7 +26,8 @@ export type AgentFocus =
   | "goto"
   | "dungeon"
   | "leatherworking"
-  | "jewelcrafting";
+  | "jewelcrafting"
+  | "farming";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
 export type GatherPreference = NonNullable<BotScript["nodeType"]>;
