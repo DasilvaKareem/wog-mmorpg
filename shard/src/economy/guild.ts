@@ -102,15 +102,17 @@ export function registerGuildRoutes(server: FastifyInstance) {
     const zoneId = request.params.zoneId ?? entity.region ?? "unknown";
 
     try {
-      // Get all guilds
+      // Get all guilds (IDs start at 1; 0 is the "no guild" sentinel)
       const nextId = await getNextGuildId();
       const activeGuilds = [];
 
-      for (let i = 0; i < nextId; i++) {
-        const guild = await getGuildFromChain(i);
-        if (guild.status === GuildStatus.Active) {
-          activeGuilds.push(formatGuildForResponse(guild));
-        }
+      for (let i = 1; i < nextId; i++) {
+        try {
+          const guild = await getGuildFromChain(i);
+          if (guild.status === GuildStatus.Active) {
+            activeGuilds.push(formatGuildForResponse(guild));
+          }
+        } catch { /* skip unreadable guild */ }
       }
 
       return {
@@ -252,11 +254,13 @@ export function registerGuildRoutes(server: FastifyInstance) {
       const nextId = await getNextGuildId();
       const guilds = [];
 
-      for (let i = 0; i < nextId; i++) {
-        const guild = await getGuildFromChain(i);
-        if (guild.status === GuildStatus.Active) {
-          guilds.push(formatGuildForResponse(guild));
-        }
+      for (let i = 1; i < nextId; i++) {
+        try {
+          const guild = await getGuildFromChain(i);
+          if (guild.status === GuildStatus.Active) {
+            guilds.push(formatGuildForResponse(guild));
+          }
+        } catch { /* skip unreadable guild */ }
       }
 
       return guilds;

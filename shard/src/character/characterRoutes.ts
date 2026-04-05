@@ -23,6 +23,7 @@ type CharacterListEntry = {
     | "registered"
     | "failed_retryable"
     | "failed_permanent";
+  chainRegistrationLastError?: string | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"
@@ -98,6 +99,7 @@ function buildCharacterEntryFromSaved(
     characterTokenId: saved.characterTokenId ?? null,
     agentId: liveMatches ? liveEntity.agentId : saved.agentId ?? null,
     chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
+    chainRegistrationLastError: saved.chainRegistrationLastError ?? null,
     bootstrapStatus,
     name: fullName,
     description: `Level ${level} ${saved.raceId} ${saved.classId}`,

@@ -29,6 +29,7 @@ export type AgentFocus =
   | "jewelcrafting";
 
 export type AgentStrategy = "aggressive" | "balanced" | "defensive";
+export type GatherPreference = NonNullable<BotScript["nodeType"]>;
 
 export interface ChatMessage {
   role: "user" | "agent" | "activity" | "question";
@@ -75,9 +76,12 @@ export interface AgentConfig {
   enabled: boolean;
   focus: AgentFocus;
   strategy: AgentStrategy;
+  gatherNodeType?: GatherPreference;
   targetZone?: string;
   /** Set when user clicks "send agent here" on an NPC. Cleared once agent arrives. */
   gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string; techniqueId?: string; techniqueName?: string; questId?: string };
+  /** Set when user clicks empty ground to move agent to a position. Cleared on arrival. */
+  gotoPosition?: { x: number; y: number; zoneId: string };
   lastUpdated: number;
   /** Pricing tier — defaults to "free" for backward compat */
   tier?: AgentTier;
@@ -217,6 +221,99 @@ export async function getChatHistory(
     assertRedisAvailable("getChatHistory");
   }
   return (memChat.get(key) ?? []).slice(-limit);
+}
+
+// ── Error log (per-agent, queryable) ────────────────────────────────────────
+
+export interface AgentErrorEntry {
+  ts: number;
+  category: "loop" | "supervisor" | "action" | "mcp" | "deploy" | "chat" | "other";
+  message: string;
+  /** Which script/focus was active when the error occurred */
+  scriptType?: string;
+  /** Which zone the agent was in */
+  zoneId?: string;
+  /** Extra context (endpoint, target, etc.) */
+  context?: Record<string, string>;
+}
+
+function errorKey(k: string) { return `agent:errors:${k.toLowerCase()}`; }
+/** Global error stream — all agents combined */
+const GLOBAL_ERROR_KEY = "agent:errors:__global__";
+const memErrors = new Map<string, AgentErrorEntry[]>();
+const MAX_ERRORS_PER_AGENT = 200;
+const MAX_GLOBAL_ERRORS = 500;
+
+export async function appendAgentError(
+  userWallet: string,
+  entry: AgentErrorEntry,
+): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const serialized = JSON.stringify(entry);
+  const redis = getRedis();
+  if (redis) {
+    try {
+      // Per-agent log
+      await redis.rpush(errorKey(key), serialized);
+      await redis.ltrim(errorKey(key), -MAX_ERRORS_PER_AGENT, -1);
+      // Global log
+      const globalEntry = JSON.stringify({ ...entry, wallet: key });
+      await redis.rpush(GLOBAL_ERROR_KEY, globalEntry);
+      await redis.ltrim(GLOBAL_ERROR_KEY, -MAX_GLOBAL_ERRORS, -1);
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("appendAgentError");
+  }
+
+  const list = memErrors.get(key) ?? [];
+  list.push(entry);
+  if (list.length > MAX_ERRORS_PER_AGENT) list.splice(0, list.length - MAX_ERRORS_PER_AGENT);
+  memErrors.set(key, list);
+}
+
+export async function getAgentErrors(
+  userWallet: string,
+  limit = 100,
+): Promise<AgentErrorEntry[]> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.lrange(errorKey(key), -limit, -1);
+      return raw.map((s: string) => JSON.parse(s) as AgentErrorEntry);
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getAgentErrors");
+  }
+  return (memErrors.get(key) ?? []).slice(-limit);
+}
+
+export async function getGlobalAgentErrors(
+  limit = 200,
+): Promise<(AgentErrorEntry & { wallet?: string })[]> {
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.lrange(GLOBAL_ERROR_KEY, -limit, -1);
+      return raw.map((s: string) => JSON.parse(s));
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getGlobalAgentErrors");
+  }
+  // Fallback: merge all in-memory
+  const all: (AgentErrorEntry & { wallet?: string })[] = [];
+  for (const [wallet, entries] of memErrors) {
+    for (const e of entries) all.push({ ...e, wallet });
+  }
+  all.sort((a, b) => a.ts - b.ts);
+  return all.slice(-limit);
 }
 
 // ── Deploy count (per-owner wallet) ──────────────────────────────────────────

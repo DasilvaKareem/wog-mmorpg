@@ -17,6 +17,7 @@ import {
   setAgentRuntimeState,
   appendChatMessage,
   getChatHistory,
+  appendAgentError,
   askSummonerQuestion,
   getSummonerQuestion,
   clearSummonerQuestion,
@@ -26,9 +27,11 @@ import {
   updateObjectiveProgress,
   type AgentFocus,
   type AgentStrategy,
+  type GatherPreference,
   type AgentObjective,
   type PendingQuestion,
   type AgentRuntimeState,
+  type AgentErrorEntry,
 } from "./agentConfigStore.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
@@ -147,12 +150,17 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
 }
 
 /** Convert config focus -> initial BotScript when supervisor is unavailable. */
-function focusToScript(focus: AgentFocus, strategy: AgentStrategy, targetZone?: string): BotScript {
+function focusToScript(
+  focus: AgentFocus,
+  strategy: AgentStrategy,
+  targetZone?: string,
+  gatherNodeType: GatherPreference = "both",
+): BotScript {
   const levelOffset = strategy === "aggressive" ? 5 : strategy === "defensive" ? 0 : 2;
   switch (focus) {
     case "questing":   return { type: "quest",   reason: "User focus: questing" };
     case "combat":     return { type: "combat",  maxLevelOffset: levelOffset, reason: "User focus: combat" };
-    case "gathering":  return { type: "gather",  nodeType: "both", reason: "User focus: gathering" };
+    case "gathering":  return { type: "gather",  nodeType: gatherNodeType, reason: "User focus: gathering" };
     case "crafting":   return { type: "craft",   reason: "User focus: crafting" };
     case "alchemy":    return { type: "brew",    reason: "User focus: alchemy" };
     case "cooking":    return { type: "cook",    reason: "User focus: cooking" };
@@ -294,6 +302,11 @@ export class AgentRunner {
     this.ticksSinceLastDecision = 0;
   }
 
+  public setGotoPosition(x: number, y: number, zoneId: string): void {
+    this.currentScript = { type: "goto", reason: `User: move to (${Math.round(x)}, ${Math.round(y)})` };
+    this.ticksSinceLastDecision = 0;
+  }
+
   public getSnapshot() {
     return {
       wallet: this.userWallet,
@@ -355,6 +368,7 @@ export class AgentRunner {
       return true;
     } catch (err: any) {
       console.debug(`[agent] learnProfession(${professionId}): ${err.message?.slice(0, 60)}`);
+      this.logError("action", `learnProfession(${professionId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/professions/learn" });
       return false;
     }
   }
@@ -426,10 +440,12 @@ export class AgentRunner {
         } else {
           this.nextTechniqueCheckAt = Date.now() + 30_000;
         }
+        this.logError("action", `learnTechnique(${nextToLearn.id}): ${learnErr.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/techniques/learn", techniqueId: nextToLearn.id });
         return { ok: false, reason: `failed to learn ${nextToLearn.name ?? nextToLearn.id}: ${learnErr.message?.slice(0, 80) ?? "unknown error"}` };
       }
     } catch (err: any) {
       console.debug(`[agent] learnNextTechnique: ${err.message?.slice(0, 60)}`);
+      this.logError("action", `learnNextTechnique: ${err.message?.slice(0, 120) ?? "unknown"}`);
       this.nextTechniqueCheckAt = Date.now() + 30_000;
       return { ok: false, reason: `error: ${err.message?.slice(0, 80) ?? "unknown"}` };
     }
@@ -444,6 +460,7 @@ export class AgentRunner {
       return true;
     } catch (err: any) {
       console.debug(`[agent] buyItem(${tokenId}): ${err.message?.slice(0, 60)}`);
+      this.logError("action", `buyItem(${tokenId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/shop/buy" });
       return false;
     }
   }
@@ -461,6 +478,7 @@ export class AgentRunner {
       return true;
     } catch (err: any) {
       console.debug(`[agent] equipItem(${tokenId}): ${err.message?.slice(0, 60)}`);
+      this.logError("action", `equipItem(${tokenId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/equipment/equip" });
       return false;
     }
   }
@@ -544,6 +562,7 @@ export class AgentRunner {
       });
       this.maybeScheduleBlockedTrigger(failure);
       console.warn(`[agent:${this.walletTag}] repairGear failed: ${reason}`);
+      this.logError("action", `repairGear: ${reason}`, { endpoint: "/equipment/repair", targetId: smithId ?? "" });
       void this.logActivity(`Repair delayed: ${reason}`);
       return false;
     }
@@ -573,6 +592,7 @@ export class AgentRunner {
         totalPayoutCopper: result.totalPayoutCopper,
       };
     } catch (err: any) {
+      this.logError("action", `recycleItem(${tokenId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/shop/recycle" });
       return { ok: false, error: err.message?.slice(0, 120) ?? "recycle failed" };
     }
   }
@@ -587,6 +607,22 @@ export class AgentRunner {
     } catch (err: any) {
       console.debug(`[agent:${this.walletTag}] logActivity: ${err.message?.slice(0, 60)}`);
     }
+  }
+
+  private logError(
+    category: AgentErrorEntry["category"],
+    message: string,
+    context?: Record<string, string>,
+  ): void {
+    const entry: AgentErrorEntry = {
+      ts: Date.now(),
+      category,
+      message,
+      scriptType: this.currentScript?.type,
+      zoneId: this.currentRegion,
+      context,
+    };
+    appendAgentError(this.userWallet, entry).catch(() => {});
   }
 
   private async processInbox(): Promise<void> {
@@ -649,6 +685,7 @@ export class AgentRunner {
       return question;
     } catch (err: any) {
       console.debug(`[agent:${this.walletTag}] askSummoner failed: ${err.message?.slice(0, 60)}`);
+      this.logError("chat", `askSummoner failed: ${err.message?.slice(0, 120) ?? "unknown"}`);
       return null;
     }
   }
@@ -868,6 +905,14 @@ export class AgentRunner {
         category: result.category,
       });
       this.maybeScheduleBlockedTrigger(failure);
+
+      // Log every blocked action to the error log for debugging
+      this.logError("action", `${script?.type ?? "action"} blocked: ${result.reason ?? "unknown"}`, {
+        ...(result.endpoint ? { endpoint: result.endpoint } : {}),
+        ...(result.targetId ? { targetId: result.targetId } : {}),
+        ...(result.targetName ? { targetName: result.targetName } : {}),
+        consecutive: String(failure.consecutive),
+      });
 
       // Surface repeated failures to the user so they know what's going wrong
       if (failure.consecutive === 3) {
@@ -1235,7 +1280,7 @@ export class AgentRunner {
 
     switch (script.type) {
       case "combat":  return behaviors.doCombat(ctx, strategy, () => this.learnNextTechnique());
-      case "gather":  return behaviors.doGathering(ctx, strategy);
+      case "gather":  return behaviors.doGathering(ctx, strategy, script.nodeType ?? "both");
       case "travel":  return behaviors.doTravel(ctx, strategy);
       case "goto":    return behaviors.doGotoNpc(ctx, (n, t) => this.findNextZoneOnPath(n, t));
       case "shop":    return behaviors.doShopping(ctx, strategy);
@@ -1289,7 +1334,13 @@ export class AgentRunner {
   private async decideAndAct(
     entity: any,
     entities: Record<string, any>,
-    config: { focus: AgentFocus; strategy: AgentStrategy; targetZone?: string; objectives?: AgentObjective[] },
+    config: {
+      focus: AgentFocus;
+      strategy: AgentStrategy;
+      gatherNodeType?: GatherPreference;
+      targetZone?: string;
+      objectives?: AgentObjective[];
+    },
     strategy: AgentStrategy,
   ): Promise<void> {
     const objectives = config.objectives ?? [];
@@ -1339,7 +1390,7 @@ export class AgentRunner {
 
       if (trigger.type === "no_script") {
         // Always respect the user's configured focus — never override with hardcoded behavior
-        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
         this.ticksOnCurrentScript = 0;
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else if (trigger.type === "level_up") {
@@ -1355,7 +1406,7 @@ export class AgentRunner {
           this.currentScript = { type: "travel", targetZone: bestZone, reason: `Level ${lvl} unlocked ${bestZone}` };
           this.ticksOnCurrentScript = 0;
         } else {
-          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
           this.ticksOnCurrentScript = 0;
           void this.logActivity(`Level ${lvl}! Continuing ${config.focus}`);
         }
@@ -1375,16 +1426,16 @@ export class AgentRunner {
             this.currentScript = { type: "travel", targetZone: pick, reason: "Zone cleared" };
             this.ticksOnCurrentScript = 0;
           } else {
-            this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+            this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
             this.ticksOnCurrentScript = 0;
           }
         } else {
           // Has objective — stay on task, just re-issue current focus script
-          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
           this.ticksOnCurrentScript = 0;
         }
       } else if (!this.currentCaps.supervisorEnabled) {
-        this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+        this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
         this.ticksOnCurrentScript = 0;
         void this.logActivity(`[script] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else {
@@ -1413,7 +1464,8 @@ export class AgentRunner {
           this.updateTimingMetric(this.telemetry.supervisor, performance.now() - supervisorStartedAt);
           this.telemetry.supervisor.errors += 1;
           console.warn(`[agent:${this.walletTag}] Supervisor failed: ${err.message?.slice(0, 60)}`);
-          this.currentScript = focusToScript(config.focus, strategy, config.targetZone);
+          this.logError("supervisor", `Supervisor failed: ${err.message?.slice(0, 200) ?? "unknown"}`);
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
           this.ticksOnCurrentScript = 0;
         }
       }
@@ -1513,11 +1565,13 @@ export class AgentRunner {
       if (!this.mcpClient) this.mcpClient = new AgentMcpClient(this.walletTag);
       this.mcpClient.ensureConnected(privateKey).catch((err) => {
         console.warn(`[agent:${this.walletTag}] MCP connect failed (non-fatal): ${err.message?.slice(0, 60)}`);
+        this.logError("mcp", `MCP connect failed: ${err.message?.slice(0, 200) ?? "unknown"}`);
       });
 
       return true;
     } catch (err: any) {
       console.warn(`[agent:${this.walletTag}] Auth failed: ${err.message?.slice(0, 60)}`);
+      this.logError("other", `Auth failed: ${err.message?.slice(0, 200) ?? "unknown"}`);
       return false;
     }
   }
@@ -1552,6 +1606,7 @@ export class AgentRunner {
       if (state?.entities?.[this.entityId]) return true;
     } catch (err: any) {
       console.debug(`[agent:${this.walletTag}] zone check: ${err.message?.slice(0, 60)}`);
+      this.logError("other", `Zone check failed: ${err.message?.slice(0, 120) ?? "unknown"}`);
     }
 
     // Entity is gone — clean up stale wallet registry so respawn can work
@@ -1570,6 +1625,8 @@ export class AgentRunner {
           zoneId: this.currentRegion || "village-square",
           type: "player",
           name: charName,
+          ...(ref.agentId && { agentId: ref.agentId }),
+          ...(ref.characterTokenId && { characterTokenId: ref.characterTokenId }),
         });
         if (spawnResult?.spawned?.id) {
           const newEntityId: string = spawnResult.spawned.id;
@@ -1588,6 +1645,7 @@ export class AgentRunner {
         }
       } catch (err: any) {
         console.warn(`[agent:${this.walletTag}] Respawn failed: ${err.message?.slice(0, 80)}`);
+        this.logError("other", `Respawn failed: ${err.message?.slice(0, 200) ?? "unknown"}`, { endpoint: "/spawn" });
       }
     }
 
@@ -1754,6 +1812,7 @@ export class AgentRunner {
                     }
                   }
                 } catch (err: any) {
+                  this.logError("action", `Plot claim failed: ${err.message?.slice(0, 120) ?? "unknown"}`);
                   void this.logActivity(`Plot claim failed: ${err.message?.slice(0, 60)}`);
                 }
               }
@@ -2042,6 +2101,7 @@ export class AgentRunner {
         await this.decideAndAct(entity, zs.entities, config, strategy);
       } catch (err: any) {
         console.warn(`[agent:${this.walletTag}] Loop error: ${err.message?.slice(0, 80)}`);
+        this.logError("loop", `Loop error: ${err.message?.slice(0, 200) ?? "unknown"}`, { stack: err.stack?.slice(0, 300) ?? "" });
         if (!firstTickDone) {
           onFirstTickFail(err instanceof Error ? err : new Error(String(err.message ?? err)));
           this.running = false;

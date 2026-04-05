@@ -1,8 +1,9 @@
 import type { FastifyInstance } from "fastify";
+import { arenaManager } from "../combat/arenaManager.js";
 import type { CharacterStats } from "../character/classes.js";
 import { getClassById } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { mintItem, updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
+import { mintItem, updateCharacterMetadata, burnItem, findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
@@ -230,6 +231,12 @@ export interface Entity {
   /** Most recently committed technique for AI variety. */
   lastTechniqueId?: string;
   lastTechniqueTick?: number;
+  /** Arena PvP: battle ID this entity is participating in. */
+  pvpBattleId?: string;
+  /** Arena PvP: team assignment. */
+  pvpTeam?: "red" | "blue";
+  /** Arena PvP: saved position to teleport back after match. */
+  pvpSavedPosition?: { x: number; y: number; region: string };
 }
 
 function toSerializableEntity(entity: Entity): Record<string, unknown> {
@@ -400,6 +407,16 @@ export function deleteZone(zoneId: string): boolean {
 /** Get a single entity by ID from the unified world. */
 export function getEntity(id: string): Entity | undefined {
   return world.entities.get(id);
+}
+
+/** Resolve an entity by its UUID or by its agentId field. */
+export function resolveEntity(idOrAgentId: string): Entity | undefined {
+  const direct = world.entities.get(idOrAgentId);
+  if (direct) return direct;
+  for (const e of world.entities.values()) {
+    if (e.agentId != null && String(e.agentId) === idOrAgentId) return e;
+  }
+  return undefined;
 }
 
 /** Get all entities in the world. */
@@ -577,6 +594,15 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
         recalculateEntityVitals(entity);
       }
 
+      // Always clear stale PvP state on restore — matches don't survive restarts
+      if (entity.region === "coliseum-arena") {
+        const saved = entity.pvpSavedPosition;
+        entity.region = saved?.region ?? "village-square";
+        if (saved) { entity.x = saved.x; entity.y = saved.y; }
+      }
+      entity.pvpBattleId = undefined;
+      entity.pvpTeam = undefined;
+      entity.pvpSavedPosition = undefined;
       const zoneId = entity.region ?? "village-square";
       getOrCreateZone(zoneId).entities.set(entity.id, entity);
       registerSpawnedWallet(entity.walletAddress, entity.id, zoneId);
@@ -585,6 +611,22 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
       }
       if (entity.agentId != null) {
         reputationManager.ensureInitialized(entity.agentId);
+      } else if (entity.characterTokenId != null) {
+        // Async identity recovery from chain
+        findIdentityByCharacterTokenId(entity.characterTokenId, entity.walletAddress)
+          .then(async (found) => {
+            if (!found?.agentId) return;
+            entity.agentId = found.agentId;
+            reputationManager.ensureInitialized(found.agentId);
+            if (entity.walletAddress) {
+              await saveCharacter(entity.walletAddress, entity.name, {
+                agentId: found.agentId.toString(),
+                chainRegistrationStatus: "registered",
+              });
+            }
+            console.log(`[live-player] Recovered agentId=${found.agentId} for "${entity.name}" from chain`);
+          })
+          .catch(() => {});
       }
       restored++;
     } catch (err) {
@@ -1574,7 +1616,7 @@ async function handleMobDeath(
  *
  * Only picks techniques that are: learned, off cooldown, affordable (essence).
  */
-function pickTechnique(
+export function pickTechnique(
   entity: Entity,
   target: Entity,
   zone: ZoneState,
@@ -3168,6 +3210,9 @@ async function worldTick() {
       console.log(`[region] ${entity.name} crossed from ${oldRegion} to ${newRegion} at (${Math.round(entity.x)}, ${Math.round(entity.y)})`);
     }
   }
+
+  // Tick arena matches (win conditions, hazards, timers)
+  arenaManager.tickArenaMatches();
 }
 
 /**

@@ -1,5 +1,6 @@
 import * as React from "react";
 
+import { ArenaHUD } from "@/components/ArenaHUD";
 import { AuctionHouseDialog } from "@/components/AuctionHouseDialog";
 import { ColiseumDialog } from "@/components/ColiseumDialog";
 import { GuildDialog } from "@/components/GuildDialog";
@@ -18,6 +19,7 @@ export function DeferredWorldDialogs(): React.ReactElement {
       <NpcInfoDialog />
       <NpcDialogueOverlay />
       <InventoryDialog />
+      <ArenaHUD />
     </>
   );
 }

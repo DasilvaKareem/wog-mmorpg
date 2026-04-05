@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
+import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
@@ -62,6 +62,16 @@ export const PROFESSION_CATALOG: Record<ProfessionType, ProfessionInfo> = {
 
 // In-memory profession tracking: walletAddress -> Set<ProfessionType>
 const learnedProfessions = new Map<string, Set<ProfessionType>>();
+
+async function controlsWallet(
+  authenticatedWallet: string,
+  targetWallet: string | undefined | null
+): Promise<boolean> {
+  if (!targetWallet) return false;
+  if (authenticatedWallet.toLowerCase() === targetWallet.toLowerCase()) return true;
+  const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+  return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+}
 
 export function hasLearnedProfession(
   walletAddress: string,
@@ -185,7 +195,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       reply.code(400);
       return { error: "Invalid wallet address" };
     }
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized for this wallet address" };
     }
@@ -212,7 +222,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       reply.code(400);
       return { error: "Only player entities can learn professions" };
     }
-    if (!verifyEntityOwnership(entity.walletAddress, authenticatedWallet)) {
+    if (!(await controlsWallet(authenticatedWallet, entity.walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to control this player" };
     }

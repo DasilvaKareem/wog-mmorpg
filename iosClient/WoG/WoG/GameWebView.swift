@@ -2,13 +2,17 @@
 //  GameWebView.swift
 //  WoG
 //
+//  WKWebView that loads /world and injects auth credentials.
+//
 
 import SwiftUI
 import WebKit
-import AVFoundation
 
 struct GameWebView: View {
     let url: URL
+    let wallet: String
+    let token: String
+
     @State private var isLoading = true
     @State private var progress: Double = 0
 
@@ -18,34 +22,28 @@ struct GameWebView: View {
 
             WebViewRepresentable(
                 url: url,
+                wallet: wallet,
+                token: token,
                 isLoading: $isLoading,
                 progress: $progress
             )
 
             if isLoading {
-                loadingOverlay
-            }
-        }
-    }
-
-    private var loadingOverlay: some View {
-        ZStack {
-            WoGColors.bg.ignoresSafeArea()
-
-            VStack(spacing: 16) {
-                ProgressView()
-                    .progressViewStyle(CircularProgressViewStyle(tint: WoGColors.gold))
-                    .scaleEffect(1.3)
-
-                Text("Entering world...")
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(WoGColors.textDim)
-
-                if progress > 0 && progress < 1 {
-                    Text("\(Int(progress * 100))%")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(WoGColors.gold)
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: WoGColors.gold))
+                        .scaleEffect(1.3)
+                    Text("Entering world...")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(WoGColors.textDim)
+                    if progress > 0 && progress < 1 {
+                        Text("\(Int(progress * 100))%")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(WoGColors.gold)
+                    }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(WoGColors.bg)
             }
         }
     }
@@ -53,6 +51,8 @@ struct GameWebView: View {
 
 struct WebViewRepresentable: UIViewRepresentable {
     let url: URL
+    let wallet: String
+    let token: String
     @Binding var isLoading: Bool
     @Binding var progress: Double
 
@@ -64,6 +64,24 @@ struct WebViewRepresentable: UIViewRepresentable {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+
+        // Inject auth credentials into localStorage before page loads
+        if !wallet.isEmpty && !token.isEmpty {
+            let js = """
+            (function() {
+                var w = '\(wallet.lowercased())';
+                var t = '\(token)';
+                try {
+                    localStorage.setItem('wog:agent:jwt:' + w, t);
+                    localStorage.setItem('wog:agent:jwt:expiry:' + w, String(Date.now() + 82800000));
+                    console.log('[WoGiOS] Injected auth for ' + w);
+                } catch(e) { console.error('[WoGiOS] Auth inject failed', e); }
+            })();
+            """
+            let script = WKUserScript(source: js, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+            config.userContentController.addUserScript(script)
+        }
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -96,12 +114,8 @@ struct WebViewRepresentable: UIViewRepresentable {
             }
         }
 
-        // MARK: - WKNavigationDelegate
-
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.async {
-                self.parent.isLoading = false
-            }
+            DispatchQueue.main.async { self.parent.isLoading = false }
         }
 
         func webView(
@@ -113,7 +127,6 @@ struct WebViewRepresentable: UIViewRepresentable {
                 decisionHandler(.allow)
                 return
             }
-
             if url.host?.contains("worldofgeneva.com") == true || url.scheme == "about" {
                 decisionHandler(.allow)
             } else if navigationAction.navigationType == .linkActivated {
@@ -124,50 +137,18 @@ struct WebViewRepresentable: UIViewRepresentable {
             }
         }
 
-        // MARK: - WKUIDelegate — media permission handling (iOS 15+)
-
-        @available(iOS 15.0, *)
+        // Handle window.open popups
         func webView(
             _ webView: WKWebView,
-            requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-            initiatedByFrame frame: WKFrameInfo,
-            type: WKMediaCaptureType,
-            decisionHandler: @escaping (WKPermissionDecision) -> Void
-        ) {
-            // Auto-grant mic/camera for worldofgeneva.com
-            if origin.host.contains("worldofgeneva.com") {
-                // Ensure the OS-level permission is requested first
-                switch type {
-                case .microphone:
-                    AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                        DispatchQueue.main.async {
-                            decisionHandler(granted ? .grant : .deny)
-                        }
-                    }
-                case .camera:
-                    AVCaptureDevice.requestAccess(for: .video) { granted in
-                        DispatchQueue.main.async {
-                            decisionHandler(granted ? .grant : .deny)
-                        }
-                    }
-                case .cameraAndMicrophone:
-                    AVAudioSession.sharedInstance().requestRecordPermission { micGranted in
-                        guard micGranted else {
-                            DispatchQueue.main.async { decisionHandler(.deny) }
-                            return
-                        }
-                        AVCaptureDevice.requestAccess(for: .video) { camGranted in
-                            DispatchQueue.main.async {
-                                decisionHandler(camGranted ? .grant : .deny)
-                            }
-                        }
-                    }
-                @unknown default:
-                    decisionHandler(.prompt)
-                }
-            } else {
-                decisionHandler(.deny)
+            createWebViewWith configuration: WKWebViewConfiguration,
+            for navigationAction: WKNavigationAction,
+            windowFeatures: WKWindowFeatures
+        ) -> WKWebView? {
+            // Load popup URLs in the same webview
+            if let url = navigationAction.request.url {
+                webView.load(URLRequest(url: url))
             }
+            return nil
         }
     }
 }

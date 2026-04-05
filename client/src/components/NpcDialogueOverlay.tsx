@@ -480,11 +480,16 @@ function getQuestGraphScene(
     }
   }
 
-  return {
-    arcId: questGiverArcId(name),
-    sceneId: "root",
-    sceneTitle: `${name} Contract Board`,
-  };
+  // Only attempt generated quest arcs for NPCs with known quests
+  if (availableQuestIds.length > 0 || activeQuestIds.length > 0) {
+    return {
+      arcId: questGiverArcId(name),
+      sceneId: "root",
+      sceneTitle: name,
+    };
+  }
+
+  return null;
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -782,7 +787,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   const legacyNode = graphSession ? null : node;
   const graphNode = graphSession?.node ?? null;
   const activeNode = graphNode ?? legacyNode;
-  const currentText = (graphNode?.type === "freeform" ? graphNode.fallbackText ?? graphNode.prompt : activeNode?.text) ?? "";
+  const currentText = (graphNode?.type === "freeform" ? graphNode.text : activeNode?.text) ?? "";
   const { displayed, done, skip } = useTypewriter(currentText, 20);
 
   const runQuestGraphStart = React.useCallback(async (

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { preAuthenticate } from "thirdweb/wallets/in-app";
 import { useWalletContext } from "@/context/WalletContext";
 import { thirdwebClient, skaleChain, sharedInAppWallet } from "@/lib/inAppWalletClient";
@@ -19,7 +19,12 @@ const SOCIAL_PROVIDERS: { strategy: SocialStrategy; label: string; icon: string;
 
 export function MobileLoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { connect, syncAddress } = useWalletContext();
+
+  // If ?callback=wog:// is present, we're in native auth mode
+  // After login, redirect to the callback URL with wallet + token
+  const nativeCallback = searchParams.get("callback");
 
   const [step, setStep] = React.useState<Step>("login");
   const [error, setError] = React.useState<string | null>(null);
@@ -91,9 +96,20 @@ export function MobileLoginPage() {
   async function handleAuthSuccess(address: string) {
     trackUserSignedUp("mobile", address);
     await syncAddress(address);
+
+    let token = "";
     try {
-      await getAuthToken(address);
-    } catch { /* token fetch is best-effort */ }
+      token = await getAuthToken(address) ?? "";
+    } catch { /* best-effort */ }
+
+    // Native app mode: redirect to custom URL scheme with credentials
+    if (nativeCallback) {
+      const callbackUrl = `${nativeCallback}?wallet=${encodeURIComponent(address)}&token=${encodeURIComponent(token)}`;
+      window.location.href = callbackUrl;
+      return;
+    }
+
+    // Web mode: go to game
     navigate("/world");
   }
 
@@ -193,7 +209,6 @@ export function MobileLoginPage() {
 
       {/* Login buttons */}
       <div className="mx-auto mt-10 flex w-full max-w-sm flex-1 flex-col gap-3">
-        {/* Social providers */}
         {SOCIAL_PROVIDERS.map((p) => (
           <button
             key={p.strategy}
@@ -211,7 +226,6 @@ export function MobileLoginPage() {
           </button>
         ))}
 
-        {/* Email */}
         <button
           onClick={() => { setError(null); setStep("email-input"); }}
           className="flex w-full items-center gap-3 border-2 border-[#2a3450] bg-[#0e1628] px-4 py-3 text-left font-mono text-sm text-[#d6deff] shadow-[3px_3px_0_0_#000] transition hover:border-[#ffcc00] hover:text-[#ffcc00] active:translate-x-[1px] active:translate-y-[1px]"
@@ -223,7 +237,6 @@ export function MobileLoginPage() {
           <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
         </button>
 
-        {/* Wallets */}
         <button
           onClick={() => void connectWallet()}
           className="flex w-full items-center gap-3 border-2 border-[#54f28b] bg-[#0a1a0e] px-4 py-3 text-left font-mono text-sm text-[#54f28b] shadow-[3px_3px_0_0_#000] transition hover:bg-[#112a1b] active:translate-x-[1px] active:translate-y-[1px]"
@@ -238,19 +251,22 @@ export function MobileLoginPage() {
           <span className="ml-auto text-[11px] text-[#6d77a3]">[&rarr;]</span>
         </button>
 
-        {/* Error */}
         {error && (
           <p className="mt-1 border border-[#ff4d6d] bg-[#1a0a0e] px-3 py-2 font-mono text-xs text-[#ff4d6d]">
             [ERR] {error}
           </p>
         )}
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Spectate */}
         <button
-          onClick={() => navigate("/world")}
+          onClick={() => {
+            if (nativeCallback) {
+              window.location.href = `${nativeCallback}?spectate=true`;
+            } else {
+              navigate("/world");
+            }
+          }}
           className="mb-2 w-full py-3 font-mono text-xs text-[#e2e8f0]/30 transition hover:text-[#e2e8f0]/60"
         >
           Spectate without signing in &rarr;

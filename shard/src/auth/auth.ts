@@ -178,6 +178,54 @@ export function registerAuthRoutes(server: FastifyInstance): void {
     });
   });
 
+  // Verify thirdweb token and issue shard JWT (for native mobile apps)
+  server.post("/auth/verify-thirdweb", async (req, reply) => {
+    const body = req.body as any;
+    const thirdwebToken: string | undefined =
+      typeof body === "object" && body !== null ? body.thirdwebToken : undefined;
+
+    if (!thirdwebToken || typeof thirdwebToken !== "string") {
+      server.log.warn(`[auth] verify-thirdweb bad body: ${JSON.stringify(body)}`);
+      return reply.status(400).send({ error: "Missing thirdwebToken in request body" });
+    }
+
+    try {
+      const twRes = await fetch("https://api.thirdweb.com/v1/wallets/me", {
+        headers: {
+          "Authorization": `Bearer ${thirdwebToken}`,
+          "x-client-id": process.env.THIRDWEB_CLIENT_ID || "231a06443d1568f83d2d4f2c8e7dfe3b",
+        },
+      });
+
+      if (!twRes.ok) {
+        const errText = await twRes.text();
+        server.log.warn(`[auth] Thirdweb /wallets/me failed (${twRes.status}): ${errText}`);
+        return reply.status(401).send({ error: "Invalid thirdweb token" });
+      }
+
+      const twData = await twRes.json() as any;
+      const walletAddress = twData?.result?.address ?? twData?.address;
+
+      if (!walletAddress || !walletAddress.match(/^0x[a-fA-F0-9]{40}$/)) {
+        server.log.warn(`[auth] No wallet in thirdweb response: ${JSON.stringify(twData)}`);
+        return reply.status(401).send({ error: "Could not resolve wallet from thirdweb token" });
+      }
+
+      const token = generateAuthToken(walletAddress);
+      server.log.info(`[auth] Thirdweb token verified for ${walletAddress} (native mobile)`);
+
+      return reply.send({
+        success: true,
+        token,
+        walletAddress,
+        expiresIn: JWT_EXPIRY,
+      });
+    } catch (err) {
+      server.log.error(err, "[auth] Thirdweb token verification failed");
+      return reply.status(500).send({ error: "Failed to verify thirdweb token" });
+    }
+  });
+
   // Verify token endpoint (check if token is still valid)
   server.get("/auth/verify-token", {
     preHandler: authenticateRequest,

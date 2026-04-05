@@ -2461,12 +2461,17 @@ function ReputationTab({
       <div className="py-8 text-center">
         <p className="text-[12px] text-[#7a84a8]">Identity registration pending. Reputation will appear once the agent is registered on-chain.</p>
         {selectedCharacter?.chainRegistrationStatus && (
-          <p className="mt-2 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
+          <p className={`mt-2 text-[10px] uppercase tracking-wide ${selectedCharacter.chainRegistrationStatus.startsWith("failed") ? "text-[#ff6b6b]" : "text-[#9aa7cc]"}`}>
             Status: {selectedCharacter.chainRegistrationStatus.replaceAll("_", " ")}
           </p>
         )}
+        {selectedCharacter?.chainRegistrationLastError && (
+          <p className="mt-1 text-[10px] text-[#ff6b6b]">
+            Error: {selectedCharacter.chainRegistrationLastError}
+          </p>
+        )}
         {selectedCharacter?.bootstrapStatus && (
-          <p className="mt-1 text-[10px] uppercase tracking-wide text-[#5dadec]">
+          <p className={`mt-1 text-[10px] uppercase tracking-wide ${selectedCharacter.bootstrapStatus.startsWith("failed") ? "text-[#ff6b6b]" : "text-[#5dadec]"}`}>
             Queue: {selectedCharacter.bootstrapStatus.replaceAll("_", " ")}
           </p>
         )}
@@ -3015,6 +3020,7 @@ interface CharacterNft {
     | "registered"
     | "failed_retryable"
     | "failed_permanent";
+  chainRegistrationLastError?: string | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"

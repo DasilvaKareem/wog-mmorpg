@@ -54,6 +54,12 @@ const DeferredWorldDialogs = React.lazy(() =>
 const DungeonGateDialog = React.lazy(() =>
   import("@/components/DungeonGateDialog").then((mod) => ({ default: mod.DungeonGateDialog }))
 );
+const AlchemyLabDialog = React.lazy(() =>
+  import("@/components/AlchemyLabDialog").then((mod) => ({ default: mod.AlchemyLabDialog }))
+);
+const EnchantingAltarDialog = React.lazy(() =>
+  import("@/components/EnchantingAltarDialog").then((mod) => ({ default: mod.EnchantingAltarDialog }))
+);
 const HotkeyBar = React.lazy(() =>
   import("@/components/HotkeyBar").then((mod) => ({ default: mod.HotkeyBar }))
 );
@@ -682,7 +688,7 @@ function GameWorld(): React.ReactElement {
             </div>
             {showRanks && (
               <div
-                className="absolute bottom-0 left-0 min-h-0"
+                className="pointer-events-none absolute bottom-0 left-0 min-h-0"
                 style={{ width: `${leftBottomWidth}px`, height: `${leftBottomHeight}px` }}
               >
                 <PlayerPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
@@ -709,7 +715,7 @@ function GameWorld(): React.ReactElement {
           <div className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 md:right-4">
             {showWallet && (
               <div
-                className="absolute right-0 top-0 min-h-0"
+                className="pointer-events-none absolute right-0 top-0 min-h-0"
                 style={{ width: `${rightTopWidth}px`, height: `${rightTopHeight}px` }}
               >
                 {address ? (
@@ -741,7 +747,7 @@ function GameWorld(): React.ReactElement {
             )}
             {showChat && (address || !showWallet) && (
               <div
-                className="absolute bottom-0 right-0 min-h-0"
+                className="pointer-events-none absolute bottom-0 right-0 min-h-0"
                 style={{ width: `${rightBottomWidth}px`, height: `${rightBottomHeight}px` }}
               >
                 {address ? (
@@ -776,6 +782,8 @@ function GameWorld(): React.ReactElement {
           </div>
         )}
         <DungeonGateDialog />
+        <AlchemyLabDialog />
+        <EnchantingAltarDialog />
         {deferredDialogsReady && <DeferredWorldDialogs />}
         {questLogOpen && (
           <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
@@ -847,18 +855,27 @@ function AppShell(): React.ReactElement {
 
   // Listen for global "open onboarding" event on non-world routes
   React.useEffect(() => {
-    if (isWorldRoute) return; // GameWorld handles its own listener
+    if (isWorldRoute || isMobileRoute) return;
     const handler = (event: Event) => {
       setOnboardingMode(resolveOnboardingMode(event));
       setOnboardingOpen(true);
     };
     window.addEventListener(OPEN_ONBOARDING_EVENT, handler);
     return () => window.removeEventListener(OPEN_ONBOARDING_EVENT, handler);
-  }, [isWorldRoute]);
+  }, [isWorldRoute, isMobileRoute]);
+
+  // /mobile is a standalone native-app shell — render nothing else
+  if (isMobileRoute) {
+    return (
+      <React.Suspense fallback={<RouteFallback />}>
+        <MobileLoginPage />
+      </React.Suspense>
+    );
+  }
 
   return (
-    <div className={`relative h-full w-full ${isWorldRoute || isMobileRoute ? "" : "flex flex-col"}`}>
-      {!isMobileRoute && <Navbar />}
+    <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
+      <Navbar />
       {/* <PushNotificationBanner walletAddress={address} /> */}
       {isWorldRoute ? (
         <div className="h-full w-full pt-0">

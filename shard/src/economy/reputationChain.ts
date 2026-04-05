@@ -7,6 +7,7 @@
 import { ethers } from "ethers";
 import { biteSigner, biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction, reserveServerNonce, waitForBiteReceipt, waitForBiteSubmission } from "../blockchain/biteTxQueue.js";
+import { traceTx } from "../blockchain/txTracer.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
 import { OFFICIAL_REPUTATION_REGISTRY_ABI } from "../erc8004/official.js";
 import {
@@ -49,6 +50,18 @@ const MAX_SCORE = 1000;
 /** Per-entity backoff cache: maps normalized agentId → timestamp when retry is allowed */
 const reputationFailBackoff = new Map<string, number>();
 const REPUTATION_FAIL_BACKOFF_MS = 60_000; // 60 seconds before retrying a failed entity
+
+/**
+ * Tracks entities that have had at least one successful giveFeedback() on-chain.
+ * Only these entities will have data readable via getClients() — all others will
+ * revert, so there's no point attempting reconciliation for them.
+ */
+const chainFeedbackExists = new Set<string>();
+
+/** Returns true if this entity has had feedback successfully written on-chain. */
+export function hasChainFeedback(agentId: string | bigint): boolean {
+  return chainFeedbackExists.has(normalizeAgentId(agentId));
+}
 
 const CATEGORY_TAGS = ["combat", "economic", "social", "crafting", "agent"] as const;
 type CategoryIndex = 0 | 1 | 2 | 3 | 4;
@@ -162,7 +175,9 @@ export async function getReputationOnChain(
   } catch (err) {
     // Set backoff so we don't spam retries for this entity
     reputationFailBackoff.set(normalizedId, Date.now() + REPUTATION_FAIL_BACKOFF_MS);
-    console.warn(`[reputationChain] getReputation failed for ${normalizedId} (backing off ${REPUTATION_FAIL_BACKOFF_MS / 1000}s):`, err);
+    const msg = (err as { shortMessage?: string; message?: string })?.shortMessage
+      ?? (err as Error)?.message ?? "unknown error";
+    console.warn(`[reputationChain] getReputation failed for ${normalizedId} (backing off ${REPUTATION_FAIL_BACKOFF_MS / 1000}s): ${msg}`);
     return null;
   }
 }
@@ -181,7 +196,7 @@ export async function submitFeedbackOnChain(
   deltas[category as CategoryIndex] = delta;
   const record = await createChainOperation(REPUTATION_OP_TYPE, key, { agentId: key, deltas, reason: _reason });
   void processReputationOperation(record.operationId).catch((err) => {
-    console.warn(`[reputationChain] queue dispatch failed for ${key}:`, err);
+    console.warn(`[reputationChain] queue dispatch failed for ${key}: ${(err as Error)?.message ?? err}`);
   });
 }
 
@@ -203,26 +218,29 @@ export async function batchUpdateReputationOnChain(
       const delta = deltas[i];
       if (delta === 0) continue;
 
-      await queueBiteTransaction(`reputation-feedback:${normalizedAgentId}:${CATEGORY_TAGS[i]}`, async () => {
-        const tx = await waitForBiteSubmission(reputationContract.giveFeedback(
-          identityId,
-          BigInt(delta),
-          0,
-          CATEGORY_TAGS[i],
-          reason,
-          "",
-          "",
-          ethers.ZeroHash,
-          { nonce: await reserveServerNonce() ?? undefined }
-        ));
-        await waitForBiteReceipt(tx.wait());
-      });
+      await traceTx("reputation-feedback", "giveFeedback", { agentId: normalizedAgentId, category: CATEGORY_TAGS[i], delta }, "bite", () =>
+        queueBiteTransaction(`reputation-feedback:${normalizedAgentId}:${CATEGORY_TAGS[i]}`, async () => {
+          const tx = await waitForBiteSubmission(reputationContract.giveFeedback(
+            identityId,
+            BigInt(delta),
+            0,
+            CATEGORY_TAGS[i],
+            reason,
+            "",
+            "",
+            ethers.ZeroHash,
+            { nonce: await reserveServerNonce() ?? undefined }
+          ));
+          await waitForBiteReceipt(tx.wait());
+        })
+      );
     }
 
+    chainFeedbackExists.add(normalizedAgentId);
     notifyChainUpdate(normalizedAgentId, "feedback");
     return true;
   } catch (err) {
-    console.warn(`[reputationChain] feedback update failed for ${normalizeAgentId(agentId)}:`, err);
+    console.warn(`[reputationChain] feedback update failed for ${normalizeAgentId(agentId)}:`, (err as Error)?.message ?? err);
     return false;
   }
 }

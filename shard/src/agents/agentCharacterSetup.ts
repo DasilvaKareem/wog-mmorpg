@@ -207,6 +207,7 @@ export async function setupAgentCharacter(
     level: spawnLevel,
     xp: spawnXp,
     characterTokenId: spawnTokenId,
+    agentId: spawnAgentId,
     raceId: spawnRace,
     classId: spawnClass,
   }, token);

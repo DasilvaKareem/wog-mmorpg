@@ -281,7 +281,7 @@ export function buildAuthoredTalkQuestScene(config: AuthoredTalkQuestSceneConfig
     scene_end: {
       id: "scene_end",
       type: "end",
-      text: `${config.npcName}'s welcome-tour scene is complete.`,
+      text: `${config.npcName} nods and turns away.`,
     },
   };
 
@@ -485,7 +485,7 @@ export function buildMarcusWelcomeTourScene(config: MarcusWelcomeTourSceneConfig
     scene_end: {
       id: "scene_end",
       type: "end",
-      text: `${config.npcName}'s welcome-tour scene is complete.`,
+      text: `${config.npcName} nods and turns away.`,
     },
   };
 
@@ -737,7 +737,7 @@ export function buildStagedContractsScene(config: StagedContractsSceneConfig): Q
   nodes.scene_end = {
     id: "scene_end",
     type: "end",
-    text: `${config.npcName}'s staged contract scene is complete.`,
+    text: `${config.npcName} turns back to their work.`,
   };
 
   return {
@@ -827,7 +827,7 @@ export function buildKaelaBriefingScene(config: KaelaBriefingSceneConfig): Quest
       briefing_end: {
         id: "briefing_end",
         type: "end",
-        text: `${config.npcName}'s briefing scene is complete.`,
+        text: `${config.npcName} steps back, the briefing concluded.`,
       },
     },
   };
@@ -968,7 +968,7 @@ export function buildMarcusOnboardingScene(config: MarcusOnboardingSceneConfig):
       marcus_end: {
         id: "marcus_end",
         type: "end",
-        text: `${config.npcName}'s onboarding scene is complete.`,
+        text: `${config.npcName} gives a final nod and returns to their post.`,
       },
     },
   };

@@ -6,169 +6,252 @@
 import SwiftUI
 
 struct LandingView: View {
-    @State private var showGame = false
+    @State private var screen: Screen = .login
+    @State private var email = ""
+    @State private var otp = ""
+    @State private var error: String? = nil
+    @State private var loading = false
+
+    // Auth result
+    @State private var wallet = ""
+    @State private var token = ""
+
+    enum Screen {
+        case login, otpEntry, game
+    }
 
     var body: some View {
-        if showGame {
-            GameWebView(url: URL(string: "https://worldofgeneva.com/mobile")!)
-                .ignoresSafeArea(.container, edges: .bottom)
-        } else {
-            landingContent
+        switch screen {
+        case .login:
+            emailScreen
+        case .otpEntry:
+            otpScreen
+        case .game:
+            GameWebView(url: URL(string: "https://worldofgeneva.com/world")!, wallet: wallet, token: token)
+                .ignoresSafeArea()
         }
     }
 
-    private var landingContent: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                Spacer().frame(height: 60)
+    // MARK: - Email Entry
 
-                // Title
-                Text("WORLD OF GENEVA")
-                    .font(.system(size: 26, weight: .bold, design: .monospaced))
-                    .foregroundColor(WoGColors.gold)
-                    .tracking(4)
+    private var emailScreen: some View {
+        VStack(spacing: 0) {
+            Spacer()
 
-                Text("An MMORPG run by AI agents")
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(WoGColors.textDim)
-                    .padding(.top, 6)
-
-                // Badges
-                HStack(spacing: 8) {
-                    ForEach(["AI-run", "Gasless", "On-chain"], id: \.self) { badge in
-                        Text(badge)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(WoGColors.green)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 4)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(WoGColors.border, lineWidth: 1)
-                            )
-                    }
-                }
-                .padding(.top, 20)
-
-                // Features
-                VStack(spacing: 12) {
-                    FeatureCard(icon: ">>", title: "Autonomous agents", desc: "Movement, combat, trading via HTTP API")
-                    FeatureCard(icon: "$$", title: "On-chain world", desc: "Characters, loot, and gold live on SKALE")
-                    FeatureCard(icon: "**", title: "Classes and builds", desc: "8 classes, techniques, professions")
-                    FeatureCard(icon: "++", title: "Player economy", desc: "Auction house, crafting, guild treasuries")
-                    FeatureCard(icon: "!!", title: "PvP systems", desc: "Live battles, queues, prediction markets")
-                    FeatureCard(icon: "@@", title: "Agent tooling", desc: "Docs, API access, deploy your champion")
-                }
-                .padding(.top, 32)
-
-                // Enter button
-                Button(action: { showGame = true }) {
-                    Text("ENTER WORLD")
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .tracking(2)
-                        .foregroundColor(WoGColors.bg)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 52)
-                        .background(WoGColors.gold)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .padding(.top, 32)
-
-                // Docs button
-                Button(action: { showGame = true }) {
-                    Text("Read the Docs")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(WoGColors.textDim)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(WoGColors.border, lineWidth: 1)
-                        )
-                }
-                .padding(.top, 10)
-
-                // Zones
-                Text("ZONES")
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundColor(WoGColors.textDim)
-                    .tracking(3)
-                    .padding(.top, 36)
-
-                VStack(spacing: 10) {
-                    ZoneRow(name: "Village Square", level: "Lv 1-5", color: WoGColors.green)
-                    ZoneRow(name: "Wild Meadow", level: "Lv 5-10", color: Color(red: 0.48, green: 0.96, blue: 0.66))
-                    ZoneRow(name: "Dark Forest", level: "Lv 10-16", color: Color(red: 1.0, green: 0.8, blue: 0.0))
-                    ZoneRow(name: "Auroral Plains", level: "Lv 15-20", color: Color(red: 1.0, green: 0.847, blue: 0.3))
-                    ZoneRow(name: "Emerald Woods", level: "Lv 20-25", color: Color(red: 1.0, green: 0.549, blue: 0.0))
-                    ZoneRow(name: "Viridian Range", level: "Lv 25-30", color: Color(red: 1.0, green: 0.42, blue: 0.21))
-                }
-                .padding(.top, 14)
-
-                Text("worldofgeneva.com")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(WoGColors.textDim)
-                    .padding(.top, 40)
-
-                Spacer().frame(height: 30)
-            }
-            .padding(.horizontal, 24)
-        }
-        .background(WoGColors.bg)
-    }
-}
-
-struct FeatureCard: View {
-    let icon: String
-    let title: String
-    let desc: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(icon)
-                .font(.system(size: 18, design: .monospaced))
+            Text("WORLD OF GENEVA")
+                .font(.system(size: 24, weight: .bold, design: .monospaced))
                 .foregroundColor(WoGColors.gold)
-                .frame(width: 30, alignment: .leading)
+                .tracking(3)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+            Text("Sign in to play")
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(WoGColors.textDim)
+                .padding(.top, 6)
+
+            Spacer().frame(height: 40)
+
+            VStack(spacing: 14) {
+                TextField("", text: $email, prompt: Text("your@email.com").foregroundColor(Color(hex: 0x6d77a3)))
+                    .font(.system(size: 15, design: .monospaced))
                     .foregroundColor(WoGColors.text)
-                Text(desc)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
+                    .keyboardType(.emailAddress)
+                    .textContentType(.emailAddress)
+                    .padding(.horizontal, 16)
+                    .frame(height: 50)
+                    .background(Color(hex: 0x0e1628))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .onSubmit { sendCode() }
+
+                Button(action: sendCode) {
+                    HStack {
+                        if loading {
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: WoGColors.bg))
+                        }
+                        Text(loading ? "Sending..." : "Send Login Code")
+                            .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundColor(WoGColors.bg)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(email.isEmpty || loading ? WoGColors.gold.opacity(0.4) : WoGColors.gold)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .disabled(email.isEmpty || loading)
+
+                if let error = error {
+                    Text(error)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.red)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            .padding(.horizontal, 32)
+
+            Spacer()
+
+            Button(action: spectate) {
+                Text("Spectate without signing in")
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(WoGColors.textDim)
             }
+            .padding(.bottom, 40)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WoGColors.bg)
+    }
+
+    // MARK: - OTP Entry
+
+    private var otpScreen: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            Text("Enter code")
+                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .foregroundColor(WoGColors.gold)
+
+            Text("Sent to \(email)")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(WoGColors.textDim)
+                .padding(.top, 4)
+
+            Spacer().frame(height: 30)
+
+            TextField("", text: $otp, prompt: Text("000000").foregroundColor(Color(hex: 0x6d77a3)))
+                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                .foregroundColor(WoGColors.text)
+                .multilineTextAlignment(.center)
+                .keyboardType(.numberPad)
+                .textContentType(.oneTimeCode)
+                .frame(width: 200, height: 56)
+                .background(Color(hex: 0x0e1628))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .onChange(of: otp) { _, newValue in
+                    // Strip non-digits, cap at 6
+                    let digits = newValue.filter { $0.isNumber }
+                    if digits.count > 6 { otp = String(digits.prefix(6)) }
+                    else if digits != newValue { otp = digits }
+                    // Auto-verify when 6 digits
+                    if otp.count == 6 { verifyCode() }
+                }
+                .padding(.horizontal, 32)
+
+            Spacer().frame(height: 20)
+
+            HStack(spacing: 12) {
+                Button(action: { error = nil; screen = .login }) {
+                    Text("Back")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(WoGColors.textDim)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Color(hex: 0x0e1628))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(hex: 0x2a3450), lineWidth: 2))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+
+                Button(action: verifyCode) {
+                    HStack {
+                        if loading {
+                            ProgressView().progressViewStyle(CircularProgressViewStyle(tint: WoGColors.bg))
+                        }
+                        Text(loading ? "..." : "Verify")
+                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundColor(WoGColors.bg)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(otp.count < 6 || loading ? WoGColors.gold.opacity(0.4) : WoGColors.gold)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .disabled(otp.count < 6 || loading)
+            }
+            .padding(.horizontal, 32)
+
+            if let error = error {
+                Text(error)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.red)
+                    .padding(.top, 12)
+                    .padding(.horizontal, 32)
+            }
 
             Spacer()
         }
-        .padding(14)
-        .background(WoGColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(WoGColors.border, lineWidth: 1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WoGColors.bg)
+    }
+
+    // MARK: - Actions
+
+    private func sendCode() {
+        guard !email.isEmpty, !loading else { return }
+        loading = true
+        error = nil
+
+        Task {
+            do {
+                try await ThirdwebAuth.sendEmailOTP(email: email.trimmingCharacters(in: .whitespacesAndNewlines))
+                await MainActor.run {
+                    loading = false
+                    screen = .otpEntry
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    loading = false
+                }
+            }
+        }
+    }
+
+    private func verifyCode() {
+        guard otp.count == 6, !loading else { return }
+        loading = true
+        error = nil
+
+        Task {
+            do {
+                let result = try await ThirdwebAuth.verifyEmailOTP(
+                    email: email.trimmingCharacters(in: .whitespacesAndNewlines),
+                    code: otp
+                )
+                await MainActor.run {
+                    wallet = result.walletAddress
+                    token = result.shardToken
+                    loading = false
+                    screen = .game
+                }
+            } catch {
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    otp = ""
+                    loading = false
+                }
+            }
+        }
+    }
+
+    private func spectate() {
+        wallet = ""
+        token = ""
+        screen = .game
+    }
+}
+
+// MARK: - Color helper
+
+extension Color {
+    init(hex: UInt32, opacity: Double = 1.0) {
+        self.init(
+            red: Double((hex >> 16) & 0xFF) / 255.0,
+            green: Double((hex >> 8) & 0xFF) / 255.0,
+            blue: Double(hex & 0xFF) / 255.0,
+            opacity: opacity
         )
     }
-}
-
-struct ZoneRow: View {
-    let name: String
-    let level: String
-    let color: Color
-
-    var body: some View {
-        HStack {
-            Text(name)
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundColor(WoGColors.text)
-            Spacer()
-            Text(level)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(color)
-        }
-    }
-}
-
-#Preview {
-    LandingView()
-        .preferredColorScheme(.dark)
 }

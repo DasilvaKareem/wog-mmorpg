@@ -116,6 +116,13 @@ export class WorldScene extends Phaser.Scene {
   private lastViewportSyncY = Number.NaN;
   private lastViewportSyncZoom = Number.NaN;
 
+  /** Click-to-move: tracks whether an entity sprite was clicked this frame */
+  private entityClickedThisFrame = false;
+  /** Click-to-move: waypoint ring shown at the clicked position */
+  private waypointMarker: Phaser.GameObjects.Graphics | null = null;
+  private waypointTween: Phaser.Tweens.Tween | null = null;
+  private waypointTimer: Phaser.Time.TimerEvent | null = null;
+
   // LOD overview mode — rendered when zoom drops below OVERVIEW_ENTER
   private overviewMode = false;
   private overviewGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -181,6 +188,7 @@ export class WorldScene extends Phaser.Scene {
     this.floatingText = new FloatingTextLayer(this);
 
     this.entityRenderer.onClick((entity) => {
+      this.entityClickedThisFrame = true;
       // Dedicated dialogs for specialized NPC types
       if (entity.type === "guild-registrar") {
         gameBus.emit("guildRegistrarClick", entity);
@@ -190,6 +198,10 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("arenaMasterClick", entity);
       } else if (entity.type === "dungeon-gate") {
         gameBus.emit("dungeonGateClick", entity);
+      } else if (entity.type === "enchanting-altar") {
+        gameBus.emit("enchantingAltarClick", entity);
+      } else if (entity.type === "alchemy-lab") {
+        gameBus.emit("alchemyLabClick", entity);
       }
 
       // Inspect: open inspect panel for players, mobs, and bosses
@@ -213,7 +225,11 @@ export class WorldScene extends Phaser.Scene {
         "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);
-      if (STATION_TYPES.has(entity.type)) {
+      if (
+        STATION_TYPES.has(entity.type)
+        && entity.type !== "enchanting-altar"
+        && entity.type !== "alchemy-lab"
+      ) {
         gameBus.emit("npcInfoClick", entity);
       }
 
@@ -259,6 +275,32 @@ export class WorldScene extends Phaser.Scene {
       const cam = this.cameras.main;
       cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
       cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+    });
+
+    // Click-to-move: detect clicks on empty ground
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      // Skip if this was a drag (camera pan)
+      if (this.isDragging) return;
+      // Skip if an entity sprite was clicked (its handler already fired)
+      if (this.entityClickedThisFrame) {
+        this.entityClickedThisFrame = false;
+        return;
+      }
+      this.entityClickedThisFrame = false;
+      // Skip in overview mode
+      if (this.overviewMode) return;
+
+      const cam = this.cameras.main;
+      const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
+      const scale = this.tilemapRenderer.coordScale;
+      const gameX = worldPoint.x / scale;
+      const gameY = worldPoint.y / scale;
+      const zoneId = this.currentZoneLabel;
+      if (!zoneId) return;
+
+      // Show waypoint marker and emit event
+      this.showWaypointMarker(worldPoint.x, worldPoint.y);
+      gameBus.emit("agentGoToPosition", { x: gameX, y: gameY, zoneId });
     });
 
     this.input.on(
@@ -353,6 +395,7 @@ export class WorldScene extends Phaser.Scene {
     // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
       playSoundEffect("move_zone_transition");
+      this.clearWaypointMarker();
       this.scrollToZone(zoneId);
     });
 
@@ -538,6 +581,34 @@ export class WorldScene extends Phaser.Scene {
   private releaseFollow(): void {
     this.followTarget = null;
     this.lockedWalletAddress = null;
+  }
+
+  private showWaypointMarker(phaserX: number, phaserY: number): void {
+    this.clearWaypointMarker();
+
+    const g = this.add.graphics();
+    g.setPosition(phaserX, phaserY);
+    g.setDepth(500);
+    g.lineStyle(2, 0x54f28b, 0.8);
+    g.strokeCircle(0, 0, 12);
+    g.fillStyle(0x54f28b, 0.25);
+    g.fillCircle(0, 0, 6);
+
+    this.waypointMarker = g;
+    this.waypointTween = this.tweens.add({
+      targets: g,
+      alpha: { from: 0.9, to: 0.3 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+    });
+    this.waypointTimer = this.time.delayedCall(15_000, () => this.clearWaypointMarker());
+  }
+
+  private clearWaypointMarker(): void {
+    if (this.waypointTween) { this.waypointTween.destroy(); this.waypointTween = null; }
+    if (this.waypointTimer) { this.waypointTimer.destroy(); this.waypointTimer = null; }
+    if (this.waypointMarker) { this.waypointMarker.destroy(); this.waypointMarker = null; }
   }
 
   /**
@@ -1231,6 +1302,9 @@ export class WorldScene extends Phaser.Scene {
     if (this.lockedWalletAddress && !this.followTarget) {
       selected.add("village-square");
     }
+
+    // Always poll the arena zone so PvP matches are visible
+    selected.add("coliseum-arena");
 
     for (const zone of nearest.slice(0, 2)) {
       selected.add(zone.zoneId);

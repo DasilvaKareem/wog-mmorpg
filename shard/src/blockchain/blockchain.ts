@@ -806,14 +806,16 @@ async function processIdentityRegistrationPayload(
       return null;
     }
 
-    await queueBiteTransaction(`identity-transfer:${existing.agentId}`, async () =>
-      waitForBiteSubmission(identityWriteContract.transferFrom(
-        serverAddress,
-        payload.ownerAddress,
-        existing.agentId,
-        { nonce: await reserveServerNonce() ?? undefined }
-      ))
-        .then((tx: any) => waitForBiteReceipt(tx.wait()))
+    await traceTx("identity-transfer", "transferIdentity", { agentId: existing.agentId.toString(), to: payload.ownerAddress }, "bite", () =>
+      queueBiteTransaction(`identity-transfer:${existing.agentId}`, async () =>
+        waitForBiteSubmission(identityWriteContract.transferFrom(
+          serverAddress,
+          payload.ownerAddress,
+          existing.agentId,
+          { nonce: await reserveServerNonce() ?? undefined }
+        ))
+          .then((tx: any) => waitForBiteReceipt(tx.wait()))
+      )
     );
     console.log(`[identity] Recovered and transferred agent #${existing.agentId} -> ${payload.ownerAddress}`);
     return {
@@ -846,16 +848,15 @@ async function processIdentityRegistrationPayload(
   let receipt: any = null;
   let submittedTxHash: string | null = null;
   try {
-    const registerTx = await queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
+    const registerTx = await traceTx("identity-register", "registerIdentity", { characterTokenId: characterTokenId.toString(), owner: payload.ownerAddress }, "bite", () => queueBiteTransaction(`identity-register:${characterTokenId}`, async () => {
       const registerTx = await waitForBiteSubmission(
-        identityWriteContract["register(string,(string,bytes)[])"](
+        identityWriteContract["register(string)"](
           agentURI,
-          metadataEntries,
           { nonce: await reserveServerNonce() ?? undefined }
         )
       );
       return registerTx;
-    });
+    }));
     submittedTxHash = registerTx.hash ?? null;
     if (!submittedTxHash) {
       throw new Error(`Identity registration submission returned no tx hash for character ${characterTokenId.toString()}`);
@@ -897,6 +898,27 @@ async function processIdentityRegistrationPayload(
 
   console.log(`[identity] Registered agent #${agentId} for character ${characterTokenId} -> tx ${receipt.hash}`);
 
+  // Set characterTokenId metadata while server still owns the token
+  // (must happen before transfer since only the owner can set metadata)
+  try {
+    await traceTx("identity-setMetadata", "setCharacterTokenId", { agentId: agentId.toString(), characterTokenId: characterTokenId.toString() }, "bite", () =>
+      queueBiteTransaction(`identity-metadata:${agentId}`, async () => {
+        const tx = await waitForBiteSubmission(
+          identityWriteContract.setMetadata(
+            agentId,
+            "characterTokenId",
+            ethers.AbiCoder.defaultAbiCoder().encode(["uint256"], [characterTokenId]),
+            { nonce: await reserveServerNonce() ?? undefined }
+          )
+        );
+        return waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS);
+      })
+    );
+    console.log(`[identity] Set characterTokenId=${characterTokenId} metadata on agent #${agentId}`);
+  } catch (err) {
+    console.warn(`[identity] Failed to set metadata on agent #${agentId}: ${(err as Error).message?.slice(0, 80)}`);
+  }
+
   if (payload.validationTags.length > 0) {
     const { publishValidationClaim } = await import("../erc8004/validation.js");
     for (const tag of payload.validationTags) {
@@ -906,14 +928,16 @@ async function processIdentityRegistrationPayload(
 
   if (payload.ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
     try {
-      await queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
-        waitForBiteSubmission(identityWriteContract.transferFrom(
-          serverAddress,
-          payload.ownerAddress,
-          agentId,
-          { nonce: await reserveServerNonce() ?? undefined }
-        ))
-          .then((tx: any) => waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS))
+      await traceTx("identity-transfer", "transferIdentity", { agentId: agentId.toString(), to: payload.ownerAddress }, "bite", () =>
+        queueBiteTransaction(`identity-transfer:${agentId}`, async () =>
+          waitForBiteSubmission(identityWriteContract.transferFrom(
+            serverAddress,
+            payload.ownerAddress,
+            agentId,
+            { nonce: await reserveServerNonce() ?? undefined }
+          ))
+            .then((tx: any) => waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS))
+        )
       );
     } catch (err) {
       const currentOwner = await getIdentityOwner(BigInt(agentId));
@@ -1498,7 +1522,7 @@ registerChainOperationProcessor("item-burn", async (record: ChainOperationRecord
     const chainTokenId = await getChainTokenIdForGameTokenId(BigInt(payload.tokenId));
     const tx = burn({
       contract: itemsContract,
-      account: payload.fromAddress,
+      account: signer.address,
       id: chainTokenId,
       value: BigInt(payload.quantity),
     });

@@ -21,6 +21,8 @@ import {
   clearAgentEntityRef,
   appendChatMessage,
   getChatHistory,
+  getAgentErrors,
+  getGlobalAgentErrors,
   defaultConfig,
   getDeployCount,
   incrementDeployCount,
@@ -32,6 +34,7 @@ import {
   clearCompletedObjectives,
   createObjectiveId,
   type AgentFocus,
+  type GatherPreference,
   type AgentStrategy,
   type AgentObjective,
 } from "./agentConfigStore.js";
@@ -45,7 +48,7 @@ import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntiti
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
-import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
+import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
@@ -518,6 +521,35 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     });
   });
 
+  // ── GET /agent/errors/:walletAddress ─────────────────────────────────────
+  // Returns the error log for a specific agent.
+  server.get<{
+    Params: { walletAddress: string };
+    Querystring: { limit?: string };
+  }>("/agent/errors/:walletAddress", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { walletAddress } = request.params;
+    if (walletAddress.toLowerCase() !== authWallet.toLowerCase()) {
+      return reply.code(403).send({ error: "Cannot view another user's agent errors" });
+    }
+    const limit = Math.min(parseInt(request.query.limit ?? "100", 10) || 100, 200);
+    const errors = await getAgentErrors(authWallet, limit);
+    return reply.send({ errors });
+  });
+
+  // ── GET /agent/errors — all agents (admin) ────────────────────────────────
+  // Returns the global error stream across all agents. No auth for now so
+  // you can quickly pull it from a dashboard / CLI.
+  server.get<{
+    Querystring: { limit?: string };
+  }>("/agent/errors", async (request, reply) => {
+    const limit = Math.min(parseInt(request.query.limit ?? "200", 10) || 200, 500);
+    const errors = await getGlobalAgentErrors(limit);
+    return reply.send({ errors });
+  });
+
   // ── GET /agent/wallet/:ownerWallet ───────────────────────────────────────
   // Public (no auth) — returns the custodial wallet address for an owner.
   // The custodial address is a public blockchain address, not sensitive.
@@ -966,7 +998,13 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
     }
 
     // Self-heal: restart agent loop if it should be running but isn't
-    if (config.enabled && !agentManager.isRunning(authWallet)) {
+    if (!config.enabled) {
+      // Re-enable expired session — reset timer so the agent gets a fresh window
+      await patchAgentConfig(authWallet, { enabled: true, sessionStartedAt: Date.now() });
+      config.enabled = true;
+      config.sessionStartedAt = Date.now();
+    }
+    if (!agentManager.isRunning(authWallet)) {
       await agentManager.ensureRunning(authWallet);
     }
 
@@ -1085,7 +1123,7 @@ Strategy options: aggressive, balanced, defensive`;
     const chatToolDecls: FunctionDeclaration[] = [
       {
         name: "update_focus",
-        description: "Update the agent's activity focus and combat strategy",
+        description: "Update the agent's activity focus and combat strategy. For mining, set focus=gathering and nodeType=ore. For herbalism, set focus=gathering and nodeType=herb.",
         parameters: {
           type: "OBJECT" as Type,
           properties: {
@@ -1102,6 +1140,11 @@ Strategy options: aggressive, balanced, defensive`;
             targetZone: {
               type: "STRING" as Type,
               description: "Optional target zone to move to",
+            },
+            nodeType: {
+              type: "STRING" as Type,
+              enum: ["ore", "herb", "both"],
+              description: "Gathering only: which resource nodes to target",
             },
           },
           required: ["focus"],
@@ -1457,6 +1500,7 @@ Strategy options: aggressive, balanced, defensive`;
               focus: AgentFocus;
               strategy?: AgentStrategy;
               targetZone?: string;
+              nodeType?: GatherPreference;
             };
             const patch: any = { focus: input.focus };
             if (input.strategy) patch.strategy = input.strategy;
@@ -1473,13 +1517,14 @@ Strategy options: aggressive, balanced, defensive`;
               // Prevent stale travel directives from overriding non-travel focus.
               patch.targetZone = undefined;
             }
+            patch.gatherNodeType = input.focus === "gathering" ? (input.nodeType ?? "both") : undefined;
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
             actionsTaken.push(
-              `[switched to ${patch.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
+              `[switched to ${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
             );
             server.log.info(
-              `[agent/chat] Config updated: focus=${patch.focus} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
+              `[agent/chat] Config updated: focus=${patch.focus} gatherNodeType=${patch.gatherNodeType ?? "none"} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
             );
 
             const runner = agentManager.getRunner(authWallet);
@@ -1549,7 +1594,13 @@ Strategy options: aggressive, balanced, defensive`;
               };
               const newFocus = focusMap[input.professionId];
               if (newFocus) {
-                await patchAgentConfig(authWallet, { focus: newFocus });
+                await patchAgentConfig(authWallet, {
+                  focus: newFocus,
+                  gatherNodeType:
+                    input.professionId === "mining" ? "ore" :
+                    input.professionId === "herbalism" ? "herb" :
+                    newFocus === "gathering" ? "both" : undefined,
+                });
                 configUpdated = true;
               }
             } else if (input.action === "learn_technique") {
@@ -1790,7 +1841,7 @@ Strategy options: aggressive, balanced, defensive`;
             tools: [{
               functionDeclarations: [{
                 name: "update_focus",
-                description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel.",
+                description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel. For mining use focus=gathering with nodeType=ore. For herbalism use focus=gathering with nodeType=herb.",
                 parameters: {
                   type: "OBJECT" as Type,
                   properties: {
@@ -1802,6 +1853,11 @@ Strategy options: aggressive, balanced, defensive`;
                     strategy: {
                       type: "STRING" as Type,
                       enum: ["aggressive", "balanced", "defensive"],
+                    },
+                    nodeType: {
+                      type: "STRING" as Type,
+                      enum: ["ore", "herb", "both"],
+                      description: "Gathering only: which resource nodes to target",
                     },
                   },
                   required: ["focus"],
@@ -1904,6 +1960,7 @@ Strategy options: aggressive, balanced, defensive`;
     await patchAgentConfig(authWallet, {
       focus: "goto",
       gotoTarget: { entityId, zoneId, name, action, profession, questId },
+      gotoPosition: undefined,
     });
 
     const logText = action === "learn-profession" && profession
@@ -1926,6 +1983,47 @@ Strategy options: aggressive, balanced, defensive`;
     }
 
     return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
+  });
+
+  // ── POST /agent/goto-position — Send agent to a world position (map click) ──
+  server.post<{
+    Body: { x: number; y: number; zoneId: string };
+  }>("/agent/goto-position", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { x, y, zoneId } = request.body ?? {};
+
+    if (x == null || y == null || !zoneId) {
+      return reply.code(400).send({ error: "x, y, and zoneId are required" });
+    }
+
+    // Clamp to zone's world-space bounds (zones have offsets in the global world)
+    const layout = getWorldLayout();
+    const zone = layout.zones[zoneId];
+    const offset = zone?.offset ?? { x: 0, z: 0 };
+    const size = zone?.size ?? { width: 640, height: 640 };
+    const cx = Math.max(offset.x, Math.min(offset.x + size.width, x));
+    const cy = Math.max(offset.z, Math.min(offset.z + size.height, y));
+
+    await patchAgentConfig(authWallet, {
+      focus: "goto",
+      gotoPosition: { x: cx, y: cy, zoneId },
+      gotoTarget: undefined,
+    });
+
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[GOTO] Moving to position (${Math.round(cx)}, ${Math.round(cy)}) in ${zoneId}`,
+      ts: Date.now(),
+    });
+
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) {
+      runner.setGotoPosition(cx, cy, zoneId);
+    }
+
+    return reply.send({ ok: true, gotoPosition: { x: cx, y: cy, zoneId } });
   });
 
   // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────

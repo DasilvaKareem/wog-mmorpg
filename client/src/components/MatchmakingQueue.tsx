@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWallet } from "@/hooks/useWallet";
-import { useGameContext } from "@/context/GameContext";
 import { getAuthToken } from "@/lib/agentAuth";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
@@ -44,7 +43,6 @@ export function MatchmakingQueue(): React.ReactElement {
   const [loading, setLoading] = React.useState(false);
   const [queuedAgentId, setQueuedAgentId] = React.useState<string | null>(null);
   const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
-  const { gameRef } = useGameContext();
   const { notify } = useToast();
 
   React.useEffect(() => {
@@ -66,23 +64,13 @@ export function MatchmakingQueue(): React.ReactElement {
         const data = await response.json();
 
         if (data.inBattle && data.battleId) {
-          // Match found! Transition to battle arena
+          // Match found! The server teleports the player entity to the arena zone.
+          // The WorldScene camera will naturally follow.
           setInQueue(false);
           setQueuedAgentId(null);
           notify("Match found! Entering arena...", "success");
 
-          // Emit event for any listeners
-          gameBus.emit("matchFound", {
-            battleId: data.battleId,
-            status: data.status,
-          });
-
-          // Switch Phaser scene: sleep WorldScene, start BattleScene
-          const game = gameRef.current;
-          if (game) {
-            game.scene.sleep("WorldScene");
-            game.scene.start("BattleScene", { battleId: data.battleId });
-          }
+          gameBus.emit("matchFound", { battleId: data.battleId, status: data.status });
         }
       } catch (error) {
         console.error("Failed to poll for match:", error);
@@ -94,7 +82,7 @@ export function MatchmakingQueue(): React.ReactElement {
     void pollForMatch();
 
     return () => clearInterval(interval);
-  }, [inQueue, queuedAgentId, gameRef, notify]);
+  }, [inQueue, queuedAgentId, notify]);
 
   const fetchQueues = async () => {
     try {
@@ -128,7 +116,7 @@ export function MatchmakingQueue(): React.ReactElement {
     const liveName =
       characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
 
-    const allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
+    let allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
       Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
         if (entity.type !== "player") return [];
         const entityWallet = entity.walletAddress?.toLowerCase();
@@ -137,25 +125,68 @@ export function MatchmakingQueue(): React.ReactElement {
       }),
     );
 
+    // Fallback: if wallet matching found nothing, try matching by character name
+    if (allPlayers.length === 0 && (preferredName || liveName)) {
+      allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
+        Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
+          if (entity.type !== "player") return [];
+          const eName = entity.name?.trim().toLowerCase();
+          if (eName !== preferredName && eName !== liveName) return [];
+          return [{ ...entity, id: entity.id ?? entityId }];
+        }),
+      );
+    }
+
     if (allPlayers.length === 0) {
       return null;
     }
 
     const withIdentity = allPlayers.filter((entity) => entity.agentId && entity.characterTokenId);
-    if (withIdentity.length === 0) {
-      return null;
+    if (withIdentity.length > 0) {
+      const selected =
+        withIdentity.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
+        withIdentity.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
+        withIdentity[0];
+
+      return {
+        agentId: String(selected.agentId),
+        characterTokenId: String(selected.characterTokenId),
+        level: selected.level ?? characterProgress?.level ?? 1,
+      };
     }
 
-    const selected =
-      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-      withIdentity[0];
+    // Fallback: entity exists but missing identity fields — check agent wallet endpoint
+    const candidate =
+      allPlayers.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
+      allPlayers.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
+      allPlayers[0];
 
-    return {
-      agentId: String(selected.agentId),
-      characterTokenId: String(selected.characterTokenId),
-      level: selected.level ?? characterProgress?.level ?? 1,
-    };
+    try {
+      const walletRes = await fetch(`${API_URL}/agent/wallet/${encodeURIComponent(address)}`);
+      if (walletRes.ok) {
+        const walletData = await walletRes.json();
+        if (walletData.agentId && walletData.characterTokenId) {
+          return {
+            agentId: String(walletData.agentId),
+            characterTokenId: String(walletData.characterTokenId),
+            level: candidate?.level ?? characterProgress?.level ?? 1,
+          };
+        }
+      }
+    } catch {
+      // fall through
+    }
+
+    // Last resort: use entity ID as agentId and characterTokenId if available
+    if (candidate) {
+      return {
+        agentId: String(candidate.agentId ?? candidate.id ?? ""),
+        characterTokenId: String(candidate.characterTokenId ?? "0"),
+        level: candidate.level ?? characterProgress?.level ?? 1,
+      };
+    }
+
+    return null;
   }, [address, characterProgress, deployedCharacterName]);
 
   const handleJoinQueue = async () => {

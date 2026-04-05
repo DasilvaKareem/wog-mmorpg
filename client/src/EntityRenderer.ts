@@ -34,7 +34,7 @@ interface EntityVisual {
   lastY: number;
   facing: "down" | "left" | "right" | "up";
   moving: boolean;
-  isNpc: boolean;
+  hideLabel: boolean;
   hovered: boolean;
   fx: AppliedFx;
   spriteScale: number; // mob/boss scale multiplier
@@ -59,9 +59,9 @@ const DISABLE_ENTITY_VIEWPORT_CULLING = true; // keep characters renderable even
 const MOB_SCALE = 1.4;
 const BOSS_SCALE = 1.8;
 
+/** Entity types whose labels are hidden by default and revealed on hover */
 const HIDE_LABEL_TYPES = new Set([
-  "merchant", "trainer", "profession-trainer", "guild-registrar",
-  "auctioneer", "arena-master", "quest-giver", "lore-npc", "npc",
+  "mob", "boss",
   "ore-node", "herb-node", "crop-node",
 ]);
 
@@ -768,7 +768,7 @@ export class EntityRenderer {
         lastY: py,
         facing: "down",
         moving: false,
-        isNpc: false,
+        hideLabel: false,
         hovered: false,
         fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
         spriteScale: 1,
@@ -802,7 +802,7 @@ export class EntityRenderer {
       .setScale(mobScale)
       .setInteractive({ useHandCursor: true });
 
-    const isNpc = HIDE_LABEL_TYPES.has(entity.type);
+    const hideLabel = HIDE_LABEL_TYPES.has(entity.type);
 
     sprite.on("pointerdown", () => {
       const ent = this.entities.get(id);
@@ -813,7 +813,7 @@ export class EntityRenderer {
 
     sprite.on("pointerover", () => {
       const v = this.visuals.get(id);
-      if (v && v.isNpc) {
+      if (v && v.hideLabel) {
         v.hovered = true;
         v.label.setVisible(true);
         v.hpBar.setVisible(true);
@@ -823,7 +823,7 @@ export class EntityRenderer {
 
     sprite.on("pointerout", () => {
       const v = this.visuals.get(id);
-      if (v && v.isNpc) {
+      if (v && v.hideLabel) {
         v.hovered = false;
         v.label.setVisible(false);
         v.hpBar.setVisible(false);
@@ -902,7 +902,7 @@ export class EntityRenderer {
     }
 
     // Hide NPC labels and HP bars by default — shown on hover
-    if (isNpc) {
+    if (hideLabel) {
       label.setVisible(false);
       hpBar.setVisible(false);
       hpBg.setVisible(false);
@@ -920,7 +920,7 @@ export class EntityRenderer {
       lastY: py,
       facing: "down",
       moving: false,
-      isNpc,
+      hideLabel,
       hovered: false,
       fx: { types: new Set(), glow: null, colorMatrix: null, shine: null },
       spriteScale: mobScale,
@@ -1096,7 +1096,7 @@ export class EntityRenderer {
     const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
     const sc = visual.spriteScale;
     visual.hpBar
-      .setPosition(
+      ?.setPosition(
         visual.sprite.x - HP_BAR_W / 2 + (HP_BAR_W * hpRatio) / 2,
         visual.sprite.y + 10 * sc,
       )
@@ -1416,7 +1416,7 @@ export class EntityRenderer {
     visual.inViewport = inViewport;
 
     const showSprite = this.spritesVisible && inViewport;
-    const showDetails = showSprite && (!visual.isNpc || visual.hovered);
+    const showDetails = showSprite && (!visual.hideLabel || visual.hovered);
     const showMarker = showSprite && (!this.lowPower || !entity || entity.type === "player" || entity.type === "boss");
 
     visual.sprite.setVisible(showSprite);

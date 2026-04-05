@@ -110,9 +110,11 @@ export async function registerPvPRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const { agentId, walletAddress, characterTokenId, level, format, preferredTeam } =
       req.body;
+    console.log(`[pvp-debug] queue/join request: agentId=${agentId} wallet=${walletAddress} level=${level} format=${format} tokenId=${characterTokenId}`);
 
     // Validation
     if (!agentId || !walletAddress || !characterTokenId || !level || !format) {
+      console.log(`[pvp-debug] queue/join REJECTED: missing fields`);
       return reply.code(400).send({
         error: "Missing required fields: agentId, walletAddress, characterTokenId, level, format",
       });
@@ -148,6 +150,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
     };
 
     await pvpBattleManager.joinQueue(entry);
+    console.log(`[pvp-debug] queue/join SUCCESS: agentId=${agentId} format=${format} elo=${elo}`);
 
     return reply.send({
       success: true,
@@ -341,7 +344,8 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       });
     }
 
-    return reply.send({ battle: state });
+    const poolId = pvpBattleManager.getPoolForBattle(battleId);
+    return reply.send({ battle: state, poolId: poolId ?? null });
   });
 
   /**
@@ -452,10 +456,12 @@ export async function registerPvPRoutes(app: FastifyInstance) {
       return reply.send({ inBattle: false, battleId: null, status: null });
     }
 
+    const poolId = pvpBattleManager.getPoolForBattle(activeBattle.battleId);
     return reply.send({
       inBattle: true,
       battleId: activeBattle.battleId,
       status: activeBattle.status,
+      poolId: poolId ?? null,
     });
   });
 

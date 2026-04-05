@@ -1,6 +1,7 @@
 export {
   batchUpdateReputationOnChain,
   getReputationOnChain,
+  hasChainFeedback,
   initReputationOnChain,
   registerReputationChainListener,
   submitFeedbackOnChain,

@@ -38,6 +38,7 @@ export function PredictionMarketPanel({
   const [selectedTeam, setSelectedTeam] = React.useState<"RED" | "BLUE" | null>(null);
   const [betAmount, setBetAmount] = React.useState("");
   const [placingBet, setPlacingBet] = React.useState(false);
+  const [claiming, setClaiming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const { address, isConnected } = useWallet();
   const { notify } = useToast();
@@ -239,8 +240,37 @@ export function PredictionMarketPanel({
           <div className="mt-1 text-[11px] font-bold text-[#f1f5ff]">
             Winner: {winner.toUpperCase()} Team
           </div>
-          <Button className="mt-2 h-7 w-full text-[9px]" variant="ghost">
-            Claim Winnings
+          <Button
+            className="mt-2 h-7 w-full text-[9px]"
+            variant="ghost"
+            disabled={claiming || !address}
+            onClick={async () => {
+              if (!address) return;
+              setClaiming(true);
+              try {
+                const { getAuthToken } = await import("@/lib/agentAuth");
+                const token = await getAuthToken(address);
+                const headers: Record<string, string> = { "Content-Type": "application/json" };
+                if (token) headers["Authorization"] = `Bearer ${token}`;
+                const res = await fetch(`${API_URL}/api/prediction/pool/${poolId}/claim`, {
+                  method: "POST",
+                  headers,
+                  body: JSON.stringify({ walletAddress: address }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                  notify("Winnings claimed!", "success");
+                } else {
+                  notify(data.error ?? "Claim failed", "error");
+                }
+              } catch (err) {
+                notify((err as Error).message, "error");
+              } finally {
+                setClaiming(false);
+              }
+            }}
+          >
+            {claiming ? "Claiming..." : "Claim Winnings"}
           </Button>
         </div>
       ) : (

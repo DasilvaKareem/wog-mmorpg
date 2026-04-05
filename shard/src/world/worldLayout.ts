@@ -217,10 +217,18 @@ function loadLayout(): WorldLayout {
     maxZ = Math.max(maxZ, offset.z + height);
   }
 
+  // Inject the PvP coliseum-arena zone into the layout
+  zones["coliseum-arena"] = {
+    id: "coliseum-arena",
+    offset: { x: 5000, z: 5000 },
+    size: { width: 600, height: 600 },
+    levelReq: 1,
+  };
+
   cachedLayout = {
     zones,
     tileSize: 10,
-    totalSize: { width: maxX - minX, height: maxZ - minZ },
+    totalSize: { width: Math.max(maxX - minX, 5600), height: Math.max(maxZ - minZ, 5600) },
   };
 
   console.log(

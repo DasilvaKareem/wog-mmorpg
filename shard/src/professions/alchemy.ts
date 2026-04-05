@@ -5,6 +5,7 @@ import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchai
 import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
+import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { logDiary, narrativeBrew, narrativeConsume } from "../social/diary.js";
 import { awardProfessionXp, PROFESSION_XP, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
@@ -15,6 +16,16 @@ import { randomUUID } from "crypto";
 import { advanceGatherQuests } from "../social/questSystem.js";
 
 const lastBrewTime = new Map<string, number>();
+
+async function controlsWallet(
+  authenticatedWallet: string,
+  targetWallet: string | undefined | null
+): Promise<boolean> {
+  if (!targetWallet) return false;
+  if (authenticatedWallet.toLowerCase() === targetWallet.toLowerCase()) return true;
+  const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+  return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+}
 
 export interface AlchemyRecipe {
   recipeId: string;
@@ -552,7 +563,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     }
 
     // Verify authenticated wallet matches request wallet
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -590,6 +601,18 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     if (!entity) {
       reply.code(404);
       return { error: "Entity not found" };
+    }
+    if (entity.type !== "player") {
+      reply.code(400);
+      return { error: "Only player entities can brew potions" };
+    }
+    if (!(await controlsWallet(authenticatedWallet, entity.walletAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to control this player" };
+    }
+    if (entity.walletAddress?.toLowerCase() !== walletAddress.toLowerCase()) {
+      reply.code(400);
+      return { error: "walletAddress does not match entity owner" };
     }
 
     // Enforce brewing cooldown

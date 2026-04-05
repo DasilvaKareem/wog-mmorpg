@@ -5,6 +5,7 @@
  */
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
@@ -684,6 +685,26 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     });
   }, []);
 
+  // Listen for empty-ground clicks — send agent to that position immediately
+  const agentRunning = status?.running ?? false;
+  React.useEffect(() => {
+    return gameBus.on("agentGoToPosition", async ({ x, y, zoneId }) => {
+      if (!token || !agentRunning) return;
+      addSystemMsg(`Moving agent to (${Math.round(x)}, ${Math.round(y)})...`);
+      try {
+        const res = await fetch(`${API_URL}/agent/goto-position`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ x, y, zoneId }),
+        });
+        const data = await res.json();
+        if (!res.ok) addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      }
+    });
+  }, [token, agentRunning]);
+
   async function confirmGoto(actionOverride?: string) {
     if (!pendingGoto || !token) return;
     const { entityId, zoneId, name, teachesProfession, action: pendingAction, questId, questTitle } = pendingGoto;
@@ -743,7 +764,11 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   return (
     <div
       data-tutorial-id="agent-chat-panel"
-      className={`flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${collapsed ? "" : "h-full"} ${className}`}
+      className={cn(
+        "pointer-events-auto flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000]",
+        className,
+        collapsed ? "h-auto" : "h-full",
+      )}
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">

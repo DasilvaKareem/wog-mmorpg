@@ -16,6 +16,7 @@ import { computeStatsAtLevel } from "../character/leveling.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
+import { findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -273,6 +274,27 @@ export function registerSpawnOrders(server: FastifyInstance) {
     // Initialize reputation for player agents when identity is available
     if (type === "player" && entity.agentId != null) {
       reputationManager.ensureInitialized(entity.agentId);
+    }
+
+    // Async identity recovery: if entity has characterTokenId but no agentId,
+    // check the chain and patch the entity + Redis save in the background.
+    if (type === "player" && entity.characterTokenId != null && entity.agentId == null) {
+      findIdentityByCharacterTokenId(entity.characterTokenId, walletAddress)
+        .then(async (found) => {
+          if (!found?.agentId) return;
+          entity.agentId = found.agentId;
+          reputationManager.ensureInitialized(found.agentId);
+          if (walletAddress) {
+            await saveCharacter(walletAddress, entity.name, {
+              agentId: found.agentId.toString(),
+              chainRegistrationStatus: "registered",
+            });
+          }
+          server.log.info(`[spawn] Recovered agentId=${found.agentId} for "${entity.name}" from chain`);
+        })
+        .catch((err) => {
+          server.log.debug(`[spawn] Identity recovery failed for "${entity.name}": ${err.message?.slice(0, 60)}`);
+        });
     }
 
     server.log.info(

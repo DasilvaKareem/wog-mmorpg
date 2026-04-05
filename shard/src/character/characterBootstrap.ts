@@ -661,7 +661,7 @@ export async function startCharacterBootstrapWorker(logger?: FastifyBaseLogger):
     }
   };
 
-  await run();
+  void run();
   workerTimer = setInterval(() => {
     void run();
   }, 5_000);

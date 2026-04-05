@@ -192,7 +192,10 @@ export function PlayerPanel({ className }: PlayerPanelProps): React.ReactElement
   const totalPlayers = lobbies.reduce((sum, lobby) => sum + lobby.players.length, 0);
 
   return (
-    <Card className={cn("pointer-events-auto", className)} data-tutorial-id="ranks-panel">
+    <Card
+      className={cn("pointer-events-auto", className, collapsed ? "h-auto" : "h-full")}
+      data-tutorial-id="ranks-panel"
+    >
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">

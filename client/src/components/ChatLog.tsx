@@ -151,7 +151,7 @@ export function ChatLog({ zoneId, className, embedded = false }: ChatLogProps): 
   }
 
   return (
-    <Card className={cn("pointer-events-auto flex flex-col", className)}>
+    <Card className={cn("pointer-events-auto flex flex-col", className, collapsed ? "h-auto" : "h-full")}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">

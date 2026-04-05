@@ -16,7 +16,7 @@ export function buildQuestGiverArcId(npcName: string): string {
 function objectiveSummary(quest: Quest): string {
   switch (quest.objective.type) {
     case "talk":
-      return `Speak with ${quest.objective.targetNpcName ?? quest.npcId}.`;
+      return `Listen to what ${quest.objective.targetNpcName ?? quest.npcId} has to say about "${quest.title}".`;
     case "kill":
       return quest.objective.targetMobName
         ? `Defeat ${quest.objective.count} ${quest.objective.targetMobName}.`
@@ -55,7 +55,7 @@ function turnInLine(quest: Quest): string {
 }
 
 function idleLine(npcName: string): string {
-  return `${npcName} folds their arms. "No contract needs your attention from me right now."`;
+  return `${npcName} nods. "I have nothing more for you at the moment. Return later."`;
 }
 
 function buildQuestNodes(quest: Quest): Record<string, QuestGraphNode> {
@@ -104,10 +104,10 @@ function buildQuestNodes(quest: Quest): Record<string, QuestGraphNode> {
       id: `${quest.id}_freeform`,
       type: "freeform",
       speaker: "npc",
-      text: `Speak plainly about \"${quest.title}\".`,
-      prompt: "Ask about the contract in your own words.",
-      placeholder: "Example: I'll take the job. What exactly do you need?",
-      fallbackText: `${quest.npcId} waits a beat. "Be direct. Accept it, ask for details, or step aside."`,
+      text: `"Go ahead — ask me anything about ${quest.title}."`,
+      prompt: `Respond to ${quest.npcId}.`,
+      placeholder: "What would you like to say?",
+      fallbackText: `${quest.npcId} pauses, waiting for a clearer answer.`,
       routes: [
         {
           id: `${quest.id}_freeform_accept`,
@@ -253,7 +253,7 @@ function buildQuestGiverArc(npcName: string, quests: Quest[]): QuestArcDefinitio
     scene_end: {
       id: "scene_end",
       type: "end",
-      text: `${npcName}'s current scene is complete.`,
+      text: `${npcName} turns back to their work.`,
     },
   };
 
@@ -272,7 +272,7 @@ function buildQuestGiverArc(npcName: string, quests: Quest[]): QuestArcDefinitio
       root: {
         id: "root",
         npcName,
-        title: `${npcName} Contract Board`,
+        title: `${npcName}`,
         startNodeId: "root",
         nodes,
       },

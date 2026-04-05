@@ -5,6 +5,7 @@
  */
 import {
   getReputationOnChain,
+  hasChainFeedback,
   initReputationOnChain,
   registerReputationChainListener,
   submitFeedbackOnChain,
@@ -103,7 +104,11 @@ export class ReputationManager {
   }
 
   private scheduleChainReconcile(agentId: string | bigint): void {
-    this.chainSyncNeeded.add(normalizeAgentId(agentId));
+    const key = normalizeAgentId(agentId);
+    // Only reconcile entities that have had feedback written on-chain.
+    // Entities with no chain feedback will always get CALL_EXCEPTION from getClients().
+    if (!hasChainFeedback(key)) return;
+    this.chainSyncNeeded.add(key);
   }
 
   private async reconcileFromChain(agentId: string | bigint): Promise<ReputationScore | null> {

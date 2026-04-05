@@ -425,8 +425,9 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
   return (
     <Card
       className={cn(
-        "pointer-events-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden",
+        "pointer-events-auto flex min-h-0 w-full max-w-none flex-col overflow-hidden",
         className,
+        collapsed ? "h-auto" : "h-full",
       )}
       data-tutorial-id="wallet-panel"
     >

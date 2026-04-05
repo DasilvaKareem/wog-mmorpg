@@ -1372,6 +1372,60 @@ export async function doGotoNpc(
     ctx.setEntityGotoMode(true);
 
     const config = await getAgentConfig(ctx.userWallet);
+
+    // ── Position-based goto (click-to-move) ─────────────────────────────
+    const pos = config?.gotoPosition;
+    if (pos) {
+      // Wrong zone — travel there first
+      if (pos.zoneId !== ctx.currentRegion) {
+        const neighbors = getZoneConnections(ctx.currentRegion).map((zone) => ({
+          zone,
+          levelReq: ZONE_LEVEL_REQUIREMENTS[zone] ?? 1,
+        }));
+        const nextZone = neighbors.find((n) => n.zone === pos.zoneId)
+          ? pos.zoneId
+          : findNextZoneOnPath(neighbors, pos.zoneId);
+        if (nextZone) {
+          ctx.issueCommand({ action: "travel", targetZone: nextZone });
+          void ctx.logActivity(`Heading to ${pos.zoneId} for waypoint`);
+          return actionProgressed(`Traveling toward waypoint in ${pos.zoneId}`);
+        }
+        return actionBlocked(`No route to ${pos.zoneId}`, {
+          failureKey: `goto:route:${pos.zoneId}`,
+        });
+      }
+
+      // In the right zone — walk toward position
+      const zs = await ctx.getZoneState();
+      if (!zs) return actionIdle("Zone state unavailable");
+      const { me } = zs;
+
+      const dist = Math.hypot(pos.x - me.x, pos.y - me.y);
+      if (dist <= 35) {
+        // Arrived — clear position, idle
+        void ctx.logActivity(`Arrived at waypoint (${Math.round(pos.x)}, ${Math.round(pos.y)})`);
+        ctx.setEntityGotoMode(false);
+        await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
+        ctx.setScript(null);
+        return actionCompleted("Arrived at waypoint");
+      }
+
+      // Still walking — issue/reissue move command
+      const moving = await ctx.moveToEntity(me, { x: pos.x, y: pos.y, name: "waypoint" } as any);
+      if (moving) {
+        void ctx.logActivity(`Walking to waypoint (${Math.round(dist)} away)`);
+        return actionProgressed("Walking to waypoint");
+      }
+
+      // moveToEntity returned false = close enough
+      void ctx.logActivity(`Arrived at waypoint`);
+      ctx.setEntityGotoMode(false);
+      await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
+      ctx.setScript(null);
+      return actionCompleted("Arrived at waypoint");
+    }
+
+    // ── Entity-based goto (NPC click) ───────────────────────────────────
     const target = config?.gotoTarget;
     if (!target) {
       ctx.setEntityGotoMode(false);
@@ -1820,6 +1874,15 @@ async function fallbackToCombat(
 const RANK_TO_KEY_TOKEN: Record<string, bigint> = {
   E: 134n, D: 135n, C: 136n, B: 137n, A: 138n, S: 139n,
 };
+/** Rank → gate essence (reagent) token ID mapping */
+const RANK_TO_REAGENT_TOKEN: Record<string, bigint> = {
+  E: 128n, D: 129n, C: 130n, B: 131n, A: 132n, S: 133n,
+};
+/** Rank → alchemy recipe ID for brewing the gate essence */
+const RANK_TO_ESSENCE_RECIPE: Record<string, string> = {
+  E: "crude-gate-essence", D: "lesser-gate-essence", C: "gate-essence",
+  B: "greater-gate-essence", A: "superior-gate-essence", S: "supreme-gate-essence",
+};
 const RANK_LEVEL_REQS: Record<string, number> = {
   E: 3, D: 7, C: 12, B: 18, A: 28, S: 40,
 };
@@ -1892,13 +1955,106 @@ export async function doDungeon(
     const rank = targetGate.gateRank as string;
     const keyTokenId = RANK_TO_KEY_TOKEN[rank];
 
-    // ── Phase 3: Check key ──────────────────────────────────────────────
+    // ── Phase 3: Check key — brew essence / forge key if missing ──────
     if (keyTokenId) {
       try {
         const keyBalance = await getItemBalance(ctx.custodialWallet, keyTokenId);
         if (keyBalance < 1n) {
-          void ctx.logActivity(`No ${rank}-Key to open gate — need to forge one`);
-          return fallbackToCombat(ctx, `Missing ${rank}-Key for dungeon gate`, strategy);
+          const reagentTokenId = RANK_TO_REAGENT_TOKEN[rank];
+          const essenceRecipeId = RANK_TO_ESSENCE_RECIPE[rank];
+
+          // Check if we already have the gate essence reagent
+          let hasReagent = false;
+          if (reagentTokenId) {
+            try {
+              const reagentBalance = await getItemBalance(ctx.custodialWallet, reagentTokenId);
+              hasReagent = reagentBalance >= 1n;
+            } catch {
+              // If balance check fails, try brewing first
+            }
+          }
+
+          if (hasReagent) {
+            // We have the reagent — forge the key at the enchanting altar
+            const altar = ctx.findNearestEntity(entities, me, (e) => e.type === "enchanting-altar");
+            if (!altar) {
+              void ctx.logActivity(`Have gate essence but no enchanting altar — fighting while waiting`);
+              return fallbackToCombat(ctx, `No enchanting altar to forge ${rank}-Key`, strategy);
+            }
+            const [altarId, altarEntity] = altar;
+            const moving = await ctx.moveToEntity(me, altarEntity);
+            if (moving) {
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Moving to enchanting altar to forge ${rank}-Key` });
+              return actionProgressed(`Moving to ${altarEntity.name ?? "enchanting altar"} to forge ${rank}-Key`);
+            }
+
+            try {
+              await ctx.api("POST", "/dungeon/forge-key", {
+                walletAddress: ctx.custodialWallet,
+                zoneId: ctx.currentRegion,
+                entityId: ctx.entityId,
+                altarId,
+                reagentTokenId: Number(reagentTokenId),
+              });
+              void ctx.logActivity(`Forged ${rank}-Key at ${altarEntity.name ?? "enchanting altar"}`);
+              logZoneEvent({
+                zoneId: ctx.currentRegion, type: "profession", tick: 0,
+                message: `${me.name} forged a ${rank}-Key at the enchanting altar`,
+                entityId: ctx.entityId, entityName: me.name,
+                data: { profession: "enchanting", target: `${rank}-Key` },
+              });
+              // Key forged — continue to Phase 4 (party + gate opening) on next tick
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `${rank}-Key forged — heading to gate` });
+              return actionProgressed(`Forged ${rank}-Key — heading to dungeon gate`);
+            } catch (err: any) {
+              const reason = formatAgentError(err);
+              void ctx.logActivity(`Key forging failed: ${reason}`);
+              return actionBlocked(reason, { failureKey: `dungeon:forge-key:${rank}` });
+            }
+          } else {
+            // No reagent — brew the gate essence at the alchemy lab
+            const learned = await ctx.learnProfession("alchemy");
+            if (!learned) {
+              return actionProgressed("Need alchemy to brew gate essence — learning");
+            }
+
+            const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
+            if (!lab) {
+              void ctx.logActivity(`Need gate essence but no alchemy lab — fighting while waiting`);
+              return fallbackToCombat(ctx, `No alchemy lab to brew ${rank} gate essence`, strategy);
+            }
+            const [labId, labEntity] = lab;
+            const moving = await ctx.moveToEntity(me, labEntity);
+            if (moving) {
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Moving to alchemy lab to brew gate essence` });
+              return actionProgressed(`Moving to ${labEntity.name ?? "alchemy lab"} to brew gate essence`);
+            }
+
+            try {
+              await ctx.api("POST", "/alchemy/brew", {
+                walletAddress: ctx.custodialWallet,
+                zoneId: ctx.currentRegion,
+                entityId: ctx.entityId,
+                alchemyLabId: labId,
+                recipeId: essenceRecipeId,
+              });
+              void ctx.logActivity(`Brewed gate essence for ${rank}-Key`);
+              logZoneEvent({
+                zoneId: ctx.currentRegion, type: "profession", tick: 0,
+                message: `${me.name} brewed a gate essence for ${rank}-Key`,
+                entityId: ctx.entityId, entityName: me.name,
+                data: { profession: "alchemy", target: essenceRecipeId },
+              });
+              // Essence brewed — next tick will forge the key
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Gate essence brewed — forge key next` });
+              return actionProgressed(`Brewed gate essence — will forge ${rank}-Key next`);
+            } catch (err: any) {
+              const reason = formatAgentError(err);
+              void ctx.logActivity(`Gate essence brewing failed: ${reason} — gathering materials`);
+              // Missing materials — go gather
+              return doGathering(ctx, strategy, "both");
+            }
+          }
         }
       } catch {
         // If blockchain check fails, try anyway

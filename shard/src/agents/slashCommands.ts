@@ -26,6 +26,7 @@ import {
   getAgentCustodialWallet,
   patchAgentConfig,
   type AgentFocus,
+  type GatherPreference,
   type AgentStrategy,
 } from "./agentConfigStore.js";
 import { agentManager } from "./agentManager.js";
@@ -341,7 +342,7 @@ cmd({
     const VALID_FOCUSES: Record<string, AgentFocus> = {
       combat: "combat", fight: "combat", grind: "combat",
       quest: "questing", questing: "questing",
-      gather: "gathering", gathering: "gathering", mine: "gathering", herb: "gathering",
+      gather: "gathering", gathering: "gathering", mine: "gathering", herb: "gathering", herbalism: "gathering",
       craft: "crafting", crafting: "crafting", forge: "crafting",
       brew: "alchemy", alchemy: "alchemy", potion: "alchemy",
       cook: "cooking", cooking: "cooking",
@@ -360,6 +361,15 @@ cmd({
     }
 
     const patch: Record<string, unknown> = { focus };
+    if (focus === "gathering") {
+      const gatherNodeType: GatherPreference =
+        focusInput === "mine" ? "ore" :
+        (focusInput === "herb" || focusInput === "herbalism") ? "herb" :
+        "both";
+      patch.gatherNodeType = gatherNodeType;
+    } else {
+      patch.gatherNodeType = undefined;
+    }
     if (focus === "traveling" && zoneInput) {
       const resolved = resolveRegionId(zoneInput);
       if (resolved) patch.targetZone = resolved;
