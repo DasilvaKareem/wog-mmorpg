@@ -33,6 +33,7 @@ import {
 const PROFESSION_HUB_ZONE = "village-square";
 const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
 const SICKLE_TOKENS: Record<number, number> = { 41: 1, 42: 2, 43: 3, 44: 4 };
+const HOE_TOKENS: Record<number, number> = { 220: 1, 221: 2, 222: 3, 223: 4 };
 const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
 const AUCTION_LISTING_FEE_COPPER = 50;
 const AUCTION_RELIST_COOLDOWN_MS = 10 * 60_000;
@@ -357,6 +358,14 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResu
 type GatherPreference = "ore" | "herb" | "both";
 type GatheringToolKind = "pickaxe" | "sickle";
 
+/**
+ * Nodes blacklisted due to "skill too low" — prevents agents from
+ * hammering the same node hundreds of times. Entries expire after 5 minutes
+ * so the agent retries once its skill may have improved.
+ */
+const gatherSkillBlacklist = new Set<string>();
+setInterval(() => gatherSkillBlacklist.clear(), 5 * 60_000);
+
 function matchesTool(name: string | undefined, toolKind: GatheringToolKind): boolean {
   const lower = name?.toLowerCase() ?? "";
   return toolKind === "pickaxe" ? lower.includes("pickaxe") : lower.includes("sickle");
@@ -385,7 +394,8 @@ function findGatherNode(
   preference: GatherPreference,
 ): [string, any] | null {
   const matches = Object.entries(entities)
-    .filter(([, e]) => {
+    .filter(([id, e]) => {
+      if (gatherSkillBlacklist.has(id)) return false;
       const alive = !e.depletedAtTick && (e.charges ?? 0) > 0;
       if (preference === "ore") return e.type === "ore-node" && alive;
       if (preference === "herb") return e.type === "flower-node" && alive;
@@ -630,6 +640,17 @@ export async function doGathering(
         return actionCompleted(`Mined ${nodeEntity.name ?? "ore node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
+        if (/skill too low/i.test(reason)) {
+          gatherSkillBlacklist.add(nodeId);
+          void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
+          return actionBlocked(reason, {
+            failureKey: `mining:skill:${ctx.currentRegion}`,
+            endpoint: "/mining/gather",
+            targetId: nodeId,
+            targetName: nodeEntity.name,
+            category: "strategic",
+          });
+        }
         void ctx.logActivity(`Mining failed: ${reason}`);
         return actionBlocked(reason, {
           failureKey: `mining:${nodeId}`,
@@ -660,6 +681,18 @@ export async function doGathering(
         return actionCompleted(`Gathered ${nodeEntity.name ?? "flower node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
+        // Skill too low — blacklist this node and try a lower-tier one
+        if (/skill too low/i.test(reason)) {
+          gatherSkillBlacklist.add(nodeId);
+          void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
+          return actionBlocked(reason, {
+            failureKey: `herbalism:skill:${ctx.currentRegion}`,
+            endpoint: "/herbalism/gather",
+            targetId: nodeId,
+            targetName: nodeEntity.name,
+            category: "strategic",
+          });
+        }
         void ctx.logActivity(`Herbalism failed: ${reason}`);
         return actionBlocked(reason, {
           failureKey: `herbalism:${nodeId}`,
@@ -673,6 +706,119 @@ export async function doGathering(
     const reason = formatAgentError(err);
     console.debug(`[agent] gathering tick: ${reason.slice(0, 60)}`);
     return actionBlocked(reason, { failureKey: `gather:error:${ctx.currentRegion}` });
+  }
+}
+
+// ── Farming ─────────────────────────────────────────────────────────────────
+
+function findCropNode(
+  entities: Record<string, any>,
+  me: any,
+): [string, any] | null {
+  const matches = Object.entries(entities)
+    .filter(([, e]) => e.type === "crop-node" && !e.depletedAtTick && (e.charges ?? 0) > 0)
+    .sort(([, a], [, b]) => {
+      const tierA = a.requiredHoeTier ?? 1;
+      const tierB = b.requiredHoeTier ?? 1;
+      const tierDiff = tierA - tierB;
+      if (tierDiff !== 0) return tierDiff;
+      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
+    });
+  return matches[0] as [string, any] ?? null;
+}
+
+export async function doFarming(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+): Promise<ActionResult> {
+  try {
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    const node = findCropNode(entities, me);
+    if (!node) {
+      return fallbackToCombat(ctx, "No crop nodes in this zone — travel to a farmland zone", strategy);
+    }
+
+    const [nodeId, nodeEntity] = node;
+
+    // Ensure a hoe is equipped — buy one if needed
+    const equipped = me.equipment?.weapon;
+    const equippedHoeTier = equipped ? (HOE_TOKENS[equipped.tokenId] ?? 0) : 0;
+    if (equippedHoeTier === 0) {
+      const merchant = Object.entries(entities).find(
+        ([, e]) => e.type === "npc" && (e.npcRole === "merchant" || e.npcRole === "shop"),
+      );
+      if (merchant) {
+        const [, merchantEntity] = merchant;
+        const moving = await ctx.moveToEntity(me, merchantEntity);
+        if (moving) return actionProgressed("Moving to merchant to buy a hoe");
+        try {
+          await ctx.api("POST", "/shop/buy", {
+            walletAddress: ctx.custodialWallet,
+            zoneId: ctx.currentRegion,
+            entityId: ctx.entityId,
+            tokenId: "220",
+            quantity: 1,
+          });
+          await ctx.api("POST", "/equipment/equip", {
+            walletAddress: ctx.custodialWallet,
+            tokenId: "220",
+            entityId: ctx.entityId,
+          });
+          void ctx.logActivity("Bought and equipped Wooden Hoe");
+          return actionProgressed("Equipped a hoe — ready to farm");
+        } catch (err: any) {
+          return actionBlocked(formatAgentError(err), {
+            failureKey: "farm:buy-hoe",
+            endpoint: "/shop/buy",
+          });
+        }
+      }
+      return actionBlocked("No hoe equipped and no merchant nearby", { failureKey: "farm:no-hoe" });
+    }
+
+    // Move to crop node
+    const moving = await ctx.moveToEntity(me, nodeEntity);
+    if (moving) return actionProgressed(`Moving to ${nodeEntity.name ?? "crop node"}`);
+
+    // Harvest
+    try {
+      await ctx.api("POST", "/farming/harvest", {
+        walletAddress: ctx.custodialWallet,
+        zoneId: ctx.currentRegion,
+        entityId: ctx.entityId,
+        cropNodeId: nodeId,
+      });
+      void ctx.logActivity(`Harvested ${nodeEntity.name ?? "crop"}`);
+      logZoneEvent({
+        zoneId: ctx.currentRegion, type: "profession", tick: 0,
+        message: `${me.name} is harvesting ${nodeEntity.name ?? "crops"}`,
+        entityId: ctx.entityId, entityName: me.name,
+        data: { profession: "farming", target: nodeEntity.name },
+      });
+      emitAgentChat({
+        entityId: ctx.entityId, entityName: me.name ?? "Agent",
+        zoneId: ctx.currentRegion, event: "gathering",
+        origin: me.origin, classId: me.classId,
+        detail: nodeEntity.name,
+      });
+      return actionCompleted(`Harvested ${nodeEntity.name ?? "crop"}`);
+    } catch (err: any) {
+      const reason = formatAgentError(err);
+      void ctx.logActivity(`Farming failed: ${reason}`);
+      return actionBlocked(reason, {
+        failureKey: `farm:${nodeId}`,
+        endpoint: "/farming/harvest",
+        targetId: nodeId,
+        targetName: nodeEntity.name,
+      });
+    }
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    console.debug(`[agent] farming tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `farm:error:${ctx.currentRegion}` });
   }
 }
 
