@@ -135,6 +135,37 @@ function getLowestHpAlly(entity: any, entities: Record<string, any>): any | null
   return (lowest.hp / Math.max(1, lowest.maxHp)) < 0.9 ? lowest : null;
 }
 
+function logPartyCoordination(
+  ctx: AgentContext,
+  me: any,
+  kind: string,
+  message: string,
+  data?: Record<string, unknown>,
+  cooldownMs = 3_000,
+): void {
+  ctx.recordPartyCoordination(kind);
+  const cooldownKey = `party-log:${kind}:${data?.targetId ?? data?.leaderId ?? ""}`;
+  if (ctx.isInteractionOnCooldown(cooldownKey)) return;
+  ctx.setInteractionCooldown(cooldownKey, cooldownMs);
+
+  logZoneEvent({
+    zoneId: ctx.currentRegion,
+    type: "party",
+    tick: 0,
+    message,
+    entityId: me.id,
+    entityName: me.name,
+    targetId: typeof data?.targetId === "string" ? data.targetId : undefined,
+    targetName: typeof data?.targetName === "string" ? data.targetName : undefined,
+    data: {
+      kind,
+      leaderId: data?.leaderId,
+      leaderName: data?.leaderName,
+      ...data,
+    },
+  });
+}
+
 function pickCombatTechnique(entity: any, target: any, zoneTick: number, entities: Record<string, any>): TechniqueDefinition | null {
   const learned = entity.learnedTechniques ?? [];
   if (learned.length === 0) return null;
@@ -413,6 +444,7 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: R
   const technique = pickCombatTechnique(me, target, zoneTick, entities);
   if (technique) {
     const targetId = getTechniqueTargetId(me, target, technique, entities);
+    const commandTarget = entities[targetId] ?? getWorldEntity(targetId) ?? target;
     const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: technique.id });
     if (!issued) {
       return actionBlocked(`Could not use ${technique.name}`, {
@@ -421,7 +453,33 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: R
         targetName: target.name ?? "target",
       });
     }
-    const targetLabel = targetId === me.id ? "self" : (target.name ?? "target");
+    if (technique.targetType === "party") {
+      logPartyCoordination(ctx, me, "party-technique", `${me.name ?? "Party member"} uses ${technique.name} for the party`, {
+        techniqueId: technique.id,
+        techniqueName: technique.name,
+      });
+    } else if (technique.targetType === "ally" && targetId !== me.id) {
+      const allyTarget = commandTarget;
+      const leaderId = getPartyLeaderId(me.id);
+      const isLeaderTarget = targetId === leaderId;
+      const kind = technique.type === "healing"
+        ? (isLeaderTarget ? "heal-leader" : "heal-ally")
+        : (isLeaderTarget ? "buff-leader" : "buff-ally");
+      logPartyCoordination(
+        ctx,
+        me,
+        kind,
+        `${me.name ?? "Party member"} uses ${technique.name} on ${allyTarget?.name ?? "an ally"}`,
+        {
+          targetId,
+          targetName: allyTarget?.name,
+          techniqueId: technique.id,
+          techniqueName: technique.name,
+          leaderId,
+        },
+      );
+    }
+    const targetLabel = targetId === me.id ? "self" : (commandTarget.name ?? "target");
     void ctx.logActivity(`Using ${technique.name} on ${targetLabel}`);
     return actionProgressed(`Using ${technique.name} on ${targetLabel}`);
   }
@@ -605,7 +663,14 @@ export async function doCombat(
         const distToLeader = Math.hypot((leader.x ?? 0) - (me.x ?? 0), (leader.y ?? 0) - (me.y ?? 0));
         if (distToLeader > 60) {
           const moving = await ctx.moveToEntity(me, leader, 30);
-          if (moving) return actionProgressed(`Following party leader ${leader.name ?? "leader"}`);
+          if (moving) {
+            logPartyCoordination(ctx, me, "follow-leader", `${me.name ?? "Party member"} is following ${leader.name ?? "leader"}`, {
+              leaderId: leader.id,
+              leaderName: leader.name,
+              distance: Math.round(distToLeader),
+            });
+            return actionProgressed(`Following party leader ${leader.name ?? "leader"}`);
+          }
         }
       }
     }
@@ -659,6 +724,15 @@ export async function doCombat(
 
     const partyTarget = pickPartyCombatTarget(me, entities);
     if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy)) {
+      const leader = partyLeaderId ? entities[partyLeaderId] : null;
+      const leaderTargetId = leader?.order?.targetId;
+      const kind = leaderTargetId === partyTarget.id ? "assist-leader-target" : "assist-party-tag";
+      logPartyCoordination(ctx, me, kind, `${me.name ?? "Party member"} is assisting on ${partyTarget.name ?? "target"}`, {
+        targetId: partyTarget.id,
+        targetName: partyTarget.name,
+        leaderId: partyLeaderId,
+        leaderName: leader?.name,
+      });
       return engageCombatTarget(ctx, me, partyTarget, entities);
     }
 
@@ -2032,7 +2106,19 @@ export async function doQuesting(
       const questMobNames = new Set(
         killQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
       );
-      return doQuestCombat(ctx, strategy, questMobNames);
+      const combatResult = await doQuestCombat(ctx, strategy, questMobNames);
+
+      // If combat is blocked, do something productive instead of spinning
+      if (combatResult.status === "blocked") {
+        // Try gather/craft quests first
+        if (hasGatherQuest) {
+          void ctx.logActivity("Quest combat blocked — gathering for quest instead");
+          return doGathering(ctx, strategy);
+        }
+        // Otherwise do any productive non-combat activity
+        return questBlockedFallback(ctx, strategy, combatResult.reason ?? "no safe targets", findNextZoneForLevel, me);
+      }
+      return combatResult;
     } else if (hasGatherQuest) {
       void ctx.logActivity("Gathering resources for quest");
       return doGathering(ctx, strategy);
@@ -2099,6 +2185,44 @@ async function doQuestCombat(
     console.debug(`[agent] quest combat tick: ${reason.slice(0, 60)}`);
     return actionBlocked(reason, { failureKey: `quest-combat:error:${ctx.currentRegion}` });
   }
+}
+
+// ── Quest blocked fallback ──────────────────────────────────────────────────
+
+/**
+ * When quest combat is blocked (no safe targets), pick a productive fallback
+ * instead of spinning on the same blocked action forever.
+ */
+async function questBlockedFallback(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  reason: string,
+  findNextZoneForLevel: (level: number) => string | null,
+  me: any,
+): Promise<ActionResult> {
+  const myLevel = me.level ?? 1;
+
+  // Option 1: Zone is too hard — travel to an appropriate zone
+  const zoneReq = ZONE_LEVEL_REQUIREMENTS[ctx.currentRegion] ?? 1;
+  if (myLevel < zoneReq) {
+    const betterZone = findNextZoneForLevel(myLevel);
+    if (betterZone && betterZone !== ctx.currentRegion) {
+      console.log(`[agent:${ctx.walletTag}] Quest combat blocked, underleveled (Lv${myLevel} in L${zoneReq} zone) — traveling to ${betterZone}`);
+      void ctx.logActivity(`Too dangerous here (Lv${myLevel} in L${zoneReq} zone) — heading to ${betterZone}`);
+      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: betterZone });
+      ctx.setScript(null);
+      return actionProgressed(`Traveling to ${betterZone} — current zone too dangerous`);
+    }
+  }
+
+  // Option 2: Try gathering — always productive, earns profession XP
+  void ctx.logActivity(`Quest combat blocked (${reason}) — gathering while waiting`);
+  const gatherResult = await doGathering(ctx, strategy);
+  if (gatherResult.status !== "blocked") return gatherResult;
+
+  // Option 3: Try crafting with existing materials
+  void ctx.logActivity("Gathering blocked too — trying to craft");
+  return actionProgressed(`Quest combat paused: ${reason} — looking for other work`);
 }
 
 // ── Shared helper ────────────────────────────────────────────────────────────

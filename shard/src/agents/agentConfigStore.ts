@@ -9,6 +9,7 @@
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import type { AgentTier } from "./agentTiers.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
+import type { Edict } from "../combat/edicts.js";
 
 export type AgentFocus =
   | "questing"
@@ -90,6 +91,8 @@ export interface AgentConfig {
   sessionStartedAt?: number;
   /** Ordered list of objectives — agent works through them in order */
   objectives?: AgentObjective[];
+  /** Ordered combat edicts (gambit rules) — evaluated top-to-bottom each tick */
+  edicts?: Edict[];
 }
 
 export interface AgentEntityRef {

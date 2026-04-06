@@ -123,6 +123,7 @@ interface AgentTelemetrySnapshot {
     topTargets: Array<{ name: string; count: number }>;
     topReasons: Array<{ name: string; count: number }>;
   };
+  party: Record<string, number>;
   triggers: Record<string, number>;
   lastLoopAt: number | null;
 }
@@ -245,6 +246,7 @@ export class AgentRunner {
       byTarget: {} as Record<string, number>,
       byReason: {} as Record<string, number>,
     },
+    party: {} as Record<string, number>,
     triggers: {} as Record<string, number>,
     lastLoopAt: null as number | null,
   };
@@ -774,9 +776,14 @@ export class AgentRunner {
         topTargets: this.topCountEntries(this.telemetry.failures.byTarget),
         topReasons: this.topCountEntries(this.telemetry.failures.byReason),
       },
+      party: { ...this.telemetry.party },
       triggers: { ...this.telemetry.triggers },
       lastLoopAt: this.telemetry.lastLoopAt,
     };
+  }
+
+  private recordPartyCoordination(kind: string): void {
+    this.telemetry.party[kind] = (this.telemetry.party[kind] ?? 0) + 1;
   }
 
   private async getZoneState(): Promise<{ entities: Record<string, any>; me: any; recentEvents: ZoneEvent[] } | null> {
@@ -883,6 +890,29 @@ export class AgentRunner {
     return next;
   }
 
+  /**
+   * Circuit breaker: pick an alternative focus when the current script is stuck.
+   * Cycles through fallback activities, skipping the one the agent is already doing.
+   */
+  private pickCircuitBreakerFocus(stuckScriptType: string): AgentFocus | null {
+    // Map script types to their parent focus so we can skip the current one
+    const scriptToFocus: Record<string, AgentFocus> = {
+      quest: "questing", combat: "combat", gather: "gathering",
+      craft: "crafting", brew: "alchemy", cook: "cooking",
+      enchant: "enchanting", shop: "shopping", farm: "farming",
+      leatherwork: "leatherworking", jewelcraft: "jewelcrafting",
+      learn: "learning",
+    };
+    const currentFocus = scriptToFocus[stuckScriptType] ?? this.lastFocus;
+
+    // Ordered fallback rotation — diverse enough to unstick most situations
+    const fallbacks: AgentFocus[] = [
+      "gathering", "crafting", "farming", "questing", "cooking",
+      "alchemy", "shopping", "combat",
+    ];
+    return fallbacks.find((f) => f !== currentFocus) ?? null;
+  }
+
   private maybeScheduleBlockedTrigger(failure: FailureMemoryEntry): void {
     const threshold = failure.category === "strategic" ? 2 : 3;
     if (failure.consecutive < threshold) return;
@@ -925,6 +955,26 @@ export class AgentRunner {
         const what = script?.type ?? "action";
         const why = result.reason ?? "unknown error";
         void this.logActivity(`[STUCK] ${what} blocked 10x in a row: ${why} — may need a different approach`);
+      }
+
+      // ── Circuit breaker: 15 consecutive blocks → rotate to a different focus ──
+      if (failure.consecutive >= 15) {
+        const currentType = script?.type ?? "unknown";
+        const fallback = this.pickCircuitBreakerFocus(currentType);
+        if (fallback) {
+          console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to ${fallback}`);
+          void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to ${fallback}`);
+          this.logError("action", `Circuit breaker fired: ${currentType} → ${fallback} after ${failure.consecutive} blocks`, {
+            fromScript: currentType,
+            toFocus: fallback,
+            reason: failure.reason,
+          });
+          this.currentScript = null;
+          this.ticksSinceLastDecision = MAX_STALE_TICKS;
+          // Clear the failure so the counter resets for the new focus
+          this.clearFailure(failure.key);
+          void patchAgentConfig(this.userWallet, { focus: fallback });
+        }
       }
       return;
     }
@@ -1254,6 +1304,7 @@ export class AgentRunner {
       isInteractionOnCooldown: (key) => self.isInteractionOnCooldown(key),
       setInteractionCooldown: (key, ms) => self.setInteractionCooldown(key, ms),
       clearInteractionCooldown: (key) => self.clearInteractionCooldown(key),
+      recordPartyCoordination: (kind) => self.recordPartyCoordination(kind),
       logActivity: (text) => { void self.logActivity(text); },
       setEntityGotoMode: (on) => self.setEntityGotoMode(on),
       getWalletBalance: () => self.getWalletBalance(),

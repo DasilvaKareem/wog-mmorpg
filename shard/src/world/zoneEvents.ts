@@ -20,7 +20,8 @@ export type ZoneEventType =
   | "ability"
   | "technique"
   | "consume"
-  | "profession";
+  | "profession"
+  | "party";
 
 export interface ZoneEvent {
   id: string;

@@ -186,6 +186,7 @@ export interface AgentContext {
   isInteractionOnCooldown(key: string): boolean;
   setInteractionCooldown(key: string, ms: number): void;
   clearInteractionCooldown(key: string): void;
+  recordPartyCoordination(kind: string): void;
   logActivity(text: string): void;
   setEntityGotoMode(on: boolean): void;
   getWalletBalance(): Promise<{ copper: number; items: any[] }>;

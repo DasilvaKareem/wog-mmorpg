@@ -819,6 +819,15 @@ export function getPlayerPartyId(playerId: string): string | undefined {
   return playerToParty.get(playerId);
 }
 
+export function getPartyMemberIdsByPartyId(partyId: string): string[] | null {
+  const party = parties.get(partyId);
+  return party ? [...party.memberIds] : null;
+}
+
+export function getPartyLeaderIdByPartyId(partyId: string): string | undefined {
+  return parties.get(partyId)?.leaderId;
+}
+
 // Helper to get a party leader ID (or the player themselves if solo)
 export function getPartyLeaderId(playerId: string): string | undefined {
   const partyId = playerToParty.get(playerId);

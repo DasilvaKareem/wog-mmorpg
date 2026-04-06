@@ -13,6 +13,7 @@ import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
 import { ChatLog } from "@/components/ChatLog";
+import { EdictsDialog } from "@/components/EdictsDialog";
 import { trackGiveInstruction, trackAgentTaskStarted, trackAgentTaskCompleted, trackAgentProgressTick } from "@/lib/analytics";
 
 interface InboxMessage {
@@ -73,6 +74,8 @@ interface AgentStatusData {
     level: number;
     hp: number;
     maxHp: number;
+    classId?: string;
+    learnedTechniques?: string[];
   } | null;
   entitySource?: "live" | "saved" | null;
   currentActivity: string | null;
@@ -294,6 +297,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [authLoading, setAuthLoading] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
+  const [showEdicts, setShowEdicts] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<"chat" | "zonelog">("chat");
   const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string; action?: string; questId?: string; questTitle?: string } | null>(null);
   const [cmdSuggestions, setCmdSuggestions] = React.useState<typeof SLASH_COMMANDS>([]);
@@ -806,6 +810,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           )}
           {isDeployed && (
             <button
+              onClick={() => setShowEdicts(true)}
+              className="text-[11px] text-[#7a8b9e] hover:text-[#ffdd57] transition-colors uppercase tracking-widest"
+              title="Combat edicts"
+            >
+              [edicts]
+            </button>
+          )}
+          {isDeployed && (
+            <button
               onClick={() => setShowStopConfirm(true)}
               className="text-[11px] text-[#7a8b9e] hover:text-[#ff4d6d] transition-colors uppercase tracking-widest"
               title="Stop agent"
@@ -1231,6 +1244,16 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </div>
         </div>
       )}
+
+      {/* Edicts dialog */}
+      <EdictsDialog
+        open={showEdicts}
+        onOpenChange={setShowEdicts}
+        walletAddress={walletAddress}
+        token={token}
+        classId={status?.entity?.classId}
+        learnedTechniqueIds={status?.entity?.learnedTechniques}
+      />
 
       {/* Deploy payment overlay */}
       {showDeployPayment && (

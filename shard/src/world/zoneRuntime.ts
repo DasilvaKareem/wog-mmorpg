@@ -14,6 +14,8 @@ import { logZoneEvent, getRecentZoneEvents } from "./zoneEvents.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
+import { getEdictCache } from "../combat/edictCache.js";
+import { evaluateEdicts } from "../combat/edictEvaluator.js";
 import { randomInt, randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty, getPartyLeaderId } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
@@ -3221,6 +3223,30 @@ async function worldTick() {
       const classRange = getEntityAttackRange(entity);
       const autoCombatRange = Math.max(BASE_AUTO_COMBAT_RANGE, classRange + 20);
       const nearestMob = pickAutoCombatTarget(entity, zone, autoCombatRange);
+
+      // ── Edict evaluation (gambit system) ──────────────────────────
+      // If the player has edicts configured, evaluate them first.
+      // First match wins; if no match, fall through to default AI.
+      const edicts = entity.walletAddress ? getEdictCache(entity.walletAddress) : undefined;
+      if (edicts && edicts.length > 0) {
+        const edictResult = evaluateEdicts(entity, zone, edicts, nearestMob ?? null);
+        if (edictResult) {
+          if (edictResult.order) {
+            entity.order = edictResult.order as unknown as typeof entity.order;
+            continue;
+          }
+          const eTarget = edictResult.targetOverride ?? nearestMob;
+          if (!eTarget) continue;
+          if (edictResult.techniqueOverride) {
+            const techTarget = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
+            entity.order = { action: "technique", targetId: techTarget, techniqueId: edictResult.techniqueOverride.id };
+          } else {
+            entity.order = { action: "attack", targetId: eTarget.id };
+          }
+          continue;
+        }
+        // No edict matched — fall through to default AI below
+      }
 
       if (!nearestMob) continue;
 

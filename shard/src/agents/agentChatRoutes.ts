@@ -50,6 +50,8 @@ import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
+import { buildPartyCoordinationReport } from "../social/partyReport.js";
+import { getPartyMemberIdsByPartyId } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
@@ -57,6 +59,8 @@ import { getAgentOrigin } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
+import { validateEdicts, type Edict } from "../combat/edicts.js";
+import { setEdictCache } from "../combat/edictCache.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -521,6 +525,40 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     });
   });
 
+  // ── GET /party/report/:partyId ──────────────────────────────────────────
+  server.get<{
+    Params: { partyId: string };
+  }>("/party/report/:partyId", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { partyId } = request.params;
+    const memberIds = getPartyMemberIdsByPartyId(partyId);
+    if (!memberIds || memberIds.length === 0) {
+      return reply.code(404).send({ error: "Party not found" });
+    }
+
+    const authCustodialWallet = await getAgentCustodialWallet(authWallet);
+    const authorizedWallets = new Set([
+      authWallet.toLowerCase(),
+      authCustodialWallet?.toLowerCase() ?? "",
+    ]);
+    const hasAccess = memberIds.some((memberId) => {
+      const member = getWorldEntity(memberId) as { walletAddress?: string } | null;
+      return !!member?.walletAddress && authorizedWallets.has(member.walletAddress.toLowerCase());
+    });
+    if (!hasAccess) {
+      return reply.code(403).send({ error: "Cannot inspect another party's report" });
+    }
+
+    const report = buildPartyCoordinationReport(partyId);
+    if (!report) {
+      return reply.code(404).send({ error: "Party report unavailable" });
+    }
+
+    return reply.send(report);
+  });
+
   // ── GET /agent/errors/:walletAddress ─────────────────────────────────────
   // Returns the error log for a specific agent.
   server.get<{
@@ -958,6 +996,39 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       applied: { focus, strategy: strategy ?? "balanced", targetZone: targetZone ?? null },
       message: title ? `Now doing: ${title}` : `Focus changed to ${focus}`,
     });
+  });
+
+  // ── GET /agent/edicts/:wallet — load edicts ───────────────────────────────
+  server.get<{
+    Params: { wallet: string };
+  }>("/agent/edicts/:wallet", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const wallet = request.params.wallet.toLowerCase();
+    const config = await getAgentConfig(wallet);
+    return reply.send({ edicts: config?.edicts ?? [] });
+  });
+
+  // ── PUT /agent/edicts — save full edict list ─────────────────────────────
+  server.put<{
+    Body: { edicts: Edict[] };
+  }>("/agent/edicts", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { edicts } = request.body;
+
+    const validation = validateEdicts(edicts);
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error });
+    }
+
+    await patchAgentConfig(authWallet, { edicts });
+    // Update in-memory cache so zone tick picks it up immediately
+    setEdictCache(authWallet, edicts as Edict[]);
+
+    server.log.info(`[edicts] ${authWallet.slice(0, 8)} saved ${(edicts as Edict[]).length} edicts`);
+    return reply.send({ ok: true, edicts });
   });
 
   // ── POST /agent/chat ──────────────────────────────────────────────────────

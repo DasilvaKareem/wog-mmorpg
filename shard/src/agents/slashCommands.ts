@@ -16,8 +16,10 @@ import {
   type Entity,
 } from "../world/zoneRuntime.js";
 import { getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getWorldLayout } from "../world/worldLayout.js";
+import { getZoneEvents } from "../world/zoneEvents.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
-import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
+import { getPartyLeaderId, getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
+import { buildPartyCoordinationReport } from "../social/partyReport.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { fetchLiquidationInventory } from "./agentUtils.js";
 import {
@@ -62,6 +64,11 @@ const COMMANDS: CommandDef[] = [];
 
 function cmd(def: CommandDef) {
   COMMANDS.push(def);
+}
+
+function formatPct(numerator: number, denominator: number): string {
+  if (denominator <= 0) return "0%";
+  return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
 // ── /help ──────────────────────────────────────────────────────────────────
@@ -416,14 +423,91 @@ cmd({
     const partyId = getPlayerPartyId(ctx.entityId);
     if (!partyId) return { response: "You are not in a party." };
 
+    const leaderId = getPartyLeaderId(ctx.entityId);
     const members = getPartyMembers(ctx.entityId);
     const lines = members.map((id) => {
       const member = getEntity(id);
       if (!member) return `  (unknown)`;
-      return `  ${member.name} — L${member.level ?? "?"} ${member.classId ?? "?"} (${Math.round((member.hp / Math.max(member.maxHp, 1)) * 100)}% HP)`;
+      const leaderTag = id === leaderId ? " [leader]" : "";
+      return `  ${member.name}${leaderTag} — L${member.level ?? "?"} ${member.classId ?? "?"} (${Math.round((member.hp / Math.max(member.maxHp, 1)) * 100)}% HP)`;
     });
 
     return { response: `Party (${members.length}):\n${lines.join("\n")}` };
+  },
+});
+
+cmd({
+  aliases: ["partydebug", "partymetrics", "coord"],
+  usage: "/partydebug",
+  description: "Show recent party coordination metrics and party events",
+  handler: (_args, ctx) => {
+    if (!ctx.entityId || !ctx.entity) return { response: "No character in world." };
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (!partyId) return { response: "You are not in a party." };
+
+    const runner = agentManager.getRunner(ctx.authWallet);
+    const partyTelemetry = runner?.getSnapshot().telemetry?.party ?? {};
+    const topMetrics = Object.entries(partyTelemetry)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, count]) => `  ${name}: ${count}`);
+
+    const recentPartyEvents = getZoneEvents(ctx.entity.region ?? "unknown", 80)
+      .filter((event) => event.type === "party")
+      .slice(-6)
+      .map((event) => `  ${event.message}`);
+
+    const leaderId = getPartyLeaderId(ctx.entityId);
+    const leader = leaderId ? getEntity(leaderId) : null;
+
+    return {
+      response: [
+        `Party Debug`,
+        `Party: ${partyId}`,
+        `Leader: ${leader?.name ?? leaderId ?? "unknown"}`,
+        `Metrics:`,
+        ...(topMetrics.length > 0 ? topMetrics : ["  (no party metrics yet)"]),
+        `Recent party events:`,
+        ...(recentPartyEvents.length > 0 ? recentPartyEvents : ["  (no recent party events)"]),
+      ].join("\n"),
+    };
+  },
+});
+
+cmd({
+  aliases: ["partyreport", "partyrep", "preport"],
+  usage: "/partyreport",
+  description: "Summarize party cohesion and leader-follow effectiveness",
+  handler: (_args, ctx) => {
+    if (!ctx.entityId || !ctx.entity) return { response: "No character in world." };
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (!partyId) return { response: "You are not in a party." };
+    const report = buildPartyCoordinationReport(partyId);
+    if (!report) return { response: "Party report unavailable." };
+
+    const recentLines = report.recentEvents.length > 0
+      ? report.recentEvents.slice(0, 8).map((event) => `  ${event.message}`)
+      : ["  (no recent party events)"];
+
+    const topMetricLines = report.metrics.top.map(({ kind, count }) => `  ${kind}: ${count}`);
+
+    return {
+      response: [
+        `Party Report`,
+        `Party: ${report.partyId}`,
+        `Leader: ${report.leader.name ?? report.leader.entityId ?? "unknown"}`,
+        `Members: ${report.counts.liveMembers}/${report.counts.totalMembers} live`,
+        `Cohesion: ${report.counts.followerCount > 0 ? `${report.counts.nearLeaderFollowers}/${report.counts.followerCount} followers near leader (${report.ratios.cohesionPct}%)` : "n/a (no followers)"}`,
+        `Cohesion failures: ${report.counts.cohesionFailures} (${report.counts.offZoneFollowers} off-zone, ${report.counts.spacingFailures} too far)`,
+        `Leader-call assist share: ${report.ratios.leaderCallAssistPct}% (${report.metrics.assistLeaderTarget}/${Math.max(1, report.metrics.assistTotal)})`,
+        `Leader-support share: ${report.ratios.leaderSupportPct}% (${report.metrics.leaderSupportTotal}/${Math.max(1, report.metrics.supportTotal)})`,
+        `Follow activity share: ${report.ratios.followActivityPct}% (${report.metrics.followLeader}/${Math.max(1, report.metrics.followLeader + report.metrics.assistTotal)})`,
+        `Party metrics:`,
+        ...(topMetricLines.length > 0 ? topMetricLines : ["  (no party metrics yet)"]),
+        `Recent party events:`,
+        ...recentLines,
+      ].join("\n"),
+    };
   },
 });
 

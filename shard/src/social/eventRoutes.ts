@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { getZoneEvents, getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
+import { getZoneEvents, getAllZoneEvents, logZoneEvent, type ZoneEventType } from "../world/zoneEvents.js";
 import { getEntity } from "../world/zoneRuntime.js";
 
 export function registerEventRoutes(server: FastifyInstance) {
@@ -9,14 +9,18 @@ export function registerEventRoutes(server: FastifyInstance) {
    * Query params: region (optional), limit (default 100), since (timestamp filter)
    */
   server.get<{
-    Querystring: { region?: string; limit?: string; since?: string };
+    Querystring: { region?: string; limit?: string; since?: string; type?: string };
   }>("/events", async (request, reply) => {
     const limit = request.query.limit ? parseInt(request.query.limit, 10) : 100;
     const since = request.query.since ? parseInt(request.query.since, 10) : undefined;
     const region = request.query.region;
+    const types = request.query.type
+      ? request.query.type.split(",").map((value) => value.trim()).filter(Boolean) as ZoneEventType[]
+      : undefined;
 
     if (region) {
-      const events = getZoneEvents(region, limit, since);
+      const events = getZoneEvents(region, limit, since)
+        .filter((event) => !types || types.includes(event.type));
       return {
         region,
         count: events.length,
@@ -24,7 +28,8 @@ export function registerEventRoutes(server: FastifyInstance) {
       };
     }
 
-    const events = getAllZoneEvents(limit, since);
+    const events = getAllZoneEvents(limit, since)
+      .filter((event) => !types || types.includes(event.type));
 
     return {
       count: events.length,
@@ -35,13 +40,17 @@ export function registerEventRoutes(server: FastifyInstance) {
   // Backward compat alias: GET /events/:zoneId
   server.get<{
     Params: { zoneId: string };
-    Querystring: { limit?: string; since?: string };
+    Querystring: { limit?: string; since?: string; type?: string };
   }>("/events/:zoneId", async (request, reply) => {
     const { zoneId } = request.params;
     const limit = request.query.limit ? parseInt(request.query.limit, 10) : 100;
     const since = request.query.since ? parseInt(request.query.since, 10) : undefined;
+    const types = request.query.type
+      ? request.query.type.split(",").map((value) => value.trim()).filter(Boolean) as ZoneEventType[]
+      : undefined;
 
-    const events = getZoneEvents(zoneId, limit, since);
+    const events = getZoneEvents(zoneId, limit, since)
+      .filter((event) => !types || types.includes(event.type));
 
     return {
       zoneId,
