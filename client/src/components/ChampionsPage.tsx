@@ -9,6 +9,7 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { formatCopperString, formatGoldString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
 import { openOnboarding } from "@/lib/onboarding";
+import { getRegistrationStatusLabel, isRegistrationSettled, resolveRegistrationTxHash } from "@/lib/characterRegistration";
 import { PaymentGate } from "@/components/PaymentGate";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -2544,11 +2545,14 @@ function ReputationTab({
   }
 
   const rankColor = RANK_COLORS[rep.rank] ?? "#95A5A6";
-  const registrationTxHash = characterRegistrationSettled
-    ? (identity?.registrationTxHash ?? selectedCharacter?.agentRegistrationTxHash ?? null)
-    : null;
+  const registrationTxHash = resolveRegistrationTxHash({
+    character: selectedCharacter,
+    identity,
+    resolvedAgentId: effectiveAgentId,
+  });
   const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
   const displayCharacterTokenId = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? identity?.characterTokenId ?? null;
+  const registrationStatusLabel = getRegistrationStatusLabel(selectedCharacter, identity);
 
   return (
     <div className="space-y-4">
@@ -2557,7 +2561,7 @@ function ReputationTab({
           <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
             <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Identity</p>
             <p className="mt-1 text-[12px] font-bold text-[#d6deff]">
-              {characterRegistrationSettled && (identity?.onChainRegistered ?? true) ? "Registered On-Chain" : "Pending Registration"}
+              {registrationStatusLabel}
             </p>
             {displayCharacterTokenId && (
               <p className="mt-1 text-[10px] text-[#9aa7cc]">Character Token #{displayCharacterTokenId}</p>
@@ -3196,8 +3200,7 @@ function getCharacterRegistrationProgress(character: CharacterNft | null | undef
 }
 
 function isCharacterRegistrationSettled(character: CharacterNft | null | undefined): boolean {
-  const progress = getCharacterRegistrationProgress(character);
-  return progress.tone === "done" && !progress.active;
+  return isRegistrationSettled(character);
 }
 
 function isCharacterBootstrapActive(character: CharacterNft | null | undefined): boolean {

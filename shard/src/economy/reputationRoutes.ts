@@ -5,7 +5,8 @@
 
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { loadAllCharactersForWallet } from "../character/characterStore.js";
+import { loadAllCharactersForWallet, saveCharacter } from "../character/characterStore.js";
+import { findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import { getEntityAgentId } from "../erc8004/agentResolution.js";
 import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
@@ -44,11 +45,31 @@ export async function registerReputationRoutes(app: FastifyInstance) {
     );
 
     const lookupWallet = ownerWallet ?? liveEntity?.walletAddress ?? null;
-    const savedCharacter = lookupWallet
-      ? (await loadAllCharactersForWallet(lookupWallet)).find(
-          (character) => character.agentId?.trim() === normalizedAgentId
-        ) ?? null
-      : null;
+    let savedCharacter = null;
+    if (lookupWallet) {
+      const characters = await loadAllCharactersForWallet(lookupWallet);
+      for (const character of characters) {
+        if (character.agentId?.trim() !== normalizedAgentId) continue;
+        if (!character.characterTokenId) continue;
+
+        const verifiedIdentity = await findIdentityByCharacterTokenId(
+          BigInt(character.characterTokenId),
+          lookupWallet
+        ).catch(() => null);
+
+        if (verifiedIdentity?.agentId?.toString() === normalizedAgentId) {
+          savedCharacter = character;
+          break;
+        }
+
+        const fallbackStatus = character.characterTokenId ? "mint_confirmed" : "unregistered";
+        await saveCharacter(lookupWallet, character.name, {
+          agentId: null,
+          agentRegistrationTxHash: null,
+          chainRegistrationStatus: fallbackStatus,
+        }).catch(() => {});
+      }
+    }
 
     if (!ownerWallet && !endpoint && !liveEntity && !savedCharacter) {
       return reply.code(404).send({ error: "Identity not found for this agent" });

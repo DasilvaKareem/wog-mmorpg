@@ -10,6 +10,7 @@ import { gameBus } from "@/lib/eventBus";
 import { playSoundEffect } from "@/lib/soundEffects";
 import { WalletManager } from "@/lib/walletManager";
 import { getAuthToken } from "@/lib/agentAuth";
+import { getRegistrationStatusLabel, isRegistrationSettled, resolveRegistrationTxHash } from "@/lib/characterRegistration";
 import type { Entity, CharacterStats, ActiveEffect } from "@/types";
 
 /* ── 8-bit retro palette ─────────────────────────────────────── */
@@ -895,16 +896,22 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
             : [],
         );
 
+        const nameMatchedCharacters = characters.filter((character) => {
+          const characterBaseName = (character.name ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+          return Boolean(characterBaseName) && characterBaseName === entityBaseName;
+        });
+
         const matched =
-          characters.find((character) => character.agentId && character.agentId === entity.agentId)
+          nameMatchedCharacters.find((character) => {
+            const tokenId = character.characterTokenId ?? character.tokenId ?? null;
+            return Boolean(entity.characterTokenId && tokenId && tokenId === entity.characterTokenId);
+          })
+          ?? nameMatchedCharacters[0]
           ?? characters.find((character) => {
             const tokenId = character.characterTokenId ?? character.tokenId ?? null;
             return Boolean(entity.characterTokenId && tokenId && tokenId === entity.characterTokenId);
           })
-          ?? characters.find((character) => {
-            const characterBaseName = (character.name ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
-            return Boolean(characterBaseName) && characterBaseName === entityBaseName;
-          })
+          ?? characters.find((character) => character.agentId && character.agentId === entity.agentId)
           ?? null;
 
         if (matched) {
@@ -918,12 +925,12 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
           const matchedBootstrapActive = ["queued", "pending_mint", "mint_confirmed", "identity_pending", "failed_retryable"].includes(
             matched.bootstrapStatus ?? "",
           );
-          if (matched.agentId && !matchedBootstrapActive && matched.chainRegistrationStatus === "registered") {
+          if (matchedBootstrapActive) {
+            setResolvedAgentId(null);
+          } else if (matched.agentId && matched.chainRegistrationStatus === "registered") {
             setResolvedAgentId(matched.agentId);
           } else if (entity.characterTokenId && matched.characterTokenId && matched.characterTokenId === entity.characterTokenId && matched.agentId) {
             setResolvedAgentId(matched.agentId);
-          } else if (matchedBootstrapActive) {
-            setResolvedAgentId(null);
           }
         }
         setResolvingCharacter(false);
@@ -945,12 +952,7 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
   const chainStatusLabel = resolvedCharacter?.bootstrapStatus
     ?? resolvedCharacter?.chainRegistrationStatus
     ?? null;
-  const characterLooksRegistered = Boolean(
-    resolvedCharacter
-    && resolvedCharacter.chainRegistrationStatus === "registered"
-    && !bootstrapActive
-    && (resolvedCharacter.agentRegistrationTxHash || resolvedCharacter.agentId),
-  );
+  const characterLooksRegistered = isRegistrationSettled(resolvedCharacter);
 
   React.useEffect(() => {
     if (!resolvedAgentId) {
@@ -987,16 +989,14 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
       .finally(() => setReputationLoading(false));
   }, [resolvedAgentId, entity.walletAddress, characterLooksRegistered]);
 
-  const registrationTxHash = characterLooksRegistered
-    ? (resolvedCharacter?.agentRegistrationTxHash ?? identity?.registrationTxHash ?? null)
-    : null;
+  const registrationTxHash = resolveRegistrationTxHash({
+    character: resolvedCharacter,
+    identity,
+    resolvedAgentId,
+  });
   const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
   const onChainRegistered = characterLooksRegistered && (identity?.onChainRegistered ?? true);
-  const statusLabel = onChainRegistered
-    ? "Registered on-chain"
-    : chainStatusLabel
-      ? chainStatusLabel.replace(/_/g, " ")
-      : "Identity registration pending";
+  const statusLabel = getRegistrationStatusLabel(resolvedCharacter, identity);
 
   if (resolvingCharacter) {
     return <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>;

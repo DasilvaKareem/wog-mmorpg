@@ -16,6 +16,7 @@ import { computeStatsAtLevel } from "../character/leveling.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { restoreProfessionSkills } from "../professions/professionXp.js";
@@ -168,8 +169,16 @@ export function registerSpawnOrders(server: FastifyInstance) {
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
         : undefined;
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
-    const resolvedTokenId = parseOnChainTokenId(saved?.characterTokenId ?? characterTokenId);
-    const resolvedAgentId = parseAgentId(saved?.agentId ?? agentId);
+    const verifiedResolvedIdentity = type === "player" && walletAddress
+      ? await buildVerifiedIdentityPatch(walletAddress, {
+          characterTokenId: saved?.characterTokenId ?? characterTokenId,
+          agentId: saved?.agentId ?? agentId,
+          agentRegistrationTxHash: saved?.agentRegistrationTxHash,
+          chainRegistrationStatus: saved?.chainRegistrationStatus,
+        })
+      : {};
+    const resolvedTokenId = parseOnChainTokenId(verifiedResolvedIdentity.characterTokenId ?? characterTokenId);
+    const resolvedAgentId = parseAgentId(verifiedResolvedIdentity.agentId ?? agentId);
 
     // Saved coords may be raw world-space, normalized-world from the bad layout shift,
     // or legacy zone-local values. Prefer an explicit in-zone world-space match first.
@@ -258,12 +267,15 @@ export function registerSpawnOrders(server: FastifyInstance) {
 
     // First-time spawn: save initial character data
     if (!saved && walletAddress && type === "player") {
+      const verifiedIdentityPatch = await buildVerifiedIdentityPatch(walletAddress, {
+        characterTokenId: entity.characterTokenId?.toString(),
+        agentId: entity.agentId?.toString(),
+      });
       await saveCharacter(walletAddress, entity.name, {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,
-        ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
-        ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+        ...verifiedIdentityPatch,
         raceId: resolvedRaceId ?? "human",
         classId: resolvedClassId ?? "warrior",
         calling: resolvedCalling,
@@ -321,9 +333,13 @@ export function registerSpawnOrders(server: FastifyInstance) {
           entity.agentId = found.agentId;
           reputationManager.ensureInitialized(found.agentId);
           if (walletAddress) {
-            await saveCharacter(walletAddress, entity.name, {
+            const verifiedIdentityPatch = await buildVerifiedIdentityPatch(walletAddress, {
+              characterTokenId: entity.characterTokenId?.toString(),
               agentId: found.agentId.toString(),
               chainRegistrationStatus: "registered",
+            });
+            await saveCharacter(walletAddress, entity.name, {
+              ...verifiedIdentityPatch,
             });
           }
           server.log.info(`[spawn] Recovered agentId=${found.agentId} for "${entity.name}" from chain`);

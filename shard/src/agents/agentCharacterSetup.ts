@@ -18,6 +18,7 @@ import {
 } from "./agentConfigStore.js";
 import { authenticateWithWallet } from "../auth/authHelper.js";
 import { loadCharacter } from "../character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
 import { extractRawCharacterName } from "./agentUtils.js";
 
@@ -45,6 +46,25 @@ function normalizeOnChainTokenId(value: unknown): string | undefined {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return undefined;
   return trimmed;
+}
+
+function normalizeCharacterLookupName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = extractRawCharacterName(value) ?? value;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function selectRequestedCharacter(characters: any[] | undefined, requestedName: string): any | null {
+  if (!Array.isArray(characters) || characters.length === 0) return null;
+  const normalizedRequested = normalizeCharacterLookupName(requestedName);
+  if (!normalizedRequested) return characters[0] ?? null;
+
+  const exact = characters.find((character) => {
+    const candidate = normalizeCharacterLookupName(character?.name);
+    return candidate === normalizedRequested;
+  });
+  return exact ?? characters[0] ?? null;
 }
 
 export interface CharacterSetupResult {
@@ -144,13 +164,17 @@ export async function setupAgentCharacter(
           : typeof liveEntity.agentId === "number"
             ? Math.trunc(liveEntity.agentId).toString()
             : undefined;
+      const verifiedLiveIdentity = await buildVerifiedIdentityPatch(custodialAddress, {
+        characterTokenId: recoveredTokenId,
+        agentId: recoveredAgentId,
+      });
 
       await setAgentEntityRef(userWallet, {
         entityId: spawnedEntry.entityId,
         zoneId: spawnedEntry.zoneId,
         characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
-        ...(recoveredAgentId ? { agentId: recoveredAgentId } : {}),
-        ...(recoveredTokenId ? { characterTokenId: recoveredTokenId } : {}),
+        ...(verifiedLiveIdentity.characterTokenId ? { characterTokenId: verifiedLiveIdentity.characterTokenId } : {}),
+        ...(verifiedLiveIdentity.agentId ? { agentId: verifiedLiveIdentity.agentId } : {}),
       });
 
       console.log(`[agentSetup] Reattached to live shard entity ${spawnedEntry.entityId} for ${userWallet}`);
@@ -159,8 +183,8 @@ export async function setupAgentCharacter(
         entityId: spawnedEntry.entityId,
         zoneId: spawnedEntry.zoneId,
         characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
-        agentId: recoveredAgentId,
-        characterTokenId: recoveredTokenId,
+        agentId: verifiedLiveIdentity.agentId ?? undefined,
+        characterTokenId: verifiedLiveIdentity.characterTokenId ?? undefined,
         alreadyExisted: true,
       };
     }
@@ -196,7 +220,7 @@ export async function setupAgentCharacter(
   let character: any;
   try {
     const charData = await apiCall("GET", `/character/${custodialAddress}`, undefined, token);
-    character = charData.characters?.[0];
+    character = selectRequestedCharacter(charData.characters, characterName);
   } catch {
     character = null;
   }
@@ -209,10 +233,14 @@ export async function setupAgentCharacter(
   const spawnXp = character?.properties?.xp ?? 0;
   const spawnRace = character?.properties?.race ?? raceId;
   const spawnClass = character?.properties?.class ?? classId;
-  const spawnTokenId = normalizeOnChainTokenId(character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId);
-  const spawnAgentId = typeof character?.agentId === "string" && character.agentId.trim().length > 0
-    ? character.agentId.trim()
-    : existingSave?.agentId;
+  const verifiedSpawnIdentity = await buildVerifiedIdentityPatch(custodialAddress, {
+    characterTokenId: character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId,
+    agentId: character?.agentId ?? existingSave?.agentId,
+    agentRegistrationTxHash: character?.agentRegistrationTxHash ?? existingSave?.agentRegistrationTxHash,
+    chainRegistrationStatus: character?.chainRegistrationStatus ?? existingSave?.chainRegistrationStatus,
+  });
+  const spawnTokenId = verifiedSpawnIdentity.characterTokenId;
+  const spawnAgentId = verifiedSpawnIdentity.agentId;
 
   // ── Step 6: Spawn into last known zone (or village-square for new agents) ──
   const startZone = existingRef?.zoneId ?? "village-square";
@@ -263,8 +291,8 @@ export async function setupAgentCharacter(
     entityId,
     zoneId: resolvedZoneId,
     characterName: spawnName,
-    agentId: spawnAgentId,
-    characterTokenId: spawnTokenId,
+    agentId: spawnAgentId ?? undefined,
+    characterTokenId: spawnTokenId ?? undefined,
     alreadyExisted: false,
   };
 }

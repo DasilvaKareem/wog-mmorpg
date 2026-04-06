@@ -37,6 +37,7 @@ import { flushPlayer } from "../blockchain/chainBatcher.js";
 import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { getRedis } from "../redis.js";
 import { reputationManager } from "../economy/reputationManager.js";
+import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 
 export interface ZoneState {
   zoneId: string;
@@ -599,6 +600,20 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
         entity.stats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level ?? 1);
         recalculateEntityVitals(entity);
       }
+      if (entity.walletAddress) {
+        const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+          characterTokenId: entity.characterTokenId?.toString(),
+          agentId: entity.agentId?.toString(),
+        });
+        if (verifiedIdentityPatch.characterTokenId) {
+          entity.characterTokenId = BigInt(verifiedIdentityPatch.characterTokenId);
+        }
+        if (verifiedIdentityPatch.agentId) {
+          entity.agentId = BigInt(verifiedIdentityPatch.agentId);
+        } else {
+          entity.agentId = undefined;
+        }
+      }
 
       // Always clear stale PvP state on restore — matches don't survive restarts
       if (entity.region === "coliseum-arena") {
@@ -625,9 +640,13 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
             entity.agentId = found.agentId;
             reputationManager.ensureInitialized(found.agentId);
             if (entity.walletAddress) {
-              await saveCharacter(entity.walletAddress, entity.name, {
+              const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+                characterTokenId: entity.characterTokenId?.toString(),
                 agentId: found.agentId.toString(),
                 chainRegistrationStatus: "registered",
+              });
+              await saveCharacter(entity.walletAddress, entity.name, {
+                ...verifiedIdentityPatch,
               });
             }
             console.log(`[live-player] Recovered agentId=${found.agentId} for "${entity.name}" from chain`);
@@ -3400,12 +3419,15 @@ export async function saveAllOnlinePlayers(): Promise<void> {
   for (const entity of world.entities.values()) {
     if (entity.type !== "player" || !entity.walletAddress || !entity.name) continue;
     try {
+      const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+        characterTokenId: entity.characterTokenId?.toString(),
+        agentId: entity.agentId?.toString(),
+      });
       await saveCharacter(entity.walletAddress, entity.name, {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,
-        ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
-        ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+        ...verifiedIdentityPatch,
         raceId: entity.raceId ?? "human",
         classId: entity.classId ?? "warrior",
         calling: entity.calling,

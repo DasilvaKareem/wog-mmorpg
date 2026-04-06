@@ -275,8 +275,15 @@ const characterWriteContract = process.env.CHARACTER_CONTRACT_ADDRESS && biteSig
 // Keep the default conservative on testnet so repeated bootstrap/test runs do not
 // drain the server wallet. Deployments can raise this explicitly if needed.
 const SFUEL_DISTRIBUTION_AMOUNT = process.env.SFUEL_DISTRIBUTION_AMOUNT || "0.000001";
+const AUTO_SFUEL_TOP_UP_MIN_BALANCE = ethers.parseEther(
+  process.env.AUTO_SFUEL_TOP_UP_MIN_BALANCE || "0.01"
+);
+const AUTO_SFUEL_TOP_UP_TARGET_BALANCE = ethers.parseEther(
+  process.env.AUTO_SFUEL_TOP_UP_TARGET_BALANCE || "0.05"
+);
 const TX_GAS_PRICE_CACHE_MS = 5_000;
 let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
+const inflightGasTopUps = new Map<string, Promise<void>>();
 
 let seedingPromise: Promise<void> | null = null;
 
@@ -400,6 +407,9 @@ async function sendTransactionWithManagedGas(
       ? await reserveServerNonce()
       : null;
     try {
+      if (!isServerSignerAccount(account)) {
+        await ensureAccountHasGasBalance(account.address);
+      }
       const gasPrice = await resolveManagedGasPrice();
       const tx = {
         ...transaction,
@@ -422,6 +432,14 @@ async function sendTransactionWithManagedGas(
           }
         }
       }
+      if (!isServerSignerAccount(account) && isLowGasBalanceError(err)) {
+        try {
+          await ensureAccountHasGasBalance(account.address, { force: true });
+          continue;
+        } catch (topUpErr) {
+          err.topUpError = topUpErr;
+        }
+      }
       if (!isTransientRpcSendError(err) || attempt >= MAX_RETRIES) {
         throw err;
       }
@@ -440,6 +458,63 @@ async function sendTransactionWithManagedGas(
 // The gas cost to send sFUEL (~0.00125 sFUEL) far exceeds the distribution
 // amount (0.000001 sFUEL), so skip if the wallet already has enough to transact.
 const SFUEL_SKIP_THRESHOLD = parseFloat(process.env.SFUEL_SKIP_THRESHOLD || "0.0001");
+
+function isLowGasBalanceError(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? "");
+  return msg.includes("Account balance is too low")
+    || msg.includes("insufficient funds for gas");
+}
+
+async function topUpAccountGasBalance(toAddress: string, amountWei: bigint): Promise<void> {
+  if (amountWei <= 0n) return;
+  const tx = prepareTransaction({
+    to: toAddress,
+    value: amountWei,
+    chain: skaleBase,
+    client: thirdwebClient,
+  });
+  await queueTransaction(serverAccount, `sfuel-auto-topup:${toAddress.toLowerCase()}:${amountWei.toString()}`, async () => {
+    await sendTransactionWithManagedGas(tx, serverAccount);
+  });
+}
+
+async function ensureAccountHasGasBalance(
+  address: string,
+  options?: { force?: boolean }
+): Promise<void> {
+  const normalized = address.toLowerCase();
+  if (normalized === serverAccount.address.toLowerCase()) return;
+
+  const existing = inflightGasTopUps.get(normalized);
+  if (existing) {
+    await existing;
+    return;
+  }
+
+  const topUpPromise = (async () => {
+    const balance = await biteProvider.getBalance(normalized);
+    const minimum = options?.force ? AUTO_SFUEL_TOP_UP_TARGET_BALANCE : AUTO_SFUEL_TOP_UP_MIN_BALANCE;
+    if (balance >= minimum) return;
+
+    const target = AUTO_SFUEL_TOP_UP_TARGET_BALANCE > minimum
+      ? AUTO_SFUEL_TOP_UP_TARGET_BALANCE
+      : minimum;
+    const deficit = target - balance;
+    if (deficit <= 0n) return;
+
+    await topUpAccountGasBalance(normalized, deficit);
+    console.log(`[sfuel] Auto-topped ${normalized} by ${ethers.formatEther(deficit)} sFUEL`);
+  })();
+
+  inflightGasTopUps.set(normalized, topUpPromise);
+  try {
+    await topUpPromise;
+  } finally {
+    if (inflightGasTopUps.get(normalized) === topUpPromise) {
+      inflightGasTopUps.delete(normalized);
+    }
+  }
+}
 
 /**
  * Send a small amount of sFUEL so the wallet can transact on SKALE.

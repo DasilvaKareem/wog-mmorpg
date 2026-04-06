@@ -90,6 +90,7 @@ import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blo
 import { getWorldLayout } from "./world/worldLayout.js";
 import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersFromRedis } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
 import { biteProvider, probeBiteRpc, SKALE_BASE_CHAIN_ID, SKALE_BASE_RPC_URL } from "./blockchain/biteChain.js";
@@ -663,12 +664,15 @@ server.post<{
   }
 
   // Save full character state
+  const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+    characterTokenId: entity.characterTokenId?.toString(),
+    agentId: entity.agentId?.toString(),
+  });
   await saveCharacter(entity.walletAddress, entity.name, {
     name: entity.name,
     level: entity.level ?? 1,
     xp: entity.xp ?? 0,
-    ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
-    ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+    ...verifiedIdentityPatch,
     raceId: entity.raceId ?? "human",
     classId: entity.classId ?? "warrior",
     calling: entity.calling,
@@ -866,6 +870,11 @@ const start = async () => {
     server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
   }
 
+  const port = Number(process.env.PORT) || 3000;
+  const host = "0.0.0.0";
+  await server.listen({ port, host });
+  server.log.info(`Shard listening on ${host}:${port}`);
+
   // Restore gold reservations from Redis (prevents double-spend after restart)
   restoreReservations().catch((err: any) => {
     server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
@@ -914,17 +923,6 @@ const start = async () => {
   server.log.info(`[chain] RPC target ${SKALE_BASE_RPC_URL} (expected chainId=${SKALE_BASE_CHAIN_ID})`);
   await assertConfiguredRpc();
   server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
-
-  // Run DB migrations before accepting traffic
-  await runMigrations().catch((err) => {
-    server.log.warn(`[db] migrations failed (non-fatal for now): ${err.message}`);
-  });
-
-  const port = Number(process.env.PORT) || 3000;
-  const host = "0.0.0.0";
-
-  await server.listen({ port, host });
-  server.log.info(`Shard listening on ${host}:${port}`);
 
   // Restore agents that were running before restart
   agentManager.restoreFromRedis().catch((err: any) => {

@@ -3,7 +3,7 @@ import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
-import { getOwnedCharacters, resolveIdentityRegistrationTxHash } from "../blockchain/blockchain.js";
+import { findIdentityByCharacterTokenId, getOwnedCharacters, resolveIdentityRegistrationTxHash } from "../blockchain/blockchain.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
@@ -178,6 +178,26 @@ async function backfillAgentRegistrationTxHash(
   }
 
   try {
+    const verifiedIdentity = await findIdentityByCharacterTokenId(
+      BigInt(saved.characterTokenId),
+      walletAddress
+    ).catch(() => null);
+
+    if (!verifiedIdentity?.agentId || verifiedIdentity.agentId.toString() !== saved.agentId) {
+      const fallbackStatus = saved.characterTokenId ? "mint_confirmed" : "unregistered";
+      await saveCharacter(walletAddress, saved.name, {
+        agentId: null,
+        agentRegistrationTxHash: null,
+        chainRegistrationStatus: fallbackStatus,
+      });
+      return {
+        ...entry,
+        agentId: null,
+        agentRegistrationTxHash: null,
+        chainRegistrationStatus: fallbackStatus,
+      };
+    }
+
     const txHash = await resolveIdentityRegistrationTxHash(BigInt(saved.agentId));
     if (!txHash) return entry;
     await saveCharacter(walletAddress, saved.name, { agentRegistrationTxHash: txHash });
