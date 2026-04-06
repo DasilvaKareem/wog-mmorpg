@@ -5,8 +5,8 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getAllZones, getOrCreateZone } from "../world/zoneRuntime.js";
-import { getPlayerPartyId } from "../social/partySystem.js";
+import { getEntity as getWorldEntity, getOrCreateZone } from "../world/zoneRuntime.js";
+import { getPartyLeaderId, getPartyMembers, getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
@@ -105,7 +105,37 @@ function getTechniqueCooldownExpiry(entity: any, techniqueId: string): number | 
   return undefined;
 }
 
-function pickCombatTechnique(entity: any, target: any, zoneTick: number): TechniqueDefinition | null {
+function getPartySupportMembers(entity: any, entities: Record<string, any>): any[] {
+  return getPartyMembers(entity.id)
+    .map((memberId) => entities[memberId] ?? getWorldEntity(memberId))
+    .filter((member): member is any => !!member && member.type === "player" && member.hp > 0);
+}
+
+function hasBuffFromCaster(entity: any, target: any): boolean {
+  return !!target?.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
+}
+
+function getLeaderFirstBuffTarget(entity: any, entities: Record<string, any>): any | null {
+  const members = getPartySupportMembers(entity, entities);
+  if (members.length <= 1) return null;
+
+  const leaderId = getPartyLeaderId(entity.id);
+  const leader = leaderId ? members.find((member) => member.id === leaderId) : undefined;
+  if (leader && leader.id !== entity.id && !hasBuffFromCaster(entity, leader)) return leader;
+
+  return members.find((member) => member.id !== entity.id && !hasBuffFromCaster(entity, member)) ?? null;
+}
+
+function getLowestHpAlly(entity: any, entities: Record<string, any>): any | null {
+  const members = getPartySupportMembers(entity, entities).filter((member) => member.id !== entity.id);
+  if (members.length === 0) return null;
+
+  const lowest = members.sort((a, b) => (a.hp / Math.max(1, a.maxHp)) - (b.hp / Math.max(1, b.maxHp)))[0];
+  if (!lowest) return null;
+  return (lowest.hp / Math.max(1, lowest.maxHp)) < 0.9 ? lowest : null;
+}
+
+function pickCombatTechnique(entity: any, target: any, zoneTick: number, entities: Record<string, any>): TechniqueDefinition | null {
   const learned = entity.learnedTechniques ?? [];
   if (learned.length === 0) return null;
 
@@ -133,6 +163,21 @@ function pickCombatTechnique(entity: any, target: any, zoneTick: number): Techni
     if (heal) return heal;
   }
 
+  const lowestHpAlly = getLowestHpAlly(entity, entities);
+  if (lowestHpAlly) {
+    const partyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "party");
+    if (partyHeal) return partyHeal;
+
+    const allyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "ally");
+    if (allyHeal) return allyHeal;
+  }
+
+  const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
+  if (leaderBuffTarget) {
+    const allyBuff = usable.find((technique) => technique.type === "buff" && technique.targetType === "ally");
+    if (allyBuff) return allyBuff;
+  }
+
   const hasDebuff = target.activeEffects?.some(
     (effect: any) => (effect.type === "debuff" || effect.type === "dot") && effect.casterId === entity.id,
   );
@@ -149,10 +194,48 @@ function pickCombatTechnique(entity: any, target: any, zoneTick: number): Techni
   return null;
 }
 
-function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition): string {
-  if (technique.targetType === "self" || technique.targetType === "ally") return entity.id;
+function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition, entities: Record<string, any>): string {
+  if (technique.targetType === "self" || technique.targetType === "party") return entity.id;
+  if (technique.targetType === "ally") {
+    const lowHpAlly = getLowestHpAlly(entity, entities);
+    if (technique.type === "healing" && lowHpAlly) return lowHpAlly.id;
+
+    const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
+    if (leaderBuffTarget) return leaderBuffTarget.id;
+
+    return entity.id;
+  }
   if (technique.type === "buff" || technique.type === "healing") return entity.id;
   return target.id;
+}
+
+function pickPartyCombatTarget(me: any, entities: Record<string, any>): any | null {
+  const partyId = getPlayerPartyId(me.id);
+  if (!partyId) return null;
+
+  const partyMemberIds = getPartyMembers(me.id);
+  if (partyMemberIds.length <= 1) return null;
+
+  const leaderId = getPartyLeaderId(me.id);
+  if (leaderId && leaderId !== me.id) {
+    const leader = entities[leaderId];
+    const order = leader?.order;
+    if (leader?.type === "player" && leader.hp > 0 && order && (order.action === "attack" || order.action === "technique")) {
+      const target = entities[order.targetId];
+      if (target && target.hp > 0 && (target.type === "mob" || target.type === "boss")) {
+        return target;
+      }
+    }
+  }
+
+  const sameParty = new Set(partyMemberIds);
+  return Object.values(entities)
+    .filter((entity: any) => (entity.type === "mob" || entity.type === "boss") && entity.hp > 0 && sameParty.has(entity.taggedBy))
+    .sort((a: any, b: any) => {
+      const distA = Math.hypot((a.x ?? 0) - (me.x ?? 0), (a.y ?? 0) - (me.y ?? 0));
+      const distB = Math.hypot((b.x ?? 0) - (me.x ?? 0), (b.y ?? 0) - (me.y ?? 0));
+      return distA - distB;
+    })[0] ?? null;
 }
 
 function getCombatOrderTarget(me: any): any | null {
@@ -315,7 +398,7 @@ function pickCombatTarget(
   return shortlist[Math.floor(Math.random() * shortlist.length)]?.target ?? scored[0].target;
 }
 
-function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResult {
+function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: Record<string, any>): ActionResult {
   const activeTarget = getCombatOrderTarget(me);
   if (activeTarget) {
     if (me.order?.action === "technique") {
@@ -327,9 +410,9 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResu
   }
 
   const zoneTick = getOrCreateZone(ctx.currentRegion).tick;
-  const technique = pickCombatTechnique(me, target, zoneTick);
+  const technique = pickCombatTechnique(me, target, zoneTick, entities);
   if (technique) {
-    const targetId = getTechniqueTargetId(me, target, technique);
+    const targetId = getTechniqueTargetId(me, target, technique, entities);
     const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: technique.id });
     if (!issued) {
       return actionBlocked(`Could not use ${technique.name}`, {
@@ -513,6 +596,19 @@ export async function doCombat(
     const zs = await ctx.getZoneState();
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
+    const partyId = getPlayerPartyId(ctx.entityId);
+    const partyLeaderId = getPartyLeaderId(ctx.entityId);
+
+    if (partyId && partyLeaderId && partyLeaderId !== me.id) {
+      const leader = entities[partyLeaderId];
+      if (leader?.type === "player" && leader.hp > 0) {
+        const distToLeader = Math.hypot((leader.x ?? 0) - (me.x ?? 0), (leader.y ?? 0) - (me.y ?? 0));
+        if (distToLeader > 60) {
+          const moving = await ctx.moveToEntity(me, leader, 30);
+          if (moving) return actionProgressed(`Following party leader ${leader.name ?? "leader"}`);
+        }
+      }
+    }
 
     // Disengage if HP too low (only if retreat enabled)
     if (ctx.currentCaps.retreatEnabled) {
@@ -549,7 +645,7 @@ export async function doCombat(
 
     const activeTarget = getCombatOrderTarget(me);
     if (activeTarget && isCombatTargetAllowed(me, activeTarget, strategy)) {
-      return engageCombatTarget(ctx, me, activeTarget);
+      return engageCombatTarget(ctx, me, activeTarget, entities);
     }
 
     if (activeTarget) {
@@ -561,6 +657,11 @@ export async function doCombat(
       return actionProgressed(`Disengaging from ${activeTarget.name ?? "target"}`);
     }
 
+    const partyTarget = pickPartyCombatTarget(me, entities);
+    if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy)) {
+      return engageCombatTarget(ctx, me, partyTarget, entities);
+    }
+
     const mob = pickCombatTarget(me, eligible, strategy);
     if (!mob) {
       return actionBlocked("No safe combat targets for current strategy", {
@@ -569,7 +670,7 @@ export async function doCombat(
         category: "strategic",
       });
     }
-    return engageCombatTarget(ctx, me, mob);
+    return engageCombatTarget(ctx, me, mob, entities);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] combat tick: ${reason.slice(0, 60)}`);
@@ -1986,7 +2087,7 @@ async function doQuestCombat(
       });
     }
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
-    const result = engageCombatTarget(ctx, me, mob);
+    const result = engageCombatTarget(ctx, me, mob, entities);
     if (result.status === "progressed") {
       void ctx.logActivity(isQuestTarget
         ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
@@ -2291,7 +2392,7 @@ async function doDungeonCombat(ctx: AgentContext, strategy: AgentStrategy): Prom
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
     const [, mob] = sorted[0] as [string, any];
-    const result = engageCombatTarget(ctx, me, mob);
+    const result = engageCombatTarget(ctx, me, mob, entities);
     if (result.status === "progressed") {
       void ctx.logActivity(`Dungeon: fighting ${mob.name ?? "mob"} (${mobs.length} remain)`);
     }

@@ -1552,8 +1552,11 @@ export class WorldScene extends Phaser.Scene {
         this.updateOverviewDots();
       }
 
-      // Re-apply wallet lock after each poll (entity may have just spawned)
-      if (this.lockedWalletAddress) {
+      // Re-apply wallet lock after each poll ONLY if we haven't found the entity yet
+      // (i.e. followTarget is still null — entity may not have spawned yet).
+      // Once followTarget is set the update() loop handles camera tracking,
+      // and if the user drags/pans away releaseFollow() clears both fields.
+      if (this.lockedWalletAddress && !this.followTarget) {
         this.lockToPlayerWallet(this.lockedWalletAddress);
       }
 

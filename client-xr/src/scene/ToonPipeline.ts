@@ -68,6 +68,13 @@ export function toonMat(opts: {
   });
 }
 
+/**
+ * Objects on this layer are rendered in the color pass but excluded from
+ * the normal/depth pass, so the edge-detection shader ignores them.
+ * Use for sprites, text labels, HP bars, VFX overlays, etc.
+ */
+export const NO_OUTLINE_LAYER = 1;
+
 // ── Edge detection shader ───────────────────────────────────────────
 
 const EdgeDetectionShader = {
@@ -207,11 +214,14 @@ export class ToonPipeline {
 
   /** Call instead of renderer.render(scene, camera) */
   render() {
-    // 1. Render normals + depth in one pass (depth texture auto-filled)
+    // 1. Render normals + depth — exclude NO_OUTLINE_LAYER objects
+    const savedMask = this.camera.layers.mask;
+    this.camera.layers.disable(NO_OUTLINE_LAYER);
     this.scene.overrideMaterial = this.normalMaterial;
     this.renderer.setRenderTarget(this.normalRT);
     this.renderer.render(this.scene, this.camera);
     this.scene.overrideMaterial = null;
+    this.camera.layers.mask = savedMask;
 
     // 2. Composite with edge detection (RenderPass does the color render)
     this.renderer.setRenderTarget(null);

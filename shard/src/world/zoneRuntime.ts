@@ -1645,7 +1645,7 @@ export function pickTechnique(
   // 1. Self-buff if we don't have one active
   const hasBuff = entity.activeEffects?.some(e => e.type === "buff" && e.casterId === entity.id);
   if (!hasBuff) {
-    const buff = usable.find(t => t.type === "buff" && t.targetType === "self");
+    const buff = usable.find(t => t.type === "buff" && (t.targetType === "self" || t.targetType === "party"));
     if (buff) return buff;
   }
 
@@ -1654,6 +1654,21 @@ export function pickTechnique(
   if (hpRatio < 0.4) {
     const heal = usable.find(t => t.type === "healing");
     if (heal) return heal;
+  }
+
+  const allyHealTarget = getLowestHpPartyAlly(entity, zone);
+  if (allyHealTarget) {
+    const partyHeal = usable.find(t => t.type === "healing" && t.targetType === "party");
+    if (partyHeal) return partyHeal;
+
+    const allyHeal = usable.find(t => t.type === "healing" && t.targetType === "ally");
+    if (allyHeal) return allyHeal;
+  }
+
+  const allyBuffTarget = getLeaderFirstBuffTarget(entity, zone);
+  if (allyBuffTarget) {
+    const allyBuff = usable.find(t => t.type === "buff" && t.targetType === "ally");
+    if (allyBuff) return allyBuff;
   }
 
   // 3. Debuff on target if we haven't already debuffed them
@@ -1773,6 +1788,80 @@ function isAliveAutoCombatTarget(entity: Entity | undefined): entity is Entity {
     && !entity.leashing;
 }
 
+function getSameZonePartyMembers(
+  entity: Entity,
+  zone: ZoneState,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+): Entity[] {
+  return partyMemberIds
+    .map((memberId) => zone.entities.get(memberId))
+    .filter((member): member is Entity => !!member && member.type === "player" && member.hp > 0 && member.region === zone.zoneId);
+}
+
+function hasBuffFromCaster(caster: Entity, target: Entity): boolean {
+  return !!target.activeEffects?.some((effect) => effect.type === "buff" && effect.casterId === caster.id);
+}
+
+function getLeaderFirstBuffTarget(
+  entity: Entity,
+  zone: ZoneState,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  const members = getSameZonePartyMembers(entity, zone, partyMemberIds);
+  if (members.length <= 1) return null;
+
+  const leaderId = partyLeaderIdOverride ?? getPartyLeaderId(entity.id);
+  const leader = leaderId ? members.find((member) => member.id === leaderId) : undefined;
+  if (leader && leader.id !== entity.id && !hasBuffFromCaster(entity, leader)) {
+    return leader;
+  }
+
+  return members.find((member) => member.id !== entity.id && !hasBuffFromCaster(entity, member)) ?? null;
+}
+
+function getLowestHpPartyAlly(
+  entity: Entity,
+  zone: ZoneState,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+): Entity | null {
+  const members = getSameZonePartyMembers(entity, zone, partyMemberIds).filter((member) => member.id !== entity.id);
+  if (members.length === 0) return null;
+
+  const lowest = members
+    .sort((a, b) => (a.hp / Math.max(1, a.maxHp)) - (b.hp / Math.max(1, b.maxHp)))[0];
+
+  if (!lowest) return null;
+  return (lowest.hp / Math.max(1, lowest.maxHp)) < 0.9 ? lowest : null;
+}
+
+export function pickTechniqueTargetIdForAutoCombat(
+  entity: Entity,
+  primaryTarget: Entity,
+  technique: TechniqueDefinition,
+  zone: ZoneState,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+  partyLeaderIdOverride?: string,
+): string {
+  if (technique.targetType === "self" || technique.targetType === "party") return entity.id;
+
+  if (technique.targetType === "ally") {
+    if (technique.type === "healing") {
+      const lowestHpAlly = getLowestHpPartyAlly(entity, zone, partyMemberIds);
+      if (lowestHpAlly) return lowestHpAlly.id;
+    }
+
+    if (technique.type === "buff") {
+      const leaderFirstTarget = getLeaderFirstBuffTarget(entity, zone, partyMemberIds, partyLeaderIdOverride);
+      if (leaderFirstTarget) return leaderFirstTarget.id;
+    }
+
+    return entity.id;
+  }
+
+  return primaryTarget.id;
+}
+
 function getPartyTargetLockKey(playerId: string, partyIdOverride?: string): string | undefined {
   return partyIdOverride ?? getPlayerPartyId(playerId);
 }
@@ -1866,32 +1955,20 @@ function getPartyFocusTarget(
 ): Entity | null {
   if (partyMemberIds.length <= 1) return null;
 
-  let focusedTarget: Entity | null = null;
-  let focusedDistance = Number.POSITIVE_INFINITY;
-
-  for (const memberId of partyMemberIds) {
-    if (memberId === entity.id) continue;
-
-    const member = zone.entities.get(memberId);
-    if (!member || member.type !== "player" || member.hp <= 0) continue;
-
-    const order = member.order;
-    if (!order || (order.action !== "attack" && order.action !== "technique")) continue;
-
-    const target = zone.entities.get(order.targetId);
-    if (!isAliveAutoCombatTarget(target)) continue;
-
-    const distance = getDistanceBetween(entity, target);
-    if (distance > autoCombatRange) continue;
-    if (!isTargetWithinPartyAnchorRange(entity, target, zone, partyLeaderIdOverride)) continue;
-
-    if (!focusedTarget || distance < focusedDistance) {
-      focusedTarget = target;
-      focusedDistance = distance;
+  const leaderId = partyLeaderIdOverride ?? getPartyLeaderId(entity.id);
+  if (leaderId && leaderId !== entity.id) {
+    const leader = zone.entities.get(leaderId);
+    const order = leader?.order;
+    if (leader && leader.type === "player" && leader.hp > 0 && order && (order.action === "attack" || order.action === "technique")) {
+      const target = zone.entities.get(order.targetId);
+      if (isAliveAutoCombatTarget(target)) {
+        const distance = getDistanceBetween(entity, target);
+        if (distance <= autoCombatRange && isTargetWithinPartyAnchorRange(entity, target, zone, partyLeaderIdOverride)) {
+          return target;
+        }
+      }
     }
   }
-
-  if (focusedTarget) return focusedTarget;
 
   const sameZonePartyMembers = new Set(partyMemberIds);
   let taggedTarget: Entity | null = null;
@@ -2078,6 +2155,31 @@ function applyTechniqueInCombat(
   }
 
   return result;
+}
+
+function applyPartyTechniqueInCombat(
+  caster: Entity,
+  technique: TechniqueDefinition,
+  zone: ZoneState,
+): { affectedIds: string[] } {
+  const affectedIds: string[] = [];
+  const memberIds = getPartyMembers(caster.id);
+
+  for (const memberId of memberIds) {
+    const member = getEntity(memberId);
+    if (!member || member.type !== "player" || member.hp <= 0) continue;
+    if (member.region !== zone.zoneId) continue;
+
+    applyTechniqueInCombat(caster, member, technique, zone);
+    affectedIds.push(member.id);
+  }
+
+  if (affectedIds.length === 0) {
+    applyTechniqueInCombat(caster, caster, technique, zone);
+    affectedIds.push(caster.id);
+  }
+
+  return { affectedIds };
 }
 
 /** Add an active effect (same logic as techniqueRoutes, but accessible from zoneRuntime) */
@@ -2635,8 +2737,13 @@ async function worldTick() {
             entity.lastTechniqueTick = zone.tick;
           }
 
-          // Apply technique effects inline (mirrors techniqueRoutes logic)
-          const techResult = applyTechniqueInCombat(entity, target, technique, zone);
+          const isPartyTechnique = technique.targetType === "party";
+          const partyResult = isPartyTechnique
+            ? applyPartyTechniqueInCombat(entity, technique, zone)
+            : undefined;
+          const techResult: TechniqueHitResult = isPartyTechnique
+            ? {}
+            : applyTechniqueInCombat(entity, target, technique, zone);
 
           // Mob tagging + combat tracking for attack techniques
           if (technique.type === "attack") {
@@ -2646,7 +2753,27 @@ async function worldTick() {
           }
 
           // Log the technique use
-          if (technique.type === "attack") {
+          if (isPartyTechnique) {
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "ability",
+              tick: zone.tick,
+              message: `${entity.name} uses ${technique.name} on the party!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              data: {
+                techniqueId: technique.id,
+                techniqueName: technique.name,
+                techniqueType: technique.type,
+                animStyle: technique.animStyle,
+                affectedIds: partyResult?.affectedIds ?? [entity.id],
+                casterX: entity.x,
+                casterZ: entity.y,
+                targetX: entity.x,
+                targetZ: entity.y,
+              },
+            });
+          } else if (technique.type === "attack") {
             if (techResult.dodged) {
               logZoneEvent({
                 zoneId: zone.zoneId,
@@ -3028,21 +3155,30 @@ async function worldTick() {
       entity.order = { action: "attack", targetId: target.id };
     }
 
-    // ── Rental follow-leader AI ──────────────────────────────────────
-    // Rented characters follow their party leader when idle. Runs BEFORE
-    // auto-combat so: far from leader → follow order → auto-combat skips;
-    // near leader + mob nearby → no follow → auto-combat engages.
+    // ── Party/rental follow-leader AI ────────────────────────────────
+    // Idle party followers stay near the leader. Rentals can also opt in
+    // explicitly via followLeaderId. Runs BEFORE auto-combat so: far from
+    // leader → follow order → auto-combat skips; near leader + mob nearby →
+    // no follow → auto-combat engages.
     const FOLLOW_DISTANCE = 60;
     const FOLLOW_STOP_DISTANCE = 30;
     for (const entity of zone.entities.values()) {
-      if (!entity.followLeaderId) continue;
+      if (entity.type !== "player") continue;
       if (entity.order) continue;
       if (entity.castingIntent) continue;
       if (entity.hp <= 0) continue;
       if (entity.travelTargetZone) continue;
+      if (entity.gotoMode) continue;
 
-      const leader = getEntity(entity.followLeaderId);
+      const leaderId = entity.followLeaderId ?? getPartyLeaderId(entity.id);
+      if (!leaderId || leaderId === entity.id) continue;
+
+      const partyId = getPlayerPartyId(entity.id);
+      if (!entity.followLeaderId && !partyId) continue;
+
+      const leader = getEntity(leaderId);
       if (!leader) continue;
+      if (leader.type !== "player" || leader.hp <= 0) continue;
 
       // Zone follow: leader moved to a different region
       if (leader.region && leader.region !== entity.region) {
@@ -3091,9 +3227,7 @@ async function worldTick() {
       // Pick the best technique from what the player has learned at trainers
       const chosenTech = pickTechnique(entity, nearestMob, zone);
       if (chosenTech) {
-        const techTarget = (chosenTech.targetType === "self" || chosenTech.targetType === "ally")
-          ? entity.id
-          : nearestMob.id;
+        const techTarget = pickTechniqueTargetIdForAutoCombat(entity, nearestMob, chosenTech, zone);
         entity.order = { action: "technique", targetId: techTarget, techniqueId: chosenTech.id };
       } else {
         // Fall back to basic attack

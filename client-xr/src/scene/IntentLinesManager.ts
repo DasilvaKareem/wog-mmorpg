@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Entity, EntityOrder, VisibleIntent } from "../types.js";
 import type { IntentVisibilityMode } from "../hud/IntentModeBadge.js";
 import type { EntityManager } from "./EntityManager.js";
+import { NO_OUTLINE_LAYER } from "./ToonPipeline.js";
 
 type CombatOrder = Extract<EntityOrder, { action: "attack" | "technique" }>;
 
@@ -308,6 +309,7 @@ export class IntentLinesManager {
     const shafts: THREE.Mesh[] = [];
     for (let i = 0; i < CURVE_SEGMENTS; i++) {
       const shaft = new THREE.Mesh(SHAFT_GEO, shaftMaterial);
+      shaft.layers.set(NO_OUTLINE_LAYER);
       shaft.visible = false;
       shafts.push(shaft);
       this.group.add(shaft);
@@ -321,6 +323,7 @@ export class IntentLinesManager {
       blending: THREE.AdditiveBlending,
     });
     const sourceMarker = new THREE.Mesh(MARKER_GEO, sourceMaterial);
+    sourceMarker.layers.set(NO_OUTLINE_LAYER);
     sourceMarker.visible = false;
     this.group.add(sourceMarker);
 
@@ -332,6 +335,7 @@ export class IntentLinesManager {
       blending: THREE.AdditiveBlending,
     });
     const targetRing = new THREE.Mesh(RING_GEO, ringMaterial);
+    targetRing.layers.set(NO_OUTLINE_LAYER);
     targetRing.visible = false;
     this.group.add(targetRing);
 
@@ -343,6 +347,7 @@ export class IntentLinesManager {
       blending: THREE.AdditiveBlending,
     });
     const arrowhead = new THREE.Mesh(ARROW_GEO, arrowMaterial);
+    arrowhead.layers.set(NO_OUTLINE_LAYER);
     arrowhead.visible = false;
     this.group.add(arrowhead);
 
@@ -355,6 +360,7 @@ export class IntentLinesManager {
       blending: THREE.AdditiveBlending,
     });
     const glyph = new THREE.Sprite(glyphMaterial);
+    glyph.layers.set(NO_OUTLINE_LAYER);
     glyph.visible = false;
     this.group.add(glyph);
 

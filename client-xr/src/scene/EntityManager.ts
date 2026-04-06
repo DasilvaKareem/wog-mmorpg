@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
-import { getGradientMap } from "./ToonPipeline.js";
+import { getGradientMap, NO_OUTLINE_LAYER } from "./ToonPipeline.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
 
@@ -655,6 +655,7 @@ function makeLabel(text: string, color = "#ffffff"): THREE.Sprite {
   tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
   const sprite = new THREE.Sprite(mat);
+  sprite.layers.set(NO_OUTLINE_LAYER);
   const aspect = canvas.width / canvas.height;
   sprite.scale.set(aspect * 0.5, 0.5, 1);
   return sprite;
@@ -720,6 +721,7 @@ function makeSpeechBubble(text: string): THREE.Sprite {
   tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
   const sprite = new THREE.Sprite(mat);
+  sprite.layers.set(NO_OUTLINE_LAYER);
   const aspect = canvasW / canvasH;
   const scaleH = 0.6 + lines.length * 0.2;
   sprite.scale.set(scaleH * aspect, scaleH, 1);
@@ -751,6 +753,7 @@ function makeFloatingText(text: string, color: string): THREE.Sprite {
   tex.minFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
   const sprite = new THREE.Sprite(mat);
+  sprite.layers.set(NO_OUTLINE_LAYER);
   sprite.scale.set(1.2, 0.6, 1);
   return sprite;
 }
@@ -1767,6 +1770,7 @@ export class EntityManager {
       const labelY = info.style === "mob" && ent.type === "boss" ? 2.35 : 1.95;
 
       hpBarBg = new THREE.Mesh(hpBarBgGeo, new THREE.MeshBasicMaterial({ color: 0x333333, depthTest: false }));
+      hpBarBg.layers.set(NO_OUTLINE_LAYER);
       hpBarBg.position.y = labelY;
       group.add(hpBarBg);
 
@@ -1774,6 +1778,7 @@ export class EntityManager {
       hpBarFg = new THREE.Mesh(hpBarFgGeo, new THREE.MeshBasicMaterial({
         color: hpRatio > 0.5 ? 0x44cc44 : hpRatio > 0.25 ? 0xcccc44 : 0xcc4444, depthTest: false,
       }));
+      hpBarFg.layers.set(NO_OUTLINE_LAYER);
       hpBarFg.position.y = labelY;
       hpBarFg.position.z = 0.001;
       hpBarFg.scale.x = Math.max(0.01, hpRatio);

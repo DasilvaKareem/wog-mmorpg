@@ -12,7 +12,7 @@ import { EntityManager } from "./scene/EntityManager.js";
 import { EffectsManager } from "./scene/EffectsManager.js";
 import { IntentLinesManager } from "./scene/IntentLinesManager.js";
 import { SkyRenderer } from "./scene/SkyRenderer.js";
-import { ToonPipeline } from "./scene/ToonPipeline.js";
+import { ToonPipeline, NO_OUTLINE_LAYER } from "./scene/ToonPipeline.js";
 import { DesktopControls } from "./input/DesktopControls.js";
 import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
@@ -65,6 +65,8 @@ const camera = new THREE.PerspectiveCamera(
 );
 
 // ── Toon post-processing ─────────────────────────────────────────────
+
+camera.layers.enable(NO_OUTLINE_LAYER); // render text/sprites/UI but exclude from outlines
 
 const toonPipeline = new ToonPipeline({
   renderer, scene, camera,
