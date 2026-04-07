@@ -698,10 +698,13 @@ export async function doCombat(
     };
     const maxMobLevel = levelCap[strategy];
 
-    const eligible = Object.entries(entities).filter(
+    const livingMobs = Object.entries(entities).filter(
+      ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0,
+    );
+    const eligible = livingMobs.filter(
       ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel,
     );
-    if (eligible.length === 0) {
+    if (livingMobs.length === 0) {
       return actionBlocked("No eligible mobs in zone", {
         failureKey: `combat:no-targets:${ctx.currentRegion}`,
         targetName: ctx.currentRegion,
@@ -736,13 +739,17 @@ export async function doCombat(
       return engageCombatTarget(ctx, me, partyTarget, entities);
     }
 
-    const mob = pickCombatTarget(me, eligible, strategy);
+    const candidatePool = eligible.length > 0 ? eligible : livingMobs;
+    const mob = pickCombatTarget(me, candidatePool, strategy);
     if (!mob) {
       return actionBlocked("No safe combat targets for current strategy", {
         failureKey: `combat:no-safe-targets:${ctx.currentRegion}:${strategy}`,
         targetName: ctx.currentRegion,
         category: "strategic",
       });
+    }
+    if (eligible.length === 0) {
+      void ctx.logActivity(`No ideal targets nearby — fighting ${mob.name ?? "mob"} anyway`);
     }
     return engageCombatTarget(ctx, me, mob, entities);
   } catch (err: any) {

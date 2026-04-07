@@ -8,6 +8,7 @@ export interface GameEventMap {
   enchantingAltarClick: Entity;
   alchemyLabClick: Entity;
   entityInspect: { entityId: string; zoneId: string };
+  clearEntityInspect: void;
   inspectSelf: { zoneId: string; walletAddress: string };
   switchZone: { zoneId: string };
   zoneChanged: { zoneId: string };

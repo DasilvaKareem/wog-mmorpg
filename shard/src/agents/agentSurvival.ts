@@ -4,7 +4,7 @@
  */
 
 import { patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
-import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections } from "../world/worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, FARM_ZONES, getZoneConnections } from "../world/worldLayout.js";
 import type { AgentContext } from "./agentUtils.js";
 import { COOKING_RECIPES } from "../professions/cooking.js";
 import { getPotionEffect } from "../professions/potionEffects.js";
@@ -133,6 +133,14 @@ export async function checkSelfAdaptation(
     const hasWeapon = Boolean(equipment.weapon);
     const currentFocus = state.currentFocus;
 
+    // Farm zone escape: if stuck in a farm zone without a farming focus, go back to village-square
+    if (FARM_ZONES.has(ctx.currentRegion) && currentFocus !== "farming") {
+      console.log(`[agent:${ctx.walletTag}] Self-adapt: stuck in farm zone ${ctx.currentRegion} with focus ${currentFocus} — returning to village-square`);
+      void ctx.logActivity(`Wrong zone for ${currentFocus} — heading back to town`);
+      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: "village-square" });
+      return true;
+    }
+
     // Crafting escape hatch: stuck in gathering/crafting for 250+ ticks (~5 min) → return to questing
     // This gives agents enough time to actually gather materials and craft items.
     // Skip if user has an active objective — they explicitly want this focus.
@@ -230,7 +238,7 @@ export async function checkSelfAdaptation(
     ) {
       const neighbors = getZoneConnections(ctx.currentRegion).filter((z) => {
         const req = ZONE_LEVEL_REQUIREMENTS[z] ?? 1;
-        return myLevel >= req && z !== ctx.currentRegion;
+        return myLevel >= req && z !== ctx.currentRegion && !FARM_ZONES.has(z);
       });
       if (neighbors.length > 0) {
         const pick = neighbors[Math.floor(Math.random() * neighbors.length)];

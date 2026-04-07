@@ -36,7 +36,7 @@ import {
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
-import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, FARM_ZONES, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
@@ -1149,6 +1149,16 @@ export class AgentRunner {
       return false;
     }
 
+    // Give up after 12 stale ticks — likely blocked by entity collision.
+    // Widen the "close enough" radius so we can interact from further away.
+    if (this.moveToStaleCount >= 12) {
+      console.log(`[agent:${this.walletTag}] moveToEntity stalled 12x to ${target.name ?? "target"} (${Math.round(dist)} away) — treating as arrived`);
+      this.moveToStaleCount = 0;
+      this.moveToLastDistance = Number.POSITIVE_INFINITY;
+      this.moveToLastTarget = "";
+      return false; // Treat as "close enough" so the caller can attempt interaction
+    }
+
     const entity = getWorldEntity(this.entityId);
     const currentOrder = entity?.order;
     const alreadyMovingToTarget = currentOrder?.action === "move"
@@ -1193,6 +1203,7 @@ export class AgentRunner {
     const allowed = this.currentCaps.allowedZones;
     const zonesByLevel = Object.entries(ZONE_LEVEL_REQUIREMENTS)
       .filter(([zone]) => allowed === "all" || allowed.includes(zone))
+      .filter(([zone]) => !FARM_ZONES.has(zone)) // Skip farm zones — no quests/mobs
       .sort(([, a], [, b]) => a - b);
     let bestZone: string | null = null;
     for (const [zone, req] of zonesByLevel) {
@@ -1465,13 +1476,20 @@ export class AgentRunner {
           void this.logActivity(`Level ${lvl}! Continuing ${config.focus}`);
         }
       } else if (trigger.type === "no_targets") {
+        if (config.focus === "combat") {
+          this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity("No mobs visible right now — holding combat focus");
+          return;
+        }
         // Only wander to a new zone if there's no active objective
         if (!activeObj) {
           const lvl = entity.level ?? 1;
           const allowed = this.currentCaps.allowedZones;
           const accessibleNeighbors = getZoneConnections(this.currentRegion)
             .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1))
-            .filter((z) => allowed === "all" || allowed.includes(z));
+            .filter((z) => allowed === "all" || allowed.includes(z))
+            .filter((z) => !FARM_ZONES.has(z)); // Don't wander into farm zones
           if (accessibleNeighbors.length > 0) {
             const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
             console.log(`[agent:${this.walletTag}] No targets in ${this.currentRegion}, moving to ${pick}`);

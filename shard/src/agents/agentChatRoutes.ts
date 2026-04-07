@@ -460,7 +460,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     // Pick only serializable fields from the raw zone entity (avoid BigInt crash)
-    let entity: { name: string; level: number; hp: number | null; maxHp: number | null } | null = null;
+    let entity: { name: string; level: number; hp: number | null; maxHp: number | null; classId?: string; learnedTechniques?: string[] } | null = null;
     let entitySource: "live" | "saved" | null = null;
     if (ref) {
       const raw = await getEntityState(ref.entityId, ref.zoneId);
@@ -470,6 +470,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           level: Number(raw.level ?? 1),
           hp: raw.hp != null ? Number(raw.hp) : null,
           maxHp: raw.maxHp != null ? Number(raw.maxHp) : null,
+          classId: raw.classId,
+          learnedTechniques: raw.learnedTechniques,
         };
         entitySource = "live";
       }
@@ -485,6 +487,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             level: saved.level ?? 1,
             hp: null,
             maxHp: null,
+            classId: saved.classId,
+            learnedTechniques: saved.learnedTechniques,
           };
           entitySource = "saved";
         }

@@ -80,6 +80,16 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "starfall-ranch": 1,
 };
 
+/** Farmland zones — used for farming/crops only, not questing or combat.
+ *  Agents should not roam into these unless they have a farming focus. */
+export const FARM_ZONES: ReadonlySet<string> = new Set([
+  "sunflower-fields", "harvest-hollow", "willowfen-pastures",
+  "bramblewood-homestead", "goldenreach-grange", "dewveil-orchard",
+  "thornwall-ranch", "moonpetal-gardens", "ironroot-farmstead",
+  "crystalbloom-terrace", "copperfield-meadow", "silkwood-grove",
+  "emberglow-estate", "starfall-ranch",
+]);
+
 // ── Connection graph (loaded from world.json) ───────────────────────
 
 interface WorldConnection {

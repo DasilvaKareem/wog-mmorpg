@@ -291,6 +291,9 @@ export class WorldScene extends Phaser.Scene {
       // Skip in overview mode
       if (this.overviewMode) return;
 
+      this.releaseFollow();
+      gameBus.emit("clearEntityInspect", undefined as never);
+
       const cam = this.cameras.main;
       const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
       const scale = this.tilemapRenderer.coordScale;

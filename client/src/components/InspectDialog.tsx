@@ -143,6 +143,12 @@ export function InspectDialog(): React.ReactElement | null {
     void fetchEntity(entityId, zoneId);
   });
 
+  useGameBridge("clearEntityInspect", () => {
+    setOpen(false);
+    setEntity(null);
+    setInspectZoneId(null);
+  });
+
   // Listen for self-inspect ("I" key)
   useGameBridge("inspectSelf", ({ zoneId, walletAddress }) => {
     setIsSelf(true);

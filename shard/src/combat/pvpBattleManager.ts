@@ -727,30 +727,30 @@ export class PvPBattleManager {
   /**
    * Get all active battles
    */
-  getActiveBattles(): Array<{
-    battleId: string;
-    format: PvPFormat;
-    status: string;
-    playersCount: number;
-  }> {
-    // Arena manager matches
-    const arenaMatches = arenaManager.getActiveMatches().map((m) => ({
-      battleId: m.battleId,
-      format: m.format,
-      status: m.status,
-      playersCount: m.playerCount,
-    }));
-    // Legacy engine matches (if any still running)
+  getActiveBattles(): PvPBattleState[] {
+    const battles: PvPBattleState[] = [];
+
+    for (const match of arenaManager.getActiveMatches()) {
+      const state = arenaManager.getMatchState(match.battleId);
+      if (!state) continue;
+      const legacyState = this.arenaStateToLegacy(state);
+      const poolId = this.getPoolForBattle(match.battleId);
+      if (poolId) {
+        legacyState.config.marketPoolId = poolId;
+      }
+      battles.push(legacyState);
+    }
+
     for (const [battleId, battle] of this.activeBattles.entries()) {
       const state = battle.getState();
-      arenaMatches.push({
-        battleId,
-        format: state.config.format,
-        status: state.status,
-        playersCount: state.config.teamRed.length + state.config.teamBlue.length,
-      });
+      const poolId = this.getPoolForBattle(battleId);
+      if (poolId) {
+        state.config.marketPoolId = poolId;
+      }
+      battles.push(state);
     }
-    return arenaMatches;
+
+    return battles;
   }
 
   /**
