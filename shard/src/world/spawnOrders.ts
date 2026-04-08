@@ -47,6 +47,30 @@ interface SpawnOrderBody {
   origin?: string;
 }
 
+// ── Appearance backfill for legacy characters ─────────────────────
+const SPAWN_SKINS   = ["pale", "fair", "light", "medium", "tan", "olive", "brown", "dark"];
+const SPAWN_EYES    = ["brown", "blue", "green", "gold", "amber", "gray", "violet"];
+const SPAWN_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald", "topknot", "bangs"];
+const SPAWN_GENDERS: ("male" | "female")[] = ["male", "female"];
+
+function spawnNameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function randomSpawnAppearance(name: string) {
+  const h = spawnNameHash(name);
+  return {
+    gender:    SPAWN_GENDERS[h % SPAWN_GENDERS.length] as "male" | "female",
+    skinColor: SPAWN_SKINS[(h >>> 3) % SPAWN_SKINS.length],
+    eyeColor:  SPAWN_EYES[(h >>> 6) % SPAWN_EYES.length],
+    hairStyle: SPAWN_HAIRS[(h >>> 9) % SPAWN_HAIRS.length],
+  };
+}
+
 function parseOnChainTokenId(value: string | undefined): bigint | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
@@ -131,10 +155,13 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
     const resolvedCalling = (saved?.calling as "adventurer" | "farmer" | "merchant" | "craftsman" | undefined) ?? calling;
-    const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
-    const resolvedSkinColor = saved?.skinColor ?? skinColor;
-    const resolvedHairStyle = saved?.hairStyle ?? hairStyle;
-    const resolvedEyeColor = saved?.eyeColor ?? eyeColor;
+    // Backfill appearance for legacy characters that lack it
+    const needsAppearance = type === "player" && !saved?.gender && !gender;
+    const backfillAppearance = needsAppearance ? randomSpawnAppearance(name) : null;
+    const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender ?? backfillAppearance?.gender;
+    const resolvedSkinColor = saved?.skinColor ?? skinColor ?? backfillAppearance?.skinColor;
+    const resolvedHairStyle = saved?.hairStyle ?? hairStyle ?? backfillAppearance?.hairStyle;
+    const resolvedEyeColor = saved?.eyeColor ?? eyeColor ?? backfillAppearance?.eyeColor;
     const resolvedOrigin = saved?.origin ?? origin;
     const derivedStats =
       type === "player" && resolvedRaceId && resolvedClassId
@@ -217,6 +244,17 @@ export function registerSpawnOrders(server: FastifyInstance) {
       server.log.info(
         `[persistence] Restored profession skills for "${entity.name}": ${Object.entries(saved.professionSkills).map(([p, d]) => `${p} L${d.level}`).join(", ")}`
       );
+    }
+
+    // Persist backfilled appearance to Redis so it sticks across respawns
+    if (backfillAppearance && saved && walletAddress && type === "player") {
+      void saveCharacter(walletAddress, entity.name, {
+        ...saved,
+        gender: resolvedGender,
+        skinColor: resolvedSkinColor,
+        hairStyle: resolvedHairStyle,
+        eyeColor: resolvedEyeColor,
+      }).catch(() => {});
     }
 
     // First-time spawn: save initial character data

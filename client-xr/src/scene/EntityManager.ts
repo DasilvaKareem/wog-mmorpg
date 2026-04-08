@@ -766,12 +766,13 @@ type HumanoidRigLike = CharacterRig;
 
 // ── Animation types ─────────────────────────────────────────────────
 
-type AnimName = "walk" | "idle" | "attack" | "magicbolt" | "bowshot"
+type AnimName = "walk" | "run" | "idle" | "attack" | "magicbolt" | "bowshot"
   | "heroicstrike" | "cleave" | "shieldwall" | "battlerage" | "intimidatingshout" | "rallyingcry" | "rendingstrike"
   | "spellcast" | "darkcast" | "holycast"
   | "palmstrike" | "flyingkick" | "whirlwindkick"
   | "damage" | "heal" | "death" | "gather" | "craft"
-  | "mine" | "forage" | "skin" | "brew" | "cook" | "enchant" | "carve";
+  | "mine" | "forage" | "skin" | "brew" | "cook" | "enchant" | "carve"
+  | "roll" | "jump" | "shoot" | "pickup" | "sit" | "standup" | "levelup" | "defeat";
 
 /** Map gatherType → profession-specific gather animation */
 const GATHER_ANIM: Record<string, AnimName> = {
@@ -875,12 +876,18 @@ function attackAnimForClass(classId: string | undefined): AnimName {
 }
 
 const PROFESSION_ANIMS: Set<AnimName> = new Set([
-  "gather", "craft", "mine", "forage", "skin", "brew", "cook", "enchant", "carve",
+  "gather", "craft", "mine", "forage", "skin", "brew", "cook", "enchant", "carve", "pickup",
+]);
+
+/** Animations that are non-combat one-shots (shouldn't be treated as combat holds) */
+const NON_COMBAT_ONESHOTS: Set<AnimName> = new Set([
+  "levelup", "defeat", "jump", "roll", "sit", "standup", ...PROFESSION_ANIMS,
 ]);
 
 function isCombatAnimation(name: AnimName | null): boolean {
-  return name != null && name !== "walk" && name !== "idle" && name !== "damage" && name !== "heal" && name !== "death"
-    && !PROFESSION_ANIMS.has(name);
+  return name != null && name !== "walk" && name !== "run" && name !== "idle"
+    && name !== "damage" && name !== "heal" && name !== "death"
+    && !NON_COMBAT_ONESHOTS.has(name);
 }
 
 function getIntentAnimForEntity(entity: Entity, intent: Pick<VisibleIntent, "techniqueId">): AnimName {
@@ -952,6 +959,8 @@ export class EntityManager {
   private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
+  private charAssets: import("./CharacterAssets.js").CharacterAssets | null = null;
+  private armorSystem: import("./ArmorSystem.js").ArmorSystem | null = null;
   private avatarAssets = new AvatarAssets();
 
   constructor() {
@@ -961,6 +970,16 @@ export class EntityManager {
   /** Link to environment assets for GLB ore/resource models */
   setEnvironmentAssets(assets: EnvironmentAssets) {
     this.envAssets = assets;
+  }
+
+  /** Link to character assets for GLB character models */
+  setCharacterAssets(assets: import("./CharacterAssets.js").CharacterAssets) {
+    this.charAssets = assets;
+  }
+
+  /** Link to armor system for equipment rendering */
+  setArmorSystem(armor: import("./ArmorSystem.js").ArmorSystem) {
+    this.armorSystem = armor;
   }
 
   /** Link to an elevation provider (WorldManager or TerrainRenderer) */
@@ -1123,7 +1142,7 @@ export class EntityManager {
       }
 
       // ── Animation blending via mixer ──
-      if (obj.mixer && obj.rig) {
+      if (obj.mixer && (obj.rig || obj.hasGlbModel)) {
         const curAnim = obj.currentAnim;
         const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "idle";
 
@@ -1275,9 +1294,9 @@ export class EntityManager {
   private getClipForEntity(obj: EntityObject, name: AnimName): THREE.AnimationClip | null {
     const override = obj.clipOverrides.get(name);
     if (override) return override;
-    if (!obj.rig) {
-      return AnimationLibrary.get(name);
-    }
+    // GLB characters only use their own clips via clipOverrides — never fall back
+    // to AnimationLibrary (incompatible bone names)
+    if (obj.hasGlbModel) return null;
     return AnimationLibrary.get(name);
   }
 
@@ -1602,7 +1621,7 @@ export class EntityManager {
     obj.targetZ = pos.z;
     this.snapToPosition(obj, pos.x, pos.z);
 
-    if (obj.mixer && obj.rig) {
+    if (obj.mixer && (obj.rig || obj.hasGlbModel)) {
       this.playAnimation(obj, "idle", true);
     }
 
@@ -1644,7 +1663,7 @@ export class EntityManager {
       // Combat events: trigger attack animation on the attacker
       if (ev.type === "combat" && ev.entityId && ev.data?.animStyle) {
         const attacker = this.entities.get(ev.entityId);
-        if (attacker && attacker.rig) {
+        if (attacker && (attacker.rig || attacker.hasGlbModel)) {
           const atkAnim = attackAnimForClass(attacker.entity.classId);
           if (attacker.currentAnim !== atkAnim) {
             if (ev.targetId) {
@@ -1670,6 +1689,13 @@ export class EntityManager {
           this.triggerDeath(obj);
         }
       }
+      // Level-up events: play victory/celebration animation
+      if (ev.type === "levelup" && ev.entityId) {
+        const obj = this.entities.get(ev.entityId);
+        if (obj && (obj.rig || obj.hasGlbModel)) {
+          this.playOneShot(obj, "levelup");
+        }
+      }
       // Ability events: play technique-specific animation on the caster
       if (ev.type === "ability" && ev.entityId) {
         const obj = this.entities.get(ev.entityId);
@@ -1683,7 +1709,7 @@ export class EntityManager {
           // Fallback: use class-appropriate cast/attack anim
           anim = attackAnimForClass(obj.entity.classId);
         }
-        if (anim && obj.rig && obj.currentAnim !== anim) {
+        if (anim && (obj.rig || obj.hasGlbModel) && obj.currentAnim !== anim) {
           if (ev.targetId) {
             const target = this.entities.get(ev.targetId);
             if (target) {
@@ -1722,20 +1748,81 @@ export class EntityManager {
     let rig: HumanoidRigLike | null = null;
     let mixer: THREE.AnimationMixer | null = null;
     let clipOverrides = new Map<string, THREE.AnimationClip>();
+    let hasGlbCharacter = false;
 
     switch (info.style) {
       case "humanoid": {
-        const result = ent.type === "player"
-          ? this.buildPlayer(group, ent)
-          : this.buildNpc(group, ent, info.color);
-        bodyMesh = result.body;
-        headMesh = result.head;
-        leftLeg = result.leftLeg;
-        rightLeg = result.rightLeg;
-        leftArm = result.leftArm;
-        rightArm = result.rightArm;
-        rig = result.rig;
-        clipOverrides = result.clipOverrides;
+        // Try GLB character model first
+        const glbChar = this.tryBuildGlbCharacter(group, ent);
+        if (glbChar) {
+          mixer = glbChar.mixer;
+          hasGlbCharacter = true;
+          // Map GLB animation names → our internal clip overrides
+          const glbAnimMap: Record<string, string> = {
+            // Locomotion
+            Idle: "idle", Walk: "walk", Run: "run",
+            // Combat
+            SwordSlash: "attack", Punch: "attack",
+            Shoot_OneHanded: "shoot",
+            Death: "death", Defeat: "defeat", RecieveHit: "damage",
+            // Movement abilities
+            Jump: "jump", Roll: "roll",
+            // Interactions
+            PickUp: "pickup", SitDown: "sit", StandUp: "standup",
+            // Profession — reuse PickUp for gathering/crafting
+            Walk_Carry: "gather", Run_Carry: "craft",
+            // Leveling up
+            Victory: "levelup",
+          };
+          for (const [glbName, ourName] of Object.entries(glbAnimMap)) {
+            const clip = glbChar.clips.get(glbName);
+            if (clip) clipOverrides.set(ourName, clip);
+          }
+
+          // Map technique-specific anims to best GLB equivalents
+          const swordClip = glbChar.clips.get("SwordSlash");
+          const punchClip = glbChar.clips.get("Punch");
+          const shootClip = glbChar.clips.get("Shoot_OneHanded");
+          const rollClip = glbChar.clips.get("Roll");
+          const pickupClip = glbChar.clips.get("PickUp");
+          // Melee techniques → SwordSlash
+          for (const a of ["heroicstrike", "cleave", "rendingstrike", "shieldwall", "battlerage", "intimidatingshout", "rallyingcry"] as AnimName[]) {
+            if (swordClip && !clipOverrides.has(a)) clipOverrides.set(a, swordClip);
+          }
+          // Monk techniques → Punch
+          for (const a of ["palmstrike", "flyingkick", "whirlwindkick"] as AnimName[]) {
+            if (punchClip && !clipOverrides.has(a)) clipOverrides.set(a, punchClip);
+          }
+          // Ranged/magic techniques → Shoot
+          for (const a of ["magicbolt", "bowshot", "spellcast", "darkcast", "holycast"] as AnimName[]) {
+            if (shootClip && !clipOverrides.has(a)) clipOverrides.set(a, shootClip);
+          }
+          // Dodge → Roll
+          if (rollClip && !clipOverrides.has("roll")) clipOverrides.set("roll", rollClip);
+          // Heal → same as shoot (hands-out gesture)
+          if (shootClip && !clipOverrides.has("heal")) clipOverrides.set("heal", shootClip);
+          // Professions → PickUp
+          for (const a of ["mine", "forage", "skin", "brew", "cook", "enchant", "carve"] as AnimName[]) {
+            if (pickupClip && !clipOverrides.has(a)) clipOverrides.set(a, pickupClip);
+          }
+          // Find a mesh for selection raycasting
+          group.traverse((c) => {
+            if (!bodyMesh && c instanceof THREE.SkinnedMesh) bodyMesh = c as unknown as THREE.Mesh;
+          });
+        } else {
+          // Fall back to procedural character
+          const result = ent.type === "player"
+            ? this.buildPlayer(group, ent)
+            : this.buildNpc(group, ent, info.color);
+          bodyMesh = result.body;
+          headMesh = result.head;
+          leftLeg = result.leftLeg;
+          rightLeg = result.rightLeg;
+          leftArm = result.leftArm;
+          rightArm = result.rightArm;
+          rig = result.rig;
+          clipOverrides = result.clipOverrides;
+        }
         break;
       }
       case "mob": {
@@ -1758,8 +1845,8 @@ export class EntityManager {
         break;
     }
 
-    // Set up animation mixer if rigged
-    if (rig) {
+    // Set up animation mixer if rigged (skip if GLB already set one up)
+    if (rig && !mixer) {
       mixer = new THREE.AnimationMixer(rig.rootBone);
     }
 
@@ -1804,7 +1891,7 @@ export class EntityManager {
       isMoving: false, movingSmooth: 0,
       rig, mixer, actions: new Map(), clipOverrides, currentAnim: null,
       leftLeg, rightLeg, leftArm, rightArm,
-      hasGlbModel: !!(group as any)._hasGlbModel,
+      hasGlbModel: hasGlbCharacter || !!(group as any)._hasGlbModel,
       glbAttackTimer: 0,
       combatAnimHold: 0,
       oneShotStart: 0,
@@ -2141,6 +2228,75 @@ export class EntityManager {
         break;
       }
     }
+  }
+
+  /**
+   * Try to build a GLB character model for a humanoid entity.
+   * Returns null if CharacterAssets isn't ready, falling back to procedural.
+   */
+  private tryBuildGlbCharacter(
+    group: THREE.Group,
+    ent: Entity,
+  ): import("./CharacterAssets.js").CharacterInstance | null {
+    if (!this.charAssets) {
+      console.warn(`[GLB] charAssets not set for ${ent.name}`);
+      return null;
+    }
+    if (!this.charAssets.isReady()) {
+      console.warn(`[GLB] charAssets not ready for ${ent.name}`);
+      return null;
+    }
+
+    const avatar = this.avatarAssets.resolvePlayer(ent);
+    const { skinHex, hairHex, eyeHex } = avatar.colors;
+    const { isFemale } = avatar.features;
+
+    console.log(`[GLB] Building ${ent.name} type=${ent.type} class=${ent.classId} female=${isFemale}`);
+
+    const char = this.charAssets.buildCharacter({
+      wogClass: ent.classId ?? undefined,
+      npcType: ent.type !== "player" ? ent.type : undefined,
+      isFemale,
+      skinColor: skinHex,
+      hairColor: hairHex,
+      eyeColor: eyeHex,
+      scale: 0.7, // Quaternius models are ~2.4 units tall, scale to match our ~1.7 unit characters
+    });
+
+    if (!char) {
+      console.warn(`[GLB] buildCharacter returned null for ${ent.name}`);
+      return null;
+    }
+
+    console.log(`[GLB] ✓ Built ${ent.name} — meshes:`, char.group.children.length, "clips:", char.clips.size);
+    group.add(char.group);
+
+    // Equip armor pieces from entity equipment data
+    if (this.armorSystem?.isReady() && ent.equipment) {
+      // Find the skeleton from the character's SkinnedMesh
+      if (char.skinnedMesh?.skeleton) {
+        const skeleton = char.skinnedMesh.skeleton;
+        const rootBone = skeleton.bones[0];
+        const armorGroup = this.armorSystem.equipFromEntityData(
+          ent.equipment as Record<string, { name?: string; quality?: string }>,
+          skeleton,
+          rootBone,
+        );
+        if (armorGroup.children.length > 0) {
+          console.log(`[GLB] ⚔ Equipped ${armorGroup.children.length} armor pieces on ${ent.name}`);
+          char.group.add(armorGroup);
+        }
+      }
+    }
+
+    // Start idle animation
+    const idleClip = char.clips.get("Idle");
+    if (idleClip) {
+      const action = char.mixer.clipAction(idleClip);
+      action.play();
+    }
+
+    return char;
   }
 
   private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {

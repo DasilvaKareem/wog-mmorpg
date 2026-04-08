@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { TerrainRenderer } from "./TerrainRenderer.js";
 import { CollisionMap } from "./CollisionMap.js";
 import { EnvironmentAssets } from "./EnvironmentAssets.js";
+import { CharacterAssets } from "./CharacterAssets.js";
+import { ArmorSystem } from "./ArmorSystem.js";
 import { fetchTerrain } from "../api.js";
 import type { WorldLayout, WorldLayoutZone, ElevationProvider } from "../types.js";
 
@@ -49,14 +51,21 @@ export class WorldManager implements ElevationProvider {
   private borderElapsed = 0;
   private borderWalls: THREE.Mesh[] = [];
   private envAssets = new EnvironmentAssets();
+  private charAssets = new CharacterAssets();
+  private armorSystem = new ArmorSystem();
   private envAssetsReady: Promise<void>;
 
   constructor() {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
-    // Start preloading environment GLB models immediately
-    this.envAssetsReady = this.envAssets.preload().then(() => {
+    // Start preloading environment + town + character + armor GLB models immediately
+    this.envAssetsReady = Promise.all([
+      this.envAssets.preload(),
+      this.envAssets.preloadTown(),
+      this.charAssets.preload(),
+      this.armorSystem.preload(),
+    ]).then(() => {
       // Rebuild any zones that were loaded before assets were ready
       this.rebuildZonesWithAssets();
     });
@@ -65,6 +74,16 @@ export class WorldManager implements ElevationProvider {
   /** Get the shared environment assets instance */
   getEnvironmentAssets(): EnvironmentAssets {
     return this.envAssets;
+  }
+
+  /** Get the shared character assets instance */
+  getCharacterAssets(): CharacterAssets {
+    return this.charAssets;
+  }
+
+  /** Get the shared armor system instance */
+  getArmorSystem(): ArmorSystem {
+    return this.armorSystem;
   }
 
   /** Initialize from the /world/layout response */

@@ -8,6 +8,31 @@ import { getAllEntities } from "../world/zoneRuntime.js";
 import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
+
+// ── Random appearance generation for new player characters ──────────
+const PLAYER_SKINS   = ["pale", "fair", "light", "medium", "tan", "olive", "brown", "dark"];
+const PLAYER_EYES    = ["brown", "blue", "green", "gold", "amber", "gray", "violet"];
+const PLAYER_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald", "topknot", "bangs"];
+const PLAYER_GENDERS: ("male" | "female")[] = ["male", "female"];
+
+function nameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/** Generate deterministic random appearance from character name */
+function randomPlayerAppearance(name: string) {
+  const h = nameHash(name);
+  return {
+    gender:    PLAYER_GENDERS[h % PLAYER_GENDERS.length],
+    skinColor: PLAYER_SKINS[(h >>> 3) % PLAYER_SKINS.length],
+    eyeColor:  PLAYER_EYES[(h >>> 6) % PLAYER_EYES.length],
+    hairStyle: PLAYER_HAIRS[(h >>> 9) % PLAYER_HAIRS.length],
+  };
+}
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
 import { findLatestChainOperationByTypeAndSubject } from "../blockchain/chainOperationStore.js";
@@ -283,6 +308,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           return { error: "raceId and classId are required when the character has no saved registration state" };
         }
         targetWallet = custodialWallet ?? walletAddress;
+        const appearance = randomPlayerAppearance(rawName);
         await saveCharacter(targetWallet, rawName, {
           name: rawName,
           level: 1,
@@ -291,6 +317,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           chainRegistrationStatus: characterTokenId ? "mint_confirmed" : "unregistered",
           raceId,
           classId,
+          gender: appearance.gender,
+          skinColor: appearance.skinColor,
+          eyeColor: appearance.eyeColor,
+          hairStyle: appearance.hairStyle,
           zone: "village-square",
           x: 0,
           y: 0,

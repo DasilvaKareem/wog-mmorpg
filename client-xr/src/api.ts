@@ -5,10 +5,6 @@ import type {
   WorldLayout,
 } from "./types.js";
 
-<<<<<<< HEAD
-// In dev, Vite proxy handles /zones etc. In prod (GCS), call shard directly.
-const BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
-=======
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
 const ENV_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? "";
 const CANDIDATE_BASES = ENV_BASE
@@ -37,7 +33,6 @@ async function fetchJsonWithFallback<T>(path: string): Promise<T | null> {
   }
   return null;
 }
->>>>>>> 9fffce2ab724d31b857c8621bfc401f48a43a5ef
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   return fetchJsonWithFallback<ZoneResponse>(`/zones/${zoneId}`);

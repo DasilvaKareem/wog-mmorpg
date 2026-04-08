@@ -82,6 +82,8 @@ scene.add(world.group);
 const entities = new EntityManager();
 entities.setElevationProvider(world);
 entities.setEnvironmentAssets(world.getEnvironmentAssets());
+entities.setCharacterAssets(world.getCharacterAssets());
+entities.setArmorSystem(world.getArmorSystem());
 scene.add(entities.group);
 
 const effects = new EffectsManager(entities);

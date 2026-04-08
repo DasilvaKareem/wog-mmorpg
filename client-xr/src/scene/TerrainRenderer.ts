@@ -38,6 +38,8 @@ const ROCK_TILES = new Set([50, 51]);
 const BUSH_TILES = new Set([52, 53]);
 const FENCE_TILES = new Set([58, 59]);
 const WATER_TILES = new Set([16, 17, 18, 19, 20, 21, 22, 23]);
+/** Structure ground tiles that should get a 3D floor piece (road/planks) */
+const STRUCTURE_FLOOR_TILES = new Set([24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]);
 
 const TILE_UNIT = 1;
 
@@ -272,6 +274,14 @@ export class TerrainRenderer {
           water.position.set(wx, 0.08 + elev, wz);
           this.group.add(water);
           this.waterMeshes.push(water);
+        }
+
+        // Place 3D floor pieces under structure tiles (road for exterior, planks for interior)
+        if (useGlb && STRUCTURE_FLOOR_TILES.has(groundIdx)) {
+          const floorAsset = (groundIdx === 34 || groundIdx === 35)
+            ? "town_planks" : "town_road";
+          const floor = this.envAssets!.place(floorAsset, wx, elev, wz);
+          if (floor) this.group.add(floor);
         }
 
         const ov = data.overlay[ti] ?? -1;
