@@ -2,6 +2,14 @@ import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getWalletInstanceByToken } from "../items/itemRng.js";
+import {
+  getDirectListingById,
+  listActiveDirectListings,
+  listDirectListingsBySeller,
+  listExpiredActiveDirectListingIds,
+  upsertDirectListing,
+} from "../db/directListingStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Interfaces ──────────────────────────────────────────────────────
 
@@ -87,9 +95,6 @@ export type CreateListingParams = Pick<
 export async function createListing(
   params: CreateListingParams
 ): Promise<DirectListing> {
-  const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable – cannot create listing");
-
   const now = Date.now();
   const listing: DirectListing = {
     listingId: randomUUID(),
@@ -106,11 +111,21 @@ export async function createListing(
     expiresAt: now + (params.durationMs ?? DEFAULT_LISTING_DURATION_MS),
   };
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_LISTING(listing.listingId), JSON.stringify(listing));
-  pipeline.zadd(KEY_ACTIVE, now, listing.listingId);
-  pipeline.sadd(KEY_SELLER(listing.sellerWallet), listing.listingId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertDirectListing(listing);
+  } else {
+    const redis = getRedis();
+    if (!redis) throw new Error("Redis unavailable – cannot create listing");
+  }
+
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_LISTING(listing.listingId), JSON.stringify(listing));
+    pipeline.zadd(KEY_ACTIVE, now, listing.listingId);
+    pipeline.sadd(KEY_SELLER(listing.sellerWallet), listing.listingId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -118,19 +133,19 @@ export async function createListing(
 export async function getListing(
   listingId: string
 ): Promise<(DirectListing & Record<string, unknown>) | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
-  const raw = await redis.get(KEY_LISTING(listingId));
-  if (!raw) return null;
-
-  const listing = JSON.parse(raw) as DirectListing;
+  const listing = await getRawListing(listingId);
+  if (!listing) return null;
   return enrichListing(listing);
 }
 
 export async function getRawListing(
   listingId: string
 ): Promise<DirectListing | null> {
+  if (isPostgresConfigured()) {
+    const listing = await getDirectListingById(listingId);
+    if (listing) return listing;
+  }
+
   const redis = getRedis();
   if (!redis) return null;
 
@@ -141,21 +156,24 @@ export async function getRawListing(
 export async function getActiveListings(
   filter?: ListingFilter
 ): Promise<Array<DirectListing & Record<string, unknown>>> {
-  const redis = getRedis();
-  if (!redis) return [];
-
-  const ids: string[] = await redis.zrangebyscore(KEY_ACTIVE, "-inf", "+inf");
-  if (!ids.length) return [];
-
-  const pipeline = redis.multi();
-  for (const id of ids) pipeline.get(KEY_LISTING(id));
-  const results = await pipeline.exec();
-
   let listings: Array<DirectListing & Record<string, unknown>> = [];
-  for (const [err, raw] of results) {
-    if (!err && raw) {
-      const listing = JSON.parse(raw as string) as DirectListing;
-      listings.push(enrichListing(listing));
+  if (isPostgresConfigured()) {
+    listings = (await listActiveDirectListings()).map((listing) => enrichListing(listing));
+  } else {
+    const redis = getRedis();
+    if (!redis) return [];
+
+    const ids: string[] = await redis.zrangebyscore(KEY_ACTIVE, "-inf", "+inf");
+    if (!ids.length) return [];
+
+    const pipeline = redis.multi();
+    for (const id of ids) pipeline.get(KEY_LISTING(id));
+    const results = await pipeline.exec();
+    for (const [err, raw] of results) {
+      if (!err && raw) {
+        const listing = JSON.parse(raw as string) as DirectListing;
+        listings.push(enrichListing(listing));
+      }
     }
   }
 
@@ -205,6 +223,10 @@ export async function getActiveListings(
 export async function getSellerListings(
   wallet: string
 ): Promise<Array<DirectListing & Record<string, unknown>>> {
+  if (isPostgresConfigured()) {
+    return (await listDirectListingsBySeller(wallet)).map((listing) => enrichListing(listing));
+  }
+
   const redis = getRedis();
   if (!redis) return [];
 
@@ -229,19 +251,22 @@ export async function markListingSold(
   listingId: string,
   operationId: string
 ): Promise<DirectListing | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const listing = await getRawListing(listingId);
   if (!listing) return null;
 
   listing.status = "sold";
   listing.operationId = operationId;
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
-  pipeline.zrem(KEY_ACTIVE, listingId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertDirectListing(listing);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
+    pipeline.zrem(KEY_ACTIVE, listingId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -249,18 +274,21 @@ export async function markListingSold(
 export async function markListingCancelled(
   listingId: string
 ): Promise<DirectListing | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const listing = await getRawListing(listingId);
   if (!listing) return null;
 
   listing.status = "cancelled";
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
-  pipeline.zrem(KEY_ACTIVE, listingId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertDirectListing(listing);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
+    pipeline.zrem(KEY_ACTIVE, listingId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -268,18 +296,21 @@ export async function markListingCancelled(
 export async function markListingExpired(
   listingId: string
 ): Promise<DirectListing | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const listing = await getRawListing(listingId);
   if (!listing) return null;
 
   listing.status = "expired";
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
-  pipeline.zrem(KEY_ACTIVE, listingId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertDirectListing(listing);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_LISTING(listingId), JSON.stringify(listing));
+    pipeline.zrem(KEY_ACTIVE, listingId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -289,13 +320,17 @@ export async function markListingExpired(
  * Returns the IDs of expired listings (does not modify them).
  */
 export async function expireStaleListings(): Promise<string[]> {
+  const now = Date.now();
+  if (isPostgresConfigured()) {
+    return await listExpiredActiveDirectListingIds(now);
+  }
+
   const redis = getRedis();
   if (!redis) return [];
 
   const ids: string[] = await redis.zrangebyscore(KEY_ACTIVE, "-inf", "+inf");
   if (!ids.length) return [];
 
-  const now = Date.now();
   const expired: string[] = [];
 
   const pipeline = redis.multi();

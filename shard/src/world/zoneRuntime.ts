@@ -31,11 +31,12 @@ import { getActiveXpMultiplier } from "../professions/potionEffects.js";
 import { getAttackMultiplier, getDefenseMultiplier } from "../combat/elementSystem.js";
 import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZoneTransition } from "../social/diary.js";
 import { getGameTime, checkPhaseTransition, formatGameTime } from "./worldClock.js";
-import { recordGoldSpend } from "../blockchain/goldLedger.js";
+import { recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
 import { flushPlayer } from "../blockchain/chainBatcher.js";
 import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { getRedis } from "../redis.js";
+import { deleteLiveSession, listLiveSessions, upsertLiveSession } from "../db/liveSessionStore.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 
@@ -552,15 +553,23 @@ function hydrateLivePlayerEntity(raw: Record<string, unknown>): Entity {
 
 async function persistLivePlayerEntity(entity: Entity): Promise<void> {
   if (entity.type !== "player" || !entity.walletAddress) return;
-  const redis = getRedis();
-  if (!redis) return;
-
   const payload: PersistedLivePlayer = {
     entity: serializeLivePlayerEntity(entity),
     professions: getLearnedProfessions(entity.walletAddress),
     savedAt: Date.now(),
   };
 
+  await upsertLiveSession({
+    walletAddress: entity.walletAddress,
+    entityId: entity.id,
+    zoneId: entity.region ?? "village-square",
+    sessionState: payload as unknown as Record<string, unknown>,
+  }).catch((err) => {
+    console.warn(`[live-player] Failed to sync Postgres session for ${entity.name}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
+  const redis = getRedis();
+  if (!redis) return;
   const tx = redis.multi();
   tx.sadd(LIVE_PLAYER_IDS_KEY, entity.walletAddress.toLowerCase());
   tx.set(livePlayerKey(entity.walletAddress), JSON.stringify(payload));
@@ -568,6 +577,10 @@ async function persistLivePlayerEntity(entity: Entity): Promise<void> {
 }
 
 async function removeLivePlayerEntity(walletAddress: string): Promise<void> {
+  await deleteLiveSession(walletAddress).catch((err) => {
+    console.warn(`[live-player] Failed to delete Postgres session for ${walletAddress}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
   const redis = getRedis();
   if (!redis) return;
   const tx = redis.multi();
@@ -577,6 +590,69 @@ async function removeLivePlayerEntity(walletAddress: string): Promise<void> {
 }
 
 export async function restoreLivePlayersFromRedis(): Promise<number> {
+  const persistedSessions = await listLiveSessions().catch(() => []);
+  if (persistedSessions.length > 0) {
+    let restored = 0;
+    for (const session of persistedSessions) {
+      const parsed = session.sessionState as unknown as PersistedLivePlayer;
+      const entityRaw = parsed?.entity;
+      if (!entityRaw || typeof entityRaw !== "object") continue;
+
+      try {
+        const entity = hydrateLivePlayerEntity(entityRaw);
+        if (entity.type !== "player" || !entity.walletAddress) continue;
+        if (isWalletSpawned(entity.walletAddress) || world.entities.has(entity.id)) continue;
+
+        if (entity.stats) {
+          recalculateEntityVitals(entity);
+        } else if (entity.raceId && entity.classId) {
+          entity.stats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level ?? 1);
+          recalculateEntityVitals(entity);
+        }
+        if (entity.walletAddress) {
+          const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+            characterTokenId: entity.characterTokenId?.toString(),
+            agentId: entity.agentId?.toString(),
+          });
+          if (verifiedIdentityPatch.characterTokenId) {
+            entity.characterTokenId = BigInt(verifiedIdentityPatch.characterTokenId);
+          }
+          if (verifiedIdentityPatch.agentId) {
+            entity.agentId = BigInt(verifiedIdentityPatch.agentId);
+          } else {
+            entity.agentId = undefined;
+          }
+        }
+
+        if (entity.region === "coliseum-arena") {
+          const saved = entity.pvpSavedPosition;
+          entity.region = saved?.region ?? "village-square";
+          if (saved) { entity.x = saved.x; entity.y = saved.y; }
+        }
+        entity.pvpBattleId = undefined;
+        entity.pvpTeam = undefined;
+        entity.pvpSavedPosition = undefined;
+        const zoneId = entity.region ?? session.zoneId ?? "village-square";
+        getOrCreateZone(zoneId).entities.set(entity.id, entity);
+        registerSpawnedWallet(entity.walletAddress, entity.id, zoneId);
+        if (Array.isArray(parsed.professions) && parsed.professions.length > 0) {
+          restoreProfessions(entity.walletAddress, parsed.professions);
+        }
+        if (entity.agentId != null) {
+          reputationManager.ensureInitialized(entity.agentId);
+        }
+        restored++;
+      } catch (err) {
+        console.warn("[live-player] Failed to restore player from Postgres:", err);
+      }
+    }
+
+    if (restored > 0) {
+      console.log(`[live-player] Restored ${restored} active player session(s) from Postgres`);
+      return restored;
+    }
+  }
+
   const redis = getRedis();
   if (!redis) return 0;
 
@@ -1447,7 +1523,9 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
   // Gold tax on death: level * 10 copper (e.g. L42 = 420 copper = 0.042 GOLD)
   if (player.walletAddress) {
     const goldTax = copperToGold((player.level ?? 1) * 10);
-    recordGoldSpend(player.walletAddress, goldTax);
+    void recordGoldSpendAsync(player.walletAddress, goldTax).catch((err) => {
+      console.error(`[death] Gold tax persist failed for ${player.name}:`, err);
+    });
     console.log(`[death] ${player.name} taxed ${(player.level ?? 1) * 10} copper (L${player.level ?? 1})`);
   }
 

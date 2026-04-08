@@ -6,6 +6,20 @@ import {
   registerChainOperationProcessor,
   type ChainOperationRecord,
 } from "../blockchain/chainOperationStore.js";
+import {
+  getGuild,
+  getGuildMember,
+  getGuildProposal,
+  getMemberGuildIdFromProjection,
+  listGuildMembers,
+  listGuildProposals,
+  listGuilds,
+  removeGuildMember,
+  upsertGuild,
+  upsertGuildMember,
+  upsertGuildProposal,
+} from "../db/guildStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 const GUILD_CONTRACT_ADDRESS = process.env.GUILD_CONTRACT_ADDRESS;
 
@@ -161,7 +175,27 @@ async function processGuildCreate(record: ChainOperationRecord): Promise<{ resul
     try {
       const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "GuildCreated") {
-        return { result: { guildId: Number(parsed.args.guildId), txHash: receipt.hash }, txHash: receipt.hash };
+        const guildId = Number(parsed.args.guildId);
+        const createdAt = Math.floor(Date.now() / 1000);
+        await upsertGuild({
+          guildId,
+          name: payload.name,
+          description: payload.description,
+          founder: payload.founder,
+          treasury: payload.initialDeposit,
+          level: 1,
+          reputation: 0,
+          status: GuildStatus.Active,
+          createdAt,
+          memberCount: 1,
+        });
+        await upsertGuildMember(guildId, {
+          address: payload.founder,
+          rank: MemberRank.Founder,
+          joinedAt: createdAt,
+          contributedGold: payload.initialDeposit,
+        });
+        return { result: { guildId, txHash: receipt.hash }, txHash: receipt.hash };
       }
     } catch {}
   }
@@ -196,6 +230,17 @@ registerChainOperationProcessor("guild-join", async (record: ChainOperationRecor
     const tx = await ensureGuildContract().joinGuild(payload.guildId, payload.member);
     return tx.wait();
   });
+  const guild = await getGuild(payload.guildId);
+  const joinedAt = Math.floor(Date.now() / 1000);
+  await upsertGuildMember(payload.guildId, {
+    address: payload.member,
+    rank: MemberRank.Member,
+    joinedAt,
+    contributedGold: 0,
+  });
+  if (guild) {
+    await upsertGuild({ ...guild, memberCount: guild.memberCount + 1 });
+  }
   return { result: receipt.hash, txHash: receipt.hash };
 });
 
@@ -211,6 +256,11 @@ registerChainOperationProcessor("guild-leave", async (record: ChainOperationReco
     const tx = await ensureGuildContract().leaveGuild(payload.guildId, payload.member);
     return tx.wait();
   });
+  const guild = await getGuild(payload.guildId);
+  await removeGuildMember(payload.guildId, payload.member);
+  if (guild) {
+    await upsertGuild({ ...guild, memberCount: Math.max(0, guild.memberCount - 1) });
+  }
   return { result: receipt.hash, txHash: receipt.hash };
 });
 
@@ -231,6 +281,17 @@ registerChainOperationProcessor("guild-deposit", async (record: ChainOperationRe
     const tx = await ensureGuildContract().depositGold(payload.guildId, payload.member, amountWei);
     return tx.wait();
   });
+  const guild = await getGuild(payload.guildId);
+  const member = await getGuildMember(payload.guildId, payload.member);
+  if (guild) {
+    await upsertGuild({ ...guild, treasury: guild.treasury + payload.amount });
+  }
+  if (member) {
+    await upsertGuildMember(payload.guildId, {
+      ...member,
+      contributedGold: member.contributedGold + payload.amount,
+    });
+  }
   return { result: receipt.hash, txHash: receipt.hash };
 });
 
@@ -270,7 +331,23 @@ registerChainOperationProcessor("guild-proposal", async (record: ChainOperationR
     try {
       const parsed = contract.interface.parseLog(log);
       if (parsed?.name === "ProposalCreated") {
-        return { result: { proposalId: Number(parsed.args.proposalId), txHash: receipt.hash }, txHash: receipt.hash };
+        const proposalId = Number(parsed.args.proposalId);
+        const createdAt = Math.floor(Date.now() / 1000);
+        await upsertGuildProposal({
+          proposalId,
+          guildId: payload.guildId,
+          proposer: payload.proposer,
+          proposalType: payload.proposalType,
+          description: payload.description,
+          createdAt,
+          votingEndsAt: createdAt + 24 * 60 * 60,
+          yesVotes: 0,
+          noVotes: 0,
+          status: ProposalStatus.Active,
+          targetAddress: payload.targetAddress,
+          targetAmount: payload.targetAmount,
+        });
+        return { result: { proposalId, txHash: receipt.hash }, txHash: receipt.hash };
       }
     } catch {}
   }
@@ -293,6 +370,14 @@ registerChainOperationProcessor("guild-vote", async (record: ChainOperationRecor
     const tx = await ensureGuildContract().vote(payload.proposalId, payload.voter, payload.voteYes);
     return tx.wait();
   });
+  const proposal = await getGuildProposal(payload.proposalId);
+  if (proposal) {
+    await upsertGuildProposal({
+      ...proposal,
+      yesVotes: proposal.yesVotes + (payload.voteYes ? 1 : 0),
+      noVotes: proposal.noVotes + (payload.voteYes ? 0 : 1),
+    });
+  }
   return { result: receipt.hash, txHash: receipt.hash };
 });
 
@@ -308,6 +393,10 @@ registerChainOperationProcessor("guild-execute", async (record: ChainOperationRe
     const tx = await ensureGuildContract().executeProposal(payload.proposalId);
     return tx.wait();
   });
+  const proposal = await getGuildProposal(payload.proposalId);
+  if (proposal) {
+    await upsertGuildProposal({ ...proposal, status: ProposalStatus.Executed });
+  }
   return { result: receipt.hash, txHash: receipt.hash };
 });
 
@@ -315,6 +404,10 @@ registerChainOperationProcessor("guild-execute", async (record: ChainOperationRe
  * Get guild details from contract.
  */
 export async function getGuildFromChain(guildId: number): Promise<GuildData> {
+  if (isPostgresConfigured()) {
+    const guild = await getGuild(guildId);
+    if (guild) return guild;
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
 
   const [name, description, founder, treasury, level, reputation, status, createdAt, memberCount] =
@@ -338,6 +431,10 @@ export async function getGuildFromChain(guildId: number): Promise<GuildData> {
  * Get member details from contract.
  */
 export async function getMemberFromChain(guildId: number, memberAddress: string): Promise<MemberData> {
+  if (isPostgresConfigured()) {
+    const member = await getGuildMember(guildId, memberAddress);
+    if (member) return member;
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
 
   const [rank, joinedAt, contributedGold] = await guildContract.getMember(guildId, memberAddress);
@@ -354,6 +451,10 @@ export async function getMemberFromChain(guildId: number, memberAddress: string)
  * Get all guild members from contract.
  */
 export async function getGuildMembersFromChain(guildId: number): Promise<string[]> {
+  if (isPostgresConfigured()) {
+    const members = await listGuildMembers(guildId);
+    if (members.length > 0) return members;
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
 
   return await guildContract.getGuildMembers(guildId);
@@ -363,6 +464,10 @@ export async function getGuildMembersFromChain(guildId: number): Promise<string[
  * Get proposal details from contract.
  */
 export async function getProposalFromChain(proposalId: number): Promise<ProposalData> {
+  if (isPostgresConfigured()) {
+    const proposal = await getGuildProposal(proposalId);
+    if (proposal) return proposal;
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
 
   const [
@@ -399,6 +504,12 @@ export async function getProposalFromChain(proposalId: number): Promise<Proposal
  * Get next guild ID (total guilds created).
  */
 export async function getNextGuildId(): Promise<number> {
+  if (isPostgresConfigured()) {
+    const guilds = await listGuilds();
+    if (guilds.length > 0) {
+      return Math.max(...guilds.map((guild) => guild.guildId)) + 1;
+    }
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
   try {
     return Number(await guildContract.nextGuildId());
@@ -415,6 +526,12 @@ export async function getNextGuildId(): Promise<number> {
  * Get next proposal ID (total proposals created).
  */
 export async function getNextProposalId(): Promise<number> {
+  if (isPostgresConfigured()) {
+    const proposals = await listGuildProposals();
+    if (proposals.length > 0) {
+      return Math.max(...proposals.map((proposal) => proposal.proposalId)) + 1;
+    }
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
   try {
     return Number(await guildContract.nextProposalId());
@@ -431,6 +548,10 @@ export async function getNextProposalId(): Promise<number> {
  * Get guild ID for a member address.
  */
 export async function getMemberGuildId(memberAddress: string): Promise<number> {
+  if (isPostgresConfigured()) {
+    const guildId = await getMemberGuildIdFromProjection(memberAddress);
+    if (guildId > 0) return guildId;
+  }
   if (!guildContract) throw new Error("Guild contract not initialized");
   try {
     return Number(await guildContract.memberToGuild(memberAddress));
@@ -455,10 +576,26 @@ export function getCachedGuildName(walletAddress: string): string | undefined {
 
 /** Refresh the guild name cache by scanning all active guilds. */
 export async function refreshGuildNameCache(): Promise<void> {
-  if (!guildContract || cacheRefreshing) return;
+  if (cacheRefreshing) return;
   cacheRefreshing = true;
 
   try {
+    if (isPostgresConfigured()) {
+      const guilds = await listGuilds();
+      const newCache = new Map<string, string>();
+      for (const guild of guilds) {
+        if (guild.status !== GuildStatus.Active) continue;
+        const members = await listGuildMembers(guild.guildId);
+        for (const addr of members) {
+          newCache.set(addr.toLowerCase(), guild.name);
+        }
+      }
+      guildNameCache.clear();
+      for (const [k, v] of newCache) guildNameCache.set(k, v);
+      return;
+    }
+
+    if (!guildContract) return;
     // Verify contract is actually deployed before calling methods
     const provider = guildContract.runner?.provider;
     if (provider && GUILD_CONTRACT_ADDRESS) {

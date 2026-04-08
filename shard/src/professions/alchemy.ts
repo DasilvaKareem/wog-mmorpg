@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getEntity, getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
@@ -667,7 +667,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
       const goldCost = copperToGold(recipe.copperCost);
       const onChainGold = parseFloat(await getGoldBalance(walletAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(walletAddress, safeOnChainGold);
       if (availableGold < goldCost) {
         reply.code(400);
         return {
@@ -676,7 +676,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
         };
       }
-      recordGoldSpend(walletAddress, goldCost);
+      await recordGoldSpendAsync(walletAddress, goldCost);
     }
 
     // CRITICAL: Burn required materials (consume flower NFTs)
@@ -772,14 +772,19 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     } catch (err) {
       server.log.error(err, `[alchemy] Failed to mint potion for ${walletAddress}`);
 
-      // TODO: Refund burned materials on mint failure
-      // This is a critical edge case - materials were consumed but potion wasn't created
+      for (const material of recipe.requiredMaterials) {
+        try {
+          await mintItem(walletAddress, material.tokenId, BigInt(material.quantity));
+        } catch (refundErr) {
+          server.log.error(refundErr, `[alchemy] Failed refunding ${material.tokenId.toString()} to ${walletAddress}`);
+        }
+      }
 
       reply.code(500);
       return {
         error: "Brewing failed - potion could not be created",
         materialsConsumed: burnedMaterials,
-        warning: "Flowers were consumed but potion creation failed - contact support",
+        warning: "Potion creation failed; refund attempted for consumed materials.",
       };
     }
   });

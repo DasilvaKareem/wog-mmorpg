@@ -20,7 +20,6 @@ import { registerGuildTick } from "./economy/guildTick.js";
 import { registerGuildVaultRoutes } from "./economy/guildVault.js";
 import { spawnNpcs, tickMobRespawner } from "./world/npcSpawner.js";
 import { initMerchantWallets, registerMerchantAgentTick, getMerchantCount } from "./world/merchantAgent.js";
-import { restoreMerchantStatesFromRedis } from "./world/merchantAgent.js";
 import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
@@ -36,7 +35,7 @@ import { registerEventRoutes } from "./social/eventRoutes.js";
 import { registerTerrainRoutes } from "./world/terrainRoutes.js";
 import { registerSkinningRoutes } from "./professions/skinning.js";
 import { registerCookingRoutes } from "./professions/cooking.js";
-import { registerPartyRoutes, restorePartiesFromRedis } from "./social/partySystem.js";
+import { registerPartyRoutes } from "./social/partySystem.js";
 import { registerFriendsRoutes } from "./social/friendsSystem.js";
 import { registerAuthRoutes } from "./auth/auth.js";
 import { registerZoneTransitionRoutes } from "./world/zoneTransition.js";
@@ -44,7 +43,7 @@ import { registerLeaderboardRoutes } from "./social/leaderboard.js";
 import { registerLeatherworkingRoutes } from "./professions/leatherworking.js";
 import { registerUpgradingRoutes } from "./items/upgrading.js";
 import { registerJewelcraftingRoutes } from "./professions/jewelcrafting.js";
-import { rebuildAuctionCache, getAllAuctionsFromCache } from "./economy/auctionHouseChain.js";
+import { rebuildAuctionCache, getAllAuctionsFromCache, hydrateAuctionCacheFromProjections } from "./economy/auctionHouseChain.js";
 import { registerPvPRoutes } from "./combat/pvpRoutes.js";
 import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
@@ -84,11 +83,10 @@ import { registerPlotRoutes } from "./farming/plotRoutes.js";
 import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
 import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
-import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats, mintGold } from "./blockchain/blockchain.js";
 import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersFromRedis } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
@@ -99,6 +97,9 @@ import { pvpBattleManager } from "./combat/pvpBattleManager.js";
 import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js";
 import { startReputationChainWorker } from "./economy/reputationChain.js";
 import { startChainOperationReplayWorker } from "./blockchain/chainOperationStore.js";
+import { ensureGameSchema, getGameSchemaHealth } from "./db/gameSchema.js";
+import { initPostgres, isPostgresConfigured } from "./db/postgres.js";
+import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
 
 const server = Fastify({ logger: true });
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
@@ -107,6 +108,9 @@ const REQUIRE_REDIS_PERSISTENCE = !["0", "false", "no", "off"].includes(
 );
 const LOCAL_TEST_MODE = (process.env.LOCAL_TEST_MODE ?? "").trim().toLowerCase();
 const SKIP_MERCHANT_BOOTSTRAP = LOCAL_TEST_MODE === "core";
+const LAZY_RUNTIME_HYDRATION = !["0", "false", "no", "off"].includes(
+  (process.env.LAZY_RUNTIME_HYDRATION ?? "true").trim().toLowerCase()
+);
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -826,12 +830,35 @@ setInterval(() => {
 }, 5000);
 
 const start = async () => {
-  if (REQUIRE_REDIS_PERSISTENCE) {
+  await initPostgres();
+  if (isPostgresConfigured()) {
+    await ensureGameSchema();
+    const health = await getGameSchemaHealth().catch(() => null);
+    server.log.info(
+      health
+        ? `[postgres] Ready (characters=${health.characterCount}, identities=${health.identityStateCount}, walletLinks=${health.walletLinkCount}, characterProjections=${health.characterProjectionCount}, outbox=${health.outboxCount}, chainOps=${health.chainOperationCount}, professions=${health.professionStateCount}, equipment=${health.equipmentStateCount}, parties=${health.partyCount}, listings=${health.listingCount}, plots=${health.plotStateCount}, itemMappings=${health.itemTokenMappingCount}, itemInstances=${health.craftedItemInstanceCount}, friendEdges=${health.friendEdgeCount}, friendRequests=${health.friendRequestCount}, auctions=${health.auctionProjectionCount}, guilds=${health.guildCount}, guildMembers=${health.guildMembershipCount}, guildProposals=${health.guildProposalCount}, pushSubs=${health.webPushSubscriptionCount}, telegramLinks=${health.telegramLinkCount}, marketplaceOps=${health.marketplaceOperationCount}, marketplacePayments=${health.marketplacePendingPaymentCount}, goldPayments=${health.goldPendingPaymentCount}, rentals=${health.rentalListingCount}, rentalGrants=${health.rentalGrantCount}, rentalEntities=${health.characterRentalEntityCount}, diaryEntries=${health.diaryEntryCount}, reputationScores=${health.reputationScoreCount}, reputationFeedback=${health.reputationFeedbackCount}, custodialWallets=${health.custodialWalletCount}, walletRuntime=${health.walletRuntimeStateCount}, walletRegistrations=${health.walletRegistrationStateCount}, bootstrapJobs=${health.characterBootstrapJobCount}, inbox=${health.agentInboxMessageCount}, inboxHistory=${health.agentInboxHistoryCount}, merchants=${health.merchantStateCount}, partyInvites=${health.partyInviteCount}, promoCodes=${health.promoCodeCount}, promoRedemptions=${health.promoCodeRedemptionCount}, goldReservations=${health.goldReservationCount})`
+        : "[postgres] Ready"
+    );
+  } else {
+    server.log.warn("[postgres] DATABASE_URL not configured; authoritative persistent read models are disabled");
+  }
+
+  if (REQUIRE_REDIS_PERSISTENCE && !isPostgresConfigured()) {
     assertRedisAvailable("server boot");
     server.log.info("[redis] Redis persistence required and available");
-  } else if (!getRedis() && isMemoryFallbackAllowed()) {
+  } else if (REQUIRE_REDIS_PERSISTENCE && isPostgresConfigured() && !getRedis()) {
+    server.log.warn("[redis] Redis persistence requested but Postgres is authoritative; continuing without Redis");
+  } else if (!getRedis() && isMemoryFallbackAllowed() && !isPostgresConfigured()) {
     server.log.warn("[redis] Running with memory fallback enabled; persistence guarantees are reduced");
   }
+
+  await hydrateAuctionCacheFromProjections().then((count) => {
+    if (count > 0) {
+      server.log.info(`[auction] Hydrated ${count} auction projection(s) from Postgres`);
+    }
+  }).catch((err: any) => {
+    server.log.warn(`[auction] Failed to hydrate Postgres auction projections: ${err.message?.slice(0, 100)}`);
+  });
 
   // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
   rebuildAuctionCache().catch((err: any) => {
@@ -875,32 +902,15 @@ const start = async () => {
   await server.listen({ port, host });
   server.log.info(`Shard listening on ${host}:${port}`);
 
-  // Restore gold reservations from Redis (prevents double-spend after restart)
-  restoreReservations().catch((err: any) => {
-    server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  if (LAZY_RUNTIME_HYDRATION) {
+    server.log.info("[runtime] Lazy hydration enabled; skipping eager restore of live sessions, parties, PvP, merchants, agents, plots, and gold reservations");
+  } else {
+    await pvpBattleManager.restoreFromRedis().catch((err: any) => {
+      server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+  }
 
-  // Restore plot ownership from Redis (land persists across restarts)
-  const { initializePlotsFromRedis } = await import("./farming/plotSystem.js");
-  await initializePlotsFromRedis().catch((err: any) => {
-    server.log.warn(`[plots] Plot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await restoreMerchantStatesFromRedis().catch((err: any) => {
-    server.log.warn(`[merchant] Merchant restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await pvpBattleManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await restoreLivePlayersFromRedis().catch((err: any) => {
-    server.log.warn(`[live-player] Live player restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await restorePartiesFromRedis().catch((err: any) => {
-    server.log.warn(`[party] Party restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  startAgentRuntimeReconciler(server.log);
 
   await startCharacterBootstrapWorker(server.log).catch((err: any) => {
     server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
@@ -923,11 +933,6 @@ const start = async () => {
   server.log.info(`[chain] RPC target ${SKALE_BASE_RPC_URL} (expected chainId=${SKALE_BASE_CHAIN_ID})`);
   await assertConfiguredRpc();
   server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
-
-  // Restore agents that were running before restart
-  agentManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
 };
 
 // Graceful shutdown: stop all agent loops, flush batched chain writes

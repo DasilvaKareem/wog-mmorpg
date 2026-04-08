@@ -5,17 +5,14 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
-import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
-import { getGoldBalance } from "../blockchain/blockchain.js";
-import { copperToGold } from "../blockchain/currency.js";
 import {
-  getPlotsInZone,
-  getOwnedPlot,
+  getPlotsInZoneAsync,
+  getOwnedPlotAsync,
   getPlotDef,
-  claimPlot,
   releasePlot,
   transferPlot,
 } from "./plotSystem.js";
+import { claimPlotForWallet } from "../services/plotService.js";
 
 export function registerPlotRoutes(server: FastifyInstance) {
   // GET /plots/:zoneId — list all plots in a zone with ownership status
@@ -23,7 +20,7 @@ export function registerPlotRoutes(server: FastifyInstance) {
     "/plots/:zoneId",
     async (request) => {
       const { zoneId } = request.params;
-      const plots = getPlotsInZone(zoneId);
+      const plots = await getPlotsInZoneAsync(zoneId);
       const defs = plots.map((p) => {
         const def = getPlotDef(p.plotId);
         return {
@@ -48,7 +45,7 @@ export function registerPlotRoutes(server: FastifyInstance) {
     "/plots/owned/:walletAddress",
     async (request) => {
       const { walletAddress } = request.params;
-      const plot = getOwnedPlot(walletAddress);
+      const plot = await getOwnedPlotAsync(walletAddress);
       if (!plot) return { owned: false, plot: null };
       const def = getPlotDef(plot.plotId);
       return {
@@ -90,22 +87,10 @@ export function registerPlotRoutes(server: FastifyInstance) {
         return reply.code(403).send({ error: "Not your character" });
       }
 
-      // Get plot cost
       const def = getPlotDef(plotId);
       if (!def) return reply.code(404).send({ error: "Plot not found" });
 
-      // Check gold balance (cost is in gold)
-      const goldCost = copperToGold(def.cost * 100);
-      const onChainGold = parseFloat(await getGoldBalance(walletAddress));
-      const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
-      if (availableGold < goldCost) {
-        return reply.code(400).send({ error: `Not enough gold. Need ${def.cost} gold.` });
-      }
-      recordGoldSpend(walletAddress, goldCost);
-
-      // Claim the plot
-      const result = claimPlot(plotId, walletAddress, player.name);
+      const result = await claimPlotForWallet(plotId, walletAddress, player.name);
       if (!result.ok) {
         return reply.code(400).send({ error: result.error });
       }
@@ -129,7 +114,7 @@ export function registerPlotRoutes(server: FastifyInstance) {
     async (request, reply) => {
       const { walletAddress } = request.body;
 
-      const result = releasePlot(walletAddress);
+      const result = await releasePlot(walletAddress);
       if (!result.ok) {
         return reply.code(400).send({ error: result.error });
       }
@@ -147,7 +132,7 @@ export function registerPlotRoutes(server: FastifyInstance) {
     async (request, reply) => {
       const { walletAddress, toWalletAddress, toName } = request.body;
 
-      const result = transferPlot(walletAddress, toWalletAddress, toName);
+      const result = await transferPlot(walletAddress, toWalletAddress, toName);
       if (!result.ok) {
         return reply.code(400).send({ error: result.error });
       }

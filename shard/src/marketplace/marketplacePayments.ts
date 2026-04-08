@@ -1,6 +1,12 @@
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
 import {
+  deleteMarketplacePendingPayment,
+  getMarketplacePendingPayment,
+  putMarketplacePendingPayment,
+} from "../db/marketplaceStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import {
   getOperation,
   updateOperationStatus,
   OperationStatus,
@@ -63,6 +69,10 @@ function formatUsdAmount(amountCents: number): string {
 async function getPendingMarketplacePayment(
   paymentId: string
 ): Promise<PendingMarketplacePayment | null> {
+  if (isPostgresConfigured()) {
+    const payment = await getMarketplacePendingPayment<PendingMarketplacePayment>(paymentId);
+    if (payment) return payment;
+  }
   const redis = getRedis();
   if (!redis) return null;
 
@@ -75,9 +85,6 @@ export async function createMarketplacePaymentIntent(params: {
   amountCents: number;
   description?: string;
 }): Promise<MarketplacePaymentIntent> {
-  const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable – cannot create payment");
-
   const paymentId = randomUUID();
   const pending: PendingMarketplacePayment = {
     paymentId,
@@ -87,12 +94,18 @@ export async function createMarketplacePaymentIntent(params: {
     createdAt: Date.now(),
   };
 
-  await redis.set(
-    KEY_PAYMENT(paymentId),
-    JSON.stringify(pending),
-    "EX",
-    PAYMENT_TTL_SECONDS
-  );
+  if (isPostgresConfigured()) {
+    await putMarketplacePendingPayment(paymentId, pending.wallet, pending, Date.now() + PAYMENT_TTL_SECONDS * 1000);
+  }
+  const redis = getRedis();
+  if (redis) {
+    await redis.set(
+      KEY_PAYMENT(paymentId),
+      JSON.stringify(pending),
+      "EX",
+      PAYMENT_TTL_SECONDS
+    );
+  }
 
   return {
     paymentId,
@@ -130,6 +143,9 @@ export async function validateMarketplacePayment(params: {
 }
 
 export async function deleteMarketplacePayment(paymentId: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    await deleteMarketplacePendingPayment(paymentId);
+  }
   const redis = getRedis();
   if (!redis) return;
   await redis.del(KEY_PAYMENT(paymentId));

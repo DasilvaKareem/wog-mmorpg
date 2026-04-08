@@ -2,11 +2,12 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { saveCharacter, getProfessionsForWallet } from "../character/characterStore.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getProfessionSkills, skillXpProgress } from "./professionXp.js";
+import { getProfessionSkills, restoreProfessionSkills, skillXpProgress } from "./professionXp.js";
+import { listProfessionStateForWallet } from "../db/professionStateStore.js";
 
 export type ProfessionType = "mining" | "herbalism" | "skinning" | "blacksmithing" | "alchemy" | "cooking" | "leatherworking" | "jewelcrafting";
 
@@ -125,6 +126,27 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       }
 
       let learned = getLearnedProfessions(walletAddress);
+      let skills = getProfessionSkills(walletAddress);
+
+      const projected = await listProfessionStateForWallet(walletAddress).catch(() => []);
+      if (projected.length > 0) {
+        restoreProfessions(walletAddress, projected.map((entry) => entry.professionId));
+        restoreProfessionSkills(
+          walletAddress,
+          Object.fromEntries(
+            projected.map((entry) => [
+              entry.professionId,
+              {
+                xp: entry.skillXp,
+                level: entry.skillLevel,
+                actions: entry.actionCount,
+              },
+            ])
+          )
+        );
+        learned = getLearnedProfessions(walletAddress);
+        skills = getProfessionSkills(walletAddress);
+      }
 
       // If in-memory is empty (champion offline / server restarted),
       // fall back to the persisted character data in Redis
@@ -153,10 +175,26 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       }
 
       // Build per-profession skill details — check both owner and custodial wallets
-      let skills = getProfessionSkills(walletAddress);
       if (Object.keys(skills).length === 0) {
         const custodial = await getAgentCustodialWallet(walletAddress);
         if (custodial) {
+          const custodialProjected = await listProfessionStateForWallet(custodial).catch(() => []);
+          if (custodialProjected.length > 0) {
+            restoreProfessions(custodial, custodialProjected.map((entry) => entry.professionId));
+            restoreProfessionSkills(
+              custodial,
+              Object.fromEntries(
+                custodialProjected.map((entry) => [
+                  entry.professionId,
+                  {
+                    xp: entry.skillXp,
+                    level: entry.skillLevel,
+                    actions: entry.actionCount,
+                  },
+                ])
+              )
+            );
+          }
           skills = getProfessionSkills(custodial);
         }
       }
@@ -264,7 +302,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
       const goldCost = copperToGold(professionInfo.cost);
       const onChainGold = parseFloat(await getGoldBalance(walletAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(walletAddress, safeOnChainGold);
       if (availableGold < goldCost) {
         reply.code(400);
         return {
@@ -273,7 +311,7 @@ export function registerProfessionRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
         };
       }
-      recordGoldSpend(walletAddress, goldCost);
+      await recordGoldSpendAsync(walletAddress, goldCost);
     }
 
     // Learn the profession

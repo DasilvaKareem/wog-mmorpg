@@ -3,7 +3,7 @@
  */
 
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
 import { getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG } from "../items/itemCatalog.js";
@@ -216,7 +216,7 @@ export async function fetchWalletBalance(
   try {
     const onChainGold = parseFloat(await getGoldBalance(custodialWallet));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(custodialWallet, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(custodialWallet, safeOnChainGold);
     const balanceResults = await Promise.all(
       ITEM_CATALOG.map((item) => getItemBalance(custodialWallet, item.tokenId)),
     );
@@ -253,7 +253,7 @@ export async function fetchLiquidationInventory(
   try {
     const onChainGold = parseFloat(await getGoldBalance(custodialWallet));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(custodialWallet, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(custodialWallet, safeOnChainGold);
     const equippedCounts = await getEquippedItemCounts(custodialWallet);
     const balanceResults = await Promise.all(
       ITEM_CATALOG.map((item) => getItemBalance(custodialWallet, item.tokenId)),

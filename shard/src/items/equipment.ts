@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getItemByTokenId, getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
 import { getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
@@ -542,7 +542,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const goldCost = copperToGold(totalCost); // convert to on-chain gold
     const onChainGold = parseFloat(await getGoldBalance(owner));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(owner, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(owner, safeOnChainGold);
     if (availableGold < goldCost) {
       reply.code(400);
       return {
@@ -560,7 +560,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       syncEquippedInstance(owner, equipped);
     }
     recalculateEntityVitals(entity);
-    recordGoldSpend(owner, goldCost);
+    await recordGoldSpendAsync(owner, goldCost);
 
     // Log repair diary entry
     if (owner) {
@@ -581,7 +581,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       },
       playerLevel,
       totalCost,
-      remainingGold: formatGold(getAvailableGold(owner, safeOnChainGold)),
+      remainingGold: formatGold(await getAvailableGoldAsync(owner, safeOnChainGold)),
       repairs,
       ...serializeEntityEquipment(entity),
     };

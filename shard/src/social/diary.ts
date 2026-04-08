@@ -13,6 +13,8 @@ import type { FastifyInstance } from "fastify";
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
+import { insertDiaryEntry, listDiaryEntries } from "../db/diaryStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 import { formatCopperString } from "../blockchain/currency.js";
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -447,6 +449,11 @@ export function logDiary(
   }
 
   // Fire-and-forget Redis write
+  if (isPostgresConfigured()) {
+    void insertDiaryEntry(entry).catch((err: unknown) =>
+      console.error(`[diary] Postgres write failed for ${key}:`, err),
+    );
+  }
   const redis = getRedis();
   if (redis) {
     const serialized = JSON.stringify(entry);
@@ -482,7 +489,14 @@ async function readDiary(
 ): Promise<DiaryEntry[]> {
   const key = walletAddress.toLowerCase();
 
-  // Try Redis first
+  if (isPostgresConfigured()) {
+    const rows = await listDiaryEntries(key, limit, offset);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  // Try Redis next
   const redis = getRedis();
   if (redis) {
     try {

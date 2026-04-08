@@ -16,6 +16,17 @@ import { getRedis } from "../redis.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getAllEntities, recalculateEntityVitals } from "../world/zoneRuntime.js";
 import { saveCharacter } from "../character/characterStore.js";
+import {
+  getActiveRentalGrantForToken,
+  getRentalGrantProjection,
+  getRentalListingProjection,
+  listActiveRentalGrantsForRenter,
+  listActiveRentalListingsProjection,
+  listExpiredActiveRentalGrantIds,
+  upsertRentalGrant,
+  upsertRentalListing,
+} from "../db/rentalStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Interfaces ──────────────────────────────────────────────────────
 
@@ -78,9 +89,6 @@ export type CreateRentalParams = Pick<
 export async function createRentalListing(
   params: CreateRentalParams
 ): Promise<RentalListing> {
-  const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable");
-
   const now = Date.now();
   const listing: RentalListing = {
     rentalId: randomUUID(),
@@ -97,11 +105,17 @@ export async function createRentalListing(
     createdAt: now,
   };
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_RENTAL(listing.rentalId), JSON.stringify(listing));
-  pipeline.zadd(KEY_RENTALS_ACTIVE, now, listing.rentalId);
-  pipeline.sadd(KEY_RENTALS_OWNER(listing.ownerWallet), listing.rentalId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertRentalListing(listing);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_RENTAL(listing.rentalId), JSON.stringify(listing));
+    pipeline.zadd(KEY_RENTALS_ACTIVE, now, listing.rentalId);
+    pipeline.sadd(KEY_RENTALS_OWNER(listing.ownerWallet), listing.rentalId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -109,6 +123,10 @@ export async function createRentalListing(
 export async function getRentalListing(
   rentalId: string
 ): Promise<RentalListing | null> {
+  if (isPostgresConfigured()) {
+    const listing = await getRentalListingProjection(rentalId);
+    if (listing) return listing;
+  }
   const redis = getRedis();
   if (!redis) return null;
   const raw = await redis.get(KEY_RENTAL(rentalId));
@@ -116,6 +134,10 @@ export async function getRentalListing(
 }
 
 export async function getActiveRentalListings(): Promise<RentalListing[]> {
+  if (isPostgresConfigured()) {
+    const listings = await listActiveRentalListingsProjection();
+    if (listings.length > 0) return listings;
+  }
   const redis = getRedis();
   if (!redis) return [];
 
@@ -139,18 +161,21 @@ export async function getActiveRentalListings(): Promise<RentalListing[]> {
 export async function cancelRentalListing(
   rentalId: string
 ): Promise<RentalListing | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const listing = await getRentalListing(rentalId);
   if (!listing) return null;
 
   listing.status = "cancelled";
+  if (isPostgresConfigured()) {
+    await upsertRentalListing(listing);
+  }
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_RENTAL(rentalId), JSON.stringify(listing));
-  pipeline.zrem(KEY_RENTALS_ACTIVE, rentalId);
-  await pipeline.exec();
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_RENTAL(rentalId), JSON.stringify(listing));
+    pipeline.zrem(KEY_RENTALS_ACTIVE, rentalId);
+    await pipeline.exec();
+  }
 
   return listing;
 }
@@ -168,9 +193,6 @@ export async function createRentalGrant(params: {
   usageMode: "equip" | "deploy" | "access" | "full";
   operationId?: string;
 }): Promise<RentalGrant> {
-  const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable");
-
   const now = Date.now();
   const grant: RentalGrant = {
     grantId: randomUUID(),
@@ -188,18 +210,29 @@ export async function createRentalGrant(params: {
     renewCount: 0,
   };
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_GRANT(grant.grantId), JSON.stringify(grant));
-  pipeline.zadd(KEY_GRANTS_ACTIVE, grant.endsAt, grant.grantId);
-  pipeline.sadd(KEY_GRANTS_RENTER(grant.renterWallet), grant.grantId);
-  pipeline.sadd(KEY_GRANTS_TOKEN(grant.tokenId), grant.grantId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertRentalGrant(grant);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_GRANT(grant.grantId), JSON.stringify(grant));
+    pipeline.zadd(KEY_GRANTS_ACTIVE, grant.endsAt, grant.grantId);
+    pipeline.sadd(KEY_GRANTS_RENTER(grant.renterWallet), grant.grantId);
+    pipeline.sadd(KEY_GRANTS_TOKEN(grant.tokenId), grant.grantId);
+    await pipeline.exec();
+  }
 
   // Increment active rentals on listing
   const listing = await getRentalListing(params.rentalId);
   if (listing) {
     listing.activeRentals++;
-    await redis.set(KEY_RENTAL(params.rentalId), JSON.stringify(listing));
+    if (isPostgresConfigured()) {
+      await upsertRentalListing(listing);
+    }
+    if (redis) {
+      await redis.set(KEY_RENTAL(params.rentalId), JSON.stringify(listing));
+    }
   }
 
   return grant;
@@ -208,6 +241,10 @@ export async function createRentalGrant(params: {
 export async function getRentalGrant(
   grantId: string
 ): Promise<RentalGrant | null> {
+  if (isPostgresConfigured()) {
+    const grant = await getRentalGrantProjection(grantId);
+    if (grant) return grant;
+  }
   const redis = getRedis();
   if (!redis) return null;
   const raw = await redis.get(KEY_GRANT(grantId));
@@ -217,6 +254,10 @@ export async function getRentalGrant(
 export async function getActiveGrantsForRenter(
   wallet: string
 ): Promise<RentalGrant[]> {
+  if (isPostgresConfigured()) {
+    const grants = await listActiveRentalGrantsForRenter(wallet, Date.now());
+    if (grants.length > 0) return grants;
+  }
   const redis = getRedis();
   if (!redis) return [];
 
@@ -246,6 +287,10 @@ export async function hasActiveRentalRight(
   wallet: string,
   tokenId: number
 ): Promise<RentalGrant | null> {
+  if (isPostgresConfigured()) {
+    const grant = await getActiveRentalGrantForToken(wallet, tokenId, Date.now());
+    if (grant) return grant;
+  }
   const redis = getRedis();
   if (!redis) return null;
 
@@ -278,9 +323,6 @@ export async function hasActiveRentalRight(
 export async function renewRentalGrant(
   grantId: string
 ): Promise<RentalGrant | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const grant = await getRentalGrant(grantId);
   if (!grant || grant.status !== "active") return null;
 
@@ -293,11 +335,16 @@ export async function renewRentalGrant(
   grant.endsAt = extendFrom + listing.durationSeconds * 1000;
   grant.renewCount++;
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_GRANT(grantId), JSON.stringify(grant));
-  // Update the sorted set score to new expiry
-  pipeline.zadd(KEY_GRANTS_ACTIVE, grant.endsAt, grantId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertRentalGrant(grant);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_GRANT(grantId), JSON.stringify(grant));
+    pipeline.zadd(KEY_GRANTS_ACTIVE, grant.endsAt, grantId);
+    await pipeline.exec();
+  }
 
   return grant;
 }
@@ -307,31 +354,35 @@ export async function renewRentalGrant(
  * Called by the expiry tick.
  */
 export async function expireRentalGrants(): Promise<string[]> {
-  const redis = getRedis();
-  if (!redis) return [];
-
   const now = Date.now();
-  // Get all grants that expired before now
-  const expiredIds: string[] = await redis.zrangebyscore(
-    KEY_GRANTS_ACTIVE, "-inf", now.toString()
-  );
+  const redis = getRedis();
+  const expiredIds: string[] = isPostgresConfigured()
+    ? await listExpiredActiveRentalGrantIds(now)
+    : redis
+      ? await redis.zrangebyscore(KEY_GRANTS_ACTIVE, "-inf", now.toString())
+      : [];
   if (!expiredIds.length) return [];
 
   const expired: string[] = [];
   for (const grantId of expiredIds) {
     const grant = await getRentalGrant(grantId);
     if (!grant || grant.status !== "active") {
-      // Already expired or cancelled, just clean from sorted set
-      await redis.zrem(KEY_GRANTS_ACTIVE, grantId);
+      if (redis) {
+        await redis.zrem(KEY_GRANTS_ACTIVE, grantId);
+      }
       continue;
     }
 
     grant.status = "expired";
-
-    const pipeline = redis.multi();
-    pipeline.set(KEY_GRANT(grantId), JSON.stringify(grant));
-    pipeline.zrem(KEY_GRANTS_ACTIVE, grantId);
-    await pipeline.exec();
+    if (isPostgresConfigured()) {
+      await upsertRentalGrant(grant);
+    }
+    if (redis) {
+      const pipeline = redis.multi();
+      pipeline.set(KEY_GRANT(grantId), JSON.stringify(grant));
+      pipeline.zrem(KEY_GRANTS_ACTIVE, grantId);
+      await pipeline.exec();
+    }
 
     if (grant.assetType === "character") {
       // Deactivate character rental: save progress, despawn, remove from party
@@ -346,7 +397,12 @@ export async function expireRentalGrants(): Promise<string[]> {
     const listing = await getRentalListing(grant.rentalId);
     if (listing && listing.activeRentals > 0) {
       listing.activeRentals--;
-      await redis.set(KEY_RENTAL(grant.rentalId), JSON.stringify(listing));
+      if (isPostgresConfigured()) {
+        await upsertRentalListing(listing);
+      }
+      if (redis) {
+        await redis.set(KEY_RENTAL(grant.rentalId), JSON.stringify(listing));
+      }
     }
 
     expired.push(grantId);

@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import { isPostgresConfigured, postgresQuery } from "../db/postgres.js";
 
 export type ChainOperationStatus =
   | "queued"
@@ -49,6 +50,22 @@ const CHAIN_OPERATION_MAX_RETRIES = Math.max(
 );
 const processorRegistry = new Map<string, ChainOperationProcessor<unknown>>();
 
+type ChainOperationRow = {
+  operation_id: string;
+  type: string;
+  subject: string;
+  payload_json: unknown;
+  status: ChainOperationStatus;
+  attempt_count: number;
+  next_attempt_at_ms: string;
+  created_at_ms: string;
+  updated_at_ms: string;
+  last_attempt_at_ms: string | null;
+  completed_at_ms: string | null;
+  tx_hash: string | null;
+  last_error: string | null;
+};
+
 export interface ChainOperationExecutionResult<T> {
   result: T;
   txHash?: string | null;
@@ -95,7 +112,89 @@ function deserialize(raw: Record<string, string>): ChainOperationRecord | null {
   };
 }
 
+function fromRow(row: ChainOperationRow): ChainOperationRecord {
+  return {
+    operationId: row.operation_id,
+    type: row.type,
+    subject: row.subject,
+    payload: JSON.stringify(row.payload_json ?? {}),
+    status: row.status,
+    attemptCount: Number(row.attempt_count ?? 0) || 0,
+    nextAttemptAt: Number(row.next_attempt_at_ms ?? "0") || 0,
+    createdAt: Number(row.created_at_ms ?? "0") || 0,
+    updatedAt: Number(row.updated_at_ms ?? "0") || 0,
+    ...(row.last_attempt_at_ms ? { lastAttemptAt: Number(row.last_attempt_at_ms) || 0 } : {}),
+    ...(row.completed_at_ms ? { completedAt: Number(row.completed_at_ms) || 0 } : {}),
+    ...(row.tx_hash ? { txHash: row.tx_hash } : {}),
+    ...(row.last_error ? { lastError: row.last_error } : {}),
+  };
+}
+
+function shouldUsePostgres(): boolean {
+  return isPostgresConfigured();
+}
+
 async function persist(record: ChainOperationRecord): Promise<void> {
+  if (shouldUsePostgres()) {
+    await postgresQuery(
+      `
+        insert into game.chain_operations (
+          operation_id,
+          type,
+          subject,
+          payload_json,
+          status,
+          attempt_count,
+          next_attempt_at,
+          created_at,
+          updated_at,
+          last_attempt_at,
+          completed_at,
+          tx_hash,
+          last_error
+        ) values (
+          $1, $2, $3, $4::jsonb, $5, $6,
+          to_timestamp($7::double precision / 1000.0),
+          to_timestamp($8::double precision / 1000.0),
+          to_timestamp($9::double precision / 1000.0),
+          case when $10::bigint is null then null else to_timestamp($10::double precision / 1000.0) end,
+          case when $11::bigint is null then null else to_timestamp($11::double precision / 1000.0) end,
+          $12,
+          $13
+        )
+        on conflict (operation_id)
+        do update set
+          type = excluded.type,
+          subject = excluded.subject,
+          payload_json = excluded.payload_json,
+          status = excluded.status,
+          attempt_count = excluded.attempt_count,
+          next_attempt_at = excluded.next_attempt_at,
+          updated_at = excluded.updated_at,
+          last_attempt_at = excluded.last_attempt_at,
+          completed_at = excluded.completed_at,
+          tx_hash = excluded.tx_hash,
+          last_error = excluded.last_error
+      `,
+      [
+        record.operationId,
+        record.type,
+        record.subject,
+        record.payload,
+        record.status,
+        record.attemptCount,
+        record.nextAttemptAt,
+        record.createdAt,
+        record.updatedAt,
+        record.lastAttemptAt ?? null,
+        record.completedAt ?? null,
+        record.txHash ?? null,
+        record.lastError ?? null,
+      ]
+    );
+    return;
+  }
+
   const redis = getRedis();
   if (redis) {
     await redis.hset(KEY(record.operationId), serialize(record));
@@ -145,6 +244,32 @@ export async function createChainOperation(
 }
 
 export async function getChainOperation(operationId: string): Promise<ChainOperationRecord | null> {
+  if (shouldUsePostgres()) {
+    const { rows } = await postgresQuery<ChainOperationRow>(
+      `
+        select
+          operation_id,
+          type,
+          subject,
+          payload_json,
+          status,
+          attempt_count,
+          floor(extract(epoch from next_attempt_at) * 1000)::text as next_attempt_at_ms,
+          floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
+          floor(extract(epoch from updated_at) * 1000)::text as updated_at_ms,
+          case when last_attempt_at is null then null else floor(extract(epoch from last_attempt_at) * 1000)::text end as last_attempt_at_ms,
+          case when completed_at is null then null else floor(extract(epoch from completed_at) * 1000)::text end as completed_at_ms,
+          tx_hash,
+          last_error
+        from game.chain_operations
+        where operation_id = $1
+        limit 1
+      `,
+      [operationId]
+    );
+    return rows[0] ? fromRow(rows[0]) : null;
+  }
+
   const redis = getRedis();
   if (redis) {
     const raw = await redis.hgetall(KEY(operationId));
@@ -163,6 +288,33 @@ export async function findLatestChainOperationByTypeAndSubject(
   type: string,
   subject: string,
 ): Promise<ChainOperationRecord | null> {
+  if (shouldUsePostgres()) {
+    const { rows } = await postgresQuery<ChainOperationRow>(
+      `
+        select
+          operation_id,
+          type,
+          subject,
+          payload_json,
+          status,
+          attempt_count,
+          floor(extract(epoch from next_attempt_at) * 1000)::text as next_attempt_at_ms,
+          floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
+          floor(extract(epoch from updated_at) * 1000)::text as updated_at_ms,
+          case when last_attempt_at is null then null else floor(extract(epoch from last_attempt_at) * 1000)::text end as last_attempt_at_ms,
+          case when completed_at is null then null else floor(extract(epoch from completed_at) * 1000)::text end as completed_at_ms,
+          tx_hash,
+          last_error
+        from game.chain_operations
+        where type = $1 and subject = $2
+        order by updated_at desc
+        limit 1
+      `,
+      [type, subject]
+    );
+    return rows[0] ? fromRow(rows[0]) : null;
+  }
+
   const redis = getRedis();
   if (redis) {
     const ids = await redis.smembers(KEY_TYPE(type));
@@ -237,6 +389,37 @@ export async function markChainOperationRetryable(operationId: string, err: unkn
 }
 
 export async function listDueChainOperations(type?: string): Promise<ChainOperationRecord[]> {
+  if (shouldUsePostgres()) {
+    const values: unknown[] = [];
+    const typeFilter = type ? `and type = $1` : "";
+    if (type) values.push(type);
+    const { rows } = await postgresQuery<ChainOperationRow>(
+      `
+        select
+          operation_id,
+          type,
+          subject,
+          payload_json,
+          status,
+          attempt_count,
+          floor(extract(epoch from next_attempt_at) * 1000)::text as next_attempt_at_ms,
+          floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
+          floor(extract(epoch from updated_at) * 1000)::text as updated_at_ms,
+          case when last_attempt_at is null then null else floor(extract(epoch from last_attempt_at) * 1000)::text end as last_attempt_at_ms,
+          case when completed_at is null then null else floor(extract(epoch from completed_at) * 1000)::text end as completed_at_ms,
+          tx_hash,
+          last_error
+        from game.chain_operations
+        where next_attempt_at <= now()
+          ${typeFilter}
+          and status not in ('submitted', 'confirmed', 'completed', 'failed_permanent')
+        order by next_attempt_at asc
+      `,
+      values
+    );
+    return rows.map(fromRow);
+  }
+
   const redis = getRedis();
   let ids: string[] = [];
   if (redis) {
@@ -266,11 +449,6 @@ export async function acquireChainOperationLock(operationId: string, ttlMs = CHA
     const result = await redis.set(KEY_LOCK(operationId), "1", "PX", ttlMs, "NX");
     return result === "OK";
   }
-
-  if (!isMemoryFallbackAllowed()) {
-    assertRedisAvailable("chainOperationStore.acquireLock");
-    return false;
-  }
   if (memoryLocks.has(operationId)) return false;
   memoryLocks.add(operationId);
   return true;
@@ -280,10 +458,6 @@ export async function extendChainOperationLock(operationId: string, ttlMs = CHAI
   const redis = getRedis();
   if (redis) {
     return (await redis.pexpire(KEY_LOCK(operationId), ttlMs)) === 1;
-  }
-  if (!isMemoryFallbackAllowed()) {
-    assertRedisAvailable("chainOperationStore.extendLock");
-    return false;
   }
   return memoryLocks.has(operationId);
 }

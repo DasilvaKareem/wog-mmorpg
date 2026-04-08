@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
-import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import {
   encryptPrice,
   createTradeOnChain,
@@ -120,7 +120,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
     try {
       const onChainGold = parseFloat(await getGoldBalance(buyerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(buyerAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(buyerAddress, safeOnChainGold);
       if (availableGold < bidPrice) {
         reply.code(400);
         return {
@@ -155,7 +155,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
           BigInt(result.quantity)
         );
         const settledPrice = result.askPrice;
-        recordGoldSpend(buyerAddress, settledPrice);
+        await recordGoldSpendAsync(buyerAddress, settledPrice);
         server.log.info(
           `Trade ${tradeId} matched! Item minted to buyer: ${mintTx}`
         );
@@ -168,7 +168,7 @@ export function registerTradeRoutes(server: FastifyInstance) {
           bidPrice: result.bidPrice,
           settledPrice,
           remainingGold: formatGold(
-            getAvailableGold(buyerAddress, safeOnChainGold)
+            await getAvailableGoldAsync(buyerAddress, safeOnChainGold)
           ),
           itemTx: mintTx,
           txHash,

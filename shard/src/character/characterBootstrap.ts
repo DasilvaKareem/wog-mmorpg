@@ -15,6 +15,12 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { loadCharacter, saveCharacter } from "./characterStore.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { computeStatsAtLevel } from "./leveling.js";
+import {
+  getCharacterBootstrapJobRecord,
+  listDueCharacterBootstrapJobKeys,
+  upsertCharacterBootstrapJob,
+} from "../db/walletInfraStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 export type CharacterBootstrapStatus =
   | "queued"
@@ -118,6 +124,9 @@ function parseJob(raw: Record<string, string>): CharacterBootstrapJob | null {
 }
 
 async function saveJob(job: CharacterBootstrapJob): Promise<void> {
+  if (isPostgresConfigured()) {
+    await upsertCharacterBootstrapJob(key(job.walletAddress, job.characterName), job);
+  }
   const redis = getRedis();
   if (redis) {
     await redis.hset(key(job.walletAddress, job.characterName), serializeJob(job));
@@ -146,6 +155,10 @@ async function saveJob(job: CharacterBootstrapJob): Promise<void> {
 }
 
 export async function loadCharacterBootstrapJob(walletAddress: string, characterName: string): Promise<CharacterBootstrapJob | null> {
+  if (isPostgresConfigured()) {
+    const job = await getCharacterBootstrapJobRecord(key(walletAddress, characterName));
+    if (job) return job;
+  }
   const redis = getRedis();
   if (redis) {
     const raw = await redis.hgetall(key(walletAddress, characterName));
@@ -659,6 +672,10 @@ export async function processCharacterBootstrapJob(
 }
 
 async function listDueJobs(now: number): Promise<string[]> {
+  if (isPostgresConfigured()) {
+    const jobs = await listDueCharacterBootstrapJobKeys(now);
+    if (jobs.length > 0) return jobs;
+  }
   const redis = getRedis();
   if (redis) {
     return await redis.zrangebyscore(pendingIndexKey, 0, now);

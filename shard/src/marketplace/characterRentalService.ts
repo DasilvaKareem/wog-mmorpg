@@ -21,6 +21,13 @@ import {
 } from "../world/zoneRuntime.js";
 import { randomUUID } from "crypto";
 import { getRentalGrant, type RentalGrant } from "./rentService.js";
+import {
+  deleteCharacterRentalEntity,
+  getCharacterRentalEntity,
+  getCharacterRentalEntityByEntityId,
+  upsertCharacterRentalEntity,
+} from "../db/rentalStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Redis Keys ──────────────────────────────────────────────────────
 
@@ -146,6 +153,9 @@ async function activateWithSave(
   };
 
   const redis = getRedis();
+  if (isPostgresConfigured()) {
+    await upsertCharacterRentalEntity(record);
+  }
   if (redis) {
     await redis.set(KEY_RENTAL_ENTITY(grantId), JSON.stringify(record), "EX", 7 * 86400);
     // Block owner commands for this entity
@@ -162,6 +172,10 @@ async function activateWithSave(
  * for the original owner. Returns the grantId if blocked, null if not.
  */
 export async function isEntityRentalBlocked(entityId: string): Promise<string | null> {
+  if (isPostgresConfigured()) {
+    const record = await getCharacterRentalEntityByEntityId(entityId);
+    if (record) return record.grantId;
+  }
   const redis = getRedis();
   if (!redis) return null;
   return redis.get(KEY_RENTAL_BLOCK(entityId));
@@ -174,13 +188,11 @@ export async function isEntityRentalBlocked(entityId: string): Promise<string | 
  * remove from party.
  */
 export async function deactivateCharacterRental(grantId: string): Promise<boolean> {
+  const persisted = isPostgresConfigured() ? await getCharacterRentalEntity(grantId) : null;
   const redis = getRedis();
-  if (!redis) return false;
-
-  const raw = await redis.get(KEY_RENTAL_ENTITY(grantId));
-  if (!raw) return false;
-
-  const record = JSON.parse(raw) as RentalEntityRecord;
+  const raw = persisted ? null : await redis?.get(KEY_RENTAL_ENTITY(grantId));
+  const record = persisted ?? (raw ? (JSON.parse(raw) as RentalEntityRecord) : null);
+  if (!record) return false;
   const entity = getEntity(record.entityId);
 
   if (entity) {
@@ -206,8 +218,13 @@ export async function deactivateCharacterRental(grantId: string): Promise<boolea
   }
 
   // Clean up Redis
-  await redis.del(KEY_RENTAL_ENTITY(grantId));
-  await redis.del(KEY_RENTAL_BLOCK(record.entityId));
+  if (isPostgresConfigured()) {
+    await deleteCharacterRentalEntity(grantId);
+  }
+  if (redis) {
+    await redis.del(KEY_RENTAL_ENTITY(grantId));
+    await redis.del(KEY_RENTAL_BLOCK(record.entityId));
+  }
 
   return true;
 }
@@ -218,6 +235,10 @@ export async function deactivateCharacterRental(grantId: string): Promise<boolea
 export async function getRentalEntityRecord(
   grantId: string
 ): Promise<RentalEntityRecord | null> {
+  if (isPostgresConfigured()) {
+    const record = await getCharacterRentalEntity(grantId);
+    if (record) return record;
+  }
   const redis = getRedis();
   if (!redis) return null;
   const raw = await redis.get(KEY_RENTAL_ENTITY(grantId));

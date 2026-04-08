@@ -1,11 +1,60 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: wog-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wog
+      POSTGRES_USER: wog
+      POSTGRES_PASSWORD: wog
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wog -d wog"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: wog-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
   shard:
-    build: .
+    build:
+      context: .
+      dockerfile: shard/Dockerfile
+    container_name: wog-shard
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "3000:3000"
-    restart: unless-stopped
     security_opt:
       - no-new-privileges:true
     environment:
       NODE_ENV: production
       PORT: "3000"
+      DATABASE_URL: postgresql://wog:wog@postgres:5432/wog
+      REDIS_URL: redis://redis:6379
+      SHARD_CHAIN_ENV: testnet
+      REQUIRE_REDIS_PERSISTENCE: "true"
+
+volumes:
+  postgres-data:
+  redis-data:

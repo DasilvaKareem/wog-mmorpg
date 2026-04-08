@@ -1,5 +1,12 @@
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
+import {
+  getMarketplaceOperation,
+  listMarketplaceOperationsByStatus,
+  listMarketplaceOperationsByWallet,
+  upsertMarketplaceOperation,
+} from "../db/marketplaceStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Status & Type Enums ─────────────────────────────────────────────
 
@@ -83,9 +90,6 @@ export type CreateOperationParams = Omit<
 export async function createOperation(
   params: CreateOperationParams
 ): Promise<Operation> {
-  const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable – cannot create operation");
-
   const now = Date.now();
   const op: Operation = {
     ...params,
@@ -95,11 +99,17 @@ export async function createOperation(
     updatedAt: now,
   };
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_OP(op.operationId), JSON.stringify(op));
-  pipeline.sadd(KEY_OPS_WALLET(op.ownerWallet), op.operationId);
-  pipeline.sadd(KEY_OPS_STATUS(op.status), op.operationId);
-  await pipeline.exec();
+  if (isPostgresConfigured()) {
+    await upsertMarketplaceOperation(op);
+  }
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_OP(op.operationId), JSON.stringify(op));
+    pipeline.sadd(KEY_OPS_WALLET(op.ownerWallet), op.operationId);
+    pipeline.sadd(KEY_OPS_STATUS(op.status), op.operationId);
+    await pipeline.exec();
+  }
 
   return op;
 }
@@ -107,6 +117,10 @@ export async function createOperation(
 export async function getOperation(
   operationId: string
 ): Promise<Operation | null> {
+  if (isPostgresConfigured()) {
+    const op = await getMarketplaceOperation(operationId);
+    if (op) return op;
+  }
   const redis = getRedis();
   if (!redis) return null;
 
@@ -133,9 +147,6 @@ export async function updateOperationStatus(
     >
   >
 ): Promise<Operation | null> {
-  const redis = getRedis();
-  if (!redis) return null;
-
   const op = await getOperation(operationId);
   if (!op) return null;
 
@@ -145,13 +156,19 @@ export async function updateOperationStatus(
   op.updatedAt = Date.now();
   if (extra) Object.assign(op, extra);
 
-  const pipeline = redis.multi();
-  pipeline.set(KEY_OP(operationId), JSON.stringify(op));
-  if (oldStatus !== newStatus) {
-    pipeline.srem(KEY_OPS_STATUS(oldStatus), operationId);
-    pipeline.sadd(KEY_OPS_STATUS(newStatus), operationId);
+  if (isPostgresConfigured()) {
+    await upsertMarketplaceOperation(op);
   }
-  await pipeline.exec();
+  const redis = getRedis();
+  if (redis) {
+    const pipeline = redis.multi();
+    pipeline.set(KEY_OP(operationId), JSON.stringify(op));
+    if (oldStatus !== newStatus) {
+      pipeline.srem(KEY_OPS_STATUS(oldStatus), operationId);
+      pipeline.sadd(KEY_OPS_STATUS(newStatus), operationId);
+    }
+    await pipeline.exec();
+  }
 
   return op;
 }
@@ -159,6 +176,10 @@ export async function updateOperationStatus(
 export async function getOperationsByWallet(
   wallet: string
 ): Promise<Operation[]> {
+  if (isPostgresConfigured()) {
+    const ops = await listMarketplaceOperationsByWallet(wallet);
+    if (ops.length > 0) return ops;
+  }
   const redis = getRedis();
   if (!redis) return [];
 
@@ -179,6 +200,10 @@ export async function getOperationsByWallet(
 export async function getOperationsByStatus(
   status: OperationStatus
 ): Promise<Operation[]> {
+  if (isPostgresConfigured()) {
+    const ops = await listMarketplaceOperationsByStatus(status);
+    if (ops.length > 0) return ops;
+  }
   const redis = getRedis();
   if (!redis) return [];
 

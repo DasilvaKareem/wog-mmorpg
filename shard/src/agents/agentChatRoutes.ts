@@ -43,7 +43,6 @@ import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getRedis } from "../redis.js";
 import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
@@ -61,6 +60,7 @@ import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
 import { validateEdicts, type Edict } from "../combat/edicts.js";
 import { setEdictCache } from "../combat/edictCache.js";
+import { getPromoCode, hasRedeemedPromoCode, redeemPromoCode, upsertPromoCode } from "../db/runtimeMetaStore.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -2182,8 +2182,7 @@ Strategy options: aggressive, balanced, defensive`;
   });
 
   // ── Promo codes ─────────────────────────────────────────────────────────
-  // Codes stored in Redis: promo:{CODE} → JSON { tier, maxUses, uses, goldBonus? }
-  // Seed codes via POST /agent/promo/create (admin) or manually in Redis.
+  // Codes are stored durably in Postgres and may be mirrored to Redis if needed.
 
   interface PromoCode {
     tier: AgentTier;
@@ -2196,10 +2195,15 @@ Strategy options: aggressive, balanced, defensive`;
   function promoUsedKey(code: string, wallet: string) { return `promo:used:${code.toUpperCase().trim()}:${wallet.toLowerCase()}`; }
 
   async function getPromo(code: string): Promise<PromoCode | null> {
-    const redis = getRedis();
-    if (!redis) return null;
-    const raw = await redis.get(promoKey(code));
-    return raw ? (JSON.parse(raw) as PromoCode) : null;
+    const promo = await getPromoCode(code);
+    return promo
+      ? {
+          tier: promo.tier as AgentTier,
+          maxUses: promo.maxUses,
+          uses: promo.uses,
+          goldBonus: promo.goldBonus,
+        }
+      : null;
   }
 
   // ── POST /agent/promo/create — create a promo code (admin) ─────────────
@@ -2214,10 +2218,8 @@ Strategy options: aggressive, balanced, defensive`;
     if (!code || !tier || !maxUses) {
       return reply.code(400).send({ error: "code, tier, and maxUses required" });
     }
-    const redis = getRedis();
-    if (!redis) return reply.code(500).send({ error: "Redis unavailable" });
     const promo: PromoCode = { tier, maxUses, uses: 0, goldBonus };
-    await redis.set(promoKey(code), JSON.stringify(promo));
+    await upsertPromoCode({ code, tier, maxUses, uses: 0, goldBonus });
     return reply.send({ ok: true, code: code.toUpperCase().trim(), promo });
   });
 
@@ -2258,7 +2260,6 @@ Strategy options: aggressive, balanced, defensive`;
     let promoApplied = false;
     let promoGoldBonus = 0;
     if (promoCode) {
-      const redis = getRedis();
       const promo = await getPromo(promoCode);
       if (!promo) {
         return reply.code(400).send({ error: "Invalid promo code." });
@@ -2272,20 +2273,23 @@ Strategy options: aggressive, balanced, defensive`;
         return reply.code(400).send({ error: "This promo code has reached its usage limit." });
       }
       // Check if wallet already used this code
-      if (redis) {
-        const alreadyUsed = await redis.get(promoUsedKey(promoCode, authWallet));
-        if (alreadyUsed) {
-          return reply.code(400).send({ error: "You have already used this promo code." });
-        }
+      if (await hasRedeemedPromoCode(promoCode, authWallet)) {
+        return reply.code(400).send({ error: "You have already used this promo code." });
       }
       // Redeem
-      promo.uses += 1;
-      if (redis) {
-        await redis.set(promoKey(promoCode), JSON.stringify(promo));
-        await redis.set(promoUsedKey(promoCode, authWallet), "1");
+      const redeemed = await redeemPromoCode(promoCode, authWallet);
+      if (!redeemed) {
+        const latest = await getPromo(promoCode);
+        if (latest && latest.uses >= latest.maxUses) {
+          return reply.code(400).send({ error: "This promo code has reached its usage limit." });
+        }
+        if (await hasRedeemedPromoCode(promoCode, authWallet)) {
+          return reply.code(400).send({ error: "You have already used this promo code." });
+        }
+        return reply.code(409).send({ error: "Promo redemption conflicted. Please retry." });
       }
       promoApplied = true;
-      promoGoldBonus = promo.goldBonus ?? 0;
+      promoGoldBonus = redeemed.goldBonus ?? 0;
       server.log.info(`[upgrade-tier] Promo ${promoCode.toUpperCase()} redeemed by ${authWallet} for ${tier} tier`);
     }
 

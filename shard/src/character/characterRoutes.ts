@@ -36,6 +36,7 @@ function randomPlayerAppearance(name: string) {
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
 import { findLatestChainOperationByTypeAndSubject } from "../blockchain/chainOperationStore.js";
+import { listCharacterProjectionsForWallets, type CharacterProjectionRecord } from "./characterProjectionStore.js";
 
 type CharacterListEntry = {
   tokenId: string;
@@ -219,6 +220,53 @@ function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterList
   }
 
   return Array.from(deduped.values());
+}
+
+function buildCharacterEntryFromProjection(
+  projection: CharacterProjectionRecord,
+  liveEntity?: {
+    level: number;
+    xp: number;
+    hp: number;
+    maxHp: number;
+    zoneId: string;
+    name: string;
+    agentId: string | null;
+    characterTokenId: string | null;
+  } | null
+): CharacterListEntry {
+  const liveName = liveEntity?.name ? stripCharacterClassSuffix(liveEntity.name) : null;
+  const liveMatches = Boolean(
+    liveEntity
+    && projection.characterTokenId
+    && liveEntity.characterTokenId
+    && projection.characterTokenId === liveEntity.characterTokenId
+    && liveName
+    && stripCharacterClassSuffix(projection.characterName).toLowerCase() === liveName.toLowerCase()
+  );
+  const level = liveMatches ? liveEntity!.level : projection.level;
+  const xp = liveMatches ? liveEntity!.xp : projection.xp;
+  const classDef = CLASS_DEFINITIONS.find((entry) => entry.id === projection.classId);
+  const fullName = classDef ? `${projection.characterName} the ${classDef.name}` : projection.characterName;
+
+  return {
+    tokenId: projection.characterTokenId ?? `projection-${projection.walletAddress}-${projection.normalizedName}-${projection.classId}`,
+    characterTokenId: projection.characterTokenId ?? null,
+    agentId: liveMatches ? liveEntity!.agentId : projection.agentId,
+    agentRegistrationTxHash: projection.agentRegistrationTxHash,
+    chainRegistrationStatus: projection.chainRegistrationStatus as CharacterListEntry["chainRegistrationStatus"] ?? "unregistered",
+    chainRegistrationLastError: projection.chainRegistrationLastError,
+    bootstrapStatus: null,
+    name: fullName,
+    description: `Level ${level} ${projection.raceId} ${projection.classId}`,
+    properties: {
+      race: projection.raceId,
+      class: projection.classId,
+      level,
+      xp,
+      stats: computeStatsAtLevel(projection.raceId, projection.classId, level),
+    },
+  };
 }
 
 async function resolveSavedCharacter(
@@ -632,6 +680,21 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         const deployedCharacterName = liveEntity
           ? liveEntity.name.replace(/\s+the\s+\w+$/i, "").trim()
           : null;
+
+        const projectedCharacters = await listCharacterProjectionsForWallets(
+          [walletAddress, custodialWallet].filter((wallet): wallet is string => Boolean(wallet))
+        ).catch(() => []);
+        if (projectedCharacters.length > 0) {
+          return {
+            walletAddress,
+            liveEntity,
+            deployedCharacterName,
+            characters: dedupeCharacterEntries(
+              projectedCharacters.map((projection) => buildCharacterEntryFromProjection(projection, liveEntity))
+            ),
+            sourceOfTruth: "postgres-projection",
+          };
+        }
 
         // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)
         // Query both the owner wallet and the custodial wallet (characters are minted to custodial)

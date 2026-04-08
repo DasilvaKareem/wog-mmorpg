@@ -4,7 +4,7 @@ import type { TechniqueDefinition } from "./techniques.js";
 import { getOrCreateZone, getEntity, recalculateEntityVitals, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { clampToZoneBounds } from "../world/worldLayout.js";
 import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
-import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import { randomUUID } from "crypto";
@@ -179,7 +179,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     const onChainGoldStr = await getGoldBalance(player.walletAddress);
     const onChainGold = Number(onChainGoldStr);
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(player.walletAddress, safeOnChainGold);
 
     const goldCost = copperToGold(technique.copperCost);
     if (availableGold < goldCost) {
@@ -189,7 +189,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
 
     // Deduct gold (copper → gold conversion)
-    recordGoldSpend(player.walletAddress, goldCost);
+    await recordGoldSpendAsync(player.walletAddress, goldCost);
 
     // Add technique to learned list
     if (!player.learnedTechniques) {
@@ -220,7 +220,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
       data: { techniqueName: technique.name, techniqueId, techniqueType: technique.type },
     });
 
-    const newAvailableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
+    const newAvailableGold = await getAvailableGoldAsync(player.walletAddress, safeOnChainGold);
 
     return reply.send({
       success: true,

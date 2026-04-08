@@ -7,6 +7,12 @@ import {
   registerChainOperationProcessor,
   type ChainOperationRecord,
 } from "../blockchain/chainOperationStore.js";
+import {
+  getAuctionProjection,
+  listAuctionProjections,
+  upsertAuctionProjection,
+} from "../db/auctionProjectionStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 const AUCTION_HOUSE_CONTRACT_ADDRESS = process.env.AUCTION_HOUSE_CONTRACT_ADDRESS;
 
@@ -63,6 +69,7 @@ const auctionCache = new Map<number, AuctionData>();
 
 function cacheAuction(data: AuctionData): void {
   auctionCache.set(data.auctionId, data);
+  void upsertAuctionProjection(data).catch(() => {});
 }
 
 function isTransientRpcReadError(err: unknown): boolean {
@@ -198,6 +205,7 @@ async function processAuctionBid(
             cached.highBid = payload.bidAmount;
             cached.endTime = Number(parsed.args.newEndTime);
             if (parsed.args.extended) cached.extensionCount++;
+            await upsertAuctionProjection(cached);
           }
           return {
             result: {
@@ -252,7 +260,10 @@ async function processAuctionEnd(record: ChainOperationRecord): Promise<{ result
       return tx.wait();
     });
     const cached = auctionCache.get(payload.auctionId);
-    if (cached) cached.status = 1;
+    if (cached) {
+      cached.status = 1;
+      await upsertAuctionProjection(cached);
+    }
     return { result: receipt.hash, txHash: receipt.hash };
   });
 }
@@ -273,7 +284,10 @@ async function processAuctionCancel(record: ChainOperationRecord): Promise<{ res
       return tx.wait();
     });
     const cached = auctionCache.get(payload.auctionId);
-    if (cached) cached.status = 2;
+    if (cached) {
+      cached.status = 2;
+      await upsertAuctionProjection(cached);
+    }
     return { result: receipt.hash, txHash: receipt.hash };
   });
 }
@@ -284,6 +298,13 @@ registerChainOperationProcessor("auction-cancel", processAuctionCancel);
  * function has a known bug on SKALE BITE v2 — returns 0x for all IDs).
  */
 export async function getAuctionFromChain(auctionId: number): Promise<AuctionData> {
+  if (isPostgresConfigured()) {
+    const projected = await getAuctionProjection(auctionId);
+    if (projected) {
+      auctionCache.set(projected.auctionId, projected);
+      return projected;
+    }
+  }
   const cached = auctionCache.get(auctionId);
   if (cached) return cached;
   throw new Error(`Auction ${auctionId} not found`);
@@ -313,6 +334,12 @@ export async function getZoneAuctionsFromChain(
   zoneId: string,
   statusFilter?: number
 ): Promise<number[]> {
+  if (isPostgresConfigured()) {
+    const projected = await listAuctionProjections(statusFilter, zoneId);
+    projected.forEach((auction) => auctionCache.set(auction.auctionId, auction));
+    return projected.map((auction) => auction.auctionId);
+  }
+
   const auctionIds: number[] = [];
 
   for (const auction of auctionCache.values()) {
@@ -338,6 +365,15 @@ export function getAllAuctionsFromCache(statusFilter?: number): AuctionData[] {
     }
   }
   return results;
+}
+
+export async function hydrateAuctionCacheFromProjections(): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+  const auctions = await listAuctionProjections();
+  for (const auction of auctions) {
+    auctionCache.set(auction.auctionId, auction);
+  }
+  return auctions.length;
 }
 
 /**

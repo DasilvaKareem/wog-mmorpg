@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { distributeSFuel, mintGold, getGoldBalance, getItemBalance, transferGoldFrom } from "./blockchain.js";
 import { biteProvider } from "./biteChain.js";
-import { formatGold, getAvailableGold, getSpentGold } from "./goldLedger.js";
+import { formatGold, getAvailableGoldAsync, getSpentGoldAsync } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
 import { goldToCopper, copperToGold } from "./currency.js";
 import { createCustodialWallet, getCustodialWallet } from "./custodialWalletRedis.js";
@@ -16,6 +16,13 @@ import {
   updateChainOperation,
 } from "./chainOperationStore.js";
 import { ethers } from "ethers";
+import {
+  getWalletRegistrationState as getWalletRegistrationStateProjection,
+  getWalletRuntimeState,
+  putWalletRegistrationState,
+  putWalletRuntimeState,
+} from "../db/walletInfraStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // Track registered wallets to avoid duplicate welcome bonuses
 const registeredWallets = new Set<string>();
@@ -43,6 +50,13 @@ function normalizeAddress(address: string): string {
 
 async function getStoredTreasuryAddress(): Promise<string | null> {
   if (treasuryAddressCache) return treasuryAddressCache;
+  if (isPostgresConfigured()) {
+    const stored = await getWalletRuntimeState<string>(TREASURY_ADDRESS_KEY);
+    if (stored) {
+      treasuryAddressCache = normalizeAddress(stored);
+      return treasuryAddressCache;
+    }
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -57,13 +71,16 @@ async function getStoredTreasuryAddress(): Promise<string | null> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getStoredTreasuryAddress");
+    if (!isPostgresConfigured()) assertRedisAvailable("getStoredTreasuryAddress");
   }
   return null;
 }
 
 async function storeTreasuryAddress(address: string): Promise<void> {
   const normalized = normalizeAddress(address);
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(TREASURY_ADDRESS_KEY, normalized);
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -75,7 +92,7 @@ async function storeTreasuryAddress(address: string): Promise<void> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("storeTreasuryAddress");
+    if (!isPostgresConfigured()) assertRedisAvailable("storeTreasuryAddress");
   }
 
   treasuryAddressCache = normalized;
@@ -83,6 +100,13 @@ async function storeTreasuryAddress(address: string): Promise<void> {
 
 async function isTreasurySeeded(): Promise<boolean> {
   if (treasurySeededMem) return true;
+  if (isPostgresConfigured()) {
+    const seeded = await getWalletRuntimeState<string>(TREASURY_SEEDED_KEY);
+    if (seeded === "1") {
+      treasurySeededMem = true;
+      return true;
+    }
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -97,7 +121,7 @@ async function isTreasurySeeded(): Promise<boolean> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("isTreasurySeeded");
+    if (!isPostgresConfigured()) assertRedisAvailable("isTreasurySeeded");
   }
   return false;
 }
@@ -134,6 +158,9 @@ async function ensureTreasuryGasBalance(server: FastifyInstance, treasuryAddress
 }
 
 async function markTreasurySeeded(): Promise<void> {
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(TREASURY_SEEDED_KEY, "1");
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -144,7 +171,7 @@ async function markTreasurySeeded(): Promise<void> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("markTreasurySeeded");
+    if (!isPostgresConfigured()) assertRedisAvailable("markTreasurySeeded");
   }
 
   treasurySeededMem = true;
@@ -153,6 +180,13 @@ async function markTreasurySeeded(): Promise<void> {
 async function isWalletRegistered(address: string): Promise<boolean> {
   const normalized = normalizeAddress(address);
   if (registeredWallets.has(normalized)) return true;
+  if (isPostgresConfigured()) {
+    const persisted = await getWalletRuntimeState<string>(`${REGISTERED_WALLET_KEY_PREFIX}${normalized}`);
+    if (persisted === "1") {
+      registeredWallets.add(normalized);
+      return true;
+    }
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -167,7 +201,9 @@ async function isWalletRegistered(address: string): Promise<boolean> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("isWalletRegistered");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("isWalletRegistered");
+    }
   }
 
   return false;
@@ -175,6 +211,9 @@ async function isWalletRegistered(address: string): Promise<boolean> {
 
 async function markWalletRegistered(address: string): Promise<void> {
   const normalized = normalizeAddress(address);
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(`${REGISTERED_WALLET_KEY_PREFIX}${normalized}`, "1");
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -186,7 +225,9 @@ async function markWalletRegistered(address: string): Promise<void> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("markWalletRegistered");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("markWalletRegistered");
+    }
   }
 
   registeredWallets.add(normalized);
@@ -197,9 +238,15 @@ function walletRegistrationStatusKey(address: string): string {
 }
 
 async function getWalletRegistrationStatus(address: string): Promise<Record<string, string> | null> {
+  if (isPostgresConfigured()) {
+    const status = await getWalletRegistrationStateProjection(address);
+    if (status) return status;
+  }
   const redis = getRedis();
   if (!redis) {
-    assertRedisAvailable("getWalletRegistrationStatus");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("getWalletRegistrationStatus");
+    }
     return null;
   }
   const raw = await redis.hgetall(walletRegistrationStatusKey(address));
@@ -207,8 +254,9 @@ async function getWalletRegistrationStatus(address: string): Promise<Record<stri
 }
 
 async function saveWalletRegistrationStatus(address: string, fields: Record<string, string | number | null | undefined>): Promise<void> {
+  const existing = (await getWalletRegistrationStatus(address)) ?? {};
   const redis = getRedis();
-  if (!redis) {
+  if (!redis && !isPostgresConfigured()) {
     assertRedisAvailable("saveWalletRegistrationStatus");
     return;
   }
@@ -223,8 +271,17 @@ async function saveWalletRegistrationStatus(address: string, fields: Record<stri
       data[field] = String(value);
     }
   }
-  if (Object.keys(data).length > 0) await redis.hset(key, data);
-  if (deletes.length > 0) await redis.hdel(key, ...deletes);
+  const nextState = { ...existing, ...data };
+  for (const field of deletes) {
+    delete nextState[field];
+  }
+  if (isPostgresConfigured()) {
+    await putWalletRegistrationState(address, nextState);
+  }
+  if (redis) {
+    if (Object.keys(data).length > 0) await redis.hset(key, data);
+    if (deletes.length > 0) await redis.hdel(key, ...deletes);
+  }
 }
 
 async function findPendingWalletRegistrationOperation(address: string): Promise<string | null> {
@@ -586,8 +643,8 @@ export function registerWalletRoutes(server: FastifyInstance) {
       try {
         const onChainGold = parseFloat(await getGoldBalance(address));
         const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-        const spentGold = getSpentGold(address);
-        const availableGold = getAvailableGold(address, safeOnChainGold);
+        const spentGold = await getSpentGoldAsync(address);
+        const availableGold = await getAvailableGoldAsync(address, safeOnChainGold);
 
         // Fetch all item balances in parallel (cached 10s in blockchain.ts)
         const balanceResults = await Promise.all(

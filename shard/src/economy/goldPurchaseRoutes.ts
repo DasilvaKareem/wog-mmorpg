@@ -14,8 +14,14 @@ import { getRedis } from "../redis.js";
 import { randomUUID } from "crypto";
 import { getCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { copperToGold, formatCopperString, goldToCopper } from "../blockchain/currency.js";
-import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { areFriends } from "../social/friendsSystem.js";
+import {
+  deleteGoldPendingPayment,
+  getGoldPendingPayment,
+  putGoldPendingPayment,
+} from "../db/marketplaceStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Gold pack definitions ────────────────────────────────────────────────────
 
@@ -56,13 +62,20 @@ interface PendingPayment {
 function pendingKey(paymentId: string) { return `gold:pending:${paymentId}`; }
 
 async function storePending(p: PendingPayment): Promise<void> {
+  if (isPostgresConfigured()) {
+    await putGoldPendingPayment(p.paymentId, p.wallet, p, Date.now() + 1800 * 1000);
+  }
   const redis = getRedis();
-  if (!redis) throw new Error("Redis unavailable");
-  // TTL 30 minutes — payment must be confirmed within that window
-  await redis.set(pendingKey(p.paymentId), JSON.stringify(p), "EX", 1800);
+  if (redis) {
+    await redis.set(pendingKey(p.paymentId), JSON.stringify(p), "EX", 1800);
+  }
 }
 
 async function getPending(paymentId: string): Promise<PendingPayment | null> {
+  if (isPostgresConfigured()) {
+    const pending = await getGoldPendingPayment<PendingPayment>(paymentId);
+    if (pending) return pending;
+  }
   const redis = getRedis();
   if (!redis) return null;
   const raw = await redis.get(pendingKey(paymentId));
@@ -70,6 +83,9 @@ async function getPending(paymentId: string): Promise<PendingPayment | null> {
 }
 
 async function deletePending(paymentId: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    await deleteGoldPendingPayment(paymentId);
+  }
   const redis = getRedis();
   if (redis) await redis.del(pendingKey(paymentId));
 }
@@ -274,7 +290,7 @@ export function registerGoldPurchaseRoutes(server: FastifyInstance): void {
     try {
       const onChainGold = parseFloat(await getGoldBalance(senderCustodial));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(senderCustodial, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(senderCustodial, safeOnChainGold);
 
       if (availableGold < totalCharge) {
         return reply.code(400).send({
@@ -290,7 +306,7 @@ export function registerGoldPurchaseRoutes(server: FastifyInstance): void {
       }
 
       const txHash = await transferGoldWithGasRetry(server, senderCustodial, toWallet, normalizedAmount);
-      recordGoldSpend(senderCustodial, FRIEND_TRANSFER_FEE_GOLD);
+      await recordGoldSpendAsync(senderCustodial, FRIEND_TRANSFER_FEE_GOLD);
 
       server.log.info(
         `[gold-transfer] ${senderCustodial} sent ${formatGold(normalizedAmount)} GOLD to ${toWallet} (fee ${formatGold(FRIEND_TRANSFER_FEE_GOLD)}) tx=${txHash}`,

@@ -9,9 +9,9 @@ import {
   getAgentEntityRef,
   patchAgentConfig,
   clearAgentRuntimeState,
+  listEnabledAgentWallets,
 } from "./agentConfigStore.js";
 import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
-import { getRedis } from "../redis.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { loadAnyCharacterForWallet } from "../character/characterStore.js";
 import { extractRawCharacterName } from "./agentUtils.js";
@@ -198,34 +198,30 @@ class AgentManager {
   }
 
   /**
-   * On server boot: scan Redis for all agent:config:* keys with enabled=true
-   * and restart those loops. Called once from server.ts after Redis is ready.
+   * On server boot: enumerate enabled agents from the authoritative store
+   * and restart those loops.
    */
-  async restoreFromRedis(): Promise<void> {
-    const redis = getRedis();
-    if (!redis) {
-      console.log("[AgentManager] No Redis — skipping boot restore");
+  async restoreEnabledAgents(): Promise<void> {
+    let wallets: string[] = [];
+    try {
+      wallets = await listEnabledAgentWallets();
+    } catch (err: any) {
+      console.warn("[AgentManager] Boot restore enumeration failed:", err.message);
       return;
     }
 
-    let keys: string[] = [];
-    try {
-      keys = await redis.keys("agent:config:*");
-    } catch (err: any) {
-      console.warn("[AgentManager] Boot restore scan failed:", err.message);
+    if (wallets.length === 0) {
+      console.log("[AgentManager] No persisted enabled agents found");
       return;
     }
 
     let restored = 0;
     let failed = 0;
-    for (const key of keys) {
+    for (const userWallet of wallets) {
       try {
-        const raw = await redis.get(key);
-        if (!raw) continue;
-        const config = JSON.parse(raw);
+        const config = await getAgentConfig(userWallet);
+        if (!config) continue;
         if (!config.enabled) continue;
-
-        const userWallet = key.replace("agent:config:", "");
         const rehydrated = await this.rehydrateMissingEntity(userWallet);
         if (!rehydrated) {
           failed++;
@@ -236,7 +232,7 @@ class AgentManager {
         restored++;
       } catch (err: any) {
         failed++;
-        const wallet = key.replace("agent:config:", "").slice(0, 8);
+        const wallet = userWallet.slice(0, 8);
         console.warn(`[AgentManager] Boot restore failed for ${wallet}: ${err.message?.slice(0, 80)}`);
       }
     }

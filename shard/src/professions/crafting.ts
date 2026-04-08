@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold, formatGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { rollCraftedItem } from "../items/itemRng.js";
@@ -804,7 +804,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
       const goldCost = copperToGold(recipe.copperCost);
       const onChainGold = parseFloat(await getGoldBalance(walletAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(walletAddress, safeOnChainGold);
       if (availableGold < goldCost) {
         reply.code(400);
         return {
@@ -813,7 +813,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
           available: formatGold(availableGold),
         };
       }
-      recordGoldSpend(walletAddress, goldCost);
+      await recordGoldSpendAsync(walletAddress, goldCost);
     }
 
     // PRE-CHECK: Verify on-chain balances before attempting burn (avoids costly reverts)
@@ -944,14 +944,19 @@ export function registerCraftingRoutes(server: FastifyInstance) {
     } catch (err) {
       server.log.error(err, `[crafting] Failed to mint crafted item for ${walletAddress}`);
 
-      // TODO: Refund burned materials on mint failure
-      // This is a critical edge case - materials were consumed but item wasn't created
+      for (const material of recipe.requiredMaterials) {
+        try {
+          await mintItem(walletAddress, material.tokenId, BigInt(material.quantity));
+        } catch (refundErr) {
+          server.log.error(refundErr, `[crafting] Failed refunding ${material.tokenId.toString()} to ${walletAddress}`);
+        }
+      }
 
       reply.code(500);
       return {
         error: "Crafting failed - item could not be created",
         materialsConsumed: burnedMaterials,
-        warning: "Materials were consumed but item creation failed - contact support",
+        warning: "Item creation failed; refund attempted for consumed materials.",
       };
     }
   });

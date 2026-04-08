@@ -21,6 +21,13 @@
 import webPush, { type PushSubscription } from "web-push";
 import { getRedis } from "../redis.js";
 import { setDiaryPushHook, type DiaryAction, type DiaryEntry } from "./diary.js";
+import {
+  deleteWebPushSubscription,
+  getWebPushSubscription,
+  listWebPushWallets,
+  upsertWebPushSubscription,
+} from "../db/notificationStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── VAPID configuration ───────────────────────────────────────────────────
 let vapidConfigured = false;
@@ -64,16 +71,18 @@ export async function saveSubscription(
   wallet: string,
   subscription: PushSubscription
 ): Promise<void> {
-  const redis = getRedis();
-  if (!redis) {
-    console.warn("[web-push] Redis not available — subscription not saved");
-    return;
-  }
   const data: StoredSubscription = {
     subscription,
     wallet: wallet.toLowerCase(),
     createdAt: Date.now(),
   };
+  if (isPostgresConfigured()) {
+    await upsertWebPushSubscription(data.wallet, data.subscription, data.createdAt);
+  }
+  const redis = getRedis();
+  if (!redis) {
+    return;
+  }
   // Keep subscription for 1 year (subscriptions can expire but this gives headroom)
   await redis.set(pushSubKey(wallet), JSON.stringify(data), "EX", 365 * 24 * 60 * 60);
 }
@@ -82,6 +91,9 @@ export async function saveSubscription(
  * Remove a push subscription for a wallet address.
  */
 export async function removeSubscription(wallet: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    await deleteWebPushSubscription(wallet);
+  }
   const redis = getRedis();
   if (!redis) return;
   await redis.del(pushSubKey(wallet));
@@ -93,6 +105,10 @@ export async function removeSubscription(wallet: string): Promise<void> {
 export async function getSubscription(
   wallet: string
 ): Promise<PushSubscription | null> {
+  if (isPostgresConfigured()) {
+    const subscription = await getWebPushSubscription(wallet);
+    if (subscription) return subscription;
+  }
   const redis = getRedis();
   if (!redis) return null;
   try {
@@ -162,12 +178,17 @@ export async function broadcastPush(payload: PushPayload): Promise<number> {
   ensureVapidConfigured();
   if (!vapidConfigured) return 0;
 
-  const redis = getRedis();
-  if (!redis) return 0;
-
   let sent = 0;
   try {
-    const keys: string[] = await redis.keys("push:sub:*");
+    const wallets = isPostgresConfigured()
+      ? await listWebPushWallets()
+      : (() => [] as string[])();
+    const redis = getRedis();
+    const keys: string[] = wallets.length > 0
+      ? wallets.map((wallet) => `push:sub:${wallet}`)
+      : !isPostgresConfigured() && redis
+        ? await redis.keys("push:sub:*")
+        : [];
     const results = await Promise.allSettled(
       keys.map(async (key: string) => {
         const wallet = key.replace("push:sub:", "");

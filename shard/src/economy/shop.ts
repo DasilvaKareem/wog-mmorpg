@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getGoldBalance, mintGold, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
-import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemRecycleCopperValue, getItemsByTokenIds } from "../items/itemCatalog.js";
 import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
 import { consumeOwnedItemInstances } from "../items/itemRng.js";
@@ -165,7 +165,7 @@ export function registerShopRoutes(server: FastifyInstance) {
     try {
       const onChainGold = parseFloat(await getGoldBalance(buyerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(buyerAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(buyerAddress, safeOnChainGold);
       if (availableGold < goldCost) {
         reply.code(400);
         return {
@@ -180,7 +180,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       server.log.info(
         `Minted ${quantity}x ${item.name} to ${buyerAddress}: ${itemTx}`
       );
-      recordGoldSpend(buyerAddress, goldCost);
+      await recordGoldSpendAsync(buyerAddress, goldCost);
 
       // Update merchant inventory if using dynamic path
       if (merchantState) {
@@ -215,7 +215,7 @@ export function registerShopRoutes(server: FastifyInstance) {
         quantity,
         unitPrice,
         totalCost,
-        remainingGold: formatGold(getAvailableGold(buyerAddress, safeOnChainGold)),
+        remainingGold: formatGold(await getAvailableGoldAsync(buyerAddress, safeOnChainGold)),
         itemTx,
       merchantEntityId: merchantEntityId ? resolveMerchantEntityId(merchantEntityId) : null,
       };

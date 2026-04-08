@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { mintItem } from "../blockchain/blockchain.js";
-import { recordGoldSpend, unreserveGold } from "../blockchain/goldLedger.js";
+import { recordGoldSpendAsync, unreserveGoldAsync } from "../blockchain/goldLedger.js";
 import { assignItemInstanceOwner, getAuctionEscrowInstance } from "../items/itemRng.js";
 import {
   getNextAuctionId,
@@ -82,10 +82,10 @@ async function auctionTick(server: FastifyInstance) {
             }
 
             // Record gold spend (deduct from available)
-            recordGoldSpend(auction.highBidder, auction.highBid);
+            await recordGoldSpendAsync(auction.highBidder, auction.highBid);
 
             // Unreserve the gold (since it's now spent)
-            unreserveGold(auction.highBidder, auction.highBid);
+            await unreserveGoldAsync(auction.highBidder, auction.highBid);
 
             const winnerAgentId = auction.highBidderAgentId ?? resolveLiveAgentIdForWallet(auction.highBidder);
             if (winnerAgentId) {

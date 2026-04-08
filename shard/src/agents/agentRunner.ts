@@ -1066,8 +1066,8 @@ export class AgentRunner {
           const justCompletedFarmQuest = FARM_LAND_QUESTS.some((qid) => completedIds.includes(qid));
           if (justCompletedFarmQuest && this.custodialWallet) {
             // Check if they already own a plot (async in a fire-and-forget)
-            import("../farming/plotSystem.js").then(({ getOwnedPlot }) => {
-              const owned = getOwnedPlot(this.custodialWallet!) ?? getOwnedPlot(this.userWallet);
+            import("../farming/plotSystem.js").then(async ({ getOwnedPlotAsync }) => {
+              const owned = await getOwnedPlotAsync(this.custodialWallet!) ?? await getOwnedPlotAsync(this.userWallet);
               if (!owned) {
                 void this.askSummoner(
                   `I talked to Plot Registrar Helga and there's a small plot in Sunflower Fields for just 25 gold. Should I claim it for us? We can start building a homestead there.`,
@@ -1860,8 +1860,8 @@ export class AgentRunner {
               } else {
                 // Already in the zone — claim the cheapest available plot
                 try {
-                  const { getPlotsInZone, getPlotDef, claimPlot } = await import("../farming/plotSystem.js");
-                  const plots = getPlotsInZone(targetZone);
+                  const { getPlotsInZoneAsync, getPlotDef, claimPlot } = await import("../farming/plotSystem.js");
+                  const plots = await getPlotsInZoneAsync(targetZone);
                   const available = plots
                     .filter((p) => !p.owner)
                     .map((p) => ({ state: p, def: getPlotDef(p.plotId) }))
@@ -1871,7 +1871,7 @@ export class AgentRunner {
                     const cheapest = available[0];
                     const walletToUse = this.custodialWallet ?? this.userWallet;
                     const charName = entity.name ?? "Champion";
-                    const result = claimPlot(cheapest.state.plotId, walletToUse, charName);
+                    const result = await claimPlot(cheapest.state.plotId, walletToUse, charName);
                     if (result.ok) {
                       void this.logActivity(`Claimed plot ${cheapest.state.plotId} in ${targetZone} for ${cheapest.def!.cost}g!`);
                       await appendChatMessage(this.userWallet, {

@@ -7,6 +7,10 @@
  */
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import { clearWalletEntityLink, upsertWalletLink } from "../character/characterProjectionStore.js";
+import { enqueueOutboxEvent } from "../db/outbox.js";
+import { getWalletRuntimeState, listWalletRuntimeStatesByPrefix, putWalletRuntimeState } from "../db/walletInfraStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 import type { AgentTier } from "./agentTiers.js";
 import type { BotScript, TriggerEvent } from "../types/botScriptTypes.js";
 import type { Edict } from "../combat/edicts.js";
@@ -137,6 +141,10 @@ export function defaultConfig(): AgentConfig {
 // ── Config ──────────────────────────────────────────────────────────────────
 
 export async function getAgentConfig(userWallet: string): Promise<AgentConfig | null> {
+  if (isPostgresConfigured()) {
+    const stored = await getWalletRuntimeState<AgentConfig>(walletKey(userWallet));
+    if (stored) return stored;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -147,13 +155,16 @@ export async function getAgentConfig(userWallet: string): Promise<AgentConfig | 
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getAgentConfig");
+    if (!isPostgresConfigured()) assertRedisAvailable("getAgentConfig");
   }
   return memConfig.get(userWallet.toLowerCase()) ?? null;
 }
 
 export async function setAgentConfig(userWallet: string, config: AgentConfig): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(walletKey(key), config);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -163,7 +174,7 @@ export async function setAgentConfig(userWallet: string, config: AgentConfig): P
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("setAgentConfig");
+    if (!isPostgresConfigured()) assertRedisAvailable("setAgentConfig");
   }
   memConfig.set(key, config);
 }
@@ -189,6 +200,14 @@ export async function appendChatMessage(
   maxHistory = 50
 ): Promise<void> {
   const key = userWallet.toLowerCase();
+  const existingHistory = isPostgresConfigured()
+    ? ((await getWalletRuntimeState<ChatMessage[]>(chatKey(key))) ?? memChat.get(key) ?? [])
+    : [];
+  if (isPostgresConfigured()) {
+    const nextHistory = [...existingHistory, msg];
+    if (nextHistory.length > maxHistory) nextHistory.splice(0, nextHistory.length - maxHistory);
+    await putWalletRuntimeState(chatKey(key), nextHistory);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -199,7 +218,7 @@ export async function appendChatMessage(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("appendChatMessage");
+    if (!isPostgresConfigured()) assertRedisAvailable("appendChatMessage");
   }
 
   const list = memChat.get(key) ?? [];
@@ -213,6 +232,10 @@ export async function getChatHistory(
   limit = 50
 ): Promise<ChatMessage[]> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const history = await getWalletRuntimeState<ChatMessage[]>(chatKey(key));
+    if (history && history.length > 0) return history.slice(-limit);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -222,7 +245,7 @@ export async function getChatHistory(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getChatHistory");
+    if (!isPostgresConfigured()) assertRedisAvailable("getChatHistory");
   }
   return (memChat.get(key) ?? []).slice(-limit);
 }
@@ -254,6 +277,17 @@ export async function appendAgentError(
 ): Promise<void> {
   const key = userWallet.toLowerCase();
   const serialized = JSON.stringify(entry);
+  if (isPostgresConfigured()) {
+    const perAgent = (await getWalletRuntimeState<AgentErrorEntry[]>(errorKey(key))) ?? memErrors.get(key) ?? [];
+    const nextPerAgent = [...perAgent, entry];
+    if (nextPerAgent.length > MAX_ERRORS_PER_AGENT) nextPerAgent.splice(0, nextPerAgent.length - MAX_ERRORS_PER_AGENT);
+    await putWalletRuntimeState(errorKey(key), nextPerAgent);
+
+    const globalEntries = (await getWalletRuntimeState<Array<AgentErrorEntry & { wallet?: string }>>(GLOBAL_ERROR_KEY)) ?? [];
+    const nextGlobal = [...globalEntries, { ...entry, wallet: key }];
+    if (nextGlobal.length > MAX_GLOBAL_ERRORS) nextGlobal.splice(0, nextGlobal.length - MAX_GLOBAL_ERRORS);
+    await putWalletRuntimeState(GLOBAL_ERROR_KEY, nextGlobal);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -269,7 +303,7 @@ export async function appendAgentError(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("appendAgentError");
+    if (!isPostgresConfigured()) assertRedisAvailable("appendAgentError");
   }
 
   const list = memErrors.get(key) ?? [];
@@ -283,6 +317,10 @@ export async function getAgentErrors(
   limit = 100,
 ): Promise<AgentErrorEntry[]> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const entries = await getWalletRuntimeState<AgentErrorEntry[]>(errorKey(key));
+    if (entries && entries.length > 0) return entries.slice(-limit);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -292,7 +330,7 @@ export async function getAgentErrors(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getAgentErrors");
+    if (!isPostgresConfigured()) assertRedisAvailable("getAgentErrors");
   }
   return (memErrors.get(key) ?? []).slice(-limit);
 }
@@ -300,6 +338,10 @@ export async function getAgentErrors(
 export async function getGlobalAgentErrors(
   limit = 200,
 ): Promise<(AgentErrorEntry & { wallet?: string })[]> {
+  if (isPostgresConfigured()) {
+    const entries = await getWalletRuntimeState<Array<AgentErrorEntry & { wallet?: string }>>(GLOBAL_ERROR_KEY);
+    if (entries && entries.length > 0) return entries.slice(-limit);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -309,7 +351,7 @@ export async function getGlobalAgentErrors(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getGlobalAgentErrors");
+    if (!isPostgresConfigured()) assertRedisAvailable("getGlobalAgentErrors");
   }
   // Fallback: merge all in-memory
   const all: (AgentErrorEntry & { wallet?: string })[] = [];
@@ -327,6 +369,10 @@ const memDeployCount = new Map<string, number>();
 
 export async function getDeployCount(userWallet: string): Promise<number> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const stored = await getWalletRuntimeState<number>(deployCountKey(key));
+    if (typeof stored === "number") return stored;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -336,13 +382,27 @@ export async function getDeployCount(userWallet: string): Promise<number> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getDeployCount");
+    if (!isPostgresConfigured()) assertRedisAvailable("getDeployCount");
   }
   return memDeployCount.get(key) ?? 0;
 }
 
 export async function incrementDeployCount(userWallet: string): Promise<number> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const next = ((await getWalletRuntimeState<number>(deployCountKey(key))) ?? memDeployCount.get(key) ?? 0) + 1;
+    await putWalletRuntimeState(deployCountKey(key), next);
+    memDeployCount.set(key, next);
+    const redis = getRedis();
+    if (redis) {
+      try {
+        await redis.incr(deployCountKey(key));
+      } catch (err) {
+        if (!isMemoryFallbackAllowed()) throw err;
+      }
+    }
+    return next;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -362,6 +422,10 @@ export async function incrementDeployCount(userWallet: string): Promise<number> 
 // ── Custodial wallet mapping ─────────────────────────────────────────────────
 
 export async function getAgentCustodialWallet(userWallet: string): Promise<string | null> {
+  if (isPostgresConfigured()) {
+    const addr = await getWalletRuntimeState<string>(custWalletKey(userWallet));
+    if (addr) return addr;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -372,7 +436,7 @@ export async function getAgentCustodialWallet(userWallet: string): Promise<strin
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getAgentCustodialWallet");
+    if (!isPostgresConfigured()) assertRedisAvailable("getAgentCustodialWallet");
   }
   return memWallet.get(userWallet.toLowerCase()) ?? null;
 }
@@ -380,22 +444,51 @@ export async function getAgentCustodialWallet(userWallet: string): Promise<strin
 export async function setAgentCustodialWallet(userWallet: string, custodialAddress: string): Promise<void> {
   const key = userWallet.toLowerCase();
   const normalized = custodialAddress.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(custWalletKey(key), normalized);
+  }
   const redis = getRedis();
   if (redis) {
     try {
       await redis.set(custWalletKey(key), normalized);
+      await upsertWalletLink({
+        ownerWallet: key,
+        custodialWallet: normalized,
+      }).catch((err) => {
+        console.warn(`[walletLinks] Failed to sync custodial mapping for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+      });
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("setAgentCustodialWallet");
+    if (!isPostgresConfigured()) assertRedisAvailable("setAgentCustodialWallet");
   }
   memWallet.set(key, normalized);
+  await upsertWalletLink({
+    ownerWallet: key,
+    custodialWallet: normalized,
+  }).catch((err) => {
+    console.warn(`[walletLinks] Failed to sync custodial mapping for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  });
+  await enqueueOutboxEvent({
+    topic: "wallet_link.updated",
+    aggregateType: "wallet_link",
+    aggregateKey: key,
+    payload: {
+      ownerWallet: key,
+      custodialWallet: normalized,
+    },
+  }).catch((err) => {
+    console.warn(`[outbox] Failed to enqueue wallet_link.updated for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  });
 }
 
 export async function clearAgentCustodialWallet(userWallet: string): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(custWalletKey(key), null);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -408,7 +501,7 @@ export async function clearAgentCustodialWallet(userWallet: string): Promise<voi
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("clearAgentCustodialWallet");
+    if (!isPostgresConfigured()) assertRedisAvailable("clearAgentCustodialWallet");
   }
   memWallet.delete(key);
 }
@@ -416,6 +509,10 @@ export async function clearAgentCustodialWallet(userWallet: string): Promise<voi
 // ── Entity ref ───────────────────────────────────────────────────────────────
 
 export async function getAgentEntityRef(userWallet: string): Promise<AgentEntityRef | null> {
+  if (isPostgresConfigured()) {
+    const stored = await getWalletRuntimeState<AgentEntityRef>(entityKey(userWallet));
+    if (stored?.entityId && stored?.zoneId) return stored;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -437,42 +534,89 @@ export async function getAgentEntityRef(userWallet: string): Promise<AgentEntity
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getAgentEntityRef");
+    if (!isPostgresConfigured()) assertRedisAvailable("getAgentEntityRef");
   }
   return memEntity.get(userWallet.toLowerCase()) ?? null;
 }
 
 export async function setAgentEntityRef(userWallet: string, ref: AgentEntityRef): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(entityKey(key), ref);
+  }
   const redis = getRedis();
   if (redis) {
     try {
       await redis.set(entityKey(key), JSON.stringify(ref));
+      await upsertWalletLink({
+        ownerWallet: key,
+        entityId: ref.entityId,
+        lastZoneId: ref.zoneId,
+        characterName: ref.characterName ?? null,
+        agentId: ref.agentId ?? null,
+        characterTokenId: ref.characterTokenId ?? null,
+      }).catch((err) => {
+        console.warn(`[walletLinks] Failed to sync entity ref for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+      });
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("setAgentEntityRef");
+    if (!isPostgresConfigured()) assertRedisAvailable("setAgentEntityRef");
   }
   memEntity.set(key, ref);
+  await upsertWalletLink({
+    ownerWallet: key,
+    entityId: ref.entityId,
+    lastZoneId: ref.zoneId,
+    characterName: ref.characterName ?? null,
+    agentId: ref.agentId ?? null,
+    characterTokenId: ref.characterTokenId ?? null,
+  }).catch((err) => {
+    console.warn(`[walletLinks] Failed to sync entity ref for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  });
+  await enqueueOutboxEvent({
+    topic: "wallet_runtime.updated",
+    aggregateType: "wallet_link",
+    aggregateKey: key,
+    payload: {
+      ownerWallet: key,
+      entityId: ref.entityId,
+      zoneId: ref.zoneId,
+      characterName: ref.characterName ?? null,
+      agentId: ref.agentId ?? null,
+      characterTokenId: ref.characterTokenId ?? null,
+    },
+  }).catch((err) => {
+    console.warn(`[outbox] Failed to enqueue wallet_runtime.updated for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  });
 }
 
 export async function clearAgentEntityRef(userWallet: string): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(entityKey(key), null);
+  }
   const redis = getRedis();
   if (redis) {
     try {
       await redis.del(entityKey(key));
+      await clearWalletEntityLink(key).catch((err) => {
+        console.warn(`[walletLinks] Failed to clear entity ref for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+      });
       memEntity.delete(key);
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("clearAgentEntityRef");
+    if (!isPostgresConfigured()) assertRedisAvailable("clearAgentEntityRef");
   }
   memEntity.delete(key);
+  await clearWalletEntityLink(key).catch((err) => {
+    console.warn(`[walletLinks] Failed to clear entity ref for ${key}: ${err.message?.slice(0, 140) ?? err}`);
+  });
 }
 
 // ── Runtime snapshot ────────────────────────────────────────────────────────
@@ -481,6 +625,10 @@ const memRuntime = new Map<string, AgentRuntimeState>();
 
 export async function getAgentRuntimeState(userWallet: string): Promise<AgentRuntimeState | null> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const stored = await getWalletRuntimeState<AgentRuntimeState>(runtimeKey(key));
+    if (stored) return stored;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -491,7 +639,7 @@ export async function getAgentRuntimeState(userWallet: string): Promise<AgentRun
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getAgentRuntimeState");
+    if (!isPostgresConfigured()) assertRedisAvailable("getAgentRuntimeState");
   }
   return memRuntime.get(key) ?? null;
 }
@@ -499,6 +647,9 @@ export async function getAgentRuntimeState(userWallet: string): Promise<AgentRun
 export async function setAgentRuntimeState(userWallet: string, runtime: AgentRuntimeState): Promise<void> {
   const key = userWallet.toLowerCase();
   const payload = { ...runtime, updatedAt: Date.now() };
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(runtimeKey(key), payload);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -509,13 +660,16 @@ export async function setAgentRuntimeState(userWallet: string, runtime: AgentRun
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("setAgentRuntimeState");
+    if (!isPostgresConfigured()) assertRedisAvailable("setAgentRuntimeState");
   }
   memRuntime.set(key, payload);
 }
 
 export async function clearAgentRuntimeState(userWallet: string): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(runtimeKey(key), null);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -526,7 +680,7 @@ export async function clearAgentRuntimeState(userWallet: string): Promise<void> 
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("clearAgentRuntimeState");
+    if (!isPostgresConfigured()) assertRedisAvailable("clearAgentRuntimeState");
   }
   memRuntime.delete(key);
 }
@@ -562,6 +716,9 @@ export async function askSummonerQuestion(
     expiresAt: now + QUESTION_TTL_MS,
   };
 
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(questionKey(key), question);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -571,7 +728,7 @@ export async function askSummonerQuestion(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("askSummonerQuestion");
+    if (!isPostgresConfigured()) assertRedisAvailable("askSummonerQuestion");
   }
   memQuestions.set(key, question);
   return question;
@@ -580,6 +737,13 @@ export async function askSummonerQuestion(
 /** Get the current pending question (if any). Returns null if expired or none. */
 export async function getSummonerQuestion(userWallet: string): Promise<PendingQuestion | null> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const q = await getWalletRuntimeState<PendingQuestion>(questionKey(key));
+    if (q) {
+      if (Date.now() > q.expiresAt && !q.reply) return null;
+      return q;
+    }
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -592,7 +756,7 @@ export async function getSummonerQuestion(userWallet: string): Promise<PendingQu
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getSummonerQuestion");
+    if (!isPostgresConfigured()) assertRedisAvailable("getSummonerQuestion");
   }
   const q = memQuestions.get(key);
   if (!q) return null;
@@ -613,6 +777,9 @@ export async function replySummonerQuestion(
 
   existing.reply = reply;
   existing.repliedAt = Date.now();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(questionKey(key), existing);
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -624,7 +791,7 @@ export async function replySummonerQuestion(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("replySummonerQuestion");
+    if (!isPostgresConfigured()) assertRedisAvailable("replySummonerQuestion");
   }
   memQuestions.set(key, existing);
   return existing;
@@ -633,6 +800,9 @@ export async function replySummonerQuestion(
 /** Clear the pending question after the agent has processed the reply. */
 export async function clearSummonerQuestion(userWallet: string): Promise<void> {
   const key = userWallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    await putWalletRuntimeState(questionKey(key), null);
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -643,7 +813,7 @@ export async function clearSummonerQuestion(userWallet: string): Promise<void> {
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("clearSummonerQuestion");
+    if (!isPostgresConfigured()) assertRedisAvailable("clearSummonerQuestion");
   }
   memQuestions.delete(key);
 }
@@ -747,6 +917,14 @@ export async function clearCompletedObjectives(userWallet: string): Promise<Agen
 /** Get the first non-completed objective (the one the agent should work on). */
 export function getActiveObjective(objectives: AgentObjective[]): AgentObjective | null {
   return objectives.find((o) => o.status === "pending" || o.status === "active") ?? null;
+}
+
+export async function listEnabledAgentWallets(): Promise<string[]> {
+  if (!isPostgresConfigured()) return [];
+  const rows = await listWalletRuntimeStatesByPrefix<AgentConfig>("agent:config:");
+  return rows
+    .filter((row) => row.payload?.enabled)
+    .map((row) => row.key.replace(/^agent:config:/, "").toLowerCase());
 }
 
 /** Derive the focus + targetZone an objective implies. */

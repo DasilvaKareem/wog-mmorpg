@@ -1,5 +1,7 @@
 import { getRedis } from "../redis.js";
 import { ITEM_CATALOG, getItemByTokenId, type ItemDefinition } from "./itemCatalog.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import { listItemTokenMappings, upsertItemTokenMappings } from "../db/itemTokenMappingStore.js";
 
 const ITEM_TOKEN_MAPPING_KEY = "items:token-id-mapping:v1";
 
@@ -100,6 +102,23 @@ function normalizeMapping(stored: StoredItemTokenMapping | null): {
 }
 
 async function readStoredMapping(): Promise<StoredItemTokenMapping | null> {
+  if (isPostgresConfigured()) {
+    try {
+      const rows = await listItemTokenMappings();
+      if (rows.length > 0) {
+        return {
+          version: 1,
+          byGameTokenId: Object.fromEntries(
+            rows.map((row) => [row.gameTokenId, row.chainTokenId])
+          ),
+          updatedAt: Date.now(),
+        };
+      }
+    } catch (err: any) {
+      console.warn(`[items] Failed to read item token mapping from Postgres: ${err?.message ?? err}`);
+    }
+  }
+
   const redis = getRedis();
   if (redis) {
     try {
@@ -113,6 +132,20 @@ async function readStoredMapping(): Promise<StoredItemTokenMapping | null> {
 }
 
 async function writeStoredMapping(mapping: StoredItemTokenMapping): Promise<void> {
+  if (isPostgresConfigured()) {
+    try {
+      await upsertItemTokenMappings(
+        Object.entries(mapping.byGameTokenId).map(([gameTokenId, chainTokenId]) => ({
+          gameTokenId,
+          chainTokenId,
+          itemName: getItemByTokenId(BigInt(gameTokenId))?.name ?? "Unknown Item",
+        }))
+      );
+    } catch (err: any) {
+      console.warn(`[items] Failed to persist item token mapping to Postgres: ${err?.message ?? err}`);
+    }
+  }
+
   const redis = getRedis();
   if (redis) {
     try {

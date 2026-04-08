@@ -2,11 +2,13 @@ import type { FastifyInstance } from "fastify";
 import { NPC_DEFS, type NpcDef } from "./npcSpawner.js";
 import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { mintGold, mintItem, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getEntitiesInRegion, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { getRedis } from "../redis.js";
+import { getMerchantStateProjection, listMerchantStates, upsertMerchantState } from "../db/merchantStateStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Data Structures ──────────────────────────────────────────────
 
@@ -140,12 +142,16 @@ function hydrateMerchantState(state: PersistedMerchantState): MerchantState {
 }
 
 async function persistMerchantState(state: MerchantState): Promise<void> {
+  const stableId = merchantStableId(state.zoneId, state.npcName);
+  const serialized = serializeMerchantState(state);
+  if (isPostgresConfigured()) {
+    await upsertMerchantState(stableId, state.zoneId, state.npcName, state.walletAddress, serialized);
+  }
   const redis = getRedis();
   if (!redis) return;
 
-  const stableId = merchantStableId(state.zoneId, state.npcName);
   const key = merchantStateKey(stableId);
-  const payload = JSON.stringify(serializeMerchantState(state));
+  const payload = JSON.stringify(serialized);
   const tx = redis.multi();
   tx.sadd(MERCHANT_STATE_IDS_KEY, stableId);
   tx.set(key, payload);
@@ -159,6 +165,37 @@ function persistMerchantStateEventually(state: MerchantState, context: string): 
 }
 
 export async function restoreMerchantStatesFromRedis(): Promise<number> {
+  if (isPostgresConfigured()) {
+    const rows = await listMerchantStates();
+    if (rows.length > 0) {
+      let restored = 0;
+      for (const row of rows) {
+        try {
+          const persistedState = hydrateMerchantState(row.payload as PersistedMerchantState);
+          const entity = getEntitiesInRegion(persistedState.zoneId).find(
+            (candidate) =>
+              candidate.type === "merchant" &&
+              (candidate.id === persistedState.entityId || candidate.name === persistedState.npcName)
+          );
+          if (!entity || entity.type !== "merchant") continue;
+          const previousEntityId = persistedState.entityId;
+          const state: MerchantState = { ...persistedState, entityId: entity.id };
+          entity.walletAddress = state.walletAddress;
+          merchantStates.set(entity.id, state);
+          merchantEntityAliases.set(previousEntityId, entity.id);
+          merchantEntityAliases.set(entity.id, entity.id);
+          restored++;
+        } catch (err) {
+          console.warn(`[merchant] Failed to restore Postgres merchant state for ${row.merchantId}:`, err);
+        }
+      }
+      if (restored > 0) {
+        console.log(`[merchant] Restored ${restored} merchant state(s) from Postgres`);
+        return restored;
+      }
+    }
+  }
+
   const redis = getRedis();
   if (!redis) return 0;
 
@@ -280,6 +317,16 @@ export async function initMerchantWallets(): Promise<void> {
       const restoredState = getMerchantState(entity.id) ?? merchantStates.get(entity.id);
       if (restoredState) {
         merchantEntityAliases.set(entity.id, restoredState.entityId);
+        continue;
+      }
+
+      const persistedProjection = await getMerchantStateProjection(stableId).catch(() => null);
+      if (persistedProjection) {
+        const persistedState = hydrateMerchantState(persistedProjection as PersistedMerchantState);
+        entity.walletAddress = persistedState.walletAddress;
+        const state: MerchantState = { ...persistedState, entityId: entity.id };
+        merchantStates.set(entity.id, state);
+        merchantEntityAliases.set(entity.id, entity.id);
         continue;
       }
 
@@ -408,7 +455,7 @@ async function syncInventory(state: MerchantState): Promise<void> {
   try {
     // Sync gold
     const rawGold = parseFloat(await getGoldBalance(state.walletAddress));
-    state.goldBalance = Number.isFinite(rawGold) ? getAvailableGold(state.walletAddress, rawGold) : 0;
+    state.goldBalance = Number.isFinite(rawGold) ? await getAvailableGoldAsync(state.walletAddress, rawGold) : 0;
 
     // Sync item balances
     for (const [tokenId, entry] of state.inventory) {
