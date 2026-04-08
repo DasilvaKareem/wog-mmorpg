@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { getGradientMap, NO_OUTLINE_LAYER } from "./ToonPipeline.js";
@@ -1109,7 +1110,9 @@ export class EntityManager {
         // Sample terrain elevation so entities sit on the ground
         if (this.elevationProvider) {
           const targetY = this.elevationProvider.getElevationAt(g.position.x, g.position.z);
-          g.position.y += (targetY - g.position.y) * Math.min(8 * dt, 1);
+          // GLB characters need a small lift since their feet are exactly at origin
+          const yOffset = obj.hasGlbModel ? 0.15 : 0;
+          g.position.y += ((targetY + yOffset) - g.position.y) * Math.min(8 * dt, 1);
         }
 
         // Compute facing direction from actual movement delta
@@ -1270,8 +1273,9 @@ export class EntityManager {
   }
 
   private snapToPosition(obj: EntityObject, x: number, z: number) {
-    const y = this.elevationProvider?.getElevationAt(x, z) ?? obj.group.position.y;
-    obj.group.position.set(x, y, z);
+    const baseY = this.elevationProvider?.getElevationAt(x, z) ?? obj.group.position.y;
+    const yOffset = obj.hasGlbModel ? 0.15 : 0;
+    obj.group.position.set(x, baseY + yOffset, z);
   }
 
   private updateHpBar(obj: EntityObject, ent: Entity) {
@@ -2272,6 +2276,7 @@ export class EntityManager {
     group.add(char.group);
 
     // Equip armor pieces from entity equipment data
+    console.log(`[GLB] Armor system: exists=${!!this.armorSystem} ready=${this.armorSystem?.isReady()} equipment=${JSON.stringify(ent.equipment)}`);
     if (this.armorSystem?.isReady() && ent.equipment) {
       // Find the skeleton from the character's SkinnedMesh
       if (char.skinnedMesh?.skeleton) {
@@ -2289,6 +2294,17 @@ export class EntityManager {
       }
     }
 
+    // Attach weapon to right hand bone
+    if (ent.equipment) {
+      const weaponData = (ent.equipment as Record<string, { name?: string }>).weapon;
+      if (weaponData?.name) {
+        const fistR = char.bones["Fist.R"] ?? char.bones["FistR"];
+        if (fistR) {
+          this.attachWeaponGlb(fistR, weaponData.name, ent.name);
+        }
+      }
+    }
+
     // Start idle animation
     const idleClip = char.clips.get("Idle");
     if (idleClip) {
@@ -2297,6 +2313,79 @@ export class EntityManager {
     }
 
     return char;
+  }
+
+  /** Weapon GLB loader (shared) */
+  private static weaponLoader: GLTFLoader | null = null;
+  private static weaponCache: THREE.Object3D | null = null;
+  private static weaponLoading: Promise<void> | null = null;
+  /** All placed weapon meshes — for live tuner updates */
+  static weaponInstances: THREE.Object3D[] = [];
+
+  private static getWeaponLoader(): GLTFLoader {
+    if (!EntityManager.weaponLoader) {
+      EntityManager.weaponLoader = new GLTFLoader();
+    }
+    return EntityManager.weaponLoader;
+  }
+
+  /** Load sword.glb once, clone for each entity */
+  private attachWeaponGlb(bone: THREE.Bone, itemName: string, entityName: string): void {
+    const WEAPON_URL = new URL("models/sword.glb", new URL(import.meta.env.BASE_URL, window.location.href)).href;
+
+    const attach = (template: THREE.Object3D) => {
+      const weapon = template.clone(true);
+      weapon.name = `weapon_${itemName}`;
+
+      // Convert to toon materials
+      const gradMap = getGradientMap();
+      weapon.traverse((c) => {
+        if (c instanceof THREE.Mesh) {
+          const std = c.material as THREE.MeshStandardMaterial;
+          c.material = new THREE.MeshToonMaterial({
+            color: std.color ?? 0x888888,
+            map: std.map ?? undefined,
+            gradientMap: gradMap,
+          });
+        }
+      });
+
+      weapon.position.set(0.010, 0.360, 0.400);
+      weapon.rotation.set(-1.442, -0.192, 0.158);
+      weapon.scale.setScalar(1.0);
+
+      bone.add(weapon);
+      EntityManager.weaponInstances.push(weapon);
+      console.log(`[GLB] 🗡 Attached sword.glb to ${entityName}`);
+    };
+
+    // Use cached template if available
+    if (EntityManager.weaponCache) {
+      attach(EntityManager.weaponCache);
+      return;
+    }
+
+    // Load once, cache, then attach
+    if (!EntityManager.weaponLoading) {
+      EntityManager.weaponLoading = new Promise<void>((resolve) => {
+        EntityManager.getWeaponLoader().load(
+          WEAPON_URL,
+          (gltf) => {
+            EntityManager.weaponCache = gltf.scene;
+            resolve();
+          },
+          undefined,
+          (err) => {
+            console.error("[GLB] Failed to load sword.glb:", err);
+            resolve();
+          },
+        );
+      });
+    }
+
+    EntityManager.weaponLoading.then(() => {
+      if (EntityManager.weaponCache) attach(EntityManager.weaponCache);
+    });
   }
 
   private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {

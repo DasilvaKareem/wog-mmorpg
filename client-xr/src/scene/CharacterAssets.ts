@@ -55,29 +55,29 @@ const NPC_MODEL: Record<string, string> = {
   "auctioneer":   "Pirate_Male",
 };
 
-/** Skeleton bone names in the Quaternius models */
+/** Skeleton bone names in the Quaternius models (dots stripped by SkeletonUtils.clone) */
 const BONE_NAMES = {
   root: "Bone",
-  body: "Body",
+  body: "Body_1",
   hips: "Hips",
   abdomen: "Abdomen",
   torso: "Torso",
   neck: "Neck",
   head: "Head",
-  shoulderL: "Shoulder.L",
-  upperArmL: "UpperArm.L",
-  lowerArmL: "LowerArm.L",
-  fistL: "Fist.L",
-  shoulderR: "Shoulder.R",
-  upperArmR: "UpperArm.R",
-  lowerArmR: "LowerArm.R",
-  fistR: "Fist.R",
-  upperLegL: "UpperLeg.L",
-  lowerLegL: "LowerLeg.L",
-  upperLegR: "UpperLeg.R",
-  lowerLegR: "LowerLeg.R",
-  footL: "Foot.L",
-  footR: "Foot.R",
+  shoulderL: "ShoulderL",
+  upperArmL: "UpperArmL",
+  lowerArmL: "LowerArmL",
+  fistL: "FistL",
+  shoulderR: "ShoulderR",
+  upperArmR: "UpperArmR",
+  lowerArmR: "LowerArmR",
+  fistR: "FistR",
+  upperLegL: "UpperLegL",
+  lowerLegL: "LowerLegL",
+  upperLegR: "UpperLegR",
+  lowerLegR: "LowerLegR",
+  footL: "FootL",
+  footR: "FootR",
 } as const;
 
 /** Materials that map to customizable character colors */
@@ -199,15 +199,32 @@ export class CharacterAssets {
       if (node instanceof THREE.SkinnedMesh && !skinnedMesh) {
         skinnedMesh = node;
       }
-      if (node instanceof THREE.Bone) {
-        bones[node.name] = node;
-      }
     });
 
     if (!skinnedMesh) {
       console.warn(`[CharAssets] No SkinnedMesh in ${modelName}`);
       return null;
     }
+
+    // Get bones from the skeleton (traverse doesn't find them after SkeletonUtils.clone)
+    const skeleton = (skinnedMesh as THREE.SkinnedMesh).skeleton;
+    if (skeleton) {
+      for (const bone of skeleton.bones) {
+        if (bone.name) bones[bone.name] = bone;
+      }
+    }
+    // Also scan scene hierarchy for any Object3D with bone-like names
+    // (SkeletonUtils.clone may not preserve instanceof Bone)
+    if (Object.keys(bones).length === 0) {
+      clone.traverse((node) => {
+        if (node.name && (node.name.includes("Fist") || node.name.includes("Head") ||
+            node.name.includes("Torso") || node.name.includes("Shoulder") ||
+            node.name.includes("Foot") || node.name.includes("Bone"))) {
+          bones[node.name] = node as THREE.Bone;
+        }
+      });
+    }
+    console.log(`[CharAssets] ${modelName}: ${Object.keys(bones).length} bones found: ${Object.keys(bones).join(", ")}`);
 
     // Remap materials with custom colors and toon shading
     const sm = skinnedMesh as THREE.SkinnedMesh;

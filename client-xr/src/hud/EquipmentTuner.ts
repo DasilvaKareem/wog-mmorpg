@@ -66,6 +66,11 @@ export class EquipmentTuner {
     return SLOTS[name];
   }
 
+  /** Whether the tuner panel is currently open */
+  isVisible(): boolean {
+    return this.visible;
+  }
+
   private render() {
     const slot = SLOTS[this.activeSlot];
     if (!slot) return;

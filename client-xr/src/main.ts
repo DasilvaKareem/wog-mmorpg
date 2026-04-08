@@ -36,6 +36,18 @@ const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https:
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
+(window as any).__equipTuner = equipTuner;
+
+// Live-update weapon meshes from tuner every frame — only when panel is open
+function syncWeaponsToTuner() {
+  if (!equipTuner.isVisible()) return;
+  const slot = equipTuner.getSlot("sword");
+  if (!slot) return;
+  for (const weapon of EntityManager.weaponInstances) {
+    weapon.position.set(slot.pos.x, slot.pos.y, slot.pos.z);
+    weapon.rotation.set(slot.rot.x, slot.rot.y, slot.rot.z);
+  }
+}
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -585,7 +597,7 @@ function animate() {
   effects.update(dt);
   intentLines.update(dt);
   world.updateAnimations(dt);
-  // agentChat is event-driven, no per-frame update needed
+  syncWeaponsToTuner();
 
   // Post-processing doesn't work with WebXR — use plain render in VR
   if (xrSession.isPresenting) {
