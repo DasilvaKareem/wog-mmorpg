@@ -236,7 +236,7 @@ export async function processNameOperation(operationId: string): Promise<void> {
               );
               return waitForBiteReceipt(tx.wait());
             });
-            return receipt.hash;
+            return (receipt as any).hash;
           } catch (err) {
             if (await isRegisteredToWallet(walletAddress, name)) {
               return "already-registered";
@@ -261,7 +261,7 @@ export async function processNameOperation(operationId: string): Promise<void> {
               );
               return waitForBiteReceipt(tx.wait());
             });
-            return receipt.hash;
+            return (receipt as any).hash;
           } catch (err) {
             if ((await reverseLookupOnChain(walletAddress)) === null) {
               return "already-released";

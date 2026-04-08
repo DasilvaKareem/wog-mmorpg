@@ -83,6 +83,7 @@ import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
 import { restoreReservations } from "./blockchain/goldLedger.js";
 import { getTxStats, mintGold } from "./blockchain/blockchain.js";
+import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
 import { getWorldLayout } from "./world/worldLayout.js";
 import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersFromRedis } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
@@ -618,6 +619,7 @@ server.get("/admin/dashboard", async () => {
       rpcUrl: SKALE_BASE_RPC_URL,
       rpcError: rpcProbe.error,
       txStats: getTxStats(),
+      chainBatcher: getChainBatcherStats(),
     },
     zones: { count: regionCounts.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
     agents: { active: agentSnapshots.length, list: agentSnapshots },
@@ -731,6 +733,7 @@ registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
 registerZoneRuntime(server);
+startChainBatcher();
 registerSpawnOrders(server);
 registerCommands(server);
 registerStateApi(server);
@@ -920,13 +923,15 @@ const start = async () => {
   });
 };
 
-// Graceful shutdown: stop all agent loops
+// Graceful shutdown: stop all agent loops, flush batched chain writes
 process.on("SIGTERM", async () => {
+  await stopChainBatcher();
   await agentManager.stopAll();
   await server.close();
   process.exit(0);
 });
 process.on("SIGINT", async () => {
+  await stopChainBatcher();
   await agentManager.stopAll();
   await server.close();
   process.exit(0);

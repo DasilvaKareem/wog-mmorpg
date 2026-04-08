@@ -3,7 +3,8 @@ import { arenaManager } from "../combat/arenaManager.js";
 import type { CharacterStats } from "../character/classes.js";
 import { getClassById } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { mintItem, updateCharacterMetadata, burnItem, findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
+import { updateCharacterMetadata, burnItem, findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
+import { queueItemMint, queueGoldTransfer } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
 import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
@@ -32,7 +33,7 @@ import { logDiary, narrativeDeath, narrativeKill, narrativeLevelUp, narrativeZon
 import { getGameTime, checkPhaseTransition, formatGameTime } from "./worldClock.js";
 import { recordGoldSpend } from "../blockchain/goldLedger.js";
 import { copperToGold, formatCopperString } from "../blockchain/currency.js";
-import { transferFromTreasury } from "../blockchain/wallet.js";
+import { flushPlayer } from "../blockchain/chainBatcher.js";
 import { deleteItemInstance, upsertItemInstanceFromEquipment } from "../items/itemRng.js";
 import { getRedis } from "../redis.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -478,6 +479,10 @@ export function updateSpawnedWalletZone(wallet: string, newZoneId: string): void
 /** Unregister a wallet when its entity is removed (logout, death-despawn, etc). */
 export function unregisterSpawnedWallet(wallet: string): void {
   spawnedWallets.delete(wallet.toLowerCase());
+  // Flush any pending batched chain writes for this player
+  flushPlayer(wallet).catch((err) =>
+    console.error(`[chainBatcher] flush on disconnect failed for ${wallet}:`, err)
+  );
 }
 
 /** Get all spawned wallet entries (for debugging/admin). */
@@ -1518,15 +1523,10 @@ async function handleMobDeath(
     console.warn(`[loot] ${mob.name} killed by ${killer.name} — no loot table entry, loot skipped`);
   }
   if (killer?.walletAddress && lootTable) {
-    // Roll auto-drops
+    // Roll auto-drops — queued in memory, flushed to chain every 30s
     const autoDrops = rollDrops(lootTable.autoDrops);
     for (const drop of autoDrops) {
-      mintItem(killer.walletAddress, drop.tokenId, BigInt(drop.quantity)).catch((err) => {
-        console.error(
-          `[loot] Failed to mint tokenId ${drop.tokenId} to ${killer.walletAddress}:`,
-          err
-        );
-      });
+      queueItemMint(killer.walletAddress, drop.tokenId, BigInt(drop.quantity));
     }
 
     if (autoDrops.length > 0) {
@@ -1549,36 +1549,28 @@ async function handleMobDeath(
     }
   } else if (copperReward > 0 && killer.walletAddress) {
     const goldReward = copperToGold(copperReward);
-    void transferFromTreasury(killer.walletAddress, goldReward.toString())
-      .then((txHash) => {
-        const rewardLabel = formatCopperString(copperReward);
-        console.log(
-          `[loot] ${killer.name} received ${rewardLabel} from ${mob.name} tx=${txHash}`
-        );
-        logZoneEvent({
-          zoneId: zone.zoneId,
-          type: "loot",
-          tick: zone.tick,
-          message: `${killer.name} looted ${rewardLabel} from ${mob.name}.`,
-          entityId: killer.id,
-          entityName: killer.name,
-          targetId: mob.id,
-          targetName: mob.name,
-          data: {
-            copperReward,
-            goldReward,
-            mobLevel: mob.level ?? null,
-            playerLevel: killer.level ?? null,
-            txHash,
-          },
-        });
-      })
-      .catch((err) => {
-        console.error(
-          `[loot] Failed to transfer ${copperReward} copper from treasury to ${killer.walletAddress}:`,
-          err
-        );
-      });
+    // Queue gold in memory — flushed to chain every 5 minutes
+    queueGoldTransfer(killer.walletAddress, goldReward);
+    const rewardLabel = formatCopperString(copperReward);
+    console.log(
+      `[loot] ${killer.name} received ${rewardLabel} from ${mob.name} (batched)`
+    );
+    logZoneEvent({
+      zoneId: zone.zoneId,
+      type: "loot",
+      tick: zone.tick,
+      message: `${killer.name} looted ${rewardLabel} from ${mob.name}.`,
+      entityId: killer.id,
+      entityName: killer.name,
+      targetId: mob.id,
+      targetName: mob.name,
+      data: {
+        copperReward,
+        goldReward,
+        mobLevel: mob.level ?? null,
+        playerLevel: killer.level ?? null,
+      },
+    });
   }
 
   // Create corpse entity for skinning (if mob has skinning drops)
