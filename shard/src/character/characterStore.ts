@@ -396,7 +396,8 @@ export async function loadAllCharactersForWallet(
   const seen = new Set<string>();
   const results: CharacterSaveData[] = [];
 
-  const redis = isPostgresConfigured() ? null : getRedis();
+  // Always fall through to Redis — postgres may not have migrated data yet
+  const redis = getRedis();
   if (redis) {
     try {
       const keys: string[] = await scanKeys(`${prefix}*`);
