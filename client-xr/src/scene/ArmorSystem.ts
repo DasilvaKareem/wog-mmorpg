@@ -26,10 +26,59 @@ interface ArmorPieceDef {
   materials: string[];
   /** Default tint color (can be overridden per-item) */
   defaultColor?: number;
+  /** Optional donor bone names used to constrain broad materials to the right body region */
+  allowedBones?: string[];
 }
+
+type ArmorEquipmentItem = {
+  name?: string;
+  quality?: string;
+  xrVisualId?: string | null;
+};
+
+const TARGET_SKELETON_INDEX_BY_NAME: Record<string, number> = {
+  bone: 0,
+  root: 0,
+  footl: 1,
+  body: 2,
+  body1: 2,
+  hips: 3,
+  abdomen: 4,
+  torso: 5,
+  neck: 6,
+  head: 7,
+  shoulderl: 8,
+  upperarml: 9,
+  lowerarml: 10,
+  fistl: 11,
+  fist1l: 11,
+  fist2l: 11,
+  thumb1l: 11,
+  thumb2l: 11,
+  shoulderr: 12,
+  upperarmr: 13,
+  lowerarmr: 14,
+  fistr: 15,
+  fist1r: 15,
+  fist2r: 15,
+  weaponr: 15,
+  thumb1r: 15,
+  thumb2r: 15,
+  upperlegl: 16,
+  lowerlegl: 17,
+  upperlegr: 18,
+  lowerlegr: 19,
+  poletargetl: 20,
+  footr: 21,
+  poletargetr: 22,
+};
 
 function normalizeMaterialName(name: string): string {
   return name.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+}
+
+function normalizeBoneName(name: string): string {
+  return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function materialMatches(name: string, targets: string[]): boolean {
@@ -54,7 +103,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   // ═══════════════════════════════════════════════════════════════════
   knight_plate:       { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x4c4c4c },
   knight_gold_plate:  { donor: "Knight_Golden_Male",   materials: ["Armor"],        defaultColor: 0x8a7a32 },
-  soldier_jacket:     { donor: "Soldier_Male",         materials: ["Main"],         defaultColor: 0x48553b },
+  soldier_jacket:     { donor: "Soldier_Male",         materials: ["Black"],        defaultColor: 0x778899, allowedBones: ["Body", "Hips", "Abdomen", "Torso", "Neck"] },
   blue_soldier_jacket:{ donor: "BlueSoldier_Male",     materials: ["Main"],         defaultColor: 0x2e394c },
   ninja_suit:         { donor: "Ninja_Male",           materials: ["Main"],         defaultColor: 0x1c1c1c },
   sand_ninja_suit:    { donor: "Ninja_Sand",           materials: ["Main"],         defaultColor: 0x7b6f4c },
@@ -74,12 +123,12 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   cowboy_jacket:      { donor: "Cowboy_Male",           materials: ["Jacket"],       defaultColor: 0x814824 },
   zombie_rags:        { donor: "Zombie_Male",          materials: ["Clothes"],      defaultColor: 0x53457b },
   // Blender modular donor target: split Warrior into skinned torso/armor regions.
-  warrior_chest:      { donor: "Warrior_Modular",      materials: ["Armor", "Chest", "Torso", "Clothes"], defaultColor: 0x7d7b82 },
+  warrior_chest:      { donor: "Warrior_Modular",      materials: ["Armor", "Chest", "Torso", "Clothes"], defaultColor: 0x7d7b82, allowedBones: ["Body", "Hips", "Abdomen", "Torso", "Neck"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // SHOULDERS / OVERLAY
   // ═══════════════════════════════════════════════════════════════════
-  knight_pauldrons:   { donor: "Knight_Male",          materials: ["Armor_Dark"],   defaultColor: 0x333333 },
+  knight_pauldrons:   { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x9098a8, allowedBones: ["Shoulder.L", "UpperArm.L", "Shoulder.R", "UpperArm.R"] },
   gold_pauldrons:     { donor: "Knight_Golden_Male",   materials: ["Armor_Dark"],   defaultColor: 0x292929 },
   soldier_gear:       { donor: "Soldier_Male",         materials: ["Black"],        defaultColor: 0x2b2b2b },
   blue_soldier_gear:  { donor: "BlueSoldier_Male",     materials: ["Black"],        defaultColor: 0x2b2b2b },
@@ -89,7 +138,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   chef_apron:         { donor: "Chef_Hat",             materials: ["DarkClothes"],  defaultColor: 0x9a9a9a },
   suit_details:       { donor: "Suit_Male",            materials: ["Details"],      defaultColor: 0x484848 },
   oldclassy_detail:   { donor: "OldClassy_Male",       materials: ["Detail"],       defaultColor: 0x8d5c39 },
-  warrior_shoulders:  { donor: "Warrior_Modular",      materials: ["Shoulder", "Shoulders", "Pauldron"], defaultColor: 0x6e727c },
+  warrior_shoulders:  { donor: "Warrior_Modular",      materials: ["Shoulder", "Shoulders", "Pauldron"], defaultColor: 0x6e727c, allowedBones: ["Shoulder.L", "UpperArm.L", "Shoulder.R", "UpperArm.R"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // LEGS / PANTS
@@ -105,7 +154,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   zombie_pants:       { donor: "Zombie_Male",          materials: ["Pants"],        defaultColor: 0x9a9171 },
   knight_detail:      { donor: "Knight_Male",          materials: ["Detail"],       defaultColor: 0x54321f },
   doctor_scrubs:      { donor: "Doctor_Male_Old",      materials: ["Brown"],        defaultColor: 0x1f3436 },
-  warrior_legs:       { donor: "Warrior_Modular",      materials: ["Legs", "Pants", "Greaves"], defaultColor: 0x665a4a },
+  warrior_legs:       { donor: "Warrior_Modular",      materials: ["Legs", "Pants", "Greaves"], defaultColor: 0x665a4a, allowedBones: ["UpperLeg.L", "LowerLeg.L", "Foot.L", "UpperLeg.R", "LowerLeg.R", "Foot.R"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // HELM / HAT
@@ -120,7 +169,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   chef_hat:           { donor: "Chef_Hat",             materials: ["Hat"],          defaultColor: 0xf4f3e8 },
   worker_hat:         { donor: "Worker_Male",          materials: ["Hat"],          defaultColor: 0xa19741 },
   oldclassy_hat:      { donor: "OldClassy_Male",       materials: ["Hat"],          defaultColor: 0x1b1a16 },
-  warrior_helm:       { donor: "Warrior_Modular",      materials: ["Helm", "Helmet", "Headgear"], defaultColor: 0x8d8f95 },
+  warrior_helm:       { donor: "Warrior_Modular",      materials: ["Helm", "Helmet", "Headgear"], defaultColor: 0x8d8f95, allowedBones: ["Neck", "Head"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // BELT / ACCESSORY
@@ -139,7 +188,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   suit_shirt:         { donor: "Suit_Male",            materials: ["Shirt"],        defaultColor: 0xcccccc },
   oldclassy_belt:     { donor: "OldClassy_Male",       materials: ["Belt"],         defaultColor: 0x523724 },
   doctor_stethoscope: { donor: "Doctor_Male_Old",      materials: ["Black"],        defaultColor: 0x46806e },
-  warrior_belt:       { donor: "Warrior_Modular",      materials: ["Belt", "Waist", "Tabard"], defaultColor: 0x8b5c36 },
+  warrior_belt:       { donor: "Warrior_Modular",      materials: ["Belt", "Waist", "Tabard"], defaultColor: 0x8b5c36, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // HAIR (equippable styles)
@@ -160,7 +209,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   // ── Chest (most specific first) ──
   [/gold.*plate|golden.*plate|gold.*chest/i,                "knight_gold_plate"],
   [/plate.*chest|plate.*armor|iron.*plate|steel.*plate|full.*plate/i, "knight_plate"],
-  [/chainmail|chain.*shirt|mail.*shirt/i,                   "soldier_jacket"],
+  [/chainmail|chain.*shirt|mail.*shirt/i,                   "knight_plate"],
   [/ninja.*suit|shadow.*garb/i,                             "ninja_suit"],
   [/desert.*wrap|sand.*suit/i,                              "sand_ninja_suit"],
   [/wizard.*robe|mage.*robe|arcane.*robe/i,                 "wizard_robe"],
@@ -253,6 +302,31 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/viking.*braid|warrior.*braid|red.*braid/i,             "viking_braids"],
 ];
 
+function resolveArmorPieceFromName(itemName: string): string | null {
+  const lower = itemName.toLowerCase();
+  for (const [pattern, pieceId] of ITEM_NAME_TO_PIECE) {
+    if (pattern.test(lower)) return pieceId;
+  }
+  return null;
+}
+
+function resolveCanonicalArmorPieceId(item?: ArmorEquipmentItem | null): string | null {
+  if (!item) return null;
+
+  const byName = item.name ? resolveArmorPieceFromName(item.name) : null;
+  const byVisualId = (item.xrVisualId && ARMOR_CATALOG[item.xrVisualId])
+    ? item.xrVisualId
+    : null;
+
+  // Prefer current item-name mappings over older persisted xrVisualIds so
+  // live characters pick up remapped visuals without data migration.
+  if (byName && byVisualId && byName !== byVisualId) {
+    return byName;
+  }
+
+  return byVisualId ?? byName;
+}
+
 /* ── Extracted piece cache ────────────────────────────────────────── */
 
 interface ExtractedPiece {
@@ -296,11 +370,7 @@ export class ArmorSystem {
    * Given an equipment slot and item name from the shard, resolve the best armor piece ID.
    */
   resolveArmorPiece(itemName: string): string | null {
-    const lower = itemName.toLowerCase();
-    for (const [pattern, pieceId] of ITEM_NAME_TO_PIECE) {
-      if (pattern.test(lower)) return pieceId;
-    }
-    return null;
+    return resolveArmorPieceFromName(itemName);
   }
 
   /**
@@ -314,13 +384,19 @@ export class ArmorSystem {
     tintColor?: number,
   ): THREE.SkinnedMesh | null {
     const piece = this.pieceCache.get(pieceId);
-    if (!piece) return null;
+    if (!piece) {
+      console.warn(`[Armor] Missing cached piece: ${pieceId}`);
+      return null;
+    }
 
     const color = tintColor ?? piece.defaultColor;
     const material = new THREE.MeshToonMaterial({
       color,
       gradientMap: getGradientMap(),
       side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
 
     const mesh = new THREE.SkinnedMesh(piece.geometry, material);
@@ -338,7 +414,7 @@ export class ArmorSystem {
    * Returns a group containing all armor meshes.
    */
   equipFromEntityData(
-    equipment: Record<string, { name?: string; quality?: string; xrVisualId?: string | null }>,
+    equipment: Record<string, ArmorEquipmentItem>,
     targetSkeleton: THREE.Skeleton,
     rootBone: THREE.Bone,
   ): THREE.Group {
@@ -346,9 +422,7 @@ export class ArmorSystem {
     armorGroup.name = "equipment";
 
     for (const [_slot, item] of Object.entries(equipment)) {
-      const pieceId = (item.xrVisualId && ARMOR_CATALOG[item.xrVisualId])
-        ? item.xrVisualId
-        : (item.name ? this.resolveArmorPiece(item.name) : null);
+      const pieceId = resolveCanonicalArmorPieceId(item);
       if (!pieceId) continue;
 
       // Quality-based color tinting
@@ -360,6 +434,22 @@ export class ArmorSystem {
     }
 
     return armorGroup;
+  }
+
+  resolveEquipmentDebug(
+    equipment: Record<string, ArmorEquipmentItem>,
+  ): Record<string, { name?: string; xrVisualId?: string | null; resolvedPieceId: string | null; cached: boolean }> {
+    return Object.fromEntries(
+      Object.entries(equipment).map(([slot, item]) => {
+        const pieceId = resolveCanonicalArmorPieceId(item);
+        return [slot, {
+          name: item?.name,
+          xrVisualId: item?.xrVisualId ?? null,
+          resolvedPieceId: pieceId,
+          cached: pieceId ? this.pieceCache.has(pieceId) : false,
+        }];
+      }),
+    );
   }
 
   /** Get all available piece IDs */
@@ -377,6 +467,117 @@ export class ArmorSystem {
       case "uncommon":  return 0x44cc44;
       default:          return undefined; // use piece default
     }
+  }
+
+  private remapGeometrySkinIndices(
+    geometry: THREE.BufferGeometry,
+    donorSkeleton: THREE.Skeleton,
+  ): void {
+    const skinIndex = geometry.getAttribute("skinIndex");
+    if (!(skinIndex instanceof THREE.BufferAttribute)) return;
+
+    const donorBones = donorSkeleton.bones;
+    const remap = new Map<number, number>();
+    for (let i = 0; i < donorBones.length; i++) {
+      const normalized = normalizeBoneName(donorBones[i]?.name ?? "");
+      const mapped = TARGET_SKELETON_INDEX_BY_NAME[normalized];
+      remap.set(i, mapped ?? 0);
+    }
+
+    for (let i = 0; i < skinIndex.count; i++) {
+      for (let c = 0; c < skinIndex.itemSize; c++) {
+        const sourceIndex = skinIndex.getComponent(i, c) as number;
+        skinIndex.setComponent(i, c, remap.get(sourceIndex) ?? 0);
+      }
+    }
+    skinIndex.needsUpdate = true;
+  }
+
+  private buildSubsetGeometry(
+    sourceGeo: THREE.BufferGeometry,
+    allIndices: number[],
+  ): THREE.BufferGeometry | null {
+    const srcIndex = sourceGeo.index;
+    if (!srcIndex || allIndices.length === 0) return null;
+
+    const uniqueVerts = [...new Set(allIndices)];
+    const oldToNew = new Map<number, number>();
+    uniqueVerts.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
+
+    const newGeo = new THREE.BufferGeometry();
+
+    for (const attrName of ["position", "normal", "uv", "skinIndex", "skinWeight"]) {
+      const src = sourceGeo.getAttribute(attrName);
+      if (!src) continue;
+      const itemSize = src.itemSize;
+      const ctor = (src.array as ArrayLike<number>) instanceof Float32Array ? Float32Array : Uint16Array;
+      const arr = new ctor(uniqueVerts.length * itemSize);
+      for (let ni = 0; ni < uniqueVerts.length; ni++) {
+        const oi = uniqueVerts[ni];
+        for (let c = 0; c < itemSize; c++) {
+          arr[ni * itemSize + c] = (src as THREE.BufferAttribute).getComponent(oi, c) as number;
+        }
+      }
+      newGeo.setAttribute(attrName, new THREE.BufferAttribute(arr, itemSize));
+    }
+
+    const IndexArray = uniqueVerts.length > 65535 ? Uint32Array : Uint16Array;
+    const newIndices = new IndexArray(allIndices.length);
+    for (let i = 0; i < allIndices.length; i++) {
+      newIndices[i] = oldToNew.get(allIndices[i])!;
+    }
+    newGeo.setIndex(new THREE.BufferAttribute(newIndices, 1));
+    return newGeo;
+  }
+
+  private filterGeometryByAllowedBones(
+    sourceGeo: THREE.BufferGeometry,
+    donorSkeleton: THREE.Skeleton,
+    allowedBones: string[],
+  ): THREE.BufferGeometry | null {
+    const srcIndex = sourceGeo.index;
+    const skinIndex = sourceGeo.getAttribute("skinIndex");
+    const skinWeight = sourceGeo.getAttribute("skinWeight");
+    if (!srcIndex || !(skinIndex instanceof THREE.BufferAttribute) || !(skinWeight instanceof THREE.BufferAttribute)) {
+      return sourceGeo.clone();
+    }
+
+    const allowedNames = new Set(allowedBones.map(normalizeBoneName));
+    const allowedBoneIndices = new Set<number>();
+    donorSkeleton.bones.forEach((bone, index) => {
+      if (allowedNames.has(normalizeBoneName(bone.name ?? ""))) {
+        allowedBoneIndices.add(index);
+      }
+    });
+    if (!allowedBoneIndices.size) {
+      return sourceGeo.clone();
+    }
+
+    const keptTriangleIndices: number[] = [];
+    for (let i = 0; i < srcIndex.count; i += 3) {
+      let keepTriangle = true;
+      for (let t = 0; t < 3; t++) {
+        const vertexIndex = srcIndex.getX(i + t);
+        let dominantBone = -1;
+        let dominantWeight = -1;
+        for (let c = 0; c < skinIndex.itemSize; c++) {
+          const weight = skinWeight.getComponent(vertexIndex, c) as number;
+          if (weight > dominantWeight) {
+            dominantWeight = weight;
+            dominantBone = skinIndex.getComponent(vertexIndex, c) as number;
+          }
+        }
+        if (!allowedBoneIndices.has(dominantBone)) {
+          keepTriangle = false;
+          break;
+        }
+      }
+      if (keepTriangle) {
+        keptTriangleIndices.push(srcIndex.getX(i), srcIndex.getX(i + 1), srcIndex.getX(i + 2));
+      }
+    }
+
+    return this.buildSubsetGeometry(sourceGeo, keptTriangleIndices);
   }
 
   private async loadDonor(name: string): Promise<void> {
@@ -450,69 +651,61 @@ export class ArmorSystem {
     const geo = matchingDonor.geometry;
     const materials = Array.isArray(matchingDonor.material) ? matchingDonor.material : [matchingDonor.material];
     const groups = geo.groups;
+    const donorMaterialMatches = materials.some((mat) =>
+      materialMatches((mat as THREE.Material).name ?? "", def.materials),
+    );
+
+    let extractedGeo: THREE.BufferGeometry | null = null;
 
     if (!groups.length) {
-      console.warn(`[Armor] No groups in ${def.donor} geometry`);
-      return;
-    }
-
-    const matchingGroups: { start: number; count: number }[] = [];
-    for (const group of groups) {
-      const mat = materials[group.materialIndex ?? 0];
-      const matName = (mat as THREE.Material).name ?? "";
-      if (materialMatches(matName, def.materials)) {
-        matchingGroups.push({ start: group.start, count: group.count });
+      if (!donorMaterialMatches) {
+        console.warn(`[Armor] No groups and no matching donor material [${def.materials}] in ${def.donor}`);
+        return;
       }
-    }
-
-    if (!matchingGroups.length) {
-      console.warn(`[Armor] No matching geometry groups [${def.materials}] in ${def.donor}`);
-      return;
-    }
-
-    const srcIndex = geo.index;
-    if (!srcIndex) return;
-
-    const allIndices: number[] = [];
-    for (const g of matchingGroups) {
-      for (let i = g.start; i < g.start + g.count; i++) {
-        allIndices.push(srcIndex.getX(i));
-      }
-    }
-
-    const uniqueVerts = [...new Set(allIndices)];
-    const oldToNew = new Map<number, number>();
-    uniqueVerts.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
-
-    const newGeo = new THREE.BufferGeometry();
-
-    for (const attrName of ["position", "normal", "uv", "skinIndex", "skinWeight"]) {
-      const src = geo.getAttribute(attrName);
-      if (!src) continue;
-      const itemSize = src.itemSize;
-      const ctor = (src.array as ArrayLike<number>) instanceof Float32Array ? Float32Array : Uint16Array;
-      const arr = new ctor(uniqueVerts.length * itemSize);
-      for (let ni = 0; ni < uniqueVerts.length; ni++) {
-        const oi = uniqueVerts[ni];
-        for (let c = 0; c < itemSize; c++) {
-          arr[ni * itemSize + c] = (src as THREE.BufferAttribute).getComponent(oi, c) as number;
+      extractedGeo = geo.clone();
+    } else {
+      const matchingGroups: { start: number; count: number }[] = [];
+      for (const group of groups) {
+        const mat = materials[group.materialIndex ?? 0];
+        const matName = (mat as THREE.Material).name ?? "";
+        if (materialMatches(matName, def.materials)) {
+          matchingGroups.push({ start: group.start, count: group.count });
         }
       }
-      newGeo.setAttribute(attrName, new THREE.BufferAttribute(arr, itemSize));
+
+      if (!matchingGroups.length) {
+        console.warn(`[Armor] No matching geometry groups [${def.materials}] in ${def.donor}`);
+        return;
+      }
+
+      const allIndices: number[] = [];
+      for (const g of matchingGroups) {
+        for (let i = g.start; i < g.start + g.count; i++) {
+          allIndices.push(geo.index!.getX(i));
+        }
+      }
+
+      extractedGeo = this.buildSubsetGeometry(geo, allIndices);
     }
 
-    const IndexArray = uniqueVerts.length > 65535 ? Uint32Array : Uint16Array;
-    const newIndices = new IndexArray(allIndices.length);
-    for (let i = 0; i < allIndices.length; i++) {
-      newIndices[i] = oldToNew.get(allIndices[i])!;
+    if (!extractedGeo) return;
+
+    if (def.allowedBones?.length) {
+      const filteredGeo = this.filterGeometryByAllowedBones(extractedGeo, matchingDonor.skeleton, def.allowedBones);
+      if (!filteredGeo) {
+        console.warn(`[Armor] Bone-region filter removed all geometry for ${pieceId}`);
+        return;
+      }
+      extractedGeo = filteredGeo;
     }
-    newGeo.setIndex(new THREE.BufferAttribute(newIndices, 1));
+
+    this.remapGeometrySkinIndices(extractedGeo, matchingDonor.skeleton);
 
     this.pieceCache.set(pieceId, {
-      geometry: newGeo,
+      geometry: extractedGeo,
       defaultColor: def.defaultColor ?? 0x888888,
     });
   }
 }
 
-export { ARMOR_CATALOG, ITEM_NAME_TO_PIECE };
+export { ARMOR_CATALOG, ITEM_NAME_TO_PIECE, resolveCanonicalArmorPieceId };

@@ -34,9 +34,13 @@ export class AnimationLabPanel {
   private weaponSelect!: HTMLSelectElement;
   private shieldToggle!: HTMLInputElement;
   private helmSelect!: HTMLSelectElement;
+  private chestSelect!: HTMLSelectElement;
+  private glovesSelect!: HTMLSelectElement;
+  private legsSelect!: HTMLSelectElement;
   private shouldersSelect!: HTMLSelectElement;
   private beltSelect!: HTMLSelectElement;
   private bootsSelect!: HTMLSelectElement;
+  private narutoPresetBtn!: HTMLButtonElement;
   private cameraButtons = new Map<AnimationLabCameraPreset, HTMLButtonElement>();
   private keyTimesWrap!: HTMLDivElement;
   private suppressSlider = false;
@@ -118,6 +122,7 @@ export class AnimationLabPanel {
 
       <div style="margin-bottom:12px">
         <div style="margin-bottom:6px;color:#cab394">Equipment Preview</div>
+        <button id="al-preset-naruto" style="${this.buttonCss("#5b3f24")};width:100%;margin-bottom:8px">Load Naruto Preset</button>
         <label style="display:block;margin-bottom:8px">
           <div style="margin-bottom:4px;color:#a89275">Weapon</div>
           <select id="al-weapon" style="${this.selectCss()}">${weaponOptions}</select>
@@ -127,6 +132,18 @@ export class AnimationLabPanel {
           <label>
             <div style="margin-bottom:4px;color:#a89275">Helm</div>
             <select id="al-helm" style="${this.selectCss()}">${armorOptions}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Chest</div>
+            <select id="al-chest" style="${this.selectCss()}">${armorOptions}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Gloves</div>
+            <select id="al-gloves" style="${this.selectCss()}">${armorOptions}</select>
+          </label>
+          <label>
+            <div style="margin-bottom:4px;color:#a89275">Legs</div>
+            <select id="al-legs" style="${this.selectCss()}">${armorOptions}</select>
           </label>
           <label>
             <div style="margin-bottom:4px;color:#a89275">Shoulders</div>
@@ -196,10 +213,14 @@ export class AnimationLabPanel {
     this.weaponSelect = this.root.querySelector("#al-weapon") as HTMLSelectElement;
     this.shieldToggle = this.root.querySelector("#al-shield") as HTMLInputElement;
     this.helmSelect = this.root.querySelector("#al-helm") as HTMLSelectElement;
+    this.chestSelect = this.root.querySelector("#al-chest") as HTMLSelectElement;
+    this.glovesSelect = this.root.querySelector("#al-gloves") as HTMLSelectElement;
+    this.legsSelect = this.root.querySelector("#al-legs") as HTMLSelectElement;
     this.shouldersSelect = this.root.querySelector("#al-shoulders") as HTMLSelectElement;
     this.beltSelect = this.root.querySelector("#al-belt") as HTMLSelectElement;
     this.bootsSelect = this.root.querySelector("#al-boots") as HTMLSelectElement;
     this.keyTimesWrap = this.root.querySelector("#al-key-times") as HTMLDivElement;
+    this.narutoPresetBtn = this.root.querySelector("#al-preset-naruto") as HTMLButtonElement;
 
     const cameraWrap = this.root.querySelector("#al-camera-wrap") as HTMLDivElement;
     for (const preset of CAMERA_PRESETS) {
@@ -291,8 +312,24 @@ export class AnimationLabPanel {
       this.lab.setShieldEquipped(this.shieldToggle.checked);
     });
 
+    this.narutoPresetBtn.addEventListener("click", () => {
+      this.lab.applyLoadoutPreset("naruto");
+    });
+
     this.helmSelect.addEventListener("change", () => {
       this.lab.setArmorStyle("helm", this.helmSelect.value as PreviewArmorStyle);
+    });
+
+    this.chestSelect.addEventListener("change", () => {
+      this.lab.setArmorStyle("chest", this.chestSelect.value as PreviewArmorStyle);
+    });
+
+    this.glovesSelect.addEventListener("change", () => {
+      this.lab.setArmorStyle("gloves", this.glovesSelect.value as PreviewArmorStyle);
+    });
+
+    this.legsSelect.addEventListener("change", () => {
+      this.lab.setArmorStyle("legs", this.legsSelect.value as PreviewArmorStyle);
     });
 
     this.shouldersSelect.addEventListener("change", () => {
@@ -346,6 +383,9 @@ export class AnimationLabPanel {
     this.weaponSelect.value = state.weaponType;
     this.shieldToggle.checked = state.shieldEquipped;
     this.helmSelect.value = state.helmStyle;
+    this.chestSelect.value = state.chestStyle;
+    this.glovesSelect.value = state.glovesStyle;
+    this.legsSelect.value = state.legStyle;
     this.shouldersSelect.value = state.shoulderStyle;
     this.beltSelect.value = state.beltStyle;
     this.bootsSelect.value = state.bootStyle;

@@ -17,6 +17,12 @@ export class DesktopControls {
   private lastMouse = { x: 0, y: 0 };
   private keys = new Set<string>();
 
+  /** Previous target position for movement-direction tracking */
+  private prevTarget = new THREE.Vector3(0, 0, 0);
+  /** Whether the user is manually controlling the camera yaw (suppresses auto-follow) */
+  private userControlledYaw = false;
+  private userYawTimer = 0;
+
   /** Optional collision check — return false to block movement */
   collisionCheck: ((x: number, z: number) => boolean) | null = null;
 
@@ -91,6 +97,34 @@ export class DesktopControls {
       this.yaw += this.autoOrbitSpeed * dt;
     }
 
+    // MMO-style auto-follow: rotate camera behind the character when locked and moving
+    if (this.locked && !this.isDragging) {
+      if (this.userControlledYaw) {
+        this.userYawTimer -= dt;
+        if (this.userYawTimer <= 0) this.userControlledYaw = false;
+      }
+
+      const dx = this.target.x - this.prevTarget.x;
+      const dz = this.target.z - this.prevTarget.z;
+      const moveDist = Math.sqrt(dx * dx + dz * dz);
+
+      // Only adjust if character moved a meaningful amount
+      if (moveDist > 0.01 && !this.userControlledYaw) {
+        // Camera orbits FROM this angle — offset by PI to sit behind the character
+        const targetYaw = Math.atan2(dx, dz) + Math.PI;
+
+        // Smooth lerp towards target yaw, handling angle wrapping
+        let delta = targetYaw - this.yaw;
+        // Normalize to [-PI, PI]
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+
+        const lerpSpeed = 2.0 * dt; // smooth follow
+        this.yaw += delta * Math.min(lerpSpeed, 1);
+      }
+    }
+    this.prevTarget.copy(this.target);
+
     this.updateCamera();
   }
 
@@ -140,6 +174,9 @@ export class DesktopControls {
 
     this.yaw -= dx * 0.005;
     this.pitch = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, this.pitch + dy * 0.005));
+    // Suppress auto-follow briefly after manual camera rotation
+    this.userControlledYaw = true;
+    this.userYawTimer = 1.5; // seconds before auto-follow resumes
     this.updateCamera();
   };
 

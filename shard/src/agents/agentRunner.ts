@@ -32,6 +32,9 @@ import {
   type PendingQuestion,
   type AgentRuntimeState,
   type AgentErrorEntry,
+  getActionQueue,
+  setActionQueue,
+  clearActionQueue,
 } from "./agentConfigStore.js";
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
@@ -295,7 +298,10 @@ export class AgentRunner {
 
   public clearScript(): void {
     this.currentScript = null;
-    this.ticksSinceLastDecision = MAX_STALE_TICKS;
+    // If queue has items, the next tick will dequeue. Otherwise force re-evaluation.
+    if (this.actionQueue.length === 0) {
+      this.ticksSinceLastDecision = MAX_STALE_TICKS;
+    }
   }
 
   public setGotoTarget(entityId: string, zoneId: string, name?: string, action?: string, profession?: string): void {
@@ -309,6 +315,52 @@ export class AgentRunner {
   public setGotoPosition(x: number, y: number, zoneId: string): void {
     this.currentScript = { type: "goto", reason: `User: move to (${Math.round(x)}, ${Math.round(y)})` };
     this.ticksSinceLastDecision = 0;
+  }
+
+  // ── Action Queue ────────────────────────────────────────────────────────────
+
+  private actionQueue: BotScript[] = [];
+
+  /** Push one or more scripts to the back of the queue */
+  public async enqueueActions(scripts: BotScript[], clearExisting = false): Promise<void> {
+    if (clearExisting) this.actionQueue = [];
+    this.actionQueue.push(...scripts);
+    if (this.actionQueue.length > 10) this.actionQueue = this.actionQueue.slice(0, 10);
+    await setActionQueue(this.userWallet, this.actionQueue);
+    // Start executing immediately if idle
+    if (!this.currentScript && this.actionQueue.length > 0) {
+      this.dequeueNext();
+    }
+    console.log(`[agent:${this.walletTag}] Queue now has ${this.actionQueue.length} items`);
+  }
+
+  /** Clear all queued actions */
+  public async clearQueue(): Promise<void> {
+    this.actionQueue = [];
+    await clearActionQueue(this.userWallet);
+    console.log(`[agent:${this.walletTag}] Queue cleared`);
+  }
+
+  /** View current queue */
+  public getQueue(): BotScript[] {
+    return [...this.actionQueue];
+  }
+
+  /** Whether the queue is driving behavior (suppresses autonomous triggers) */
+  public get queueActive(): boolean {
+    return this.actionQueue.length > 0;
+  }
+
+  /** Dequeue the next action and set it as current script */
+  private dequeueNext(): void {
+    if (this.actionQueue.length === 0) return;
+    const next = this.actionQueue.shift()!;
+    this.currentScript = next;
+    this.ticksOnCurrentScript = 0;
+    this.ticksSinceLastDecision = 0;
+    void setActionQueue(this.userWallet, this.actionQueue);
+    void this.logActivity(`[queue] ${next.type}: ${next.reason ?? "queued action"} (${this.actionQueue.length} remaining)`);
+    console.log(`[agent:${this.walletTag}] Dequeued: ${next.type} (${this.actionQueue.length} left)`);
   }
 
   public getSnapshot() {
@@ -1421,15 +1473,30 @@ export class AgentRunner {
       maxStaleTicks: MAX_STALE_TICKS,
     };
 
+    // ── Action queue: dequeue next if idle ──
+    if (!this.currentScript && this.actionQueue.length > 0) {
+      this.dequeueNext();
+      return; // let the new script execute on the next tick
+    }
+
     // Increment counters before detection (detectTrigger is now pure)
     this.ticksSinceLastDecision++;
     this.ticksOnCurrentScript++;
 
     const pendingTrigger = this.pendingTrigger;
     this.pendingTrigger = null;
-    const trigger = pendingTrigger
+    let trigger = pendingTrigger
       ?? this.detectZoneEventTrigger(this.cachedZoneState?.recentEvents ?? [])
       ?? detectTrigger(entity, entities, triggerState);
+
+    // When the queue is active, suppress triggers that would override user's plan.
+    // Only "blocked" triggers (repeated failures) can interrupt a queued action.
+    if (trigger && this.actionQueue.length > 0) {
+      if (trigger.type === "zone_arrived" || trigger.type === "periodic" || trigger.type === "no_script") {
+        console.log(`[agent:${this.walletTag}] Suppressed ${trigger.type} trigger — queue active (${this.actionQueue.length} items)`);
+        trigger = null;
+      }
+    }
 
     if (trigger) {
       this.telemetry.triggers[trigger.type] = (this.telemetry.triggers[trigger.type] ?? 0) + 1;
@@ -1524,6 +1591,7 @@ export class AgentRunner {
             recentZoneEvents: this.cachedZoneState?.recentEvents ?? [],
             recentFailures: this.getRecentFailures(),
             userDirective,
+            configFocus: config.focus,
             apiCall: this.api!,
             walletGoldCopper,
             mcpClient: this.mcpClient?.isConnected() ? this.mcpClient : undefined,
@@ -1586,6 +1654,10 @@ export class AgentRunner {
   async start(waitForFirstTick = false): Promise<void> {
     this.running = true;
     await this.restoreRuntimeSnapshot();
+    this.actionQueue = await getActionQueue(this.userWallet);
+    if (this.actionQueue.length > 0) {
+      console.log(`[agent:${this.walletTag}] Restored ${this.actionQueue.length} queued actions`);
+    }
     console.log(`[agent:${this.walletTag}] Loop starting`);
 
     let resolveFirst: () => void;

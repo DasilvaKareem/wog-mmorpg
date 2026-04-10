@@ -155,3 +155,111 @@ export interface ActivePlayersResponse {
 export interface ElevationProvider {
   getElevationAt(x: number, z: number): number;
 }
+
+// ── Character select types ─────────────────────────────────────────
+
+export interface CharacterListEntry {
+  tokenId: string;
+  characterTokenId?: string | null;
+  agentId?: string | null;
+  chainRegistrationStatus?: string | null;
+  bootstrapStatus?: string | null;
+  name: string;
+  description: string;
+  properties: {
+    race?: string;
+    class?: string;
+    level?: number;
+    xp?: number;
+    stats?: Record<string, number>;
+  };
+}
+
+export interface CharacterListResponse {
+  walletAddress: string;
+  liveEntity: {
+    level: number;
+    xp: number;
+    hp: number;
+    maxHp: number;
+    zoneId: string;
+    name: string;
+    agentId: string | null;
+    characterTokenId: string | null;
+  } | null;
+  deployedCharacterName: string | null;
+  characters: CharacterListEntry[];
+}
+
+export interface ClassDef {
+  id: string;
+  name: string;
+  description: string;
+  baseStats: Record<string, number>;
+}
+
+export interface RaceDef {
+  id: string;
+  name: string;
+  description: string;
+  statModifiers: Record<string, number>;
+}
+
+// ── Quest types ────────────────────────────────────────────────────
+
+export interface QuestObjective {
+  type: "kill" | "talk" | "gather" | "craft";
+  targetMobName?: string;
+  targetNpcName?: string;
+  targetItemName?: string;
+  count: number;
+}
+
+export interface QuestRewards {
+  copper: number;
+  xp: number;
+  items?: { tokenId: number; quantity: number }[];
+}
+
+export interface ActiveQuest {
+  questId: string;
+  title: string;
+  description: string;
+  objective: QuestObjective;
+  progress: number;
+  required: number;
+  complete: boolean;
+  rewards: QuestRewards;
+  npcEntityId?: string | null;
+}
+
+export interface CompletedQuest {
+  questId: string;
+  title: string;
+  description: string;
+  rewards: QuestRewards;
+}
+
+export interface QuestLogResponse {
+  entityId: string;
+  playerName: string;
+  classId: string;
+  zoneId: string;
+  storyFlags: string[];
+  activeQuests: ActiveQuest[];
+  completedQuests: CompletedQuest[];
+}
+
+export interface AvailableQuest {
+  questId: string;
+  title: string;
+  description: string;
+  npcEntityId: string;
+  npcName: string;
+  objective: QuestObjective;
+  rewards: QuestRewards;
+}
+
+export interface ZoneQuestsResponse {
+  quests: AvailableQuest[];
+}

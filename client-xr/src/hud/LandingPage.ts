@@ -171,6 +171,10 @@ export class LandingPage {
     this.root.style.display = "none";
   }
 
+  show() {
+    this.root.style.display = "";
+  }
+
   private bindEvents() {
     this.panel.querySelectorAll<HTMLElement>("[data-view-trigger]").forEach((el) => {
       el.addEventListener("click", () => {

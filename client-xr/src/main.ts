@@ -23,14 +23,17 @@ import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { AgentChat } from "./hud/AgentChat.js";
 import { LandingPage } from "./hud/LandingPage.js";
+import { CharacterSelect } from "./hud/CharacterSelect.js";
+import type { CharacterReadyDetail } from "./hud/CharacterSelect.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
+import { QuestPanel } from "./hud/QuestPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, completeQuest, talkToNpc } from "./api.js";
 import { getAuthToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
-import type { ActivePlayer, Entity, VisibleIntent, ZoneResponse } from "./types.js";
+import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 
 const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
@@ -119,17 +122,46 @@ const intentModeBadge = new IntentModeBadge();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const agentChat = new AgentChat();
+const charSelect = !isAnimationLab
+  ? new CharacterSelect({
+    charAssets: world.getCharacterAssets(),
+    onCharacterReady: (detail: CharacterReadyDetail) => {
+      charSelect!.hide();
+      ownWalletAddress = detail.walletAddress.toLowerCase();
+      ownEntityId = detail.entityId || null;
+      agentChat.setWallet(ownWalletAddress);
+      agentChat.setEntityId(detail.entityId || null);
+      questPanel.setPlayer(ownWalletAddress, true);
+      controls.setLandingMode(false);
+      setGameplayHudVisible(true);
+      console.log("[enter] Character ready:", detail.characterName, "zone:", detail.zoneId);
+
+      // Move camera to their zone and find the entity
+      const zoneCenter = world.getZoneCenter(detail.zoneId);
+      if (zoneCenter) {
+        controls.setTarget(zoneCenter.x, 0, zoneCenter.z);
+        world.updateLoading(zoneCenter.x, zoneCenter.z);
+      }
+      void findOwnCharacter();
+    },
+    onBack: () => {
+      charSelect!.hide();
+      landing!.show();
+    },
+  })
+  : null;
+
 const landing = !isAnimationLab
   ? new LandingPage({
     onEnterWorld: ({ walletAddress }) => {
-      ownWalletAddress = walletAddress?.toLowerCase() ?? null;
-      agentChat.setWallet(ownWalletAddress);
-      controls.setLandingMode(false);
-      setGameplayHudVisible(true);
-      console.log("[enter] Wallet:", ownWalletAddress);
-      // Find own character for reference (but don't auto-lock unless spacebar toggled)
-      if (ownWalletAddress) {
-        void findOwnCharacter();
+      if (walletAddress) {
+        ownWalletAddress = walletAddress.toLowerCase();
+        void charSelect!.show(ownWalletAddress);
+      } else {
+        // Guest mode — skip character select, enter as spectator
+        controls.setLandingMode(false);
+        setGameplayHudVisible(true);
+        console.log("[enter] Guest spectator mode");
       }
     },
   })
@@ -182,6 +214,7 @@ function setGameplayHudVisible(visible: boolean) {
     "minimap",
     "intent-tooltip",
     "intent-mode-badge",
+    "quest-panel",
   ];
 
   for (const id of ids) {
@@ -201,6 +234,9 @@ let ownEntityId: string | null = null;
 let autoLockEnabled = false;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
+let lastQuestPollTime = 0;
+let questLogData: QuestLogResponse | null = null;
+const QUEST_POLL_INTERVAL = 5_000;
 const processedRecentEventIds = new Map<string, number>();
 
 function filterNewZoneEvents(events: NonNullable<ZoneResponse["recentEvents"]>) {
@@ -350,6 +386,33 @@ const playerPanel = new PlayerPanel({
   },
 });
 
+const questPanel = new QuestPanel({
+  onAcceptQuest: async (questId) => {
+    if (!ownWalletAddress || !ownEntityId) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await acceptQuest(token, ownEntityId, questId);
+    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
+    else console.log("[quest] Accept failed:", result.error);
+  },
+  onCompleteQuest: async (questId, npcEntityId) => {
+    if (!ownWalletAddress || !ownEntityId) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await completeQuest(token, ownEntityId, questId, npcEntityId);
+    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
+    else console.log("[quest] Complete failed:", result.error);
+  },
+  onTalkToNpc: async (npcEntityId) => {
+    if (!ownWalletAddress || !ownEntityId) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await talkToNpc(token, ownEntityId, npcEntityId);
+    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
+    else console.log("[quest] Talk failed:", result.error);
+  },
+});
+
 if (landing) {
   controls.setLandingMode(true);
   setGameplayHudVisible(false);
@@ -447,6 +510,9 @@ async function pollNearbyZones() {
 
     // Minimap — pass camera in server coords
     minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+
+    // Quest poll piggybacks on zone poll but self-throttles to 5s
+    void pollQuests();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -467,6 +533,28 @@ async function pollActivePlayers() {
   }
 }
 
+// ── Quest polling (throttled to 5s) ─────────────────────────────────
+
+async function pollQuests() {
+  const addr = ownWalletAddress;
+  if (!addr) return;
+
+  const now = Date.now();
+  if (now - lastQuestPollTime < QUEST_POLL_INTERVAL) return;
+  lastQuestPollTime = now;
+
+  const log = await fetchQuestLog(addr);
+  if (log) {
+    questLogData = log;
+    questPanel.updateQuestLog(log);
+
+    if (ownEntityId && log.zoneId) {
+      const zq = await fetchZoneQuests(log.zoneId, ownEntityId);
+      if (zq) questPanel.updateZoneQuests(zq);
+    }
+  }
+}
+
 // ── Raycaster for entity picking ────────────────────────────────────
 
 const raycaster = new THREE.Raycaster();
@@ -481,12 +569,43 @@ renderer.domElement.addEventListener("click", (e) => {
   );
   raycaster.setFromCamera(ndcMouse, camera);
 
-  // Click entity — show inspector and lock camera to it
+  // Click entity — show inspector, attack hostiles, lock camera on non-hostiles
   const entityHits = raycaster.intersectObjects(entities.group.children, true);
   const entity = entities.getEntityAt(entityHits);
   if (entity) {
     inspector.show(entity, e.clientX, e.clientY);
-    lockOn(entity.id);
+    // Hostile click — attack and keep camera on own character
+    if ((entity.type === "mob" || entity.type === "boss") && ownWalletAddress && ownEntityId) {
+      if (!lockedEntityId) {
+        autoLockEnabled = true;
+        lockOn(ownEntityId);
+      }
+      const ownEntity = entities.getEntity(ownEntityId);
+      const zoneId = ownEntity?.zoneId;
+      if (zoneId) {
+        void (async () => {
+          const token = await getAuthToken(ownWalletAddress!);
+          if (!token) return;
+          const result = await postCommand(token, {
+            zoneId,
+            entityId: ownEntityId!,
+            action: "attack",
+            targetId: entity.id,
+          });
+          if (!result.ok) {
+            console.log("[click-attack] Failed:", result.error);
+          } else {
+            console.log(`[click-attack] Attacking ${entity.name}`);
+          }
+        })();
+      }
+    } else {
+      // Non-hostile entity — lock camera to it
+      lockOn(entity.id);
+      if (entity.type === "quest-giver" && ownEntityId) {
+        questPanel.showAvailable();
+      }
+    }
     return;
   }
 
@@ -627,6 +746,9 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "v" || e.key === "V") {
     const mode = intentLines.cycleVisibilityMode();
     intentModeBadge.setMode(mode);
+  }
+  if (e.key === "q" || e.key === "Q") {
+    questPanel.toggle();
   }
   if (e.key === " ") {
     e.preventDefault();

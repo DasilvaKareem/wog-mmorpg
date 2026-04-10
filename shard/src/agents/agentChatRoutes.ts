@@ -38,6 +38,7 @@ import {
   type AgentStrategy,
   type AgentObjective,
 } from "./agentConfigStore.js";
+import type { BotScript } from "../types/botScriptTypes.js";
 import { sendAgentPush } from "./agentPushService.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
@@ -1187,6 +1188,8 @@ RULES:
 8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
 9. Use send_message to talk to nearby players.
 10. After tool results, explain briefly as yourself. No bracket tags.
+11. For MULTI-STEP plans ("mine ore then craft then travel"), use queue_actions to queue them in order. The agent will execute each one sequentially. For single actions, update_focus is fine.
+12. If the user says "stop", "cancel", or wants to change plans, use clear_queue to clear the action queue.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
@@ -1305,13 +1308,64 @@ Strategy options: aggressive, balanced, defensive`;
           required: ["toWallet", "body"],
         },
       },
+      {
+        name: "queue_actions",
+        description: "Queue multiple actions to execute in sequence. Use this when the user gives multi-step instructions like 'mine ore then craft a sword then travel to dark-forest'. Each action runs until completion, then the next one starts. The queue takes priority over autonomous behavior.",
+        parameters: {
+          type: "OBJECT" as Type,
+          properties: {
+            actions: {
+              type: "ARRAY" as Type,
+              items: {
+                type: "OBJECT" as Type,
+                properties: {
+                  type: {
+                    type: "STRING" as Type,
+                    enum: ["quest", "combat", "gather", "craft", "brew", "cook", "enchant", "leatherwork", "jewelcraft", "farm", "shop", "trade", "travel", "idle"],
+                    description: "The action type",
+                  },
+                  targetZone: {
+                    type: "STRING" as Type,
+                    description: "For travel: the destination zone",
+                  },
+                  nodeType: {
+                    type: "STRING" as Type,
+                    enum: ["ore", "herb", "both"],
+                    description: "For gather: which resource nodes to target",
+                  },
+                  maxLevelOffset: {
+                    type: "NUMBER" as Type,
+                    description: "For combat: max level offset for mobs to fight",
+                  },
+                  reason: {
+                    type: "STRING" as Type,
+                    description: "Short reason for this action",
+                  },
+                },
+                required: ["type"],
+              },
+              description: "Array of actions to queue in order",
+            },
+            clearExisting: {
+              type: "BOOLEAN" as Type,
+              description: "If true, clear the existing queue before adding new actions. Default true.",
+            },
+          },
+          required: ["actions"],
+        },
+      },
+      {
+        name: "clear_queue",
+        description: "Clear all queued actions and return to autonomous behavior. Use when the user says stop, cancel, or wants to do something different.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
     ];
 
     // When MCP is connected, replace hardcoded read tools with curated MCP subset
     // Using chatOnly=true to keep tool count low (~13 MCP + 3 local = ~16 total)
     // instead of dumping all ~60 MCP tools which bloats token count and confuses the LLM
     if (mcpClient) {
-      const localOnlyTools = new Set(["update_focus", "take_action", "send_message"]);
+      const localOnlyTools = new Set(["update_focus", "take_action", "send_message", "queue_actions", "clear_queue"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
       const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
       chatToolDecls.length = 0;
@@ -1845,6 +1899,52 @@ Strategy options: aggressive, balanced, defensive`;
             toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, actions: actionsTaken }) });
           } catch {
             toolResults.push({ name: fnName, content: JSON.stringify({ error: "Action failed" }) });
+          }
+        }
+
+        else if (fnName === "queue_actions") {
+          try {
+            const input = fnArgs as {
+              actions: Array<{ type: string; targetZone?: string; nodeType?: string; maxLevelOffset?: number; reason?: string }>;
+              clearExisting?: boolean;
+            };
+            if (!input.actions || input.actions.length === 0) {
+              toolResults.push({ name: fnName, content: JSON.stringify({ error: "At least one action is required" }) });
+            } else {
+              const scripts: BotScript[] = input.actions.map((a) => ({
+                type: a.type as BotScript["type"],
+                targetZone: a.targetZone,
+                nodeType: a.nodeType as BotScript["nodeType"],
+                maxLevelOffset: a.maxLevelOffset ?? 2,
+                reason: a.reason ?? `Queued: ${a.type}`,
+              }));
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                await runner.enqueueActions(scripts, input.clearExisting !== false);
+                runner.clearScript(); // start executing immediately
+              }
+              const summary = scripts.map((s) => s.type).join(" → ");
+              actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
+              server.log.info(`[agent/chat] queue_actions: ${summary}`);
+              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary }) });
+            }
+          } catch {
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
+          }
+        }
+
+        else if (fnName === "clear_queue") {
+          try {
+            const runner = agentManager.getRunner(authWallet);
+            if (runner) {
+              await runner.clearQueue();
+              runner.clearScript();
+            }
+            actionsTaken.push("[cleared action queue]");
+            server.log.info("[agent/chat] clear_queue");
+            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, message: "Queue cleared, returning to autonomous behavior" }) });
+          } catch {
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to clear queue" }) });
           }
         }
 

@@ -60,6 +60,9 @@ export interface AnimationLabState {
   weaponType: PreviewWeaponType;
   shieldEquipped: boolean;
   helmStyle: PreviewArmorStyle;
+  chestStyle: PreviewArmorStyle;
+  glovesStyle: PreviewArmorStyle;
+  legStyle: PreviewArmorStyle;
   shoulderStyle: PreviewArmorStyle;
   beltStyle: PreviewArmorStyle;
   bootStyle: PreviewArmorStyle;
@@ -190,6 +193,9 @@ export class AnimationLab {
   private weaponType: PreviewWeaponType = "sword";
   private shieldEquipped = false;
   private helmStyle: PreviewArmorStyle = "none";
+  private chestStyle: PreviewArmorStyle = "none";
+  private glovesStyle: PreviewArmorStyle = "none";
+  private legStyle: PreviewArmorStyle = "none";
   private shoulderStyle: PreviewArmorStyle = "none";
   private beltStyle: PreviewArmorStyle = "none";
   private bootStyle: PreviewArmorStyle = "none";
@@ -273,6 +279,9 @@ export class AnimationLab {
       weaponType: this.weaponType,
       shieldEquipped: this.shieldEquipped,
       helmStyle: this.helmStyle,
+      chestStyle: this.chestStyle,
+      glovesStyle: this.glovesStyle,
+      legStyle: this.legStyle,
       shoulderStyle: this.shoulderStyle,
       beltStyle: this.beltStyle,
       bootStyle: this.bootStyle,
@@ -344,12 +353,39 @@ export class AnimationLab {
     this.rebuildEquipment();
   }
 
-  setArmorStyle(slot: "helm" | "shoulders" | "belt" | "boots", style: PreviewArmorStyle) {
+  setArmorStyle(slot: "helm" | "chest" | "gloves" | "legs" | "shoulders" | "belt" | "boots", style: PreviewArmorStyle) {
     if (slot === "helm") this.helmStyle = style;
+    if (slot === "chest") this.chestStyle = style;
+    if (slot === "gloves") this.glovesStyle = style;
+    if (slot === "legs") this.legStyle = style;
     if (slot === "shoulders") this.shoulderStyle = style;
     if (slot === "belt") this.beltStyle = style;
     if (slot === "boots") this.bootStyle = style;
     this.rebuildEquipment();
+  }
+
+  applyLoadoutPreset(name: "naruto") {
+    if (name === "naruto") {
+      this.appearance = {
+        race: "human",
+        classId: "paladin",
+        hairStyle: "short",
+        skinColor: "tan",
+      };
+      this.weaponType = "sword";
+      this.shieldEquipped = false;
+      this.helmStyle = "none";
+      this.chestStyle = "chain";
+      this.glovesStyle = "plate";
+      this.legStyle = "plate";
+      this.shoulderStyle = "plate";
+      this.beltStyle = "plate";
+      this.bootStyle = "none";
+      this.stripAvatarMeshes();
+      this.buildPreviewAvatar();
+      this.rebuildEquipment();
+      this.emit();
+    }
   }
 
   setRigTuning(partial: Partial<RigTuning>) {
@@ -727,6 +763,9 @@ export class AnimationLab {
     }
 
     this.addHelm();
+    this.addChest();
+    this.addGloves();
+    this.addLegs();
     this.addShoulders();
     this.addBelt();
     this.addBoots();
@@ -762,6 +801,58 @@ export class AnimationLab {
     } else {
       this.attachPreviewMesh(this.rig.head, new THREE.Mesh(HELM_CAP_GEO, mat), "helmLeather", { y: 0.1 });
       this.attachPreviewMesh(this.rig.head, new THREE.Mesh(HELM_BRIM_GEO, mat), "helmLeather", { y: 0.04 });
+    }
+  }
+
+  private addChest() {
+    if (this.chestStyle === "none") return;
+    const slot = this.chestStyle === "plate" ? "chestPlate" : this.chestStyle === "chain" ? "chestChain" : "chestLeather";
+    const mat = this.chestStyle === "plate"
+      ? makeEquipmentMat(0xbbbbcc)
+      : this.chestStyle === "chain"
+        ? makeEquipmentMat(0x778899)
+        : makeEquipmentMat(0x7a5533);
+    if (this.chestStyle === "plate") {
+      const cuirass = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.35, 4, 8), mat);
+      cuirass.scale.set(0.92, 0.9, 0.7);
+      this.attachPreviewMesh(this.rig.chest, cuirass, slot, { z: 0.06 });
+    } else {
+      const vest = new THREE.Mesh(new THREE.CapsuleGeometry(0.27, 0.32, 3, 6), mat);
+      vest.scale.set(0.94, 0.96, 0.72);
+      this.attachPreviewMesh(this.rig.chest, vest, slot, { y: -0.02, z: 0.05 });
+    }
+  }
+
+  private addGloves() {
+    if (this.glovesStyle === "none") return;
+    const plate = this.glovesStyle === "plate";
+    const slot = plate ? "glovePlate" : "gloveLeather";
+    const mat = plate ? makeEquipmentMat(0xbbbbcc) : makeEquipmentMat(0x7a5533);
+    for (const arm of [this.rig.lArm, this.rig.rArm]) {
+      if (plate) {
+        this.attachPreviewMesh(arm, new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.53, 4, 6), mat), slot, { y: -0.12, z: 0.08 });
+        this.attachPreviewMesh(arm, new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.09, 0.07, 6), mat), slot, { y: 0.08, z: 0.05 });
+      } else {
+        this.attachPreviewMesh(arm, new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.49, 4, 6), mat), slot, { y: -0.12, z: 0.06 });
+      }
+    }
+  }
+
+  private addLegs() {
+    if (this.legStyle === "none") return;
+    const slot = this.legStyle === "plate" ? "legPlate" : this.legStyle === "chain" ? "legChain" : "legLeather";
+    const mat = this.legStyle === "plate"
+      ? makeEquipmentMat(0xbbbbcc)
+      : this.legStyle === "chain"
+        ? makeEquipmentMat(0x778899)
+        : makeEquipmentMat(0x7a5533);
+    for (const knee of [this.rig.lKnee, this.rig.rKnee]) {
+      if (this.legStyle === "plate") {
+        this.attachPreviewMesh(knee, new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.32, 3, 6), mat), slot, { y: -0.18, z: 0.10 });
+        this.attachPreviewMesh(knee, new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), mat), slot, { y: 0.01, z: 0.10 });
+      } else {
+        this.attachPreviewMesh(knee, new THREE.Mesh(new THREE.CapsuleGeometry(0.085, 0.34, 3, 6), mat), slot, { y: -0.18, z: 0.08 });
+      }
     }
   }
 

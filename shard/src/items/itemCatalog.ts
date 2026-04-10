@@ -2183,14 +2183,14 @@ function resolveItemXrVisualId(item: Pick<ItemDefinition, "tokenId" | "equipSlot
   switch (Number(item.tokenId)) {
     case 7:   return "shield_wood";
     case 8:   return "worker_vest";
-    case 9:   return "soldier_jacket";
+    case 9:   return "knight_plate";
     case 10:  return "soldier_helm";
     case 12:  return "ninja_legs";
     case 13:  return "boots_leather";
     case 14:  return "soldier_gear";
     case 15:  return "gloves_leather";
     case 16:  return "oldclassy_belt";
-    case 17:  return "warrior_legs";
+    case 17:  return "knight_detail";
     case 18:  return "boots_plate";
     case 19:  return "gloves_plate";
     case 20:  return "warrior_belt";

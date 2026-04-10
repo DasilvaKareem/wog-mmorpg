@@ -307,16 +307,18 @@ export class CharacterAssets {
         color = new THREE.Color(0xffffff);
       }
 
-      return new THREE.MeshToonMaterial({
+      const toon = new THREE.MeshToonMaterial({
         color,
-        map: map ?? undefined,
         gradientMap: gradMap,
         side: std.side,
         transparent: std.transparent,
         opacity: std.opacity,
         alphaTest: std.alphaTest,
         depthWrite: std.depthWrite,
+        ...(map ? { map } : {}),
       });
+      toon.name = name;
+      return toon;
     };
 
     for (const mesh of skinnedMeshes) {

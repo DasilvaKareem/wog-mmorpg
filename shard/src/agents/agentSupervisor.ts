@@ -41,6 +41,8 @@ export interface SupervisorContext {
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
   /** Real on-chain wallet balance in copper (pre-fetched by runner). entity.gold is always 0. */
   walletGoldCopper?: number;
+  /** User's configured focus (questing, combat, gathering, etc.) — used by defaultScript fallback */
+  configFocus?: string;
   /** MCP client — if connected, supervisor uses MCP tools instead of hardcoded ones. */
   mcpClient?: AgentMcpClient;
 }
@@ -402,7 +404,26 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
     return { type: "combat", maxLevelOffset: 1, reason: "Action blocked — switching to reliable combat" };
   }
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
-  if (event.type === "zone_arrived") return { type: "quest", reason: "New region — check for quests" };
+  if (event.type === "zone_arrived") {
+    // Respect user's configured focus instead of always forcing quests
+    const focus = ctx.configFocus;
+    if (focus && focus !== "questing") {
+      const FOCUS_TO_SCRIPT: Record<string, BotScript> = {
+        combat:     { type: "combat", maxLevelOffset: 2, reason: `Arrived — continuing combat` },
+        gathering:  { type: "gather", reason: `Arrived — continuing gathering` },
+        crafting:   { type: "craft", reason: `Arrived — continuing crafting` },
+        alchemy:    { type: "brew", reason: `Arrived — continuing alchemy` },
+        cooking:    { type: "cook", reason: `Arrived — continuing cooking` },
+        enchanting: { type: "enchant", reason: `Arrived — continuing enchanting` },
+        shopping:   { type: "shop", reason: `Arrived — continuing shopping` },
+        trading:    { type: "trade", reason: `Arrived — continuing trading` },
+        farming:    { type: "farm", reason: `Arrived — continuing farming` },
+        idle:       { type: "idle", reason: `Arrived — staying idle as requested` },
+      };
+      if (FOCUS_TO_SCRIPT[focus]) return FOCUS_TO_SCRIPT[focus];
+    }
+    return { type: "quest", reason: "New region — check for quests" };
+  }
   if (event.type === "no_targets") {
     return { type: "travel", reason: "Area cleared — move on" };
   }

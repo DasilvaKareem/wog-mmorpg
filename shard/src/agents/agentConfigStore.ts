@@ -189,6 +189,55 @@ export async function patchAgentConfig(
   return updated;
 }
 
+// ── Action Queue (per-agent, Redis-backed) ─────────────────────────────────
+
+const MAX_QUEUE_SIZE = 10;
+function queueKey(k: string) { return `agent:queue:${k.toLowerCase()}`; }
+const memQueue = new Map<string, BotScript[]>();
+
+export async function getActionQueue(userWallet: string): Promise<BotScript[]> {
+  const key = userWallet.toLowerCase();
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const raw = await redis.get(queueKey(key));
+      if (raw) return JSON.parse(raw) as BotScript[];
+      return [];
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("getActionQueue");
+  }
+  return memQueue.get(key) ?? [];
+}
+
+export async function setActionQueue(userWallet: string, items: BotScript[]): Promise<void> {
+  const key = userWallet.toLowerCase();
+  const clamped = items.slice(0, MAX_QUEUE_SIZE);
+  const redis = getRedis();
+  if (redis) {
+    try {
+      if (clamped.length === 0) {
+        await redis.del(queueKey(key));
+      } else {
+        await redis.set(queueKey(key), JSON.stringify(clamped));
+      }
+      return;
+    } catch (err) {
+      if (!isMemoryFallbackAllowed()) throw err;
+    }
+  } else {
+    assertRedisAvailable("setActionQueue");
+  }
+  if (clamped.length === 0) memQueue.delete(key);
+  else memQueue.set(key, clamped);
+}
+
+export async function clearActionQueue(userWallet: string): Promise<void> {
+  await setActionQueue(userWallet, []);
+}
+
 function chatKey(k: string) { return `agent:chat:${k.toLowerCase()}`; }
 
 // In-memory fallback for chat when Redis is unavailable
