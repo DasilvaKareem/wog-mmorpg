@@ -58,6 +58,9 @@ export async function resolvePreferredAgentIdForWallet(walletAddress: string): P
   if (characters.length === 0) return null;
 
   characters.sort((left, right) => {
+    const leftRegistered = left.chainRegistrationStatus === "registered" ? 1 : 0;
+    const rightRegistered = right.chainRegistrationStatus === "registered" ? 1 : 0;
+    if (leftRegistered !== rightRegistered) return rightRegistered - leftRegistered;
     if (left.level !== right.level) return right.level - left.level;
     if (left.xp !== right.xp) return right.xp - left.xp;
     return left.name.localeCompare(right.name);

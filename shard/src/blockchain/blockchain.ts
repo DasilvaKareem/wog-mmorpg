@@ -1269,6 +1269,22 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
   );
 }
 
+async function waitForCharacterMetadataReceiptByHash(
+  txHash: string,
+  timeoutMs = DEV_ENABLED ? 10_000 : 90_000,
+  intervalMs = 3_000,
+): Promise<ethers.TransactionReceipt> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const receipt = await skaleProvider.getTransactionReceipt(txHash).catch(() => null);
+    if (receipt) {
+      return receipt;
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`Timed out waiting for on-chain receipt after ${timeoutMs}ms`);
+}
+
 /**
  * Register an agent identity on the ERC-8004 identity registry.
  * Uses the metadata-aware registration path when available, then transfers
@@ -1932,6 +1948,54 @@ registerChainOperationProcessor("identity-register", async (record: ChainOperati
 
 registerChainOperationProcessor("character-metadata-update", async (record: ChainOperationRecord) => {
   const payload = JSON.parse(record.payload) as CharacterMetadataPayload;
-  const result = await processCharacterMetadataPayload(payload);
-  return { result, txHash: result };
+  return traceTx(
+    "metadata-update",
+    "updateCharacterMetadata",
+    { tokenId: payload.characterTokenId, name: payload.name, level: payload.level },
+    "skale",
+    async () => {
+      if (!characterWriteContract) {
+        throw new Error("Character write contract unavailable");
+      }
+      const metadata = {
+        name: payload.name,
+        description: `Level ${payload.level} ${payload.raceId} ${payload.classId}`,
+        properties: {
+          race: payload.raceId,
+          class: payload.classId,
+          level: payload.level,
+          xp: payload.xp,
+          stats: payload.stats,
+        },
+      };
+      const uri = await resolveCharacterMetadataUri(metadata);
+      const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
+        const gasPrice = await resolveManagedGasPrice();
+        return await waitForBiteSubmission(
+          characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
+            gasPrice,
+            maxFeePerGas: undefined,
+            maxPriorityFeePerGas: undefined,
+            type: 0,
+            nonce: await reserveServerNonce() ?? undefined,
+          })
+        );
+      });
+      const txHash = String(tx.hash ?? "");
+      if (!txHash) {
+        throw new Error(`Metadata update submission returned no tx hash for character ${payload.characterTokenId}`);
+      }
+      await updateChainOperation(record.operationId, {
+        status: "submitted",
+        txHash,
+        lastError: undefined,
+      });
+
+      const receipt = await waitForCharacterMetadataReceiptByHash(txHash);
+      txStats.metadataUpdates++;
+      recordTx("metadata-update", txHash);
+      lastSyncedLevel.set(payload.characterTokenId, payload.level);
+      return { result: txHash, txHash: String((receipt as any).hash ?? txHash) };
+    }
+  );
 });

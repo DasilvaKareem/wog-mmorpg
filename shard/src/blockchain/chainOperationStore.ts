@@ -641,7 +641,10 @@ export async function processTrackedChainOperation<T = unknown>(
   const record = await getChainOperation(operationId);
   if (!record) return null;
   const now = Date.now();
-  if (record.status === "submitted") {
+  if (
+    record.txHash
+    && (record.status === "submitted" || record.status === "failed_retryable")
+  ) {
     const recovered = await recoverSubmittedChainOperation(record);
     if (recovered !== "rerun") {
       return null;

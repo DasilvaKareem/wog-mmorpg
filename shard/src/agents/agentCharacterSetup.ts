@@ -58,13 +58,24 @@ function normalizeCharacterLookupName(value: unknown): string | null {
 function selectRequestedCharacter(characters: any[] | undefined, requestedName: string): any | null {
   if (!Array.isArray(characters) || characters.length === 0) return null;
   const normalizedRequested = normalizeCharacterLookupName(requestedName);
-  if (!normalizedRequested) return characters[0] ?? null;
+  if (!normalizedRequested) {
+    const sorted = [...characters].sort((left, right) => {
+      const leftLevel = Number(left?.properties?.level ?? 1);
+      const rightLevel = Number(right?.properties?.level ?? 1);
+      if (leftLevel !== rightLevel) return rightLevel - leftLevel;
+      const leftXp = Number(left?.properties?.xp ?? 0);
+      const rightXp = Number(right?.properties?.xp ?? 0);
+      if (leftXp !== rightXp) return rightXp - leftXp;
+      return String(left?.name ?? "").localeCompare(String(right?.name ?? ""));
+    });
+    return sorted[0] ?? null;
+  }
 
   const exact = characters.find((character) => {
     const candidate = normalizeCharacterLookupName(character?.name);
     return candidate === normalizedRequested;
   });
-  return exact ?? characters[0] ?? null;
+  return exact ?? null;
 }
 
 export interface CharacterSetupResult {

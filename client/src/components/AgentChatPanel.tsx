@@ -311,6 +311,37 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const inboxReadMarker = React.useRef<InboxReadMarker | null>(null);
   const seededServerHistory = React.useRef(false);
   const lastProgressTickRef = React.useRef(0);
+  const primaryCharacter = React.useMemo(() => {
+    if (selectedCharacterTokenId) {
+      const selected = characters.find((character) => character.tokenId === selectedCharacterTokenId);
+      if (selected) return selected;
+    }
+
+    const liveByToken = status?.characterTokenId
+      ? characters.find((character) => (character.characterTokenId ?? character.tokenId) === status.characterTokenId)
+      : null;
+    if (liveByToken) return liveByToken;
+
+    const liveByName = status?.entity?.name
+      ? characters.find((character) => {
+          const baseName = character.name.replace(/\s+the\s+\w+$/i, "").trim();
+          const liveBaseName = status.entity?.name?.replace(/\s+the\s+\w+$/i, "").trim();
+          return Boolean(liveBaseName) && (baseName === liveBaseName || character.name === status.entity?.name);
+        })
+      : null;
+    if (liveByName) return liveByName;
+
+    const sorted = [...characters].sort((left, right) => {
+      const leftLevel = Number(left.properties?.level ?? 1);
+      const rightLevel = Number(right.properties?.level ?? 1);
+      if (leftLevel !== rightLevel) return rightLevel - leftLevel;
+      const leftXp = Number(left.properties?.xp ?? 0);
+      const rightXp = Number(right.properties?.xp ?? 0);
+      if (leftXp !== rightXp) return rightXp - leftXp;
+      return left.name.localeCompare(right.name);
+    });
+    return sorted[0] ?? null;
+  }, [characters, selectedCharacterTokenId, status?.characterTokenId, status?.entity?.name]);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
@@ -491,17 +522,13 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setDeploying(true);
     addSystemMsg("Deploying agent...");
     try {
-      // Send character info — use selected character if set, otherwise first
-      const primary = (selectedCharacterTokenId
-        ? characters.find((c) => c.tokenId === selectedCharacterTokenId)
-        : null) ?? characters[0];
       const deployBody: Record<string, string | undefined> = { walletAddress };
-      if (primary) {
-        deployBody.characterName = primary.name;
-        deployBody.raceId = primary.properties.race;
-        deployBody.classId = primary.properties.class;
+      if (primaryCharacter) {
+        deployBody.characterName = primaryCharacter.name;
+        deployBody.raceId = primaryCharacter.properties.race;
+        deployBody.classId = primaryCharacter.properties.class;
       }
-      trackAgentTaskStarted({ walletAddress, characterName: primary?.name });
+      trackAgentTaskStarted({ walletAddress, characterName: primaryCharacter?.name });
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
