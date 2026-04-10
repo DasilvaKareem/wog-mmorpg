@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, recalculateEntityVitals, getWorldTick } from "../world/zoneRuntime.js";
-import { burnItem } from "../blockchain/blockchain.js";
+import { enqueueItemBurn } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
@@ -205,7 +205,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
 
     // CRITICAL: Burn enchantment elixir NFT
     try {
-      const burnTx = await burnItem(
+      const burnTx = await enqueueItemBurn(
         walletAddress,
         BigInt(enchantmentElixirTokenId),
         1n
@@ -411,7 +411,7 @@ export function registerEnchantingRoutes(server: FastifyInstance) {
 
     // CRITICAL: Burn 1x Disenchanting Scroll (tokenId 115)
     try {
-      const burnTx = await burnItem(walletAddress, 115n, 1n);
+      const burnTx = await enqueueItemBurn(walletAddress, 115n, 1n);
 
       // Revert durability enchantment if present
       const hadDurabilityEnchant = equippedItem.enchantments.some(e => e.type === "durability");

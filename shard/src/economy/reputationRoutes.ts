@@ -5,14 +5,12 @@
 
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { loadAllCharactersForWallet, saveCharacter } from "../character/characterStore.js";
-import { findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import { getEntityAgentId } from "../erc8004/agentResolution.js";
-import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
 import { getValidationClaims } from "../erc8004/validation.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
+import { getCharacterProjectionByAgentId } from "../character/characterProjectionStore.js";
 
 export async function registerReputationRoutes(app: FastifyInstance) {
   /**
@@ -23,19 +21,8 @@ export async function registerReputationRoutes(app: FastifyInstance) {
     Params: { agentId: string };
   }>("/api/agents/:agentId/identity", async (req, reply) => {
     const normalizedAgentId = req.params.agentId.trim();
-    let ownerWallet: string | null = null;
-    let endpoint: string | null = null;
-
     try {
-      const agentId = BigInt(normalizedAgentId);
-      try {
-        [ownerWallet, endpoint] = await Promise.all([
-          getAgentOwnerWallet(agentId),
-          getAgentEndpoint(agentId),
-        ]);
-      } catch (err) {
-        app.log.warn({ err, agentId: normalizedAgentId }, "failed to resolve on-chain identity surface");
-      }
+      BigInt(normalizedAgentId);
     } catch {
       return reply.code(400).send({ error: "Invalid agentId" });
     }
@@ -43,55 +30,29 @@ export async function registerReputationRoutes(app: FastifyInstance) {
     const liveEntity = Array.from(getAllEntities().values()).find(
       (entity) => entity.type === "player" && getEntityAgentId(entity) === normalizedAgentId
     );
+    const projection = await getCharacterProjectionByAgentId(normalizedAgentId);
 
-    const lookupWallet = ownerWallet ?? liveEntity?.walletAddress ?? null;
-    let savedCharacter = null;
-    if (lookupWallet) {
-      const characters = await loadAllCharactersForWallet(lookupWallet);
-      for (const character of characters) {
-        if (character.agentId?.trim() !== normalizedAgentId) continue;
-        if (!character.characterTokenId) continue;
-
-        const verifiedIdentity = await findIdentityByCharacterTokenId(
-          BigInt(character.characterTokenId),
-          lookupWallet
-        ).catch(() => null);
-
-        if (verifiedIdentity?.agentId?.toString() === normalizedAgentId) {
-          savedCharacter = character;
-          break;
-        }
-
-        const fallbackStatus = character.characterTokenId ? "mint_confirmed" : "unregistered";
-        await saveCharacter(lookupWallet, character.name, {
-          agentId: null,
-          agentRegistrationTxHash: null,
-          chainRegistrationStatus: fallbackStatus,
-        }).catch(() => {});
-      }
-    }
-
-    if (!ownerWallet && !endpoint && !liveEntity && !savedCharacter) {
+    if (!projection && !liveEntity) {
       return reply.code(404).send({ error: "Identity not found for this agent" });
     }
 
     return reply.send({
       identity: {
         agentId: normalizedAgentId,
-        ownerWallet: ownerWallet ?? liveEntity?.walletAddress ?? null,
-        endpoint,
+        ownerWallet: projection?.walletAddress ?? liveEntity?.walletAddress ?? null,
+        endpoint: null,
         characterTokenId:
-          savedCharacter?.characterTokenId ??
+          projection?.characterTokenId ??
           liveEntity?.characterTokenId?.toString() ??
           null,
-        registrationTxHash: savedCharacter?.agentRegistrationTxHash ?? null,
+        registrationTxHash: projection?.agentRegistrationTxHash ?? null,
         chainId: SKALE_BASE_CHAIN_ID,
-        name: savedCharacter?.name ?? liveEntity?.name ?? null,
-        classId: savedCharacter?.classId ?? liveEntity?.classId ?? null,
-        raceId: savedCharacter?.raceId ?? liveEntity?.raceId ?? null,
-        level: savedCharacter?.level ?? liveEntity?.level ?? null,
-        zone: savedCharacter?.zone ?? liveEntity?.region ?? null,
-        onChainRegistered: Boolean(ownerWallet || endpoint),
+        name: projection?.characterName ?? liveEntity?.name ?? null,
+        classId: projection?.classId ?? liveEntity?.classId ?? null,
+        raceId: projection?.raceId ?? liveEntity?.raceId ?? null,
+        level: projection?.level ?? liveEntity?.level ?? null,
+        zone: projection?.zoneId ?? liveEntity?.region ?? null,
+        onChainRegistered: projection?.chainRegistrationStatus === "registered",
       },
     });
   });

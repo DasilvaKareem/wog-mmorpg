@@ -1,7 +1,7 @@
 import { randomPrivateKey, privateKeyToAccount } from "thirdweb/wallets";
 import { thirdwebClient } from "./chain.js";
 import { encrypt, decrypt } from "./encryption.js";
-import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed, scanKeys } from "../redis.js";
 import type { Account } from "thirdweb/wallets";
 import {
   deleteCustodialWalletRecord,
@@ -215,7 +215,7 @@ export async function getAllCustodialWallets(): Promise<CustodialWalletInfo[]> {
 
   if (redis) {
     try {
-      const keys = await redis.keys("wallet:*");
+      const keys = await scanKeys("wallet:*");
       return keys.map((key: string) => ({
         address: key.replace("wallet:", ""),
         createdAt: Date.now(),

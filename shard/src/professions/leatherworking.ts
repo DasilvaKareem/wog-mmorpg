@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem } from "../blockchain/blockchain.js";
+import { enqueueItemMint, enqueueItemBurn } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { rollCraftedItem } from "../items/itemRng.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
@@ -337,7 +337,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
     const burnedMaterials: Array<{ tokenId: string; quantity: number; tx: string }> = [];
     try {
       for (const material of recipe.requiredMaterials) {
-        const burnTx = await burnItem(
+        const burnTx = await enqueueItemBurn(
           walletAddress,
           material.tokenId,
           BigInt(material.quantity)
@@ -359,7 +359,7 @@ export function registerLeatherworkingRoutes(server: FastifyInstance) {
 
     // Mint crafted item
     try {
-      const craftTx = await mintItem(
+      const craftTx = await enqueueItemMint(
         walletAddress,
         recipe.outputTokenId,
         BigInt(recipe.outputQuantity)

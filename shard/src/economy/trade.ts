@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
-import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync, revertGoldSpendAsync } from "../blockchain/goldLedger.js";
 import {
   encryptPrice,
   createTradeOnChain,
@@ -148,14 +148,20 @@ export function registerTradeRoutes(server: FastifyInstance) {
       const result = await waitForTradeResolution(tradeId);
 
       if (result.matched) {
-        // Trade matched — mint item to buyer on the main SKALE chain
-        const mintTx = await mintItem(
-          buyerAddress,
-          BigInt(result.tokenId),
-          BigInt(result.quantity)
-        );
         const settledPrice = result.askPrice;
         await recordGoldSpendAsync(buyerAddress, settledPrice);
+        let mintTx: string;
+        try {
+          // Trade matched — mint item to buyer on the main SKALE chain
+          mintTx = await mintItem(
+            buyerAddress,
+            BigInt(result.tokenId),
+            BigInt(result.quantity)
+          );
+        } catch (mintErr) {
+          await revertGoldSpendAsync(buyerAddress, settledPrice).catch(() => {});
+          throw mintErr;
+        }
         server.log.info(
           `Trade ${tradeId} matched! Item minted to buyer: ${mintTx}`
         );

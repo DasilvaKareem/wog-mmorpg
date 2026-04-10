@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { distributeSFuel, mintGold, getGoldBalance, getItemBalance, transferGoldFrom } from "./blockchain.js";
+import { distributeSFuel, enqueueGoldMint, enqueueGoldTransferFrom, getGoldBalance, getItemBalance, transferGoldFrom } from "./blockchain.js";
 import { biteProvider } from "./biteChain.js";
 import { formatGold, getAvailableGoldAsync, getSpentGoldAsync } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
@@ -12,6 +12,7 @@ import {
   getChainOperation,
   listDueChainOperations,
   markChainOperationRetryable,
+  recoverSubmittedChainOperationIfNeeded,
   releaseChainOperationLock,
   updateChainOperation,
 } from "./chainOperationStore.js";
@@ -309,7 +310,7 @@ async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
   await ensureTreasuryGasBalance(server, treasuryAddress);
 
   console.log(`[wallet/register] Minting ${TREASURY_SEED_GOLD} GOLD to treasury...`);
-  const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
+  const seedTx = await enqueueGoldMint(treasuryAddress, TREASURY_SEED_GOLD);
   await markTreasurySeeded();
   console.log(`[wallet/register] Treasury ${treasuryAddress} seeded with ${TREASURY_SEED_GOLD} GOLD: ${seedTx}`);
   return treasuryAddress;
@@ -347,7 +348,7 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
 
     if (!seeded || !funded) {
       console.log(`[wallet/register] Treasury ${treasuryAddress} not seeded, minting ${TREASURY_SEED_GOLD} GOLD...`);
-      const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
+      const seedTx = await enqueueGoldMint(treasuryAddress, TREASURY_SEED_GOLD);
       await markTreasurySeeded();
       console.log(`[wallet/register] Treasury ${treasuryAddress} seeded: ${seedTx}`);
     }
@@ -370,39 +371,8 @@ async function transferWelcomeBonus(
   recipientAddress: string,
   welcomeGold: number
 ): Promise<string> {
-  const treasuryAccount = await getCustodialWallet(treasuryAddress);
   await ensureTreasuryGasBalance(server, treasuryAddress);
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      return await transferGoldFrom(treasuryAccount, recipientAddress, welcomeGold.toString());
-    } catch (err: any) {
-      const msg = String(err?.message ?? err ?? "");
-      const insufficientBalance = msg.includes("transfer amount exceeds balance");
-      const lowGasBalance =
-        msg.includes("Account balance is too low") ||
-        msg.includes("insufficient funds for gas");
-
-      if (lowGasBalance) {
-        try {
-          await ensureTreasuryGasBalance(server, treasuryAddress);
-          server.log.info(`[wallet/register] Topped up treasury gas for ${treasuryAddress} after transfer attempt ${attempt + 1}`);
-        } catch (sfuelErr: any) {
-          server.log.warn(`[wallet/register] Failed topping up treasury gas ${treasuryAddress}: ${sfuelErr.message}`);
-        }
-      }
-
-      if ((!insufficientBalance && !lowGasBalance) || attempt === 9) throw err;
-      if (insufficientBalance) {
-        server.log.info(
-          `[wallet/register] Treasury ${treasuryAddress} balance not ready for ${recipientAddress} yet, retrying transfer attempt ${attempt + 1}`
-        );
-      }
-      await delay(1500 * (attempt + 1));
-    }
-  }
-
-  throw new Error("Failed to transfer welcome bonus");
+  return await enqueueGoldTransferFrom(treasuryAddress, recipientAddress, welcomeGold.toString());
 }
 
 export interface WalletRegistrationResult {
@@ -423,6 +393,7 @@ export async function processWalletRegistrationOperation(
 ): Promise<void> {
   const record = await getChainOperation(operationId);
   if (!record || record.type !== WALLET_REGISTRATION_OP_TYPE) return;
+  if (await recoverSubmittedChainOperationIfNeeded(record)) return;
   if (!(await acquireChainOperationLock(operationId, 30_000))) return;
 
   const payload = JSON.parse(record.payload) as { address?: string };
@@ -557,6 +528,18 @@ export async function transferFromTreasury(
     }
   }
   throw new Error("Failed to transfer from treasury");
+}
+
+export async function enqueueTransferFromTreasury(
+  toAddress: string,
+  goldAmount: string
+): Promise<string> {
+  if (!treasuryAddressCache) {
+    const stored = await getStoredTreasuryAddress();
+    if (!stored) throw new Error("Treasury not initialised — call registerWalletWithWelcomeBonus first");
+    treasuryAddressCache = stored;
+  }
+  return await enqueueGoldTransferFrom(treasuryAddressCache, toAddress, goldAmount);
 }
 
 /**

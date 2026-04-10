@@ -24,6 +24,7 @@ import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 import {
+  createChainOperation,
   executeRegisteredChainOperation,
   registerChainOperationProcessor,
   type ChainOperationRecord,
@@ -535,9 +536,19 @@ export async function distributeSFuel(toAddress: string): Promise<string> {
   return executeRegisteredChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
 }
 
+export async function enqueueSfuelDistribution(toAddress: string): Promise<string> {
+  const record = await createChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
+  return record.operationId;
+}
+
 /** Mint gold (ERC-20) to a player address. `amount` is in whole tokens (e.g. "50"). */
 export async function mintGold(toAddress: string, amount: string): Promise<string> {
   return executeRegisteredChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
+}
+
+export async function enqueueGoldMint(toAddress: string, amount: string): Promise<string> {
+  const record = await createChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
+  return record.operationId;
 }
 
 /** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
@@ -616,6 +627,19 @@ export async function transferGoldFrom(
   });
 }
 
+export async function enqueueGoldTransferFrom(
+  fromAddress: string,
+  toAddress: string,
+  amount: string
+): Promise<string> {
+  const record = await createChainOperation("gold-transfer", `${fromAddress.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`, {
+    fromAddress,
+    toAddress,
+    amount,
+  });
+  return record.operationId;
+}
+
 /** Mint an ERC-1155 item to a player address using the catalog/game tokenId. */
 export async function mintItem(
   toAddress: string,
@@ -627,6 +651,19 @@ export async function mintItem(
     tokenId: tokenId.toString(),
     quantity: quantity.toString(),
   });
+}
+
+export async function enqueueItemMint(
+  toAddress: string,
+  tokenId: bigint,
+  quantity: bigint
+): Promise<string> {
+  const record = await createChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+    toAddress,
+    tokenId: tokenId.toString(),
+    quantity: quantity.toString(),
+  });
+  return record.operationId;
 }
 
 /** Get item balance for a catalog/game tokenId. Cached 10s. */
@@ -708,6 +745,19 @@ export async function burnItem(
     tokenId: tokenId.toString(),
     quantity: quantity.toString(),
   });
+}
+
+export async function enqueueItemBurn(
+  fromAddress: string,
+  tokenId: bigint,
+  quantity: bigint
+): Promise<string> {
+  const record = await createChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+    fromAddress,
+    tokenId: tokenId.toString(),
+    quantity: quantity.toString(),
+  });
+  return record.operationId;
 }
 
 // --- ERC-8004 Identity Registry (IdentityRegistryUpgradeable / AgentIdentity) ---

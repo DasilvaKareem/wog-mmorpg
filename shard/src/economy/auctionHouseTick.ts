@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { mintItem } from "../blockchain/blockchain.js";
-import { recordGoldSpendAsync, unreserveGoldAsync } from "../blockchain/goldLedger.js";
+import { recordGoldSpendAsync, revertGoldSpendAsync, unreserveGoldAsync } from "../blockchain/goldLedger.js";
 import { assignItemInstanceOwner, getAuctionEscrowInstance } from "../items/itemRng.js";
 import {
   getNextAuctionId,
@@ -71,21 +71,23 @@ async function auctionTick(server: FastifyInstance) {
             auction.highBidder !== "0x0000000000000000000000000000000000000000" &&
             auction.highBid > 0
           ) {
-            const mintTx = await mintItem(
-              auction.highBidder,
-              BigInt(auction.tokenId),
-              BigInt(auction.quantity)
-            );
-            const escrowedInstance = getAuctionEscrowInstance(i);
-            if (escrowedInstance) {
-              await assignItemInstanceOwner(escrowedInstance.instanceId, auction.highBidder);
-            }
-
-            // Record gold spend (deduct from available)
             await recordGoldSpendAsync(auction.highBidder, auction.highBid);
-
-            // Unreserve the gold (since it's now spent)
             await unreserveGoldAsync(auction.highBidder, auction.highBid);
+            let mintTx: string | null = null;
+            try {
+              mintTx = await mintItem(
+                auction.highBidder,
+                BigInt(auction.tokenId),
+                BigInt(auction.quantity)
+              );
+              const escrowedInstance = getAuctionEscrowInstance(i);
+              if (escrowedInstance) {
+                await assignItemInstanceOwner(escrowedInstance.instanceId, auction.highBidder);
+              }
+            } catch (mintErr) {
+              await revertGoldSpendAsync(auction.highBidder, auction.highBid).catch(() => {});
+              throw mintErr;
+            }
 
             const winnerAgentId = auction.highBidderAgentId ?? resolveLiveAgentIdForWallet(auction.highBidder);
             if (winnerAgentId) {

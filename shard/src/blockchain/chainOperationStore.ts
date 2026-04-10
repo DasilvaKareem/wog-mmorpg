@@ -1,6 +1,19 @@
 import { randomUUID } from "crypto";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { isPostgresConfigured, postgresQuery } from "../db/postgres.js";
+import { classifyTxFailure } from "./txTracer.js";
+import { getChainReceiptStatus } from "./chainReceipt.js";
+import {
+  createChainIntent,
+  createChainTxAttempt,
+  markChainIntentConfirmed,
+  markChainIntentFundingBlocked,
+  markChainIntentPermanentFailure,
+  markChainIntentRetryable,
+  markChainIntentSubmitted,
+  updateChainIntent,
+  updateChainTxAttempt,
+} from "./chainIntentStore.js";
 
 export type ChainOperationStatus =
   | "queued"
@@ -8,10 +21,12 @@ export type ChainOperationStatus =
   | "confirmed"
   | "completed"
   | "failed_retryable"
+  | "waiting_funds"
   | "failed_permanent";
 
 export interface ChainOperationRecord {
   operationId: string;
+  intentId?: string;
   type: string;
   subject: string;
   payload: string;
@@ -48,10 +63,19 @@ const CHAIN_OPERATION_MAX_RETRIES = Math.max(
   0,
   Number.parseInt(process.env.CHAIN_OPERATION_MAX_RETRIES ?? "8", 10) || 8
 );
+const CHAIN_OPERATION_SUBMITTED_RECOVERY_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.CHAIN_OPERATION_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
+);
+const CHAIN_OPERATION_FUNDING_RETRY_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.CHAIN_OPERATION_FUNDING_RETRY_MS ?? "300000", 10) || 300_000
+);
 const processorRegistry = new Map<string, ChainOperationProcessor<unknown>>();
 
 type ChainOperationRow = {
   operation_id: string;
+  intent_id: string | null;
   type: string;
   subject: string;
   payload_json: unknown;
@@ -78,6 +102,7 @@ export type ChainOperationProcessor<T> = (
 function serialize(record: ChainOperationRecord): Record<string, string> {
   return {
     operationId: record.operationId,
+    ...(record.intentId ? { intentId: record.intentId } : {}),
     type: record.type,
     subject: record.subject,
     payload: record.payload,
@@ -97,6 +122,7 @@ function deserialize(raw: Record<string, string>): ChainOperationRecord | null {
   if (!raw.operationId || !raw.type || !raw.subject || !raw.payload || !raw.status) return null;
   return {
     operationId: raw.operationId,
+    ...(raw.intentId ? { intentId: raw.intentId } : {}),
     type: raw.type,
     subject: raw.subject,
     payload: raw.payload,
@@ -115,6 +141,7 @@ function deserialize(raw: Record<string, string>): ChainOperationRecord | null {
 function fromRow(row: ChainOperationRow): ChainOperationRecord {
   return {
     operationId: row.operation_id,
+    ...(row.intent_id ? { intentId: row.intent_id } : {}),
     type: row.type,
     subject: row.subject,
     payload: JSON.stringify(row.payload_json ?? {}),
@@ -140,6 +167,7 @@ async function persist(record: ChainOperationRecord): Promise<void> {
       `
         insert into game.chain_operations (
           operation_id,
+          intent_id,
           type,
           subject,
           payload_json,
@@ -153,17 +181,18 @@ async function persist(record: ChainOperationRecord): Promise<void> {
           tx_hash,
           last_error
         ) values (
-          $1, $2, $3, $4::jsonb, $5, $6,
-          to_timestamp($7::double precision / 1000.0),
+          $1, $2, $3, $4, $5::jsonb, $6, $7,
           to_timestamp($8::double precision / 1000.0),
           to_timestamp($9::double precision / 1000.0),
-          case when $10::bigint is null then null else to_timestamp($10::double precision / 1000.0) end,
+          to_timestamp($10::double precision / 1000.0),
           case when $11::bigint is null then null else to_timestamp($11::double precision / 1000.0) end,
-          $12,
-          $13
+          case when $12::bigint is null then null else to_timestamp($12::double precision / 1000.0) end,
+          $13,
+          $14
         )
         on conflict (operation_id)
         do update set
+          intent_id = excluded.intent_id,
           type = excluded.type,
           subject = excluded.subject,
           payload_json = excluded.payload_json,
@@ -178,6 +207,7 @@ async function persist(record: ChainOperationRecord): Promise<void> {
       `,
       [
         record.operationId,
+        record.intentId ?? null,
         record.type,
         record.subject,
         record.payload,
@@ -192,6 +222,7 @@ async function persist(record: ChainOperationRecord): Promise<void> {
         record.lastError ?? null,
       ]
     );
+    await mirrorChainOperationIntent(record);
     return;
   }
 
@@ -228,8 +259,16 @@ export async function createChainOperation(
   payload: unknown,
 ): Promise<ChainOperationRecord> {
   const now = Date.now();
+  const intent = await createChainIntent({
+    type: `chain-operation:${type}`,
+    aggregateType: "operation",
+    aggregateKey: `${type}:${subject}`,
+    payload,
+    priority: 50,
+  });
   const record: ChainOperationRecord = {
     operationId: randomUUID(),
+    intentId: intent.intentId,
     type,
     subject,
     payload: JSON.stringify(payload ?? {}),
@@ -249,6 +288,7 @@ export async function getChainOperation(operationId: string): Promise<ChainOpera
       `
         select
           operation_id,
+          intent_id,
           type,
           subject,
           payload_json,
@@ -293,6 +333,7 @@ export async function findLatestChainOperationByTypeAndSubject(
       `
         select
           operation_id,
+          intent_id,
           type,
           subject,
           payload_json,
@@ -356,6 +397,7 @@ export async function updateChainOperation(
     ...current,
     ...patch,
     operationId: current.operationId,
+    intentId: patch.intentId ?? current.intentId,
     type: current.type,
     subject: current.subject,
     payload: patch.payload ?? current.payload,
@@ -370,6 +412,25 @@ export async function markChainOperationRetryable(operationId: string, err: unkn
   if (!current) return null;
   const attemptCount = current.attemptCount + 1;
   const lastError = (err instanceof Error ? err.message : String(err)).slice(0, 240);
+  const classification = classifyTxFailure(err);
+  if (classification.kind === "permanent") {
+    return updateChainOperation(operationId, {
+      status: "failed_permanent",
+      attemptCount,
+      nextAttemptAt: 0,
+      lastAttemptAt: Date.now(),
+      lastError,
+    });
+  }
+  if (classification.kind === "funding") {
+    return updateChainOperation(operationId, {
+      status: "waiting_funds",
+      attemptCount,
+      nextAttemptAt: Date.now() + CHAIN_OPERATION_FUNDING_RETRY_MS,
+      lastAttemptAt: Date.now(),
+      lastError,
+    });
+  }
   if (attemptCount >= CHAIN_OPERATION_MAX_RETRIES) {
     return updateChainOperation(operationId, {
       status: "failed_permanent",
@@ -397,6 +458,7 @@ export async function listDueChainOperations(type?: string): Promise<ChainOperat
       `
         select
           operation_id,
+          intent_id,
           type,
           subject,
           payload_json,
@@ -412,7 +474,7 @@ export async function listDueChainOperations(type?: string): Promise<ChainOperat
         from game.chain_operations
         where next_attempt_at <= now()
           ${typeFilter}
-          and status not in ('submitted', 'confirmed', 'completed', 'failed_permanent')
+          and status not in ('confirmed', 'completed', 'failed_permanent')
         order by next_attempt_at asc
       `,
       values
@@ -435,7 +497,7 @@ export async function listDueChainOperations(type?: string): Promise<ChainOperat
     const record = await getChainOperation(id);
     if (!record) continue;
     if (type && record.type !== type) continue;
-    if (record.status === "submitted" || record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
+    if (record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
       continue;
     }
     records.push(record);
@@ -508,17 +570,43 @@ export async function runTrackedChainOperation<T>(
   }
   await markChainOperationSubmitted(record.operationId, 1, CHAIN_OPERATION_LOCK_TTL_MS);
   const heartbeat = startChainOperationLockHeartbeat(record.operationId, CHAIN_OPERATION_LOCK_TTL_MS);
+  const attempt = record.intentId
+    ? await createChainTxAttempt({
+        intentId: record.intentId,
+        queueLabel: `${type}:${subject}`,
+        rpcProvider: process.env.SKALE_BASE_RPC_URL ?? "default",
+      })
+    : null;
 
   try {
     const { result, txHash } = await executor(record);
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: txHash ? "submitted" : "processing",
+        txHash: txHash ?? undefined,
+        submittedAt: txHash ? Date.now() : undefined,
+      });
+    }
     await updateChainOperation(record.operationId, {
       status: "completed",
       completedAt: Date.now(),
       txHash: txHash ?? undefined,
       lastError: undefined,
     });
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: "confirmed",
+        confirmedAt: Date.now(),
+      });
+    }
     return result;
   } catch (err) {
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: "failed",
+        errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 240),
+      });
+    }
     await markChainOperationRetryable(record.operationId, err);
     throw err;
   } finally {
@@ -544,10 +632,13 @@ export async function processTrackedChainOperation<T = unknown>(
   const record = await getChainOperation(operationId);
   if (!record) return null;
   const now = Date.now();
-  const submittedStillLeased =
-    record.status === "submitted" &&
-    record.nextAttemptAt > now;
-  if (submittedStillLeased || record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
+  if (record.status === "submitted") {
+    const recovered = await recoverSubmittedChainOperation(record);
+    if (recovered !== "rerun") {
+      return null;
+    }
+  }
+  if (record.status === "confirmed" || record.status === "completed" || record.status === "failed_permanent") {
     return null;
   }
   const processor = processorRegistry.get(record.type);
@@ -557,17 +648,43 @@ export async function processTrackedChainOperation<T = unknown>(
   if (!(await acquireChainOperationLock(operationId, CHAIN_OPERATION_LOCK_TTL_MS))) return null;
   await markChainOperationSubmitted(operationId, record.attemptCount + 1, CHAIN_OPERATION_LOCK_TTL_MS);
   const heartbeat = startChainOperationLockHeartbeat(operationId, CHAIN_OPERATION_LOCK_TTL_MS);
+  const attempt = record.intentId
+    ? await createChainTxAttempt({
+        intentId: record.intentId,
+        queueLabel: `${record.type}:${record.subject}`,
+        rpcProvider: process.env.SKALE_BASE_RPC_URL ?? "default",
+      })
+    : null;
 
   try {
     const { result, txHash } = await processor(record);
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: txHash ? "submitted" : "processing",
+        txHash: txHash ?? undefined,
+        submittedAt: txHash ? Date.now() : undefined,
+      });
+    }
     await updateChainOperation(operationId, {
       status: "completed",
       completedAt: Date.now(),
       txHash: txHash ?? undefined,
       lastError: undefined,
     });
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: "confirmed",
+        confirmedAt: Date.now(),
+      });
+    }
     return result as T;
   } catch (err) {
+    if (attempt) {
+      await updateChainTxAttempt(attempt.attemptId, {
+        status: "failed",
+        errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 240),
+      });
+    }
     await markChainOperationRetryable(operationId, err);
     throw err;
   } finally {
@@ -630,4 +747,89 @@ export function startChainOperationReplayWorker(
       tick().catch((err) => logger.error(err, "[chainOperationStore] replay tick failed"));
     }, intervalMs);
   }, startupDelayMs);
+}
+
+async function mirrorChainOperationIntent(record: ChainOperationRecord): Promise<void> {
+  if (!record.intentId) return;
+  if (record.status === "queued") {
+    await updateChainIntent(record.intentId, {
+      payload: record.payload,
+      status: "pending",
+      txHash: undefined,
+      lastError: undefined,
+    });
+    return;
+  }
+  if (record.status === "submitted" || record.status === "confirmed") {
+    if (record.txHash) {
+      await markChainIntentSubmitted(record.intentId, record.txHash);
+    } else {
+      await updateChainIntent(record.intentId, {
+        payload: record.payload,
+        status: "submitted",
+      });
+    }
+    return;
+  }
+  if (record.status === "completed") {
+    await markChainIntentConfirmed(record.intentId, record.txHash);
+    return;
+  }
+  if (record.status === "failed_retryable") {
+    await markChainIntentRetryable(record.intentId, record.lastError ?? "retryable failure");
+    return;
+  }
+  if (record.status === "waiting_funds") {
+    await markChainIntentFundingBlocked(record.intentId, record.lastError ?? "funding required");
+    return;
+  }
+  if (record.status === "failed_permanent") {
+    await markChainIntentPermanentFailure(record.intentId, record.lastError ?? "permanent failure");
+  }
+}
+
+async function recoverSubmittedChainOperation(
+  record: ChainOperationRecord
+): Promise<"rerun" | "recovered" | "rescheduled"> {
+  const now = Date.now();
+  if (record.nextAttemptAt > now) {
+    return "rescheduled";
+  }
+  if (record.txHash) {
+    const receipt = await getChainReceiptStatus(record.txHash);
+    if (receipt.found && receipt.success) {
+      await updateChainOperation(record.operationId, {
+        status: "completed",
+        completedAt: now,
+        lastError: undefined,
+      });
+      return "recovered";
+    }
+    if (receipt.found && receipt.success === false) {
+      await updateChainOperation(record.operationId, {
+        status: "failed_permanent",
+        completedAt: now,
+        lastError: `transaction reverted on-chain: ${record.txHash}`.slice(0, 240),
+      });
+      return "recovered";
+    }
+    await updateChainOperation(record.operationId, {
+      status: "submitted",
+      nextAttemptAt: now + CHAIN_OPERATION_SUBMITTED_RECOVERY_MS,
+      lastAttemptAt: now,
+      lastError: record.lastError ?? "awaiting receipt recovery",
+    });
+    return "rescheduled";
+  }
+  await markChainOperationRetryable(
+    record.operationId,
+    new Error(`submitted operation ${record.operationId} has no tx hash`)
+  );
+  return "rerun";
+}
+
+export async function recoverSubmittedChainOperationIfNeeded(record: ChainOperationRecord): Promise<boolean> {
+  if (record.status !== "submitted") return false;
+  const outcome = await recoverSubmittedChainOperation(record);
+  return outcome !== "rerun";
 }

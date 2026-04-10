@@ -12,13 +12,12 @@
 import { getRedis } from "../redis.js";
 import { claimPlotOnChain, releasePlotOnChain, transferPlotOnChain, updateBuildingOnChain } from "./plotChain.js";
 import {
-  acquireChainOperationLock,
+  type ChainOperationRecord,
   createChainOperation,
   getChainOperation,
   listDueChainOperations,
-  markChainOperationRetryable,
-  releaseChainOperationLock,
-  updateChainOperation,
+  processTrackedChainOperation,
+  registerChainOperationProcessor,
 } from "../blockchain/chainOperationStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
 import {
@@ -603,49 +602,7 @@ export function getFarmlandZoneIds(): string[] {
 export async function processPlotOperation(operationId: string): Promise<void> {
   const record = await getChainOperation(operationId);
   if (!record) return;
-  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
-
-  try {
-    await updateChainOperation(operationId, {
-      status: "submitted",
-      attemptCount: record.attemptCount + 1,
-      lastAttemptAt: Date.now(),
-      nextAttemptAt: Date.now(),
-      lastError: undefined,
-    });
-    const payload = JSON.parse(record.payload) as Record<string, string | number>;
-    let success = false;
-    if (record.type === PLOT_OP_CLAIM) {
-      success = await claimPlotOnChain(
-        String(payload.plotId),
-        String(payload.zoneId),
-        Number(payload.x),
-        Number(payload.y),
-        String(payload.ownerAddress),
-      );
-    } else if (record.type === PLOT_OP_RELEASE) {
-      success = await releasePlotOnChain(String(payload.ownerAddress));
-    } else if (record.type === PLOT_OP_TRANSFER) {
-      success = await transferPlotOnChain(String(payload.fromAddress), String(payload.toAddress));
-    } else if (record.type === PLOT_OP_BUILDING) {
-      success = await updateBuildingOnChain(String(payload.plotId), String(payload.buildingType ?? ""), Number(payload.stage ?? 0));
-    }
-
-    if (!success) {
-      throw new Error(`Chain operation ${record.type} did not complete`);
-    }
-
-    await updateChainOperation(operationId, {
-      status: "completed",
-      completedAt: Date.now(),
-      lastError: undefined,
-    });
-  } catch (err) {
-    await markChainOperationRetryable(operationId, err);
-    throw err;
-  } finally {
-    await releaseChainOperationLock(operationId).catch(() => {});
-  }
+  await processTrackedChainOperation(operationId);
 }
 
 export async function processPendingPlotOperations(
@@ -673,3 +630,32 @@ export function startPlotOperationWorker(logger: { error: (err: unknown, msg?: s
     tick().catch((err) => logger.error(err, "[plots] worker tick failed"));
   }, 5_000);
 }
+
+async function runPlotProcessor(record: ChainOperationRecord): Promise<{ result: true }> {
+  const payload = JSON.parse(record.payload) as Record<string, string | number>;
+  let success = false;
+  if (record.type === PLOT_OP_CLAIM) {
+    success = await claimPlotOnChain(
+      String(payload.plotId),
+      String(payload.zoneId),
+      Number(payload.x),
+      Number(payload.y),
+      String(payload.ownerAddress),
+    );
+  } else if (record.type === PLOT_OP_RELEASE) {
+    success = await releasePlotOnChain(String(payload.ownerAddress));
+  } else if (record.type === PLOT_OP_TRANSFER) {
+    success = await transferPlotOnChain(String(payload.fromAddress), String(payload.toAddress));
+  } else if (record.type === PLOT_OP_BUILDING) {
+    success = await updateBuildingOnChain(String(payload.plotId), String(payload.buildingType ?? ""), Number(payload.stage ?? 0));
+  }
+  if (!success) {
+    throw new Error(`Chain operation ${record.type} did not complete`);
+  }
+  return { result: true };
+}
+
+registerChainOperationProcessor(PLOT_OP_CLAIM, runPlotProcessor as any);
+registerChainOperationProcessor(PLOT_OP_RELEASE, runPlotProcessor as any);
+registerChainOperationProcessor(PLOT_OP_TRANSFER, runPlotProcessor as any);
+registerChainOperationProcessor(PLOT_OP_BUILDING, runPlotProcessor as any);

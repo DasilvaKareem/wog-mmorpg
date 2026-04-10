@@ -11,13 +11,11 @@ import { traceTx } from "../blockchain/txTracer.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
 import { OFFICIAL_REPUTATION_REGISTRY_ABI } from "../erc8004/official.js";
 import {
-  acquireChainOperationLock,
   createChainOperation,
   getChainOperation,
   listDueChainOperations,
-  markChainOperationRetryable,
-  releaseChainOperationLock,
-  updateChainOperation,
+  processTrackedChainOperation,
+  registerChainOperationProcessor,
 } from "../blockchain/chainOperationStore.js";
 
 const REPUTATION_CONTRACT_ADDRESS = process.env.REPUTATION_REGISTRY_ADDRESS;
@@ -248,30 +246,7 @@ export async function batchUpdateReputationOnChain(
 export async function processReputationOperation(operationId: string): Promise<void> {
   const record = await getChainOperation(operationId);
   if (!record || record.type !== REPUTATION_OP_TYPE) return;
-  if (!(await acquireChainOperationLock(operationId, 30_000))) return;
-
-  try {
-    await updateChainOperation(operationId, {
-      status: "submitted",
-      attemptCount: record.attemptCount + 1,
-      lastAttemptAt: Date.now(),
-      nextAttemptAt: Date.now(),
-      lastError: undefined,
-    });
-    const payload = JSON.parse(record.payload) as { agentId: string; deltas: [number, number, number, number, number]; reason?: string };
-    const ok = await batchUpdateReputationOnChain(payload.agentId, payload.deltas, payload.reason ?? "queued-feedback");
-    if (!ok) throw new Error(`Failed to reconcile reputation for ${payload.agentId}`);
-    await updateChainOperation(operationId, {
-      status: "completed",
-      completedAt: Date.now(),
-      lastError: undefined,
-    });
-  } catch (err) {
-    await markChainOperationRetryable(operationId, err);
-    throw err;
-  } finally {
-    await releaseChainOperationLock(operationId).catch(() => {});
-  }
+  await processTrackedChainOperation(operationId);
 }
 
 export async function processPendingReputationOperations(
@@ -297,3 +272,12 @@ export function startReputationChainWorker(logger: { error: (err: unknown, msg?:
     tick().catch((err) => logger.error(err, "[reputationChain] worker tick failed"));
   }, 5_000);
 }
+
+registerChainOperationProcessor(REPUTATION_OP_TYPE, async (record) => {
+  const payload = JSON.parse(record.payload) as { agentId: string; deltas: [number, number, number, number, number]; reason?: string };
+  const ok = await batchUpdateReputationOnChain(payload.agentId, payload.deltas, payload.reason ?? "queued-feedback");
+  if (!ok) {
+    throw new Error(`Failed to reconcile reputation for ${payload.agentId}`);
+  }
+  return { result: true };
+});

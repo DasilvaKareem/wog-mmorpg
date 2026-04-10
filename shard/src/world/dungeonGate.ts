@@ -15,7 +15,7 @@ import {
   type Entity,
 } from "./zoneRuntime.js";
 import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
-import { getItemBalance, burnItem, mintItem } from "../blockchain/blockchain.js";
+import { getItemBalance, enqueueItemBurn, enqueueItemMint } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
@@ -410,7 +410,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Burn reagent
     try {
-      await burnItem(walletAddress, BigInt(reagentTokenId), 1n);
+      await enqueueItemBurn(walletAddress, BigInt(reagentTokenId), 1n);
     } catch (err) {
       server.log.error(err, `[dungeon] Failed to burn reagent ${reagentTokenId}`);
       reply.code(500);
@@ -419,7 +419,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Mint key
     try {
-      const tx = await mintItem(walletAddress, BigInt(keyTokenId), 1n);
+      const tx = await enqueueItemMint(walletAddress, BigInt(keyTokenId), 1n);
       const keyItem = getItemByTokenId(BigInt(keyTokenId));
       const reagentItem = getItemByTokenId(BigInt(reagentTokenId));
 
@@ -569,7 +569,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Burn key
     try {
-      await burnItem(walletAddress, keyTokenId, 1n);
+      await enqueueItemBurn(walletAddress, keyTokenId, 1n);
     } catch (err) {
       server.log.error(err, `[dungeon] Failed to burn key ${keyTokenId}`);
       reply.code(500);

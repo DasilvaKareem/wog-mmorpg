@@ -6,7 +6,7 @@
  * When Redis is configured, Redis is authoritative.
  */
 
-import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed, scanKeys } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import {
   deleteCharacterProjection,
@@ -206,7 +206,7 @@ async function resolveFallbackKey(
   }
 
   try {
-    const keys: string[] = await redis.keys(`${prefix}*`);
+    const keys: string[] = await scanKeys(`${prefix}*`);
     for (const k of keys) {
       if (k === exactKey) continue;
       const storedName = k.slice(prefix.length);
@@ -399,7 +399,7 @@ export async function loadAllCharactersForWallet(
   const redis = isPostgresConfigured() ? null : getRedis();
   if (redis) {
     try {
-      const keys: string[] = await redis.keys(`${prefix}*`);
+      const keys: string[] = await scanKeys(`${prefix}*`);
       for (const k of keys) {
         const raw = await redis.hgetall(k);
         if (raw && Object.keys(raw).length > 0 && isRenderableCharacterRecord(raw)) {
@@ -447,7 +447,7 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
   const redis = isPostgresConfigured() ? null : getRedis();
   if (redis) {
     try {
-      const keys: string[] = await redis.keys(`${prefix}*`);
+      const keys: string[] = await scanKeys(`${prefix}*`);
       for (const k of keys) {
         const data: Record<string, string> = await redis.hgetall(k);
         if (data?.professions) {

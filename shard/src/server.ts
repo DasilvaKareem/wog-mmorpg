@@ -43,7 +43,7 @@ import { registerLeaderboardRoutes } from "./social/leaderboard.js";
 import { registerLeatherworkingRoutes } from "./professions/leatherworking.js";
 import { registerUpgradingRoutes } from "./items/upgrading.js";
 import { registerJewelcraftingRoutes } from "./professions/jewelcrafting.js";
-import { rebuildAuctionCache, getAllAuctionsFromCache, hydrateAuctionCacheFromProjections } from "./economy/auctionHouseChain.js";
+import { getAllAuctionsFromCache, hydrateAuctionCacheFromProjections } from "./economy/auctionHouseChain.js";
 import { registerPvPRoutes } from "./combat/pvpRoutes.js";
 import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
@@ -56,6 +56,7 @@ import { registerItemRngRoutes } from "./items/itemRng.js";
 import { registerMarketplaceRoutes } from "./economy/marketplace.js";
 import { registerDirectBuyRoutes } from "./marketplace/directBuyRoutes.js";
 import { registerMarketplaceAdminRoutes } from "./marketplace/adminRoutes.js";
+import { registerChainAdminRoutes } from "./blockchain/adminRoutes.js";
 import { registerRentalRoutes } from "./marketplace/rentalRoutes.js";
 import { registerItemCatalogRoutes } from "./items/itemCatalogRoutes.js";
 import { registerReputationRoutes } from "./economy/reputationRoutes.js";
@@ -83,8 +84,9 @@ import { registerPlotRoutes } from "./farming/plotRoutes.js";
 import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
 import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
-import { getTxStats, mintGold } from "./blockchain/blockchain.js";
+import { enqueueGoldMint, getTxStats } from "./blockchain/blockchain.js";
 import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
+import { getChainIntentStats, listChainIntents } from "./blockchain/chainIntentStore.js";
 import { getWorldLayout } from "./world/worldLayout.js";
 import { getAllEntities, getEntity, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
@@ -404,8 +406,8 @@ server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", a
   const { address, copper } = req.body;
   if (!address || !copper || copper <= 0) return reply.code(400).send({ error: "address and copper required" });
   try {
-    const tx = await mintGold(address, copper.toString());
-    return reply.send({ ok: true, tx, copper });
+    const operationId = await enqueueGoldMint(address, copper.toString());
+    return reply.send({ ok: true, operationId, copper });
   } catch (err: any) {
     return reply.code(500).send({ error: err.message });
   }
@@ -617,6 +619,11 @@ server.get("/admin/dashboard", async () => {
 
   const runners = agentManager.listRunners();
   const agentSnapshots = runners.filter(r => r.running).map(r => r.getSnapshot());
+  const chainIntentStats = await getChainIntentStats();
+  const waitingFunds = await listChainIntents({ statuses: ["waiting_funds"], limit: 200, offset: 0 });
+  const failedPermanent = await listChainIntents({ statuses: ["failed_permanent"], limit: 200, offset: 0 });
+  const staleSubmitted = (await listChainIntents({ statuses: ["submitted"], limit: 500, offset: 0 }))
+    .filter((intent) => (intent.lastSubmittedAt ?? intent.updatedAt) <= (Date.now() - 120_000));
 
   return {
     server: { uptime: process.uptime(), startedAt: Date.now() - process.uptime() * 1000, memoryMB: Math.round(mem.rss / 1048576) },
@@ -628,6 +635,12 @@ server.get("/admin/dashboard", async () => {
       rpcError: rpcProbe.error,
       txStats: getTxStats(),
       chainBatcher: getChainBatcherStats(),
+      chainIntents: {
+        byType: chainIntentStats,
+        waitingFunds: waitingFunds.length,
+        failedPermanent: failedPermanent.length,
+        staleSubmitted: staleSubmitted.length,
+      },
     },
     zones: { count: regionCounts.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
     agents: { active: agentSnapshots.length, list: agentSnapshots },
@@ -791,6 +804,7 @@ registerMarketplaceRoutes(server);
 registerDirectBuyRoutes(server);
 registerRentalRoutes(server);
 registerMarketplaceAdminRoutes(server);
+registerChainAdminRoutes(server);
 registerItemCatalogRoutes(server);
 registerReputationRoutes(server);
 registerNameServiceRoutes(server);
@@ -860,11 +874,6 @@ const start = async () => {
     server.log.warn(`[auction] Failed to hydrate Postgres auction projections: ${err.message?.slice(0, 100)}`);
   });
 
-  // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
-  rebuildAuctionCache().catch((err: any) => {
-    server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
   // Start Telegram bot (non-blocking — no bot token = graceful no-op)
   initTelegramBot().catch((err: any) => {
     server.log.warn(`[telegram] Bot init failed (non-fatal): ${err.message?.slice(0, 100)}`);
@@ -897,6 +906,8 @@ const start = async () => {
     server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
   }
 
+  startWalletRegistrationWorker(server);
+
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";
   await server.listen({ port, host });
@@ -915,7 +926,6 @@ const start = async () => {
   await startCharacterBootstrapWorker(server.log).catch((err: any) => {
     server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
-  startWalletRegistrationWorker(server);
   startNameServiceWorker(server.log);
   startPlotOperationWorker(server.log);
   startReputationChainWorker(server.log);

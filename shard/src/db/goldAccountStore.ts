@@ -45,6 +45,25 @@ export async function addGoldSpend(
   return Number(rows[0]?.spent_amount ?? amount);
 }
 
+export async function subtractGoldSpend(
+  wallet: string,
+  amount: number,
+  client?: PoolClient | null
+): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+  const { rows } = await queryWithClient<{ spent_amount: number }>(
+    client,
+    `insert into game.gold_spend_totals (wallet_address, spent_amount, updated_at)
+     values ($1,0,now())
+     on conflict (wallet_address) do update set
+       spent_amount = greatest(0, game.gold_spend_totals.spent_amount - $2),
+       updated_at = now()
+     returning spent_amount`,
+    [normWallet(wallet), amount]
+  );
+  return Number(rows[0]?.spent_amount ?? 0);
+}
+
 export async function setGoldReservationAmount(
   wallet: string,
   amount: number,

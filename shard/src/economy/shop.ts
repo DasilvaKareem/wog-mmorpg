@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { getGoldBalance, mintGold, mintItem, getItemBalance, burnItem, transferGoldFrom } from "../blockchain/blockchain.js";
+import { getGoldBalance, enqueueGoldMint, enqueueItemMint, getItemBalance, enqueueItemBurn, enqueueGoldTransferFrom } from "../blockchain/blockchain.js";
 import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemRecycleCopperValue, getItemsByTokenIds } from "../items/itemCatalog.js";
 import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
@@ -176,7 +176,7 @@ export function registerShopRoutes(server: FastifyInstance) {
       }
 
       // Mint the item to the buyer
-      const itemTx = await mintItem(buyerAddress, item.tokenId, BigInt(quantity));
+      const itemTx = await enqueueItemMint(buyerAddress, item.tokenId, BigInt(quantity));
       server.log.info(
         `Minted ${quantity}x ${item.name} to ${buyerAddress}: ${itemTx}`
       );
@@ -328,13 +328,12 @@ export function registerShopRoutes(server: FastifyInstance) {
       }
 
       // Burn items from seller
-      await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+      await enqueueItemBurn(sellerAddress, BigInt(tokenId), BigInt(quantity));
       const equippedInstanceIds = await getEquippedInstanceIds(sellerAddress);
       await consumeOwnedItemInstances(sellerAddress, tokenId, quantity, equippedInstanceIds);
 
       // Transfer gold from merchant's custodial wallet to seller (no new gold minted)
-      const merchantAccount = await getCustodialWallet(merchantState.walletAddress);
-      await transferGoldFrom(merchantAccount, sellerAddress, goldPayout.toString());
+      await enqueueGoldTransferFrom(merchantState.walletAddress, sellerAddress, goldPayout.toString());
 
       // Update merchant's in-memory gold balance (on-chain balance decreases naturally)
       merchantState.goldBalance = Math.max(0, merchantState.goldBalance - goldPayout);
@@ -456,10 +455,10 @@ export function registerShopRoutes(server: FastifyInstance) {
         };
       }
 
-      const burnTx = await burnItem(sellerAddress, BigInt(tokenId), BigInt(quantity));
+      const burnTx = await enqueueItemBurn(sellerAddress, BigInt(tokenId), BigInt(quantity));
       const equippedInstanceIds = await getEquippedInstanceIds(sellerAddress);
       await consumeOwnedItemInstances(sellerAddress, tokenId, quantity, equippedInstanceIds);
-      const goldTx = await mintGold(sellerAddress, goldPayout.toString());
+      const goldTx = await enqueueGoldMint(sellerAddress, goldPayout.toString());
 
       server.log.info(
         `[shop/recycle] ${sellerAddress} recycled ${quantity}x ${item.name} for ${totalPayoutCopper}c`

@@ -7,7 +7,7 @@
  * Storage: in-memory map + Redis (tg:wallet:{addr} → chatId)
  */
 
-import { getRedis } from "../redis.js";
+import { getRedis, scanKeys } from "../redis.js";
 import { setDiaryAlertHook, readMergedDiary, type DiaryAction, type DiaryEntry } from "./diary.js";
 import {
   deleteTelegramWalletLink,
@@ -125,7 +125,7 @@ async function loadMappingsFromRedis(): Promise<void> {
   const redis = getRedis();
   if (!redis) return;
   try {
-    const keys: string[] = await redis.keys("tg:wallet:*");
+    const keys: string[] = await scanKeys("tg:wallet:*");
     for (const key of keys) {
       const chatId: string | null = await redis.get(key);
       if (chatId) {

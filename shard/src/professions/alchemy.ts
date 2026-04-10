@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getOrCreateZone, type Entity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
+import { enqueueItemMint, enqueueItemBurn, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -683,7 +683,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     const burnedMaterials: Array<{ tokenId: string; quantity: number; tx: string }> = [];
     try {
       for (const material of recipe.requiredMaterials) {
-        const burnTx = await burnItem(
+        const burnTx = await enqueueItemBurn(
           walletAddress,
           material.tokenId,
           BigInt(material.quantity)
@@ -705,7 +705,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
 
     // Mint crafted potion
     try {
-      const potionTx = await mintItem(
+      const potionTx = await enqueueItemMint(
         walletAddress,
         recipe.outputTokenId,
         BigInt(recipe.outputQuantity)
@@ -774,7 +774,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
 
       for (const material of recipe.requiredMaterials) {
         try {
-          await mintItem(walletAddress, material.tokenId, BigInt(material.quantity));
+          await enqueueItemMint(walletAddress, material.tokenId, BigInt(material.quantity));
         } catch (refundErr) {
           server.log.error(refundErr, `[alchemy] Failed refunding ${material.tokenId.toString()} to ${walletAddress}`);
         }
@@ -839,7 +839,7 @@ export function registerAlchemyRoutes(server: FastifyInstance) {
     // Burn the consumable NFT
     let burnTx: string;
     try {
-      burnTx = await burnItem(walletAddress, BigInt(tokenId), 1n);
+      burnTx = await enqueueItemBurn(walletAddress, BigInt(tokenId), 1n);
     } catch (err) {
       server.log.error(err, `[alchemy] Failed to burn consumable for ${walletAddress}`);
       reply.code(500);

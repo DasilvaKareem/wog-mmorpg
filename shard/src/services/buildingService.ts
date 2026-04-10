@@ -1,4 +1,4 @@
-import { burnItem, getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemBurn, enqueueItemMint, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import {
@@ -45,7 +45,7 @@ export async function constructBuildingStage(
 
   for (const mat of req.stage.materials) {
     try {
-      await burnItem(walletAddress, mat.tokenId, BigInt(mat.quantity));
+      await enqueueItemBurn(walletAddress, mat.tokenId, BigInt(mat.quantity));
     } catch (err: any) {
       return { ok: false, error: `Failed to burn ${mat.name}: ${err.message}` };
     }
@@ -53,14 +53,20 @@ export async function constructBuildingStage(
 
   const result = await advanceBuildingStage(plotId, walletAddress);
   if (!result.ok) {
+    const refundFailures: string[] = [];
     for (const mat of req.stage.materials) {
       try {
-        await mintItem(walletAddress, mat.tokenId, BigInt(mat.quantity));
+        await enqueueItemMint(walletAddress, mat.tokenId, BigInt(mat.quantity));
       } catch {
-        // Best-effort compensation; the original error is more actionable to callers.
+        refundFailures.push(`${mat.quantity}x ${mat.name}`);
       }
     }
-    return result;
+    return {
+      ...result,
+      error: refundFailures.length > 0
+        ? `${result.error ?? "Construction failed"}; failed to restore ${refundFailures.join(", ")}`
+        : result.error,
+    };
   }
 
   if (copperCost > 0) {

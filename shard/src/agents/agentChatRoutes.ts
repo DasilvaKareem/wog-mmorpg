@@ -41,7 +41,7 @@ import {
 import { sendAgentPush } from "./agentPushService.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
-import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
@@ -295,8 +295,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           const existingGold = Number(existingGoldStr ?? "0");
           if (!Number.isFinite(existingGold) || existingGold < 0.001) {
             const starterCopper = 200; // 0.02 gold — enough for the cheapest weapon
-            await mintGold(result.custodialWallet, copperToGold(starterCopper).toString());
-            server.log.info(`[agent/deploy] Minted ${starterCopper}c starter gold to ${result.custodialWallet}`);
+            const operationId = await enqueueGoldMint(result.custodialWallet, copperToGold(starterCopper).toString());
+            server.log.info(`[agent/deploy] Queued ${starterCopper}c starter gold to ${result.custodialWallet}: ${operationId}`);
           }
         } catch (err: any) {
           server.log.warn(`[agent/deploy] Starter gold mint failed (non-fatal): ${err.message}`);
@@ -2319,8 +2319,8 @@ Strategy options: aggressive, balanced, defensive`;
       const custodial = await getAgentCustodialWallet(authWallet);
       if (custodial) {
         try {
-          await mintGold(custodial, goldBonus.toString());
-          server.log.info(`[upgrade-tier] Minted ${goldBonus} gold to ${custodial} for ${tier} tier upgrade`);
+          const operationId = await enqueueGoldMint(custodial, goldBonus.toString());
+          server.log.info(`[upgrade-tier] Queued ${goldBonus} gold to ${custodial} for ${tier} tier upgrade: ${operationId}`);
         } catch (err: any) {
           server.log.warn(`[upgrade-tier] Gold mint failed (non-fatal): ${err.message}`);
         }

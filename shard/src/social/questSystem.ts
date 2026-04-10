@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest, walletsMatch } from "../auth/auth.js";
 import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
-import { mintGold, mintItem } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, enqueueItemMint } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
@@ -3600,14 +3600,14 @@ export async function awardQuestRewards(
   // Award gold — convert copper reward to on-chain gold (10,000 copper = 1 gold)
   if (player.walletAddress && quest.rewards.copper > 0) {
     const goldReward = copperToGold(quest.rewards.copper);
-    await mintGold(player.walletAddress, goldReward.toString()).catch(
+    await enqueueGoldMint(player.walletAddress, goldReward.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)
     );
 
     // Award item rewards
     if (quest.rewards.items) {
       for (const item of quest.rewards.items) {
-        await mintItem(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
+        await enqueueItemMint(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
           (err) =>
             console.error(
               `[quest] Failed to mint item ${item.tokenId} x${item.quantity} for ${player.name}:`,

@@ -3,7 +3,7 @@ import { arenaManager } from "../combat/arenaManager.js";
 import type { CharacterStats } from "../character/classes.js";
 import { getClassById } from "../character/classes.js";
 import { getItemByTokenId, type ArmorSlot, type EquipmentSlot } from "../items/itemCatalog.js";
-import { updateCharacterMetadata, burnItem, findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
+import { updateCharacterMetadata, burnItem } from "../blockchain/blockchain.js";
 import { queueItemMint, queueGoldTransfer } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
@@ -708,26 +708,6 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
       }
       if (entity.agentId != null) {
         reputationManager.ensureInitialized(entity.agentId);
-      } else if (entity.characterTokenId != null) {
-        // Async identity recovery from chain
-        findIdentityByCharacterTokenId(entity.characterTokenId, entity.walletAddress)
-          .then(async (found) => {
-            if (!found?.agentId) return;
-            entity.agentId = found.agentId;
-            reputationManager.ensureInitialized(found.agentId);
-            if (entity.walletAddress) {
-              const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
-                characterTokenId: entity.characterTokenId?.toString(),
-                agentId: found.agentId.toString(),
-                chainRegistrationStatus: "registered",
-              });
-              await saveCharacter(entity.walletAddress, entity.name, {
-                ...verifiedIdentityPatch,
-              });
-            }
-            console.log(`[live-player] Recovered agentId=${found.agentId} for "${entity.name}" from chain`);
-          })
-          .catch(() => {});
       }
       restored++;
     } catch (err) {
@@ -1621,7 +1601,7 @@ async function handleMobDeath(
     // Roll auto-drops — queued in memory, flushed to chain every 30s
     const autoDrops = rollDrops(lootTable.autoDrops);
     for (const drop of autoDrops) {
-      queueItemMint(killer.walletAddress, drop.tokenId, BigInt(drop.quantity));
+      await queueItemMint(killer.walletAddress, drop.tokenId, BigInt(drop.quantity));
     }
 
     if (autoDrops.length > 0) {
@@ -1651,8 +1631,8 @@ async function handleMobDeath(
     }
   } else if (copperReward > 0 && killer.walletAddress) {
     const goldReward = copperToGold(copperReward);
-    // Queue gold in memory — flushed to chain every 5 minutes
-    queueGoldTransfer(killer.walletAddress, goldReward);
+    // Queue gold for async chain publication — flushed by the durable batcher
+    await queueGoldTransfer(killer.walletAddress, goldReward);
     const rewardLabel = formatCopperString(copperReward);
     console.log(
       `[loot] ${killer.name} received ${rewardLabel} from ${mob.name} (batched)`

@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { createCustodialWallet } from "../blockchain/custodialWallet.js";
-import { mintGold, distributeSFuel } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, enqueueSfuelDistribution } from "../blockchain/blockchain.js";
 import { generateAuthToken } from "../auth/auth.js";
 import { computeCharacter, validateCharacterInput } from "../character/characterCreate.js";
 import { getOrCreateZone, recalculateEntityVitals, isWalletSpawned, registerSpawnedWallet, type Entity } from "../world/zoneRuntime.js";
@@ -306,16 +306,16 @@ export async function deployAgent(request: DeploymentRequest): Promise<Deploymen
 
       try {
         console.log(`[x402] ${deploymentId}: Distributing ${goldBonus} gold...`);
-        goldTxHash = await mintGold(wallet.address, goldBonus.toString());
-        console.log(`[x402] ${deploymentId}: Gold distributed: ${goldTxHash}`);
+        goldTxHash = await enqueueGoldMint(wallet.address, goldBonus.toString());
+        console.log(`[x402] ${deploymentId}: Gold publish queued: ${goldTxHash}`);
       } catch (err) {
         console.error(`[x402] ${deploymentId}: Gold mint failed (non-fatal):`, err instanceof Error ? err.message : err);
       }
 
       try {
         console.log(`[x402] ${deploymentId}: Distributing sFUEL...`);
-        sfuelTxHash = await distributeSFuel(wallet.address);
-        console.log(`[x402] ${deploymentId}: sFUEL distributed: ${sfuelTxHash}`);
+        sfuelTxHash = await enqueueSfuelDistribution(wallet.address);
+        console.log(`[x402] ${deploymentId}: sFUEL publish queued: ${sfuelTxHash}`);
       } catch (err) {
         console.error(`[x402] ${deploymentId}: sFUEL failed (non-fatal):`, err instanceof Error ? err.message : err);
       }

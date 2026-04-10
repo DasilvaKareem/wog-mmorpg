@@ -1,13 +1,9 @@
 import type { FastifyBaseLogger } from "fastify";
 import {
-  getOwnedCharacters,
-  getOwnedCharacterTokenIdsFromTransfers,
   mintCharacterWithIdentity,
-  recoverCharacterTokenIdFromTransaction,
   registerIdentity,
-  findIdentityByCharacterTokenId,
 } from "../blockchain/blockchain.js";
-import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
+import { registerNameOnChain } from "../blockchain/nameServiceChain.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
@@ -199,60 +195,6 @@ function normalizeCharacterKey(name: string, classId?: string | null): string {
   return `${stripped}::${(classId ?? "").trim().toLowerCase()}`;
 }
 
-async function reconcileCharacterTokenFromChain(walletAddress: string, characterName: string, classId: string): Promise<bigint | null> {
-  const desiredKey = normalizeCharacterKey(characterName, classId);
-  try {
-    const tokenIds = await Promise.race([
-      getOwnedCharacterTokenIdsFromTransfers(walletAddress),
-      new Promise<bigint[]>((resolve) => setTimeout(() => resolve([]), 10_000)),
-    ]);
-    if (tokenIds.length === 1) {
-      return tokenIds[0] ?? null;
-    }
-  } catch {
-    // Fall through to the richer metadata-based lookup below.
-  }
-
-  let owned: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
-  try {
-    owned = await Promise.race([
-      getOwnedCharacters(walletAddress),
-      new Promise<Awaited<ReturnType<typeof getOwnedCharacters>>>((resolve) => setTimeout(() => resolve([]), 10_000)),
-    ]);
-  } catch {
-    owned = [];
-  }
-  for (const nft of owned) {
-    const props = (nft.metadata?.properties ?? {}) as Record<string, unknown>;
-    const candidateKey = normalizeCharacterKey(String(nft.metadata?.name ?? ""), typeof props.class === "string" ? props.class : null);
-    if (candidateKey !== desiredKey) continue;
-    try {
-      return BigInt(nft.id.toString());
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-async function waitForCharacterTokenRecovery(
-  walletAddress: string,
-  characterName: string,
-  classId: string,
-  timeoutMs = 90_000,
-  intervalMs = 3_000
-): Promise<bigint | null> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const recovered = await reconcileCharacterTokenFromChain(walletAddress, characterName, classId);
-    if (recovered != null) {
-      return recovered;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return null;
-}
-
 function updateRuntimeProjection(walletAddress: string, characterName: string, tokenId?: bigint | null, agentId?: bigint | null): void {
   const normalizedWallet = normalizeWallet(walletAddress);
   const normalizedName = collapseCharacterName(characterName);
@@ -266,86 +208,15 @@ function updateRuntimeProjection(walletAddress: string, characterName: string, t
 }
 
 async function sanitizeSavedIdentityState(
-  walletAddress: string,
-  characterName: string,
+  _walletAddress: string,
+  _characterName: string,
   saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
 ): Promise<NonNullable<Awaited<ReturnType<typeof loadCharacter>>>> {
-  if (!saved.agentId) {
-    return saved;
-  }
-
-  let verified = false;
-  if (saved.characterTokenId) {
-    try {
-      const recovered = await findIdentityByCharacterTokenIdWithTimeout(BigInt(saved.characterTokenId), walletAddress, 5_000);
-      verified = recovered?.agentId?.toString() === saved.agentId;
-    } catch {
-      verified = false;
-    }
-  }
-
-  if (verified) {
-    return saved;
-  }
-
-  const fallbackStatus = saved.characterTokenId ? "mint_confirmed" : "unregistered";
-  await saveCharacter(walletAddress, characterName, {
-    agentId: null,
-    agentRegistrationTxHash: null,
-    chainRegistrationStatus: fallbackStatus,
-  });
-
-  return {
-    ...saved,
-    agentId: undefined,
-    agentRegistrationTxHash: undefined,
-    chainRegistrationStatus: fallbackStatus,
-  };
-}
-
-async function findIdentityByCharacterTokenIdWithTimeout(
-  tokenId: bigint,
-  walletAddress: string,
-  timeoutMs = 10_000
-): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
-  try {
-    const ownedMatch = await Promise.race([
-      findIdentityByCharacterTokenId(tokenId, walletAddress),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-    if (ownedMatch?.agentId != null) {
-      return ownedMatch;
-    }
-    return await Promise.race([
-      findIdentityByCharacterTokenId(tokenId),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-  } catch {
-    return null;
-  }
-}
-
-async function waitForIdentityRecovery(
-  tokenId: bigint,
-  walletAddress: string,
-  timeoutMs = 90_000,
-  intervalMs = 3_000,
-): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const recovered = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress, 10_000);
-    if (recovered?.agentId != null) {
-      return recovered;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return null;
+  return saved;
 }
 
 async function ensureNameRegistered(walletAddress: string, characterName: string, logger?: FastifyBaseLogger): Promise<void> {
   try {
-    const existing = await reverseLookupOnChain(walletAddress);
-    if (existing) return;
     const registered = await registerNameOnChain(walletAddress, characterName);
     if (registered) {
       logger?.info(`[nameService] Auto-registered "${characterName}.wog" for ${walletAddress}`);
@@ -549,39 +420,20 @@ export async function processCharacterBootstrapJob(
       await saveJob(currentJob);
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
-      const recoveredTokenId = await reconcileCharacterTokenFromChain(walletAddress, characterName, saved.classId);
-      if (recoveredTokenId != null) {
-        tokenId = recoveredTokenId;
-      } else {
-        const mintResult = await mintCharacterWithIdentity(
-          walletAddress,
-          metadata,
-          currentJob.validationTags,
-          { skipIdentityRegistration: true }
-        );
-        if (mintResult.tokenId == null) {
-          let recoveredAfterMint = mintResult.txHash
-            ? await recoverCharacterTokenIdFromTransaction(mintResult.txHash)
-            : null;
-          if (recoveredAfterMint == null) {
-            recoveredAfterMint = await waitForCharacterTokenRecovery(
-              walletAddress,
-              characterName,
-              saved.classId
-            );
-          }
-          if (recoveredAfterMint == null) {
-            throw new Error("Character mint completed without tokenId");
-          }
-          tokenId = recoveredAfterMint;
-        } else {
-          tokenId = mintResult.tokenId;
-        }
-        if (mintResult.identity?.agentId != null) {
-          agentId = mintResult.identity.agentId;
-        }
-        mintIdentityTxHash = mintResult.identity?.txHash ?? null;
+      const mintResult = await mintCharacterWithIdentity(
+        walletAddress,
+        metadata,
+        currentJob.validationTags,
+        { skipIdentityRegistration: true }
+      );
+      if (mintResult.tokenId == null) {
+        throw new Error("Character mint completed without tokenId");
       }
+      tokenId = mintResult.tokenId;
+      if (mintResult.identity?.agentId != null) {
+        agentId = mintResult.identity.agentId;
+      }
+      mintIdentityTxHash = mintResult.identity?.txHash ?? null;
 
       await saveCharacter(walletAddress, characterName, {
         characterTokenId: tokenId.toString(),
@@ -610,31 +462,14 @@ export async function processCharacterBootstrapJob(
       await saveJob(currentJob);
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
-      const recoveredIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress);
-      let identityTxHash: string | null = null;
-      if (recoveredIdentity?.agentId != null) {
-        agentId = recoveredIdentity.agentId;
-      } else {
-        const identityResult = await registerIdentity(tokenId, walletAddress, "", {
-          validationTags: currentJob.validationTags,
-        });
-        identityTxHash = identityResult.txHash ?? null;
-        if (identityResult.agentId == null) {
-          const recoveredAfterRegister = await waitForIdentityRecovery(tokenId, walletAddress);
-          if (recoveredAfterRegister?.agentId != null) {
-            agentId = recoveredAfterRegister.agentId;
-          } else {
-            throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
-          }
-        } else {
-          agentId = identityResult.agentId;
-        }
+      const identityResult = await registerIdentity(tokenId, walletAddress, "", {
+        validationTags: currentJob.validationTags,
+      });
+      const identityTxHash = identityResult.txHash ?? null;
+      if (identityResult.agentId == null) {
+        throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
       }
-
-      const verifiedIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress, 5_000);
-      if (!verifiedIdentity?.agentId || verifiedIdentity.agentId.toString() !== agentId.toString()) {
-        throw new Error(`Identity verification mismatch for characterTokenId=${tokenId.toString()}`);
-      }
+      agentId = identityResult.agentId;
 
       await saveCharacter(walletAddress, characterName, {
         agentId: agentId.toString(),

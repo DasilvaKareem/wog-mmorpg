@@ -1,4 +1,3 @@
-import { findIdentityByCharacterTokenId } from "../blockchain/blockchain.js";
 import type { CharacterSavePatch } from "./characterStore.js";
 
 function normalizeNumericId(value: string | bigint | null | undefined): string | null {
@@ -9,7 +8,7 @@ function normalizeNumericId(value: string | bigint | null | undefined): string |
 }
 
 export async function buildVerifiedIdentityPatch(
-  walletAddress: string,
+  _walletAddress: string,
   params: {
     characterTokenId?: string | bigint | null;
     agentId?: string | bigint | null;
@@ -30,18 +29,6 @@ export async function buildVerifiedIdentityPatch(
 
   if (!agentId) {
     return patch;
-  }
-
-  const found = await findIdentityByCharacterTokenId(BigInt(tokenId), walletAddress).catch(() => null);
-  if (found?.agentId?.toString() !== agentId) {
-    return {
-      characterTokenId: tokenId,
-      agentId: null,
-      agentRegistrationTxHash: null,
-      ...(params.chainRegistrationStatus === "registered"
-        ? { chainRegistrationStatus: "mint_confirmed" }
-        : {}),
-    };
   }
 
   return {

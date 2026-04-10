@@ -2,7 +2,8 @@ import { ethers } from "ethers";
 import { biteWallet } from "../blockchain/biteChain.js";
 import { queueBiteTransaction } from "../blockchain/biteTxQueue.js";
 import {
-  executeRegisteredChainOperation,
+  createChainOperation,
+  processTrackedChainOperation,
   registerChainOperationProcessor,
   type ChainOperationRecord,
 } from "../blockchain/chainOperationStore.js";
@@ -29,6 +30,9 @@ function toIdentityId(agentId: string | bigint): bigint {
   return BigInt(normalizeAgentId(agentId));
 }
 
+const VALIDATION_REQUEST_OP = "validation-claim-request";
+const VALIDATION_RESPONSE_OP = "validation-claim-response";
+
 export async function publishValidationClaim(
   agentId: string | bigint,
   claim: string
@@ -45,7 +49,7 @@ export async function publishValidationClaim(
     );
     const requestURI = `wog://validation/request/${normalizeAgentId(agentId)}/${encodeURIComponent(claim)}`;
     const responseURI = `wog://validation/response/${normalizeAgentId(agentId)}/${encodeURIComponent(claim)}`;
-    return await executeRegisteredChainOperation<string>("validation-claim", `${normalizeAgentId(agentId)}:${claim}`, {
+    const operation = await createChainOperation(VALIDATION_REQUEST_OP, `${normalizeAgentId(agentId)}:${claim}`, {
       agentId: normalizeAgentId(agentId),
       claim,
       validatorAddress,
@@ -53,13 +57,17 @@ export async function publishValidationClaim(
       requestURI,
       responseURI,
     });
+    void processTrackedChainOperation(operation.operationId).catch((error) => {
+      console.warn(`[erc8004.validation] request op failed for ${normalizeAgentId(agentId)} ${claim}:`, error);
+    });
+    return operation.operationId;
   } catch (err) {
     console.warn(`[erc8004.validation] publish claim failed for ${normalizeAgentId(agentId)} ${claim}:`, err);
     return null;
   }
 }
 
-registerChainOperationProcessor("validation-claim", async (record: ChainOperationRecord) => {
+registerChainOperationProcessor(VALIDATION_REQUEST_OP, async (record: ChainOperationRecord) => {
   const payload = JSON.parse(record.payload) as {
     agentId: string;
     claim: string;
@@ -68,7 +76,7 @@ registerChainOperationProcessor("validation-claim", async (record: ChainOperatio
     requestURI: string;
     responseURI: string;
   };
-  await queueBiteTransaction(`validation-request:${payload.agentId}:${payload.claim}`, async () => {
+  const receipt = await queueBiteTransaction(`validation-request:${payload.agentId}:${payload.claim}`, async () => {
     const tx = await validationContract!.validationRequest(
       payload.validatorAddress,
       toIdentityId(payload.agentId),
@@ -77,7 +85,26 @@ registerChainOperationProcessor("validation-claim", async (record: ChainOperatio
     );
     return tx.wait();
   });
+  const responseOperation = await createChainOperation(
+    VALIDATION_RESPONSE_OP,
+    `${payload.agentId}:${payload.claim}:${payload.requestHash}`,
+    payload
+  );
+  void processTrackedChainOperation(responseOperation.operationId).catch((error) => {
+    console.warn(`[erc8004.validation] response op failed for ${payload.agentId} ${payload.claim}:`, error);
+  });
+  return { result: responseOperation.operationId, txHash: receipt.hash };
+});
 
+registerChainOperationProcessor(VALIDATION_RESPONSE_OP, async (record: ChainOperationRecord) => {
+  const payload = JSON.parse(record.payload) as {
+    agentId: string;
+    claim: string;
+    validatorAddress: string;
+    requestHash: string;
+    requestURI: string;
+    responseURI: string;
+  };
   const receipt = await queueBiteTransaction(`validation-response:${payload.agentId}:${payload.claim}`, async () => {
     const tx = await validationContract!.validationResponse(
       payload.requestHash,

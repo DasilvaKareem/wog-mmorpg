@@ -130,6 +130,7 @@ export async function ensureGameSchema(): Promise<void> {
 
         create table if not exists game.chain_operations (
           operation_id uuid primary key,
+          intent_id uuid,
           type text not null,
           subject text not null,
           payload_json jsonb not null,
@@ -149,6 +150,79 @@ export async function ensureGameSchema(): Promise<void> {
 
         create index if not exists idx_chain_operations_type_subject
           on game.chain_operations (type, subject, updated_at desc);
+
+        create table if not exists game.chain_write_intents (
+          intent_id uuid primary key,
+          type text not null,
+          aggregate_type text not null,
+          aggregate_key text not null,
+          wallet_address text,
+          payload_json jsonb not null,
+          priority integer not null default 100,
+          status text not null default 'pending',
+          available_at timestamptz not null default now(),
+          claimed_at timestamptz,
+          claim_owner text,
+          last_submitted_at timestamptz,
+          confirmed_at timestamptz,
+          attempt_count integer not null default 0,
+          tx_hash text,
+          last_error text,
+          superseded_by uuid,
+          created_at timestamptz not null default now(),
+          updated_at timestamptz not null default now()
+        );
+
+        drop index if exists game.idx_chain_write_intents_active_aggregate;
+        create unique index idx_chain_write_intents_active_aggregate
+          on game.chain_write_intents (type, aggregate_key)
+          where status in ('pending', 'retryable', 'processing', 'waiting_funds');
+
+        create index if not exists idx_chain_write_intents_due
+          on game.chain_write_intents (status, available_at, priority, created_at);
+
+        create index if not exists idx_chain_write_intents_wallet
+          on game.chain_write_intents (wallet_address, updated_at desc);
+
+        create table if not exists game.chain_tx_attempts (
+          attempt_id uuid primary key,
+          intent_id uuid not null references game.chain_write_intents(intent_id) on delete cascade,
+          signer_address text,
+          rpc_provider text,
+          queue_label text,
+          nonce bigint,
+          tx_hash text,
+          status text not null,
+          error_code text,
+          error_message text,
+          gas_limit text,
+          gas_price text,
+          max_fee_per_gas text,
+          max_priority_fee_per_gas text,
+          created_at timestamptz not null default now(),
+          submitted_at timestamptz,
+          confirmed_at timestamptz
+        );
+
+        create index if not exists idx_chain_tx_attempts_intent_created
+          on game.chain_tx_attempts (intent_id, created_at desc);
+
+        do $$
+        begin
+          if not exists (
+            select 1
+            from information_schema.constraint_column_usage
+            where table_schema = 'game'
+              and table_name = 'chain_operations'
+              and constraint_name = 'chain_operations_intent_id_fkey'
+          ) then
+            alter table game.chain_operations
+              add constraint chain_operations_intent_id_fkey
+              foreign key (intent_id) references game.chain_write_intents(intent_id) on delete set null;
+          end if;
+        exception
+          when duplicate_object then null;
+        end $$;
 
         create table if not exists game.profession_state (
           wallet_address text not null,

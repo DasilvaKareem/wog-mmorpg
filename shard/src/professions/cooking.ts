@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getOrCreateZone } from "../world/zoneRuntime.js";
-import { burnItem, mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemBurn, enqueueItemMint } from "../blockchain/blockchain.js";
 import { hasLearnedProfession } from "./professions.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -229,7 +229,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
     // Burn materials
     const burnPromises: Promise<string>[] = [];
     for (const mat of recipe.requiredMaterials) {
-      burnPromises.push(burnItem(walletAddress, mat.tokenId, BigInt(mat.quantity)));
+      burnPromises.push(enqueueItemBurn(walletAddress, mat.tokenId, BigInt(mat.quantity)));
     }
 
     try {
@@ -242,7 +242,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
 
     // Mint cooked food
     try {
-      const cookTx = await mintItem(
+      const cookTx = await enqueueItemMint(
         walletAddress,
         recipe.outputTokenId,
         BigInt(recipe.outputQuantity)
@@ -360,7 +360,7 @@ export function registerCookingRoutes(server: FastifyInstance) {
 
     // Burn the food item
     try {
-      const burnTx = await burnItem(walletAddress, BigInt(foodTokenId), 1n);
+      const burnTx = await enqueueItemBurn(walletAddress, BigInt(foodTokenId), 1n);
 
       // Restore HP
       const healAmount = Math.min(recipe.hpRestoration, entity.maxHp - entity.hp);

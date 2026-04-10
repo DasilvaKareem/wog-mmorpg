@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemMint } from "../blockchain/blockchain.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
@@ -215,7 +215,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     for (const drop of drops) {
       const item = getItemByTokenId(drop.tokenId);
       if (item) {
-        mintPromises.push(mintItem(walletAddress, drop.tokenId, BigInt(drop.quantity)));
+        mintPromises.push(enqueueItemMint(walletAddress, drop.tokenId, BigInt(drop.quantity)));
         mintedItems.push({
           name: item.name,
           quantity: drop.quantity,

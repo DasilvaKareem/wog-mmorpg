@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
-import { getRedis } from "../redis.js";
+import { getRedis, scanKeys } from "../redis.js";
 import {
   deletePersistedParty,
   deletePersistedPartyWallet,
@@ -831,7 +831,7 @@ export async function restorePartiesFromRedis(): Promise<number> {
     if (!redis) return 0;
     partyIds = await redis.smembers(PARTY_IDS_KEY);
     if (!Array.isArray(partyIds) || partyIds.length === 0) {
-      const legacyKeys = await redis.keys(`${PARTY_KEY_PREFIX}party_*`);
+      const legacyKeys = await scanKeys(`${PARTY_KEY_PREFIX}party_*`);
       partyIds = legacyKeys.map((key: string) => key.slice(PARTY_KEY_PREFIX.length));
     }
   }

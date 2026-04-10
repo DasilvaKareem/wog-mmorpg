@@ -8,7 +8,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
-import { distributeSFuel, getGoldBalance, mintGold, transferGoldFrom } from "../blockchain/blockchain.js";
+import { distributeSFuel, enqueueGoldMint, getGoldBalance, transferGoldFrom } from "../blockchain/blockchain.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getRedis } from "../redis.js";
 import { randomUUID } from "crypto";
@@ -230,15 +230,15 @@ export function registerGoldPurchaseRoutes(server: FastifyInstance): void {
     // For now, trust-based — the client sends the hash after thirdweb Pay confirms.
 
     try {
-      const tx = await mintGold(custodial, pending.goldAmount.toString());
-      server.log.info(`[gold-purchase] Minted ${pending.goldAmount} gold to ${custodial} (payment ${paymentId}, tx ${transactionHash})`);
+      const operationId = await enqueueGoldMint(custodial, pending.goldAmount.toString());
+      server.log.info(`[gold-purchase] Queued ${pending.goldAmount} gold to ${custodial} (payment ${paymentId}, payment tx ${transactionHash}, op ${operationId})`);
 
       await deletePending(paymentId);
 
       return reply.send({
         ok: true,
         goldMinted: pending.goldAmount,
-        mintTx: tx,
+        mintOperationId: operationId,
         paymentTx: transactionHash,
       });
     } catch (err: any) {

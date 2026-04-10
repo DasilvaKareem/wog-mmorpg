@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "../professions/professions.js";
-import { mintItem, burnItem, getItemBalance } from "../blockchain/blockchain.js";
+import { enqueueItemBurn, enqueueItemMint, getItemBalance } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { consumeOwnedItemInstances, rollCraftedItem } from "./itemRng.js";
 import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
@@ -229,7 +229,7 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
       }
 
       // Burn the input weapon
-      const weaponBurnTx = await burnItem(
+      const weaponBurnTx = await enqueueItemBurn(
         walletAddress,
         recipe.inputWeaponTokenId,
         1n
@@ -249,7 +249,7 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
 
       // Burn additional materials
       for (const material of recipe.additionalMaterials) {
-        const burnTx = await burnItem(
+        const burnTx = await enqueueItemBurn(
           walletAddress,
           material.tokenId,
           BigInt(material.quantity)
@@ -271,7 +271,7 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
 
     // Mint upgraded weapon
     try {
-      const upgradeTx = await mintItem(walletAddress, recipe.outputTokenId, 1n);
+      const upgradeTx = await enqueueItemMint(walletAddress, recipe.outputTokenId, 1n);
 
       const inputItem = getItemByTokenId(recipe.inputWeaponTokenId);
       const outputItem = getItemByTokenId(recipe.outputTokenId);
@@ -326,11 +326,21 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
       };
     } catch (err) {
       server.log.error(err, `[upgrading] Failed to mint upgraded weapon for ${walletAddress}`);
+      const refundFailures: string[] = [];
+      for (const burned of burnedItems) {
+        try {
+          await enqueueItemMint(walletAddress, BigInt(burned.tokenId), BigInt(burned.quantity));
+        } catch {
+          refundFailures.push(`${burned.quantity}x ${burned.tokenId}`);
+        }
+      }
       reply.code(500);
       return {
         error: "Upgrade failed - weapon could not be created",
         materialsConsumed: burnedItems,
-        warning: "Materials were consumed but upgrade failed - contact support",
+        warning: refundFailures.length > 0
+          ? `Upgrade failed and some materials could not be restored (${refundFailures.join(", ")})`
+          : "Upgrade failed and consumed materials were restored",
       };
     }
   });

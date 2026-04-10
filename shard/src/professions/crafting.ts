@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
-import { mintItem, burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
+import { enqueueItemMint, enqueueItemBurn, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
 import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -832,7 +832,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
     const burnedMaterials: Array<{ tokenId: string; quantity: number; tx: string }> = [];
     try {
       for (const material of recipe.requiredMaterials) {
-        const burnTx = await burnItem(
+        const burnTx = await enqueueItemBurn(
           walletAddress,
           material.tokenId,
           BigInt(material.quantity)
@@ -856,7 +856,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
     // Mint crafted item
     try {
-      const craftTx = await mintItem(
+      const craftTx = await enqueueItemMint(
         walletAddress,
         recipe.outputTokenId,
         BigInt(recipe.outputQuantity)
@@ -946,7 +946,7 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
       for (const material of recipe.requiredMaterials) {
         try {
-          await mintItem(walletAddress, material.tokenId, BigInt(material.quantity));
+          await enqueueItemMint(walletAddress, material.tokenId, BigInt(material.quantity));
         } catch (refundErr) {
           server.log.error(refundErr, `[crafting] Failed refunding ${material.tokenId.toString()} to ${walletAddress}`);
         }

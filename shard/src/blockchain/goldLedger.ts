@@ -4,7 +4,7 @@ import type { PoolClient } from "pg";
 import { getRedis } from "../redis.js";
 import { getGoldReservations, setGoldReservation } from "../db/runtimeMetaStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
-import { addGoldSpend, getGoldSpendTotals, setGoldReservationAmount } from "../db/goldAccountStore.js";
+import { addGoldSpend, getGoldSpendTotals, setGoldReservationAmount, subtractGoldSpend } from "../db/goldAccountStore.js";
 
 const LEDGER_PATH = path.resolve(process.cwd(), "data", "gold-spent.json");
 const REDIS_RESERVED_KEY = "gold:reserved";
@@ -181,6 +181,34 @@ export async function recordGoldSpendAsync(
     return;
   }
   recordGoldSpend(normalized, roundedAmount);
+}
+
+export async function revertGoldSpendAsync(
+  address: string,
+  amount: number,
+  client?: PoolClient | null
+): Promise<void> {
+  if (!Number.isFinite(amount) || amount <= 0) return;
+  await ensureSpentHydrated();
+  const normalized = normalizeAddress(address);
+  const roundedAmount = roundGold(amount);
+  if (isPostgresConfigured()) {
+    const next = await subtractGoldSpend(normalized, roundedAmount, client);
+    if (next > 0) {
+      spentByWallet[normalized] = roundGold(next);
+    } else {
+      delete spentByWallet[normalized];
+    }
+    return;
+  }
+  const current = spentByWallet[normalized] ?? 0;
+  const next = Math.max(0, roundGold(current - roundedAmount));
+  if (next > 0) {
+    spentByWallet[normalized] = next;
+  } else {
+    delete spentByWallet[normalized];
+  }
+  persistLedger();
 }
 
 /**

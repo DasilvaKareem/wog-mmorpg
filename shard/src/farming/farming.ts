@@ -5,7 +5,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemMint } from "../blockchain/blockchain.js";
 import { CROP_CATALOG, HARVESTABLE_PHASES, isBonusPhase, type CropType } from "./cropCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -159,7 +159,7 @@ export function registerFarmingRoutes(server: FastifyInstance) {
 
       // Mint the crop item
       try {
-        await mintItem(walletAddress, cropProps.tokenId, BigInt(quantity));
+        await enqueueItemMint(walletAddress, cropProps.tokenId, BigInt(quantity));
       } catch (err: any) {
         return reply.code(500).send({ error: `Mint failed: ${err.message}` });
       }

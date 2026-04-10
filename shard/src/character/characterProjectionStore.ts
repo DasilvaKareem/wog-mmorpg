@@ -381,6 +381,94 @@ export async function listCharacterProjectionsForWallets(wallets: string[]): Pro
   }));
 }
 
+export async function getCharacterProjectionByAgentId(agentId: string): Promise<CharacterProjectionRecord | null> {
+  const normalizedAgentId = agentId.trim();
+  if (!normalizedAgentId) return null;
+
+  const { rows } = await postgresQuery<{
+    wallet_address: string;
+    normalized_name: string;
+    character_name: string;
+    class_id: string;
+    race_id: string;
+    level: number;
+    xp: number;
+    character_token_id: string | null;
+    agent_id: string | null;
+    agent_registration_tx_hash: string | null;
+    chain_registration_status: string | null;
+    chain_registration_last_error: string | null;
+    zone_id: string;
+    calling: string | null;
+    gender: string | null;
+    skin_color: string | null;
+    hair_style: string | null;
+    eye_color: string | null;
+    origin: string | null;
+    snapshot_json: Record<string, unknown> | null;
+    source: string;
+    updated_at: string;
+  }>(
+    `
+      select
+        wallet_address,
+        normalized_name,
+        character_name,
+        class_id,
+        race_id,
+        level,
+        xp,
+        character_token_id,
+        agent_id,
+        agent_registration_tx_hash,
+        chain_registration_status,
+        chain_registration_last_error,
+        zone_id,
+        calling,
+        gender,
+        skin_color,
+        hair_style,
+        eye_color,
+        origin,
+        snapshot_json,
+        source,
+        updated_at::text as updated_at
+      from game.character_projections
+      where agent_id = $1
+      order by updated_at desc
+      limit 1
+    `,
+    [normalizedAgentId]
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    walletAddress: row.wallet_address,
+    normalizedName: row.normalized_name,
+    characterName: row.character_name,
+    classId: row.class_id,
+    raceId: row.race_id,
+    level: Number(row.level ?? 1) || 1,
+    xp: Number(row.xp ?? 0) || 0,
+    characterTokenId: row.character_token_id,
+    agentId: row.agent_id,
+    agentRegistrationTxHash: row.agent_registration_tx_hash,
+    chainRegistrationStatus: row.chain_registration_status,
+    chainRegistrationLastError: row.chain_registration_last_error,
+    zoneId: row.zone_id,
+    calling: row.calling,
+    gender: row.gender,
+    skinColor: row.skin_color,
+    hairStyle: row.hair_style,
+    eyeColor: row.eye_color,
+    origin: row.origin,
+    snapshotJson: row.snapshot_json ?? {},
+    source: row.source,
+    updatedAt: row.updated_at,
+  };
+}
+
 export async function getCharacterSnapshotForWallet(
   walletAddress: string,
   characterName: string

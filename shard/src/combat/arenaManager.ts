@@ -20,7 +20,7 @@ import {
   type Entity,
 } from "../world/zoneRuntime.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
-import { transferFromTreasury } from "../blockchain/wallet.js";
+import { enqueueTransferFromTreasury } from "../blockchain/wallet.js";
 import { setGeneratedMap } from "../world/mapGenerator.js";
 import { COLISEUM_MAPS } from "./coliseumMaps.js";
 
@@ -788,9 +788,9 @@ class ArenaManager {
 
     // Award gold to MVP
     if (mvp) {
-      const mvpEntity = resolveEntity(mvp.entityId);
-      if (mvpEntity?.walletAddress) {
-        void transferFromTreasury(mvpEntity.walletAddress, MVP_REWARD_GOLD.toString()).catch(
+        const mvpEntity = resolveEntity(mvp.entityId);
+        if (mvpEntity?.walletAddress) {
+        void enqueueTransferFromTreasury(mvpEntity.walletAddress, MVP_REWARD_GOLD.toString()).catch(
           (err) => console.error(`[arena] MVP gold transfer failed:`, err)
         );
       }

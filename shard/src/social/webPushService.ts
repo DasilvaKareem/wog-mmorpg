@@ -19,7 +19,7 @@
  */
 
 import webPush, { type PushSubscription } from "web-push";
-import { getRedis } from "../redis.js";
+import { getRedis, scanKeys } from "../redis.js";
 import { setDiaryPushHook, type DiaryAction, type DiaryEntry } from "./diary.js";
 import {
   deleteWebPushSubscription,
@@ -187,7 +187,7 @@ export async function broadcastPush(payload: PushPayload): Promise<number> {
     const keys: string[] = wallets.length > 0
       ? wallets.map((wallet) => `push:sub:${wallet}`)
       : !isPostgresConfigured() && redis
-        ? await redis.keys("push:sub:*")
+        ? await scanKeys("push:sub:*")
         : [];
     const results = await Promise.allSettled(
       keys.map(async (key: string) => {

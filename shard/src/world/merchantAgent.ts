@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { NPC_DEFS, type NpcDef } from "./npcSpawner.js";
 import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
-import { mintGold, mintItem, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, enqueueItemMint, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
 import { getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getEntitiesInRegion, type Entity } from "./zoneRuntime.js";
@@ -344,7 +344,7 @@ export async function initMerchantWallets(): Promise<void> {
       entity.walletAddress = walletInfo.address;
 
       // Mint seed gold
-      await mintGold(walletInfo.address, String(INITIAL_GOLD_SEED));
+      await enqueueGoldMint(walletInfo.address, String(INITIAL_GOLD_SEED));
 
       // Mint initial stock of each item
       const inventory = new Map<number, MerchantInventoryEntry>();
@@ -352,7 +352,7 @@ export async function initMerchantWallets(): Promise<void> {
         const item = getItemByTokenId(BigInt(tokenId));
         if (!item) continue;
 
-        await mintItem(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
+        await enqueueItemMint(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
 
         inventory.set(tokenId, {
           tokenId,
@@ -413,13 +413,13 @@ async function retryFailedMerchants(defs: NpcDef[], attempt = 1): Promise<void> 
     try {
       const walletInfo = await createCustodialWallet();
       entity.walletAddress = walletInfo.address;
-      await mintGold(walletInfo.address, String(INITIAL_GOLD_SEED));
+      await enqueueGoldMint(walletInfo.address, String(INITIAL_GOLD_SEED));
 
       const inventory = new Map<number, MerchantInventoryEntry>();
       for (const tokenId of def.shopItems!) {
         const item = getItemByTokenId(BigInt(tokenId));
         if (!item) continue;
-        await mintItem(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
+        await enqueueItemMint(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
         inventory.set(tokenId, {
           tokenId, quantity: INITIAL_STOCK_PER_ITEM, basePrice: item.copperPrice,
           currentPrice: item.copperPrice, targetStock: DEFAULT_TARGET_STOCK,
@@ -487,7 +487,7 @@ async function restockItems(state: MerchantState): Promise<void> {
       if (restockQty <= 0) continue;
 
       try {
-        await mintItem(state.walletAddress, BigInt(entry.tokenId), BigInt(restockQty));
+        await enqueueItemMint(state.walletAddress, BigInt(entry.tokenId), BigInt(restockQty));
         entry.quantity += restockQty;
         entry.lastRestockedAt = now;
 

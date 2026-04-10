@@ -19,6 +19,20 @@
 import { mintItem } from "./blockchain.js";
 import { transferFromTreasury } from "./wallet.js";
 import { ethers } from "ethers";
+import {
+  claimChainIntent,
+  createChainTxAttempt,
+  getChainIntentStats,
+  listDueChainIntents,
+  markChainIntentConfirmed,
+  markChainIntentRetryable,
+  markChainIntentSubmitted,
+  updateChainTxAttempt,
+  upsertAggregatedChainIntent,
+  type ChainWriteIntentRecord,
+} from "./chainIntentStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import { getChainReceiptStatus } from "./chainReceipt.js";
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -31,6 +45,13 @@ const SFUEL_CHECK_INTERVAL_MS = 60_000;  // check balance every 60s
 const SFUEL_MIN_BALANCE = parseFloat(process.env.SFUEL_MIN_BALANCE || "0.0005");
 // Warn (but don't pause) when balance drops below this — gives earlier notice.
 const SFUEL_WARN_BALANCE = parseFloat(process.env.SFUEL_WARN_BALANCE || "0.005");
+const ITEM_INTENT_TYPE = "batch-item-mint";
+const GOLD_INTENT_TYPE = "batch-gold-transfer";
+const CHAIN_BATCHER_CLAIM_OWNER = `chain-batcher:${process.pid}`;
+const CHAIN_BATCHER_SUBMITTED_RECOVERY_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.CHAIN_BATCHER_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
+);
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -152,8 +173,22 @@ function normalizeAddress(addr: string): string {
 /**
  * Queue an item mint. Accumulated in memory and flushed periodically.
  */
-export function queueItemMint(walletAddress: string, tokenId: bigint, quantity: bigint): void {
+export async function queueItemMint(walletAddress: string, tokenId: bigint, quantity: bigint): Promise<void> {
   const addr = normalizeAddress(walletAddress);
+  if (isPostgresConfigured()) {
+    await upsertAggregatedChainIntent({
+      type: ITEM_INTENT_TYPE,
+      aggregateType: "wallet-token",
+      aggregateKey: `${addr}:${tokenId.toString()}`,
+      walletAddress: addr,
+      mergePayload: (current) => ({
+        walletAddress: addr,
+        tokenId: tokenId.toString(),
+        quantity: String((BigInt(String(current?.quantity ?? "0")) + quantity)),
+      }),
+    });
+    return;
+  }
   let walletItems = pendingItems.get(addr);
   if (!walletItems) {
     walletItems = new Map();
@@ -169,9 +204,22 @@ export function queueItemMint(walletAddress: string, tokenId: bigint, quantity: 
  * Queue a gold transfer from treasury. Accumulated and flushed periodically.
  * @param goldAmount Gold amount as a number (e.g. 0.05 for 5 copper)
  */
-export function queueGoldTransfer(walletAddress: string, goldAmount: number): void {
+export async function queueGoldTransfer(walletAddress: string, goldAmount: number): Promise<void> {
   if (!Number.isFinite(goldAmount) || goldAmount <= 0) return;
   const addr = normalizeAddress(walletAddress);
+  if (isPostgresConfigured()) {
+    await upsertAggregatedChainIntent({
+      type: GOLD_INTENT_TYPE,
+      aggregateType: "wallet",
+      aggregateKey: addr,
+      walletAddress: addr,
+      mergePayload: (current) => ({
+        walletAddress: addr,
+        goldAmount: Number(current?.goldAmount ?? 0) + goldAmount,
+      }),
+    });
+    return;
+  }
   const current = pendingGold.get(addr) ?? 0;
   pendingGold.set(addr, current + goldAmount);
 }
@@ -182,6 +230,13 @@ export function queueGoldTransfer(walletAddress: string, goldAmount: number): vo
  * Flush all pending item mints for a single wallet.
  */
 async function flushItemsForWallet(walletAddress: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    const due = await listDueChainIntents(ITEM_INTENT_TYPE, walletAddress);
+    for (const intent of due) {
+      await flushItemIntent(intent);
+    }
+    return;
+  }
   const items = pendingItems.get(walletAddress);
   if (!items || items.size === 0) {
     pendingItems.delete(walletAddress);
@@ -216,6 +271,13 @@ async function flushItemsForWallet(walletAddress: string): Promise<void> {
  * Flush all pending gold for a single wallet.
  */
 async function flushGoldForWallet(walletAddress: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    const due = await listDueChainIntents(GOLD_INTENT_TYPE, walletAddress);
+    for (const intent of due) {
+      await flushGoldIntent(intent);
+    }
+    return;
+  }
   const amount = pendingGold.get(walletAddress);
   if (!amount || amount <= 0) {
     pendingGold.delete(walletAddress);
@@ -263,8 +325,21 @@ async function flushGoldForWallet(walletAddress: string): Promise<void> {
  */
 async function flushAllItems(): Promise<void> {
   if (chainWritesPaused) {
-    if (pendingItems.size > 0) {
-      console.log(`[chainBatcher] item flush skipped — circuit breaker open (${pendingItems.size} wallets queued)`);
+    const pendingWallets = isPostgresConfigured()
+      ? (await getChainIntentStats([ITEM_INTENT_TYPE]))[ITEM_INTENT_TYPE]?.pending ?? 0
+      : pendingItems.size;
+    if (pendingWallets > 0) {
+      console.log(`[chainBatcher] item flush skipped — circuit breaker open (${pendingWallets} wallets queued)`);
+    }
+    return;
+  }
+
+  if (isPostgresConfigured()) {
+    const intents = await listDueChainIntents(ITEM_INTENT_TYPE);
+    if (intents.length === 0) return;
+    console.log(`[chainBatcher] flushing items for ${intents.length} intent(s)`);
+    for (const intent of intents) {
+      await flushItemIntent(intent);
     }
     return;
   }
@@ -284,8 +359,21 @@ async function flushAllItems(): Promise<void> {
  */
 async function flushAllGold(): Promise<void> {
   if (chainWritesPaused) {
-    if (pendingGold.size > 0) {
-      console.log(`[chainBatcher] gold flush skipped — circuit breaker open (${pendingGold.size} wallets queued)`);
+    const pendingWallets = isPostgresConfigured()
+      ? (await getChainIntentStats([GOLD_INTENT_TYPE]))[GOLD_INTENT_TYPE]?.pending ?? 0
+      : pendingGold.size;
+    if (pendingWallets > 0) {
+      console.log(`[chainBatcher] gold flush skipped — circuit breaker open (${pendingWallets} wallets queued)`);
+    }
+    return;
+  }
+
+  if (isPostgresConfigured()) {
+    const intents = await listDueChainIntents(GOLD_INTENT_TYPE);
+    if (intents.length === 0) return;
+    console.log(`[chainBatcher] flushing gold for ${intents.length} intent(s)`);
+    for (const intent of intents) {
+      await flushGoldIntent(intent);
     }
     return;
   }
@@ -381,6 +469,17 @@ export async function stopChainBatcher(): Promise<void> {
 // ── Stats ──────────────────────────────────────────────────────────────────
 
 export function getChainBatcherStats() {
+  if (isPostgresConfigured()) {
+    return {
+      pendingItemWallets: 0,
+      pendingItemCount: 0,
+      pendingGoldWallets: 0,
+      chainWritesPaused,
+      lastSfuelBalance,
+      durable: true,
+    };
+  }
+
   let pendingItemCount = 0;
   for (const items of pendingItems.values()) {
     pendingItemCount += items.size;
@@ -393,4 +492,117 @@ export function getChainBatcherStats() {
     chainWritesPaused,
     lastSfuelBalance,
   };
+}
+
+async function flushItemIntent(intent: ChainWriteIntentRecord): Promise<void> {
+  const claimed = await claimChainIntent(intent.intentId, CHAIN_BATCHER_CLAIM_OWNER);
+  if (!claimed) return;
+
+  if (claimed.txHash && claimed.lastSubmittedAt && (Date.now() - claimed.lastSubmittedAt) >= CHAIN_BATCHER_SUBMITTED_RECOVERY_MS) {
+    const receipt = await getChainReceiptStatus(claimed.txHash);
+    if (receipt.found && receipt.success) {
+      await markChainIntentConfirmed(claimed.intentId, claimed.txHash);
+      return;
+    }
+    if (receipt.found && receipt.success === false) {
+      await markChainIntentRetryable(claimed.intentId, new Error(`batched item tx reverted: ${claimed.txHash}`), 300_000);
+      return;
+    }
+    await markChainIntentSubmitted(claimed.intentId, claimed.txHash);
+    return;
+  }
+
+  const payload = JSON.parse(claimed.payload) as { walletAddress?: string; tokenId?: string; quantity?: string };
+  if (!payload.walletAddress || !payload.tokenId || !payload.quantity) {
+    await markChainIntentRetryable(claimed.intentId, new Error("Malformed batch item payload"), 60_000);
+    return;
+  }
+
+  const attempt = await createChainTxAttempt({
+    intentId: claimed.intentId,
+    queueLabel: `batch-item:${payload.walletAddress}:${payload.tokenId}`,
+    rpcProvider: process.env.SKALE_BASE_RPC_URL ?? "default",
+  });
+
+  try {
+    const txHash = await mintItem(payload.walletAddress, BigInt(payload.tokenId), BigInt(payload.quantity));
+    await markChainIntentSubmitted(claimed.intentId, txHash);
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "submitted",
+      txHash,
+      submittedAt: Date.now(),
+    });
+    await markChainIntentConfirmed(claimed.intentId, txHash);
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "confirmed",
+      confirmedAt: Date.now(),
+    });
+  } catch (err) {
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "failed",
+      errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    });
+    await markChainIntentRetryable(claimed.intentId, err, 15_000);
+    console.error(
+      `[chainBatcher] item mint failed wallet=${payload.walletAddress} tokenId=${payload.tokenId} qty=${payload.quantity}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+async function flushGoldIntent(intent: ChainWriteIntentRecord): Promise<void> {
+  const claimed = await claimChainIntent(intent.intentId, CHAIN_BATCHER_CLAIM_OWNER);
+  if (!claimed) return;
+
+  if (claimed.txHash && claimed.lastSubmittedAt && (Date.now() - claimed.lastSubmittedAt) >= CHAIN_BATCHER_SUBMITTED_RECOVERY_MS) {
+    const receipt = await getChainReceiptStatus(claimed.txHash);
+    if (receipt.found && receipt.success) {
+      await markChainIntentConfirmed(claimed.intentId, claimed.txHash);
+      return;
+    }
+    if (receipt.found && receipt.success === false) {
+      await markChainIntentRetryable(claimed.intentId, new Error(`batched gold tx reverted: ${claimed.txHash}`), 300_000);
+      return;
+    }
+    await markChainIntentSubmitted(claimed.intentId, claimed.txHash);
+    return;
+  }
+
+  const payload = JSON.parse(claimed.payload) as { walletAddress?: string; goldAmount?: number };
+  if (!payload.walletAddress || !Number.isFinite(payload.goldAmount) || Number(payload.goldAmount) <= 0) {
+    await markChainIntentRetryable(claimed.intentId, new Error("Malformed batch gold payload"), 60_000);
+    return;
+  }
+
+  const attempt = await createChainTxAttempt({
+    intentId: claimed.intentId,
+    queueLabel: `batch-gold:${payload.walletAddress}`,
+    rpcProvider: process.env.SKALE_BASE_RPC_URL ?? "default",
+  });
+
+  try {
+    const txHash = await transferFromTreasury(payload.walletAddress, String(payload.goldAmount));
+    await markChainIntentSubmitted(claimed.intentId, txHash);
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "submitted",
+      txHash,
+      submittedAt: Date.now(),
+    });
+    await markChainIntentConfirmed(claimed.intentId, txHash);
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "confirmed",
+      confirmedAt: Date.now(),
+    });
+    console.log(`[chainBatcher] gold flush wallet=${payload.walletAddress} amount=${payload.goldAmount}`);
+  } catch (err) {
+    await updateChainTxAttempt(attempt.attemptId, {
+      status: "failed",
+      errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    });
+    await markChainIntentRetryable(claimed.intentId, err, 30_000);
+    console.error(
+      `[chainBatcher] gold transfer failed wallet=${payload.walletAddress} amount=${payload.goldAmount}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
 }
