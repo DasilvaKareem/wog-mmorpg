@@ -670,6 +670,13 @@ export async function ensureGameSchema(): Promise<void> {
 
         create index if not exists idx_wallet_item_balances_wallet
           on game.wallet_item_balances (wallet_address);
+
+        create table if not exists game.wallet_names (
+          wallet_address text primary key,
+          name text not null,
+          normalized_name text not null unique,
+          updated_at timestamptz not null default now()
+        );
       `);
       await client.query("commit");
     } catch (err) {
@@ -724,6 +731,7 @@ export async function getGameSchemaHealth(): Promise<{
   goldSpendTotalCount: number;
   walletGoldBalanceCount: number;
   walletItemBalanceCount: number;
+  walletNameCount: number;
 }> {
   const [
     { rows: characterRows },
@@ -770,6 +778,7 @@ export async function getGameSchemaHealth(): Promise<{
     { rows: goldSpendRows },
     { rows: walletGoldRows },
     { rows: walletItemRows },
+    { rows: walletNameRows },
   ] = await Promise.all([
     postgresQuery<{ count: string }>("select count(*)::text as count from game.characters"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.character_identity_state"),
@@ -815,6 +824,7 @@ export async function getGameSchemaHealth(): Promise<{
     postgresQuery<{ count: string }>("select count(*)::text as count from game.gold_spend_totals"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.wallet_gold_balances"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.wallet_item_balances"),
+    postgresQuery<{ count: string }>("select count(*)::text as count from game.wallet_names"),
   ]);
 
   return {
@@ -862,5 +872,6 @@ export async function getGameSchemaHealth(): Promise<{
     goldSpendTotalCount: Number(goldSpendRows[0]?.count ?? "0"),
     walletGoldBalanceCount: Number(walletGoldRows[0]?.count ?? "0"),
     walletItemBalanceCount: Number(walletItemRows[0]?.count ?? "0"),
+    walletNameCount: Number(walletNameRows[0]?.count ?? "0"),
   };
 }

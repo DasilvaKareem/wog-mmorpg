@@ -402,14 +402,16 @@ export async function processWalletRegistrationOperation(
 
   try {
     await updateChainOperation(operationId, {
-      status: "submitted",
+      status: "processing",
       attemptCount: record.attemptCount + 1,
       lastAttemptAt: now,
       nextAttemptAt: now,
+      txHash: undefined,
+      lastError: undefined,
     });
     await saveWalletRegistrationStatus(address, {
       operationId,
-      status: "submitted",
+      status: "processing",
       updatedAt: now,
     });
 
@@ -437,7 +439,7 @@ export async function processWalletRegistrationOperation(
     await updateChainOperation(operationId, {
       status: "completed",
       completedAt: Date.now(),
-      txHash: goldTx || sfuelTx || undefined,
+      txHash: undefined,
       lastError: undefined,
     });
     await saveWalletRegistrationStatus(address, {

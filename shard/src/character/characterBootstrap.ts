@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import {
   mintCharacterWithIdentity,
+  recoverCharacterTokenIdFromTransaction,
   registerIdentity,
 } from "../blockchain/blockchain.js";
 import { registerNameOnChain } from "../blockchain/nameServiceChain.js";
@@ -21,6 +22,7 @@ import { isPostgresConfigured } from "../db/postgres.js";
 export type CharacterBootstrapStatus =
   | "queued"
   | "pending_mint"
+  | "pending_mint_receipt"
   | "mint_confirmed"
   | "identity_pending"
   | "completed"
@@ -40,6 +42,7 @@ export interface CharacterBootstrapJob {
   lastAttemptAt?: number;
   completedAt?: number;
   lastError?: string;
+  mintTxHash?: string;
 }
 
 const memoryJobs = new Map<string, CharacterBootstrapJob>();
@@ -91,6 +94,7 @@ function serializeJob(job: CharacterBootstrapJob): Record<string, string> {
     ...(job.lastAttemptAt != null && { lastAttemptAt: String(job.lastAttemptAt) }),
     ...(job.completedAt != null && { completedAt: String(job.completedAt) }),
     ...(job.lastError ? { lastError: job.lastError } : {}),
+    ...(job.mintTxHash ? { mintTxHash: job.mintTxHash } : {}),
   };
 }
 
@@ -116,6 +120,7 @@ function parseJob(raw: Record<string, string>): CharacterBootstrapJob | null {
     ...(raw.lastAttemptAt ? { lastAttemptAt: Number(raw.lastAttemptAt) || 0 } : {}),
     ...(raw.completedAt ? { completedAt: Number(raw.completedAt) || 0 } : {}),
     ...(raw.lastError ? { lastError: raw.lastError } : {}),
+    ...(raw.mintTxHash ? { mintTxHash: raw.mintTxHash } : {}),
   };
 }
 
@@ -130,6 +135,7 @@ async function saveJob(job: CharacterBootstrapJob): Promise<void> {
     if (job.lastError == null) staleFields.push("lastError");
     if (job.completedAt == null) staleFields.push("completedAt");
     if (job.lastAttemptAt == null) staleFields.push("lastAttemptAt");
+    if (job.mintTxHash == null) staleFields.push("mintTxHash");
     if (staleFields.length > 0) {
       await redis.hdel(key(job.walletAddress, job.characterName), ...staleFields);
     }
@@ -241,6 +247,7 @@ function toCharacterRegistrationStatus(
 ): NonNullable<Awaited<ReturnType<typeof loadCharacter>>>["chainRegistrationStatus"] {
   switch (status) {
     case "pending_mint":
+    case "pending_mint_receipt":
       return "pending_mint";
     case "mint_confirmed":
       return "mint_confirmed";
@@ -412,6 +419,41 @@ export async function processCharacterBootstrapJob(
 
     if (tokenId == null) {
       let mintIdentityTxHash: string | null = null;
+      if (currentJob.mintTxHash) {
+        const recoveredTokenId = await recoverCharacterTokenIdFromTransaction(currentJob.mintTxHash);
+        if (recoveredTokenId != null) {
+          tokenId = recoveredTokenId;
+          await saveCharacter(walletAddress, characterName, {
+            characterTokenId: tokenId.toString(),
+            chainRegistrationStatus: "mint_confirmed",
+            chainRegistrationLastError: "",
+          });
+          updateRuntimeProjection(walletAddress, characterName, tokenId, agentId);
+          currentJob = {
+            ...currentJob,
+            status: agentId != null ? "completed" : "mint_confirmed",
+            updatedAt: Date.now(),
+            lastError: undefined,
+            ...(agentId != null && { completedAt: Date.now() }),
+          };
+          await saveJob(currentJob);
+        } else {
+          currentJob = {
+            ...currentJob,
+            status: "pending_mint_receipt",
+            nextAttemptAt: Date.now() + 5_000,
+            updatedAt: Date.now(),
+            lastError: undefined,
+          };
+          await saveJob(currentJob);
+          await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
+          return currentJob;
+        }
+      }
+    }
+
+    if (tokenId == null) {
+      let mintIdentityTxHash: string | null = null;
       currentJob = {
         ...currentJob,
         status: "pending_mint",
@@ -427,7 +469,17 @@ export async function processCharacterBootstrapJob(
         { skipIdentityRegistration: true }
       );
       if (mintResult.tokenId == null) {
-        throw new Error("Character mint completed without tokenId");
+        currentJob = {
+          ...currentJob,
+          status: "pending_mint_receipt",
+          mintTxHash: mintResult.txHash,
+          nextAttemptAt: Date.now() + 5_000,
+          updatedAt: Date.now(),
+          lastError: undefined,
+        };
+        await saveJob(currentJob);
+        await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
+        return currentJob;
       }
       tokenId = mintResult.tokenId;
       if (mintResult.identity?.agentId != null) {
@@ -446,6 +498,7 @@ export async function processCharacterBootstrapJob(
       currentJob = {
         ...currentJob,
         status: agentId != null ? "completed" : "mint_confirmed",
+        mintTxHash: mintResult.txHash,
         updatedAt: Date.now(),
         lastError: undefined,
         ...(agentId != null && { completedAt: Date.now() }),

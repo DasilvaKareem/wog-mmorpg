@@ -135,6 +135,19 @@ async function resolveMintedCharacterTokenId(
   return null;
 }
 
+function extractMintedCharacterTokenIdFromReceipt(receipt: any): string | null {
+  const transferLog = receipt?.logs?.find(
+    (log: any) =>
+      log?.address?.toLowerCase?.() === process.env.CHARACTER_CONTRACT_ADDRESS!.toLowerCase() &&
+      log?.topics?.[0] === ERC721_TRANSFER_TOPIC &&
+      log?.topics?.length > 3
+  );
+  if (transferLog?.topics?.[3]) {
+    return BigInt(transferLog.topics[3]).toString();
+  }
+  return null;
+}
+
 export async function recoverCharacterTokenIdFromTransaction(
   transactionHash: string,
   timeoutMs = DEV_ENABLED ? 10_000 : 90_000,
@@ -931,7 +944,9 @@ async function processCharacterMintPayload(payload: CharacterMintPayload): Promi
     txStats.characterMints++;
     recordTx("character-mint", txHash);
     characterCache.invalidate(payload.toAddress.toLowerCase());
-    const tokenId = await resolveMintedCharacterTokenId(txHash);
+    const tokenId =
+      extractMintedCharacterTokenIdFromReceipt(receipt) ??
+      await resolveMintedCharacterTokenId(txHash);
     return {
       txHash,
       tokenId,
@@ -1232,19 +1247,19 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
 
       const uri = await resolveCharacterMetadataUri(metadata);
 
-      const receipt = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
+      const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const gasPrice = await resolveManagedGasPrice();
-      const tx = await waitForBiteSubmission(
-        characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-          gasPrice,
-          maxFeePerGas: undefined,
-          maxPriorityFeePerGas: undefined,
-          type: 0,
-          nonce: await reserveServerNonce() ?? undefined,
-        })
-      );
-      return await waitForBiteReceipt(tx.wait(), DEV_ENABLED ? 10_000 : 60_000);
-    });
+        return await waitForBiteSubmission(
+          characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
+            gasPrice,
+            maxFeePerGas: undefined,
+            maxPriorityFeePerGas: undefined,
+            type: 0,
+            nonce: await reserveServerNonce() ?? undefined,
+          })
+        );
+      });
+      const receipt = await waitForBiteReceipt(tx.wait(), DEV_ENABLED ? 10_000 : 90_000);
       const txHash = String((receipt as any).hash ?? (receipt as any).transactionHash);
       txStats.metadataUpdates++;
       recordTx("metadata-update", txHash);

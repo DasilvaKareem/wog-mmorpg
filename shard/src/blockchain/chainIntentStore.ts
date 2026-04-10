@@ -106,6 +106,55 @@ const CHAIN_INTENT_SUBMITTED_RECOVERY_MS = Math.max(
   Number.parseInt(process.env.CHAIN_INTENT_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
 );
 
+export function formatChainError(err: unknown, maxLength = 400): string {
+  let message = "";
+  if (typeof err === "string") {
+    message = err;
+  } else if (err instanceof Error) {
+    message = err.message;
+  } else if (err && typeof err === "object") {
+    const candidate = err as {
+      message?: unknown;
+      shortMessage?: unknown;
+      reason?: unknown;
+      code?: unknown;
+      error?: unknown;
+      cause?: unknown;
+      data?: unknown;
+    };
+    if (typeof candidate.message === "string" && candidate.message.trim()) {
+      message = candidate.message;
+    } else if (typeof candidate.shortMessage === "string" && candidate.shortMessage.trim()) {
+      message = candidate.shortMessage;
+    } else if (typeof candidate.reason === "string" && candidate.reason.trim()) {
+      message = candidate.reason;
+    } else if (candidate.error && typeof candidate.error === "object") {
+      message = formatChainError(candidate.error, maxLength);
+    } else if (candidate.cause && typeof candidate.cause === "object") {
+      message = formatChainError(candidate.cause, maxLength);
+    } else {
+      try {
+        message = JSON.stringify(err);
+      } catch {
+        message = String(err);
+      }
+    }
+    if (!message && candidate.code != null) {
+      message = `code=${String(candidate.code)}`;
+    }
+    if (!message && candidate.data != null) {
+      try {
+        message = JSON.stringify(candidate.data);
+      } catch {
+        message = String(candidate.data);
+      }
+    }
+  } else {
+    message = String(err ?? "");
+  }
+  return message.slice(0, maxLength);
+}
+
 function shouldUsePostgres(): boolean {
   return isPostgresConfigured();
 }
@@ -703,7 +752,7 @@ export async function markChainIntentRetryable(
     availableAt: Date.now() + delayMs,
     claimedAt: undefined,
     claimOwner: undefined,
-    lastError: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    lastError: formatChainError(err, 400),
     txHash: undefined,
   });
 }
@@ -718,7 +767,7 @@ export async function markChainIntentFundingBlocked(
     availableAt: Date.now() + delayMs,
     claimedAt: undefined,
     claimOwner: undefined,
-    lastError: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    lastError: formatChainError(err, 400),
   });
 }
 
@@ -730,7 +779,7 @@ export async function markChainIntentPermanentFailure(
     status: "failed_permanent",
     claimedAt: undefined,
     claimOwner: undefined,
-    lastError: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+    lastError: formatChainError(err, 400),
   });
 }
 

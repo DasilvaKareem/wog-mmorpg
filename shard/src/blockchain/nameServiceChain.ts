@@ -17,6 +17,8 @@ import {
   processTrackedChainOperation,
   registerChainOperationProcessor,
 } from "./chainOperationStore.js";
+import { deleteWalletName, getNameByWallet, getWalletByName, isWalletNameAvailable, upsertWalletName } from "../db/nameStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 const NAME_SERVICE_ADDRESS = process.env.NAME_SERVICE_CONTRACT_ADDRESS;
 
@@ -86,6 +88,9 @@ export async function registerNameOnChain(
   const addrKey = walletAddress.toLowerCase();
   const nameKey = name.toLowerCase();
   if (!nameServiceContract) return false;
+  if (isPostgresConfigured()) {
+    await upsertWalletName(walletAddress, name);
+  }
   const record = await createChainOperation(NAME_REGISTER_OP, walletAddress.toLowerCase(), { walletAddress, name });
   try {
     await processNameOperation(record.operationId);
@@ -119,6 +124,9 @@ export async function releaseNameOnChain(
 
   if (!nameServiceContract) return false;
   const cachedName = getCached(addressToNameCache, addrKey);
+  if (isPostgresConfigured()) {
+    await deleteWalletName(walletAddress);
+  }
   const record = await createChainOperation(NAME_RELEASE_OP, walletAddress.toLowerCase(), {
     walletAddress,
     cachedName,
@@ -144,6 +152,9 @@ export async function releaseNameOnChain(
 export async function resolveNameOnChain(
   name: string
 ): Promise<string | null> {
+  if (isPostgresConfigured()) {
+    return await getWalletByName(name);
+  }
   const nameKey = name.toLowerCase();
   const cached = getCached(nameToAddressCache, nameKey);
   if (cached !== undefined) return cached;
@@ -166,6 +177,9 @@ export async function resolveNameOnChain(
 export async function reverseLookupOnChain(
   walletAddress: string
 ): Promise<string | null> {
+  if (isPostgresConfigured()) {
+    return await getNameByWallet(walletAddress);
+  }
   const addrKey = walletAddress.toLowerCase();
   const cached = getCached(addressToNameCache, addrKey);
   if (cached !== undefined) return cached;
@@ -189,11 +203,24 @@ export async function reverseLookupOnChain(
  * Check if a name is available (not taken). Uses cache + chain.
  */
 export async function isNameAvailable(name: string): Promise<boolean> {
+  if (isPostgresConfigured()) {
+    return await isWalletNameAvailable(name);
+  }
   const addr = await resolveNameOnChain(name);
   return addr === null;
 }
 
 async function isRegisteredToWallet(walletAddress: string, name: string): Promise<boolean> {
+  if (isPostgresConfigured()) {
+    const [resolvedWallet, reverseName] = await Promise.all([
+      getWalletByName(name).catch(() => null),
+      getNameByWallet(walletAddress).catch(() => null),
+    ]);
+    return (
+      resolvedWallet?.toLowerCase() === walletAddress.toLowerCase() &&
+      reverseName?.toLowerCase() === name.toLowerCase()
+    );
+  }
   const [resolvedWallet, reverseName] = await Promise.all([
     resolveNameOnChain(name).catch(() => null),
     reverseLookupOnChain(walletAddress).catch(() => null),
@@ -261,6 +288,9 @@ registerChainOperationProcessor(NAME_REGISTER_OP, async (record) => {
   }
   setCache(addressToNameCache, walletAddress.toLowerCase(), name);
   setCache(nameToAddressCache, name.toLowerCase(), walletAddress);
+  if (isPostgresConfigured()) {
+    await upsertWalletName(walletAddress, name);
+  }
   console.log(`[nameServiceChain] registered "${name}.wog" → ${walletAddress}`);
   return { result: txHash ?? "already-registered", txHash };
 });
@@ -291,6 +321,9 @@ registerChainOperationProcessor(NAME_RELEASE_OP, async (record) => {
   const cachedName = payload.cachedName || getCached(addressToNameCache, walletAddress.toLowerCase());
   if (cachedName) nameToAddressCache.delete(String(cachedName).toLowerCase());
   addressToNameCache.delete(walletAddress.toLowerCase());
+  if (isPostgresConfigured()) {
+    await deleteWalletName(walletAddress);
+  }
   console.log(`[nameServiceChain] released name for ${walletAddress}`);
   return { result: txHash ?? "already-released", txHash };
 });

@@ -28,7 +28,7 @@ export interface CharacterSaveData {
   characterTokenId?: string;
   agentId?: string;
   agentRegistrationTxHash?: string;
-  chainRegistrationStatus?: "unregistered" | "pending_mint" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
+  chainRegistrationStatus?: "unregistered" | "pending_mint" | "pending_mint_receipt" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
   chainRegistrationLastError?: string;
   raceId: string;
   classId: string;

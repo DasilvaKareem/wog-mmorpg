@@ -2479,7 +2479,7 @@ function ReputationTab({
           <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-wide">
             <span className="text-[#7a84a8]">Live shard status</span>
             <span className={registrationTone.text}>
-              {(selectedCharacter?.chainRegistrationStatus ?? "unregistered").replace(/_/g, " ")}
+              {((selectedCharacter?.bootstrapStatus ?? selectedCharacter?.chainRegistrationStatus ?? "unregistered")).replace(/_/g, " ")}
             </span>
           </div>
           {registrationProgress.active && (
@@ -3277,16 +3277,13 @@ function CharacterSwitcher({
           return (
             <button
               key={c.tokenId}
-              onClick={() => {
-                if (isPending) return;
-                onSelect(c.tokenId);
-              }}
-              disabled={isPending}
+              onClick={() => onSelect(c.tokenId)}
+              disabled={false}
               className={`text-left px-3 py-2 border-2 transition ${
                 isActive
                   ? "border-[#ffcc00]/60 bg-[#2a2210]"
                   : isPending
-                    ? "border-[#2a3450] bg-[#10162a] opacity-70"
+                    ? "border-[#2a3450] bg-[#10162a]"
                     : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
               }`}
             >

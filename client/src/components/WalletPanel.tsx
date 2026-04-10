@@ -61,14 +61,14 @@ function CharacterSection({
       : deployedCharacterName;
 
   const activeCharacter = React.useMemo(() => {
-    if (liveCharacterTokenId) {
-      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
-      if (liveCharacter) return liveCharacter;
-    }
-
     if (selectedCharacterTokenId) {
       const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
       if (selected) return selected;
+    }
+
+    if (liveCharacterTokenId) {
+      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
+      if (liveCharacter) return liveCharacter;
     }
 
     if (liveCharacterBaseName) {
@@ -82,10 +82,13 @@ function CharacterSection({
     return characters[0] ?? null;
   }, [characters, liveCharacterBaseName, liveCharacterTokenId, selectedCharacterTokenId]);
 
-  const selectionValue = liveCharacterTokenId ?? selectedCharacterTokenId ?? "";
+  const selectionValue = selectedCharacterTokenId ?? liveCharacterTokenId ?? "";
 
   const activeCharacterName = activeCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
-  const activeCharacterLevel = characterProgress?.level ?? activeCharacter?.properties.level ?? null;
+  const activeCharacterLevel =
+    selectedCharacterTokenId && activeCharacter
+      ? activeCharacter?.properties.level ?? null
+      : characterProgress?.level ?? activeCharacter?.properties.level ?? null;
   const activeCharacterRace = activeCharacter?.properties.race ?? null;
   const activeCharacterClass = activeCharacter?.properties.class ?? null;
 

@@ -6,6 +6,7 @@ import { getChainReceiptStatus } from "./chainReceipt.js";
 import {
   createChainIntent,
   createChainTxAttempt,
+  formatChainError,
   markChainIntentConfirmed,
   markChainIntentFundingBlocked,
   markChainIntentPermanentFailure,
@@ -17,6 +18,7 @@ import {
 
 export type ChainOperationStatus =
   | "queued"
+  | "processing"
   | "submitted"
   | "confirmed"
   | "completed"
@@ -411,7 +413,7 @@ export async function markChainOperationRetryable(operationId: string, err: unkn
   const current = await getChainOperation(operationId);
   if (!current) return null;
   const attemptCount = current.attemptCount + 1;
-  const lastError = (err instanceof Error ? err.message : String(err)).slice(0, 240);
+  const lastError = formatChainError(err, 240);
   const classification = classifyTxFailure(err);
   if (classification.kind === "permanent") {
     return updateChainOperation(operationId, {
@@ -544,13 +546,13 @@ function startChainOperationLockHeartbeat(
   }, intervalMs);
 }
 
-async function markChainOperationSubmitted(
+async function markChainOperationProcessing(
   operationId: string,
   attemptCount: number,
   ttlMs = CHAIN_OPERATION_LOCK_TTL_MS
 ): Promise<ChainOperationRecord | null> {
   return updateChainOperation(operationId, {
-    status: "submitted",
+    status: "processing",
     attemptCount,
     lastAttemptAt: Date.now(),
     nextAttemptAt: Date.now() + ttlMs,
@@ -568,7 +570,7 @@ export async function runTrackedChainOperation<T>(
   if (!(await acquireChainOperationLock(record.operationId, CHAIN_OPERATION_LOCK_TTL_MS))) {
     throw new Error(`Failed to acquire chain operation lock for ${record.operationId}`);
   }
-  await markChainOperationSubmitted(record.operationId, 1, CHAIN_OPERATION_LOCK_TTL_MS);
+  await markChainOperationProcessing(record.operationId, 1, CHAIN_OPERATION_LOCK_TTL_MS);
   const heartbeat = startChainOperationLockHeartbeat(record.operationId, CHAIN_OPERATION_LOCK_TTL_MS);
   const attempt = record.intentId
     ? await createChainTxAttempt({
@@ -588,11 +590,18 @@ export async function runTrackedChainOperation<T>(
       });
     }
     await updateChainOperation(record.operationId, {
-      status: "completed",
+      status: txHash ? "submitted" : "completed",
       completedAt: Date.now(),
       txHash: txHash ?? undefined,
       lastError: undefined,
     });
+    if (txHash) {
+      await updateChainOperation(record.operationId, {
+        status: "completed",
+        completedAt: Date.now(),
+        lastError: undefined,
+      });
+    }
     if (attempt) {
       await updateChainTxAttempt(attempt.attemptId, {
         status: "confirmed",
@@ -604,7 +613,7 @@ export async function runTrackedChainOperation<T>(
     if (attempt) {
       await updateChainTxAttempt(attempt.attemptId, {
         status: "failed",
-        errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 240),
+        errorMessage: formatChainError(err, 240),
       });
     }
     await markChainOperationRetryable(record.operationId, err);
@@ -646,7 +655,7 @@ export async function processTrackedChainOperation<T = unknown>(
     throw new Error(`No chain operation processor registered for type ${record.type}`);
   }
   if (!(await acquireChainOperationLock(operationId, CHAIN_OPERATION_LOCK_TTL_MS))) return null;
-  await markChainOperationSubmitted(operationId, record.attemptCount + 1, CHAIN_OPERATION_LOCK_TTL_MS);
+  await markChainOperationProcessing(operationId, record.attemptCount + 1, CHAIN_OPERATION_LOCK_TTL_MS);
   const heartbeat = startChainOperationLockHeartbeat(operationId, CHAIN_OPERATION_LOCK_TTL_MS);
   const attempt = record.intentId
     ? await createChainTxAttempt({
@@ -666,11 +675,18 @@ export async function processTrackedChainOperation<T = unknown>(
       });
     }
     await updateChainOperation(operationId, {
-      status: "completed",
+      status: txHash ? "submitted" : "completed",
       completedAt: Date.now(),
       txHash: txHash ?? undefined,
       lastError: undefined,
     });
+    if (txHash) {
+      await updateChainOperation(operationId, {
+        status: "completed",
+        completedAt: Date.now(),
+        lastError: undefined,
+      });
+    }
     if (attempt) {
       await updateChainTxAttempt(attempt.attemptId, {
         status: "confirmed",
@@ -682,7 +698,7 @@ export async function processTrackedChainOperation<T = unknown>(
     if (attempt) {
       await updateChainTxAttempt(attempt.attemptId, {
         status: "failed",
-        errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 240),
+        errorMessage: formatChainError(err, 240),
       });
     }
     await markChainOperationRetryable(operationId, err);
@@ -755,6 +771,15 @@ async function mirrorChainOperationIntent(record: ChainOperationRecord): Promise
     await updateChainIntent(record.intentId, {
       payload: record.payload,
       status: "pending",
+      txHash: undefined,
+      lastError: undefined,
+    });
+    return;
+  }
+  if (record.status === "processing") {
+    await updateChainIntent(record.intentId, {
+      payload: record.payload,
+      status: "processing",
       txHash: undefined,
       lastError: undefined,
     });

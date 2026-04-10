@@ -22,6 +22,7 @@ import { ethers } from "ethers";
 import {
   claimChainIntent,
   createChainTxAttempt,
+  formatChainError,
   getChainIntentStats,
   listDueChainIntents,
   markChainIntentConfirmed,
@@ -543,7 +544,7 @@ async function flushItemIntent(intent: ChainWriteIntentRecord): Promise<void> {
   } catch (err) {
     await updateChainTxAttempt(attempt.attemptId, {
       status: "failed",
-      errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+      errorMessage: formatChainError(err, 400),
     });
     await markChainIntentRetryable(claimed.intentId, err, 15_000);
     console.error(
@@ -600,7 +601,7 @@ async function flushGoldIntent(intent: ChainWriteIntentRecord): Promise<void> {
   } catch (err) {
     await updateChainTxAttempt(attempt.attemptId, {
       status: "failed",
-      errorMessage: (err instanceof Error ? err.message : String(err)).slice(0, 400),
+      errorMessage: formatChainError(err, 400),
     });
     await markChainIntentRetryable(claimed.intentId, err, 30_000);
     console.error(
