@@ -30,6 +30,16 @@ import {
   type ChainOperationRecord,
   updateChainOperation,
 } from "./chainOperationStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import {
+  addWalletGold,
+  addWalletItem,
+  getWalletGoldBalance,
+  getWalletItemBalance,
+  subtractWalletGold,
+  subtractWalletItem,
+  transferWalletGold,
+} from "../db/walletBalanceStore.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
 const skaleProvider = new ethers.JsonRpcProvider(
@@ -543,26 +553,31 @@ export async function enqueueSfuelDistribution(toAddress: string): Promise<strin
 
 /** Mint gold (ERC-20) to a player address. `amount` is in whole tokens (e.g. "50"). */
 export async function mintGold(toAddress: string, amount: string): Promise<string> {
+  if (isPostgresConfigured()) {
+    await addWalletGold(toAddress, Number(amount));
+    goldCache.invalidate(toAddress.toLowerCase());
+  }
   return executeRegisteredChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
 }
 
 export async function enqueueGoldMint(toAddress: string, amount: string): Promise<string> {
+  if (isPostgresConfigured()) {
+    await addWalletGold(toAddress, Number(amount));
+    goldCache.invalidate(toAddress.toLowerCase());
+  }
   const record = await createChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
   return record.operationId;
 }
 
-/** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
-export async function getGoldBalance(address: string): Promise<string> {
+export async function getOnChainGoldBalance(address: string): Promise<string> {
   const cacheKey = address.toLowerCase();
   const cached = goldCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  // Promise coalescing — reuse in-flight request for the same address
   const inflight = inflightGold.get(cacheKey);
   if (inflight) return inflight;
 
   const promise = (async (): Promise<string> => {
-    // SKALE RPC sometimes returns 0x (empty data) transiently — retry up to 3 times
     for (let attempt = 0; attempt <= 3; attempt++) {
       try {
         const result = await getBalance({ contract: goldContract, address });
@@ -582,7 +597,7 @@ export async function getGoldBalance(address: string): Promise<string> {
           msg.includes("socket hang up") ||
           code === "UND_ERR_SOCKET";
         if (isTransient && attempt < 3) {
-          await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); // 500ms, 1s, 2s
+          await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
           continue;
         }
         if (isTransient) {
@@ -591,7 +606,6 @@ export async function getGoldBalance(address: string): Promise<string> {
             console.warn(`[blockchain] getGoldBalance RPC error for ${address} after retries, returning ${stale ? "stale" : "0"}: ${msg.slice(0, 120)}`);
           }
           if (stale !== undefined) {
-            // Re-cache the stale value to prevent repeated RPC hammering
             goldCache.set(cacheKey, stale);
             return stale;
           }
@@ -604,11 +618,16 @@ export async function getGoldBalance(address: string): Promise<string> {
   })();
 
   inflightGold.set(cacheKey, promise);
-  void promise.then(
-    () => inflightGold.delete(cacheKey),
-    () => inflightGold.delete(cacheKey)
-  );
+  void promise.finally(() => inflightGold.delete(cacheKey));
   return promise;
+}
+
+/** Get gold balance for a player address. Returns formatted string (e.g. "50.0"). Cached 10s. */
+export async function getGoldBalance(address: string): Promise<string> {
+  if (isPostgresConfigured()) {
+    return String(await getWalletGoldBalance(address));
+  }
+  return await getOnChainGoldBalance(address);
 }
 
 /**
@@ -620,6 +639,11 @@ export async function transferGoldFrom(
   toAddress: string,
   amount: string
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await transferWalletGold(fromAccount.address, toAddress, Number(amount));
+    goldCache.invalidate(fromAccount.address.toLowerCase());
+    goldCache.invalidate(toAddress.toLowerCase());
+  }
   return executeRegisteredChainOperation("gold-transfer", `${fromAccount.address.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`, {
     fromAddress: fromAccount.address,
     toAddress,
@@ -632,6 +656,11 @@ export async function enqueueGoldTransferFrom(
   toAddress: string,
   amount: string
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await transferWalletGold(fromAddress, toAddress, Number(amount));
+    goldCache.invalidate(fromAddress.toLowerCase());
+    goldCache.invalidate(toAddress.toLowerCase());
+  }
   const record = await createChainOperation("gold-transfer", `${fromAddress.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`, {
     fromAddress,
     toAddress,
@@ -646,6 +675,10 @@ export async function mintItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await addWalletItem(toAddress, tokenId, quantity);
+    itemCache.invalidate(toAddress.toLowerCase());
+  }
   return executeRegisteredChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
     toAddress,
     tokenId: tokenId.toString(),
@@ -658,6 +691,10 @@ export async function enqueueItemMint(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await addWalletItem(toAddress, tokenId, quantity);
+    itemCache.invalidate(toAddress.toLowerCase());
+  }
   const record = await createChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
     toAddress,
     tokenId: tokenId.toString(),
@@ -667,7 +704,7 @@ export async function enqueueItemMint(
 }
 
 /** Get item balance for a catalog/game tokenId. Cached 10s. */
-export async function getItemBalance(
+export async function getOnChainItemBalance(
   address: string,
   tokenId: bigint
 ): Promise<bigint> {
@@ -730,6 +767,17 @@ export async function getItemBalance(
   return promise;
 }
 
+/** Get authoritative item balance for a catalog/game tokenId. */
+export async function getItemBalance(
+  address: string,
+  tokenId: bigint
+): Promise<bigint> {
+  if (isPostgresConfigured()) {
+    return await getWalletItemBalance(address, tokenId);
+  }
+  return await getOnChainItemBalance(address, tokenId);
+}
+
 /** Burn (destroy) ERC-1155 items from a player address.
  *  Signs with the player's own custodial account so the ERC-1155 contract
  *  recognises the caller as the token owner.  Falls back to server account
@@ -740,6 +788,10 @@ export async function burnItem(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await subtractWalletItem(fromAddress, tokenId, quantity);
+    itemCache.invalidate(fromAddress.toLowerCase());
+  }
   return executeRegisteredChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
     fromAddress,
     tokenId: tokenId.toString(),
@@ -752,6 +804,10 @@ export async function enqueueItemBurn(
   tokenId: bigint,
   quantity: bigint
 ): Promise<string> {
+  if (isPostgresConfigured()) {
+    await subtractWalletItem(fromAddress, tokenId, quantity);
+    itemCache.invalidate(fromAddress.toLowerCase());
+  }
   const record = await createChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
     fromAddress,
     tokenId: tokenId.toString(),

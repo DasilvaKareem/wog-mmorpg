@@ -20,6 +20,7 @@ import { getItemInstance, getWalletInstances, isItemInstanceOwnedBy, upsertItemI
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { hasActiveRentalRight } from "../marketplace/rentService.js";
+import { listWalletItemBalances } from "../db/walletBalanceStore.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -588,7 +589,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
   });
 
   // ── GET /inventory/:walletAddress ─────────────────────────────────────────
-  // Returns on-chain ERC-1155 item balances + equipped status for a wallet.
+  // Returns authoritative game inventory balances + equipped status for a wallet.
   server.get<{ Params: { walletAddress: string } }>(
     "/inventory/:walletAddress",
     async (request, reply) => {
@@ -624,13 +625,11 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         instancesByToken.set(inst.baseTokenId, arr);
       }
 
-      // Fetch all on-chain balances in parallel
-      const balances = await Promise.all(
-        ITEM_CATALOG.map(async (item) => {
-          const qty = await getItemBalance(walletAddress, item.tokenId);
-          return { tokenId: Number(item.tokenId), qty: Number(qty) };
-        })
-      );
+      const dbBalances = await listWalletItemBalances(walletAddress);
+      const balances = ITEM_CATALOG.map((item) => ({
+        tokenId: Number(item.tokenId),
+        qty: dbBalances.get(Number(item.tokenId)) ?? 0,
+      }));
 
       const items = balances
         .filter(({ tokenId, qty }) => qty > 0 || equippedByTokenId[tokenId] !== undefined)

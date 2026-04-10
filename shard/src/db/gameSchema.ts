@@ -653,6 +653,23 @@ export async function ensureGameSchema(): Promise<void> {
           spent_amount double precision not null default 0,
           updated_at timestamptz not null default now()
         );
+
+        create table if not exists game.wallet_gold_balances (
+          wallet_address text primary key,
+          balance double precision not null default 0,
+          updated_at timestamptz not null default now()
+        );
+
+        create table if not exists game.wallet_item_balances (
+          wallet_address text not null,
+          token_id bigint not null,
+          quantity bigint not null default 0,
+          updated_at timestamptz not null default now(),
+          primary key (wallet_address, token_id)
+        );
+
+        create index if not exists idx_wallet_item_balances_wallet
+          on game.wallet_item_balances (wallet_address);
       `);
       await client.query("commit");
     } catch (err) {
@@ -705,6 +722,8 @@ export async function getGameSchemaHealth(): Promise<{
   promoCodeRedemptionCount: number;
   goldReservationCount: number;
   goldSpendTotalCount: number;
+  walletGoldBalanceCount: number;
+  walletItemBalanceCount: number;
 }> {
   const [
     { rows: characterRows },
@@ -749,6 +768,8 @@ export async function getGameSchemaHealth(): Promise<{
     { rows: promoRedemptionRows },
     { rows: goldReservationRows },
     { rows: goldSpendRows },
+    { rows: walletGoldRows },
+    { rows: walletItemRows },
   ] = await Promise.all([
     postgresQuery<{ count: string }>("select count(*)::text as count from game.characters"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.character_identity_state"),
@@ -792,6 +813,8 @@ export async function getGameSchemaHealth(): Promise<{
     postgresQuery<{ count: string }>("select count(*)::text as count from game.promo_code_redemptions"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.gold_reservations"),
     postgresQuery<{ count: string }>("select count(*)::text as count from game.gold_spend_totals"),
+    postgresQuery<{ count: string }>("select count(*)::text as count from game.wallet_gold_balances"),
+    postgresQuery<{ count: string }>("select count(*)::text as count from game.wallet_item_balances"),
   ]);
 
   return {
@@ -837,5 +860,7 @@ export async function getGameSchemaHealth(): Promise<{
     promoCodeRedemptionCount: Number(promoRedemptionRows[0]?.count ?? "0"),
     goldReservationCount: Number(goldReservationRows[0]?.count ?? "0"),
     goldSpendTotalCount: Number(goldSpendRows[0]?.count ?? "0"),
+    walletGoldBalanceCount: Number(walletGoldRows[0]?.count ?? "0"),
+    walletItemBalanceCount: Number(walletItemRows[0]?.count ?? "0"),
   };
 }

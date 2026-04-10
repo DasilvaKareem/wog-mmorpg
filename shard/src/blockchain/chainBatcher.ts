@@ -33,6 +33,7 @@ import {
 } from "./chainIntentStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
 import { getChainReceiptStatus } from "./chainReceipt.js";
+import { addWalletGold, addWalletItem } from "../db/walletBalanceStore.js";
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
@@ -176,6 +177,7 @@ function normalizeAddress(addr: string): string {
 export async function queueItemMint(walletAddress: string, tokenId: bigint, quantity: bigint): Promise<void> {
   const addr = normalizeAddress(walletAddress);
   if (isPostgresConfigured()) {
+    await addWalletItem(addr, tokenId, quantity);
     await upsertAggregatedChainIntent({
       type: ITEM_INTENT_TYPE,
       aggregateType: "wallet-token",
@@ -208,6 +210,7 @@ export async function queueGoldTransfer(walletAddress: string, goldAmount: numbe
   if (!Number.isFinite(goldAmount) || goldAmount <= 0) return;
   const addr = normalizeAddress(walletAddress);
   if (isPostgresConfigured()) {
+    await addWalletGold(addr, goldAmount);
     await upsertAggregatedChainIntent({
       type: GOLD_INTENT_TYPE,
       aggregateType: "wallet",

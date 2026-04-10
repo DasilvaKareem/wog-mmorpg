@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { distributeSFuel, enqueueGoldMint, enqueueGoldTransferFrom, getGoldBalance, getItemBalance, transferGoldFrom } from "./blockchain.js";
+import { distributeSFuel, enqueueGoldMint, enqueueGoldTransferFrom, getGoldBalance, getItemBalance, getOnChainGoldBalance, getOnChainItemBalance, transferGoldFrom } from "./blockchain.js";
 import { biteProvider } from "./biteChain.js";
 import { formatGold, getAvailableGoldAsync, getSpentGoldAsync } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
@@ -624,14 +624,14 @@ export function registerWalletRoutes(server: FastifyInstance) {
       }
 
       try {
-        const onChainGold = parseFloat(await getGoldBalance(address));
+        const onChainGold = parseFloat(await getOnChainGoldBalance(address));
         const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
         const spentGold = await getSpentGoldAsync(address);
         const availableGold = await getAvailableGoldAsync(address, safeOnChainGold);
 
         // Fetch all item balances in parallel (cached 10s in blockchain.ts)
         const balanceResults = await Promise.all(
-          ITEM_CATALOG.map((item) => getItemBalance(address, item.tokenId))
+          ITEM_CATALOG.map((item) => getOnChainItemBalance(address, item.tokenId))
         );
 
         const items: {
