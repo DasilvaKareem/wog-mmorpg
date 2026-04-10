@@ -100,6 +100,7 @@ import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js
 import { startReputationChainWorker } from "./economy/reputationChain.js";
 import { startChainOperationReplayWorker } from "./blockchain/chainOperationStore.js";
 import { ensureGameSchema, getGameSchemaHealth } from "./db/gameSchema.js";
+import { migrateRedisCharactersToPostgres } from "./character/migrateRedisToPostgres.js";
 import { initPostgres, isPostgresConfigured } from "./db/postgres.js";
 import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
 
@@ -853,6 +854,15 @@ const start = async () => {
         ? `[postgres] Ready (characters=${health.characterCount}, identities=${health.identityStateCount}, walletLinks=${health.walletLinkCount}, characterProjections=${health.characterProjectionCount}, outbox=${health.outboxCount}, chainOps=${health.chainOperationCount}, professions=${health.professionStateCount}, equipment=${health.equipmentStateCount}, parties=${health.partyCount}, listings=${health.listingCount}, plots=${health.plotStateCount}, itemMappings=${health.itemTokenMappingCount}, itemInstances=${health.craftedItemInstanceCount}, friendEdges=${health.friendEdgeCount}, friendRequests=${health.friendRequestCount}, auctions=${health.auctionProjectionCount}, guilds=${health.guildCount}, guildMembers=${health.guildMembershipCount}, guildProposals=${health.guildProposalCount}, pushSubs=${health.webPushSubscriptionCount}, telegramLinks=${health.telegramLinkCount}, marketplaceOps=${health.marketplaceOperationCount}, marketplacePayments=${health.marketplacePendingPaymentCount}, goldPayments=${health.goldPendingPaymentCount}, rentals=${health.rentalListingCount}, rentalGrants=${health.rentalGrantCount}, rentalEntities=${health.characterRentalEntityCount}, diaryEntries=${health.diaryEntryCount}, reputationScores=${health.reputationScoreCount}, reputationFeedback=${health.reputationFeedbackCount}, custodialWallets=${health.custodialWalletCount}, walletRuntime=${health.walletRuntimeStateCount}, walletRegistrations=${health.walletRegistrationStateCount}, bootstrapJobs=${health.characterBootstrapJobCount}, inbox=${health.agentInboxMessageCount}, inboxHistory=${health.agentInboxHistoryCount}, merchants=${health.merchantStateCount}, partyInvites=${health.partyInviteCount}, promoCodes=${health.promoCodeCount}, promoRedemptions=${health.promoCodeRedemptionCount}, goldReservations=${health.goldReservationCount})`
         : "[postgres] Ready"
     );
+    // Migrate Redis character data into Postgres (safe to run multiple times)
+    if (getRedis()) {
+      try {
+        const result = await migrateRedisCharactersToPostgres();
+        server.log.info(`[migrate] Redis→Postgres: ${result.migrated} migrated, ${result.skipped} skipped, ${result.errors} errors`);
+      } catch (err: any) {
+        server.log.warn(`[migrate] Redis→Postgres migration failed (non-fatal): ${err.message?.slice(0, 100)}`);
+      }
+    }
   } else {
     server.log.warn("[postgres] DATABASE_URL not configured; authoritative persistent read models are disabled");
   }
