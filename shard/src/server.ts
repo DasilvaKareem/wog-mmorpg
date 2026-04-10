@@ -1,10 +1,12 @@
 import "dotenv/config";
 import "./config/devLocalContracts.js";
+import { runMigrations } from "./db.js";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { registerZoneRuntime } from "./world/zoneRuntime.js";
 import { registerSpawnOrders } from "./world/spawnOrders.js";
 import { registerStateApi } from "./routes/stateApi.js";
+import { registerStatsRoutes } from "./routes/statsRoutes.js";
 import { registerCommands } from "./social/commands.js";
 import { registerWalletRoutes, startWalletRegistrationWorker } from "./blockchain/wallet.js";
 import { registerShopRoutes } from "./economy/shop.js";
@@ -49,6 +51,7 @@ import { registerX402Routes } from "./economy/x402Routes.js";
 import { registerAgentChatRoutes } from "./agents/agentChatRoutes.js";
 import { registerAgentInboxRoutes } from "./agents/agentInboxRoutes.js";
 import { registerA2ARoutes } from "./agents/a2aRoutes.js";
+import { registerAgentDirectoryRoutes } from "./agents/agentDirectoryRoutes.js";
 import { agentManager } from "./agents/agentManager.js";
 import { registerItemRngRoutes } from "./items/itemRng.js";
 import { registerMarketplaceRoutes } from "./economy/marketplace.js";
@@ -682,7 +685,6 @@ server.post<{
     completedQuests: entity.completedQuests ?? [],
     learnedTechniques: entity.learnedTechniques ?? [],
     professions: getLearnedProfessions(entity.walletAddress),
-    pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
     equipment: entity.equipment ?? undefined,
   });
 
@@ -737,6 +739,7 @@ startChainBatcher();
 registerSpawnOrders(server);
 registerCommands(server);
 registerStateApi(server);
+registerStatsRoutes(server);
 registerWalletRoutes(server);
 registerShopRoutes(server);
 registerCharacterRoutes(server);
@@ -773,6 +776,7 @@ registerPredictionRoutes(server);
 registerAgentChatRoutes(server);
 registerAgentInboxRoutes(server);
 registerA2ARoutes(server);
+registerAgentDirectoryRoutes(server);
 registerGoldPurchaseRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
@@ -910,6 +914,11 @@ const start = async () => {
   server.log.info(`[chain] RPC target ${SKALE_BASE_RPC_URL} (expected chainId=${SKALE_BASE_CHAIN_ID})`);
   await assertConfiguredRpc();
   server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
+
+  // Run DB migrations before accepting traffic
+  await runMigrations().catch((err) => {
+    server.log.warn(`[db] migrations failed (non-fatal for now): ${err.message}`);
+  });
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";

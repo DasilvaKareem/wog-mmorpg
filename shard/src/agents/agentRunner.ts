@@ -36,7 +36,7 @@ import {
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
-import { ZONE_LEVEL_REQUIREMENTS, FARM_ZONES, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, QUEST_ZONES, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
@@ -1203,7 +1203,7 @@ export class AgentRunner {
     const allowed = this.currentCaps.allowedZones;
     const zonesByLevel = Object.entries(ZONE_LEVEL_REQUIREMENTS)
       .filter(([zone]) => allowed === "all" || allowed.includes(zone))
-      .filter(([zone]) => !FARM_ZONES.has(zone)) // Skip farm zones — no quests/mobs
+      .filter(([zone]) => QUEST_ZONES.has(zone)) // Only route to zones with quest content
       .sort(([, a], [, b]) => a - b);
     let bestZone: string | null = null;
     for (const [zone, req] of zonesByLevel) {
@@ -1489,7 +1489,7 @@ export class AgentRunner {
           const accessibleNeighbors = getZoneConnections(this.currentRegion)
             .filter((z) => lvl >= (ZONE_LEVEL_REQUIREMENTS[z] ?? 1))
             .filter((z) => allowed === "all" || allowed.includes(z))
-            .filter((z) => !FARM_ZONES.has(z)); // Don't wander into farm zones
+            .filter((z) => QUEST_ZONES.has(z)); // Only wander to zones with quest content
           if (accessibleNeighbors.length > 0) {
             const pick = accessibleNeighbors[Math.floor(Math.random() * accessibleNeighbors.length)];
             console.log(`[agent:${this.walletTag}] No targets in ${this.currentRegion}, moving to ${pick}`);

@@ -216,7 +216,6 @@ export function registerSpawnOrders(server: FastifyInstance) {
       completedQuests: saved?.completedQuests ?? [],
       storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
-      pendingQuestApprovals: saved?.pendingQuestApprovals ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
@@ -282,7 +281,6 @@ export function registerSpawnOrders(server: FastifyInstance) {
         storyFlags: [],
         learnedTechniques: [],
         professions: [],
-        pendingQuestApprovals: [],
       });
     }
 

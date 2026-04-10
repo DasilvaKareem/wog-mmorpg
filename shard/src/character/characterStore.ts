@@ -41,7 +41,6 @@ export interface CharacterSaveData {
   storyFlags: string[];
   learnedTechniques: string[];
   professions: string[];
-  pendingQuestApprovals?: string[];
   signatureTechniqueId?: string;
   ultimateTechniqueId?: string;
   /** Serialized equipment map — persisted as JSON string in Redis */
@@ -157,7 +156,6 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     storyFlags: parseStringArray(raw.storyFlags),
     learnedTechniques: parseStringArray(raw.learnedTechniques),
     professions: parseStringArray(raw.professions),
-    pendingQuestApprovals: parseStringArray(raw.pendingQuestApprovals),
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,

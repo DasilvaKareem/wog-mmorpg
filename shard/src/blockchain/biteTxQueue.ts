@@ -72,7 +72,14 @@ export function isTransientRpcSendError(err: unknown): boolean {
   );
 }
 
+function isBalanceError(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
+  return msg.includes("balance is too low") || msg.includes("transfer amount exceeds balance");
+}
+
 function isNonceError(err: unknown): boolean {
+  // Balance errors share code -32004 with nonce errors on SKALE — don't retry those
+  if (isBalanceError(err)) return false;
   const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
   const code = String((err as any)?.code ?? (err as any)?.cause?.code ?? (err as any)?.data?.code ?? "");
   return (

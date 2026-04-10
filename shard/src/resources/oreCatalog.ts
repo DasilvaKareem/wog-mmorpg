@@ -1,4 +1,4 @@
-export type OreType = "coal" | "tin" | "copper" | "silver" | "gold";
+export type OreType = "stone" | "coal" | "tin" | "copper" | "silver" | "gold";
 
 export interface OreProperties {
   label: string;
@@ -11,6 +11,15 @@ export interface OreProperties {
 }
 
 export const ORE_CATALOG: Record<OreType, OreProperties> = {
+  stone: {
+    label: "Stone Blocks",
+    rarity: "common",
+    maxCharges: 5,
+    tokenId: 191n,
+    respawnTicks: 80,
+    requiredPickaxeTier: 1,
+    requiredSkillLevel: 1,
+  },
   coal: {
     label: "Coal Deposit",
     rarity: "common",

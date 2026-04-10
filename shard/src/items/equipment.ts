@@ -325,6 +325,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
       name: itemInstance?.displayName ?? item.name,
+      xrVisualId: item.xrVisualId ?? null,
       durability,
       maxDurability,
       broken: false,

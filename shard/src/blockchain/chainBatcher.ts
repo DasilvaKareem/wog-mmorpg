@@ -26,7 +26,11 @@ const ITEM_FLUSH_INTERVAL_MS = 30_000;   // 30 seconds
 const GOLD_FLUSH_INTERVAL_MS = 300_000;  // 5 minutes
 
 const SFUEL_CHECK_INTERVAL_MS = 60_000;  // check balance every 60s
-const SFUEL_MIN_BALANCE = 0.01;          // pause chain writes below this
+// Pause threshold: low enough that a faucet top-up (0.001 sFUEL) can reopen it.
+// Old value was 0.01 which kept the breaker permanently open on low-balance chains.
+const SFUEL_MIN_BALANCE = parseFloat(process.env.SFUEL_MIN_BALANCE || "0.0005");
+// Warn (but don't pause) when balance drops below this — gives earlier notice.
+const SFUEL_WARN_BALANCE = parseFloat(process.env.SFUEL_WARN_BALANCE || "0.005");
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +46,11 @@ let sfuelCheckTimer: ReturnType<typeof setInterval> | null = null;
 
 let chainWritesPaused = false;
 let lastSfuelBalance = -1;
+
+/** Gold transfer circuit breaker — pause after balance-too-low errors */
+let goldTransfersPaused = false;
+let goldPausedUntil = 0;
+const GOLD_PAUSE_DURATION_MS = 10 * 60_000; // 10 minutes between retries
 
 // ── sFUEL Circuit Breaker ──────────────────────────────────────────────────
 
@@ -62,6 +71,42 @@ function getServerWalletAddress(): string | null {
   }
 }
 
+let sfuelAutoRefillAttemptedAt = 0;
+const SFUEL_REFILL_COOLDOWN_MS = 5 * 60_000; // only try auto-refill once per 5 min
+
+async function tryAutoRefillSFuel(addr: string): Promise<void> {
+  const now = Date.now();
+  if (now - sfuelAutoRefillAttemptedAt < SFUEL_REFILL_COOLDOWN_MS) return;
+  sfuelAutoRefillAttemptedAt = now;
+
+  // SKALE chains expose a community pool / PoW faucet endpoint.
+  // Try the chain's built-in sFUEL distributor via a signed eth_sendRawTransaction.
+  // If the chain has a faucet API, this is where to call it.
+  const faucetUrl = process.env.SFUEL_FAUCET_URL;
+  if (!faucetUrl) {
+    console.warn(
+      `[chainBatcher] sFUEL critically low (${addr.slice(0, 8)}). ` +
+      `Set SFUEL_FAUCET_URL or top up manually. Game writes are paused.`
+    );
+    return;
+  }
+
+  try {
+    const res = await fetch(faucetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address: addr }),
+    });
+    if (res.ok) {
+      console.log(`[chainBatcher] sFUEL auto-refill requested from faucet for ${addr.slice(0, 8)}`);
+    } else {
+      console.warn(`[chainBatcher] sFUEL faucet returned ${res.status} for ${addr.slice(0, 8)}`);
+    }
+  } catch (err) {
+    console.warn(`[chainBatcher] sFUEL faucet request failed:`, err instanceof Error ? err.message : err);
+  }
+}
+
 async function checkSfuelBalance(): Promise<void> {
   const addr = getServerWalletAddress();
   if (!addr) return;
@@ -72,12 +117,17 @@ async function checkSfuelBalance(): Promise<void> {
     const balEth = parseFloat(ethers.formatEther(balance));
     lastSfuelBalance = balEth;
 
+    if (balEth < SFUEL_WARN_BALANCE && balEth >= SFUEL_MIN_BALANCE) {
+      console.warn(`[chainBatcher] sFUEL WARNING — balance ${balEth.toFixed(6)} is low. Top up soon.`);
+    }
+
     if (balEth < SFUEL_MIN_BALANCE && !chainWritesPaused) {
       chainWritesPaused = true;
       console.warn(
         `[chainBatcher] sFUEL CIRCUIT BREAKER OPEN — balance ${balEth.toFixed(6)} < ${SFUEL_MIN_BALANCE}. ` +
         `Chain writes paused. Pending: ${pendingItems.size} wallets (items), ${pendingGold.size} wallets (gold).`
       );
+      void tryAutoRefillSFuel(addr);
     } else if (balEth >= SFUEL_MIN_BALANCE && chainWritesPaused) {
       chainWritesPaused = false;
       console.log(
@@ -172,6 +222,15 @@ async function flushGoldForWallet(walletAddress: string): Promise<void> {
     return;
   }
 
+  // Gold circuit breaker: skip if treasury balance is known to be depleted
+  if (goldTransfersPaused && Date.now() < goldPausedUntil) {
+    return; // keep gold queued, don't attempt transfer
+  }
+  if (goldTransfersPaused) {
+    goldTransfersPaused = false;
+    console.log("[chainBatcher] gold circuit breaker reset — retrying transfers");
+  }
+
   // Take snapshot and clear pending
   pendingGold.delete(walletAddress);
 
@@ -179,13 +238,23 @@ async function flushGoldForWallet(walletAddress: string): Promise<void> {
     await transferFromTreasury(walletAddress, amount.toString());
     console.log(`[chainBatcher] gold flush wallet=${walletAddress} amount=${amount}`);
   } catch (err) {
-    console.error(
-      `[chainBatcher] gold transfer failed wallet=${walletAddress} amount=${amount}:`,
-      err instanceof Error ? err.message : err
-    );
+    const msg = err instanceof Error ? err.message : String(err);
     // Re-queue on failure
     const existing = pendingGold.get(walletAddress) ?? 0;
     pendingGold.set(walletAddress, existing + amount);
+
+    // Trip circuit breaker on balance errors to avoid spamming the chain
+    if (msg.includes("balance is too low") || msg.includes("transfer amount exceeds balance")) {
+      if (!goldTransfersPaused) {
+        console.error(
+          `[chainBatcher] treasury GOLD balance depleted — pausing gold transfers for ${GOLD_PAUSE_DURATION_MS / 60_000}min. Queued gold is retained.`
+        );
+        goldTransfersPaused = true;
+        goldPausedUntil = Date.now() + GOLD_PAUSE_DURATION_MS;
+      }
+    } else {
+      console.error(`[chainBatcher] gold transfer failed wallet=${walletAddress} amount=${amount}: ${msg}`);
+    }
   }
 }
 

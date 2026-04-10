@@ -7,7 +7,7 @@ import { updateCharacterMetadata, burnItem, findIdentityByCharacterTokenId } fro
 import { queueItemMint, queueGoldTransfer } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import type { OreType } from "../resources/oreCatalog.js";
-import { QUEST_CATALOG, doesKillCountForQuest } from "../social/questSystem.js";
+import { QUEST_CATALOG, doesKillCountForQuest, advanceGatherQuests } from "../social/questSystem.js";
 import { type ProfessionType, getLearnedProfessions, restoreProfessions } from "../professions/professions.js";
 import type { FlowerType } from "../resources/flowerCatalog.js";
 import { CROP_CATALOG, GROWTH_MULTIPLIERS, type CropType } from "../farming/cropCatalog.js";
@@ -80,6 +80,7 @@ export interface CastingIntent {
 export interface EquippedItemState {
   tokenId: number;
   name?: string;
+  xrVisualId?: string | null;
   durability: number;
   maxDurability: number;
   broken?: boolean;
@@ -225,8 +226,6 @@ export interface Entity {
   leashing?: boolean;
   /** True when a player agent is navigating to an NPC — suppresses auto-combat. */
   gotoMode?: boolean;
-  /** Quest IDs awaiting summoner approval (players only). */
-  pendingQuestApprovals?: string[];
   /** Entity ID of party leader to follow when idle (rented characters). */
   followLeaderId?: string;
   /** In-flight technique windup state for pre-resolution telegraphing. */
@@ -1078,10 +1077,9 @@ function shouldSuppressMobGold(killer: Entity, mob: Entity): boolean {
  * Level-gap and repeat-kill penalties are applied per member.
  */
 function awardPartyXp(zone: ZoneState, xpRecipient: Entity, baseXpReward: number, mobLevel?: number): void {
-  if (baseXpReward <= 0 || xpRecipient.level == null) {
-    console.warn(`[xp-debug] SKIPPED XP: recipient=${xpRecipient.name} baseXp=${baseXpReward} level=${xpRecipient.level} levelIsNull=${xpRecipient.level == null}`);
-    return;
-  }
+  // Only players receive XP — mobs killing players/other mobs should not gain XP
+  if (xpRecipient.type !== "player") return;
+  if (baseXpReward <= 0 || xpRecipient.level == null) return;
 
   const partyMemberIds = getPartyMembers(xpRecipient.id);
 
@@ -1533,6 +1531,13 @@ async function handleMobDeath(
       console.log(
         `[loot] ${killer.name} (${killer.walletAddress}) auto-looted ${autoDrops.length} recyclable item drops from ${mob.name}`
       );
+      // Advance gather/craft quests for looted items
+      if (killer.type === "player" && killer.activeQuests?.length) {
+        for (const drop of autoDrops) {
+          const itemDef = getItemByTokenId(drop.tokenId);
+          if (itemDef?.name) advanceGatherQuests(killer, itemDef.name);
+        }
+      }
     }
   }
 
@@ -2715,6 +2720,26 @@ async function worldTick() {
               startedAtTick: zone.tick,
               resolveAtTick: zone.tick + windupTicks,
             };
+            logZoneEvent({
+              zoneId: zone.zoneId,
+              type: "technique-start",
+              tick: zone.tick,
+              message: `${entity.name} begins casting ${technique.name}!`,
+              entityId: entity.id,
+              entityName: entity.name,
+              targetId: target.id,
+              targetName: target.name,
+              data: {
+                techniqueId: technique.id,
+                techniqueName: technique.name,
+                animStyle: technique.animStyle,
+                windupTicks,
+                casterX: entity.x,
+                casterZ: entity.y,
+                targetX: target.x,
+                targetZ: target.y,
+              },
+            });
             entity.order = undefined;
             continue;
           }
@@ -3398,7 +3423,6 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         storyFlags: entity.storyFlags ?? [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: getLearnedProfessions(entity.walletAddress),
-        pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
         equipment: entity.equipment ?? undefined,
       });
       await persistLivePlayerEntity(entity);

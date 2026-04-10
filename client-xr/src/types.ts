@@ -18,7 +18,15 @@ export interface Entity {
   equipment?: Partial<
     Record<
       string,
-      { tokenId: number; name?: string; quality?: string; durability?: number; maxDurability?: number; broken?: boolean }
+      {
+        tokenId: number;
+        name?: string;
+        xrVisualId?: string | null;
+        quality?: string;
+        durability?: number;
+        maxDurability?: number;
+        broken?: boolean;
+      }
     >
   >;
   partyId?: string;

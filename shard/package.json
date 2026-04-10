@@ -23,11 +23,13 @@
     "@google/genai": "^1.44.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
     "@skalenetwork/bite": "^0.7.1",
+    "@types/pg": "^8.20.0",
     "dotenv": "^17.2.4",
     "ethers": "^6.16.0",
     "fastify": "^5.2.1",
     "ioredis": "^5.9.3",
     "jsonwebtoken": "^9.0.3",
+    "pg": "^8.20.0",
     "thirdweb": "^5.118.1",
     "viem": "^2.45.3",
     "web-push": "^3.6.7"

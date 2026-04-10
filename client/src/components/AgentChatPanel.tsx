@@ -101,6 +101,7 @@ const FOCUS_COLORS: Record<string, string> = {
   crafting: "#b48efa",
   alchemy: "#54dbb8",
   cooking: "#f2a854",
+  homestead: "#7dd3a7",
   enchanting: "#c792ea",
   idle: "#8b9abc",
 };

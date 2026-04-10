@@ -36,6 +36,13 @@ const NPC_SKINS   = ["fair", "light", "medium", "tan", "brown", "dark"];
 const NPC_EYES    = ["brown", "blue", "green", "amber", "gray", "violet"];
 const NPC_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald"];
 
+const TRADER_SHOP_ITEMS = [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76, 227];
+const BLACKSMITH_SHOP_ITEMS = [
+  3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115,
+  224, 225, 226, 228, 229, 230,
+  243, 244, 245, 246, 247, 248, 249,
+];
+
 // Female-presenting NPC names (used to assign gender for hair diversity)
 const FEMALE_NAMES = new Set([
   "lysandra", "kira", "willow", "mirelle", "hilda", "elara",
@@ -143,7 +150,7 @@ export const NPC_DEFS: NpcDef[] = [
     y: 260,
     hp: 999,
     // Sells potions, starter weapons, starter armor, Stone Pickaxe, Basic Sickle, Rusty Skinning Knife, Traveler's Cloak
-    shopItems: [0, 1, 2, 4, 6, 7, 8, 10, 12, 13, 14, 15, 16, 27, 41, 76, 227],
+    shopItems: TRADER_SHOP_ITEMS,
   },
   {
     zoneId: "village-square",
@@ -153,7 +160,7 @@ export const NPC_DEFS: NpcDef[] = [
     y: 260,
     hp: 999,
     // Sells advanced weapons, heavy armor, pickaxes, sickles, skinning knives, disenchanting scroll
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -165,7 +172,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 160,
     y: 60,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
   {
     zoneId: "dark-forest",
@@ -174,7 +181,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 160,
     y: 60,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   {
@@ -1230,7 +1237,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -1500,7 +1507,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -1770,7 +1777,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -2048,7 +2055,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -2326,7 +2333,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -2604,7 +2611,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer
@@ -2864,7 +2871,7 @@ export const NPC_DEFS: NpcDef[] = [
     x: 220,
     y: 420,
     hp: 999,
-    shopItems: [3, 5, 9, 17, 18, 19, 20, 21, 28, 29, 30, 42, 43, 44, 77, 78, 79, 115, 224, 225, 226, 228, 229, 230],
+    shopItems: BLACKSMITH_SHOP_ITEMS,
   },
 
   // Auctioneer

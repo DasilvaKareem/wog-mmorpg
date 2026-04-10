@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { ethers } from "ethers";
 
-const provider = new ethers.JsonRpcProvider("https://skale-base.skalenodes.com/v1/base");
+const provider = new ethers.JsonRpcProvider(process.env.SKALE_BASE_RPC_URL || "https://1187947933.rpc.thirdweb.com");
 const wallet = new ethers.Wallet(process.env.SERVER_PRIVATE_KEY!, provider);
 const contract = new ethers.Contract(
   process.env.IDENTITY_REGISTRY_ADDRESS!,

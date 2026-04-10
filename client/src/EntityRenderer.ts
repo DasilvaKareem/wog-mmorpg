@@ -388,6 +388,7 @@ export class EntityRenderer {
         hpBg.destroy();
         partyRing?.destroy();
         questMarker?.destroy();
+        (visual as any).nodeShimmer?.destroy();
         this.visuals.delete(entityId);
         this.entities.delete(entityId);
         this.dying.delete(entityId);
@@ -592,23 +593,103 @@ export class EntityRenderer {
 
       // Brown earth particles
       this.spawnGatherParticles(sx, sy - 2, 0xbb8833, 0xddaa44, 5);
+
+    } else if (gatherType === "skinning") {
+      // Red-brown tint flash
+      visual.sprite.setTint(0xcc6644);
+      this.scene.time.delayedCall(350, () => visual.sprite?.clearTint());
+
+      // Quick slash motion — lateral swipe
+      this.scene.tweens.add({
+        targets: visual.sprite,
+        x: sx + 3,
+        duration: 80,
+        ease: "Quad.easeIn",
+        yoyo: true,
+        repeat: 1,
+        onUpdate: () => {
+          const s = visual.spriteScale;
+          visual.label.setPosition(visual.sprite.x, visual.sprite.y - 12 * s);
+          visual.hpBg.setPosition(visual.sprite.x, visual.sprite.y + 10 * s);
+        },
+        onComplete: () => {
+          visual.sprite.setPosition(sx, sy);
+        },
+      });
+
+      // Slash lines — 3 short diagonal streaks
+      for (let i = 0; i < 3; i++) {
+        const line = this.scene.add.graphics().setDepth(126);
+        line.lineStyle(1.2, 0xcc6644, 0.8);
+        const ox = sx - 4 + i * 4;
+        const oy = sy - 6;
+        line.beginPath();
+        line.moveTo(ox, oy);
+        line.lineTo(ox + 3, oy + 8);
+        line.strokePath();
+        this.scene.tweens.add({
+          targets: line, alpha: 0,
+          duration: 300, delay: i * 50,
+          onComplete: () => line.destroy(),
+        });
+      }
+
+      // Red-brown hide particles
+      this.spawnGatherParticles(sx, sy - 4, 0xcc6644, 0x996644, 3);
     }
 
-    // Node depletion flash — flash the resource node white then fade back
+    // Node depletion animation — shrink + fade + white flash, then recover
     if (nodeId) {
       const nodeVisual = this.visuals.get(nodeId);
       if (nodeVisual?.sprite) {
+        const ns = nodeVisual.spriteScale;
         nodeVisual.sprite.setTint(0xffffff);
+
+        // Impact flash ring around node
+        const ring = this.scene.add.circle(
+          nodeVisual.sprite.x, nodeVisual.sprite.y, 6,
+          gatherType === "mining" ? 0xffaa33 :
+          gatherType === "herbalism" ? 0x66dd88 :
+          gatherType === "farming" ? 0xddbb44 : 0xffffff,
+          0.5,
+        ).setDepth(124);
+        this.scene.tweens.add({
+          targets: ring, scaleX: 2.5, scaleY: 2.5, alpha: 0,
+          duration: 350, ease: "Quad.easeOut",
+          onComplete: () => ring.destroy(),
+        });
+
+        // Node shake + shrink
         this.scene.tweens.add({
           targets: nodeVisual.sprite,
-          alpha: 0.5,
-          duration: 150,
+          scaleX: ns * 0.8, scaleY: ns * 0.8, alpha: 0.5,
+          duration: 200, ease: "Back.easeIn",
           yoyo: true,
           onComplete: () => {
             nodeVisual.sprite?.clearTint();
             nodeVisual.sprite?.setAlpha(1);
+            nodeVisual.sprite?.setScale(ns);
           },
         });
+
+        // Debris particles flying off node
+        const nx = nodeVisual.sprite.x;
+        const ny = nodeVisual.sprite.y;
+        for (let i = 0; i < 3; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const dot = this.scene.add
+            .circle(nx, ny, 1 + Math.random(), 0xffffff, 0.7)
+            .setDepth(125);
+          this.scene.tweens.add({
+            targets: dot,
+            x: nx + Math.cos(angle) * (8 + Math.random() * 6),
+            y: ny + Math.sin(angle) * (8 + Math.random() * 6),
+            alpha: 0,
+            duration: 400,
+            ease: "Quad.easeOut",
+            onComplete: () => dot.destroy(),
+          });
+        }
       }
     }
   }
@@ -687,6 +768,7 @@ export class EntityRenderer {
         visual.hpBg.destroy();
         visual.partyRing?.destroy();
         visual.questMarker?.destroy();
+        (visual as any).nodeShimmer?.destroy();
         this.visuals.delete(id);
         this.entities.delete(id);
       }
@@ -934,6 +1016,28 @@ export class EntityRenderer {
     // Apply initial FX for any active effects
     this.syncEffectFx(visual, entity);
     this.refreshVisualVisibility(id, visual);
+
+    // Resource node idle shimmer — subtle pulsing glow so nodes are discoverable
+    if (entity.type === "ore-node" || entity.type === "herb-node" || entity.type === "crop-node") {
+      const shimmerColor =
+        entity.type === "ore-node" ? 0xffaa33 :
+        entity.type === "herb-node" ? 0x66dd88 :
+        0xddbb44;
+      const shimmer = this.scene.add
+        .circle(px, py + 2, 5, shimmerColor, 0.15)
+        .setDepth(entityDepth - 1);
+      this.scene.tweens.add({
+        targets: shimmer,
+        alpha: 0.05,
+        scaleX: 1.3, scaleY: 1.3,
+        duration: 1500 + Math.random() * 500,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.easeInOut",
+      });
+      // Store on visual so we can clean up later
+      (visual as any).nodeShimmer = shimmer;
+    }
 
     return visual;
   }

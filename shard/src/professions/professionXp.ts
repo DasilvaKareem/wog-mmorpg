@@ -59,14 +59,23 @@ function getOrCreateSkill(wallet: string, profession: string): ProfessionSkillDa
   return map.get(profession)!;
 }
 
+export interface SkillXpResult {
+  profession: string;
+  oldLevel: number;
+  newLevel: number;
+  skillUp: boolean;
+}
+
 /** Award per-profession skill XP (called alongside character XP award) */
-function awardSkillXp(wallet: string, actionLabel: string, xpAmount: number): void {
+export function awardSkillXp(wallet: string, actionLabel: string, xpAmount: number): SkillXpResult | null {
   const profId = ACTION_TO_PROFESSION[actionLabel];
-  if (!profId) return;
+  if (!profId) return null;
   const skill = getOrCreateSkill(wallet, profId);
+  const oldLevel = skill.level;
   skill.xp += xpAmount;
   skill.actions += 1;
   skill.level = skillLevelFromXp(skill.xp);
+  return { profession: profId, oldLevel, newLevel: skill.level, skillUp: skill.level > oldLevel };
 }
 
 /** Get all profession skill data for a wallet */
@@ -157,9 +166,25 @@ export function awardProfessionXp(
 ): ProfessionXpResult {
   if (xpAmount <= 0) return { xpAwarded: 0, totalXp: entity.xp ?? 0, leveledUp: false };
 
-  // Track per-profession skill XP
+  // Track per-profession skill XP + emit skill-up event
   if (entity.walletAddress) {
-    awardSkillXp(entity.walletAddress, actionLabel, xpAmount);
+    const skillResult = awardSkillXp(entity.walletAddress, actionLabel, xpAmount);
+    if (skillResult?.skillUp) {
+      const zone = getAllZones().get(zoneId);
+      logZoneEvent({
+        zoneId,
+        type: "profession",
+        tick: zone?.tick ?? 0,
+        message: `${entity.name}'s ${skillResult.profession} skill reached ${skillResult.newLevel}!`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          profession: skillResult.profession,
+          oldLevel: skillResult.oldLevel,
+          newLevel: skillResult.newLevel,
+        },
+      });
+    }
   }
 
   // Ensure level and xp are proper numbers (safety fix)

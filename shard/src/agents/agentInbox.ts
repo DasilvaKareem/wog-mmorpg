@@ -17,7 +17,6 @@ export type InboxMessageType =
   | "trade-request"    // "I want to buy/sell X"
   | "party-invite"     // "Join my party"
   | "broadcast"        // zone-wide announcement
-  | "quest-approval"   // champion asks summoner to approve a quest
   | "system";          // game event notification (level-up, death, quest complete)
 
 export interface InboxMessage {

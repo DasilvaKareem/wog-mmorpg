@@ -43,8 +43,7 @@ type DialogueEvent =
   | "react_loot"
   | "react_technique"
   | "summon_level_up"
-  | "summon_quest_complete"
-  | "summon_quest_accept";
+  | "summon_quest_complete";
 
 interface DialogueContext {
   entityId: string;
@@ -984,32 +983,6 @@ const DIALOGUE: Record<string, string[]> = {
     "Done with \"{detail}\"! What's the plan?",
   ],
 
-  // Quest accepted — telling summoner what we're working on
-  "sunforged::summon_quest_accept": [
-    "Picked up \"{detail}\" — sounds like someone needs a champion. Should I go for it?",
-    "New quest: \"{detail}\". I'll handle it unless you have other orders.",
-    "Accepted \"{detail}\". The oath is made. Any specific approach you want?",
-  ],
-  "veilborn::summon_quest_accept": [
-    "New job: \"{detail}\". I'll get it done. Unless you've got something better?",
-    "Took on \"{detail}\". Straightforward enough. Want me to prioritize something else?",
-    "Picked up \"{detail}\". Good pay? Let me know if you'd rather I do something else.",
-  ],
-  "dawnkeeper::summon_quest_accept": [
-    "Ooh, new quest! \"{detail}\" — sounds fun! Is that okay with you?",
-    "I accepted \"{detail}\"! I'm excited! Should I get started right away?",
-    "New quest: \"{detail}\"! Want me to go for it or did you have other plans?",
-  ],
-  "ironvow::summon_quest_accept": [
-    "Took \"{detail}\". I'll handle it. Unless you've got a real challenge for me.",
-    "New quest: \"{detail}\". Easy work. Anything else you'd rather I do?",
-    "Picked up \"{detail}\". Say the word if you want me elsewhere.",
-  ],
-  "::summon_quest_accept": [
-    "Just picked up a new quest: \"{detail}\". Should I go for it?",
-    "Accepted \"{detail}\"! Want me to work on this or focus on something else?",
-    "New quest: \"{detail}\". I'll get started unless you say otherwise!",
-  ],
 };
 
 // ── Line Selection ──────────────────────────────────────────────────────

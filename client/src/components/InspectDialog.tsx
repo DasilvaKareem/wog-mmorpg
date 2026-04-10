@@ -3,6 +3,7 @@ import { API_URL, getSkaleExplorerTxUrl } from "@/config";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useItemCatalog, type CatalogItem } from "@/hooks/useItemCatalog";
 import { useTechniques, type TechniqueInfo } from "@/hooks/useTechniques";
+import { HomesteadPanel } from "@/components/HomesteadPanel";
 import { ItemTooltip } from "@/components/ItemTooltip";
 import { colorToCss, getTechniqueVisual } from "@/lib/techniqueVisuals";
 import { gameBus } from "@/lib/eventBus";
@@ -115,9 +116,9 @@ function StatRow({ label, value }: { label: string; value: number }): React.Reac
 }
 
 /* ── Tabs ─────────────────────────────────────────────────────── */
-type TabId = "equipment" | "stats" | "skills" | "effects" | "reputation";
+type TabId = "equipment" | "stats" | "skills" | "effects" | "reputation" | "homestead";
 
-const TABS: { id: TabId; label: string }[] = [
+const BASE_TABS: { id: Exclude<TabId, "homestead">; label: string }[] = [
   { id: "equipment", label: "Equip" },
   { id: "stats", label: "Stats" },
   { id: "skills", label: "Skills" },
@@ -154,6 +155,15 @@ export function InspectDialog(): React.ReactElement | null {
     setIsSelf(true);
     setInspectZoneId(zoneId);
     void fetchSelfEntity(zoneId, walletAddress);
+  });
+
+  useGameBridge("zoneChanged", ({ zoneId }) => {
+    if (!open || !isSelf) return;
+    setInspectZoneId(zoneId);
+    const ownerWallet = WalletManager.getInstance().address ?? entity?.walletAddress ?? null;
+    if (ownerWallet) {
+      void fetchSelfEntity(zoneId, ownerWallet);
+    }
   });
 
   async function fetchEntity(entityId: string, zoneId: string): Promise<void> {
@@ -205,6 +215,9 @@ export function InspectDialog(): React.ReactElement | null {
 
   const hpColor = entity.maxHp > 0 && entity.hp / entity.maxHp > 0.66 ? "#54f28b" : entity.hp / entity.maxHp > 0.33 ? "#f2c854" : "#f25454";
   const equipment = entity.equipment ?? {};
+  const tabs: { id: TabId; label: string }[] = isSelf && entity.type === "player"
+    ? [...BASE_TABS, { id: "homestead", label: "Home" }]
+    : BASE_TABS;
 
   return (
     <div
@@ -295,7 +308,7 @@ export function InspectDialog(): React.ReactElement | null {
 
       {/* Tab bar */}
       <div className="flex border-t" style={{ borderColor: BORDER }}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -319,6 +332,9 @@ export function InspectDialog(): React.ReactElement | null {
         {tab === "skills" && <SkillsTab entity={entity} getTechnique={getTechnique} />}
         {tab === "effects" && <EffectsTab entity={entity} getTechnique={getTechnique} />}
         {tab === "reputation" && <ReputationTab entity={entity} />}
+        {tab === "homestead" && isSelf && entity.type === "player" && (
+          <HomesteadPanel entity={entity} currentZoneId={inspectZoneId} />
+        )}
       </div>
 
       {/* Social actions — only for other players */}

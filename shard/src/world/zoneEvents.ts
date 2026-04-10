@@ -19,6 +19,7 @@ export type ZoneEventType =
   | "system"
   | "ability"
   | "technique"
+  | "technique-start"
   | "consume"
   | "profession"
   | "party";

@@ -91,7 +91,10 @@ const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   { zoneId: "azurshard-chasm", oreType: "gold", x: 400, y: 550 },
   { zoneId: "azurshard-chasm", oreType: "gold", x: 560, y: 400 },
 
-  // sunflower-fields - coal x3, tin x2, copper x1
+  // sunflower-fields - stone x3, coal x3, tin x2, copper x1
+  { zoneId: "sunflower-fields", oreType: "stone", x: 120, y: 350 },
+  { zoneId: "sunflower-fields", oreType: "stone", x: 320, y: 480 },
+  { zoneId: "sunflower-fields", oreType: "stone", x: 500, y: 250 },
   { zoneId: "sunflower-fields", oreType: "coal", x: 180, y: 200 },
   { zoneId: "sunflower-fields", oreType: "coal", x: 400, y: 300 },
   { zoneId: "sunflower-fields", oreType: "coal", x: 550, y: 450 },

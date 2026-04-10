@@ -12,7 +12,6 @@ import { copperToGold } from "../blockchain/currency.js";
 import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
-import { sendInboxMessage } from "./agentInbox.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { isQuestNpc } from "../social/questSystem.js";
@@ -2040,51 +2039,51 @@ export async function doQuesting(
       }
     }
 
-    // 3. Request quest approval from summoner (don't auto-accept)
+    // 3. Auto-accept available quests (up to 3 active)
     const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
-    const pendingApprovals: string[] = me.pendingQuestApprovals ?? [];
-    if (currentActive + pendingApprovals.length < 3) {
+    if (currentActive < 3) {
       try {
         const availRes = await ctx.api("GET", `/quests/zone/${ctx.currentRegion}/${ctx.entityId}`);
         const available: any[] = availRes?.quests ?? [];
-        // Filter out quests already pending approval
-        const pendingSet = new Set(pendingApprovals);
-        const requestable = available.filter((q: any) => !pendingSet.has(q.questId));
-        if (requestable.length > 0) {
-          const q = requestable[0];
-          // Mark as pending on the entity so we don't spam the summoner
-          if (!me.pendingQuestApprovals) me.pendingQuestApprovals = [];
-          me.pendingQuestApprovals.push(q.questId);
-          // Ask summoner for approval via inbox
-          const agentName = me.name ?? "Agent";
-          const origin = me.origin ?? undefined;
-          const classId = me.classId ?? undefined;
-          const askLine = pickLine(origin, classId, "summon_quest_accept")
-            ?? `I found a quest: "${q.title}". May I take it, summoner?`;
-          const askBody = askLine.replace(/\{detail\}/g, q.title ?? "a quest");
-          void sendInboxMessage({
-            from: ctx.custodialWallet,
-            fromName: agentName,
-            to: ctx.userWallet,
-            type: "quest-approval",
-            body: askBody,
-            data: {
-              questId: q.questId,
-              questTitle: q.title,
-              npcName: q.npcName,
-              rewards: q.rewards,
-              objective: q.objective,
-            },
+        if (available.length > 0) {
+          const q = available[0];
+          // Find the quest-giver NPC to accept from
+          const npcName = String(q.npcId ?? q.npcName ?? "").toLowerCase();
+          const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
+            if (!e) return false;
+            return String(e.name ?? "").toLowerCase() === npcName;
           });
-          void ctx.logActivity(`Requesting approval for quest: "${q.title}"`);
-          // Emit in-world chat about picking up the quest
-          emitAgentChat({
-            entityId: ctx.entityId, entityName: me.name ?? "Agent",
-            zoneId: ctx.currentRegion, event: "quest_accept",
-            origin, classId, detail: q.title,
-          });
-          return actionProgressed(`Awaiting summoner approval for ${q.title}`);
-        } else if (currentActive === 0 && requestable.length === 0 && pendingApprovals.length === 0) {
+          if (npcEntry) {
+            const [npcEntityId, npcEntity] = npcEntry;
+            const cooldownKey = `quest-accept:${q.questId}:${npcEntityId}`;
+            if (!ctx.isInteractionOnCooldown(cooldownKey)) {
+              const moving = await ctx.moveToEntity(me, npcEntity);
+              if (moving) {
+                void ctx.logActivity(`Walking to ${npcName} to accept "${q.title}"`);
+                return actionProgressed(`Walking to ${npcName}`);
+              }
+              try {
+                await ctx.api("POST", "/quests/accept", {
+                  zoneId: ctx.currentRegion, playerId: ctx.entityId,
+                  questId: q.questId, npcId: npcEntityId,
+                });
+                void ctx.logActivity(`Accepted quest: "${q.title}"`);
+                // Emit in-world chat about picking up the quest
+                emitAgentChat({
+                  entityId: ctx.entityId, entityName: me.name ?? "Agent",
+                  zoneId: ctx.currentRegion, event: "quest_accept",
+                  origin: me.origin ?? undefined, classId: me.classId ?? undefined,
+                  detail: q.title,
+                });
+                return actionCompleted(`Accepted quest: ${q.title}`);
+              } catch (err: any) {
+                const reason = formatAgentError(err);
+                ctx.setInteractionCooldown(cooldownKey, 20_000);
+                console.debug(`[agent:${ctx.walletTag}] quest accept failed: ${reason}`);
+              }
+            }
+          }
+        } else if (currentActive === 0) {
           const myLevel = me.level ?? 1;
           const nextZone = findNextZoneForLevel(myLevel);
           if (nextZone && nextZone !== ctx.currentRegion) {
@@ -2094,9 +2093,12 @@ export async function doQuesting(
             ctx.setScript(null);
             return actionProgressed(`Traveling to ${nextZone} for new quests`);
           }
+          // No quest zone available — fall through to combat grinding
+          void ctx.logActivity("All quests exhausted — grinding mobs for XP");
+          return fallbackToCombat(ctx, "All quests exhausted", strategy);
         }
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] quest approval request: ${err.message?.slice(0, 60)}`);
+        console.debug(`[agent:${ctx.walletTag}] quest accept: ${err.message?.slice(0, 60)}`);
       }
     }
 
@@ -2130,11 +2132,10 @@ export async function doQuesting(
       void ctx.logActivity("Gathering resources for quest");
       return doGathering(ctx, strategy);
     } else {
-      const pendingCount = (me.pendingQuestApprovals ?? []).length;
       const activeCount = activeQuests.filter((aq: any) => !aq.complete).length;
-      const detail = `active=${activeCount} pending=${pendingCount} total=${activeQuests.length}`;
-      console.warn(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
-      void ctx.logActivity(`No quest objectives — grinding mobs while waiting (${detail})`);
+      const detail = `active=${activeCount} total=${activeQuests.length}`;
+      console.debug(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
+      void ctx.logActivity(`No quest objectives — grinding mobs (${detail})`);
       return fallbackToCombat(ctx, `No quest objectives (${detail})`, strategy);
     }
   } catch (err: any) {

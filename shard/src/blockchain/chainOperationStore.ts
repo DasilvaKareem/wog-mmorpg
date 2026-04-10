@@ -417,12 +417,14 @@ export async function executeRegisteredChainOperation<T>(
 
 export async function processPendingTrackedChainOperations(
   logger: { error: (err: unknown, msg?: string) => void } = console,
-  types?: string[]
+  types?: string[],
+  maxPerTick = 8
 ): Promise<number> {
   const due = await listDueChainOperations();
   let processed = 0;
   const typeFilter = types ? new Set(types) : null;
   for (const op of due) {
+    if (processed >= maxPerTick) break;
     if (typeFilter && !typeFilter.has(op.type)) continue;
     if (!processorRegistry.has(op.type)) continue;
     try {
@@ -439,14 +441,19 @@ let workerTimer: NodeJS.Timeout | null = null;
 
 export function startChainOperationReplayWorker(
   logger: { error: (err: unknown, msg?: string) => void } = console,
-  intervalMs = 5_000
+  intervalMs = 5_000,
+  startupDelayMs = 30_000
 ): void {
   if (workerTimer) return;
   const tick = async () => {
     await processPendingTrackedChainOperations(logger);
   };
-  void tick().catch((err) => logger.error(err, "[chainOperationStore] initial replay tick failed"));
-  workerTimer = setInterval(() => {
-    tick().catch((err) => logger.error(err, "[chainOperationStore] replay tick failed"));
-  }, intervalMs);
+  // Delay first tick to avoid a crash-recovery burst: all pending ops were due
+  // immediately on restart, so we stagger them instead of firing all at once.
+  setTimeout(() => {
+    void tick().catch((err) => logger.error(err, "[chainOperationStore] initial replay tick failed"));
+    workerTimer = setInterval(() => {
+      tick().catch((err) => logger.error(err, "[chainOperationStore] replay tick failed"));
+    }, intervalMs);
+  }, startupDelayMs);
 }

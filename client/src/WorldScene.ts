@@ -1478,6 +1478,17 @@ export class WorldScene extends Phaser.Scene {
           }
         }
       }
+
+      // Profession skill-up — "SKILL UP! Mining 50"
+      if (evt.type === "profession" && evt.entityId && evtData?.newLevel) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) {
+          const prof = (evtData.profession as string) ?? "skill";
+          const lvl = evtData.newLevel as number;
+          const label = prof.charAt(0).toUpperCase() + prof.slice(1);
+          this.floatingText.showSkillUp(evt.id + ":skillup", pos, label, lvl);
+        }
+      }
     }
   }
 

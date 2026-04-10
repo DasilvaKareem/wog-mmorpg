@@ -28,6 +28,8 @@ const SLASH_COMMANDS = [
   { cmd: "/party",    desc: "Party members" },
   { cmd: "/travel",   desc: "Travel to a zone" },
   { cmd: "/where",    desc: "Current position" },
+  { cmd: "/equip",    desc: "Equip item by name" },
+  { cmd: "/unequip",  desc: "Unequip by slot or name" },
   { cmd: "/speak",    desc: "Speak publicly as your champion" },
 ];
 

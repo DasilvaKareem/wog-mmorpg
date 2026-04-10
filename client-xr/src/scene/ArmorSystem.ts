@@ -28,6 +28,22 @@ interface ArmorPieceDef {
   defaultColor?: number;
 }
 
+function normalizeMaterialName(name: string): string {
+  return name.trim().toLowerCase().replace(/[\s.-]+/g, "_");
+}
+
+function materialMatches(name: string, targets: string[]): boolean {
+  const normalized = normalizeMaterialName(name);
+  if (!normalized) return false;
+  return targets.some((target) => {
+    const token = normalizeMaterialName(target);
+    return normalized === token
+      || normalized.startsWith(`${token}_`)
+      || normalized.endsWith(`_${token}`)
+      || normalized.includes(`_${token}_`);
+  });
+}
+
 /**
  * Armor catalog: maps a piece ID to its donor model and materials.
  * Multiple tiers/styles per slot give variety.
@@ -57,6 +73,8 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   worker_vest:        { donor: "Worker_Male",          materials: ["Vest"],         defaultColor: 0x77553a },
   cowboy_jacket:      { donor: "Cowboy_Male",           materials: ["Jacket"],       defaultColor: 0x814824 },
   zombie_rags:        { donor: "Zombie_Male",          materials: ["Clothes"],      defaultColor: 0x53457b },
+  // Blender modular donor target: split Warrior into skinned torso/armor regions.
+  warrior_chest:      { donor: "Warrior_Modular",      materials: ["Armor", "Chest", "Torso", "Clothes"], defaultColor: 0x7d7b82 },
 
   // ═══════════════════════════════════════════════════════════════════
   // SHOULDERS / OVERLAY
@@ -71,6 +89,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   chef_apron:         { donor: "Chef_Hat",             materials: ["DarkClothes"],  defaultColor: 0x9a9a9a },
   suit_details:       { donor: "Suit_Male",            materials: ["Details"],      defaultColor: 0x484848 },
   oldclassy_detail:   { donor: "OldClassy_Male",       materials: ["Detail"],       defaultColor: 0x8d5c39 },
+  warrior_shoulders:  { donor: "Warrior_Modular",      materials: ["Shoulder", "Shoulders", "Pauldron"], defaultColor: 0x6e727c },
 
   // ═══════════════════════════════════════════════════════════════════
   // LEGS / PANTS
@@ -86,6 +105,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   zombie_pants:       { donor: "Zombie_Male",          materials: ["Pants"],        defaultColor: 0x9a9171 },
   knight_detail:      { donor: "Knight_Male",          materials: ["Detail"],       defaultColor: 0x54321f },
   doctor_scrubs:      { donor: "Doctor_Male_Old",      materials: ["Brown"],        defaultColor: 0x1f3436 },
+  warrior_legs:       { donor: "Warrior_Modular",      materials: ["Legs", "Pants", "Greaves"], defaultColor: 0x665a4a },
 
   // ═══════════════════════════════════════════════════════════════════
   // HELM / HAT
@@ -100,6 +120,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   chef_hat:           { donor: "Chef_Hat",             materials: ["Hat"],          defaultColor: 0xf4f3e8 },
   worker_hat:         { donor: "Worker_Male",          materials: ["Hat"],          defaultColor: 0xa19741 },
   oldclassy_hat:      { donor: "OldClassy_Male",       materials: ["Hat"],          defaultColor: 0x1b1a16 },
+  warrior_helm:       { donor: "Warrior_Modular",      materials: ["Helm", "Helmet", "Headgear"], defaultColor: 0x8d8f95 },
 
   // ═══════════════════════════════════════════════════════════════════
   // BELT / ACCESSORY
@@ -118,6 +139,7 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   suit_shirt:         { donor: "Suit_Male",            materials: ["Shirt"],        defaultColor: 0xcccccc },
   oldclassy_belt:     { donor: "OldClassy_Male",       materials: ["Belt"],         defaultColor: 0x523724 },
   doctor_stethoscope: { donor: "Doctor_Male_Old",      materials: ["Black"],        defaultColor: 0x46806e },
+  warrior_belt:       { donor: "Warrior_Modular",      materials: ["Belt", "Waist", "Tabard"], defaultColor: 0x8b5c36 },
 
   // ═══════════════════════════════════════════════════════════════════
   // HAIR (equippable styles)
@@ -154,6 +176,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/worker.*shirt|work.*shirt/i,                            "worker_shirt"],
   [/vest/i,                                                 "worker_vest"],
   [/viking.*chest|fur.*chest|barbarian/i,                   "viking_chest"],
+  [/warrior.*chest|mercenary.*armor|gladiator.*armor/i,     "warrior_chest"],
   [/dress.*shirt|fine.*shirt|classy.*shirt/i,               "oldclassy_shirt"],
   [/zombie|undead.*rag|tattered/i,                          "zombie_rags"],
   [/robe|cloak/i,                                           "wizard_robe"],
@@ -170,6 +193,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/pirate.*epaulette|gold.*buckle/i,                       "pirate_gold"],
   [/apron/i,                                                "chef_apron"],
   [/military.*gear|tactical/i,                              "soldier_gear"],
+  [/warrior.*shoulder|mercenary.*pauldron|gladiator.*shoulder/i, "warrior_shoulders"],
   [/shoulder/i,                                             "soldier_gear"],
 
   // ── Legs ──
@@ -179,6 +203,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*pant|chaps|leather.*pant/i,                     "cowboy_pants"],
   [/pirate.*boot|buccaneer.*boot/i,                         "pirate_boots"],
   [/worker.*pant|work.*pant/i,                              "worker_pants"],
+  [/warrior.*leg|mercenary.*greave|gladiator.*leg/i,        "warrior_legs"],
   [/fine.*pant|dress.*pant|classy.*pant|trouser/i,          "oldclassy_pants"],
   [/scrub|medic.*pant/i,                                    "doctor_scrubs"],
   [/plate.*greave|iron.*greave|steel.*greave/i,             "knight_detail"],
@@ -194,6 +219,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*hat|ranch.*hat/i,                               "cowboy_hat"],
   [/chef.*hat|cook.*hat|toque/i,                            "chef_hat"],
   [/hard.*hat|worker.*hat|construction/i,                   "worker_hat"],
+  [/warrior.*helm|mercenary.*helm|gladiator.*helm/i,        "warrior_helm"],
   [/top.*hat|classy.*hat|formal.*hat/i,                     "oldclassy_hat"],
   [/helm|helmet/i,                                          "soldier_helm"],
   [/hat|cap|hood/i,                                         "worker_hat"],
@@ -210,6 +236,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*scarf|bandana|neckerchief/i,                    "cowboy_scarf"],
   [/bone.*accent|viking.*accent/i,                          "viking_accents"],
   [/stethoscope/i,                                          "doctor_stethoscope"],
+  [/warrior.*belt|mercenary.*belt|gladiator.*belt/i,        "warrior_belt"],
   [/undershirt|cream.*shirt/i,                              "pirate_undershirt"],
   [/dress.*shirt.*under|suit.*shirt/i,                      "suit_shirt"],
   [/guard.*belt|plate.*belt|iron.*belt/i,                   "oldclassy_belt"],
@@ -235,7 +262,7 @@ interface ExtractedPiece {
 
 export class ArmorSystem {
   private loader = new GLTFLoader();
-  private donorCache = new Map<string, THREE.SkinnedMesh>();
+  private donorCache = new Map<string, THREE.SkinnedMesh[]>();
   private pieceCache = new Map<string, ExtractedPiece>();
   private loading = new Map<string, Promise<void>>();
   private ready = false;
@@ -311,7 +338,7 @@ export class ArmorSystem {
    * Returns a group containing all armor meshes.
    */
   equipFromEntityData(
-    equipment: Record<string, { name?: string; quality?: string }>,
+    equipment: Record<string, { name?: string; quality?: string; xrVisualId?: string | null }>,
     targetSkeleton: THREE.Skeleton,
     rootBone: THREE.Bone,
   ): THREE.Group {
@@ -319,9 +346,9 @@ export class ArmorSystem {
     armorGroup.name = "equipment";
 
     for (const [_slot, item] of Object.entries(equipment)) {
-      if (!item.name) continue;
-
-      const pieceId = this.resolveArmorPiece(item.name);
+      const pieceId = (item.xrVisualId && ARMOR_CATALOG[item.xrVisualId])
+        ? item.xrVisualId
+        : (item.name ? this.resolveArmorPiece(item.name) : null);
       if (!pieceId) continue;
 
       // Quality-based color tinting
@@ -358,30 +385,45 @@ export class ArmorSystem {
     const existing = this.loading.get(name);
     if (existing) return existing;
 
-    const url = CHAR_BASE + name + ".glb";
     const promise = new Promise<void>((resolve, reject) => {
-      this.loader.load(
-        url,
-        (gltf) => {
-          // Find the SkinnedMesh
-          gltf.scene.traverse((node) => {
-            if (node instanceof THREE.SkinnedMesh && !this.donorCache.has(name)) {
-              this.donorCache.set(name, node);
-            }
-          });
-          this.loading.delete(name);
-          if (!this.donorCache.has(name)) {
-            console.warn(`[Armor] No SkinnedMesh in donor ${name}`);
-          }
-          resolve();
-        },
-        undefined,
-        (err) => {
-          console.error(`[Armor] Failed to load donor ${url}:`, err);
-          this.loading.delete(name);
-          reject(err);
-        },
-      );
+      const finalize = (meshes: THREE.SkinnedMesh[]) => {
+        this.donorCache.set(name, meshes);
+        this.loading.delete(name);
+        if (!meshes.length) {
+          console.warn(`[Armor] No SkinnedMesh in donor ${name}`);
+        }
+        resolve();
+      };
+
+      const fail = (url: string, err: unknown, allowFallback: boolean) => {
+        if (allowFallback) {
+          console.warn(`[Armor] Failed to load donor ${url}, trying .gltf fallback`);
+          load(CHAR_BASE + name + ".gltf", false);
+          return;
+        }
+        console.error(`[Armor] Failed to load donor ${url}:`, err);
+        this.loading.delete(name);
+        reject(err);
+      };
+
+      const load = (url: string, allowFallback: boolean) => {
+        this.loader.load(
+          url,
+          (gltf) => {
+            const meshes: THREE.SkinnedMesh[] = [];
+            gltf.scene.traverse((node) => {
+              if (node instanceof THREE.SkinnedMesh) {
+                meshes.push(node);
+              }
+            });
+            finalize(meshes);
+          },
+          undefined,
+          (err) => fail(url, err, allowFallback),
+        );
+      };
+
+      load(CHAR_BASE + name + ".glb", true);
     });
 
     this.loading.set(name, promise);
@@ -389,11 +431,24 @@ export class ArmorSystem {
   }
 
   private extractPiece(pieceId: string, def: ArmorPieceDef): void {
-    const donor = this.donorCache.get(def.donor);
-    if (!donor) return;
+    const donors = this.donorCache.get(def.donor);
+    if (!donors?.length) return;
 
-    const geo = donor.geometry;
-    const materials = Array.isArray(donor.material) ? donor.material : [donor.material];
+    const matchingDonor = donors.find((donor) => {
+      const materials = Array.isArray(donor.material) ? donor.material : [donor.material];
+      return materials.some((mat) => materialMatches((mat as THREE.Material).name ?? "", def.materials));
+    });
+
+    if (!matchingDonor) {
+      const available = donors
+        .flatMap((donor) => (Array.isArray(donor.material) ? donor.material : [donor.material]))
+        .map((mat) => (mat as THREE.Material).name ?? "");
+      console.warn(`[Armor] No matching materials [${def.materials}] in ${def.donor} (has: ${available.join(", ")})`);
+      return;
+    }
+
+    const geo = matchingDonor.geometry;
+    const materials = Array.isArray(matchingDonor.material) ? matchingDonor.material : [matchingDonor.material];
     const groups = geo.groups;
 
     if (!groups.length) {
@@ -401,26 +456,23 @@ export class ArmorSystem {
       return;
     }
 
-    // Find which geometry groups match our target material names
     const matchingGroups: { start: number; count: number }[] = [];
     for (const group of groups) {
       const mat = materials[group.materialIndex ?? 0];
       const matName = (mat as THREE.Material).name ?? "";
-      if (def.materials.includes(matName)) {
+      if (materialMatches(matName, def.materials)) {
         matchingGroups.push({ start: group.start, count: group.count });
       }
     }
 
     if (!matchingGroups.length) {
-      console.warn(`[Armor] No matching materials [${def.materials}] in ${def.donor} (has: ${materials.map(m => (m as THREE.Material).name)})`);
+      console.warn(`[Armor] No matching geometry groups [${def.materials}] in ${def.donor}`);
       return;
     }
 
-    // Extract sub-geometry for the matching groups
     const srcIndex = geo.index;
     if (!srcIndex) return;
 
-    // Collect all indices from matching groups
     const allIndices: number[] = [];
     for (const g of matchingGroups) {
       for (let i = g.start; i < g.start + g.count; i++) {
@@ -428,30 +480,29 @@ export class ArmorSystem {
       }
     }
 
-    // Build a compact sub-geometry with only the referenced vertices
     const uniqueVerts = [...new Set(allIndices)];
     const oldToNew = new Map<number, number>();
     uniqueVerts.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
 
     const newGeo = new THREE.BufferGeometry();
 
-    // Copy relevant attributes
-    for (const attrName of ["position", "normal", "skinIndex", "skinWeight"]) {
+    for (const attrName of ["position", "normal", "uv", "skinIndex", "skinWeight"]) {
       const src = geo.getAttribute(attrName);
       if (!src) continue;
       const itemSize = src.itemSize;
-      const arr = new Float32Array(uniqueVerts.length * itemSize);
+      const ctor = (src.array as ArrayLike<number>) instanceof Float32Array ? Float32Array : Uint16Array;
+      const arr = new ctor(uniqueVerts.length * itemSize);
       for (let ni = 0; ni < uniqueVerts.length; ni++) {
         const oi = uniqueVerts[ni];
         for (let c = 0; c < itemSize; c++) {
-          arr[ni * itemSize + c] = (src as THREE.BufferAttribute).getComponent(oi, c);
+          arr[ni * itemSize + c] = (src as THREE.BufferAttribute).getComponent(oi, c) as number;
         }
       }
       newGeo.setAttribute(attrName, new THREE.BufferAttribute(arr, itemSize));
     }
 
-    // Remap indices
-    const newIndices = new Uint16Array(allIndices.length);
+    const IndexArray = uniqueVerts.length > 65535 ? Uint32Array : Uint16Array;
+    const newIndices = new IndexArray(allIndices.length);
     for (let i = 0; i < allIndices.length; i++) {
       newIndices[i] = oldToNew.get(allIndices[i])!;
     }

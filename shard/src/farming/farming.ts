@@ -11,6 +11,7 @@ import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { getGameTime } from "../world/worldClock.js";
+import { advanceGatherQuests } from "../social/questSystem.js";
 
 const GATHER_RANGE = 50;
 
@@ -171,6 +172,9 @@ export function registerFarmingRoutes(server: FastifyInstance) {
       const itemDef = getItemByTokenId(cropProps.tokenId);
       const itemName = itemDef?.name ?? cropProps.label;
       const bonusMsg = bonus ? " (bonus yield!)" : "";
+
+      // Advance gather/craft quests for harvested crops
+      advanceGatherQuests(player, itemName);
 
       logZoneEvent({
         zoneId: node.region ?? zoneId,

@@ -436,11 +436,27 @@ async function sendTransactionWithManagedGas(
   throw lastError;
 }
 
+// Minimum sFUEL a wallet must have before we bother distributing more.
+// The gas cost to send sFUEL (~0.00125 sFUEL) far exceeds the distribution
+// amount (0.000001 sFUEL), so skip if the wallet already has enough to transact.
+const SFUEL_SKIP_THRESHOLD = parseFloat(process.env.SFUEL_SKIP_THRESHOLD || "0.0001");
+
 /**
  * Send a small amount of sFUEL so the wallet can transact on SKALE.
- * SKALE sFUEL is the native gas token — free, but wallets need a dust amount.
+ * Skips the distribution (and its gas cost) if the recipient already has
+ * enough sFUEL to cover several transactions.
  */
 export async function distributeSFuel(toAddress: string): Promise<string> {
+  try {
+    const balance = await skaleProvider.getBalance(toAddress);
+    const balEth = parseFloat(ethers.formatEther(balance));
+    if (balEth >= SFUEL_SKIP_THRESHOLD) {
+      console.log(`[distributeSFuel] Skipping ${toAddress.slice(0, 8)} — already has ${balEth.toFixed(6)} sFUEL`);
+      return "skipped";
+    }
+  } catch {
+    // RPC error — proceed with distribution rather than skipping
+  }
   return executeRegisteredChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
 }
 
@@ -1493,6 +1509,62 @@ export async function resolveIdentityRegistrationTxHash(agentId: bigint): Promis
     latestBlock
   ).catch(() => []);
   return fullMintLogs[0]?.transactionHash ?? null;
+}
+
+export interface RegisteredIdentity {
+  agentId: bigint;
+  agentUri: string;
+  ownerAddress: string;
+  blockNumber: number;
+  txHash: string;
+}
+
+/**
+ * Enumerate all ERC-8004 registered agent identities by scanning Registered events.
+ * agentURI is decoded directly from event data — no extra tokenURI RPC calls needed.
+ */
+export async function listAllRegisteredIdentities(): Promise<RegisteredIdentity[]> {
+  if (!identityRegistryAddress) return [];
+
+  const latestBlock = BigInt(await biteProvider.getBlockNumber());
+  const registeredTopic = ethers.id("Registered(uint256,string,address)");
+  const coder = ethers.AbiCoder.defaultAbiCoder();
+
+  const logs = await paginatedGetLogs(identityRegistryAddress, [registeredTopic], latestBlock).catch(() => []);
+
+  const seen = new Set<string>();
+  const results: RegisteredIdentity[] = [];
+
+  for (const log of logs) {
+    const agentIdTopic = log.topics[1];
+    if (!agentIdTopic) continue;
+    const agentId = BigInt(agentIdTopic);
+    const agentIdStr = agentId.toString();
+    // keep only the most recent registration per agentId (logs are ordered oldest→newest)
+    if (seen.has(agentIdStr)) continue;
+    seen.add(agentIdStr);
+
+    const ownerTopic = log.topics[2];
+    const ownerAddress = ownerTopic
+      ? ethers.getAddress(`0x${ownerTopic.slice(26)}`)
+      : ethers.ZeroAddress;
+
+    let agentUri = "";
+    try {
+      const [uri] = coder.decode(["string"], log.data);
+      agentUri = uri as string;
+    } catch { /* leave empty */ }
+
+    results.push({
+      agentId,
+      agentUri,
+      ownerAddress,
+      blockNumber: Number(log.blockNumber),
+      txHash: log.transactionHash,
+    });
+  }
+
+  return results;
 }
 
 // Dedup: track last successfully synced level per tokenId to skip redundant uploads

@@ -90,6 +90,15 @@ export const FARM_ZONES: ReadonlySet<string> = new Set([
   "emberglow-estate", "starfall-ranch",
 ]);
 
+/** Zones that have quest-giver NPCs with actual quest content.
+ *  Used by agent routing to avoid sending agents to empty zones. */
+export const QUEST_ZONES: ReadonlySet<string> = new Set([
+  "village-square", "wild-meadow", "dark-forest",
+  "auroral-plains", "emerald-woods", "viridian-range",
+  "moondancer-glade", "felsrock-citadel", "lake-lumina",
+  "azurshard-chasm", "sunflower-fields",
+]);
+
 // ── Connection graph (loaded from world.json) ───────────────────────
 
 interface WorldConnection {

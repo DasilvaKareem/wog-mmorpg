@@ -54,3 +54,28 @@ export async function fetchWorldLayout(): Promise<WorldLayout | null> {
 export async function fetchActivePlayers(): Promise<ActivePlayersResponse | null> {
   return fetchJsonWithFallback<ActivePlayersResponse>("/players/active");
 }
+
+// ── Authenticated commands ──────────────────────────────────────────
+
+export async function postCommand(
+  token: string,
+  body: { zoneId: string; entityId: string; action: string; x?: number; y?: number; targetId?: string }
+): Promise<{ ok: boolean; error?: string }> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetch(toUrl(base, "/command"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      return { ok: res.ok, error: data.error };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return { ok: false, error: "All API bases unreachable" };
+}

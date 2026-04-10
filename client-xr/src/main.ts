@@ -26,8 +26,9 @@ import { LandingPage } from "./hud/LandingPage.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand } from "./api.js";
 import { getAuthToken } from "./auth.js";
+import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import type { ActivePlayer, Entity, VisibleIntent, ZoneResponse } from "./types.js";
 
@@ -51,7 +52,7 @@ function syncWeaponsToTuner() {
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const ZONE_POLL_INTERVAL = 500;
+const ZONE_POLL_INTERVAL = 250;
 const ACTIVE_PLAYERS_POLL_INTERVAL = 1000;
 const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
@@ -107,6 +108,10 @@ const intentLines = new IntentLinesManager(entities);
 scene.add(intentLines.group);
 
 const sky = new SkyRenderer(scene);
+const clickMarker = new ClickMarker();
+clickMarker.setElevationProvider(world);
+scene.add(clickMarker.mesh);
+
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
 const inspector = new EntityInspector();
@@ -122,9 +127,9 @@ const landing = !isAnimationLab
       controls.setLandingMode(false);
       setGameplayHudVisible(true);
       console.log("[enter] Wallet:", ownWalletAddress);
-      // Immediately try to find and lock to own character
+      // Find own character for reference (but don't auto-lock unless spacebar toggled)
       if (ownWalletAddress) {
-        void findAndLockOwnCharacter();
+        void findOwnCharacter();
       }
     },
   })
@@ -193,6 +198,7 @@ function setGameplayHudVisible(visible: boolean) {
 let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownEntityId: string | null = null;
+let autoLockEnabled = false;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
 const processedRecentEventIds = new Map<string, number>();
@@ -265,7 +271,7 @@ function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
  * Full sequence: call /agent/status to get entityId + zoneId,
  * move camera to their zone, poll that zone, then lock on.
  */
-async function findAndLockOwnCharacter() {
+async function findOwnCharacter() {
   if (!ownWalletAddress) return;
 
   const token = await getAuthToken(ownWalletAddress);
@@ -305,12 +311,16 @@ async function findAndLockOwnCharacter() {
     // 3. Poll that zone to load the entity
     await pollNearbyZones();
 
-    // 4. Lock on now that the entity should be in scene
+    // 4. Move camera to entity but only lock if autoLockEnabled
     const pos = entities.getEntityPosition(status.entityId);
     if (pos) {
-      lockOn(status.entityId);
       controls.setTarget(pos.x, pos.y, pos.z);
-      console.log("[autolock] Locked to", status.entity?.name);
+      if (autoLockEnabled) {
+        lockOn(status.entityId);
+        console.log("[autolock] Locked to", status.entity?.name);
+      } else {
+        console.log("[autolock] Found character, camera moved (spacebar to lock)");
+      }
     } else {
       console.log("[autolock] Entity not in scene yet, poll loop will retry");
     }
@@ -322,11 +332,21 @@ async function findAndLockOwnCharacter() {
 // ── Player panel (leaderboard + zone lobby) ─────────────────────────
 
 const playerPanel = new PlayerPanel({
-  onPlayerClick: (_player) => {
-    // No-op — camera stays locked on own character
+  onPlayerClick: (player) => {
+    if (player.id) {
+      const pos = entities.getEntityPosition(player.id);
+      if (pos) {
+        lockOn(player.id);
+        controls.setTarget(pos.x, pos.y, pos.z);
+      }
+    }
   },
-  onZoneClick: (_zoneId) => {
-    // No-op — camera stays locked on own character
+  onZoneClick: (zoneId) => {
+    const center = world.getZoneCenter(zoneId);
+    if (center) {
+      unlockCamera();
+      controls.setTarget(center.x, 0, center.z);
+    }
   },
 });
 
@@ -376,6 +396,7 @@ async function pollNearbyZones() {
     for (const { id, data } of results) {
       if (!data) continue;
       for (const [eid, ent] of Object.entries(data.entities)) {
+        ent.zoneId = id;
         merged[eid] = ent;
       }
       for (const intent of data.visibleIntents ?? []) {
@@ -405,12 +426,13 @@ async function pollNearbyZones() {
       agentChat.addEvents(newEvents);
       effects.processEvents(newEvents);
       entities.processEvents(newEvents);
+      intentLines.processEvents(newEvents);
     }
 
     effects.syncActiveEffects(merged);
 
-    // Auto-lock to own character once it appears in scene
-    if (ownEntityId && !lockedEntityId && merged[ownEntityId]) {
+    // Auto-lock to own character once it appears in scene (only if enabled)
+    if (autoLockEnabled && ownEntityId && !lockedEntityId && merged[ownEntityId]) {
       lockOn(ownEntityId);
     }
 
@@ -468,9 +490,63 @@ renderer.domElement.addEventListener("click", (e) => {
     return;
   }
 
-  // Ground click — unlock camera
-  unlockCamera();
   inspector.hide();
+
+  // Ground click — if we own a character, move to that position
+  if (ownWalletAddress && ownEntityId) {
+    const groundHit = controls.getGroundHit(e.clientX, e.clientY);
+    if (groundHit) {
+      // Convert 3D coords → server coords
+      const serverX = Math.round(groundHit.x / COORD_SCALE);
+      const serverY = Math.round(groundHit.z / COORD_SCALE);
+
+      // Look up zoneId from the entity data
+      const ownEntity = entities.getEntity(ownEntityId);
+      const zoneId = ownEntity?.zoneId;
+      if (!zoneId) {
+        console.log("[click-move] No zoneId for own entity");
+        return;
+      }
+
+      // Show destination marker
+      clickMarker.show(groundHit.x, groundHit.z);
+      clickMarker.targetServerX = serverX;
+      clickMarker.targetServerY = serverY;
+
+      // Auto-lock camera to own character when moving
+      if (!lockedEntityId) {
+        autoLockEnabled = true;
+        lockOn(ownEntityId);
+      }
+
+      // Send move command
+      void (async () => {
+        const token = await getAuthToken(ownWalletAddress!);
+        if (!token) {
+          console.log("[click-move] No auth token");
+          clickMarker.hide();
+          return;
+        }
+        const result = await postCommand(token, {
+          zoneId,
+          entityId: ownEntityId!,
+          action: "move",
+          x: serverX,
+          y: serverY,
+        });
+        if (!result.ok) {
+          console.log("[click-move] Command failed:", result.error);
+          clickMarker.hide();
+        } else {
+          console.log(`[click-move] Moving to (${serverX}, ${serverY})`);
+        }
+      })();
+      return;
+    }
+  }
+
+  // No character — just unlock camera
+  unlockCamera();
 });
 
 // ── Resize ──────────────────────────────────────────────────────────
@@ -552,6 +628,24 @@ window.addEventListener("keydown", (e) => {
     const mode = intentLines.cycleVisibilityMode();
     intentModeBadge.setMode(mode);
   }
+  if (e.key === " ") {
+    e.preventDefault();
+    autoLockEnabled = !autoLockEnabled;
+    if (autoLockEnabled && ownEntityId) {
+      lockOn(ownEntityId);
+      const pos = entities.getEntityPosition(ownEntityId);
+      if (pos) controls.setTarget(pos.x, pos.y, pos.z);
+      hudLock.textContent = `🔒 AUTO-LOCK ON`;
+      hudLock.style.display = "block";
+      console.log("[lock] Auto-lock ON — spacebar to toggle");
+    } else {
+      unlockCamera();
+      hudLock.textContent = `🔓 FREE CAMERA`;
+      hudLock.style.display = "block";
+      setTimeout(() => { if (!lockedEntityId) hudLock.style.display = "none"; }, 1500);
+      console.log("[lock] Auto-lock OFF — free camera");
+    }
+  }
 });
 
 // ── Game loop ───────────────────────────────────────────────────────
@@ -598,6 +692,13 @@ function animate() {
   intentLines.update(dt);
   world.updateAnimations(dt);
   syncWeaponsToTuner();
+
+  // Click-to-move marker
+  clickMarker.update(dt);
+  if (ownEntityId) {
+    const ownEnt = entities.getEntity(ownEntityId);
+    if (ownEnt) clickMarker.checkArrival(ownEnt.x, ownEnt.y);
+  }
 
   // Post-processing doesn't work with WebXR — use plain render in VR
   if (xrSession.isPresenting) {
