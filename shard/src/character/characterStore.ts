@@ -321,8 +321,8 @@ export async function loadCharacter(
   const k = key(walletAddress, characterName);
   let resolvedKey = k;
 
-  // Try Redis first.
-  const redis = isPostgresConfigured() ? null : getRedis();
+  // Try Redis first — always check, postgres may not have migrated data yet
+  const redis = getRedis();
   if (redis) {
     try {
       raw = await redis.hgetall(resolvedKey);
@@ -444,8 +444,8 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
   }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
 
-  // Try Redis scan first
-  const redis = isPostgresConfigured() ? null : getRedis();
+  // Always check Redis — postgres may not have migrated data yet
+  const redis = getRedis();
   if (redis) {
     try {
       const keys: string[] = await scanKeys(`${prefix}*`);
