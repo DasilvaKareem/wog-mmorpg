@@ -296,6 +296,76 @@ export interface TechniqueInfo {
   isLearned: boolean;
 }
 
+// ── Crafting / Profession types ───────────────────────────────────
+
+export interface CraftingRecipe {
+  recipeId: string;
+  name?: string;
+  output: { tokenId: string; name: string; quantity: number };
+  materials: { tokenId: string; name: string; quantity: number }[];
+  copperCost: number;
+  requiredProfession?: string;
+  requiredSkillLevel: number;
+  craftingTime?: number;
+  brewingTime?: number;
+  cookingTime?: number;
+  outputTokenId?: string;
+  outputQuantity?: number;
+  requiredMaterials?: { tokenId: string; quantity: number; itemName: string }[];
+  hpRestoration?: number;
+}
+
+export interface GuildSummary {
+  guildId: string;
+  name: string;
+  treasury: number;
+  level: number;
+  status: string;
+  memberCount: number;
+}
+
+export interface AuctionListing {
+  auctionId: string;
+  itemName: string;
+  quantity: number;
+  startPrice: number;
+  highBid: number;
+  highBidder?: string;
+  timeRemaining: number;
+  buyoutPrice?: number;
+}
+
+export interface ProfessionEntry {
+  professionId: string;
+  name: string;
+  description: string;
+  cost: number;
+}
+
+export interface EnchantmentEntry {
+  tokenId: string;
+  elixirName: string;
+  enchantmentName: string;
+  description: string;
+  statBonus: Record<string, number>;
+  specialEffect?: string;
+}
+
+export interface ArenaInfo {
+  npcId: string;
+  formats: string[];
+  queueStatus: Record<string, number>;
+  activeBattles: number;
+}
+
+export interface PvpLeaderboardEntry {
+  agentId: string;
+  name?: string;
+  elo: number;
+  wins: number;
+  losses: number;
+}
+
 export interface ShopItem {
   tokenId: number;
   name: string;

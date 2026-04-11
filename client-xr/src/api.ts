@@ -11,6 +11,13 @@ import type {
   ShopResponse,
   NpcDialogueResponse,
   TechniqueInfo,
+  CraftingRecipe,
+  GuildSummary,
+  AuctionListing,
+  ProfessionEntry,
+  EnchantmentEntry,
+  ArenaInfo,
+  PvpLeaderboardEntry,
 } from "./types.js";
 
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
@@ -247,6 +254,26 @@ export async function buyShopItem(
   });
 }
 
+export async function sendFriendRequest(
+  token: string,
+  fromWallet: string,
+  toWallet: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/friends/request", token, { fromWallet, toWallet });
+}
+
+export async function sendInboxMessage(
+  token: string,
+  body: {
+    to: string;
+    type?: "direct" | "trade-request" | "party-invite" | "broadcast";
+    body: string;
+    data?: Record<string, unknown>;
+  },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/inbox/send", token, body);
+}
+
 export async function sendNpcDialogue(
   token: string,
   npcEntityId: string,
@@ -269,4 +296,106 @@ export async function learnTechnique(
   body: { entityId: string; techniqueId: string; trainerEntityId: string; zoneId: string },
 ): Promise<{ ok: boolean; error?: string }> {
   return postJsonWithFallback("/techniques/learn", token, body);
+}
+
+// ── Crafting stations (generic) ───────────────────────────────────
+
+export async function fetchRecipes(path: string): Promise<CraftingRecipe[] | null> {
+  const data = await fetchJsonWithFallback<CraftingRecipe[] | { recipes: CraftingRecipe[] }>(path);
+  if (!data) return null;
+  return Array.isArray(data) ? data : data.recipes ?? null;
+}
+
+export async function craftAtStation(
+  token: string,
+  path: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(path, token, body);
+}
+
+// ── Guild ─────────────────────────────────────────────────────────
+
+export async function fetchGuildRegistrar(entityId: string): Promise<any | null> {
+  return fetchJsonWithFallback(`/guild/registrar/${entityId}`);
+}
+
+export async function fetchGuilds(): Promise<GuildSummary[]> {
+  return (await fetchJsonWithFallback<GuildSummary[]>("/guilds")) ?? [];
+}
+
+export async function createGuild(
+  token: string,
+  body: { founderAddress: string; name: string; description: string; initialDeposit: number },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/guild/create", token, body);
+}
+
+// ── Auction House ─────────────────────────────────────────────────
+
+export async function fetchAuctions(zoneId: string): Promise<AuctionListing[]> {
+  const data = await fetchJsonWithFallback<AuctionListing[]>(`/auctionhouse/${zoneId}/auctions`);
+  return data ?? [];
+}
+
+export async function bidAuction(
+  token: string,
+  zoneId: string,
+  body: { auctionId: string; bidderAddress: string; bidAmount: number },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/auctionhouse/${zoneId}/bid`, token, body);
+}
+
+export async function buyoutAuction(
+  token: string,
+  zoneId: string,
+  body: { auctionId: string; buyerAddress: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback(`/auctionhouse/${zoneId}/buyout`, token, body);
+}
+
+// ── Arena / PvP ───────────────────────────────────────────────────
+
+export async function fetchColiseumInfo(entityId: string): Promise<ArenaInfo | null> {
+  return fetchJsonWithFallback<ArenaInfo>(`/coliseum/npc/${entityId}`);
+}
+
+export async function joinPvpQueue(
+  token: string,
+  body: { agentId: string; walletAddress: string; characterTokenId?: string; level: number; format: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/api/pvp/queue/join", token, body);
+}
+
+export async function fetchPvpLeaderboard(): Promise<PvpLeaderboardEntry[]> {
+  const data = await fetchJsonWithFallback<{ leaderboard: PvpLeaderboardEntry[] }>("/api/pvp/leaderboard");
+  return data?.leaderboard ?? [];
+}
+
+// ── Professions ───────────────────────────────────────────────────
+
+export async function fetchProfessionCatalog(): Promise<ProfessionEntry[]> {
+  const data = await fetchJsonWithFallback<ProfessionEntry[]>("/professions/catalog");
+  return data ?? [];
+}
+
+export async function learnProfession(
+  token: string,
+  body: { walletAddress: string; zoneId: string; entityId: string; trainerId: string; professionId: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/professions/learn", token, body);
+}
+
+// ── Enchanting ────────────────────────────────────────────────────
+
+export async function fetchEnchantingCatalog(): Promise<EnchantmentEntry[]> {
+  const data = await fetchJsonWithFallback<EnchantmentEntry[]>("/enchanting/catalog");
+  return data ?? [];
+}
+
+export async function applyEnchantment(
+  token: string,
+  body: { walletAddress: string; zoneId: string; entityId: string; altarId: string; enchantmentElixirTokenId: string; equipmentSlot: string },
+): Promise<{ ok: boolean; data?: any; error?: string }> {
+  return postJsonWithFallback("/enchanting/apply", token, body);
 }
