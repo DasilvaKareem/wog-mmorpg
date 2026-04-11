@@ -140,6 +140,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
 
     const entry: MatchmakingEntry = {
       agentId,
+      entityId: agentId,
       walletAddress,
       characterTokenId: BigInt(characterTokenId),
       level,
@@ -228,6 +229,7 @@ export async function registerPvPRoutes(app: FastifyInstance) {
 
       const entry: MatchmakingEntry = {
         agentId: memberId,
+        entityId: memberId,
         walletAddress: memberEntity.walletAddress ?? "",
         characterTokenId: memberEntity.characterTokenId ?? 0n,
         level: memberEntity.level ?? 1,

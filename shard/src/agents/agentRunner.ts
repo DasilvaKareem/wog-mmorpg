@@ -76,6 +76,8 @@ const TICK_MS = 1200;
 const MAX_STALE_TICKS = Math.ceil(30_000 / TICK_MS);
 const MOVE_REISSUE_MS = 4_000;
 const MOVE_PROGRESS_EPSILON = 4;
+const PARTY_LEADER_FOLLOW_DISTANCE = 90;
+const PARTY_LEADER_STOP_DISTANCE = 35;
 const SUPERVISOR_EVENT_TYPES: ZoneEvent["type"][] = ["combat", "death", "kill", "levelup", "quest", "quest-progress", "loot", "technique"];
 
 function getQuestProgressMilestone(event: ZoneEvent): string | null {
@@ -2139,6 +2141,21 @@ export class AgentRunner {
                     await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: leaderZone });
                     this.currentScript = { type: "travel", targetZone: leaderZone, reason: "Following party leader" };
                     this.ticksOnCurrentScript = 0;
+                    await sleep(TICK_MS);
+                    continue;
+                  }
+                }
+              }
+
+              const shouldShadowLeader = focus === "combat" || focus === "questing" || this.currentScript?.type === "dungeon";
+              if (shouldShadowLeader && leaderZone === this.currentRegion) {
+                const distToLeader = Math.hypot(
+                  Number(leaderEntity?.x ?? 0) - Number(entity.x ?? 0),
+                  Number(leaderEntity?.y ?? 0) - Number(entity.y ?? 0),
+                );
+                if (distToLeader > PARTY_LEADER_FOLLOW_DISTANCE) {
+                  const moving = await this.moveToEntity(entity, leaderEntity, PARTY_LEADER_STOP_DISTANCE);
+                  if (moving) {
                     await sleep(TICK_MS);
                     continue;
                   }

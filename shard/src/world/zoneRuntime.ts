@@ -2092,6 +2092,20 @@ function getPartyFocusTarget(
   return taggedTarget;
 }
 
+export function pickPartyFocusTarget(
+  entity: Entity,
+  zone: ZoneState,
+  autoCombatRange: number,
+  partyMemberIds: string[] = getPartyMembers(entity.id),
+  partyIdOverride?: string,
+  partyLeaderIdOverride?: string,
+): Entity | null {
+  const lockedTarget = getLockedPartyTarget(entity, zone, autoCombatRange, partyIdOverride, partyLeaderIdOverride);
+  if (lockedTarget) return lockedTarget;
+
+  return getPartyFocusTarget(entity, zone, autoCombatRange, partyMemberIds, partyLeaderIdOverride);
+}
+
 function isTrivialAutoCombatTarget(entity: Entity, target: Entity): boolean {
   if (entity.type !== "player") return false;
   if (target.type !== "mob" && target.type !== "boss") return false;
@@ -2107,10 +2121,14 @@ export function pickAutoCombatTarget(
   partyIdOverride?: string,
   partyLeaderIdOverride?: string,
 ): Entity | null {
-  const lockedTarget = getLockedPartyTarget(entity, zone, autoCombatRange, partyIdOverride, partyLeaderIdOverride);
-  if (lockedTarget) return lockedTarget;
-
-  const partyFocusTarget = getPartyFocusTarget(entity, zone, autoCombatRange, partyMemberIds, partyLeaderIdOverride);
+  const partyFocusTarget = pickPartyFocusTarget(
+    entity,
+    zone,
+    autoCombatRange,
+    partyMemberIds,
+    partyIdOverride,
+    partyLeaderIdOverride,
+  );
   if (partyFocusTarget) return partyFocusTarget;
 
   const shouldRespectPartyAnchor = partyMemberIds.length > 1;

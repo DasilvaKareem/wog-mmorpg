@@ -5,7 +5,7 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getOrCreateZone } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getOrCreateZone, pickPartyFocusTarget } from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPartyMembers, getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
@@ -239,33 +239,41 @@ function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefi
   return target.id;
 }
 
-function pickPartyCombatTarget(me: any, entities: Record<string, any>): any | null {
+function pickPartyCombatTarget(me: any, currentRegion: string): any | null {
   const partyId = getPlayerPartyId(me.id);
   if (!partyId) return null;
 
   const partyMemberIds = getPartyMembers(me.id);
   if (partyMemberIds.length <= 1) return null;
 
-  const leaderId = getPartyLeaderId(me.id);
-  if (leaderId && leaderId !== me.id) {
-    const leader = entities[leaderId];
-    const order = leader?.order;
-    if (leader?.type === "player" && leader.hp > 0 && order && (order.action === "attack" || order.action === "technique")) {
-      const target = entities[order.targetId];
-      if (target && target.hp > 0 && (target.type === "mob" || target.type === "boss")) {
-        return target;
-      }
-    }
-  }
+  const zone = getOrCreateZone(currentRegion);
+  return pickPartyFocusTarget(
+    me,
+    zone,
+    Number.POSITIVE_INFINITY,
+    partyMemberIds,
+    partyId,
+    getPartyLeaderId(me.id),
+  );
+}
 
-  const sameParty = new Set(partyMemberIds);
-  return Object.values(entities)
-    .filter((entity: any) => (entity.type === "mob" || entity.type === "boss") && entity.hp > 0 && sameParty.has(entity.taggedBy))
-    .sort((a: any, b: any) => {
-      const distA = Math.hypot((a.x ?? 0) - (me.x ?? 0), (a.y ?? 0) - (me.y ?? 0));
-      const distB = Math.hypot((b.x ?? 0) - (me.x ?? 0), (b.y ?? 0) - (me.y ?? 0));
-      return distA - distB;
-    })[0] ?? null;
+function engagePartyCombatTarget(
+  ctx: AgentContext,
+  me: any,
+  entities: Record<string, any>,
+  partyTarget: any,
+  partyLeaderId?: string,
+): ActionResult {
+  const leader = partyLeaderId ? (entities[partyLeaderId] ?? getWorldEntity(partyLeaderId)) : null;
+  const leaderTargetId = leader?.order?.targetId;
+  const kind = leaderTargetId === partyTarget.id ? "assist-leader-target" : "assist-party-tag";
+  logPartyCoordination(ctx, me, kind, `${me.name ?? "Party member"} is assisting on ${partyTarget.name ?? "target"}`, {
+    targetId: partyTarget.id,
+    targetName: partyTarget.name,
+    leaderId: partyLeaderId,
+    leaderName: leader?.name,
+  });
+  return engageCombatTarget(ctx, me, partyTarget, entities);
 }
 
 function getCombatOrderTarget(me: any): any | null {
@@ -724,18 +732,9 @@ export async function doCombat(
       return actionProgressed(`Disengaging from ${activeTarget.name ?? "target"}`);
     }
 
-    const partyTarget = pickPartyCombatTarget(me, entities);
+    const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
     if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy)) {
-      const leader = partyLeaderId ? entities[partyLeaderId] : null;
-      const leaderTargetId = leader?.order?.targetId;
-      const kind = leaderTargetId === partyTarget.id ? "assist-leader-target" : "assist-party-tag";
-      logPartyCoordination(ctx, me, kind, `${me.name ?? "Party member"} is assisting on ${partyTarget.name ?? "target"}`, {
-        targetId: partyTarget.id,
-        targetName: partyTarget.name,
-        leaderId: partyLeaderId,
-        leaderName: leader?.name,
-      });
-      return engageCombatTarget(ctx, me, partyTarget, entities);
+      return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
     }
 
     const candidatePool = eligible.length > 0 ? eligible : livingMobs;
@@ -2170,6 +2169,13 @@ async function doQuestCombat(
         failureKey: `quest-combat:no-targets:${ctx.currentRegion}`,
         targetName: ctx.currentRegion,
       });
+    }
+
+    const partyLeaderId = getPartyLeaderId(ctx.entityId);
+    const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
+    const partyTargetIsQuestMob = partyTarget ? questMobNames.has((partyTarget.name ?? "").toLowerCase()) : false;
+    if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy, partyTargetIsQuestMob)) {
+      return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
     }
 
     const mob = pickCombatTarget(me, eligible, strategy, { questMobNames });

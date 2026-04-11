@@ -131,12 +131,14 @@ export class MatchmakingSystem {
     const queue = this.queues.get(format);
     if (!queue) return null;
 
-    // Purge stale entries whose entities no longer exist in the world
+    // Purge stale entries only when they include an explicit live entity reference.
+    // `agentId` is an identity key, not always a current world entity id.
     const before = queue.entries.length;
     queue.entries = queue.entries.filter((e) => {
-      const entity = resolveEntity(e.agentId);
+      if (!e.entityId) return true;
+      const entity = resolveEntity(e.entityId);
       if (!entity) {
-        console.log(`[pvp-debug] purged stale queue entry: agent=${e.agentId} (entity gone)`);
+        console.log(`[pvp-debug] purged stale queue entry: agent=${e.agentId} entity=${e.entityId} (entity gone)`);
         return false;
       }
       return true;

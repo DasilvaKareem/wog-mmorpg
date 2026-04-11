@@ -86,6 +86,7 @@ import { MatchmakingSystem } from "../src/combat/matchmaking.js";
 import {
   clearPartyAutoCombatTargetLock,
   pickAutoCombatTarget,
+  pickPartyFocusTarget,
   pickTechnique,
   pickTechniqueTargetIdForAutoCombat,
   rememberPartyAutoCombatTarget,
@@ -710,6 +711,61 @@ section("Party auto-combat target focus");
   rememberPartyAutoCombatTarget(ally.id, zone.zoneId, expiredMob.id, zone.tick - 10, partyId);
   const chosen = pickAutoCombatTarget(ally, zone, 80, [ally.id], partyId);
   assert(chosen?.id === closerMob.id, "Expired party target lock falls back to the nearest valid mob");
+
+  clearPartyAutoCombatTargetLock(partyId);
+}
+
+{
+  const partyId = "party-focus-long-range";
+  clearPartyAutoCombatTargetLock(partyId);
+
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 10,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-focus-range",
+    type: "player",
+    name: "Leader Focus Range",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const ally: Entity = {
+    id: "ally-focus-range",
+    type: "player",
+    name: "Ally Focus Range",
+    x: 260,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const lockedMob: Entity = {
+    id: "mob-focus-range",
+    type: "mob",
+    name: "Focus Range Mob",
+    x: 170,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(lockedMob.id, lockedMob);
+
+  rememberPartyAutoCombatTarget(ally.id, zone.zoneId, lockedMob.id, zone.tick, partyId);
+  const chosen = pickPartyFocusTarget(ally, zone, Number.POSITIVE_INFINITY, [leader.id, ally.id], partyId, leader.id);
+  assert(chosen?.id === lockedMob.id, "Party focus target can preserve the leader call even before the follower is in personal attack range");
 
   clearPartyAutoCombatTargetLock(partyId);
 }
