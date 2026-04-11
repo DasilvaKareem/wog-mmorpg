@@ -1,5 +1,5 @@
-import type { Entity, NpcDialogueMessage, ShopItem } from "../types.js";
-import { fetchShopInventory, buyShopItem, sendNpcDialogue } from "../api.js";
+import type { Entity, NpcDialogueMessage, ShopItem, TechniqueInfo } from "../types.js";
+import { fetchShopInventory, buyShopItem, sendNpcDialogue, fetchAvailableTechniques, learnTechnique } from "../api.js";
 
 const NPC_DIALOG_TYPES = new Set([
   "merchant", "quest-giver", "lore-npc", "guild-registrar",
@@ -49,6 +49,8 @@ export class NpcDialog {
   private shopLoading = false;
   private dialogSending = false;
   private playerGold: number | null = null;
+  private techniques: TechniqueInfo[] = [];
+  private techniquesLoading = false;
 
   constructor(callbacks: NpcDialogCallbacks) {
     this.callbacks = callbacks;
@@ -104,6 +106,9 @@ export class NpcDialog {
       if (btn.dataset.action === "buy" && btn.dataset.tokenId) {
         void this.handleBuy(Number(btn.dataset.tokenId));
       }
+      if (btn.dataset.action === "learn" && btn.dataset.techniqueId) {
+        void this.handleLearn(btn.dataset.techniqueId);
+      }
     });
 
     // Internal escape handler
@@ -126,6 +131,8 @@ export class NpcDialog {
     this.playerGold = null;
     this.shopLoading = false;
     this.dialogSending = false;
+    this.techniques = [];
+    this.techniquesLoading = false;
 
     const accent = TYPE_ACCENT[entity.type] ?? "#aaa";
     this.container.style.borderColor = accent.replace(")", ",0.4)").replace("rgb", "rgba");
@@ -171,6 +178,8 @@ export class NpcDialog {
         return [{ id: "shop", label: "Shop" }, { id: "dialog", label: "Talk" }];
       case "quest-giver":
         return [{ id: "dialog", label: "Talk" }, { id: "quests", label: "Quests" }];
+      case "trainer":
+        return [{ id: "skills", label: "Skills" }, { id: "dialog", label: "Talk" }];
       default:
         return [{ id: "dialog", label: "Talk" }];
     }
@@ -181,6 +190,7 @@ export class NpcDialog {
   private renderContent() {
     if (this.activeTab === "shop") this.renderShop();
     else if (this.activeTab === "quests") this.renderQuests();
+    else if (this.activeTab === "skills") this.renderSkills();
     else this.renderDialog();
   }
 
@@ -251,7 +261,7 @@ export class NpcDialog {
 
     // Auto-greeting on first open
     if (this.chatHistory.length === 0 && !this.dialogSending && hasChar) {
-      void this.handleDialogSend("");
+      void this.handleDialogSend("Hello");
     }
 
     // Scroll to bottom
@@ -280,9 +290,10 @@ export class NpcDialog {
 
     this.dialogSending = false;
     if (result.ok && result.data) {
-      this.chatHistory.push({ role: "npc", content: result.data.response });
+      const text = (result.data as any).reply ?? (result.data as any).response ?? "";
+      this.chatHistory.push({ role: "npc", content: text || "(no response)" });
     } else {
-      this.chatHistory.push({ role: "npc", content: "(no response)" });
+      this.chatHistory.push({ role: "npc", content: result.error ?? "(no response)" });
     }
     this.renderDialog();
   }
@@ -378,6 +389,112 @@ export class NpcDialog {
     // Update gold footer
     if (this.playerGold != null) {
       this.footerEl.innerHTML = `<div class="nd-footer-text">Your gold: ${this.playerGold}</div>`;
+    }
+  }
+
+  // ── Skills view ────────────────────────────────────────────────
+
+  private renderSkills() {
+    if (this.techniques.length === 0 && !this.techniquesLoading) {
+      this.techniquesLoading = true;
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading skills...</div>`;
+      this.footerEl.innerHTML = "";
+      void this.loadTechniques();
+      return;
+    }
+
+    if (this.techniquesLoading) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading skills...</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+
+    if (this.techniques.length === 0) {
+      this.contentEl.innerHTML = `<div class="nd-empty">No skills available for your class</div>`;
+      this.footerEl.innerHTML = "";
+      return;
+    }
+
+    const hasChar = !!this.callbacks.getOwnEntityId();
+    let html = "";
+
+    for (const tech of this.techniques) {
+      const learned = tech.isLearned;
+      const typeColor = tech.type === "attack" ? "#ff6644"
+        : tech.type === "healing" ? "#44cc66"
+        : tech.type === "buff" ? "#66bbff"
+        : tech.type === "debuff" ? "#cc66ff"
+        : "#aaa";
+
+      html += `<div class="nd-shop-item" style="opacity:${learned ? "0.6" : "1"}">`;
+      html += `<div class="nd-shop-item-header">`;
+      html += `<span class="nd-shop-item-name">${esc(tech.name)}</span>`;
+      html += `<span class="nd-shop-item-slot" style="color:${typeColor}">${esc(tech.type)} · R${tech.rank ?? 1}</span>`;
+      html += `</div>`;
+      if (tech.description) {
+        html += `<div class="nd-shop-item-desc">${esc(tech.description)}</div>`;
+      }
+      html += `<div class="nd-shop-item-stats">`;
+      html += `Lvl ${tech.levelRequired} · ${tech.essenceCost} essence · ${tech.cooldown}s cd`;
+      html += `</div>`;
+      html += `<div class="nd-shop-item-footer">`;
+      html += `<span class="nd-shop-item-price">${tech.copperCost}c</span>`;
+      if (learned) {
+        html += `<span class="nd-shop-item-stock" style="color:#4c4">Learned</span>`;
+      } else if (hasChar) {
+        html += `<button class="nd-btn" data-action="learn" data-technique-id="${esc(tech.id)}">Learn</button>`;
+      }
+      html += `</div>`;
+      html += `</div>`;
+    }
+
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+    this.footerEl.innerHTML = "";
+  }
+
+  private async loadTechniques() {
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!entityId) {
+      this.techniquesLoading = false;
+      return;
+    }
+    const data = await fetchAvailableTechniques(entityId);
+    this.techniquesLoading = false;
+    if (data) {
+      this.techniques = data;
+    }
+    if (this.activeTab === "skills") this.renderSkills();
+  }
+
+  private async handleLearn(techniqueId: string) {
+    if (!this.entity) return;
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+
+    const btn = this.contentEl.querySelector(`[data-technique-id="${techniqueId}"]`) as HTMLButtonElement;
+    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+
+    const ownEntity = this.callbacks.getOwnEntityId();
+    const result = await learnTechnique(token, {
+      entityId,
+      techniqueId,
+      trainerEntityId: this.entity.id,
+      zoneId: "",  // server resolves from entity
+    });
+
+    if (result.ok) {
+      // Mark as learned in local list
+      const tech = this.techniques.find(t => t.id === techniqueId);
+      if (tech) tech.isLearned = true;
+      if (btn) { btn.textContent = "Learned!"; }
+      setTimeout(() => this.renderSkills(), 1000);
+    } else {
+      if (btn) {
+        btn.textContent = result.error ?? "Failed";
+        btn.disabled = false;
+        setTimeout(() => { btn.textContent = "Learn"; }, 2000);
+      }
     }
   }
 

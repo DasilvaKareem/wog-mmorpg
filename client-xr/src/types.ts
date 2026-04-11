@@ -276,9 +276,24 @@ export interface NpcDialogueMessage {
 }
 
 export interface NpcDialogueResponse {
-  response: string;
-  npcName: string;
-  emotion: string;
+  reply: string;
+  response?: string;
+  npcName?: string;
+  emotion?: string;
+}
+
+export interface TechniqueInfo {
+  id: string;
+  name: string;
+  description?: string;
+  className: string;
+  type: string;
+  rank?: number;
+  levelRequired: number;
+  essenceCost: number;
+  cooldown: number;
+  copperCost: number;
+  isLearned: boolean;
 }
 
 export interface ShopItem {

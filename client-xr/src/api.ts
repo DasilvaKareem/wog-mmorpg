@@ -10,6 +10,7 @@ import type {
   ZoneQuestsResponse,
   ShopResponse,
   NpcDialogueResponse,
+  TechniqueInfo,
 } from "./types.js";
 
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
@@ -256,4 +257,16 @@ export async function sendNpcDialogue(
   return postJsonWithFallback("/npc/dialogue", token, {
     npcEntityId, entityId, message, recentHistory,
   });
+}
+
+export async function fetchAvailableTechniques(entityId: string): Promise<TechniqueInfo[] | null> {
+  const data = await fetchJsonWithFallback<{ techniques: TechniqueInfo[] }>(`/techniques/available/${entityId}`);
+  return data?.techniques ?? null;
+}
+
+export async function learnTechnique(
+  token: string,
+  body: { entityId: string; techniqueId: string; trainerEntityId: string; zoneId: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/techniques/learn", token, body);
 }
