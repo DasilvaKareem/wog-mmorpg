@@ -29,9 +29,10 @@ import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
+import { BagPanel } from "./hud/BagPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, sendFriendRequest, sendInboxMessage } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, sendFriendRequest, sendInboxMessage } from "./api.js";
 import { getAuthToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -651,6 +652,10 @@ const questPanel = new QuestPanel({
   },
 });
 
+const bagPanel = new BagPanel();
+let lastInventoryPollTime = 0;
+const INVENTORY_POLL_INTERVAL = 10_000;
+
 const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
@@ -760,6 +765,8 @@ async function pollNearbyZones() {
 
     // Quest poll piggybacks on zone poll but self-throttles to 5s
     void pollQuests();
+    // Inventory poll (only when bag is open)
+    if (bagPanel.isVisible()) void pollInventory();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -832,6 +839,19 @@ async function refreshAvailableQuestsNow() {
   const zq = await fetchZoneQuests(zoneId, ownEntityId);
   if (zq) {
     questPanel.updateZoneQuests(zq);
+  }
+}
+
+async function pollInventory() {
+  const addr = ownWalletAddress;
+  if (!addr) return;
+  const now = Date.now();
+  if (now - lastInventoryPollTime < INVENTORY_POLL_INTERVAL) return;
+  lastInventoryPollTime = now;
+
+  const inv = await fetchInventory(addr);
+  if (inv) {
+    bagPanel.updateInventory(inv.items);
   }
 }
 
@@ -1040,6 +1060,10 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "q" || e.key === "Q") {
     questPanel.toggle();
+  }
+  if (e.key === "b" || e.key === "B") {
+    bagPanel.toggle();
+    if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
   }
   if (e.key === " ") {
     e.preventDefault();
