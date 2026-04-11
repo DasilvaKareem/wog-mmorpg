@@ -219,6 +219,13 @@ export interface Entity {
   taggedAtTick?: number;
   /** Out-of-combat regen: tick when this entity last dealt/received damage (players only). */
   lastCombatTick?: number;
+  /** Run energy pool (players only). */
+  runEnergy?: number;
+  maxRunEnergy?: number;
+  /** Player preference: when true, movement uses run speed while energy remains. */
+  runModeEnabled?: boolean;
+  /** Derived movement state for clients/HUD. */
+  isRunning?: boolean;
   /** Travel command: zone the entity is walking toward (for portal-based transitions). */
   travelTargetZone?: string;
   /** Mob spawn origin — used for leash/de-aggro (mobs/bosses only). */
@@ -496,7 +503,11 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
 const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
-const MOVE_SPEED = 30; // units per tick
+const WALK_MOVE_SPEED = 30; // units per tick
+const RUN_MOVE_SPEED = 60; // units per tick
+const DEFAULT_RUN_ENERGY = 100;
+const RUN_ENERGY_DRAIN_PER_TICK = 2;
+const RUN_ENERGY_REGEN_PER_TICK = 1;
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
@@ -732,6 +743,20 @@ export function removeLivePlayerEntityEventually(walletAddress: string, context:
   void removeLivePlayerEntity(walletAddress).catch((err) => {
     console.warn(`[live-player] Failed to remove ${walletAddress} after ${context}:`, err);
   });
+}
+
+function ensurePlayerRunState(entity: Entity): void {
+  if (entity.type !== "player") return;
+  entity.maxRunEnergy = Math.max(1, entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY);
+  entity.runEnergy = Math.max(0, Math.min(entity.runEnergy ?? entity.maxRunEnergy, entity.maxRunEnergy));
+  entity.runModeEnabled = entity.runModeEnabled ?? false;
+  entity.isRunning = entity.isRunning ?? false;
+}
+
+function canEntityRun(entity: Entity): boolean {
+  if (entity.type !== "player") return false;
+  ensurePlayerRunState(entity);
+  return entity.runModeEnabled === true && (entity.runEnergy ?? 0) > 0;
 }
 
 /** Return the attack range for an entity based on its class definition. */
@@ -2275,11 +2300,12 @@ function moveToward(
   entity: Entity, tx: number, ty: number,
   zoneEntities?: Map<string, Entity>,
 ): boolean {
+  const running = canEntityRun(entity);
   const dx = tx - entity.x;
   const dy = ty - entity.y;
   const dist = Math.sqrt(dx * dx + dy * dy);
   if (dist <= 5) return true; // arrived
-  const step = Math.min(MOVE_SPEED, dist);
+  const step = Math.min(running ? RUN_MOVE_SPEED : WALK_MOVE_SPEED, dist);
   let nx = entity.x + (dx / dist) * step;
   let ny = entity.y + (dy / dist) * step;
 
@@ -2304,6 +2330,13 @@ function moveToward(
 
   entity.x = nx;
   entity.y = ny;
+  if (entity.type === "player") {
+    ensurePlayerRunState(entity);
+    entity.isRunning = running;
+    if (running) {
+      entity.runEnergy = Math.max(0, (entity.runEnergy ?? 0) - RUN_ENERGY_DRAIN_PER_TICK);
+    }
+  }
   return false;
 }
 
@@ -2333,14 +2366,16 @@ async function worldTick() {
 
   for (const zone of getAllZones().values()) {
 
-    // Regenerate essence for all player entities (INT-scaled)
+    // Regenerate player resources and clear per-tick locomotion state.
     for (const entity of zone.entities.values()) {
-      if (entity.type === "player" && entity.essence != null && entity.maxEssence != null) {
-        const intStat = entity.effectiveStats?.int ?? entity.stats?.int ?? 0;
-        const regenRate = ESSENCE_REGEN_BASE + intStat * ESSENCE_REGEN_INT_COEFF;
-        const regenAmount = Math.ceil(entity.maxEssence * regenRate);
-        entity.essence = Math.min(entity.maxEssence, entity.essence + regenAmount);
-      }
+      if (entity.type !== "player") continue;
+      ensurePlayerRunState(entity);
+      entity.isRunning = false;
+      if (entity.essence == null || entity.maxEssence == null) continue;
+      const intStat = entity.effectiveStats?.int ?? entity.stats?.int ?? 0;
+      const regenRate = ESSENCE_REGEN_BASE + intStat * ESSENCE_REGEN_INT_COEFF;
+      const regenAmount = Math.ceil(entity.maxEssence * regenRate);
+      entity.essence = Math.min(entity.maxEssence, entity.essence + regenAmount);
     }
 
     // Tag timeout: release mob tags after TAG_TIMEOUT_TICKS of inactivity
@@ -3080,6 +3115,16 @@ async function worldTick() {
       }
     }
 
+    for (const entity of zone.entities.values()) {
+      if (entity.type !== "player") continue;
+      ensurePlayerRunState(entity);
+      if (entity.isRunning) continue;
+      entity.runEnergy = Math.min(
+        entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
+        (entity.runEnergy ?? 0) + RUN_ENERGY_REGEN_PER_TICK,
+      );
+    }
+
     // ── Entity separation pass: push overlapping entities apart ─────
     // Runs every tick so even stationary entities don't stack.
     const livingEntities: Entity[] = [];
@@ -3503,6 +3548,9 @@ export async function saveAllOnlinePlayers(): Promise<void> {
         storyFlags: entity.storyFlags ?? [],
         learnedTechniques: entity.learnedTechniques ?? [],
         professions: getLearnedProfessions(entity.walletAddress),
+        runEnergy: entity.runEnergy,
+        maxRunEnergy: entity.maxRunEnergy,
+        runModeEnabled: entity.runModeEnabled,
         equipment: entity.equipment ?? undefined,
       });
       await persistLivePlayerEntity(entity);

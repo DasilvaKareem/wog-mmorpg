@@ -8,6 +8,8 @@ import type {
   RaceDef,
   QuestLogResponse,
   ZoneQuestsResponse,
+  ShopResponse,
+  NpcDialogueResponse,
 } from "./types.js";
 
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
@@ -89,7 +91,15 @@ async function postJsonWithFallback<T>(
 
 export async function postCommand(
   token: string,
-  body: { zoneId: string; entityId: string; action: string; x?: number; y?: number; targetId?: string }
+  body: {
+    zoneId: string;
+    entityId: string;
+    action: string;
+    x?: number;
+    y?: number;
+    targetId?: string;
+    runEnabled?: boolean;
+  }
 ): Promise<{ ok: boolean; error?: string }> {
   for (const base of CANDIDATE_BASES) {
     try {
@@ -216,4 +226,34 @@ export async function talkToNpc(
   npcEntityId: string,
 ): Promise<{ ok: boolean; error?: string }> {
   return postJsonWithFallback("/quests/talk", token, { entityId, npcEntityId });
+}
+
+// ── NPC interaction endpoints ─────────────────────────────────────
+
+export async function fetchShopInventory(entityId: string): Promise<ShopResponse | null> {
+  return fetchJsonWithFallback<ShopResponse>(`/shop/npc/${entityId}`);
+}
+
+export async function buyShopItem(
+  token: string,
+  buyerAddress: string,
+  tokenId: number,
+  quantity: number,
+  merchantEntityId: string,
+): Promise<{ ok: boolean; data?: { item: string; totalCost: number; remainingGold: number }; error?: string }> {
+  return postJsonWithFallback("/shop/buy", token, {
+    buyerAddress, tokenId, quantity, merchantEntityId,
+  });
+}
+
+export async function sendNpcDialogue(
+  token: string,
+  npcEntityId: string,
+  entityId: string,
+  message: string,
+  recentHistory: { role: string; content: string }[],
+): Promise<{ ok: boolean; data?: NpcDialogueResponse; error?: string }> {
+  return postJsonWithFallback("/npc/dialogue", token, {
+    npcEntityId, entityId, message, recentHistory,
+  });
 }

@@ -27,6 +27,8 @@ import { CharacterSelect } from "./hud/CharacterSelect.js";
 import type { CharacterReadyDetail } from "./hud/CharacterSelect.js";
 import { PlayerPanel } from "./hud/PlayerPanel.js";
 import { QuestPanel } from "./hud/QuestPanel.js";
+import { NpcDialog } from "./hud/NpcDialog.js";
+import { RunPanel } from "./hud/RunPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, completeQuest, talkToNpc } from "./api.js";
@@ -114,6 +116,11 @@ const sky = new SkyRenderer(scene);
 const clickMarker = new ClickMarker();
 clickMarker.setElevationProvider(world);
 scene.add(clickMarker.mesh);
+const runPanel = new RunPanel({
+  onToggle: () => {
+    void toggleRunMode();
+  },
+});
 
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
@@ -129,6 +136,8 @@ const charSelect = !isAnimationLab
       charSelect!.hide();
       ownWalletAddress = detail.walletAddress.toLowerCase();
       ownEntityId = detail.entityId || null;
+      desiredRunMode = null;
+      runPanel.reset();
       agentChat.setWallet(ownWalletAddress);
       agentChat.setEntityId(detail.entityId || null);
       questPanel.setPlayer(ownWalletAddress, true);
@@ -146,6 +155,8 @@ const charSelect = !isAnimationLab
     },
     onBack: () => {
       charSelect!.hide();
+      desiredRunMode = null;
+      runPanel.reset();
       landing!.show();
     },
   })
@@ -159,6 +170,8 @@ const landing = !isAnimationLab
         void charSelect!.show(ownWalletAddress);
       } else {
         // Guest mode — skip character select, enter as spectator
+        desiredRunMode = null;
+        runPanel.reset();
         controls.setLandingMode(false);
         setGameplayHudVisible(true);
         console.log("[enter] Guest spectator mode");
@@ -211,6 +224,7 @@ function setGameplayHudVisible(visible: boolean) {
     "player-panel",
     "panel-toggle",
     "agent-chat",
+    "run-panel",
     "minimap",
     "intent-tooltip",
     "intent-mode-badge",
@@ -231,6 +245,7 @@ function setGameplayHudVisible(visible: boolean) {
 let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownEntityId: string | null = null;
+let desiredRunMode: boolean | null = null;
 let autoLockEnabled = false;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
@@ -238,6 +253,67 @@ let lastQuestPollTime = 0;
 let questLogData: QuestLogResponse | null = null;
 const QUEST_POLL_INTERVAL = 5_000;
 const processedRecentEventIds = new Map<string, number>();
+const DEFAULT_RUN_ENERGY = 100;
+
+function updateRunPanelFromEntity(entity: Entity | null | undefined) {
+  if (!ownWalletAddress || !ownEntityId || !entity || entity.id !== ownEntityId) {
+    runPanel.update({
+      available: false,
+      enabled: false,
+      running: false,
+      energy: 0,
+      maxEnergy: DEFAULT_RUN_ENERGY,
+    });
+    return;
+  }
+
+  if (desiredRunMode != null && entity.runModeEnabled === desiredRunMode) {
+    desiredRunMode = null;
+  }
+
+  runPanel.update({
+    available: true,
+    enabled: desiredRunMode ?? entity.runModeEnabled ?? false,
+    running: entity.isRunning ?? false,
+    energy: entity.runEnergy ?? entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
+    maxEnergy: entity.maxRunEnergy ?? DEFAULT_RUN_ENERGY,
+  });
+}
+
+async function toggleRunMode() {
+  if (!ownWalletAddress || !ownEntityId) return;
+
+  const ownEntity = entities.getEntity(ownEntityId);
+  const zoneId = ownEntity?.zoneId;
+  if (!ownEntity || !zoneId) return;
+
+  const nextEnabled = !(desiredRunMode ?? ownEntity.runModeEnabled ?? false);
+  desiredRunMode = nextEnabled;
+  updateRunPanelFromEntity({
+    ...ownEntity,
+    runModeEnabled: nextEnabled,
+  });
+
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    desiredRunMode = null;
+    updateRunPanelFromEntity(ownEntity);
+    return;
+  }
+
+  const result = await postCommand(token, {
+    zoneId,
+    entityId: ownEntityId,
+    action: "set-run",
+    runEnabled: nextEnabled,
+  });
+
+  if (!result.ok) {
+    console.log("[run] Toggle failed:", result.error);
+    desiredRunMode = null;
+    updateRunPanelFromEntity(entities.getEntity(ownEntityId));
+  }
+}
 
 function filterNewZoneEvents(events: NonNullable<ZoneResponse["recentEvents"]>) {
   const now = Date.now();
@@ -413,6 +489,13 @@ const questPanel = new QuestPanel({
   },
 });
 
+const npcDialog = new NpcDialog({
+  getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
+  getOwnEntityId: () => ownEntityId,
+  getOwnWalletAddress: () => ownWalletAddress,
+  onShowQuests: () => questPanel.showAvailable(),
+});
+
 if (landing) {
   controls.setLandingMode(true);
   setGameplayHudVisible(false);
@@ -508,6 +591,8 @@ async function pollNearbyZones() {
       }
     }
 
+    updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
+
     // Minimap — pass camera in server coords
     minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
 
@@ -600,10 +685,12 @@ renderer.domElement.addEventListener("click", (e) => {
         })();
       }
     } else {
-      // Non-hostile entity — lock camera to it
-      lockOn(entity.id);
-      if (entity.type === "quest-giver" && ownEntityId) {
-        questPanel.showAvailable();
+      // Non-hostile NPC — open dialog without locking camera
+      if (NpcDialog.isNpcType(entity.type) && ownEntityId) {
+        npcDialog.open(entity);
+      } else {
+        // Other non-hostile entity — lock camera to it
+        lockOn(entity.id);
       }
     }
     return;
@@ -731,8 +818,12 @@ if (navigator.xr) {
 // Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
   if (landing?.isActive()) return;
-  // Don't intercept keys while typing in agent chat
+  // Don't intercept keys while typing in agent chat or NPC dialog
   if (agentChat.isFocused()) return;
+  if (npcDialog.isOpen()) {
+    // NpcDialog handles its own Escape internally
+    return;
+  }
   if (e.key === "Escape") {
     unlockCamera();
     inspector.hide();
@@ -741,6 +832,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === "t" || e.key === "T") {
     e.preventDefault();
     agentChat.expand();
+    return;
+  }
+  if (e.key === "r" || e.key === "R") {
+    e.preventDefault();
+    void toggleRunMode();
     return;
   }
   if (e.key === "v" || e.key === "V") {
@@ -842,6 +938,7 @@ async function init() {
     document.getElementById("player-panel")?.style.setProperty("display", "none");
     document.getElementById("panel-toggle")?.style.setProperty("display", "none");
     document.getElementById("agent-chat")?.style.setProperty("display", "none");
+    document.getElementById("run-panel")?.style.setProperty("display", "none");
     document.getElementById("minimap")?.style.setProperty("display", "none");
     document.getElementById("intent-tooltip")?.style.setProperty("display", "none");
     document.getElementById("intent-mode-badge")?.style.setProperty("display", "none");

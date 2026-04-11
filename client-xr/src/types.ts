@@ -36,6 +36,10 @@ export interface Entity {
   maxEssence?: number;
   order?: EntityOrder;
   activeEffects?: ActiveEffect[];
+  runEnergy?: number;
+  maxRunEnergy?: number;
+  runModeEnabled?: boolean;
+  isRunning?: boolean;
   // Resource nodes
   oreType?: string;
   flowerType?: string;
@@ -262,4 +266,36 @@ export interface AvailableQuest {
 
 export interface ZoneQuestsResponse {
   quests: AvailableQuest[];
+}
+
+// ── NPC interaction types ─────────────────────────────────────────
+
+export interface NpcDialogueMessage {
+  role: "player" | "npc";
+  content: string;
+}
+
+export interface NpcDialogueResponse {
+  response: string;
+  npcName: string;
+  emotion: string;
+}
+
+export interface ShopItem {
+  tokenId: number;
+  name: string;
+  description: string;
+  copperPrice: number;
+  currentPrice: number;
+  stock: number | null;
+  buyPrice: number | null;
+  category: string;
+  equipSlot: string | null;
+  statBonuses: Record<string, number>;
+}
+
+export interface ShopResponse {
+  npcId: string;
+  npcName: string;
+  items: ShopItem[];
 }
