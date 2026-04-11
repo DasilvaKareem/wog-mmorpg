@@ -565,12 +565,6 @@ const questPanel = new QuestPanel({
     const zoneId = ownEntity?.zoneId;
     if (!zoneId) return;
 
-    // Open NPC dialog with quest turn-in conversation
-    const npcEntity = entities.getEntity(npcEntityId);
-    if (npcEntity && questTitle) {
-      npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
-    }
-
     // Try direct complete first
     const result = await completeQuest(token, ownEntityId, questId, npcEntityId);
     if (result.ok) {
@@ -610,13 +604,7 @@ const questPanel = new QuestPanel({
     const zoneId = ownEntity?.zoneId;
     if (!zoneId) return;
 
-    // Open NPC dialog with quest conversation
-    const npcEntity = entities.getEntity(npcEntityId);
-    if (npcEntity && questTitle) {
-      npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
-    }
-
-    // Try direct talk first
+    // Try direct talk first (if already near the NPC)
     const result = await talkToNpc(token, ownEntityId, npcEntityId);
     if (result.ok) {
       console.log(`[quest] Talk quest completed with ${npcName}`);
@@ -625,7 +613,7 @@ const questPanel = new QuestPanel({
       return;
     }
 
-    // If too far, send the agent to walk there
+    // If too far, send the agent to walk there and auto-complete on arrival
     if (result.error?.includes("Too far")) {
       try {
         const res = await fetch(`${API_BASE}/agent/goto-npc`, {
