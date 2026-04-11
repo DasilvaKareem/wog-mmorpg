@@ -4114,10 +4114,11 @@ export function registerQuestRoutes(server: FastifyInstance) {
     );
 
     // NPC speaks during the talk quest interaction
+    const npcLine = pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title);
     const talkZoneId = request.body.zoneId ?? player.region ?? "unknown";
     logZoneEvent({
       zoneId: talkZoneId, type: "chat", tick: 0,
-      message: `${npcName}: ${pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title)}`,
+      message: `${npcName}: ${npcLine}`,
       entityId: npcEntityId, entityName: npcName,
     });
     logZoneEvent({
@@ -4143,6 +4144,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       },
       rewards: quest.rewards,
       totalCompleted: player.completedQuests.length,
+      npcDialogue: npcLine,
     };
   });
 

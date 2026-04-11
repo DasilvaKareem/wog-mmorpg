@@ -2144,6 +2144,8 @@ Strategy options: aggressive, balanced, defensive`;
       ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}`
       : action === "complete-quest" && questId
       ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}`
+      : action === "talk-quest"
+      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest`
       : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
 
     await appendChatMessage(authWallet, {

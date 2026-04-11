@@ -782,6 +782,49 @@ function makeLabel(text: string, color = "#ffffff"): THREE.Sprite {
   return sprite;
 }
 
+// ── Quest indicator ────────────────────────────────────────────────
+
+export type QuestIndicatorState = "available" | "in-progress" | "ready";
+
+const QUEST_INDICATOR_CONFIG: Record<QuestIndicatorState, { symbol: string; color: string; bg: string }> = {
+  "available":   { symbol: "!",  color: "#ffdd00", bg: "#000000" },
+  "in-progress": { symbol: "?",  color: "#aaaaaa", bg: "#000000" },
+  "ready":       { symbol: "?",  color: "#ffdd00", bg: "#000000" },
+};
+
+function makeQuestIndicator(state: QuestIndicatorState): THREE.Sprite {
+  const cfg = QUEST_INDICATOR_CONFIG[state];
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d")!;
+
+  // Circle background
+  ctx.beginPath();
+  ctx.arc(32, 32, 28, 0, Math.PI * 2);
+  ctx.fillStyle = cfg.bg;
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = cfg.color;
+  ctx.stroke();
+
+  // Symbol
+  ctx.font = "bold 40px monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = cfg.color;
+  ctx.fillText(cfg.symbol, 32, 34);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+  const sprite = new THREE.Sprite(mat);
+  sprite.layers.set(NO_OUTLINE_LAYER);
+  sprite.scale.set(0.45, 0.45, 1);
+  sprite.userData.questState = state;
+  return sprite;
+}
+
 // ── Speech bubble ──────────────────────────────────────────────────
 
 function makeSpeechBubble(text: string): THREE.Sprite {
@@ -1045,6 +1088,11 @@ function resolveCombatAnim(
   return mapped;
 }
 
+function getLocomotionAnim(entity: Pick<Entity, "isRunning">, movingSmooth: number): AnimName {
+  if (movingSmooth <= 0.1) return "idle";
+  return entity.isRunning ? "run" : "walk";
+}
+
 const PROFESSION_ANIMS: Set<AnimName> = new Set([
   "gather", "craft", "mine", "forage", "skin", "brew", "cook", "enchant", "carve", "pickup",
 ]);
@@ -1118,6 +1166,8 @@ interface EntityObject {
   lifeToken: number;
   /** Timestamp when death animation started — prevents premature respawn */
   dyingSince: number;
+  /** Floating quest indicator sprite above NPC */
+  questIndicator: THREE.Sprite | null;
 }
 
 export class EntityManager {
@@ -1130,6 +1180,8 @@ export class EntityManager {
   private charAssets: import("./CharacterAssets.js").CharacterAssets | null = null;
   private armorSystem: import("./ArmorSystem.js").ArmorSystem | null = null;
   private avatarAssets = new AvatarAssets();
+  /** NPC entity ID → quest indicator state */
+  private npcQuestStates = new Map<string, QuestIndicatorState>();
 
   constructor() {
     this.group.name = "entities";
@@ -1279,14 +1331,13 @@ export class EntityManager {
 
   /** Lerp positions, billboard, animate */
   update(dt: number, camera?: THREE.Camera) {
-    // Constant-speed move toward target (units/sec, tuned to feel smooth at 1s poll)
-    const MOVE_SPEED = 4.0;
     const EXTRAPOLATE_MAX = 0.35;
-    const step = MOVE_SPEED * dt;
 
     for (const obj of this.entities.values()) {
       const g = obj.group;
       const isAlive = obj.lifeState === "alive";
+      const moveSpeed = obj.entity.isRunning ? 6.5 : 4.0;
+      const step = moveSpeed * dt;
       obj.targetAge += dt;
       obj.combatAnimHold = Math.max(0, obj.combatAnimHold - dt);
 
@@ -1339,7 +1390,7 @@ export class EntityManager {
 
         // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
         const curAnim = obj.currentAnim;
-        const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
+        const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "run" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
         if (freeYaw) {
           let yawDiff = obj.targetYaw - g.rotation.y;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
@@ -1357,7 +1408,7 @@ export class EntityManager {
       // ── Animation blending via mixer ──
       if (obj.mixer && (obj.rig || obj.hasGlbModel)) {
         const curAnim = obj.currentAnim;
-        const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "idle";
+        const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "run" && curAnim !== "idle";
 
         // Safety valve: force return to locomotion if one-shot stuck > 3s
         if (isAlive && isOneShot && obj.oneShotStart > 0) {
@@ -1365,18 +1416,18 @@ export class EntityManager {
           if (elapsed > 3000) {
             obj.oneShotStart = 0;
             obj.combatAnimHold = 0;
-            this.playAnimation(obj, obj.movingSmooth > 0.1 ? "walk" : "idle", true);
+            this.playAnimation(obj, getLocomotionAnim(obj.entity, obj.movingSmooth), true);
           }
         }
 
         // Return from combat anim once hold timer expires
         if (isAlive && isCombatAnimation(curAnim) && obj.combatAnimHold <= 0) {
-          this.playAnimation(obj, obj.movingSmooth > 0.1 ? "walk" : "idle", true);
+          this.playAnimation(obj, getLocomotionAnim(obj.entity, obj.movingSmooth), true);
         }
 
         // Normal locomotion blend (only when not in a one-shot)
         if (isAlive && !isOneShot) {
-          const wantAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          const wantAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
           if (curAnim !== wantAnim) {
             this.playAnimation(obj, wantAnim, true);
           }
@@ -1416,6 +1467,11 @@ export class EntityManager {
       if (camera && obj.hpBarBg) {
         obj.hpBarBg.lookAt(camera.position);
         obj.hpBarFg!.lookAt(camera.position);
+      }
+
+      // Quest indicator bob
+      if (obj.questIndicator) {
+        obj.questIndicator.position.y = 2.5 + Math.sin(performance.now() * 0.003) * 0.08;
       }
     }
 
@@ -1537,7 +1593,7 @@ export class EntityManager {
       if (!clip) {
         if (!loop) {
           onFinish?.();
-          const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          const nextAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
           if (name !== nextAnim) {
             this.playAnimation(obj, nextAnim, true);
           }
@@ -1578,7 +1634,7 @@ export class EntityManager {
         if (obj.oneShotStart === startToken) {
           obj.oneShotStart = 0;
           onFinish?.();
-          const nextAnim: AnimName = obj.movingSmooth > 0.1 ? "walk" : "idle";
+          const nextAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
           this.playAnimation(obj, nextAnim, true);
         }
       };
@@ -2143,6 +2199,7 @@ export class EntityManager {
       lifeState: ent.hp > 0 ? "alive" : "dead-hidden",
       lifeToken: 0,
       dyingSince: 0,
+      questIndicator: null,
     };
 
     if (ent.hp <= 0) {
@@ -3546,10 +3603,7 @@ export class EntityManager {
     rNpcFingers.position.set(0, -0.02, 0.04);
     rig.rHand.add(rNpcFingers);
 
-    if (ent.type === "quest-giver") {
-      const q = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0xffdd00 }));
-      q.position.y = 2.0; group.add(q);
-    }
+    // Quest indicator is added dynamically via updateQuestIndicators()
     if (ent.type === "merchant") {
       const bag = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.15), new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color: 0xbb8833 }));
       bag.position.set(0, -0.05, 0);
@@ -3633,6 +3687,45 @@ export class EntityManager {
           child.rotation.set(rot.x, rot.y, rot.z);
         }
       });
+    }
+  }
+
+  /**
+   * Update quest indicators floating above NPCs.
+   * Called after quest polling with maps of npcEntityId → state.
+   */
+  updateQuestIndicators(states: Map<string, QuestIndicatorState>) {
+    // Diff: remove indicators for NPCs no longer in any quest state
+    for (const [id, prev] of this.npcQuestStates) {
+      if (!states.has(id)) {
+        this.npcQuestStates.delete(id);
+        const obj = this.entities.get(id);
+        if (obj?.questIndicator) {
+          obj.group.remove(obj.questIndicator);
+          obj.questIndicator = null;
+        }
+      }
+    }
+
+    for (const [npcId, state] of states) {
+      const obj = this.entities.get(npcId);
+      if (!obj) continue;
+
+      const prev = this.npcQuestStates.get(npcId);
+      if (prev === state) continue; // no change
+
+      // Remove old indicator
+      if (obj.questIndicator) {
+        obj.group.remove(obj.questIndicator);
+        obj.questIndicator = null;
+      }
+
+      // Create new indicator
+      const indicator = makeQuestIndicator(state);
+      indicator.position.y = 2.5;
+      obj.group.add(indicator);
+      obj.questIndicator = indicator;
+      this.npcQuestStates.set(npcId, state);
     }
   }
 

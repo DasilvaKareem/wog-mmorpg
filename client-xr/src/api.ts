@@ -22,7 +22,7 @@ import type {
 
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
 const ENV_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? "";
-const CANDIDATE_BASES = ENV_BASE
+export const CANDIDATE_BASES = ENV_BASE
   ? [ENV_BASE]
   : ["", "http://localhost:3003", "http://127.0.0.1:3003", "http://localhost:3000", "http://127.0.0.1:3000"];
 
@@ -31,7 +31,7 @@ function normalizeBase(base: string): string {
   return base.endsWith("/") ? base.slice(0, -1) : base;
 }
 
-function toUrl(base: string, path: string): string {
+export function toUrl(base: string, path: string): string {
   const normalizedBase = normalizeBase(base);
   return normalizedBase ? `${normalizedBase}${path}` : path;
 }

@@ -1,4 +1,3 @@
-type LandingView = "welcome" | "sign-in" | "register";
 type SocialStrategy = "google" | "discord" | "x" | "telegram" | "farcaster";
 
 interface LandingPageOptions {
@@ -14,12 +13,11 @@ export class LandingPage {
   private root: HTMLDivElement;
   private panel: HTMLDivElement;
   private statusEl: HTMLDivElement;
-  private zoneEl: HTMLSpanElement;
-  private onlineEl: HTMLSpanElement;
+  private zoneEl: HTMLSpanElement | null;
+  private onlineEl: HTMLSpanElement | null;
   private continueBtn: HTMLButtonElement;
   private signOutBtn: HTMLButtonElement;
   private authPill: HTMLDivElement;
-  private emailStepMap = new Map<LandingView, "email" | "otp">();
   private ready = false;
   private busy = false;
   private walletAddress: string | null = null;
@@ -31,59 +29,32 @@ export class LandingPage {
     this.root.id = "xr-landing";
     this.root.innerHTML = `
       <div class="xr-landing-scrim"></div>
-      <div class="xr-landing-orbit-note">Live orbit preview · controls unlock after entry</div>
     `;
 
     this.panel = document.createElement("div");
     this.panel.className = "xr-landing-panel";
     this.panel.innerHTML = `
       <div class="xr-landing-brand">
-        <span class="xr-landing-kicker">World of Geneva XR</span>
-        <h1>Enter The World</h1>
-        <p>A live orbit of the realm with a cleaner, modern front door for sign-in and new account creation.</p>
-      </div>
-
-      <div class="xr-landing-meta">
-        <div class="xr-landing-meta-card">
-          <span class="xr-landing-meta-label">Online now</span>
-          <span class="xr-landing-meta-value" data-online>--</span>
+        <div class="xr-landing-logo" aria-label="World of Geneva">
+          <div class="xr-landing-logo-mark">W</div>
+          <div class="xr-landing-logo-copy">
+            <span class="xr-landing-kicker">World of Geneva</span>
+            <h1>Sign In</h1>
+          </div>
         </div>
-        <div class="xr-landing-meta-card">
-          <span class="xr-landing-meta-label">Featured zone</span>
-          <span class="xr-landing-meta-value" data-zone>Loading...</span>
-        </div>
+        <p>Choose a sign-in method, then enter the world and continue into character selection.</p>
       </div>
 
       <div class="xr-landing-auth-pill" hidden>Signed in</div>
 
-      <div class="xr-landing-tabs">
-        <button type="button" class="xr-landing-tab active" data-view-trigger="welcome">Welcome</button>
-        <button type="button" class="xr-landing-tab" data-view-trigger="sign-in">Sign In</button>
-        <button type="button" class="xr-landing-tab" data-view-trigger="register">Create Account</button>
-      </div>
-
-      <section class="xr-landing-view active" data-view="welcome">
+      <section class="xr-landing-view active">
         <div class="xr-landing-copy">
-          <h2>Simple entry. Live backdrop.</h2>
-          <p>The landing screen sits above the actual world, so it feels like a front gate instead of a detached login page.</p>
-        </div>
-        <div class="xr-landing-actions xr-landing-actions-stack">
-          <button type="button" class="xr-landing-btn xr-landing-btn-primary" data-action="go-sign-in">Sign In</button>
-          <button type="button" class="xr-landing-btn xr-landing-btn-secondary" data-action="go-register">Create Account</button>
-          <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="continue-world" disabled>Enter World</button>
-        </div>
-        <!-- Sign in required to enter -->
-        <button type="button" class="xr-landing-quiet xr-landing-signout" data-action="sign-out" hidden>Sign Out</button>
-      </section>
-
-      <section class="xr-landing-view" data-view="sign-in">
-        <div class="xr-landing-copy">
-          <h2>Sign In</h2>
-          <p>Use the same thirdweb in-app wallet flow as the main client so the XR login stays consistent.</p>
+          <h2>One account flow</h2>
+          <p>Sign in once, then use Enter World to open the character flow.</p>
         </div>
         <div class="xr-landing-socials" data-socials="sign-in"></div>
         <div class="xr-landing-divider"><span>or with email</span></div>
-        <div class="xr-landing-form" data-email-flow="sign-in">
+        <div class="xr-landing-form" data-email-flow>
           <label class="xr-landing-field">
             <span>Email</span>
             <input name="email" type="email" autocomplete="email" placeholder="you@example.com" />
@@ -93,35 +64,14 @@ export class LandingPage {
             <input name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
           </label>
           <div class="xr-landing-actions">
-            <button type="button" class="xr-landing-btn xr-landing-btn-primary" data-action="send-code" data-view-source="sign-in">Send Code</button>
-            <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="verify-code" data-view-source="sign-in" hidden>Verify & Enter</button>
-            <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="back-welcome">Back</button>
+            <button type="button" class="xr-landing-btn xr-landing-btn-primary" data-action="send-code">Send Code</button>
+            <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="verify-code" hidden>Verify Code</button>
           </div>
         </div>
-      </section>
-
-      <section class="xr-landing-view" data-view="register">
-        <div class="xr-landing-copy">
-          <h2>Create Account</h2>
-          <p>New accounts use the same wallet-backed auth, just framed as first-time entry instead of return login.</p>
+        <div class="xr-landing-actions xr-landing-actions-stack">
+          <button type="button" class="xr-landing-btn xr-landing-btn-secondary" data-action="continue-world" disabled>Enter World</button>
         </div>
-        <div class="xr-landing-socials" data-socials="register"></div>
-        <div class="xr-landing-divider"><span>or with email</span></div>
-        <div class="xr-landing-form" data-email-flow="register">
-          <label class="xr-landing-field">
-            <span>Email</span>
-            <input name="email" type="email" autocomplete="email" placeholder="you@example.com" />
-          </label>
-          <label class="xr-landing-field xr-landing-otp" hidden>
-            <span>Verification Code</span>
-            <input name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
-          </label>
-          <div class="xr-landing-actions">
-            <button type="button" class="xr-landing-btn xr-landing-btn-primary" data-action="send-code" data-view-source="register">Send Code</button>
-            <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="verify-code" data-view-source="register" hidden>Create & Enter</button>
-            <button type="button" class="xr-landing-btn xr-landing-btn-ghost" data-action="back-welcome">Back</button>
-          </div>
-        </div>
+        <button type="button" class="xr-landing-quiet xr-landing-signout" data-action="sign-out" hidden>Sign Out</button>
       </section>
     `;
 
@@ -133,14 +83,13 @@ export class LandingPage {
     this.root.appendChild(this.panel);
     document.body.appendChild(this.root);
 
-    this.zoneEl = this.panel.querySelector("[data-zone]") as HTMLSpanElement;
-    this.onlineEl = this.panel.querySelector("[data-online]") as HTMLSpanElement;
+    this.zoneEl = this.panel.querySelector("[data-zone]");
+    this.onlineEl = this.panel.querySelector("[data-online]");
     this.continueBtn = this.panel.querySelector("[data-action='continue-world']") as HTMLButtonElement;
     this.signOutBtn = this.panel.querySelector("[data-action='sign-out']") as HTMLButtonElement;
     this.authPill = this.panel.querySelector(".xr-landing-auth-pill") as HTMLDivElement;
 
-    this.mountSocialButtons("sign-in");
-    this.mountSocialButtons("register");
+    this.mountSocialButtons();
     this.bindEvents();
     void this.hydrateExistingSession();
   }
@@ -151,20 +100,20 @@ export class LandingPage {
 
   setReady(ready: boolean) {
     this.ready = ready;
-    this.refreshWelcomeButtons();
+    this.refreshActionState();
     if (ready) {
-      this.setStatus(this.walletAddress ? `Signed in as ${this.truncateAddress(this.walletAddress)}.` : "World ready. Sign in or continue as spectator.");
+      this.setStatus(this.walletAddress ? `Signed in as ${this.truncateAddress(this.walletAddress)}.` : "World ready. Sign in to enter.");
     } else {
       this.setStatus("Loading world...");
     }
   }
 
   setOnlineCount(count: number) {
-    this.onlineEl.textContent = String(count);
+    if (this.onlineEl) this.onlineEl.textContent = String(count);
   }
 
   setFeaturedZone(zoneId: string) {
-    this.zoneEl.textContent = zoneId.replace(/-/g, " ");
+    if (this.zoneEl) this.zoneEl.textContent = zoneId.replace(/-/g, " ");
   }
 
   hide() {
@@ -176,21 +125,9 @@ export class LandingPage {
   }
 
   private bindEvents() {
-    this.panel.querySelectorAll<HTMLElement>("[data-view-trigger]").forEach((el) => {
-      el.addEventListener("click", () => {
-        this.showView(el.dataset.viewTrigger as LandingView);
-      });
-    });
-
-    this.panel.querySelector("[data-action='go-sign-in']")?.addEventListener("click", () => this.showView("sign-in"));
-    this.panel.querySelector("[data-action='go-register']")?.addEventListener("click", () => this.showView("register"));
-    this.panel.querySelectorAll<HTMLElement>("[data-action='back-welcome']").forEach((el) => {
-      el.addEventListener("click", () => this.showView("welcome"));
-    });
-
     this.continueBtn.addEventListener("click", () => {
-      if (!this.ready) return;
-      this.enterWorld(this.walletAddress, this.walletAddress ? "authenticated" : "guest");
+      if (!this.ready || !this.walletAddress) return;
+      this.enterWorld(this.walletAddress, "authenticated");
     });
 
     this.signOutBtn.addEventListener("click", async () => {
@@ -198,26 +135,16 @@ export class LandingPage {
         const { xrAuth } = await this.loadAuthModule();
         await xrAuth.disconnect();
         this.walletAddress = null;
-        this.refreshWelcomeButtons();
-        this.setStatus(this.ready ? "Signed out. Sign in or continue as spectator." : "Loading world...");
+        this.refreshActionState();
+        this.setStatus(this.ready ? "Signed out. Sign in to enter." : "Loading world...");
       });
     });
 
-    this.panel.querySelectorAll<HTMLElement>("[data-action='send-code']").forEach((el) => {
-      el.addEventListener("click", () => {
-        const view = el.dataset.viewSource;
-        if (view === "sign-in" || view === "register") {
-          void this.sendEmailCode(view);
-        }
-      });
+    this.panel.querySelector("[data-action='send-code']")?.addEventListener("click", () => {
+      void this.sendEmailCode();
     });
-    this.panel.querySelectorAll<HTMLElement>("[data-action='verify-code']").forEach((el) => {
-      el.addEventListener("click", () => {
-        const view = el.dataset.viewSource;
-        if (view === "sign-in" || view === "register") {
-          void this.verifyEmailCode(view);
-        }
-      });
+    this.panel.querySelector("[data-action='verify-code']")?.addEventListener("click", () => {
+      void this.verifyEmailCode();
     });
   }
 
@@ -226,17 +153,17 @@ export class LandingPage {
       const { xrAuth } = await this.loadAuthModule();
       const address = await xrAuth.autoConnect();
       this.walletAddress = address;
-      this.refreshWelcomeButtons();
+      this.refreshActionState();
       if (address) {
         this.setStatus(this.ready ? `Signed in as ${this.truncateAddress(address)}.` : "Loading world...");
       } else {
-        this.setStatus(this.ready ? "World ready. Sign in or continue as spectator." : "Loading world...");
+        this.setStatus(this.ready ? "World ready. Sign in to enter." : "Loading world...");
       }
     });
   }
 
-  private mountSocialButtons(view: Extract<LandingView, "sign-in" | "register">) {
-    const container = this.panel.querySelector(`[data-socials='${view}']`);
+  private mountSocialButtons() {
+    const container = this.panel.querySelector("[data-socials='sign-in']");
     if (!container) return;
 
     for (const social of SOCIALS) {
@@ -246,33 +173,14 @@ export class LandingPage {
       button.textContent = social.label;
       button.style.setProperty("--social-accent", social.accent);
       button.addEventListener("click", () => {
-        void this.connectSocial(social.strategy, view);
+        void this.connectSocial(social.strategy);
       });
       container.appendChild(button);
     }
   }
 
-  private showView(view: LandingView) {
-    this.panel.querySelectorAll<HTMLElement>("[data-view]").forEach((el) => {
-      el.classList.toggle("active", el.dataset.view === view);
-    });
-    this.panel.querySelectorAll<HTMLElement>("[data-view-trigger]").forEach((el) => {
-      el.classList.toggle("active", el.dataset.viewTrigger === view);
-    });
-
-    if (view === "welcome") {
-      this.setStatus(this.ready
-        ? this.walletAddress
-          ? `Signed in as ${this.truncateAddress(this.walletAddress)}.`
-          : "World ready. Sign in or continue as spectator."
-        : "Loading world...");
-    } else if (!this.busy) {
-      this.setStatus(view === "sign-in" ? "Authenticate with thirdweb." : "Create a new wallet-backed account.");
-    }
-  }
-
-  private getFlowElements(view: Extract<LandingView, "sign-in" | "register">) {
-    const flow = this.panel.querySelector(`[data-email-flow='${view}']`) as HTMLDivElement;
+  private getFlowElements() {
+    const flow = this.panel.querySelector("[data-email-flow]") as HTMLDivElement;
     return {
       emailInput: flow.querySelector<HTMLInputElement>("input[name='email']")!,
       otpWrap: flow.querySelector<HTMLElement>(".xr-landing-otp")!,
@@ -282,21 +190,21 @@ export class LandingPage {
     };
   }
 
-  private async connectSocial(strategy: SocialStrategy, view: Extract<LandingView, "sign-in" | "register">) {
+  private async connectSocial(strategy: SocialStrategy) {
     await this.runBusy(
-      view === "register" ? `Creating account with ${strategy}...` : `Signing in with ${strategy}...`,
+      `Signing in with ${strategy}...`,
       async () => {
         const { xrAuth } = await this.loadAuthModule();
         const address = await xrAuth.connectSocial(strategy);
         this.walletAddress = address;
-        this.refreshWelcomeButtons();
-        this.enterWorld(address, "authenticated");
+        this.refreshActionState();
+        this.setStatus(`Signed in as ${this.truncateAddress(address)}. Enter world when ready.`);
       }
     );
   }
 
-  private async sendEmailCode(view: Extract<LandingView, "sign-in" | "register">) {
-    const els = this.getFlowElements(view);
+  private async sendEmailCode() {
+    const els = this.getFlowElements();
     const email = els.emailInput.value.trim();
     if (!email) {
       this.setStatus("Enter your email first.");
@@ -306,7 +214,6 @@ export class LandingPage {
     await this.runBusy("Sending verification code...", async () => {
       const { xrAuth } = await this.loadAuthModule();
       await xrAuth.sendEmailCode(email);
-      this.emailStepMap.set(view, "otp");
       els.otpWrap.hidden = false;
       els.verifyBtn.hidden = false;
       this.setStatus("Code sent. Enter it to continue.");
@@ -314,8 +221,8 @@ export class LandingPage {
     });
   }
 
-  private async verifyEmailCode(view: Extract<LandingView, "sign-in" | "register">) {
-    const els = this.getFlowElements(view);
+  private async verifyEmailCode() {
+    const els = this.getFlowElements();
     const email = els.emailInput.value.trim();
     const otp = els.otpInput.value.trim();
     if (!email || !otp) {
@@ -323,24 +230,19 @@ export class LandingPage {
       return;
     }
 
-    await this.runBusy(
-      view === "register" ? "Creating account..." : "Verifying sign-in...",
-      async () => {
-        const { xrAuth } = await this.loadAuthModule();
-        const address = await xrAuth.verifyEmailCode(email, otp);
-        this.walletAddress = address;
-        this.refreshWelcomeButtons();
-        this.enterWorld(address, "authenticated");
-      }
-    );
+    await this.runBusy("Verifying sign-in...", async () => {
+      const { xrAuth } = await this.loadAuthModule();
+      const address = await xrAuth.verifyEmailCode(email, otp);
+      this.walletAddress = address;
+      this.refreshActionState();
+      this.setStatus(`Signed in as ${this.truncateAddress(address)}. Enter world when ready.`);
+    });
   }
 
-  private refreshWelcomeButtons() {
+  private refreshActionState() {
     const signedIn = Boolean(this.walletAddress);
-    this.continueBtn.disabled = !this.ready;
-    this.continueBtn.textContent = signedIn
-      ? `Enter World As ${this.truncateAddress(this.walletAddress!)}`
-      : "Enter World";
+    this.continueBtn.disabled = !this.ready || !signedIn;
+    this.continueBtn.textContent = "Enter World";
     this.authPill.hidden = !signedIn;
     this.authPill.textContent = signedIn ? `Signed in · ${this.truncateAddress(this.walletAddress!)}` : "Signed in";
     this.signOutBtn.hidden = !signedIn;
@@ -459,6 +361,36 @@ export class LandingPage {
         padding: 18px 18px 14px;
       }
 
+      .xr-landing-logo {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 16px;
+        text-align: left;
+      }
+
+      .xr-landing-logo-mark {
+        display: grid;
+        place-items: center;
+        width: 72px;
+        height: 72px;
+        border-radius: 22px;
+        background:
+          radial-gradient(circle at 35% 35%, rgba(255, 242, 205, 0.32), transparent 42%),
+          linear-gradient(135deg, rgba(239, 201, 127, 0.96), rgba(110, 65, 34, 0.96));
+        color: #24160d;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 247, 226, 0.48),
+          0 12px 28px rgba(0, 0, 0, 0.26);
+        font-size: 42px;
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .xr-landing-logo-copy {
+        min-width: 0;
+      }
+
       .xr-landing-kicker {
         display: inline-flex;
         padding: 6px 12px;
@@ -472,7 +404,7 @@ export class LandingPage {
       }
 
       .xr-landing-brand h1 {
-        margin: 18px 0 10px;
+        margin: 14px 0 0;
         color: var(--xr-landing-ink);
         font-size: clamp(36px, 5vw, 50px);
         line-height: 0.94;
@@ -484,37 +416,6 @@ export class LandingPage {
         color: var(--xr-landing-copy);
         font-size: 14px;
         line-height: 1.65;
-      }
-
-      .xr-landing-meta {
-        position: relative;
-        z-index: 1;
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-      }
-
-      .xr-landing-meta-card {
-        padding: 14px 16px;
-        border-radius: 18px;
-        background: rgba(255, 251, 239, 0.05);
-        border: 1px solid rgba(239, 201, 127, 0.1);
-      }
-
-      .xr-landing-meta-label {
-        display: block;
-        color: var(--xr-landing-muted);
-        font: 600 10px/1 "Courier New", monospace;
-        letter-spacing: 0.16em;
-        text-transform: uppercase;
-      }
-
-      .xr-landing-meta-value {
-        display: block;
-        margin-top: 8px;
-        color: var(--xr-landing-ink);
-        font-size: 18px;
-        text-transform: capitalize;
       }
 
       .xr-landing-auth-pill {
@@ -532,47 +433,9 @@ export class LandingPage {
         text-align: center;
       }
 
-      .xr-landing-tabs {
-        position: relative;
-        z-index: 1;
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 8px;
-        margin: 18px 0 16px;
-        padding: 6px;
-        border-radius: 18px;
-        background: rgba(11, 10, 9, 0.46);
-        border: 1px solid rgba(239, 201, 127, 0.12);
-      }
-
-      .xr-landing-tab {
-        padding: 10px 12px;
-        border: none;
-        border-radius: 12px;
-        background: transparent;
-        color: var(--xr-landing-muted);
-        cursor: pointer;
-        font: 600 11px/1 "Courier New", monospace;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-        transition: color 160ms ease, background-color 160ms ease, transform 160ms ease;
-      }
-
-      .xr-landing-tab:hover,
-      .xr-landing-tab.active {
-        color: var(--xr-landing-gold);
-        background: rgba(239, 201, 127, 0.08);
-        transform: translateY(-1px);
-      }
-
       .xr-landing-view {
-        display: none;
         position: relative;
         z-index: 1;
-      }
-
-      .xr-landing-view.active {
-        display: block;
       }
 
       .xr-landing-copy h2 {
@@ -715,7 +578,7 @@ export class LandingPage {
 
       .xr-landing-btn:disabled {
         opacity: 0.52;
-        cursor: wait;
+        cursor: not-allowed;
         transform: none;
       }
 
@@ -750,20 +613,6 @@ export class LandingPage {
         text-transform: uppercase;
       }
 
-      .xr-landing-orbit-note {
-        position: absolute;
-        right: 18px;
-        bottom: 16px;
-        padding: 10px 14px;
-        border-radius: 999px;
-        background: rgba(8, 10, 14, 0.44);
-        border: 1px solid rgba(239, 201, 127, 0.12);
-        color: rgba(244, 234, 208, 0.74);
-        font: 600 11px/1 "Courier New", monospace;
-        letter-spacing: 0.14em;
-        text-transform: uppercase;
-      }
-
       @media (max-width: 640px) {
         .xr-landing-panel {
           width: calc(100vw - 20px);
@@ -771,19 +620,18 @@ export class LandingPage {
           border-radius: 24px;
         }
 
-        .xr-landing-meta,
+        .xr-landing-logo,
         .xr-landing-actions {
           grid-template-columns: 1fr;
         }
 
-        .xr-landing-tabs {
-          grid-template-columns: 1fr;
+        .xr-landing-logo {
+          text-align: center;
         }
 
-        .xr-landing-orbit-note {
-          left: 16px;
-          right: 16px;
-          text-align: center;
+        .xr-landing-logo-copy {
+          display: grid;
+          justify-items: center;
         }
       }
     `;

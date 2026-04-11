@@ -1,9 +1,10 @@
 import type { ActiveQuest, AvailableQuest, QuestLogResponse, ZoneQuestsResponse } from "../types.js";
 
 interface QuestPanelCallbacks {
-  onAcceptQuest: (questId: string) => void;
-  onCompleteQuest: (questId: string, npcEntityId: string) => void;
-  onTalkToNpc: (npcEntityId: string) => void;
+  onAcceptQuest: (questId: string, npcEntityId: string, npcName: string) => void;
+  onCompleteQuest: (questId: string, npcEntityId: string, questTitle: string, questDesc: string, objectiveType: string) => void;
+  onTalkToNpc: (npcEntityId: string, npcName: string, questTitle: string, questDesc: string, objectiveType: string) => void;
+  onOpenAvailable?: () => void;
 }
 
 /**
@@ -51,6 +52,9 @@ export class QuestPanel {
       this.activeTab = tab;
       this.tabBar.querySelectorAll(".qp-tab").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      if (tab === "available") {
+        this.callbacks.onOpenAvailable?.();
+      }
       this.render();
     });
     this.container.appendChild(this.tabBar);
@@ -76,9 +80,11 @@ export class QuestPanel {
       const questId = btn.dataset.questId ?? "";
       const npcId = btn.dataset.npcId ?? "";
 
-      if (action === "accept") this.callbacks.onAcceptQuest(questId);
-      else if (action === "complete") this.callbacks.onCompleteQuest(questId, npcId);
-      else if (action === "talk") this.callbacks.onTalkToNpc(npcId);
+      if (action === "accept") {
+        const npcName = btn.dataset.npcName ?? "";
+        this.callbacks.onAcceptQuest(questId, npcId, npcName);
+      } else if (action === "complete") this.callbacks.onCompleteQuest(questId, npcId, btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", btn.dataset.objType ?? "kill");
+      else if (action === "talk") this.callbacks.onTalkToNpc(npcId, btn.dataset.npcName ?? "", btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", "talk");
     });
   }
 
@@ -104,12 +110,16 @@ export class QuestPanel {
       b.classList.toggle("active", (b as HTMLElement).dataset.tab === "available");
     });
     this.container.style.display = "flex";
+    this.callbacks.onOpenAvailable?.();
     this.render();
   }
 
   toggle() {
     if (this.container.style.display === "none") {
       this.container.style.display = "flex";
+      if (this.activeTab === "available") {
+        this.callbacks.onOpenAvailable?.();
+      }
       this.render();
     } else {
       this.container.style.display = "none";
@@ -160,7 +170,7 @@ export class QuestPanel {
       if (q.complete) {
         html += `<div class="qp-ready">READY TO TURN IN</div>`;
         if (this.isOwn && q.npcEntityId) {
-          html += `<button class="qp-btn" data-action="complete" data-quest-id="${esc(q.questId)}" data-npc-id="${esc(q.npcEntityId)}">Turn In</button>`;
+          html += `<button class="qp-btn" data-action="complete" data-quest-id="${esc(q.questId)}" data-npc-id="${esc(q.npcEntityId)}" data-quest-title="${esc(q.title)}" data-quest-desc="${esc(q.description)}" data-obj-type="${esc(q.objective.type)}">Turn In</button>`;
         }
       } else {
         html += `<div class="qp-progress">`;
@@ -201,9 +211,9 @@ export class QuestPanel {
 
       if (this.isOwn) {
         if (q.objective.type === "talk") {
-          html += `<button class="qp-btn" data-action="talk" data-npc-id="${esc(q.npcEntityId)}">Talk</button>`;
+          html += `<button class="qp-btn" data-action="talk" data-npc-id="${esc(q.npcEntityId)}" data-npc-name="${esc(q.npcName)}" data-quest-title="${esc(q.title)}" data-quest-desc="${esc(q.description)}">Talk</button>`;
         } else {
-          html += `<button class="qp-btn" data-action="accept" data-quest-id="${esc(q.questId)}">Accept</button>`;
+          html += `<button class="qp-btn" data-action="accept" data-quest-id="${esc(q.questId)}" data-npc-id="${esc(q.npcEntityId)}" data-npc-name="${esc(q.npcName)}">Accept</button>`;
         }
       }
 

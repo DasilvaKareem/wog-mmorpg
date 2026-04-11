@@ -1876,6 +1876,26 @@ export async function doGotoNpc(
           targetName,
         });
       }
+    } else if (arrivalAction === "talk-quest" && ctx.custodialWallet) {
+      try {
+        await ctx.api("POST", "/quests/talk", {
+          zoneId: ctx.currentRegion,
+          entityId: ctx.entityId,
+          npcEntityId: targetEntityId,
+        });
+        void ctx.logActivity(`Talked to ${targetName ?? "NPC"} for quest`);
+        console.log(`[agent:${ctx.walletTag}] Talk quest at ${targetName ?? targetEntityId} (user-initiated)`);
+      } catch (questErr: any) {
+        const reason = formatAgentError(questErr);
+        void ctx.logActivity(`Could not talk for quest: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:talk-quest:${targetEntityId}`,
+          endpoint: "/quests/talk",
+          targetId: targetEntityId,
+          targetName,
+        });
+      }
     } else if (arrivalAction === "complete-quest" && (target as any).questId && ctx.custodialWallet) {
       try {
         await ctx.api("POST", "/quests/complete", {

@@ -1,8 +1,7 @@
 import { createThirdwebClient, defineChain } from "thirdweb";
 import { inAppWallet } from "thirdweb/wallets";
 import { preAuthenticate } from "thirdweb/wallets/in-app";
-
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
+import { CANDIDATE_BASES, toUrl } from "./api.js";
 const ADDRESS_KEY = "wog:xr:wallet-address";
 const LEGACY_TOKEN_KEY = "wog:agent:jwt";
 const LEGACY_EXPIRY_KEY = "wog:agent:jwt:expiry";
@@ -79,14 +78,17 @@ export function clearCachedToken(walletAddress?: string): void {
 }
 
 async function registerWallet(address: string): Promise<void> {
-  try {
-    await fetch(`${API_URL}/wallet/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address }),
-    });
-  } catch {
-    // Non-fatal.
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetch(toUrl(base, "/wallet/register"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address }),
+      });
+      if (res.ok) return;
+    } catch {
+      // Try next candidate base.
+    }
   }
 }
 
@@ -103,29 +105,32 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
   const cached = getCachedToken(walletAddress);
   if (cached) return cached;
 
-  try {
-    const challengeRes = await fetch(`${API_URL}/auth/challenge?wallet=${walletAddress}`);
-    if (!challengeRes.ok) return null;
-    const { message, timestamp } = await challengeRes.json();
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const challengeRes = await fetch(toUrl(base, `/auth/challenge?wallet=${walletAddress}`));
+      if (!challengeRes.ok) continue;
+      const { message, timestamp } = await challengeRes.json();
 
-    const account = await sharedInAppWallet.getAccount();
-    if (!account) return null;
-    if (account.address.toLowerCase() !== walletAddress.toLowerCase()) return null;
+      const account = await sharedInAppWallet.getAccount();
+      if (!account) return null;
+      if (account.address.toLowerCase() !== walletAddress.toLowerCase()) return null;
 
-    const signature = await account.signMessage({ message });
-    const verifyRes = await fetch(`${API_URL}/auth/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ walletAddress, signature, timestamp }),
-    });
-    if (!verifyRes.ok) return null;
+      const signature = await account.signMessage({ message });
+      const verifyRes = await fetch(toUrl(base, "/auth/verify"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, signature, timestamp }),
+      });
+      if (!verifyRes.ok) continue;
 
-    const { token } = await verifyRes.json();
-    if (token) cacheToken(walletAddress, token);
-    return token ?? null;
-  } catch {
-    return null;
+      const { token } = await verifyRes.json();
+      if (token) cacheToken(walletAddress, token);
+      return token ?? null;
+    } catch {
+      // Try next candidate base.
+    }
   }
+  return null;
 }
 
 class XRAuth {

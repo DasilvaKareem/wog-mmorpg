@@ -1,7 +1,6 @@
 import type { ZoneEvent } from "../types.js";
 import { getAuthToken } from "../auth.js";
-
-const API_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
+import { CANDIDATE_BASES, toUrl } from "../api.js";
 const MAX_MESSAGES = 80;
 const COLLAPSED_VISIBLE = 6;
 
@@ -264,17 +263,26 @@ export class AgentChat {
     this.sending = true;
     this.input.placeholder = "Speaking...";
     try {
-      const res = await fetch(`${API_URL}/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ entityId: this.entityId, message }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        this.push({ role: "system", text: `Speak failed: ${res.status} — ${body.slice(0, 120)}`, time: Date.now(), color: "#ff8866" });
+      let lastErr = "";
+      let ok = false;
+      for (const base of CANDIDATE_BASES) {
+        try {
+          const res = await fetch(toUrl(base, "/chat"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ entityId: this.entityId, message }),
+          });
+          if (res.ok) { ok = true; break; }
+          lastErr = `${res.status} — ${(await res.text()).slice(0, 120)}`;
+        } catch {
+          // Try next candidate base.
+        }
+      }
+      if (!ok) {
+        this.push({ role: "system", text: `Speak failed: ${lastErr || "All API bases unreachable"}`, time: Date.now(), color: "#ff8866" });
       }
     } catch (err) {
       this.push({ role: "system", text: `Network error: ${err}`, time: Date.now(), color: "#ff8866" });
@@ -288,15 +296,27 @@ export class AgentChat {
     this.sending = true;
     this.input.placeholder = "Sending...";
     try {
-      const res = await fetch(`${API_URL}/agent/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ message }),
-      });
+      let res: Response | null = null;
+      for (const base of CANDIDATE_BASES) {
+        try {
+          const r = await fetch(toUrl(base, "/agent/chat"), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ message }),
+          });
+          if (r.ok || r.status < 500) { res = r; break; }
+        } catch {
+          // Try next candidate base.
+        }
+      }
 
+      if (!res) {
+        this.push({ role: "system", text: "All API bases unreachable", time: Date.now(), color: "#ff8866" });
+        return;
+      }
       if (!res.ok) {
         const body = await res.text();
         this.push({ role: "system", text: `Error: ${res.status} — ${body.slice(0, 120)}`, time: Date.now(), color: "#ff8866" });

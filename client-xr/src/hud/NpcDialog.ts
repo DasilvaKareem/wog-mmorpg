@@ -871,6 +871,41 @@ export class NpcDialog {
     }
   }
 
+  /** Open the dialog with pre-seeded quest dialogue (for talk/complete quests). */
+  openWithQuestDialogue(entity: Entity, questTitle: string, questDesc: string, objectiveType?: string) {
+    this.open(entity);
+    this.activeTab = "dialog";
+    this.tabBar.querySelectorAll(".nd-tab").forEach((b) =>
+      b.classList.toggle("active", (b as HTMLElement).dataset.tab === "dialog"));
+
+    const npcName = entity.name;
+    if (objectiveType === "talk") {
+      // Talk quest — player greets, NPC delivers the quest narrative
+      this.chatHistory = [
+        { role: "player", content: `Hey ${npcName}, you wanted to talk to me?` },
+        { role: "npc", content: questDesc },
+        { role: "player", content: `Got it. I'll keep that in mind.` },
+        { role: "npc", content: `Thank you for hearing me out, adventurer. Your help means everything.` },
+      ];
+    } else {
+      // Kill/gather/craft quest turn-in — player reports back
+      const verbMap: Record<string, string> = {
+        kill: "took care of",
+        gather: "gathered everything for",
+        craft: "finished crafting what you needed for",
+      };
+      const verb = verbMap[objectiveType ?? ""] ?? "finished";
+      this.chatHistory = [
+        { role: "player", content: `Hey ${npcName}, I ${verb} "${questTitle}".` },
+        { role: "npc", content: `Impressive work, adventurer! "${questTitle}" was no easy task.` },
+        { role: "player", content: `It was nothing. What's my reward?` },
+        { role: "npc", content: `Here — you've more than earned it. The realm thanks you.` },
+      ];
+    }
+
+    this.renderContent();
+  }
+
   // ── Quests view ────────────────────────────────────────────────
 
   private renderQuests() {

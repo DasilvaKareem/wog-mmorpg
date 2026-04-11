@@ -8,7 +8,7 @@ window.onerror = (msg, src, line, col, err) => {
 
 import * as THREE from "three";
 import { WorldManager } from "./scene/WorldManager.js";
-import { EntityManager } from "./scene/EntityManager.js";
+import { EntityManager, type QuestIndicatorState } from "./scene/EntityManager.js";
 import { EffectsManager } from "./scene/EffectsManager.js";
 import { IntentLinesManager } from "./scene/IntentLinesManager.js";
 import { SkyRenderer } from "./scene/SkyRenderer.js";
@@ -31,7 +31,7 @@ import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, completeQuest, talkToNpc } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, sendFriendRequest, sendInboxMessage } from "./api.js";
 import { getAuthToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -124,7 +124,61 @@ const runPanel = new RunPanel({
 
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
-const inspector = new EntityInspector();
+const inspector = new EntityInspector({
+  canActOnPlayer: (entity) => {
+    return entity.type === "player"
+      && !!entity.walletAddress
+      && !!ownWalletAddress
+      && entity.walletAddress.toLowerCase() !== ownWalletAddress;
+  },
+  onAddFriend: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Friend request unavailable");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const result = await sendFriendRequest(token, ownWalletAddress, entity.walletAddress);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
+    return `Friend request sent to ${entity.name}`;
+  },
+  onTrade: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade request unavailable");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
+    const result = await sendInboxMessage(token, {
+      to: entity.walletAddress,
+      type: "trade-request",
+      body: `${ownName} wants to trade with you.`,
+      data: {
+        kind: "trade-request",
+        targetEntityId: entity.id,
+        targetName: entity.name,
+        fromEntityId: ownEntityId,
+      },
+    });
+    if (!result.ok) throw new Error(result.error ?? "Failed to send trade request");
+    return `Trade request sent to ${entity.name}`;
+  },
+  onDuel: async (entity) => {
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel request unavailable");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
+    const result = await sendInboxMessage(token, {
+      to: entity.walletAddress,
+      type: "direct",
+      body: `${ownName} challenged you to a duel. Meet at the coliseum and queue 1v1.`,
+      data: {
+        kind: "duel-request",
+        challengerEntityId: ownEntityId,
+        challengerName: ownName,
+        targetEntityId: entity.id,
+        targetName: entity.name,
+      },
+    });
+    if (!result.ok) throw new Error(result.error ?? "Failed to send duel request");
+    return `Duel challenge sent to ${entity.name}`;
+  },
+});
 const intentModeBadge = new IntentModeBadge();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
@@ -463,29 +517,94 @@ const playerPanel = new PlayerPanel({
 });
 
 const questPanel = new QuestPanel({
-  onAcceptQuest: async (questId) => {
+  onAcceptQuest: async (questId, npcEntityId, npcName) => {
     if (!ownWalletAddress || !ownEntityId) return;
     const token = await getAuthToken(ownWalletAddress);
     if (!token) return;
-    const result = await acceptQuest(token, ownEntityId, questId);
-    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
-    else console.log("[quest] Accept failed:", result.error);
+    const ownEntity = entities.getEntity(ownEntityId);
+    const zoneId = ownEntity?.zoneId;
+    if (!zoneId) return;
+    try {
+      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "accept-quest", questId }),
+      });
+      if (res.ok) {
+        console.log(`[quest] Agent heading to ${npcName} to accept quest ${questId}`);
+        lastQuestPollTime = 0;
+        void pollQuests();
+      } else {
+        console.log("[quest] goto-npc failed:", res.status, await res.text());
+      }
+    } catch (err) {
+      console.log("[quest] goto-npc error:", err);
+    }
   },
-  onCompleteQuest: async (questId, npcEntityId) => {
+  onCompleteQuest: async (questId, npcEntityId, questTitle, questDesc, objectiveType) => {
     if (!ownWalletAddress || !ownEntityId) return;
     const token = await getAuthToken(ownWalletAddress);
     if (!token) return;
-    const result = await completeQuest(token, ownEntityId, questId, npcEntityId);
-    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
-    else console.log("[quest] Complete failed:", result.error);
+    const ownEntity = entities.getEntity(ownEntityId);
+    const zoneId = ownEntity?.zoneId;
+    if (!zoneId) return;
+
+    // Open NPC dialog with quest turn-in conversation
+    const npcEntity = entities.getEntity(npcEntityId);
+    if (npcEntity && questTitle) {
+      npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entityId: npcEntityId, zoneId, action: "complete-quest", questId }),
+      });
+      if (res.ok) {
+        console.log(`[quest] Agent heading to NPC to turn in quest ${questId}`);
+        lastQuestPollTime = 0;
+        void pollQuests();
+      } else {
+        console.log("[quest] goto-npc failed:", res.status, await res.text());
+      }
+    } catch (err) {
+      console.log("[quest] goto-npc error:", err);
+    }
   },
-  onTalkToNpc: async (npcEntityId) => {
+  onTalkToNpc: async (npcEntityId, npcName, questTitle, questDesc, objectiveType) => {
     if (!ownWalletAddress || !ownEntityId) return;
     const token = await getAuthToken(ownWalletAddress);
     if (!token) return;
-    const result = await talkToNpc(token, ownEntityId, npcEntityId);
-    if (result.ok) { lastQuestPollTime = 0; void pollQuests(); }
-    else console.log("[quest] Talk failed:", result.error);
+    const ownEntity = entities.getEntity(ownEntityId);
+    const zoneId = ownEntity?.zoneId;
+    if (!zoneId) return;
+
+    // Open NPC dialog with quest conversation
+    const npcEntity = entities.getEntity(npcEntityId);
+    if (npcEntity && questTitle) {
+      npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "talk-quest" }),
+      });
+      if (res.ok) {
+        console.log(`[quest] Agent heading to ${npcName || "NPC"} for talk quest`);
+        lastQuestPollTime = 0;
+        void pollQuests();
+      } else {
+        console.log("[quest] goto-npc failed:", res.status, await res.text());
+      }
+    } catch (err) {
+      console.log("[quest] goto-npc error:", err);
+    }
+  },
+  onOpenAvailable: () => {
+    void refreshAvailableQuestsNow();
   },
 });
 
@@ -636,7 +755,40 @@ async function pollQuests() {
     if (ownEntityId && log.zoneId) {
       const zq = await fetchZoneQuests(log.zoneId, ownEntityId);
       if (zq) questPanel.updateZoneQuests(zq);
+
+      // Build quest indicator states for NPCs
+      const indicatorStates = new Map<string, QuestIndicatorState>();
+
+      // Available quests → yellow "!" on quest giver
+      if (zq) {
+        for (const q of zq.quests) {
+          if (q.npcEntityId) indicatorStates.set(q.npcEntityId, "available");
+        }
+      }
+
+      // Active quests — in-progress "?" or ready-to-turn-in "?"
+      for (const aq of log.activeQuests) {
+        if (!aq.npcEntityId) continue;
+        // "ready" overrides "in-progress", "in-progress" overrides "available"
+        if (aq.complete) {
+          indicatorStates.set(aq.npcEntityId, "ready");
+        } else if (!indicatorStates.has(aq.npcEntityId) || indicatorStates.get(aq.npcEntityId) === "available") {
+          indicatorStates.set(aq.npcEntityId, "in-progress");
+        }
+      }
+
+      entities.updateQuestIndicators(indicatorStates);
     }
+  }
+}
+
+async function refreshAvailableQuestsNow() {
+  if (!ownEntityId) return;
+  const zoneId = entities.getEntity(ownEntityId)?.zoneId ?? questLogData?.zoneId;
+  if (!zoneId) return;
+  const zq = await fetchZoneQuests(zoneId, ownEntityId);
+  if (zq) {
+    questPanel.updateZoneQuests(zq);
   }
 }
 
