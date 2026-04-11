@@ -31,7 +31,7 @@ import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, sendFriendRequest, sendInboxMessage } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, sendFriendRequest, sendInboxMessage } from "./api.js";
 import { getAuthToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -524,21 +524,36 @@ const questPanel = new QuestPanel({
     const ownEntity = entities.getEntity(ownEntityId);
     const zoneId = ownEntity?.zoneId;
     if (!zoneId) return;
-    try {
-      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "accept-quest", questId }),
-      });
-      if (res.ok) {
-        console.log(`[quest] Agent heading to ${npcName} to accept quest ${questId}`);
-        lastQuestPollTime = 0;
-        void pollQuests();
-      } else {
-        console.log("[quest] goto-npc failed:", res.status, await res.text());
+
+    // Try direct accept first (works if player is within 100 units of NPC)
+    const result = await acceptQuest(token, ownEntityId, questId);
+    if (result.ok) {
+      console.log(`[quest] Accepted quest ${questId} from ${npcName}`);
+      lastQuestPollTime = 0;
+      void pollQuests();
+      return;
+    }
+
+    // If too far, send the agent to walk there
+    if (result.error?.includes("Too far")) {
+      try {
+        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "accept-quest", questId }),
+        });
+        if (res.ok) {
+          console.log(`[quest] Agent heading to ${npcName} to accept quest ${questId}`);
+          lastQuestPollTime = 0;
+          void pollQuests();
+        } else {
+          console.log("[quest] goto-npc failed:", res.status, await res.text());
+        }
+      } catch (err) {
+        console.log("[quest] goto-npc error:", err);
       }
-    } catch (err) {
-      console.log("[quest] goto-npc error:", err);
+    } else {
+      console.log("[quest] Accept failed:", result.error);
     }
   },
   onCompleteQuest: async (questId, npcEntityId, questTitle, questDesc, objectiveType) => {
@@ -555,21 +570,35 @@ const questPanel = new QuestPanel({
       npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
     }
 
-    try {
-      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entityId: npcEntityId, zoneId, action: "complete-quest", questId }),
-      });
-      if (res.ok) {
-        console.log(`[quest] Agent heading to NPC to turn in quest ${questId}`);
-        lastQuestPollTime = 0;
-        void pollQuests();
-      } else {
-        console.log("[quest] goto-npc failed:", res.status, await res.text());
+    // Try direct complete first
+    const result = await completeQuest(token, ownEntityId, questId, npcEntityId);
+    if (result.ok) {
+      console.log(`[quest] Completed quest ${questId}`);
+      lastQuestPollTime = 0;
+      void pollQuests();
+      return;
+    }
+
+    // If too far, send the agent to walk there
+    if (result.error?.includes("Too far")) {
+      try {
+        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId: npcEntityId, zoneId, action: "complete-quest", questId }),
+        });
+        if (res.ok) {
+          console.log(`[quest] Agent heading to NPC to turn in quest ${questId}`);
+          lastQuestPollTime = 0;
+          void pollQuests();
+        } else {
+          console.log("[quest] goto-npc failed:", res.status, await res.text());
+        }
+      } catch (err) {
+        console.log("[quest] goto-npc error:", err);
       }
-    } catch (err) {
-      console.log("[quest] goto-npc error:", err);
+    } else {
+      console.log("[quest] Complete failed:", result.error);
     }
   },
   onTalkToNpc: async (npcEntityId, npcName, questTitle, questDesc, objectiveType) => {
@@ -586,21 +615,35 @@ const questPanel = new QuestPanel({
       npcDialog.openWithQuestDialogue(npcEntity, questTitle, questDesc, objectiveType);
     }
 
-    try {
-      const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "talk-quest" }),
-      });
-      if (res.ok) {
-        console.log(`[quest] Agent heading to ${npcName || "NPC"} for talk quest`);
-        lastQuestPollTime = 0;
-        void pollQuests();
-      } else {
-        console.log("[quest] goto-npc failed:", res.status, await res.text());
+    // Try direct talk first
+    const result = await talkToNpc(token, ownEntityId, npcEntityId);
+    if (result.ok) {
+      console.log(`[quest] Talk quest completed with ${npcName}`);
+      lastQuestPollTime = 0;
+      void pollQuests();
+      return;
+    }
+
+    // If too far, send the agent to walk there
+    if (result.error?.includes("Too far")) {
+      try {
+        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "talk-quest" }),
+        });
+        if (res.ok) {
+          console.log(`[quest] Agent heading to ${npcName || "NPC"} for talk quest`);
+          lastQuestPollTime = 0;
+          void pollQuests();
+        } else {
+          console.log("[quest] goto-npc failed:", res.status, await res.text());
+        }
+      } catch (err) {
+        console.log("[quest] goto-npc error:", err);
       }
-    } catch (err) {
-      console.log("[quest] goto-npc error:", err);
+    } else {
+      console.log("[quest] Talk failed:", result.error);
     }
   },
   onOpenAvailable: () => {
