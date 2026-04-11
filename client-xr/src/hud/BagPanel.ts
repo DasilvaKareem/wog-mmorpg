@@ -211,7 +211,7 @@ export class BagPanel {
     style.textContent = `
       #bag-panel {
         position: fixed;
-        bottom: 12px;
+        bottom: 64px;
         right: 12px;
         width: 228px;
         max-height: calc(100vh - 200px);

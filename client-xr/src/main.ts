@@ -30,9 +30,11 @@ import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
+import { SkillsPanel } from "./hud/SkillsPanel.js";
+import { ActionBar } from "./hud/ActionBar.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, sendFriendRequest, sendInboxMessage } from "./api.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage } from "./api.js";
 import { getAuthToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -641,8 +643,34 @@ const questPanel = new QuestPanel({
 });
 
 const bagPanel = new BagPanel();
+const skillsPanel = new SkillsPanel();
 let lastInventoryPollTime = 0;
+let lastProfessionPollTime = 0;
 const INVENTORY_POLL_INTERVAL = 10_000;
+const PROFESSION_POLL_INTERVAL = 15_000;
+
+// ── Bottom-right action bar ────────────────────────────────────────
+const actionBar = new ActionBar();
+actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => {
+  bagPanel.toggle();
+  if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
+}});
+actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => {
+  skillsPanel.toggle();
+  if (skillsPanel.isVisible()) { lastProfessionPollTime = 0; void pollProfessions(); }
+}});
+actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => {
+  questPanel.toggle();
+}});
+actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "T", onClick: () => {
+  playerPanel.toggle();
+}});
+actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
+  if (ownEntityId) {
+    const ent = entities.getEntity(ownEntityId);
+    if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
+  }
+}});
 
 const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
@@ -755,6 +783,7 @@ async function pollNearbyZones() {
     void pollQuests();
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
+    if (skillsPanel.isVisible()) void pollProfessions();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -840,6 +869,19 @@ async function pollInventory() {
   const inv = await fetchInventory(addr);
   if (inv) {
     bagPanel.updateInventory(inv.items);
+  }
+}
+
+async function pollProfessions() {
+  const addr = ownWalletAddress;
+  if (!addr) return;
+  const now = Date.now();
+  if (now - lastProfessionPollTime < PROFESSION_POLL_INTERVAL) return;
+  lastProfessionPollTime = now;
+
+  const data = await fetchProfessionStatus(addr);
+  if (data) {
+    skillsPanel.updateProfessions(data);
   }
 }
 
@@ -1052,6 +1094,16 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "b" || e.key === "B") {
     bagPanel.toggle();
     if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
+  }
+  if (e.key === "p" || e.key === "P") {
+    skillsPanel.toggle();
+    if (skillsPanel.isVisible()) { lastProfessionPollTime = 0; void pollProfessions(); }
+  }
+  if (e.key === "e" || e.key === "E") {
+    if (ownEntityId) {
+      const ent = entities.getEntity(ownEntityId);
+      if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
+    }
   }
   if (e.key === " ") {
     e.preventDefault();
