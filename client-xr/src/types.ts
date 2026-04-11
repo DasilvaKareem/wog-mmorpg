@@ -182,11 +182,13 @@ export interface CharacterListEntry {
 export interface CharacterListResponse {
   walletAddress: string;
   liveEntity: {
+    id: string;
     level: number;
     xp: number;
     hp: number;
     maxHp: number;
     zoneId: string;
+    region: string;
     name: string;
     agentId: string | null;
     characterTokenId: string | null;

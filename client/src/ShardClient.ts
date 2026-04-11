@@ -127,12 +127,14 @@ export async function fetchCharactersWithLive(
         description?: string;
       }>;
       liveEntity?: {
+        id: string;
         name: string;
         level: number;
         xp: number;
         hp: number;
         maxHp: number;
         zoneId: string;
+        region?: string;
         agentId?: string | null;
         characterTokenId?: string | null;
       };
@@ -177,12 +179,15 @@ export async function fetchCharactersWithLive(
     if (data.liveEntity) {
       const le = data.liveEntity;
       liveEntity = {
+        id: le.id,
         name: le.name,
         level: le.level,
         xp: le.xp,
         hp: le.hp,
         maxHp: le.maxHp,
         zoneId: le.zoneId,
+        region: le.region ?? le.zoneId,
+        agentId: le.agentId ?? null,
         characterTokenId: le.characterTokenId ?? null,
         source: "live",
       };
@@ -204,12 +209,15 @@ export async function fetchCharacters(
 }
 
 export interface WalletCharacterProgress {
+  id?: string;
   name: string;
   level: number;
   xp: number;
   hp: number;
   maxHp: number;
   zoneId?: string;
+  region?: string;
+  agentId?: string | null;
   characterTokenId?: string | null;
   source: "live" | "nft";
 }

@@ -184,7 +184,14 @@ export async function spawnCharacter(
     raceId?: string;
     characterTokenId?: string;
   },
-): Promise<{ ok: boolean; spawned?: { id: string }; zone?: string; error?: string }> {
+): Promise<{
+  ok: boolean;
+  spawned?: { id: string };
+  zone?: string;
+  zoneId?: string;
+  entityId?: string;
+  error?: string;
+}> {
   for (const base of CANDIDATE_BASES) {
     try {
       const res = await fetch(toUrl(base, "/spawn"), {
@@ -193,7 +200,14 @@ export async function spawnCharacter(
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      return { ok: res.ok, spawned: data.spawned, zone: data.zone, error: data.error };
+      return {
+        ok: res.ok,
+        spawned: data.spawned,
+        zone: data.zone,
+        zoneId: data.zoneId,
+        entityId: data.entityId,
+        error: data.error,
+      };
     } catch {
       // Try next candidate base.
     }

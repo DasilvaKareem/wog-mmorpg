@@ -3,7 +3,7 @@ import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
-import { getAllEntities } from "../world/zoneRuntime.js";
+import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
 import { loadAllCharactersForWallet, loadCharacter, saveCharacter, type CharacterCalling, type CharacterSaveData } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
@@ -70,6 +70,19 @@ type CharacterListEntry = {
   };
 };
 
+type LiveCharacterEntity = {
+  id: string;
+  level: number;
+  xp: number;
+  hp: number;
+  maxHp: number;
+  zoneId: string;
+  region: string;
+  name: string;
+  agentId: string | null;
+  characterTokenId: string | null;
+};
+
 function resolveBootstrapChainRegistrationStatus(
   bootstrapStatus: string | null | undefined,
   fallbackStatus: string | null | undefined,
@@ -117,6 +130,42 @@ function normalizeCharacterKey(name: string, classId?: string | null): string {
   return `${stripCharacterClassSuffix(name).toLowerCase()}::${(classId ?? "").trim().toLowerCase()}`;
 }
 
+function serializeLiveCharacterEntity(
+  entity: {
+    id: string;
+    level?: number;
+    xp?: number;
+    hp: number;
+    maxHp: number;
+    region?: string;
+    name: string;
+    agentId?: string | number | bigint | null;
+    characterTokenId?: string | number | bigint | null;
+  },
+  fallbackZoneId?: string | null,
+): LiveCharacterEntity {
+  const zoneId = entity.region ?? fallbackZoneId ?? "unknown";
+  const serializeBigNumberish = (value: string | number | bigint | null | undefined): string | null => {
+    if (value == null) return null;
+    if (typeof value === "bigint") return value.toString();
+    if (typeof value === "number") return Number.isFinite(value) ? Math.trunc(value).toString() : null;
+    return value;
+  };
+
+  return {
+    id: entity.id,
+    level: entity.level ?? 1,
+    xp: entity.xp ?? 0,
+    hp: entity.hp,
+    maxHp: entity.maxHp,
+    zoneId,
+    region: zoneId,
+    name: entity.name,
+    agentId: serializeBigNumberish(entity.agentId),
+    characterTokenId: serializeBigNumberish(entity.characterTokenId),
+  };
+}
+
 function compareCharacterEntries(left: CharacterListEntry, right: CharacterListEntry): number {
   const leftLevel = Number(left.properties.level ?? 1);
   const rightLevel = Number(right.properties.level ?? 1);
@@ -151,16 +200,7 @@ function buildCharacterEntryFromProjection(
   projection: CharacterProjectionRecord,
   saved: CharacterSaveData | null,
   bootstrapStatus: CharacterListEntry["bootstrapStatus"],
-  liveEntity?: {
-    level: number;
-    xp: number;
-    hp: number;
-    maxHp: number;
-    zoneId: string;
-    name: string;
-    agentId: string | null;
-    characterTokenId: string | null;
-  } | null
+  liveEntity?: LiveCharacterEntity | null
 ): CharacterListEntry {
   const liveName = liveEntity?.name ? stripCharacterClassSuffix(liveEntity.name) : null;
   const liveMatches = Boolean(
@@ -202,16 +242,7 @@ function buildCharacterEntryFromProjection(
 async function buildProjectedCharacterEntries(
   ownerWallet: string,
   custodialWallet: string | null,
-  liveEntity?: {
-    level: number;
-    xp: number;
-    hp: number;
-    maxHp: number;
-    zoneId: string;
-    name: string;
-    agentId: string | null;
-    characterTokenId: string | null;
-  } | null,
+  liveEntity?: LiveCharacterEntity | null,
 ): Promise<CharacterListEntry[]> {
   const wallets = [ownerWallet, custodialWallet].filter((wallet): wallet is string => Boolean(wallet));
   const [projectedCharacters, ownerSavedCharacters, custodialSavedCharacters] = await Promise.all([
@@ -660,32 +691,38 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         const normalizedWallet = walletAddress.toLowerCase();
         const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
         const agentRef = await getAgentEntityRef(walletAddress);
-        let liveEntity: {
-          level: number;
-          xp: number;
-          hp: number;
-          maxHp: number;
-          zoneId: string;
-          name: string;
-          agentId: string | null;
-          characterTokenId: string | null;
-        } | null = null;
+        let liveEntity: LiveCharacterEntity | null = null;
         if (agentRef?.entityId) {
           const entity = getAllEntities().get(agentRef.entityId);
           if (entity?.type === "player") {
             const ew = entity.walletAddress?.toLowerCase();
             if (ew === normalizedWallet || ew === custodialWallet) {
-              liveEntity = {
-                level: entity.level ?? 1,
-                xp: entity.xp ?? 0,
-                hp: entity.hp,
-                maxHp: entity.maxHp,
-                zoneId: entity.region ?? agentRef.zoneId ?? "unknown",
-                name: entity.name,
-                agentId: entity.agentId != null ? String(entity.agentId) : agentRef.agentId ?? null,
-                characterTokenId: entity.characterTokenId != null ? entity.characterTokenId.toString() : agentRef.characterTokenId ?? null,
-              };
+              liveEntity = serializeLiveCharacterEntity({
+                ...entity,
+                agentId: entity.agentId ?? agentRef.agentId ?? null,
+                characterTokenId: entity.characterTokenId ?? agentRef.characterTokenId ?? null,
+              }, agentRef.zoneId);
             }
+          }
+        }
+        if (!liveEntity) {
+          for (const candidateWallet of [normalizedWallet, custodialWallet].filter((value): value is string => Boolean(value))) {
+            const spawned = isWalletSpawned(candidateWallet);
+            if (!spawned) continue;
+            const entity = getAllEntities().get(spawned.entityId);
+            if (!entity || entity.type !== "player") continue;
+            liveEntity = serializeLiveCharacterEntity(entity, spawned.zoneId);
+            break;
+          }
+        }
+        if (!liveEntity) {
+          const liveWorldEntity = Array.from(getAllEntities().values()).find((entity) => {
+            if (entity.type !== "player" || !entity.walletAddress) return false;
+            const entityWallet = entity.walletAddress.toLowerCase();
+            return entityWallet === normalizedWallet || entityWallet === custodialWallet;
+          });
+          if (liveWorldEntity) {
+            liveEntity = serializeLiveCharacterEntity(liveWorldEntity, liveWorldEntity.region ?? null);
           }
         }
         const deployedCharacterName = liveEntity

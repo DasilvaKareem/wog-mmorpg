@@ -82,6 +82,7 @@ export class CharacterSelect {
     this.panel.className = "cs-panel";
     this.panel.innerHTML = `
       <div class="cs-header">
+        <button type="button" class="cs-btn cs-btn-ghost cs-header-back" data-action="back">Back</button>
         <span class="cs-kicker">World of Geneva XR</span>
         <h1>Select Character</h1>
       </div>
@@ -94,9 +95,6 @@ export class CharacterSelect {
       <div class="cs-list" data-view="list"></div>
       <div class="cs-create" data-view="create" style="display:none"></div>
       <div class="cs-status">Loading characters...</div>
-      <div class="cs-actions-bottom">
-        <button type="button" class="cs-btn cs-btn-ghost" data-action="back">Back</button>
-      </div>
     `;
 
     this.root.appendChild(this.panel);
@@ -599,7 +597,11 @@ export class CharacterSelect {
         raceId: this.selectedRace,
       });
 
-      if (!spawn.ok) throw new Error(spawn.error || "Spawn failed.");
+      if (!spawn.ok) {
+        const reconnected = this.handleExistingLiveSpawn(name, spawn);
+        if (reconnected) return;
+        throw new Error(spawn.error || "Spawn failed.");
+      }
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
@@ -625,7 +627,11 @@ export class CharacterSelect {
         characterTokenId: char.characterTokenId ?? undefined,
       });
 
-      if (!spawn.ok) throw new Error(spawn.error || "Spawn failed.");
+      if (!spawn.ok) {
+        const reconnected = this.handleExistingLiveSpawn(char.name, spawn);
+        if (reconnected) return;
+        throw new Error(spawn.error || "Spawn failed.");
+      }
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
@@ -640,10 +646,28 @@ export class CharacterSelect {
     if (!this.liveEntity) return;
     this.options.onCharacterReady({
       walletAddress: this.walletAddress,
-      entityId: "",
+      entityId: this.liveEntity.id,
       zoneId: this.liveEntity.zoneId,
       characterName: this.liveEntity.name,
     });
+  }
+
+  private handleExistingLiveSpawn(
+    characterName: string,
+    spawn: { ok: boolean; entityId?: string; zoneId?: string; error?: string },
+  ): boolean {
+    if (spawn.error !== "Wallet already has a live character on this shard" || !spawn.entityId || !spawn.zoneId) {
+      return false;
+    }
+
+    this.setStatus(`${characterName} is already live. Reconnecting...`);
+    this.options.onCharacterReady({
+      walletAddress: this.walletAddress,
+      entityId: spawn.entityId,
+      zoneId: spawn.zoneId,
+      characterName,
+    });
+    return true;
   }
 
   // ── Helpers ────────────────────────────────────────────────────────
@@ -720,9 +744,16 @@ export class CharacterSelect {
       .cs-panel.is-busy button { pointer-events: none; opacity: 0.78; }
 
       .cs-header {
+        position: relative;
         text-align: center;
         padding-bottom: 12px;
         margin-bottom: 0;
+      }
+
+      .cs-header-back {
+        position: absolute;
+        top: 0;
+        left: 0;
       }
 
       .cs-kicker {
@@ -1032,7 +1063,7 @@ export class CharacterSelect {
       .cs-stat-up { color: #7fd6be; margin-left: 2px; }
       .cs-stat-down { color: #ff9a8b; margin-left: 2px; }
 
-      /* ── Status & bottom actions ── */
+      /* ── Status ── */
 
       .cs-status {
         margin-top: 14px;
@@ -1046,17 +1077,14 @@ export class CharacterSelect {
         text-transform: uppercase;
       }
 
-      .cs-actions-bottom {
-        display: flex;
-        justify-content: center;
-        margin-top: 12px;
-      }
-
       @media (max-width: 640px) {
         .cs-panel {
           width: calc(100vw - 20px);
           padding: 20px 16px 14px;
           border-radius: 24px;
+        }
+        .cs-header {
+          padding-top: 38px;
         }
         .cs-preview-viewport { height: 260px; }
         .cs-picker { grid-template-columns: 1fr; }
