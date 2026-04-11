@@ -22,22 +22,15 @@ export class PlayerPanel {
   private zonePlayers: Map<string, ActivePlayer[]> = new Map();
   private expandedZones = new Set<string>();
   private callbacks: PanelCallbacks;
-  private visible = true;
-  private toggleBtn: HTMLButtonElement;
+  private visible = false;
 
   constructor(callbacks: PanelCallbacks) {
     this.callbacks = callbacks;
 
-    // Toggle button
-    this.toggleBtn = document.createElement("button");
-    this.toggleBtn.id = "panel-toggle";
-    this.toggleBtn.textContent = "Hide Players";
-    this.toggleBtn.addEventListener("click", () => this.toggle());
-    document.body.appendChild(this.toggleBtn);
-
     // Main container
     this.container = document.createElement("div");
     this.container.id = "player-panel";
+    this.container.style.display = "none";
 
     // Tab bar
     this.tabBar = document.createElement("div");
@@ -88,8 +81,6 @@ export class PlayerPanel {
   toggle() {
     this.visible = !this.visible;
     this.container.style.display = this.visible ? "flex" : "none";
-    this.toggleBtn.textContent = this.visible ? "Hide Players" : "Show Players";
-    this.toggleBtn.classList.toggle("collapsed", !this.visible);
   }
 
   /** Call every poll with the global active player list */
@@ -205,22 +196,6 @@ export class PlayerPanel {
   private injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
-      #panel-toggle {
-        position: fixed;
-        top: 12px;
-        left: 180px;
-        z-index: 20;
-        padding: 6px 14px;
-        background: rgba(20, 30, 50, 0.85);
-        border: 1px solid #4f8;
-        border-radius: 6px;
-        color: #4f8;
-        font: bold 12px monospace;
-        cursor: pointer;
-      }
-      #panel-toggle:hover { background: rgba(30, 50, 70, 0.95); }
-      #panel-toggle.collapsed { opacity: 0.6; }
-
       #player-panel {
         position: fixed;
         top: 44px;
