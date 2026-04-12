@@ -88,7 +88,7 @@ import { enqueueGoldMint, getTxStats } from "./blockchain/blockchain.js";
 import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
 import { getChainIntentStats, listChainIntents } from "./blockchain/chainIntentStore.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllEntities, getEntity, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, restoreLivePlayersFromPostgres, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
@@ -934,6 +934,14 @@ const start = async () => {
       server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
     });
   }
+
+  await restoreLivePlayersFromPostgres().then((count) => {
+    if (count > 0) {
+      server.log.info(`[live-player] Restored ${count} active player session(s) from Postgres`);
+    }
+  }).catch((err: any) => {
+    server.log.warn(`[live-player] Postgres restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  });
 
   startAgentRuntimeReconciler(server.log);
 

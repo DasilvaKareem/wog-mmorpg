@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getOfficialErc8004Addresses } from "../erc8004/official.js";
+import { getOfficialErc8004Addresses, SKALE_BASE_MAINNET_CHAIN_ID } from "../erc8004/official.js";
 
 type DeploymentManifest = {
   chainId?: number;
@@ -201,5 +201,5 @@ if (DEV_ENABLED) {
     );
   }
 } else {
-  applyOfficialRegistryFallback(process.env.SKALE_BASE_CHAIN_ID);
+  applyOfficialRegistryFallback(process.env.SKALE_BASE_CHAIN_ID ?? String(SKALE_BASE_MAINNET_CHAIN_ID));
 }

@@ -600,84 +600,16 @@ async function removeLivePlayerEntity(walletAddress: string): Promise<void> {
   await tx.exec();
 }
 
-export async function restoreLivePlayersFromRedis(): Promise<number> {
+export async function restoreLivePlayersFromPostgres(): Promise<number> {
   const persistedSessions = await listLiveSessions().catch(() => []);
-  if (persistedSessions.length > 0) {
-    let restored = 0;
-    for (const session of persistedSessions) {
-      const parsed = session.sessionState as unknown as PersistedLivePlayer;
-      const entityRaw = parsed?.entity;
-      if (!entityRaw || typeof entityRaw !== "object") continue;
-
-      try {
-        const entity = hydrateLivePlayerEntity(entityRaw);
-        if (entity.type !== "player" || !entity.walletAddress) continue;
-        if (isWalletSpawned(entity.walletAddress) || world.entities.has(entity.id)) continue;
-
-        if (entity.stats) {
-          recalculateEntityVitals(entity);
-        } else if (entity.raceId && entity.classId) {
-          entity.stats = computeStatsAtLevel(entity.raceId, entity.classId, entity.level ?? 1);
-          recalculateEntityVitals(entity);
-        }
-        if (entity.walletAddress) {
-          const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
-            characterTokenId: entity.characterTokenId?.toString(),
-            agentId: entity.agentId?.toString(),
-          });
-          if (verifiedIdentityPatch.characterTokenId) {
-            entity.characterTokenId = BigInt(verifiedIdentityPatch.characterTokenId);
-          }
-          if (verifiedIdentityPatch.agentId) {
-            entity.agentId = BigInt(verifiedIdentityPatch.agentId);
-          } else {
-            entity.agentId = undefined;
-          }
-        }
-
-        if (entity.region === "coliseum-arena") {
-          const saved = entity.pvpSavedPosition;
-          entity.region = saved?.region ?? "village-square";
-          if (saved) { entity.x = saved.x; entity.y = saved.y; }
-        }
-        entity.pvpBattleId = undefined;
-        entity.pvpTeam = undefined;
-        entity.pvpSavedPosition = undefined;
-        const zoneId = entity.region ?? session.zoneId ?? "village-square";
-        getOrCreateZone(zoneId).entities.set(entity.id, entity);
-        registerSpawnedWallet(entity.walletAddress, entity.id, zoneId);
-        if (Array.isArray(parsed.professions) && parsed.professions.length > 0) {
-          restoreProfessions(entity.walletAddress, parsed.professions);
-        }
-        if (entity.agentId != null) {
-          reputationManager.ensureInitialized(entity.agentId);
-        }
-        restored++;
-      } catch (err) {
-        console.warn("[live-player] Failed to restore player from Postgres:", err);
-      }
-    }
-
-    if (restored > 0) {
-      console.log(`[live-player] Restored ${restored} active player session(s) from Postgres`);
-      return restored;
-    }
-  }
-
-  const redis = getRedis();
-  if (!redis) return 0;
-
-  const wallets: string[] = await redis.smembers(LIVE_PLAYER_IDS_KEY);
-  if (!Array.isArray(wallets) || wallets.length === 0) return 0;
-
   let restored = 0;
-  for (const wallet of wallets) {
-    const raw = await redis.get(livePlayerKey(wallet));
-    if (!raw) continue;
+  for (const session of persistedSessions) {
+    const parsed = session.sessionState as unknown as PersistedLivePlayer;
+    const entityRaw = parsed?.entity;
+    if (!entityRaw || typeof entityRaw !== "object") continue;
 
     try {
-      const parsed = JSON.parse(raw) as PersistedLivePlayer;
-      const entity = hydrateLivePlayerEntity(parsed.entity);
+      const entity = hydrateLivePlayerEntity(entityRaw);
       if (entity.type !== "player" || !entity.walletAddress) continue;
       if (isWalletSpawned(entity.walletAddress) || world.entities.has(entity.id)) continue;
 
@@ -702,7 +634,6 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
         }
       }
 
-      // Always clear stale PvP state on restore — matches don't survive restarts
       if (entity.region === "coliseum-arena") {
         const saved = entity.pvpSavedPosition;
         entity.region = saved?.region ?? "village-square";
@@ -722,12 +653,12 @@ export async function restoreLivePlayersFromRedis(): Promise<number> {
       }
       restored++;
     } catch (err) {
-      console.warn("[live-player] Failed to restore player from Redis:", err);
+      console.warn("[live-player] Failed to restore player from Postgres:", err);
     }
   }
 
   if (restored > 0) {
-    console.log(`[live-player] Restored ${restored} active player session(s) from Redis`);
+    console.log(`[live-player] Restored ${restored} active player session(s) from Postgres`);
   }
 
   return restored;
