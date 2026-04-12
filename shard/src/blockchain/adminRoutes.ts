@@ -1,17 +1,21 @@
 import type { FastifyInstance } from "fastify";
+import { ethers } from "ethers";
 import {
   getChainIntent,
   getChainIntentStats,
   listChainIntents,
   listChainTxAttempts,
   type ChainIntentStatus,
+  type ChainTxAttemptRecord,
 } from "./chainIntentStore.js";
+import { biteProvider } from "./biteChain.js";
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
 const STALE_SUBMITTED_MS = Math.max(
   30_000,
   Number.parseInt(process.env.CHAIN_INTENT_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
 );
+const GAS_RATE_WINDOW_MS = 60 * 60 * 1000;
 
 function verifyAdmin(
   request: { headers: Record<string, string | string[] | undefined> },
@@ -36,6 +40,237 @@ function parseStatuses(raw?: string): ChainIntentStatus[] | undefined {
     .map((value) => value.trim())
     .filter(Boolean) as ChainIntentStatus[];
   return values.length > 0 ? values : undefined;
+}
+
+type AttemptGasDetails = {
+  gasUsed: string | null;
+  effectiveGasPrice: string | null;
+  feeWei: string | null;
+  valueWei: string | null;
+  fromAddress: string | null;
+  feeSource: "receipt" | "estimate" | "none";
+};
+
+type GasSummary = {
+  attemptsAnalyzed: number;
+  confirmedAttempts: number;
+  attemptsWithReceipt: number;
+  totalGasUsed: string;
+  totalFeeWei: string;
+  totalFeeEther: string;
+  gasPerHour: string;
+  feeWeiPerHour: string;
+  feeEtherPerHour: string;
+  serverOutgoingValueWei: string;
+  serverOutgoingValueEther: string;
+  serverOutgoingTxCount: number;
+  serverTotalOutflowWei: string;
+  serverTotalOutflowEther: string;
+  windowMs: number;
+};
+
+type ServerWalletSummary = {
+  address: string | null;
+  balanceWei: string;
+  balanceEther: string;
+  nonce: number | null;
+};
+
+type CachedSummary = {
+  expiresAt: number;
+  value: GasSummary;
+};
+
+const SUMMARY_CACHE_MS = 30_000;
+let lifetimeGasSummaryCache: CachedSummary | null = null;
+
+function formatEtherFromWei(value: bigint): string {
+  const whole = value / 10n ** 18n;
+  const fraction = value % 10n ** 18n;
+  if (fraction === 0n) return whole.toString();
+  return `${whole}.${fraction.toString().padStart(18, "0").replace(/0+$/, "")}`;
+}
+
+function safeBigInt(value?: string | null): bigint | null {
+  if (!value) return null;
+  try {
+    return BigInt(value);
+  } catch {
+    return null;
+  }
+}
+
+async function enrichAttemptGas(attempt: ChainTxAttemptRecord): Promise<ChainTxAttemptRecord & { gas: AttemptGasDetails }> {
+  if (attempt.txHash) {
+    try {
+      const [receipt, tx] = await Promise.all([
+        biteProvider.getTransactionReceipt(attempt.txHash),
+        biteProvider.getTransaction(attempt.txHash),
+      ]);
+      if (receipt) {
+        const gasUsed = receipt.gasUsed ?? null;
+        const effectiveGasPrice = receipt.gasPrice ?? null;
+        const feeWei =
+          gasUsed != null && effectiveGasPrice != null
+            ? (gasUsed * effectiveGasPrice)
+            : null;
+        return {
+          ...attempt,
+          gas: {
+            gasUsed: gasUsed?.toString() ?? null,
+            effectiveGasPrice: effectiveGasPrice?.toString() ?? null,
+            feeWei: feeWei?.toString() ?? null,
+            valueWei: tx?.value?.toString() ?? null,
+            fromAddress: tx?.from ?? null,
+            feeSource: "receipt",
+          },
+        };
+      }
+    } catch {
+      // Fall through to estimated fee metadata if receipt lookup fails.
+    }
+  }
+
+  const gasLimit = safeBigInt(attempt.gasLimit);
+  const feePerGas = safeBigInt(attempt.gasPrice) ?? safeBigInt(attempt.maxFeePerGas);
+  const estimatedFeeWei =
+    gasLimit != null && feePerGas != null
+      ? gasLimit * feePerGas
+      : null;
+
+  return {
+    ...attempt,
+    gas: {
+      gasUsed: null,
+      effectiveGasPrice: feePerGas?.toString() ?? null,
+      feeWei: estimatedFeeWei?.toString() ?? null,
+      valueWei: null,
+      fromAddress: attempt.signerAddress ?? null,
+      feeSource: estimatedFeeWei != null ? "estimate" : "none",
+    },
+  };
+}
+
+function summarizeGasUsage(
+  attempts: Array<ChainTxAttemptRecord & { gas: AttemptGasDetails }>,
+  serverWalletAddress?: string | null
+): GasSummary {
+  const now = Date.now();
+  const normalizedServerWallet = serverWalletAddress?.toLowerCase() ?? null;
+  let confirmedAttempts = 0;
+  let attemptsWithReceipt = 0;
+  let totalGasUsed = 0n;
+  let totalFeeWei = 0n;
+  let windowGasUsed = 0n;
+  let windowFeeWei = 0n;
+  let serverOutgoingValueWei = 0n;
+  let serverOutgoingTxCount = 0;
+
+  for (const attempt of attempts) {
+    if (attempt.status !== "confirmed") continue;
+    confirmedAttempts++;
+    const gasUsed = safeBigInt(attempt.gas.gasUsed);
+    const feeWei = safeBigInt(attempt.gas.feeWei);
+    const valueWei = safeBigInt(attempt.gas.valueWei);
+    const fromAddress = attempt.gas.fromAddress?.toLowerCase() ?? attempt.signerAddress?.toLowerCase() ?? null;
+    if (gasUsed != null) {
+      attemptsWithReceipt++;
+      totalGasUsed += gasUsed;
+      if ((attempt.confirmedAt ?? attempt.createdAt) >= now - GAS_RATE_WINDOW_MS) {
+        windowGasUsed += gasUsed;
+      }
+    }
+    if (feeWei != null) {
+      totalFeeWei += feeWei;
+      if ((attempt.confirmedAt ?? attempt.createdAt) >= now - GAS_RATE_WINDOW_MS) {
+        windowFeeWei += feeWei;
+      }
+    }
+    if (
+      normalizedServerWallet &&
+      fromAddress === normalizedServerWallet &&
+      valueWei != null &&
+      valueWei > 0n
+    ) {
+      serverOutgoingValueWei += valueWei;
+      serverOutgoingTxCount++;
+    }
+  }
+
+  return {
+    attemptsAnalyzed: attempts.length,
+    confirmedAttempts,
+    attemptsWithReceipt,
+    totalGasUsed: totalGasUsed.toString(),
+    totalFeeWei: totalFeeWei.toString(),
+    totalFeeEther: formatEtherFromWei(totalFeeWei),
+    gasPerHour: windowGasUsed.toString(),
+    feeWeiPerHour: windowFeeWei.toString(),
+    feeEtherPerHour: formatEtherFromWei(windowFeeWei),
+    serverOutgoingValueWei: serverOutgoingValueWei.toString(),
+    serverOutgoingValueEther: formatEtherFromWei(serverOutgoingValueWei),
+    serverOutgoingTxCount,
+    serverTotalOutflowWei: (totalFeeWei + serverOutgoingValueWei).toString(),
+    serverTotalOutflowEther: formatEtherFromWei(totalFeeWei + serverOutgoingValueWei),
+    windowMs: GAS_RATE_WINDOW_MS,
+  };
+}
+
+async function getServerWalletSummary(): Promise<ServerWalletSummary> {
+  const privateKey = process.env.SERVER_PRIVATE_KEY?.trim();
+  if (!privateKey) {
+    return {
+      address: null,
+      balanceWei: "0",
+      balanceEther: "0",
+      nonce: null,
+    };
+  }
+
+  try {
+    const wallet = new ethers.Wallet(privateKey, biteProvider);
+    const [balance, nonce] = await Promise.all([
+      biteProvider.getBalance(wallet.address),
+      biteProvider.getTransactionCount(wallet.address),
+    ]);
+    return {
+      address: wallet.address,
+      balanceWei: balance.toString(),
+      balanceEther: formatEtherFromWei(balance),
+      nonce,
+    };
+  } catch {
+    return {
+      address: null,
+      balanceWei: "0",
+      balanceEther: "0",
+      nonce: null,
+    };
+  }
+}
+
+async function listAllChainTxAttempts(limit = 500): Promise<ChainTxAttemptRecord[]> {
+  const all: ChainTxAttemptRecord[] = [];
+  for (let offset = 0; ; offset += limit) {
+    const page = await listChainTxAttempts({ limit, offset });
+    all.push(...page);
+    if (page.length < limit) break;
+  }
+  return all;
+}
+
+async function getLifetimeGasSummary(serverWalletAddress?: string | null): Promise<GasSummary> {
+  const now = Date.now();
+  if (lifetimeGasSummaryCache && lifetimeGasSummaryCache.expiresAt > now) {
+    return lifetimeGasSummaryCache.value;
+  }
+  const attempts = await listAllChainTxAttempts();
+  const summary = summarizeGasUsage(await Promise.all(attempts.map((attempt) => enrichAttemptGas(attempt))), serverWalletAddress);
+  lifetimeGasSummaryCache = {
+    expiresAt: now + SUMMARY_CACHE_MS,
+    value: summary,
+  };
+  return summary;
 }
 
 export function registerChainAdminRoutes(server: FastifyInstance): void {
@@ -84,6 +319,14 @@ export function registerChainAdminRoutes(server: FastifyInstance): void {
   <div class="section">
     <h2>By Type</h2>
     <div id="by-type"></div>
+  </div>
+  <div class="section">
+    <h2>Gas Overview</h2>
+    <div id="gas-summary"></div>
+  </div>
+  <div class="section">
+    <h2>Server Wallet</h2>
+    <div id="server-wallet"></div>
   </div>
   <div class="section">
     <h2>Failed Permanent</h2>
@@ -154,6 +397,47 @@ function renderByType(stats) {
   ]);
 }
 
+function renderGasSummary(gas) {
+  if (!gas?.recent || !gas?.lifetime) {
+    $('gas-summary').innerHTML = '<div class="empty">No gas data</div>';
+    return;
+  }
+  const rows = [
+    { scope: 'Recent Dashboard Sample', ...gas.recent },
+    { scope: 'Lifetime Recorded DB History', ...gas.lifetime },
+  ];
+  renderTable('gas-summary', rows, [
+    { label: 'Scope', key: 'scope' },
+    { label: 'Attempts Analyzed', key: 'attemptsAnalyzed' },
+    { label: 'Confirmed Attempts', key: 'confirmedAttempts' },
+    { label: 'Receipt-backed', key: 'attemptsWithReceipt' },
+    { label: 'Total Gas Used', key: 'totalGasUsed' },
+    { label: 'Gas Fee', render: (r) => esc(r.totalFeeEther) + ' sFUEL' },
+    { label: 'Value Sent', render: (r) => esc(r.serverOutgoingValueEther) + ' sFUEL' },
+    { label: 'Value Txs', key: 'serverOutgoingTxCount' },
+    { label: 'Total Outflow', render: (r) => esc(r.serverTotalOutflowEther) + ' sFUEL' },
+    { label: 'Fee / Hour', render: (r) => esc(r.feeEtherPerHour) + ' sFUEL' },
+    { label: 'Window', render: (r) => Math.round((Number(r.windowMs || 0) / 60000)) + ' min' },
+  ]);
+  $('gas-summary').insertAdjacentHTML(
+    'beforeend',
+    '<div class="small muted" style="margin-top:8px">Recent sample uses the latest 100 attempts. Lifetime uses all recorded Postgres attempts and includes server-wallet value transfers tracked by tx hash.</div>'
+  );
+}
+
+function renderServerWallet(wallet) {
+  if (!wallet || !wallet.address) {
+    $('server-wallet').innerHTML = '<div class="empty">Server wallet unavailable</div>';
+    return;
+  }
+  renderTable('server-wallet', [wallet], [
+    { label: 'Address', key: 'address' },
+    { label: 'Balance', render: (r) => esc(r.balanceEther) + ' sFUEL' },
+    { label: 'Balance (Wei)', key: 'balanceWei' },
+    { label: 'On-chain Nonce', key: 'nonce' },
+  ]);
+}
+
 async function fetchStatus() {
   const secret = $('secret').value.trim();
   if (!secret) {
@@ -167,6 +451,8 @@ async function fetchStatus() {
   const data = await res.json();
   renderCards(data);
   renderByType(data.stats);
+  renderGasSummary(data.gas);
+  renderServerWallet(data.serverWallet);
   renderTable('failed', data.failedPermanent, [
     { label: 'Type', key: 'type' },
     { label: 'Aggregate', key: 'aggregateKey' },
@@ -193,6 +479,9 @@ async function fetchStatus() {
     { label: 'Queue', key: 'queueLabel' },
     { label: 'Status', key: 'status' },
     { label: 'TX', render: (r) => r.txHash ? '<span class="pill">' + esc(r.txHash) + '</span>' : '<span class="muted">-</span>' },
+    { label: 'Gas Used', render: (r) => r.gas?.gasUsed ? esc(r.gas.gasUsed) : '<span class="muted">-</span>' },
+    { label: 'Fee', render: (r) => r.gas?.feeWei ? '<span class="pill">' + esc(r.gas.feeWei) + '</span>' : '<span class="muted">-</span>' },
+    { label: 'Fee Src', render: (r) => r.gas?.feeSource ? esc(r.gas.feeSource) : '<span class="muted">-</span>' },
     { label: 'Error', render: (r) => r.errorMessage ? '<span class="error">' + esc(r.errorMessage) + '</span>' : '<span class="muted">-</span>' },
     { label: 'Created', key: 'createdAt' },
   ]);
@@ -273,10 +562,18 @@ syncAuto();
       const submittedAt = intent.lastSubmittedAt ?? intent.updatedAt;
       return submittedAt <= (Date.now() - STALE_SUBMITTED_MS);
     });
-    const recentAttempts = await listChainTxAttempts({ limit: 50, offset: 0 });
+    const recentAttemptsRaw = await listChainTxAttempts({ limit: 100, offset: 0 });
+    const recentAttempts = await Promise.all(recentAttemptsRaw.slice(0, 50).map((attempt) => enrichAttemptGas(attempt)));
+    const serverWallet = await getServerWalletSummary();
+    const gas = {
+      recent: summarizeGasUsage(await Promise.all(recentAttemptsRaw.map((attempt) => enrichAttemptGas(attempt))), serverWallet.address),
+      lifetime: await getLifetimeGasSummary(serverWallet.address),
+    };
 
     return {
       stats,
+      gas,
+      serverWallet,
       counts: {
         waitingFunds: waitingFunds.length,
         failedPermanent: permanentFailures.length,
