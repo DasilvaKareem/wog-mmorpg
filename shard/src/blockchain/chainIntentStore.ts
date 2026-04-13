@@ -324,147 +324,157 @@ export async function upsertAggregatedChainIntent(input: {
   mergePayload: (current: Record<string, unknown> | null) => Record<string, unknown>;
 }): Promise<ChainWriteIntentRecord> {
   const normalizedWallet = normalizeWallet(input.walletAddress);
-  const now = Date.now();
   if (shouldUsePostgres()) {
-    return await withPostgresClient(async (client) => {
-      await client.query("begin");
+    for (let attemptIndex = 0; attemptIndex < 3; attemptIndex++) {
+      const now = Date.now();
       try {
-        const { rows } = await client.query<ChainIntentRow>(
-          `
-            select
-              intent_id,
-              type,
-              aggregate_type,
-              aggregate_key,
-              wallet_address,
-              payload_json,
-              priority,
-              status,
-              floor(extract(epoch from available_at) * 1000)::text as available_at_ms,
-              case when claimed_at is null then null else floor(extract(epoch from claimed_at) * 1000)::text end as claimed_at_ms,
-              claim_owner,
-              case when last_submitted_at is null then null else floor(extract(epoch from last_submitted_at) * 1000)::text end as last_submitted_at_ms,
-              case when confirmed_at is null then null else floor(extract(epoch from confirmed_at) * 1000)::text end as confirmed_at_ms,
-              attempt_count,
-              tx_hash,
-              last_error,
-              superseded_by,
-              floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
-              floor(extract(epoch from updated_at) * 1000)::text as updated_at_ms
-            from game.chain_write_intents
-            where type = $1
-              and aggregate_key = $2
-              and status in ('pending', 'retryable', 'processing', 'waiting_funds', 'submitted')
-            order by created_at desc
-            limit 1
-            for update
-          `,
-          [input.type, input.aggregateKey]
-        );
-        const existing = rows[0] ? fromIntentRow(rows[0]) : null;
-        if (existing?.status === "submitted") {
-          // Preserve the in-flight publish. Returning the active submitted intent keeps
-          // aggregate dedupe intact without mutating the payload behind a live tx hash.
-          await client.query("commit");
-          return existing;
-        }
-        const mergedPayload = input.mergePayload(existing ? JSON.parse(existing.payload) : null);
-        const nextStatus: ChainIntentStatus =
-          existing?.status === "processing"
-            ? "pending"
-            : existing?.status === "waiting_funds"
-              ? "waiting_funds"
-              : (existing?.status ?? "pending");
+        return await withPostgresClient(async (client) => {
+          await client.query("begin");
+          try {
+            const { rows } = await client.query<ChainIntentRow>(
+              `
+                select
+                  intent_id,
+                  type,
+                  aggregate_type,
+                  aggregate_key,
+                  wallet_address,
+                  payload_json,
+                  priority,
+                  status,
+                  floor(extract(epoch from available_at) * 1000)::text as available_at_ms,
+                  case when claimed_at is null then null else floor(extract(epoch from claimed_at) * 1000)::text end as claimed_at_ms,
+                  claim_owner,
+                  case when last_submitted_at is null then null else floor(extract(epoch from last_submitted_at) * 1000)::text end as last_submitted_at_ms,
+                  case when confirmed_at is null then null else floor(extract(epoch from confirmed_at) * 1000)::text end as confirmed_at_ms,
+                  attempt_count,
+                  tx_hash,
+                  last_error,
+                  superseded_by,
+                  floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
+                  floor(extract(epoch from updated_at) * 1000)::text as updated_at_ms
+                from game.chain_write_intents
+                where type = $1
+                  and aggregate_key = $2
+                  and status in ('pending', 'retryable', 'processing', 'waiting_funds', 'submitted')
+                order by created_at desc
+                limit 1
+                for update
+              `,
+              [input.type, input.aggregateKey]
+            );
+            const existing = rows[0] ? fromIntentRow(rows[0]) : null;
+            if (existing?.status === "submitted") {
+              await client.query("commit");
+              return existing;
+            }
+            const mergedPayload = input.mergePayload(existing ? JSON.parse(existing.payload) : null);
+            const nextStatus: ChainIntentStatus =
+              existing?.status === "processing"
+                ? "pending"
+                : existing?.status === "waiting_funds"
+                  ? "waiting_funds"
+                  : (existing?.status ?? "pending");
 
-        if (existing) {
-          await client.query(
-            `
-              update game.chain_write_intents
-              set wallet_address = coalesce($2, wallet_address),
-                  payload_json = $3::jsonb,
-                  priority = $4,
-                  status = $5,
-                  available_at = to_timestamp($6::double precision / 1000.0),
-                  claimed_at = null,
-                  claim_owner = null,
-                  last_error = null,
-                  updated_at = to_timestamp($7::double precision / 1000.0)
-              where intent_id = $1
-            `,
-            [
-              existing.intentId,
-              normalizedWallet ?? null,
-              JSON.stringify(mergedPayload),
-              input.priority ?? existing.priority,
-              nextStatus,
-              now,
-              now,
-            ]
-          );
-          await client.query("commit");
-          return {
-            ...existing,
-            ...(normalizedWallet ? { walletAddress: normalizedWallet } : {}),
-            payload: JSON.stringify(mergedPayload),
-            priority: input.priority ?? existing.priority,
-            status: nextStatus,
-            availableAt: now,
-            claimedAt: undefined,
-            claimOwner: undefined,
-            lastError: undefined,
-            updatedAt: now,
-          };
-        }
+            if (existing) {
+              await client.query(
+                `
+                  update game.chain_write_intents
+                  set wallet_address = coalesce($2, wallet_address),
+                      payload_json = $3::jsonb,
+                      priority = $4,
+                      status = $5,
+                      available_at = to_timestamp($6::double precision / 1000.0),
+                      claimed_at = null,
+                      claim_owner = null,
+                      last_error = null,
+                      updated_at = to_timestamp($7::double precision / 1000.0)
+                  where intent_id = $1
+                `,
+                [
+                  existing.intentId,
+                  normalizedWallet ?? null,
+                  JSON.stringify(mergedPayload),
+                  input.priority ?? existing.priority,
+                  nextStatus,
+                  now,
+                  now,
+                ]
+              );
+              await client.query("commit");
+              return {
+                ...existing,
+                ...(normalizedWallet ? { walletAddress: normalizedWallet } : {}),
+                payload: JSON.stringify(mergedPayload),
+                priority: input.priority ?? existing.priority,
+                status: nextStatus,
+                availableAt: now,
+                claimedAt: undefined,
+                claimOwner: undefined,
+                lastError: undefined,
+                updatedAt: now,
+              };
+            }
 
-        const created: ChainWriteIntentRecord = {
-          intentId: randomUUID(),
-          type: input.type,
-          aggregateType: input.aggregateType,
-          aggregateKey: input.aggregateKey,
-          ...(normalizedWallet ? { walletAddress: normalizedWallet } : {}),
-          payload: JSON.stringify(mergedPayload),
-          priority: input.priority ?? 100,
-          status: "pending",
-          availableAt: now,
-          attemptCount: 0,
-          createdAt: now,
-          updatedAt: now,
-        };
-        await client.query(
-          `
-            insert into game.chain_write_intents (
-              intent_id, type, aggregate_type, aggregate_key, wallet_address, payload_json,
-              priority, status, available_at, created_at, updated_at
-            ) values (
-              $1, $2, $3, $4, $5, $6::jsonb, $7, $8,
-              to_timestamp($9::double precision / 1000.0),
-              to_timestamp($10::double precision / 1000.0),
-              to_timestamp($11::double precision / 1000.0)
-            )
-          `,
-          [
-            created.intentId,
-            created.type,
-            created.aggregateType,
-            created.aggregateKey,
-            created.walletAddress ?? null,
-            created.payload,
-            created.priority,
-            created.status,
-            created.availableAt,
-            created.createdAt,
-            created.updatedAt,
-          ]
-        );
-        await client.query("commit");
-        return created;
+            const created: ChainWriteIntentRecord = {
+              intentId: randomUUID(),
+              type: input.type,
+              aggregateType: input.aggregateType,
+              aggregateKey: input.aggregateKey,
+              ...(normalizedWallet ? { walletAddress: normalizedWallet } : {}),
+              payload: JSON.stringify(mergedPayload),
+              priority: input.priority ?? 100,
+              status: "pending",
+              availableAt: now,
+              attemptCount: 0,
+              createdAt: now,
+              updatedAt: now,
+            };
+            await client.query(
+              `
+                insert into game.chain_write_intents (
+                  intent_id, type, aggregate_type, aggregate_key, wallet_address, payload_json,
+                  priority, status, available_at, created_at, updated_at
+                ) values (
+                  $1, $2, $3, $4, $5, $6::jsonb, $7, $8,
+                  to_timestamp($9::double precision / 1000.0),
+                  to_timestamp($10::double precision / 1000.0),
+                  to_timestamp($11::double precision / 1000.0)
+                )
+              `,
+              [
+                created.intentId,
+                created.type,
+                created.aggregateType,
+                created.aggregateKey,
+                created.walletAddress ?? null,
+                created.payload,
+                created.priority,
+                created.status,
+                created.availableAt,
+                created.createdAt,
+                created.updatedAt,
+              ]
+            );
+            await client.query("commit");
+            return created;
+          } catch (err) {
+            await client.query("rollback");
+            throw err;
+          }
+        });
       } catch (err) {
-        await client.query("rollback");
-        throw err;
+        const message = formatChainError(err, 200);
+        const isUniqueConflict = message.includes("idx_chain_write_intents_active_aggregate")
+          || message.includes("duplicate key value violates unique constraint");
+        if (!isUniqueConflict || attemptIndex === 2) {
+          throw err;
+        }
       }
-    });
+    }
   }
 
+  const now = Date.now();
   const aggregateLookup = `${input.type}:${input.aggregateKey}`;
   const existingId = memoryAggregate.get(aggregateLookup);
   const existing = existingId ? memoryIntents.get(existingId) ?? null : null;

@@ -4,6 +4,7 @@ dist/
 .env
 client/.env.production
 .DS_Store
+.env.production
 
 # Astro generated
 docs/.astro/

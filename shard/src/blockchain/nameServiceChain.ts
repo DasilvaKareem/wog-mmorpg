@@ -54,6 +54,7 @@ const CACHE_TTL_MS = 60_000;
 const KEEP_OPTIMISTIC_LOCAL_NAME_CACHE = SKALE_BASE_CHAIN_ID === 31337;
 const NAME_REGISTER_OP = "name-register";
 const NAME_RELEASE_OP = "name-release";
+const BOOTSTRAP_CHAIN_PRIORITY = 10;
 
 /** address (lowercase) → name */
 const addressToNameCache = new Map<string, CacheEntry>();
@@ -91,7 +92,12 @@ export async function registerNameOnChain(
   if (isPostgresConfigured()) {
     await upsertWalletName(walletAddress, name);
   }
-  const record = await createChainOperation(NAME_REGISTER_OP, walletAddress.toLowerCase(), { walletAddress, name });
+  const record = await createChainOperation(
+    NAME_REGISTER_OP,
+    walletAddress.toLowerCase(),
+    { walletAddress, name },
+    { priority: BOOTSTRAP_CHAIN_PRIORITY }
+  );
   try {
     await processNameOperation(record.operationId);
     const updated = await getChainOperation(record.operationId);

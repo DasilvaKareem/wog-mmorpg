@@ -259,14 +259,22 @@ export async function createChainOperation(
   type: string,
   subject: string,
   payload: unknown,
+  options?: {
+    priority?: number;
+  },
 ): Promise<ChainOperationRecord> {
+  const existing = await findLatestChainOperationByTypeAndSubject(type, subject);
+  if (existing && existing.status !== "completed" && existing.status !== "failed_permanent") {
+    return existing;
+  }
+
   const now = Date.now();
   const intent = await createChainIntent({
     type: `chain-operation:${type}`,
     aggregateType: "operation",
     aggregateKey: `${type}:${subject}`,
     payload,
-    priority: 50,
+    priority: options?.priority ?? 50,
   });
   const record: ChainOperationRecord = {
     operationId: randomUUID(),
@@ -716,8 +724,11 @@ export async function executeRegisteredChainOperation<T>(
   type: string,
   subject: string,
   payload: unknown,
+  options?: {
+    priority?: number;
+  },
 ): Promise<T> {
-  const record = await createChainOperation(type, subject, payload);
+  const record = await createChainOperation(type, subject, payload, options);
   const result = await processTrackedChainOperation<T>(record.operationId);
   if (result === null) {
     throw new Error(`Chain operation ${type} did not run`);

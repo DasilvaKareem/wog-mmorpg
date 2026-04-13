@@ -1,4 +1,4 @@
-import type { FastifyBaseLogger } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import {
   mintCharacterWithIdentity,
   recoverCharacterTokenIdFromTransaction,
@@ -18,6 +18,8 @@ import {
   upsertCharacterBootstrapJob,
 } from "../db/walletInfraStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
+import { listAllCharacterProjections } from "./characterProjectionStore.js";
+import { ensureWalletRegistrationQueued } from "../blockchain/wallet.js";
 
 export type CharacterBootstrapStatus =
   | "queued"
@@ -597,14 +599,99 @@ export async function processPendingCharacterBootstraps(logger?: FastifyBaseLogg
   return processed;
 }
 
-export async function startCharacterBootstrapWorker(logger?: FastifyBaseLogger): Promise<void> {
+function shouldAutoQueueBootstrap(params: {
+  chainRegistrationStatus: string | null | undefined;
+  agentId: string | null | undefined;
+  existingJob: CharacterBootstrapJob | null;
+}): boolean {
+  const status = params.chainRegistrationStatus ?? "unregistered";
+  if (params.agentId) return false;
+  if (status === "registered" || status === "failed_permanent") return false;
+
+  const job = params.existingJob;
+  if (!job) return true;
+  if (job.status === "completed" || job.status === "failed_permanent") {
+    return status !== "registered";
+  }
+  return false;
+}
+
+export async function reconcileMissingCharacterBootstrapJobs(logger?: FastifyBaseLogger): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+
+  const projections = await listAllCharacterProjections();
+  let enqueued = 0;
+
+  for (const projection of projections) {
+    const existingJob = await loadCharacterBootstrapJob(projection.walletAddress, projection.characterName);
+    if (!shouldAutoQueueBootstrap({
+      chainRegistrationStatus: projection.chainRegistrationStatus,
+      agentId: projection.agentId,
+      existingJob,
+    })) {
+      continue;
+    }
+
+    await enqueueCharacterBootstrap(
+      projection.walletAddress,
+      projection.characterName,
+      "character:auto-reconcile",
+      ["wog:a2a-enabled"]
+    );
+    enqueued++;
+  }
+
+  if (enqueued > 0) {
+    logger?.info(`[character-bootstrap] Auto-enqueued ${enqueued} missing bootstrap job(s) from persisted character state`);
+  }
+
+  return enqueued;
+}
+
+export async function reconcileImportedPlayerBootstrap(server: FastifyInstance): Promise<{
+  walletQueued: number;
+  walletAlreadyQueued: number;
+  characterQueued: number;
+}> {
+  if (!isPostgresConfigured()) {
+    return { walletQueued: 0, walletAlreadyQueued: 0, characterQueued: 0 };
+  }
+
+  const projections = await listAllCharacterProjections();
+  const seenWallets = new Set<string>();
+  let walletQueued = 0;
+  let walletAlreadyQueued = 0;
+
+  for (const projection of projections) {
+    const walletAddress = normalizeWallet(projection.walletAddress);
+    if (seenWallets.has(walletAddress)) continue;
+    seenWallets.add(walletAddress);
+
+    const result = await ensureWalletRegistrationQueued(server, walletAddress);
+    if (result === "queued") walletQueued += 1;
+    if (result === "already_queued") walletAlreadyQueued += 1;
+  }
+
+  const characterQueued = await reconcileMissingCharacterBootstrapJobs(server.log);
+  if (walletQueued > 0 || walletAlreadyQueued > 0 || characterQueued > 0) {
+    server.log.info(
+      `[bootstrap-reconcile] queued wallets=${walletQueued}, active-wallet-ops=${walletAlreadyQueued}, character-jobs=${characterQueued}`
+    );
+  }
+
+  return { walletQueued, walletAlreadyQueued, characterQueued };
+}
+
+export async function startCharacterBootstrapWorker(server: FastifyInstance): Promise<void> {
   if (workerTimer) return;
+
+  await reconcileImportedPlayerBootstrap(server);
 
   const run = async () => {
     if (workerInFlight) return;
     workerInFlight = true;
     try {
-      await processPendingCharacterBootstraps(logger);
+      await processPendingCharacterBootstraps(server.log);
     } finally {
       workerInFlight = false;
     }

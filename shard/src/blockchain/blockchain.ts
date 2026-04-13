@@ -102,6 +102,7 @@ const ownershipLookupWarnAt = new Map<string, number>();
 // Promise coalescing — if a read is already in-flight, concurrent callers reuse the same promise
 const inflightGold = new Map<string, Promise<string>>();
 const inflightItem = new Map<string, Promise<bigint>>();
+const BOOTSTRAP_CHAIN_PRIORITY = 10;
 
 const ERC721_TRANSFER_TOPIC = ethers.id("Transfer(address,address,uint256)");
 const IDENTITY_RECEIPT_TIMEOUT_MS = DEV_ENABLED ? 10_000 : 20_000;
@@ -556,11 +557,21 @@ export async function distributeSFuel(toAddress: string): Promise<string> {
   } catch {
     // RPC error — proceed with distribution rather than skipping
   }
-  return executeRegisteredChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
+  return executeRegisteredChainOperation(
+    "sfuel-distribute",
+    toAddress.toLowerCase(),
+    { toAddress },
+    { priority: BOOTSTRAP_CHAIN_PRIORITY }
+  );
 }
 
 export async function enqueueSfuelDistribution(toAddress: string): Promise<string> {
-  const record = await createChainOperation("sfuel-distribute", toAddress.toLowerCase(), { toAddress });
+  const record = await createChainOperation(
+    "sfuel-distribute",
+    toAddress.toLowerCase(),
+    { toAddress },
+    { priority: BOOTSTRAP_CHAIN_PRIORITY }
+  );
   return record.operationId;
 }
 
@@ -578,7 +589,12 @@ export async function enqueueGoldMint(toAddress: string, amount: string): Promis
     await addWalletGold(toAddress, Number(amount));
     goldCache.invalidate(toAddress.toLowerCase());
   }
-  const record = await createChainOperation("gold-mint", `${toAddress.toLowerCase()}:${amount}`, { toAddress, amount });
+  const record = await createChainOperation(
+    "gold-mint",
+    `${toAddress.toLowerCase()}:${amount}`,
+    { toAddress, amount },
+    { priority: BOOTSTRAP_CHAIN_PRIORITY }
+  );
   return record.operationId;
 }
 
@@ -667,18 +683,24 @@ export async function transferGoldFrom(
 export async function enqueueGoldTransferFrom(
   fromAddress: string,
   toAddress: string,
-  amount: string
+  amount: string,
+  options?: { priority?: number }
 ): Promise<string> {
   if (isPostgresConfigured()) {
     await transferWalletGold(fromAddress, toAddress, Number(amount));
     goldCache.invalidate(fromAddress.toLowerCase());
     goldCache.invalidate(toAddress.toLowerCase());
   }
-  const record = await createChainOperation("gold-transfer", `${fromAddress.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`, {
-    fromAddress,
-    toAddress,
-    amount,
-  });
+  const record = await createChainOperation(
+    "gold-transfer",
+    `${fromAddress.toLowerCase()}:${toAddress.toLowerCase()}:${amount}`,
+    {
+      fromAddress,
+      toAddress,
+      amount,
+    },
+    { priority: options?.priority }
+  );
   return record.operationId;
 }
 
@@ -1375,7 +1397,8 @@ export async function registerIdentity(
         ownerAddress,
         metadataURI,
         validationTags,
-      } satisfies IdentityRegistrationPayload
+      } satisfies IdentityRegistrationPayload,
+      { priority: BOOTSTRAP_CHAIN_PRIORITY }
     );
     if (result.agentId == null) {
       const recovered = await recoverExistingIdentity();
@@ -1533,7 +1556,8 @@ export async function mintCharacterWithIdentity(
     const mintResult = await executeRegisteredChainOperation<CharacterMintProcessorResult>(
       "character-mint",
       `${toAddress.toLowerCase()}:${nft.name.toLowerCase()}`,
-      { toAddress, nft } satisfies CharacterMintPayload
+      { toAddress, nft } satisfies CharacterMintPayload,
+      { priority: BOOTSTRAP_CHAIN_PRIORITY }
     );
     const tokenId = mintResult.tokenId != null ? BigInt(mintResult.tokenId) : null;
 

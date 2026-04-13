@@ -945,7 +945,7 @@ const start = async () => {
 
   startAgentRuntimeReconciler(server.log);
 
-  await startCharacterBootstrapWorker(server.log).catch((err: any) => {
+  await startCharacterBootstrapWorker(server).catch((err: any) => {
     server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
   });
   startNameServiceWorker(server.log);

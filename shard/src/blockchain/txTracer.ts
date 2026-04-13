@@ -82,7 +82,12 @@ export function classifyTxFailure(err: any): { code?: number | string; reason?: 
     return { code, reason, retryable: true, kind: "retryable" };
   }
   // Gas / balance — retryable after funding
-  if (msg.includes("insufficient funds") || msg.includes("Account balance is too low")) {
+  if (
+    msg.includes("insufficient funds") ||
+    msg.includes("Account balance is too low") ||
+    msg.includes("transfer amount exceeds balance") ||
+    msg.includes("Treasury not initialised")
+  ) {
     return { code, reason, retryable: true, kind: "funding" };
   }
   // Revert / business logic — not retryable

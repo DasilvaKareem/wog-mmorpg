@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { distributeSFuel, enqueueGoldMint, enqueueGoldTransferFrom, getGoldBalance, getItemBalance, getOnChainGoldBalance, getOnChainItemBalance, transferGoldFrom } from "./blockchain.js";
+import { distributeSFuel, enqueueGoldTransferFrom, getGoldBalance, getItemBalance, getOnChainGoldBalance, getOnChainItemBalance, mintGold, transferGoldFrom } from "./blockchain.js";
 import { biteProvider } from "./biteChain.js";
 import { formatGold, getAvailableGoldAsync, getSpentGoldAsync } from "./goldLedger.js";
 import { ITEM_CATALOG, getItemRarity } from "../items/itemCatalog.js";
@@ -9,6 +9,7 @@ import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redi
 import {
   acquireChainOperationLock,
   createChainOperation,
+  findLatestChainOperationByTypeAndSubject,
   getChainOperation,
   listDueChainOperations,
   markChainOperationRetryable,
@@ -42,6 +43,7 @@ const WALLET_REGISTRATION_OP_TYPE = "wallet-register";
 const LOCAL_HARDHAT_CHAIN_ID = "31337";
 const TREASURY_MIN_NATIVE_BALANCE = ethers.parseEther("0.1");
 const LOCAL_TREASURY_TOP_UP_BALANCE = ethers.parseEther("1000");
+const BOOTSTRAP_CHAIN_PRIORITY = 10;
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -288,11 +290,17 @@ async function saveWalletRegistrationStatus(address: string, fields: Record<stri
 async function findPendingWalletRegistrationOperation(address: string): Promise<string | null> {
   const status = await getWalletRegistrationStatus(address);
   const operationId = status?.operationId;
-  if (!operationId) return null;
-  const record = await getChainOperation(operationId);
-  if (!record) return null;
-  if (record.status === "completed" || record.status === "failed_permanent") return null;
-  return operationId;
+  if (operationId) {
+    const record = await getChainOperation(operationId);
+    if (record && record.status !== "completed" && record.status !== "failed_permanent") {
+      return operationId;
+    }
+  }
+
+  const latest = await findLatestChainOperationByTypeAndSubject(WALLET_REGISTRATION_OP_TYPE, normalizeAddress(address));
+  if (!latest) return null;
+  if (latest.status === "completed" || latest.status === "failed_permanent") return null;
+  return latest.operationId;
 }
 
 async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
@@ -310,7 +318,7 @@ async function createAndSeedTreasury(server: FastifyInstance): Promise<string> {
   await ensureTreasuryGasBalance(server, treasuryAddress);
 
   console.log(`[wallet/register] Minting ${TREASURY_SEED_GOLD} GOLD to treasury...`);
-  const seedTx = await enqueueGoldMint(treasuryAddress, TREASURY_SEED_GOLD);
+  const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
   await markTreasurySeeded();
   console.log(`[wallet/register] Treasury ${treasuryAddress} seeded with ${TREASURY_SEED_GOLD} GOLD: ${seedTx}`);
   return treasuryAddress;
@@ -348,7 +356,7 @@ async function ensureWelcomeTreasury(server: FastifyInstance): Promise<string> {
 
     if (!seeded || !funded) {
       console.log(`[wallet/register] Treasury ${treasuryAddress} not seeded, minting ${TREASURY_SEED_GOLD} GOLD...`);
-      const seedTx = await enqueueGoldMint(treasuryAddress, TREASURY_SEED_GOLD);
+      const seedTx = await mintGold(treasuryAddress, TREASURY_SEED_GOLD);
       await markTreasurySeeded();
       console.log(`[wallet/register] Treasury ${treasuryAddress} seeded: ${seedTx}`);
     }
@@ -372,7 +380,12 @@ async function transferWelcomeBonus(
   welcomeGold: number
 ): Promise<string> {
   await ensureTreasuryGasBalance(server, treasuryAddress);
-  return await enqueueGoldTransferFrom(treasuryAddress, recipientAddress, welcomeGold.toString());
+  return await enqueueGoldTransferFrom(
+    treasuryAddress,
+    recipientAddress,
+    welcomeGold.toString(),
+    { priority: BOOTSTRAP_CHAIN_PRIORITY }
+  );
 }
 
 export interface WalletRegistrationResult {
@@ -561,7 +574,12 @@ export async function registerWalletWithWelcomeBonus(
   const existingPending = await findPendingWalletRegistrationOperation(normalized);
   let operationId = existingPending;
   if (!operationId) {
-    const record = await createChainOperation(WALLET_REGISTRATION_OP_TYPE, normalized, { address: normalized });
+    const record = await createChainOperation(
+      WALLET_REGISTRATION_OP_TYPE,
+      normalized,
+      { address: normalized },
+      { priority: BOOTSTRAP_CHAIN_PRIORITY }
+    );
     operationId = record.operationId;
     await saveWalletRegistrationStatus(normalized, {
       operationId,
@@ -582,6 +600,27 @@ export async function registerWalletWithWelcomeBonus(
       gold: WELCOME_GOLD,
     },
   };
+}
+
+export async function ensureWalletRegistrationQueued(
+  server: FastifyInstance,
+  address: string
+): Promise<"already_registered" | "already_queued" | "queued"> {
+  const normalized = normalizeAddress(address);
+  if (await isWalletRegistered(normalized)) {
+    return "already_registered";
+  }
+
+  const existingPending = await findPendingWalletRegistrationOperation(normalized);
+  if (existingPending) {
+    void processWalletRegistrationOperation(server, existingPending).catch((err) => {
+      server.log.warn(`[wallet/register] async registration dispatch failed for ${normalized}: ${String((err as Error)?.message ?? err).slice(0, 160)}`);
+    });
+    return "already_queued";
+  }
+
+  await registerWalletWithWelcomeBonus(server, normalized);
+  return "queued";
 }
 
 export function registerWalletRoutes(server: FastifyInstance) {
