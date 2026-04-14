@@ -995,7 +995,7 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
     resolvedAgentId,
   });
   const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
-  const onChainRegistered = characterLooksRegistered && (identity?.onChainRegistered ?? true);
+  const onChainRegistered = characterLooksRegistered;
   const statusLabel = getRegistrationStatusLabel(resolvedCharacter, identity);
 
   if (resolvingCharacter) {

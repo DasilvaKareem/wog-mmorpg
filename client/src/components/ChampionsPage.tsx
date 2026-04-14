@@ -2551,7 +2551,7 @@ function ReputationTab({
     resolvedAgentId: effectiveAgentId,
   });
   const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
-  const displayCharacterTokenId = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? identity?.characterTokenId ?? null;
+  const displayCharacterTokenId = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? null;
   const registrationStatusLabel = getRegistrationStatusLabel(selectedCharacter, identity);
 
   return (

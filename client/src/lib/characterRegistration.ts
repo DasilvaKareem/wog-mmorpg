@@ -30,9 +30,10 @@ export function isRegistrationSettled(character: RegistrationCharacterLike | nul
 
 export function getRegistrationStatusLabel(
   character: RegistrationCharacterLike | null | undefined,
-  identity: RegistrationIdentityLike | null | undefined,
+  _identity: RegistrationIdentityLike | null | undefined,
 ): string {
-  if (isRegistrationSettled(character) && (identity?.onChainRegistered ?? true)) {
+  // Client source of truth is shard character state (Postgres-backed).
+  if (isRegistrationSettled(character)) {
     return "Registered on-chain";
   }
   const status = character?.bootstrapStatus ?? character?.chainRegistrationStatus ?? null;
@@ -61,21 +62,7 @@ export function resolveRegistrationTxHash(params: {
   identity: RegistrationIdentityLike | null | undefined;
   resolvedAgentId?: string | null;
 }): string | null {
-  const { character, identity, resolvedAgentId } = params;
+  const { character } = params;
   if (!isRegistrationSettled(character)) return null;
-
-  if (!resolvedAgentId) {
-    return character?.agentRegistrationTxHash ?? null;
-  }
-
-  const characterTokenId = character?.characterTokenId ?? character?.tokenId ?? null;
-  const identityMatchesCharacter = Boolean(
-    identity
-    && (!characterTokenId
-      || identity.characterTokenId == null
-      || identity.characterTokenId === characterTokenId)
-  );
-
-  if (!identityMatchesCharacter) return null;
-  return identity?.registrationTxHash ?? null;
+  return character?.agentRegistrationTxHash ?? null;
 }
