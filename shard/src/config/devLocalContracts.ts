@@ -95,11 +95,17 @@ function shouldOverrideWithManifest(key: string, currentValue: string | undefine
   // In DEV mode, local chain addresses should come from the active Hardhat manifest
   // rather than any stale values persisted in shard/.env.
   if (
-    key.endsWith("_CONTRACT_ADDRESS") ||
-    key.endsWith("_REGISTRY_ADDRESS") ||
-    key === "SKALE_BASE_RPC_URL" ||
-    key === "SKALE_BASE_CHAIN_ID"
+    DEV_ENABLED &&
+    (
+      key.endsWith("_CONTRACT_ADDRESS") ||
+      key === "SKALE_BASE_RPC_URL" ||
+      key === "SKALE_BASE_CHAIN_ID"
+    )
   ) {
+    return true;
+  }
+
+  if (key === "IDENTITY_REGISTRY_ADDRESS" || key === "REPUTATION_REGISTRY_ADDRESS") {
     return true;
   }
 

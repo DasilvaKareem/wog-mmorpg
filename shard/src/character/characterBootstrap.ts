@@ -14,6 +14,7 @@ import { getAllEntities } from "../world/zoneRuntime.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import {
   getCharacterBootstrapJobRecord,
+  listDueCharacterBootstrapJobs,
   listDueCharacterBootstrapJobKeys,
   upsertCharacterBootstrapJob,
 } from "../db/walletInfraStore.js";
@@ -561,21 +562,31 @@ export async function processCharacterBootstrapJob(
   }
 }
 
-async function listDueJobs(now: number): Promise<string[]> {
+async function listDueJobs(now: number): Promise<Array<{ walletAddress: string; characterName: string }>> {
   if (isPostgresConfigured()) {
-    const jobs = await listDueCharacterBootstrapJobKeys(now);
-    if (jobs.length > 0) return jobs;
+    const jobs = await listDueCharacterBootstrapJobs(now);
+    if (jobs.length > 0) {
+      return jobs.map((job) => ({
+        walletAddress: normalizeWallet(job.walletAddress),
+        characterName: collapseCharacterName(job.characterName),
+      }));
+    }
   }
   const redis = getRedis();
   if (redis) {
-    return await redis.zrangebyscore(pendingIndexKey, 0, now);
+    const values = await redis.zrangebyscore(pendingIndexKey, 0, now);
+    return values
+      .map((value: string) => parseJobId(value))
+      .filter((value: { walletAddress: string; characterName: string } | null): value is { walletAddress: string; characterName: string } => value != null);
   }
 
   if (!isMemoryFallbackAllowed()) {
     assertRedisAvailable("characterBootstrap.listDueJobs");
     return [];
   }
-  return Array.from(memoryPending.values());
+  return Array.from(memoryPending.values())
+    .map((value: string) => parseJobId(value))
+    .filter((value: { walletAddress: string; characterName: string } | null): value is { walletAddress: string; characterName: string } => value != null);
 }
 
 function parseJobId(value: string): { walletAddress: string; characterName: string } | null {
@@ -590,10 +601,8 @@ function parseJobId(value: string): { walletAddress: string; characterName: stri
 export async function processPendingCharacterBootstraps(logger?: FastifyBaseLogger): Promise<number> {
   const dueJobs = await listDueJobs(Date.now());
   let processed = 0;
-  for (const value of dueJobs) {
-    const parsed = parseJobId(value);
-    if (!parsed) continue;
-    await processCharacterBootstrapJob(parsed.walletAddress, parsed.characterName, logger);
+  for (const due of dueJobs) {
+    await processCharacterBootstrapJob(due.walletAddress, due.characterName, logger);
     processed++;
   }
   return processed;

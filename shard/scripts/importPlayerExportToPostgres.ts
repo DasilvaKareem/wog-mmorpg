@@ -74,8 +74,9 @@ function normalizeWallet(value: string): string {
 async function main() {
   const sourcePath = process.argv[2];
   if (!sourcePath) {
-    throw new Error("Usage: tsx scripts/importPlayerExportToPostgres.ts <export-json-path>");
+    throw new Error("Usage: tsx scripts/importPlayerExportToPostgres.ts <export-json-path> [--include-registered-wallets]");
   }
+  const includeRegisteredWallets = process.argv.includes("--include-registered-wallets");
 
   const resolvedPath = path.resolve(process.cwd(), sourcePath);
   const raw = await readFile(resolvedPath, "utf8");
@@ -128,11 +129,17 @@ async function main() {
   }
 
   let importedRegisteredWallets = 0;
-  for (const wallet of payload.registeredWallets ?? []) {
-    await putWalletRuntimeState(`wallet:registered:${normalizeWallet(wallet)}`, "1");
-    importedRegisteredWallets += 1;
+  if (includeRegisteredWallets) {
+    for (const wallet of payload.registeredWallets ?? []) {
+      await putWalletRuntimeState(`wallet:registered:${normalizeWallet(wallet)}`, "1");
+      importedRegisteredWallets += 1;
+    }
+    console.log(`[import] registered wallets ${importedRegisteredWallets}/${payload.registeredWallets.length}`);
+  } else {
+    console.log(
+      `[import] registered wallets skipped (${payload.registeredWallets.length} present in export; pass --include-registered-wallets to restore them)`
+    );
   }
-  console.log(`[import] registered wallets ${importedRegisteredWallets}/${payload.registeredWallets.length}`);
 
   let importedFriends = 0;
   for (const record of payload.friends ?? []) {

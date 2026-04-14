@@ -1156,17 +1156,6 @@ async function processIdentityRegistrationPayload(
         console.warn(`[identity] Failed to submit metadata update for agent #${agentId}: ${(err as Error).message?.slice(0, 120)}`);
       }
 
-      if (payload.validationTags.length > 0) {
-        try {
-          const { publishValidationClaim } = await import("../erc8004/validation.js");
-          for (const tag of payload.validationTags) {
-            void publishValidationClaim(agentId, tag);
-          }
-        } catch (err) {
-          console.warn(`[identity] Failed to queue validation claims for agent #${agentId}: ${(err as Error).message?.slice(0, 120)}`);
-        }
-      }
-
       if (payload.ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
         try {
           await submitIdentityTransfer(agentId);

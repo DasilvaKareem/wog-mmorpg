@@ -122,3 +122,28 @@ export async function listDueCharacterBootstrapJobKeys(now: number): Promise<str
   );
   return rows.map((r) => r.job_key);
 }
+
+export async function listDueCharacterBootstrapJobs(now: number): Promise<Array<{
+  jobKey: string;
+  walletAddress: string;
+  characterName: string;
+}>> {
+  if (!isPostgresConfigured()) return [];
+  const { rows } = await postgresQuery<{
+    job_key: string;
+    wallet_address: string;
+    character_name: string;
+  }>(
+    `select job_key, wallet_address, character_name
+       from game.character_bootstrap_jobs
+      where status not in ('completed', 'failed_permanent')
+        and next_attempt_at_ms <= $1
+      order by next_attempt_at_ms asc`,
+    [now]
+  );
+  return rows.map((row) => ({
+    jobKey: row.job_key,
+    walletAddress: row.wallet_address,
+    characterName: row.character_name,
+  }));
+}
