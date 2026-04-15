@@ -47,6 +47,7 @@ export class CharacterSelect {
   private selectedClass: string = "";
   private selectedRace: string = "";
   private liveEntity: CharacterListResponse["liveEntity"] = null;
+  private deployedCharacterName: string | null = null;
   private characters: CharacterListEntry[] = [];
 
   // 3D preview state
@@ -345,6 +346,7 @@ export class CharacterSelect {
     this.classes = classes;
     this.races = races;
     this.liveEntity = charData?.liveEntity ?? null;
+    this.deployedCharacterName = charData?.deployedCharacterName ?? null;
     this.characters = charData?.characters ?? [];
 
     if (this.characters.length === 0) {
@@ -418,7 +420,7 @@ export class CharacterSelect {
     if (this.characters.length === 0) { bar.innerHTML = ""; return; }
 
     const char = this.characters[this.currentIndex];
-    const isLive = this.liveEntity && this.liveEntity.name === char.name;
+    const isLive = this.isCharacterLive(char);
     const level = isLive ? this.liveEntity!.level : (char.properties.level ?? 1);
     const race = char.properties.race ?? "unknown";
     const cls = char.properties.class ?? "unknown";
@@ -447,6 +449,19 @@ export class CharacterSelect {
         void this.spawnExisting(char);
       }
     });
+  }
+
+  private isCharacterLive(char: CharacterListEntry): boolean {
+    if (!this.liveEntity) return false;
+    const liveTokenId = this.liveEntity.characterTokenId;
+    const charTokenId = char.characterTokenId ?? null;
+    if (liveTokenId && charTokenId) {
+      return liveTokenId === charTokenId;
+    }
+    const deployedBase = this.deployedCharacterName?.trim().toLowerCase() ?? null;
+    if (!deployedBase) return false;
+    const charBase = char.name.replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+    return charBase === deployedBase;
   }
 
   // ── Character list (compact, below info bar) ───────────────────────
