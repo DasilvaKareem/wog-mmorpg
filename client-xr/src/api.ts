@@ -18,6 +18,8 @@ import type {
   EnchantmentEntry,
   ArenaInfo,
   PvpLeaderboardEntry,
+  InventoryResponse,
+  ProfessionStatusResponse,
 } from "./types.js";
 
 // Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
@@ -36,10 +38,41 @@ export function toUrl(base: string, path: string): string {
   return normalizedBase ? `${normalizedBase}${path}` : path;
 }
 
+const NETWORK_TIMEOUT_MS = 12_000;
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  retryCount = 2,
+): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout);
+      if (response.status === 522 && attempt < retryCount) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err;
+      if (attempt < retryCount) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  throw lastError ?? new Error("Network request failed");
+}
+
 async function fetchJsonWithFallback<T>(path: string): Promise<T | null> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, path));
+      const res = await fetchWithRetry(toUrl(base, path));
       if (!res.ok) continue;
       return (await res.json()) as T;
     } catch {
@@ -77,7 +110,7 @@ async function postJsonWithFallback<T>(
 ): Promise<{ ok: boolean; data?: T; error?: string }> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, path), {
+      const res = await fetchWithRetry(toUrl(base, path), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -111,7 +144,7 @@ export async function postCommand(
 ): Promise<{ ok: boolean; error?: string }> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, "/command"), {
+      const res = await fetchWithRetry(toUrl(base, "/command"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -133,7 +166,7 @@ export async function postCommand(
 export async function fetchCharacters(walletAddress: string, token: string): Promise<CharacterListResponse | null> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, `/character/${walletAddress}`), {
+      const res = await fetchWithRetry(toUrl(base, `/character/${walletAddress}`), {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) continue;
@@ -159,7 +192,7 @@ export async function createCharacter(
 ): Promise<{ ok: boolean; character?: { name: string }; error?: string }> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, "/character/create"), {
+      const res = await fetchWithRetry(toUrl(base, "/character/create"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
@@ -194,7 +227,7 @@ export async function spawnCharacter(
 }> {
   for (const base of CANDIDATE_BASES) {
     try {
-      const res = await fetch(toUrl(base, "/spawn"), {
+      const res = await fetchWithRetry(toUrl(base, "/spawn"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
@@ -266,6 +299,14 @@ export async function buyShopItem(
   return postJsonWithFallback("/shop/buy", token, {
     buyerAddress, tokenId, quantity, merchantEntityId,
   });
+}
+
+export async function fetchInventory(walletAddress: string): Promise<InventoryResponse | null> {
+  return fetchJsonWithFallback<InventoryResponse>(`/inventory/${walletAddress}`);
+}
+
+export async function fetchProfessionStatus(walletAddress: string): Promise<ProfessionStatusResponse | null> {
+  return fetchJsonWithFallback<ProfessionStatusResponse>(`/professions/${walletAddress}`);
 }
 
 export async function sendFriendRequest(

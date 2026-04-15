@@ -386,3 +386,52 @@ export interface ShopResponse {
   npcName: string;
   items: ShopItem[];
 }
+
+// ── Inventory types (for BagPanel) ────────────────────────────────
+
+export interface InventoryInstance {
+  instanceId: string;
+  displayName: string;
+  quality: string;
+  qualityColor: string;
+}
+
+export interface InventoryItem {
+  tokenId: number;
+  name: string;
+  displayName?: string | null;
+  description?: string;
+  category: string;
+  equipSlot?: string | null;
+  rarity?: string;
+  quality?: string;
+  quantity: number;
+  equipped?: boolean;
+  equippedCount?: number;
+  equippedSlot?: string | null;
+  durability?: number | null;
+  maxDurability?: number | null;
+  recyclableQuantity?: number;
+  recycleCopperValue?: number;
+  instances?: InventoryInstance[] | null;
+}
+
+export interface InventoryResponse {
+  walletAddress: string;
+  items: InventoryItem[];
+}
+
+// ── Profession status types (for SkillsPanel) ─────────────────────
+
+export interface ProfessionSkillSummary {
+  level: number;
+  xp: number;
+  actions: number;
+  progress: number;
+}
+
+export interface ProfessionStatusResponse {
+  walletAddress: string;
+  professions: string[];
+  skills: Record<string, ProfessionSkillSummary>;
+}
