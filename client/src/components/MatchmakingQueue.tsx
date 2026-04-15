@@ -42,7 +42,7 @@ export function MatchmakingQueue(): React.ReactElement {
   const [inQueue, setInQueue] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [queuedAgentId, setQueuedAgentId] = React.useState<string | null>(null);
-  const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
+  const { address, isConnected, characterProgress } = useWallet();
   const { notify } = useToast();
 
   // Resolve identity once and reuse it for queue checks
@@ -154,11 +154,7 @@ export function MatchmakingQueue(): React.ReactElement {
     }
 
     const snapshot = (await response.json()) as StateSnapshot;
-    const preferredName = deployedCharacterName?.trim().toLowerCase() ?? null;
-    const liveName =
-      characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
-
-    let allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
+    const allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
       Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
         if (entity.type !== "player") return [];
         const entityWallet = entity.walletAddress?.toLowerCase();
@@ -167,28 +163,21 @@ export function MatchmakingQueue(): React.ReactElement {
       }),
     );
 
-    // Fallback: if wallet matching found nothing, try matching by character name
-    if (allPlayers.length === 0 && (preferredName || liveName)) {
-      allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
-        Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
-          if (entity.type !== "player") return [];
-          const eName = entity.name?.trim().toLowerCase();
-          if (eName !== preferredName && eName !== liveName) return [];
-          return [{ ...entity, id: entity.id ?? entityId }];
-        }),
-      );
-    }
-
     if (allPlayers.length === 0) {
       return null;
     }
 
     const withIdentity = allPlayers.filter((entity) => entity.agentId && entity.characterTokenId);
     if (withIdentity.length > 0) {
-      const selected =
-        withIdentity.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-        withIdentity.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-        withIdentity[0];
+      const activeToken = characterProgress?.characterTokenId
+        ? String(characterProgress.characterTokenId)
+        : null;
+      const selected = activeToken
+        ? (withIdentity.find((entity) => String(entity.characterTokenId) === activeToken) ?? null)
+        : (withIdentity.length === 1 ? withIdentity[0] : null);
+      if (!selected) {
+        return null;
+      }
 
       return {
         agentId: String(selected.agentId),
@@ -197,12 +186,7 @@ export function MatchmakingQueue(): React.ReactElement {
       };
     }
 
-    // Fallback: entity exists but missing identity fields — check agent wallet endpoint
-    const candidate =
-      allPlayers.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-      allPlayers.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-      allPlayers[0];
-
+    // Fallback: resolve canonical active identity for this wallet.
     try {
       const walletRes = await fetch(`${API_URL}/agent/wallet/${encodeURIComponent(address)}`);
       if (walletRes.ok) {
@@ -211,7 +195,7 @@ export function MatchmakingQueue(): React.ReactElement {
           return {
             agentId: String(walletData.agentId),
             characterTokenId: String(walletData.characterTokenId),
-            level: candidate?.level ?? characterProgress?.level ?? 1,
+            level: characterProgress?.level ?? 1,
           };
         }
       }
@@ -219,17 +203,8 @@ export function MatchmakingQueue(): React.ReactElement {
       // fall through
     }
 
-    // Last resort: use entity ID as agentId and characterTokenId if available
-    if (candidate) {
-      return {
-        agentId: String(candidate.agentId ?? candidate.id ?? ""),
-        characterTokenId: String(candidate.characterTokenId ?? "0"),
-        level: candidate.level ?? characterProgress?.level ?? 1,
-      };
-    }
-
     return null;
-  }, [address, characterProgress, deployedCharacterName]);
+  }, [address, characterProgress]);
 
   const handleJoinQueue = async () => {
     if (!address) {

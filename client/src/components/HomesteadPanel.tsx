@@ -87,7 +87,10 @@ export function HomesteadPanel({ entity, currentZoneId }: HomesteadPanelProps): 
   const [busyAction, setBusyAction] = React.useState<string | null>(null);
   const [message, setMessage] = React.useState<{ tone: "ok" | "error"; text: string } | null>(null);
 
-  const ownerWallet = entity.walletAddress ?? null;
+  // Homestead ownership is tied to the connected owner wallet.
+  // The live entity wallet can be custodial and should not override owner identity.
+  const ownerWallet = address ?? WalletManager.getInstance().address ?? entity.walletAddress ?? null;
+  const liveEntityWallet = entity.walletAddress ?? null;
   const homestead = status?.homestead ?? null;
   const tiers = status?.tiers ?? [];
   const enterRadius = status?.enterRadius ?? 0;
@@ -185,12 +188,12 @@ export function HomesteadPanel({ entity, currentZoneId }: HomesteadPanelProps): 
       async (data) => {
         gameBus.emit("followPlayer", {
           zoneId: String(data.zoneId ?? homestead?.instanceZoneId ?? ""),
-          walletAddress: ownerWallet ?? entity.walletAddress ?? "",
+          walletAddress: liveEntityWallet ?? ownerWallet ?? "",
         });
         flash("ok", "Entered your homestead.");
       },
     );
-  }, [entity.id, entity.walletAddress, flash, homestead?.instanceZoneId, ownerWallet]);
+  }, [entity.id, flash, homestead?.instanceZoneId, liveEntityWallet, ownerWallet]);
 
   const handleExit = React.useCallback(async () => {
     await runHomesteadAction(
@@ -200,12 +203,12 @@ export function HomesteadPanel({ entity, currentZoneId }: HomesteadPanelProps): 
       async (data) => {
         gameBus.emit("followPlayer", {
           zoneId: String(data.zoneId ?? homestead?.publicZoneId ?? ""),
-          walletAddress: ownerWallet ?? entity.walletAddress ?? "",
+          walletAddress: liveEntityWallet ?? ownerWallet ?? "",
         });
         flash("ok", "Returned to your plot entrance.");
       },
     );
-  }, [entity.id, entity.walletAddress, flash, homestead?.publicZoneId, ownerWallet]);
+  }, [entity.id, flash, homestead?.publicZoneId, liveEntityWallet, ownerWallet]);
 
   const handleUpgrade = React.useCallback(async () => {
     await runHomesteadAction(

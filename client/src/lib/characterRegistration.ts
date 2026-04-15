@@ -7,12 +7,6 @@ export interface RegistrationCharacterLike {
   bootstrapStatus?: string | null;
 }
 
-export interface RegistrationIdentityLike {
-  characterTokenId?: string | null;
-  registrationTxHash?: string | null;
-  onChainRegistered?: boolean;
-}
-
 const ACTIVE_BOOTSTRAP_STATUSES = new Set([
   "queued",
   "pending_mint",
@@ -30,7 +24,6 @@ export function isRegistrationSettled(character: RegistrationCharacterLike | nul
 
 export function getRegistrationStatusLabel(
   character: RegistrationCharacterLike | null | undefined,
-  _identity: RegistrationIdentityLike | null | undefined,
 ): string {
   // Client source of truth is shard character state (Postgres-backed).
   if (isRegistrationSettled(character)) {
@@ -59,8 +52,6 @@ export function getRegistrationStatusLabel(
 
 export function resolveRegistrationTxHash(params: {
   character: RegistrationCharacterLike | null | undefined;
-  identity: RegistrationIdentityLike | null | undefined;
-  resolvedAgentId?: string | null;
 }): string | null {
   const { character } = params;
   if (!isRegistrationSettled(character)) return null;

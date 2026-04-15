@@ -47,18 +47,8 @@ function CharacterSection({
   const [showSwapMenu, setShowSwapMenu] = React.useState(false);
   const liveCharacterTokenId =
     characterProgress?.source === "live"
-      ? characterProgress.characterTokenId ??
-        characters.find((c) => {
-          const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-          const liveBaseName = characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim();
-          return baseName === liveBaseName || c.name === characterProgress.name;
-        })?.tokenId ??
-        null
+      ? characterProgress.characterTokenId ?? null
       : null;
-  const liveCharacterBaseName =
-    characterProgress?.source === "live"
-      ? characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim()
-      : deployedCharacterName;
 
   const activeCharacter = React.useMemo(() => {
     if (selectedCharacterTokenId) {
@@ -71,16 +61,8 @@ function CharacterSection({
       if (liveCharacter) return liveCharacter;
     }
 
-    if (liveCharacterBaseName) {
-      const deployed = characters.find((c) => {
-        const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-        return baseName === liveCharacterBaseName || c.name === liveCharacterBaseName;
-      });
-      if (deployed) return deployed;
-    }
-
     return characters[0] ?? null;
-  }, [characters, liveCharacterBaseName, liveCharacterTokenId, selectedCharacterTokenId]);
+  }, [characters, liveCharacterTokenId, selectedCharacterTokenId]);
 
   const selectionValue = selectedCharacterTokenId ?? liveCharacterTokenId ?? "";
 
@@ -230,8 +212,7 @@ function CharacterSection({
                 </option>
               )}
               {characters.map((c) => {
-                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"
@@ -297,8 +278,7 @@ function CharacterSection({
                 </option>
               )}
               {characters.map((c) => {
-                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"

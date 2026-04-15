@@ -247,11 +247,13 @@ export function InspectDialog(): React.ReactElement | null {
             {entity.level ? `Lv.${entity.level}` : ""}
             {entity.kills !== undefined ? ` | ${entity.kills} kills` : ""}
           </div>
-          {(entity.walletAddress || entity.characterTokenId) && (
+          {((isSelf ? WalletManager.getInstance().address : entity.walletAddress) || (!isSelf && entity.characterTokenId)) && (
             <div className="mt-1 text-[9px]" style={{ color: "#8fa0c9" }}>
-              {entity.walletAddress ? `Wallet ${shortWallet(entity.walletAddress)}` : ""}
-              {entity.walletAddress && entity.characterTokenId ? " | " : ""}
-              {entity.characterTokenId ? `Token #${entity.characterTokenId}` : ""}
+              {(isSelf ? WalletManager.getInstance().address : entity.walletAddress)
+                ? `Wallet ${shortWallet(isSelf ? WalletManager.getInstance().address : entity.walletAddress)}`
+                : ""}
+              {!isSelf && entity.walletAddress && entity.characterTokenId ? " | " : ""}
+              {!isSelf && entity.characterTokenId ? `Token #${entity.characterTokenId}` : ""}
             </div>
           )}
         </div>
@@ -332,7 +334,13 @@ export function InspectDialog(): React.ReactElement | null {
         {tab === "stats" && <StatsTab entity={entity} />}
         {tab === "skills" && <SkillsTab entity={entity} getTechnique={getTechnique} />}
         {tab === "effects" && <EffectsTab entity={entity} getTechnique={getTechnique} />}
-        {tab === "reputation" && <ReputationTab entity={entity} />}
+        {tab === "reputation" && (
+          <ReputationTab
+            entity={entity}
+            walletAddressOverride={isSelf ? WalletManager.getInstance().address : null}
+            characterNameHint={entity.name}
+          />
+        )}
         {tab === "homestead" && isSelf && entity.type === "player" && (
           <HomesteadPanel entity={entity} currentZoneId={inspectZoneId} />
         )}
@@ -826,7 +834,15 @@ const REP_CATEGORIES: { key: keyof Omit<RepData, "overall" | "rank">; label: str
   { key: "agent", label: "AGENT", color: "#b48efa" },
 ];
 
-function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
+function ReputationTab({
+  entity,
+  walletAddressOverride,
+  characterNameHint,
+}: {
+  entity: Entity;
+  walletAddressOverride?: string | null;
+  characterNameHint?: string | null;
+}): React.ReactElement {
   const [rep, setRep] = React.useState<RepData | null>(null);
   const [identity, setIdentity] = React.useState<{
     registrationTxHash?: string | null;
@@ -838,7 +854,7 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
   const [identityLoading, setIdentityLoading] = React.useState(false);
   const [resolvingCharacter, setResolvingCharacter] = React.useState(true);
   const [reputationError, setReputationError] = React.useState<string | null>(null);
-  const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(entity.agentId ?? null);
+  const [resolvedAgentId, setResolvedAgentId] = React.useState<string | null>(null);
   const [resolvedCharacter, setResolvedCharacter] = React.useState<{
     agentId?: string | null;
     agentRegistrationTxHash?: string | null;
@@ -847,72 +863,73 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
     characterTokenId?: string | null;
   } | null>(null);
 
-  const entityBaseName = React.useMemo(
-    () => entity.name.replace(/\s+the\s+\w+$/i, "").trim().toLowerCase(),
-    [entity.name],
-  );
-
   React.useEffect(() => {
-    setResolvedAgentId(entity.agentId ?? null);
+    setResolvedAgentId(null);
     setResolvedCharacter(null);
     setIdentity(null);
     setResolvingCharacter(true);
-  }, [entity.agentId, entity.characterTokenId]);
+  }, [entity.agentId, entity.walletAddress, entity.characterTokenId, walletAddressOverride, characterNameHint]);
 
   React.useEffect(() => {
     let cancelled = false;
-
-    const walletManager = WalletManager.getInstance();
-    const candidateWallets = [entity.walletAddress, walletManager.custodialAddress, walletManager.address]
-      .filter((wallet): wallet is string => typeof wallet === "string" && wallet.length > 0)
-      .map((wallet) => wallet.toLowerCase())
-      .filter((wallet, index, all) => all.indexOf(wallet) === index);
-
-    if (candidateWallets.length === 0) {
+    const explicitWallet = typeof walletAddressOverride === "string" ? walletAddressOverride.trim().toLowerCase() : "";
+    const entityWallet = typeof entity.walletAddress === "string" ? entity.walletAddress.trim().toLowerCase() : "";
+    const wallet = explicitWallet || entityWallet;
+    if (!wallet) {
+      setResolvedAgentId(null);
       setResolvingCharacter(false);
       return;
     }
 
-    Promise.all(
-      candidateWallets.map((wallet) =>
-        fetch(`${API_URL}/character/${wallet}`)
-          .then((res) => (res.ok ? res.json() : null))
-          .catch(() => null),
-      ),
-    )
-      .then((responses) => {
+    fetch(`${API_URL}/character/${wallet}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((response) => {
         if (cancelled) return;
-        const characters = responses.flatMap((data) =>
-          Array.isArray(data?.characters)
-            ? (data.characters as Array<{
-                agentId?: string | null;
-                agentRegistrationTxHash?: string | null;
-                chainRegistrationStatus?: string | null;
-                bootstrapStatus?: string | null;
-                characterTokenId?: string | null;
-                tokenId?: string | null;
-                name?: string;
-              }>)
-            : [],
-        );
+        const characters = Array.isArray(response?.characters)
+          ? (response.characters as Array<{
+              name?: string | null;
+              agentId?: string | null;
+              agentRegistrationTxHash?: string | null;
+              chainRegistrationStatus?: string | null;
+              bootstrapStatus?: string | null;
+              characterTokenId?: string | null;
+              tokenId?: string | null;
+            }>)
+          : [];
 
-        const nameMatchedCharacters = characters.filter((character) => {
-          const characterBaseName = (character.name ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
-          return Boolean(characterBaseName) && characterBaseName === entityBaseName;
-        });
+        const normalize = (value: string | number | null | undefined): string | null => {
+          if (value === null || value === undefined) return null;
+          const text = String(value).trim();
+          return text.length > 0 ? text : null;
+        };
+        const normalizeName = (value: string | null | undefined): string | null => {
+          if (!value) return null;
+          const collapsed = value.trim().replace(/\s+/g, " ");
+          if (!collapsed) return null;
+          return collapsed.replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+        };
 
-        const matched =
-          nameMatchedCharacters.find((character) => {
-            const tokenId = character.characterTokenId ?? character.tokenId ?? null;
-            return Boolean(entity.characterTokenId && tokenId && tokenId === entity.characterTokenId);
-          })
-          ?? nameMatchedCharacters[0]
-          ?? characters.find((character) => {
-            const tokenId = character.characterTokenId ?? character.tokenId ?? null;
-            return Boolean(entity.characterTokenId && tokenId && tokenId === entity.characterTokenId);
-          })
-          ?? characters.find((character) => character.agentId && character.agentId === entity.agentId)
-          ?? null;
+        const targetTokenId = normalize(entity.characterTokenId);
+        const targetAgentId = normalize(entity.agentId);
+        const targetCharacterName = normalizeName(characterNameHint ?? entity.name);
+
+        let matched: (typeof characters)[number] | null = null;
+        if (targetTokenId) {
+          matched =
+            characters.find((character) => normalize(character.characterTokenId ?? character.tokenId) === targetTokenId)
+            ?? null;
+        }
+        if (!matched && targetAgentId) {
+          matched = characters.find((character) => normalize(character.agentId) === targetAgentId) ?? null;
+        }
+        if (!matched && targetCharacterName) {
+          matched =
+            characters.find((character) => {
+              const candidateName = normalizeName(character.name ?? null);
+              return candidateName === targetCharacterName;
+            })
+            ?? null;
+        }
 
         if (matched) {
           setResolvedCharacter({
@@ -929,14 +946,19 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
             setResolvedAgentId(null);
           } else if (matched.agentId && matched.chainRegistrationStatus === "registered") {
             setResolvedAgentId(matched.agentId);
-          } else if (entity.characterTokenId && matched.characterTokenId && matched.characterTokenId === entity.characterTokenId && matched.agentId) {
-            setResolvedAgentId(matched.agentId);
+          } else {
+            setResolvedAgentId(null);
           }
+        } else {
+          setResolvedCharacter(null);
+          setResolvedAgentId(null);
         }
         setResolvingCharacter(false);
       })
       .catch(() => {
         if (!cancelled) {
+          setResolvedAgentId(null);
+          setResolvedCharacter(null);
           setResolvingCharacter(false);
         }
       });
@@ -944,7 +966,7 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [entity.agentId, entity.walletAddress, entity.characterTokenId, entityBaseName]);
+  }, [entity.agentId, entity.walletAddress, entity.characterTokenId, walletAddressOverride, characterNameHint, entity.name]);
 
   const bootstrapActive = ["queued", "pending_mint", "mint_confirmed", "identity_pending", "failed_retryable"].includes(
     resolvedCharacter?.bootstrapStatus ?? "",
@@ -960,7 +982,10 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
       setIdentity(null);
       setReputationLoading(false);
       setIdentityLoading(false);
-      setReputationError(entity.walletAddress ? "No reputation data" : "NPCs don't have reputation");
+      const effectiveWallet =
+        (typeof walletAddressOverride === "string" && walletAddressOverride.trim()) ||
+        (typeof entity.walletAddress === "string" && entity.walletAddress.trim());
+      setReputationError(effectiveWallet ? "No reputation data" : "NPCs don't have reputation");
       return;
     }
     setReputationLoading(true);
@@ -987,16 +1012,14 @@ function ReputationTab({ entity }: { entity: Entity }): React.ReactElement {
       })
       .catch(() => setReputationError(characterLooksRegistered ? "Reputation sync pending" : "No reputation data"))
       .finally(() => setReputationLoading(false));
-  }, [resolvedAgentId, entity.walletAddress, characterLooksRegistered]);
+  }, [resolvedAgentId, entity.walletAddress, walletAddressOverride, characterLooksRegistered]);
 
   const registrationTxHash = resolveRegistrationTxHash({
     character: resolvedCharacter,
-    identity,
-    resolvedAgentId,
   });
   const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
   const onChainRegistered = characterLooksRegistered;
-  const statusLabel = getRegistrationStatusLabel(resolvedCharacter, identity);
+  const statusLabel = getRegistrationStatusLabel(resolvedCharacter);
 
   if (resolvingCharacter) {
     return <div className="text-[11px]" style={{ color: DIM }}>Loading...</div>;

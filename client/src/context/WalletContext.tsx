@@ -127,11 +127,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       if (liveCharacterGlobal) {
         const liveTokenId =
           liveCharacterGlobal.characterTokenId ??
-          ownedCharacters.find((character) => {
-            const baseName = character.name.replace(/\s+the\s+\w+$/i, "").trim();
-            const liveBaseName = liveCharacterGlobal.name.replace(/\s+the\s+\w+$/i, "").trim();
-            return character.tokenId === liveCharacterGlobal.characterTokenId || baseName === liveBaseName || character.name === liveCharacterGlobal.name;
-          })?.tokenId ??
           null;
         if (liveTokenId && selectedCharacterTokenId !== liveTokenId) {
           setSelectedCharacterTokenId(liveTokenId);
