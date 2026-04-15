@@ -120,6 +120,7 @@ export class AgentChat {
 
   /** Expand and focus the input */
   expand() {
+    this.show();
     this.expanded = true;
     this.root.classList.add("expanded");
     this.input.focus();
@@ -133,6 +134,31 @@ export class AgentChat {
     this.input.blur();
     this.input.value = "";
     this.hideAutocomplete();
+  }
+
+  /** Whether the chat panel is visible at all (not display:none) */
+  isVisible(): boolean {
+    return !this.root.classList.contains("chat-hidden");
+  }
+
+  /** Show the chat panel (does not auto-expand input) */
+  show() {
+    this.root.classList.remove("chat-hidden");
+  }
+
+  /** Hide the chat panel entirely */
+  hide() {
+    this.collapse();
+    this.root.classList.add("chat-hidden");
+  }
+
+  /** Toggle visibility; when showing, also expand the input for typing */
+  toggle() {
+    if (this.isVisible()) {
+      this.hide();
+    } else {
+      this.expand();
+    }
   }
 
   private push(entry: ChatEntry) {
@@ -403,6 +429,10 @@ export class AgentChat {
         transition: background 150ms ease;
         border-radius: 8px;
         pointer-events: auto;
+      }
+
+      #agent-chat.chat-hidden {
+        display: none;
       }
 
       #agent-chat.expanded {

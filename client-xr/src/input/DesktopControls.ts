@@ -17,6 +17,14 @@ export class DesktopControls {
   private lastMouse = { x: 0, y: 0 };
   private keys = new Set<string>();
 
+  // Touch state
+  private touchStart = { x: 0, y: 0 };
+  private touchMoved = false;
+  private activeTouchId: number | null = null;
+  private pinchStartDist = 0;
+  private pinchStartDistance = 0;
+  private static readonly TAP_THRESHOLD_PX = 10;
+
   /** Previous target position for movement-direction tracking */
   private prevTarget = new THREE.Vector3(0, 0, 0);
   /** Whether the user is manually controlling the camera yaw (suppresses auto-follow) */
@@ -38,6 +46,14 @@ export class DesktopControls {
     domElement.addEventListener("mouseup", this.onMouseUp);
     domElement.addEventListener("wheel", this.onWheel, { passive: false });
     domElement.addEventListener("contextmenu", (e) => e.preventDefault());
+    domElement.addEventListener("touchstart", this.onTouchStart, { passive: false });
+    domElement.addEventListener("touchmove", this.onTouchMove, { passive: false });
+    domElement.addEventListener("touchend", this.onTouchEnd, { passive: false });
+    domElement.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
+    // iOS Safari fires proprietary gesture events for pinch; we handle pinch via touch events.
+    domElement.addEventListener("gesturestart", this.onGesture, { passive: false });
+    domElement.addEventListener("gesturechange", this.onGesture, { passive: false });
+    domElement.addEventListener("gestureend", this.onGesture, { passive: false });
     window.addEventListener("keydown", this.onKeyDown);
     window.addEventListener("keyup", this.onKeyUp);
 
@@ -204,10 +220,94 @@ export class DesktopControls {
     this.keys.delete(e.key.toLowerCase());
   };
 
+  // ── Touch handlers (mobile orbit + pinch-zoom; tap passes through as click) ──
+
+  private onTouchStart = (e: TouchEvent) => {
+    if (this.landingMode) return;
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      this.activeTouchId = t.identifier;
+      this.touchStart = { x: t.clientX, y: t.clientY };
+      this.lastMouse = { x: t.clientX, y: t.clientY };
+      this.touchMoved = false;
+      this.isDragging = false;
+    } else if (e.touches.length === 2) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      this.pinchStartDist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      this.pinchStartDistance = this.distance;
+      this.isDragging = false;
+      this.activeTouchId = null;
+      // Mark as "moved" so iOS Safari doesn't fire a synthesized click on pinch-release.
+      this.touchMoved = true;
+      e.preventDefault();
+    }
+  };
+
+  private onTouchMove = (e: TouchEvent) => {
+    if (this.landingMode) return;
+
+    if (e.touches.length === 2 && this.pinchStartDist > 0) {
+      const [a, b] = [e.touches[0], e.touches[1]];
+      const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+      const ratio = this.pinchStartDist / Math.max(1, d);
+      this.distance = Math.max(5, Math.min(50, this.pinchStartDistance * ratio));
+      this.updateCamera();
+      e.preventDefault();
+      return;
+    }
+
+    if (e.touches.length !== 1 || this.activeTouchId === null) return;
+    const t = Array.from(e.touches).find((tt) => tt.identifier === this.activeTouchId);
+    if (!t) return;
+
+    const totalDx = t.clientX - this.touchStart.x;
+    const totalDy = t.clientY - this.touchStart.y;
+    if (!this.touchMoved && Math.hypot(totalDx, totalDy) > DesktopControls.TAP_THRESHOLD_PX) {
+      this.touchMoved = true;
+      this.isDragging = true;
+    }
+    if (!this.isDragging) return;
+
+    const dx = t.clientX - this.lastMouse.x;
+    const dy = t.clientY - this.lastMouse.y;
+    this.lastMouse = { x: t.clientX, y: t.clientY };
+
+    this.yaw -= dx * 0.005;
+    this.pitch = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, this.pitch + dy * 0.005));
+    this.userControlledYaw = true;
+    this.userYawTimer = 1.5;
+    this.updateCamera();
+    e.preventDefault();
+  };
+
+  private onGesture = (e: Event) => {
+    e.preventDefault();
+  };
+
+  private onTouchEnd = (e: TouchEvent) => {
+    if (this.touchMoved) {
+      // Suppress the synthesized click after a drag-orbit.
+      e.preventDefault();
+    }
+    if (e.touches.length < 2) this.pinchStartDist = 0;
+    if (e.touches.length === 0) {
+      this.activeTouchId = null;
+      this.isDragging = false;
+      this.touchMoved = false;
+    }
+  };
+
   dispose() {
     this.domElement.removeEventListener("mousedown", this.onMouseDown);
     this.domElement.removeEventListener("mousemove", this.onMouseMove);
     this.domElement.removeEventListener("mouseup", this.onMouseUp);
+    this.domElement.removeEventListener("touchstart", this.onTouchStart);
+    this.domElement.removeEventListener("touchmove", this.onTouchMove);
+    this.domElement.removeEventListener("touchend", this.onTouchEnd);
+    this.domElement.removeEventListener("touchcancel", this.onTouchEnd);
+    this.domElement.removeEventListener("gesturestart", this.onGesture);
+    this.domElement.removeEventListener("gesturechange", this.onGesture);
+    this.domElement.removeEventListener("gestureend", this.onGesture);
     window.removeEventListener("keydown", this.onKeyDown);
     window.removeEventListener("keyup", this.onKeyUp);
   }

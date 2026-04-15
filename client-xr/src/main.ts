@@ -662,7 +662,10 @@ actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", o
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => {
   questPanel.toggle();
 }});
-actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "T", onClick: () => {
+actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => {
+  agentChat.toggle();
+}});
+actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
   playerPanel.toggle();
 }});
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
@@ -1104,6 +1107,9 @@ window.addEventListener("keydown", (e) => {
       const ent = entities.getEntity(ownEntityId);
       if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
     }
+  }
+  if (e.key === "u" || e.key === "U") {
+    playerPanel.toggle();
   }
   if (e.key === " ") {
     e.preventDefault();
