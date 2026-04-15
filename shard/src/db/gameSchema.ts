@@ -99,6 +99,74 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_character_projections_agent
           on game.character_projections (agent_id);
 
+        -- Repair ghost rows from early bootstrap paths that wrote empty class_id.
+        -- For each (wallet, normalized_name) with an empty-class_id row:
+        --   1. If snapshot_json stored a classId, backfill it.
+        --   2. Otherwise, if a sibling row has a non-empty class_id, drop the ghost.
+        do $$
+        declare
+          r record;
+        begin
+          for r in
+            select wallet_address, normalized_name, snapshot_json->>'classId' as snapshot_class
+            from game.character_projections
+            where (class_id is null or class_id = '')
+              and coalesce(snapshot_json->>'classId', '') <> ''
+          loop
+            update game.character_projections
+            set class_id = r.snapshot_class
+            where wallet_address = r.wallet_address
+              and normalized_name = r.normalized_name
+              and (class_id is null or class_id = '')
+              and not exists (
+                select 1 from game.character_projections p2
+                where p2.wallet_address = r.wallet_address
+                  and p2.normalized_name = r.normalized_name
+                  and p2.class_id = r.snapshot_class
+              );
+          end loop;
+        exception
+          when unique_violation then null;
+        end $$;
+
+        delete from game.character_projections p
+        where (p.class_id is null or p.class_id = '')
+          and exists (
+            select 1 from game.character_projections sibling
+            where sibling.wallet_address = p.wallet_address
+              and sibling.normalized_name = p.normalized_name
+              and sibling.class_id is not null
+              and sibling.class_id <> ''
+          );
+
+        delete from game.characters c
+        where (c.class_id is null or c.class_id = '')
+          and exists (
+            select 1 from game.characters sibling
+            where sibling.wallet_address = c.wallet_address
+              and sibling.normalized_name = c.normalized_name
+              and sibling.class_id is not null
+              and sibling.class_id <> ''
+          );
+
+        do $$
+        begin
+          alter table game.character_projections
+            add constraint character_projections_class_id_nonempty
+            check (class_id is not null and class_id <> '') not valid;
+        exception
+          when duplicate_object then null;
+        end $$;
+
+        do $$
+        begin
+          alter table game.characters
+            add constraint characters_class_id_nonempty
+            check (class_id is not null and class_id <> '') not valid;
+        exception
+          when duplicate_object then null;
+        end $$;
+
         create table if not exists game.live_sessions (
           wallet_address text primary key,
           entity_id text,

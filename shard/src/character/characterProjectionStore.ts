@@ -68,6 +68,13 @@ export async function upsertCharacterProjection(params: {
   const normalizedWallet = normalizeWallet(walletAddress);
   const normalizedName = normalizeCharacterName(character.name);
   const collapsedName = collapseCharacterName(character.name);
+  const classId = character.classId?.trim();
+  if (!classId) {
+    throw new Error(
+      `upsertCharacterProjection: classId is required (wallet=${normalizedWallet} name="${normalizedName}"). ` +
+        `Empty classId creates ghost duplicate rows because the unique key is (wallet, normalized_name, class_id).`
+    );
+  }
   const level = Math.max(1, Number(character.level ?? 1) || 1);
   const xp = Math.max(0, Number(character.xp ?? 0) || 0);
   const snapshotJson = JSON.stringify(character);
@@ -118,7 +125,7 @@ export async function upsertCharacterProjection(params: {
           normalizedWallet,
           normalizedName,
           collapsedName,
-          character.classId,
+          classId,
           character.raceId,
           level,
           xp,
@@ -218,7 +225,7 @@ export async function upsertCharacterProjection(params: {
           normalizedWallet,
           normalizedName,
           collapsedName,
-          character.classId,
+          classId,
           character.raceId,
           level,
           xp,

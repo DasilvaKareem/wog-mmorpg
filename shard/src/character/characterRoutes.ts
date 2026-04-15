@@ -183,17 +183,31 @@ function compareCharacterEntries(left: CharacterListEntry, right: CharacterListE
 }
 
 function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
-  const deduped = new Map<string, CharacterListEntry>();
+  const byNameClass = new Map<string, CharacterListEntry>();
 
   for (const character of characters) {
-    const key = normalizeCharacterKey(character.name, character.properties.class);
-    const existing = deduped.get(key);
+    const classId = character.properties.class?.trim();
+    if (!classId) continue; // ghost row from legacy write path — skip
+    const key = normalizeCharacterKey(character.name, classId);
+    const existing = byNameClass.get(key);
     if (!existing || compareCharacterEntries(existing, character) < 0) {
-      deduped.set(key, character);
+      byNameClass.set(key, character);
     }
   }
 
-  return Array.from(deduped.values());
+  // Second pass: if the same base name ended up with multiple class_ids for one
+  // wallet, keep only the highest-scored entry. Legitimate multi-class characters
+  // are rare; surfacing duplicates in the UI is worse than collapsing them.
+  const byName = new Map<string, CharacterListEntry>();
+  for (const character of byNameClass.values()) {
+    const baseKey = stripCharacterClassSuffix(character.name).toLowerCase();
+    const existing = byName.get(baseKey);
+    if (!existing || compareCharacterEntries(existing, character) < 0) {
+      byName.set(baseKey, character);
+    }
+  }
+
+  return Array.from(byName.values());
 }
 
 function buildCharacterEntryFromProjection(
