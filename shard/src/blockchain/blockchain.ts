@@ -22,6 +22,11 @@ import { bumpServerNonceFloor, isLocalServerNonceMode, isTransientRpcSendError, 
 import { ethers } from "ethers";
 import { OFFICIAL_IDENTITY_REGISTRY_ABI } from "../erc8004/official.js";
 import { traceTx } from "./txTracer.js";
+import {
+  clearManagedFeeCache,
+  createManagedFeeProvider,
+  resolveManagedFeeOverrides,
+} from "./feePolicy.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 import {
   createChainOperation,
@@ -42,7 +47,7 @@ import {
 } from "../db/walletBalanceStore.js";
 
 // SKALE-specific JSON-RPC provider to fetch the correct gas price for SKALE transactions
-const skaleProvider = new ethers.JsonRpcProvider(
+const skaleProvider = createManagedFeeProvider(
   process.env.SKALE_BASE_RPC_URL || "https://skale-base.skalenodes.com/v1/base"
 );
 import { getNFT } from "thirdweb/extensions/erc721";
@@ -306,8 +311,6 @@ const AUTO_SFUEL_TOP_UP_MIN_BALANCE = ethers.parseEther(
 const AUTO_SFUEL_TOP_UP_TARGET_BALANCE = ethers.parseEther(
   process.env.AUTO_SFUEL_TOP_UP_TARGET_BALANCE || "0.05"
 );
-const TX_GAS_PRICE_CACHE_MS = 5_000;
-let cachedGasPrice: { value: bigint; expiresAt: number } | null = null;
 const inflightGasTopUps = new Map<string, Promise<void>>();
 
 let seedingPromise: Promise<void> | null = null;
@@ -382,46 +385,6 @@ async function ensureItemTokenIdExists(targetChainTokenId: bigint): Promise<void
   }
 }
 
-/**
- * Resolve an explicit gasPrice and force legacy tx fee mode.
- * This avoids automatic EIP-1559 maxFee inflation (baseFee * 2 + tip),
- * which can make affordability checks fail for otherwise valid txs.
- */
-async function resolveManagedGasPrice(): Promise<bigint> {
-  const now = Date.now();
-  if (cachedGasPrice && cachedGasPrice.expiresAt > now) {
-    return cachedGasPrice.value;
-  }
-
-  // Query gas price from SKALE chain (where gold/items live), not BITE governance chain
-  try {
-    const feeData = await skaleProvider.getFeeData();
-    if (feeData.gasPrice && feeData.gasPrice > 0n) {
-      const buffered = (feeData.gasPrice * 125n) / 100n; // +25% buffer
-      cachedGasPrice = {
-        value: buffered,
-        expiresAt: now + TX_GAS_PRICE_CACHE_MS,
-      };
-      return buffered;
-    }
-  } catch {
-    // fallback to raw eth_gasPrice
-  }
-
-  const hexGasPrice = await skaleProvider.send("eth_gasPrice", []);
-  const gasPrice = BigInt(hexGasPrice);
-  if (gasPrice <= 0n) {
-    throw new Error(`Invalid eth_gasPrice response: ${String(hexGasPrice)}`);
-  }
-
-  const buffered = (gasPrice * 125n) / 100n; // +25% buffer
-  cachedGasPrice = {
-    value: buffered,
-    expiresAt: now + TX_GAS_PRICE_CACHE_MS,
-  };
-  return buffered;
-}
-
 async function sendTransactionWithManagedGas(
   transaction: any,
   account: Account
@@ -435,13 +398,13 @@ async function sendTransactionWithManagedGas(
       if (!isServerSignerAccount(account)) {
         await ensureAccountHasGasBalance(account.address);
       }
-      const gasPrice = await resolveManagedGasPrice();
+      const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+      const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
       const tx = {
         ...transaction,
-        gasPrice,
-        maxFeePerGas: undefined,
-        maxPriorityFeePerGas: undefined,
-        type: "legacy" as const,
+        gasPrice: undefined,
+        ...eip1559Fees,
+        type: undefined,
         nonce: managedNonce ?? undefined,
       };
       return await sendTransaction({ transaction: tx, account });
@@ -468,7 +431,7 @@ async function sendTransactionWithManagedGas(
       if (!isTransientRpcSendError(err) || attempt >= MAX_RETRIES) {
         throw err;
       }
-      cachedGasPrice = null;
+      clearManagedFeeCache(skaleProvider);
       const delay = 1000 * 2 ** attempt; // 1s, 2s, 4s
       console.warn(
         `[blockchain] sendTransaction transport error (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`
@@ -952,13 +915,10 @@ async function processCharacterMintPayload(payload: CharacterMintPayload): Promi
     }
     const tokenUri = await resolveCharacterMetadataUri(payload.nft);
     const receipt = await queueBiteTransaction(`character-mint:${payload.toAddress.toLowerCase()}`, async () => {
-      const gasPrice = await resolveManagedGasPrice();
+      const managedFees = await resolveManagedFeeOverrides(skaleProvider);
       const tx = await waitForBiteSubmission(
         characterWriteContract.mintTo(payload.toAddress, tokenUri, {
-          gasPrice,
-          maxFeePerGas: undefined,
-          maxPriorityFeePerGas: undefined,
-          type: 0,
+          ...managedFees,
           nonce: await reserveServerNonce() ?? undefined,
         })
       );
@@ -991,7 +951,7 @@ async function processIdentityRegistrationPayload(
 
   const characterTokenId = BigInt(payload.characterTokenId);
   const serverAddress = await (biteWallet as ethers.NonceManager).getAddress();
-  const identityWriteProvider = new ethers.JsonRpcProvider(
+  const identityWriteProvider = createManagedFeeProvider(
     process.env.SKALE_BASE_RPC_URL || "https://skale-base.skalenodes.com/v1/base"
   );
   const identityWriteSigner = process.env.SERVER_PRIVATE_KEY
@@ -1261,13 +1221,10 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
       const uri = await resolveCharacterMetadataUri(metadata);
 
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
-        const gasPrice = await resolveManagedGasPrice();
+        const managedFees = await resolveManagedFeeOverrides(skaleProvider);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            gasPrice,
-            maxFeePerGas: undefined,
-            maxPriorityFeePerGas: undefined,
-            type: 0,
+            ...managedFees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );
@@ -1985,13 +1942,10 @@ registerChainOperationProcessor("character-metadata-update", async (record: Chai
       };
       const uri = await resolveCharacterMetadataUri(metadata);
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
-        const gasPrice = await resolveManagedGasPrice();
+        const managedFees = await resolveManagedFeeOverrides(skaleProvider);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            gasPrice,
-            maxFeePerGas: undefined,
-            maxPriorityFeePerGas: undefined,
-            type: 0,
+            ...managedFees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );

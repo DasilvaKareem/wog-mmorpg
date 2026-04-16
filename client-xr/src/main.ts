@@ -44,7 +44,7 @@ import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneRespons
 
 let gauntletCursor: GauntletCursor | null = null;
 const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
-const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();

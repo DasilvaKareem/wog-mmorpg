@@ -4,12 +4,11 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "env": {
-    "VITE_API_URL": "https://wog.urbantech.dev",
     "VITE_THIRDWEB_CLIENT_ID": "231a06443d1568f83d2d4f2c8e7dfe3b"
   },
   "rewrites": [
     {
-      "source": "/((?!api/|auth/|agent/|character/|wallet/|world/|zones/|state/|spawn/|command/|shop/|events/|techniques/|x402/|leaderboard/|equipment/|herbalism/|mining/|alchemy/|cooking/|crafting/|enchanting/|leatherworking/|jewelcrafting/|professions/|guild/|guilds/|trade/|trades/|transition/|portals/|auctionhouse/|chat/|skinning/|quests/|party/|items/|stats/|logout/|pvp/|predict/|marketplace/|upgrading/|terrain/|chunks/|dungeon/|essence-technique/|diary/|admin/|notifications/|health|play|\\.well-known/).*)",
+      "source": "/((?!api/|auth/|agent/|character/|wallet/|world/layout|zones/|state/|spawn/|command/|shop/|events/|techniques/|x402/|leaderboard/|equipment/|herbalism/|mining/|alchemy/|cooking/|crafting/|enchanting/|leatherworking/|jewelcrafting/|professions/|guild/|guilds/|trade/|trades/|transition/|portals/|auctionhouse/|chat/|skinning/|quests/|party/|items/|stats/|logout/|pvp/|predict/|marketplace/|upgrading/|terrain/|chunks/|dungeon/|essence-technique/|diary/|admin/|notifications/|health|play|\\.well-known/).*)",
       "destination": "/index.html"
     }
   ],

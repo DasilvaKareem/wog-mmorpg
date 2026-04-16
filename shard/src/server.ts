@@ -163,6 +163,18 @@ function getAllowedCorsOrigins(): Set<string> {
   return new Set([...(configured ?? []), ...DEFAULT_CORS_ORIGINS]);
 }
 
+function isAllowedCorsOrigin(origin: string, allowed: Set<string>): boolean {
+  if (allowed.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return host === "worldofgeneva.com" || host.endsWith(".worldofgeneva.com");
+  } catch {
+    return false;
+  }
+}
+
 function getRateLimitRule(method: string, url: string): RateLimitRule | null {
   const path = getRequestPath(url);
 
@@ -740,7 +752,7 @@ server.post<{
 const allowedCorsOrigins = getAllowedCorsOrigins();
 server.register(cors, {
   origin(origin, cb) {
-    if (!origin || allowedCorsOrigins.has(origin)) {
+    if (!origin || isAllowedCorsOrigin(origin, allowedCorsOrigins)) {
       cb(null, true);
       return;
     }

@@ -1,6 +1,20 @@
-/** API URL - use env when provided, otherwise hit the local shard directly in dev. */
-export const API_URL =
-  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:3000" : "");
+/** API URL resolution:
+ *  1) Use explicit env override when sane
+ *  2) In browser prod, default to canonical shard host
+ *  3) Local dev fallback to localhost shard
+ */
+const PRODUCTION_API_FALLBACK = "https://wog.preyanshu.me";
+
+function resolveApiUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_URL || "").trim();
+  if (import.meta.env.DEV) {
+    return envUrl || "http://127.0.0.1:3000";
+  }
+
+  return envUrl || PRODUCTION_API_FALLBACK;
+}
+
+export const API_URL = resolveApiUrl();
 
 /** Asset CDN base URL — Cloudflare R2 in prod, local fallback in dev */
 export const ASSET_BASE_URL = import.meta.env.VITE_ASSET_BASE_URL || "";
