@@ -54,6 +54,15 @@ const TILE = {
   COUNTER: 35,
   FENCE_H: 58,
   FENCE_V: 59,
+  // Town decorations
+  STALL: 60,
+  STALL_GREEN: 61,
+  STALL_RED: 62,
+  FOUNTAIN: 63,
+  LANTERN: 64,
+  CART: 65,
+  BANNER_GREEN: 66,
+  BANNER_RED: 67,
   EMPTY: -1,
 } as const;
 
@@ -207,12 +216,14 @@ function biomeBaseTile(biome: string, noise: number): number {
   }
 }
 
-/** Get the elevation profile for a biome */
+/** Get the elevation profile for a biome (0-30 range, client scales to world Y) */
 function getElevProfile(biome: string): { noiseScale: number; maxElev: number; baseElev: number } {
-  if (biome === "village" || biome === "farmland") return { noiseScale: 0.02, maxElev: 1, baseElev: 0 };
-  if (biome === "forest") return { noiseScale: 0.04, maxElev: 3, baseElev: 1 };
-  return { noiseScale: 0.03, maxElev: 2, baseElev: 0 }; // grassland
+  if (biome === "village" || biome === "farmland") return { noiseScale: 0.035, maxElev: 8, baseElev: 0 };
+  if (biome === "forest") return { noiseScale: 0.045, maxElev: 26, baseElev: 6 };
+  return { noiseScale: 0.03, maxElev: 18, baseElev: 0 }; // grassland
 }
+
+const MAX_ELEVATION = 30;
 
 /**
  * Find the nearest adjacent zone with a different biome and the distance to
@@ -376,7 +387,7 @@ function generateMap(zone: ZoneData): GeneratedMap {
   // 8. Place landmarks
   for (const poi of validPois) {
     if (poi.type === "landmark") {
-      placeLandmark(ground, w, h, poi, zone);
+      placeLandmark(ground, overlay, w, h, poi, zone);
     }
   }
 
@@ -385,6 +396,11 @@ function generateMap(zone: ZoneData): GeneratedMap {
     if (poi.type === "portal") {
       placePortal(ground, overlay, w, h, poi, zone);
     }
+  }
+
+  // 9b. Place town decorations (market stalls, lanterns, banners, carts)
+  if (biome === "village" || biome === "farmland") {
+    placeTownDecorations(ground, overlay, w, h, validPois, exclusion);
   }
 
   // 10. Auto-tile water edges (shore transitions)
@@ -856,6 +872,7 @@ function stampStructure(
 
 function placeLandmark(
   ground: number[],
+  overlay: number[],
   w: number,
   h: number,
   poi: PoiDef,
@@ -886,18 +903,25 @@ function placeLandmark(
   // Fountain in center for safe zones
   if (poi.tags.includes("safe-zone")) {
     if (cx >= 0 && cx < w && cy >= 0 && cy < h) {
-      ground[cy * w + cx] = TILE.WATER_STILL;
-      // Ring of stone around fountain
-      for (let d = -1; d <= 1; d++) {
-        for (let e = -1; e <= 1; e++) {
-          if (d === 0 && e === 0) continue;
-          const fx = cx + d;
-          const fy = cy + e;
-          if (fx >= 0 && fx < w && fy >= 0 && fy < h) {
-            if (Math.abs(d) + Math.abs(e) === 2) continue; // Skip diagonals
-            ground[fy * w + fx] = TILE.STONE_DARK;
-          }
-        }
+      overlay[cy * w + cx] = TILE.FOUNTAIN;
+      ground[cy * w + cx] = TILE.STONE_FLOOR;
+    }
+  }
+
+  // Market area — place stalls in a grid pattern
+  if (poi.tags.includes("market")) {
+    const stallPositions = [
+      [-2, -1], [0, -1], [2, -1],
+      [-2,  1], [0,  1], [2,  1],
+    ];
+    const stallTypes = [TILE.STALL, TILE.STALL_GREEN, TILE.STALL_RED];
+    for (let i = 0; i < stallPositions.length; i++) {
+      const [dx, dz] = stallPositions[i];
+      const sx = cx + dx;
+      const sz = cy + dz;
+      if (sx >= 0 && sx < w && sz >= 0 && sz < h) {
+        overlay[sz * w + sx] = stallTypes[i % stallTypes.length];
+        ground[sz * w + sx] = TILE.STONE_FLOOR;
       }
     }
   }
@@ -934,47 +958,111 @@ function placePortal(
   }
 }
 
+// ── Town decoration scatter ─────────────────────────────────────────
+
+/**
+ * Scatter decorative town elements (lanterns along roads, banners near structures,
+ * carts in open areas) to give village biomes a lived-in feel.
+ */
+function placeTownDecorations(
+  ground: number[], overlay: number[], w: number, h: number,
+  pois: PoiDef[], exclusion: boolean[],
+): void {
+  const s = hashStr("town-deco");
+
+  // Place lanterns along road edges
+  for (let tz = 1; tz < h - 1; tz++) {
+    for (let tx = 1; tx < w - 1; tx++) {
+      const idx = tz * w + tx;
+      if (overlay[idx] !== TILE.EMPTY) continue;
+
+      const isRoad = ground[idx] === TILE.DIRT_PLAIN;
+      if (!isRoad) continue;
+
+      // Only at road edges (adjacent to non-road)
+      const hasGrassNeighbor =
+        ground[idx - 1] !== TILE.DIRT_PLAIN ||
+        ground[idx + 1] !== TILE.DIRT_PLAIN ||
+        ground[idx - w] !== TILE.DIRT_PLAIN ||
+        ground[idx + w] !== TILE.DIRT_PLAIN;
+      if (!hasGrassNeighbor) continue;
+
+      const n = seededNoise2D(tx, tz, s);
+      if (n < 0.02) {
+        overlay[idx] = TILE.LANTERN;
+      }
+    }
+  }
+
+  // Place banners and carts near structures
+  for (const poi of pois) {
+    if (poi.type !== "structure") continue;
+    const cx = Math.floor(poi.position.x / TILE_SIZE);
+    const cy = Math.floor(poi.position.z / TILE_SIZE);
+    const r = Math.ceil(poi.radius / TILE_SIZE);
+
+    // Scatter 1-3 decorations in the POI radius
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const dx = Math.floor(seededNoise2D(attempt, cx, s + cy) * (r * 2)) - r;
+      const dz = Math.floor(seededNoise2D(cx, attempt, s + cy + 100) * (r * 2)) - r;
+      const tx = cx + dx;
+      const tz = cy + dz;
+      if (tx < 0 || tx >= w || tz < 0 || tz >= h) continue;
+      const idx = tz * w + tx;
+      if (overlay[idx] !== TILE.EMPTY) continue;
+      // Only on grass or dirt, not inside structures
+      const g = ground[idx];
+      if (g !== TILE.GRASS_PLAIN && g !== TILE.GRASS_LIGHT && g !== TILE.DIRT_PLAIN) continue;
+
+      const n = seededNoise2D(tx, tz, s + 5000);
+      if (n < 0.15) {
+        overlay[idx] = TILE.CART;
+      } else if (n < 0.35) {
+        overlay[idx] = n < 0.25 ? TILE.BANNER_GREEN : TILE.BANNER_RED;
+      }
+    }
+  }
+}
+
 // ── Elevation generation (world-space noise + biome blending) ────────
 
 /**
- * 2D value noise for elevation. Uses multi-octave sampling for natural terrain.
+ * 2D value noise for elevation. Uses 5-octave fBm for natural terrain.
  * Returns a value 0.0-1.0 for the given tile coordinates.
  */
 function valueNoise2D(tx: number, tz: number, seed: number, scale: number): number {
-  // Sample at multiple octaves for natural-looking terrain
   let value = 0;
   let amplitude = 1;
   let totalAmp = 0;
+  const persistence = 0.45; // how much each octave contributes — lower = smoother
+  const lacunarity = 2.1;   // frequency multiplier per octave
 
-  for (let octave = 0; octave < 3; octave++) {
-    const freq = scale * Math.pow(2, octave);
+  for (let octave = 0; octave < 5; octave++) {
+    const freq = scale * Math.pow(lacunarity, octave);
     const sx = tx * freq;
     const sz = tz * freq;
 
-    // Hash-based 2D noise with interpolation
     const ix = Math.floor(sx);
     const iz = Math.floor(sz);
     const fx = sx - ix;
     const fz = sz - iz;
 
-    // Smoothstep for interpolation
-    const ux = fx * fx * (3 - 2 * fx);
-    const uz = fz * fz * (3 - 2 * fz);
+    // Quintic interpolation (smoother than cubic smoothstep)
+    const ux = fx * fx * fx * (fx * (fx * 6 - 15) + 10);
+    const uz = fz * fz * fz * (fz * (fz * 6 - 15) + 10);
 
-    // Corner values
     const n00 = seededNoise2D(ix, iz, seed + octave * 1000);
     const n10 = seededNoise2D(ix + 1, iz, seed + octave * 1000);
     const n01 = seededNoise2D(ix, iz + 1, seed + octave * 1000);
     const n11 = seededNoise2D(ix + 1, iz + 1, seed + octave * 1000);
 
-    // Bilinear interpolation
     const nx0 = n00 + (n10 - n00) * ux;
     const nx1 = n01 + (n11 - n01) * ux;
     const n = nx0 + (nx1 - nx0) * uz;
 
     value += n * amplitude;
     totalAmp += amplitude;
-    amplitude *= 0.5;
+    amplitude *= persistence;
   }
 
   return value / totalAmp;
@@ -989,14 +1077,11 @@ function seededNoise2D(ix: number, iz: number, seed: number): number {
 }
 
 /**
- * Generate elevation map for a zone. Uses world-space value noise with
+ * Generate elevation map for a zone. Uses world-space 5-octave fBm with
  * biome-blended profiles for seamless cross-zone terrain.
  *
- * Elevation values:
- *   0 = lowest (valleys, water level)
- *   1 = normal ground
- *   2 = hills
- *   3 = highest (ridges, peaks)
+ * Elevation values: 0 to MAX_ELEVATION (30).
+ * Client-XR multiplies by 0.12 → 0 to 3.6 world Y units.
  */
 function generateElevation(
   ground: number[],
@@ -1022,22 +1107,21 @@ function generateElevation(
       const wtz = worldOffTz + tz;
 
       const n = valueNoise2D(wtx, wtz, worldSeed, profile.noiseScale);
-      let elev = Math.floor(n * (profile.maxElev + 1));
+      let elev = Math.round(n * profile.maxElev);
       elev = Math.min(elev, profile.maxElev);
       elev = Math.max(elev, 0);
-      elev = Math.min(elev + profile.baseElev, 3);
+      elev = Math.min(elev + profile.baseElev, MAX_ELEVATION);
 
       // Blend elevation with adjacent zone's profile at edges
       const adj = findAdjacentBlend(wtx, wtz, zone.id);
       if (adj && adj.distance < BLEND_TILES) {
         const adjProfile = getElevProfile(adj.biome);
         const adjN = valueNoise2D(wtx, wtz, worldSeed, adjProfile.noiseScale);
-        let adjElev = Math.floor(adjN * (adjProfile.maxElev + 1));
+        let adjElev = Math.round(adjN * adjProfile.maxElev);
         adjElev = Math.min(adjElev, adjProfile.maxElev);
         adjElev = Math.max(adjElev, 0);
-        adjElev = Math.min(adjElev + adjProfile.baseElev, 3);
+        adjElev = Math.min(adjElev + adjProfile.baseElev, MAX_ELEVATION);
 
-        // Smooth lerp: 0.5 at edge, 0 at BLEND_TILES away
         const blendWeight = (1.0 - adj.distance / BLEND_TILES) * 0.5;
         elev = Math.round(elev * (1 - blendWeight) + adjElev * blendWeight);
       }
@@ -1045,6 +1129,27 @@ function generateElevation(
       elevation[idx] = elev;
     }
   }
+
+  // Gaussian-ish 3x3 smoothing pass — removes jagged single-tile spikes
+  const smoothed = new Array(w * h);
+  for (let tz = 0; tz < h; tz++) {
+    for (let tx = 0; tx < w; tx++) {
+      let sum = 0;
+      let weight = 0;
+      for (let dz = -1; dz <= 1; dz++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = tx + dx;
+          const nz = tz + dz;
+          if (nx < 0 || nx >= w || nz < 0 || nz >= h) continue;
+          const k = (dx === 0 && dz === 0) ? 4 : (Math.abs(dx) + Math.abs(dz) === 1 ? 2 : 1);
+          sum += elevation[nz * w + nx] * k;
+          weight += k;
+        }
+      }
+      smoothed[tz * w + tx] = Math.round(sum / weight);
+    }
+  }
+  for (let i = 0; i < w * h; i++) elevation[i] = smoothed[i];
 
   // Force water tiles (including edges) to elevation 0
   for (let i = 0; i < w * h; i++) {
@@ -1055,7 +1160,7 @@ function generateElevation(
     }
   }
 
-  // Flatten POI areas (portals, structures, landmarks)
+  // Flatten POI areas with smooth falloff at edges
   for (const poi of pois) {
     const cx = Math.floor(poi.position.x / TILE_SIZE);
     const cy = Math.floor(poi.position.z / TILE_SIZE);
@@ -1064,8 +1169,8 @@ function generateElevation(
     // Find average elevation around POI center
     let totalElev = 0;
     let count = 0;
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
         const tx = cx + dx;
         const tz = cy + dy;
         if (tx >= 0 && tx < w && tz >= 0 && tz < h) {
@@ -1076,27 +1181,32 @@ function generateElevation(
     }
     const avgElev = count > 0 ? Math.round(totalElev / count) : 0;
 
-    // Flatten the POI area to the average
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
+    // Flatten inner area, smooth blend at outer ring
+    for (let dy = -r - 2; dy <= r + 2; dy++) {
+      for (let dx = -r - 2; dx <= r + 2; dx++) {
         const tx = cx + dx;
         const tz = cy + dy;
-        if (tx >= 0 && tx < w && tz >= 0 && tz < h) {
-          if (dx * dx + dy * dy <= r * r) {
-            elevation[tz * w + tx] = avgElev;
-          }
+        if (tx < 0 || tx >= w || tz < 0 || tz >= h) continue;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > r + 2) continue;
+        const idx = tz * w + tx;
+        if (dist <= r) {
+          elevation[idx] = avgElev;
+        } else {
+          // Smooth blend in the 2-tile outer ring
+          const blend = (dist - r) / 2;
+          elevation[idx] = Math.round(avgElev * (1 - blend) + elevation[idx] * blend);
         }
       }
     }
   }
 
-  // Flatten road tiles (any DIRT tile gets flattened to neighbor average)
+  // Flatten road tiles with smooth neighbor averaging
   for (let tz = 0; tz < h; tz++) {
     for (let tx = 0; tx < w; tx++) {
       const idx = tz * w + tx;
       const tile = ground[idx];
       if (tile === TILE.DIRT_PLAIN || tile === TILE.DIRT_H || tile === TILE.DIRT_V || tile === TILE.DIRT_CROSS) {
-        // Set road tiles to minimum elevation of surroundings for smooth paths
         let minElev = elevation[idx];
         for (let d = -1; d <= 1; d++) {
           for (let e = -1; e <= 1; e++) {

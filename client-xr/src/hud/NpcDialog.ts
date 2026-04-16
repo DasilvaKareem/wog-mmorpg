@@ -10,9 +10,11 @@ import {
   fetchGuilds, createGuild,
   fetchAuctions, bidAuction, buyoutAuction,
   fetchColiseumInfo, joinPvpQueue, fetchPvpLeaderboard,
+  fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
   fetchEnchantingCatalog, applyEnchantment,
 } from "../api.js";
+import type { ActiveBattle, QueueStatusEntry, BattleDetails } from "../api.js";
 
 const NPC_DIALOG_TYPES = new Set([
   "merchant", "quest-giver", "lore-npc", "guild-registrar",
@@ -87,6 +89,15 @@ export class NpcDialog {
   private arenaInfo: ArenaInfo | null = null;
   private arenaLoading = false;
   private leaderboard: PvpLeaderboardEntry[] = [];
+  private activeBattles: ActiveBattle[] = [];
+  private queueStatuses: QueueStatusEntry[] = [];
+  private queuedFormats: string[] = [];
+  private selectedFormat = "1v1";
+  private inQueue = false;
+  private arenaPollTimer: ReturnType<typeof setInterval> | null = null;
+  private matchPollTimer: ReturnType<typeof setInterval> | null = null;
+  private viewingBattle: BattleDetails | null = null;
+  private viewingBattleId: string | null = null;
   // Professions
   private professions: ProfessionEntry[] = [];
   private professionsLoading = false;
@@ -150,7 +161,11 @@ export class NpcDialog {
       if (action === "create-guild") void this.handleCreateGuild();
       if (action === "bid" && btn.dataset.auctionId) void this.handleBid(btn.dataset.auctionId);
       if (action === "buyout" && btn.dataset.auctionId) void this.handleBuyout(btn.dataset.auctionId);
-      if (action === "queue" && btn.dataset.format) void this.handleQueueJoin(btn.dataset.format);
+      if (action === "queue-join") void this.handleQueueJoin();
+      if (action === "queue-leave") void this.handleQueueLeave();
+      if (action === "select-format" && btn.dataset.format) { this.selectedFormat = btn.dataset.format; if (this.activeTab === "arena") this.renderArena(); }
+      if (action === "view-battle" && btn.dataset.battleId) void this.handleViewBattle(btn.dataset.battleId);
+      if (action === "arena-back") this.handleArenaBack();
       if (action === "learn-prof" && btn.dataset.profId) void this.handleLearnProfession(btn.dataset.profId);
       if (action === "enchant" && btn.dataset.elixirId) void this.handleEnchant(btn.dataset.elixirId);
     });
@@ -185,6 +200,13 @@ export class NpcDialog {
     this.arenaInfo = null;
     this.arenaLoading = false;
     this.leaderboard = [];
+    this.activeBattles = [];
+    this.queueStatuses = [];
+    this.queuedFormats = [];
+    this.inQueue = false;
+    this.viewingBattle = null;
+    this.viewingBattleId = null;
+    this.stopArenaPolling();
     this.professions = [];
     this.professionsLoading = false;
     this.enchantments = [];
@@ -217,6 +239,7 @@ export class NpcDialog {
     this.overlay.style.display = "none";
     this.entity = null;
     this.chatHistory = [];
+    this.stopArenaPolling();
   }
 
   isOpen(): boolean {
@@ -698,75 +721,270 @@ export class NpcDialog {
   // ── Arena view ────────────────────────────────────────────────
 
   private renderArena() {
+    if (this.arenaLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`; return; }
     if (!this.arenaInfo && !this.arenaLoading) {
       this.arenaLoading = true;
       this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`;
       void this.loadArena();
       return;
     }
-    if (this.arenaLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading arena...</div>`; return; }
+
+    // Battle viewer mode
+    if (this.viewingBattle) {
+      this.renderBattleViewer();
+      return;
+    }
 
     const hasChar = !!this.callbacks.getOwnEntityId();
-    const formats = this.arenaInfo?.formats ?? ["1v1", "2v2", "5v5", "ffa"];
-    const queueStatus = this.arenaInfo?.queueStatus ?? {};
+    let html = "";
 
-    let html = `<div class="nd-shop-item" style="border-bottom:1px solid rgba(255,68,102,0.2)">`;
-    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">PvP Queue</span>`;
-    html += `<span class="nd-shop-item-slot">${this.arenaInfo?.activeBattles ?? 0} active battles</span></div>`;
-    html += `</div>`;
+    // ── Active Battles ──
+    html += `<div class="nd-shop-item" style="border-bottom:1px solid rgba(255,68,102,0.2)">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Active Battles</span>`;
+    html += `<span class="nd-shop-item-slot">${this.activeBattles.length} live</span></div></div>`;
 
-    for (const fmt of formats) {
-      const inQueue = queueStatus[fmt] ?? 0;
-      html += `<div class="nd-shop-item">`;
-      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(fmt.toUpperCase())}</span><span class="nd-shop-item-slot">${inQueue} in queue</span></div>`;
-      if (hasChar) {
-        html += `<div class="nd-shop-item-footer"><button class="nd-btn" data-action="queue" data-format="${esc(fmt)}" style="color:#ff4466;border-color:rgba(255,68,102,0.3);background:rgba(255,68,102,0.1)">Join Queue</button></div>`;
+    if (this.activeBattles.length === 0) {
+      html += `<div class="nd-shop-item"><div class="nd-shop-item-desc" style="text-align:center;opacity:0.6">No active battles — join the queue to start one</div></div>`;
+    } else {
+      for (const b of this.activeBattles) {
+        if (!b.config) continue;
+        const red = b.config.teamRed?.map((c) => c.name).join(", ") ?? "?";
+        const blue = b.config.teamBlue?.map((c) => c.name).join(", ") ?? "?";
+        const statusLabel = b.status === "in_progress" ? "LIVE" : b.status.toUpperCase().replace("_", " ");
+        html += `<div class="nd-shop-item" style="cursor:pointer" data-action="view-battle" data-battle-id="${esc(b.battleId)}">`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(b.config.format?.toUpperCase() ?? "PVP")} — ${esc(b.config.arena?.name ?? "Arena")}</span>`;
+        html += `<span class="nd-shop-item-slot" style="color:${b.status === "in_progress" ? "#54f28b" : "#ff9944"}">${statusLabel}</span></div>`;
+        html += `<div class="nd-shop-item-stats"><span style="color:#cc3333">RED: ${esc(red)}</span> vs <span style="color:#3355cc">BLUE: ${esc(blue)}</span></div>`;
+        html += `<div class="nd-shop-item-desc">Turn ${b.turnCount}${b.winner ? ` — Winner: ${b.winner.toUpperCase()}` : ""}</div>`;
+        html += `</div>`;
       }
+    }
+
+    // ── Matchmaking Queue ──
+    html += `<div class="nd-shop-item" style="border-top:1px solid rgba(255,68,102,0.2);border-bottom:1px solid rgba(255,68,102,0.2)">`;
+    html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Matchmaking</span></div></div>`;
+
+    // Queue status cards
+    for (const q of this.queueStatuses) {
+      const pct = q.playersInQueue + q.playersNeeded > 0
+        ? Math.min(100, (q.playersInQueue / (q.playersInQueue + q.playersNeeded)) * 100)
+        : 0;
+      const isSelected = this.selectedFormat === q.format;
+      html += `<div class="nd-shop-item" style="${isSelected ? "border-left:2px solid #ff4466" : ""}">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(q.format.toUpperCase())}</span>`;
+      html += `<span class="nd-shop-item-slot">${q.playersInQueue} in queue, need ${Math.max(0, q.playersNeeded)}</span></div>`;
+      html += `<div style="height:4px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:4px"><div style="height:100%;width:${pct}%;background:#ffcc00;border-radius:2px"></div></div>`;
       html += `</div>`;
     }
 
-    // Leaderboard
+    // Format selector + join/leave
+    if (hasChar) {
+      const formats = ["1v1", "2v2", "5v5", "ffa"];
+      html += `<div class="nd-shop-item"><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px">`;
+      for (const fmt of formats) {
+        const sel = this.selectedFormat === fmt;
+        html += `<button class="nd-btn" data-action="select-format" data-format="${esc(fmt)}" style="color:${sel ? "#000" : "#ff4466"};background:${sel ? "#ffcc00" : "rgba(255,68,102,0.1)"};border-color:${sel ? "#ffcc00" : "rgba(255,68,102,0.3)"};font-size:10px;padding:6px">${esc(fmt.toUpperCase())}</button>`;
+      }
+      html += `</div></div>`;
+
+      if (!this.inQueue) {
+        html += `<div class="nd-shop-item"><button class="nd-btn" data-action="queue-join" style="width:100%;color:#fff;background:rgba(255,68,102,0.25);border-color:rgba(255,68,102,0.4);padding:10px">Join ${esc(this.selectedFormat.toUpperCase())} Queue</button></div>`;
+      } else {
+        html += `<div class="nd-shop-item" style="text-align:center">`;
+        html += `<div style="color:#54f28b;font-size:11px;margin-bottom:6px">Searching for match...</div>`;
+        html += `<button class="nd-btn" data-action="queue-leave" style="width:100%;color:#ffccbf;background:rgba(255,68,102,0.12);border-color:rgba(255,68,102,0.3);padding:8px;font-size:10px">Leave Queue</button>`;
+        html += `</div>`;
+      }
+    }
+
+    // ── Leaderboard ──
     if (this.leaderboard.length > 0) {
       html += `<div class="nd-shop-item" style="border-top:1px solid rgba(255,68,102,0.2)">`;
-      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Leaderboard</span></div>`;
-      html += `</div>`;
-      for (let i = 0; i < Math.min(10, this.leaderboard.length); i++) {
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Top Fighters</span></div></div>`;
+      for (let i = 0; i < Math.min(5, this.leaderboard.length); i++) {
         const e = this.leaderboard[i];
+        const medal = i === 0 ? "#ffcc00" : i === 1 ? "#c0c0c0" : i === 2 ? "#cd7f32" : "#9aa7cc";
         html += `<div class="nd-shop-item">`;
-        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">#${i + 1} ${esc(e.name ?? e.agentId)}</span><span class="nd-shop-item-slot">${e.elo} ELO</span></div>`;
-        html += `<div class="nd-shop-item-stats">${e.wins}W / ${e.losses}L</div>`;
+        html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:${medal}">#${i + 1} ${esc(e.name ?? e.agentId)}</span><span class="nd-shop-item-slot">${e.elo} ELO</span></div>`;
+        html += `<div class="nd-shop-item-stats" style="color:#54f28b">${e.wins}W <span style="color:#ff4d6d">${e.losses}L</span></div>`;
         html += `</div>`;
       }
     }
 
     this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+    this.footerEl.innerHTML = "";
+  }
+
+  private renderBattleViewer() {
+    const b = this.viewingBattle!;
+    let html = `<div class="nd-shop-item"><div class="nd-shop-item-header">`;
+    html += `<button class="nd-btn" data-action="arena-back" style="font-size:10px;padding:4px 10px;color:#ff4466;border-color:rgba(255,68,102,0.3);background:rgba(255,68,102,0.1)">Back</button>`;
+    html += `<span class="nd-shop-item-name" style="color:#ff4466">${esc(b.config?.format?.toUpperCase() ?? "PVP")} — ${esc(b.config?.arena?.name ?? "Arena")}</span>`;
+    const statusLabel = b.status === "in_progress" ? "LIVE" : b.status?.toUpperCase().replace("_", " ") ?? "";
+    html += `<span class="nd-shop-item-slot" style="color:${b.status === "in_progress" ? "#54f28b" : "#ff9944"}">${statusLabel} · Turn ${b.turnCount}</span>`;
+    html += `</div></div>`;
+
+    if (b.winner) {
+      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:13px;font-weight:700">Winner: ${b.winner.toUpperCase()} Team</span></div>`;
+    }
+    if (b.mvp) {
+      html += `<div class="nd-shop-item" style="text-align:center"><span style="color:#ffcc00;font-size:10px">MVP: ${esc(b.mvp.name)} (${b.mvp.damage} dmg)</span></div>`;
+    }
+
+    // Teams
+    for (const [team, color, label] of [["teamRed", "#cc3333", "RED"], ["teamBlue", "#3355cc", "BLUE"]] as const) {
+      const members = (b.config as any)?.[team] as Array<{ name: string; hp?: number; maxHp?: number; level?: number }> | undefined;
+      if (!members) continue;
+      html += `<div class="nd-shop-item" style="border-left:2px solid ${color}">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:${color}">${label} Team</span></div>`;
+      for (const m of members) {
+        const hpPct = m.maxHp ? Math.round((m.hp ?? 0) / m.maxHp * 100) : 0;
+        const hpBar = m.maxHp ? ` <div style="height:3px;background:rgba(255,255,255,0.08);border-radius:2px;margin-top:2px"><div style="height:100%;width:${hpPct}%;background:${(m.hp ?? 0) > 0 ? "#54f28b" : "#ff4d6d"};border-radius:2px"></div></div>` : "";
+        html += `<div class="nd-shop-item-stats">${esc(m.name)}${m.level ? ` Lv${m.level}` : ""}${m.maxHp ? ` — ${m.hp ?? 0}/${m.maxHp} HP` : ""}${hpBar}</div>`;
+      }
+      html += `</div>`;
+    }
+
+    // Combat log (last 15 entries)
+    if (b.combatLog && b.combatLog.length > 0) {
+      html += `<div class="nd-shop-item" style="border-top:1px solid rgba(255,68,102,0.2)">`;
+      html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name" style="color:#ff4466">Combat Log</span></div>`;
+      const recent = b.combatLog.slice(-15);
+      for (const entry of recent) {
+        html += `<div class="nd-shop-item-desc" style="font-size:9px;opacity:0.8">[T${entry.turn}] ${esc(entry.description)}</div>`;
+      }
+      html += `</div>`;
+    }
+
+    this.contentEl.innerHTML = `<div class="nd-shop-grid">${html}</div>`;
+    this.footerEl.innerHTML = "";
   }
 
   private async loadArena() {
     if (!this.entity) return;
-    const [info, lb] = await Promise.all([
+    const [info, lb, battles, queueData] = await Promise.all([
       fetchColiseumInfo(this.entity.id),
       fetchPvpLeaderboard(),
+      fetchActiveBattles(),
+      fetchQueueStatus(this.callbacks.getOwnEntityId() ?? undefined),
     ]);
     this.arenaLoading = false;
     this.arenaInfo = info;
     this.leaderboard = lb;
+    this.activeBattles = battles;
+    this.queueStatuses = queueData.queues;
+    if (queueData.queuedFormats.length > 0) {
+      this.inQueue = true;
+      this.queuedFormats = queueData.queuedFormats;
+      this.selectedFormat = queueData.queuedFormats[0];
+      this.startMatchPolling();
+    }
+    this.startArenaPolling();
     if (this.activeTab === "arena") this.renderArena();
   }
 
-  private async handleQueueJoin(format: string) {
+  private startArenaPolling() {
+    this.stopArenaPolling();
+    this.arenaPollTimer = setInterval(async () => {
+      if (this.activeTab !== "arena" || !this.isOpen()) { this.stopArenaPolling(); return; }
+      const [battles, lb, queueData] = await Promise.all([
+        fetchActiveBattles(),
+        fetchPvpLeaderboard(),
+        fetchQueueStatus(this.callbacks.getOwnEntityId() ?? undefined),
+      ]);
+      this.activeBattles = battles;
+      this.leaderboard = lb;
+      this.queueStatuses = queueData.queues;
+      if (queueData.queuedFormats.length > 0 && !this.inQueue) {
+        this.inQueue = true;
+        this.queuedFormats = queueData.queuedFormats;
+        this.startMatchPolling();
+      } else if (queueData.queuedFormats.length === 0 && this.inQueue) {
+        this.inQueue = false;
+        this.queuedFormats = [];
+      }
+      // Refresh battle viewer if watching
+      if (this.viewingBattleId) {
+        const details = await fetchBattleDetails(this.viewingBattleId);
+        if (details) this.viewingBattle = details;
+      }
+      if (this.activeTab === "arena") this.renderArena();
+    }, 3000);
+  }
+
+  private startMatchPolling() {
+    if (this.matchPollTimer) return;
+    this.matchPollTimer = setInterval(async () => {
+      const entityId = this.callbacks.getOwnEntityId();
+      if (!entityId || !this.inQueue) { this.stopMatchPolling(); return; }
+      const result = await fetchCurrentBattle(entityId);
+      if (result?.inBattle && result.battleId) {
+        this.inQueue = false;
+        this.queuedFormats = [];
+        this.stopMatchPolling();
+        // Auto-open battle viewer
+        const details = await fetchBattleDetails(result.battleId);
+        if (details) {
+          this.viewingBattleId = result.battleId;
+          this.viewingBattle = details;
+        }
+        if (this.activeTab === "arena") this.renderArena();
+      }
+    }, 2000);
+  }
+
+  private stopMatchPolling() {
+    if (this.matchPollTimer) { clearInterval(this.matchPollTimer); this.matchPollTimer = null; }
+  }
+
+  private stopArenaPolling() {
+    if (this.arenaPollTimer) { clearInterval(this.arenaPollTimer); this.arenaPollTimer = null; }
+    this.stopMatchPolling();
+  }
+
+  private async handleQueueJoin() {
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
     const entityId = this.callbacks.getOwnEntityId();
     if (!token || !addr || !entityId) return;
-    const btn = this.contentEl.querySelector(`[data-format="${format}"]`) as HTMLButtonElement;
-    if (btn) { btn.textContent = "..."; btn.disabled = true; }
-    const result = await joinPvpQueue(token, { agentId: entityId, walletAddress: addr, level: 1, format });
+    const btn = this.contentEl.querySelector("[data-action='queue-join']") as HTMLButtonElement;
+    if (btn) { btn.textContent = "Joining..."; btn.disabled = true; }
+    const result = await joinPvpQueue(token, { agentId: entityId, walletAddress: addr, level: 1, format: this.selectedFormat });
     if (result.ok) {
-      if (btn) btn.textContent = "Queued!";
+      this.inQueue = true;
+      this.queuedFormats = [this.selectedFormat];
+      this.startMatchPolling();
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Join Queue"; }, 2000); }
+      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = `Join ${this.selectedFormat.toUpperCase()} Queue`; }, 2000); return; }
     }
+    if (this.activeTab === "arena") this.renderArena();
+  }
+
+  private async handleQueueLeave() {
+    const token = await this.callbacks.getAuthToken();
+    const entityId = this.callbacks.getOwnEntityId();
+    if (!token || !entityId) return;
+    const btn = this.contentEl.querySelector("[data-action='queue-leave']") as HTMLButtonElement;
+    if (btn) { btn.textContent = "Leaving..."; btn.disabled = true; }
+    await leavePvpQueue(token, { agentId: entityId, format: this.selectedFormat });
+    this.inQueue = false;
+    this.queuedFormats = [];
+    this.stopMatchPolling();
+    if (this.activeTab === "arena") this.renderArena();
+  }
+
+  private async handleViewBattle(battleId: string) {
+    this.viewingBattleId = battleId;
+    this.contentEl.innerHTML = `<div class="nd-empty">Loading battle...</div>`;
+    const details = await fetchBattleDetails(battleId);
+    this.viewingBattle = details;
+    if (this.activeTab === "arena") this.renderArena();
+  }
+
+  private handleArenaBack() {
+    this.viewingBattle = null;
+    this.viewingBattleId = null;
+    if (this.activeTab === "arena") this.renderArena();
   }
 
   // ── Professions view ──────────────────────────────────────────

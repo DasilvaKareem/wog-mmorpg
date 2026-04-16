@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "orchard-spring",
+      "name": "Dewveil Spring",
+      "type": "landmark",
+      "position": { "x": 270, "z": 300 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "orchard-herbalist",
+      "name": "Orchard Herbalist",
+      "type": "structure",
+      "position": { "x": 370, "z": 200 },
+      "radius": 20,
+      "tags": ["craft"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["craft", "buy"], "npcs": ["herbalist"] }
+    },
+    {
+      "id": "keeper-house",
+      "name": "Orchard Keeper's House",
+      "type": "structure",
+      "position": { "x": 200, "z": 420 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest"], "npcs": ["orchard-keeper"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "orchard-walk",
+      "name": "Orchard Walk",
+      "nodes": ["orchard-herbalist", "orchard-spring", "keeper-house"]
+    }
+  ]
 }

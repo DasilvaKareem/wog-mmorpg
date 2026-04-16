@@ -39,7 +39,7 @@ import {
 import { peekInbox, ackInboxMessages, sendInboxMessage } from "./agentInbox.js";
 import { exportCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import { authenticateWithWallet, createAuthenticatedAPI } from "../auth/authHelper.js";
-import { ZONE_LEVEL_REQUIREMENTS, QUEST_ZONES, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, QUEST_ZONES, FARM_ZONES, getZoneConnections, resolveRegionId } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity, getEntitiesInRegion, isWalletSpawned, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPlayerPartyId } from "../social/partySystem.js";
 import { getRecentZoneEvents, type ZoneEvent } from "../world/zoneEvents.js";
@@ -47,6 +47,12 @@ import { runSupervisor } from "./agentSupervisor.js";
 import { TIER_CAPABILITIES, type TierCapabilities } from "./agentTiers.js";
 import { AgentMcpClient } from "./mcpClient.js";
 import { type BotScript, type TriggerEvent } from "../types/botScriptTypes.js";
+import {
+  buildProgressChain,
+  buildLevelBandChain,
+  buildProfessionLearnChain,
+  findBestProgressionZone,
+} from "./agentChains.js";
 
 // Extracted modules
 import {
@@ -201,6 +207,62 @@ export class AgentRunner {
   private ticksSinceFocusChange = 0;
   private lastFocus: AgentFocus = "questing";
   private ticksInCurrentZone = 0;
+  /** Last zone the agent was productively grinding in — updated by
+   *  updateHomeZoneIfProductive(). Detour chains travel back here on completion. */
+  private homeZone: string | null = null;
+  /** Mirror of config.ignoreWeakMobs — refreshed each loop from Redis config. */
+  private ignoreWeakMobsFlag = true;
+  /** Quests flagged as stuck — key=questId, value=epoch ms when it unsticks (5 min TTL). */
+  private stuckQuests = new Map<string, number>();
+
+  /** Monotonic tick counter — used by commitTarget to measure commitment TTL in ticks. */
+  private tickCounter = 0;
+  /** Current target commitment. Cleared when the target dies, leaves the zone, or TTL expires. */
+  private committedTarget: { targetId: string; expiresAtTick: number } | null = null;
+
+  private getCommittedTargetId(): string | null {
+    if (!this.committedTarget) return null;
+    if (this.tickCounter >= this.committedTarget.expiresAtTick) {
+      this.committedTarget = null;
+      return null;
+    }
+    return this.committedTarget.targetId;
+  }
+
+  private commitTarget(targetId: string, ttlTicks = 8): void {
+    const prev = this.committedTarget?.targetId;
+    this.committedTarget = { targetId, expiresAtTick: this.tickCounter + ttlTicks };
+    if (prev !== targetId) {
+      console.log(`[agent:${this.walletTag}] Commit target ${targetId} for ${ttlTicks} ticks`);
+    }
+  }
+
+  private clearCommittedTarget(): void {
+    if (this.committedTarget) {
+      console.log(`[agent:${this.walletTag}] Released target commitment (${this.committedTarget.targetId})`);
+    }
+    this.committedTarget = null;
+  }
+
+  private isQuestStuck(questId: string): boolean {
+    const until = this.stuckQuests.get(questId);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this.stuckQuests.delete(questId);
+      return false;
+    }
+    return true;
+  }
+
+  private markQuestStuck(questId: string, reason: string): void {
+    const until = Date.now() + 5 * 60_000;
+    const wasStuck = this.stuckQuests.has(questId);
+    this.stuckQuests.set(questId, until);
+    if (!wasStuck) {
+      console.log(`[agent:${this.walletTag}] Quest ${questId} flagged stuck for 5 min: ${reason}`);
+      void this.logActivity(`Quest "${questId}" is stuck — skipping for 5 min (${reason})`);
+    }
+  }
   private combatFallbackCount = 0;
   public currentActivity = "Idle";
   public recentActivities: string[] = [];
@@ -403,11 +465,23 @@ export class AgentRunner {
       );
       if (!trainer) {
         if (this.currentRegion !== "village-square") {
-          const reason = `Need ${professionId} trainer in village-square`;
-          console.log(`[agent:${this.walletTag}] ${reason}`);
-          this.currentScript = { type: "travel", targetZone: "village-square", reason };
-          void this.logActivity(`Traveling to village-square to learn ${professionId}`);
-          this.issueCommand({ action: "travel", targetZone: "village-square" });
+          // Don't yank high-level agents back to village-square for a profession
+          // they might not actually need. Skip gracefully; caller falls back.
+          const myLevel = zs.me.level ?? 1;
+          if (myLevel >= 10) {
+            console.log(`[agent:${this.walletTag}] No ${professionId} trainer here and Lv${myLevel} — skipping profession detour`);
+            void this.logActivity(`Skipping ${professionId} — no trainer nearby, continuing grinding`);
+            return false;
+          }
+
+          // Low-level agents: enqueue a round-trip so they come back to homeZone
+          // instead of stranding in village-square.
+          const config = await getAgentConfig(this.userWallet);
+          const homeZone = config?.homeZone ?? this.currentRegion;
+          const chain = buildProfessionLearnChain(professionId, homeZone);
+          await this.enqueueActions(chain, true);
+          void this.logActivity(`Detour: learn ${professionId} → return to ${homeZone}`);
+          console.log(`[agent:${this.walletTag}] Enqueued profession-learn chain for ${professionId}, home=${homeZone}`);
           return false;
         }
         console.log(`[agent:${this.walletTag}] No ${professionId} trainer in ${this.currentRegion}`);
@@ -524,21 +598,45 @@ export class AgentRunner {
   }
 
   async equipItem(tokenId: number, instanceId?: string): Promise<boolean> {
-    if (!this.api || !this.entityId || !this.custodialWallet) return false;
-    try {
-      await this.api("POST", "/equipment/equip", {
-        zoneId: this.currentRegion, tokenId,
-        entityId: this.entityId, walletAddress: this.custodialWallet,
-        ...(instanceId ? { instanceId } : {}),
-      });
-      console.log(`[agent:${this.walletTag}] Equipped tokenId=${tokenId}`);
-      void this.logActivity(`Equipped item (token #${tokenId})`);
-      return true;
-    } catch (err: any) {
-      console.debug(`[agent] equipItem(${tokenId}): ${err.message?.slice(0, 60)}`);
-      this.logError("action", `equipItem(${tokenId}): ${err.message?.slice(0, 120) ?? "unknown"}`, { endpoint: "/equipment/equip" });
-      return false;
+    const result = await this.equipItemWithReason(tokenId, instanceId);
+    return result.ok;
+  }
+
+  /**
+   * Attempts to equip an item, retrying briefly if the balance check fails
+   * (chain tx from a just-completed shop purchase may still be propagating).
+   * Returns both success and the final error reason for smarter caller logic.
+   */
+  async equipItemWithReason(tokenId: number, instanceId?: string): Promise<{ ok: boolean; reason?: string }> {
+    if (!this.api || !this.entityId || !this.custodialWallet) return { ok: false, reason: "agent context not ready" };
+
+    const maxAttempts = 3;
+    let lastReason = "";
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.api("POST", "/equipment/equip", {
+          zoneId: this.currentRegion, tokenId,
+          entityId: this.entityId, walletAddress: this.custodialWallet,
+          ...(instanceId ? { instanceId } : {}),
+        });
+        console.log(`[agent:${this.walletTag}] Equipped tokenId=${tokenId}${attempt > 1 ? ` (attempt ${attempt})` : ""}`);
+        void this.logActivity(`Equipped item (token #${tokenId})`);
+        return { ok: true };
+      } catch (err: any) {
+        lastReason = String(err?.message ?? "unknown").slice(0, 200);
+        // Only retry the ownership race (buy→equip blockchain lag). Other errors
+        // are structural and won't fix themselves.
+        const isOwnershipRace = /does not own this item/i.test(lastReason);
+        if (!isOwnershipRace || attempt === maxAttempts) {
+          console.debug(`[agent] equipItem(${tokenId}) failed: ${lastReason.slice(0, 60)}`);
+          this.logError("action", `equipItem(${tokenId}): ${lastReason.slice(0, 120)}`, { endpoint: "/equipment/equip" });
+          return { ok: false, reason: lastReason };
+        }
+        // Wait for the chain tx to propagate before retrying
+        await new Promise((r) => setTimeout(r, 400 * attempt));
+      }
     }
+    return { ok: false, reason: lastReason };
   }
 
   async repairGear(): Promise<boolean> {
@@ -967,6 +1065,62 @@ export class AgentRunner {
     return fallbacks.find((f) => f !== currentFocus) ?? null;
   }
 
+  /**
+   * When the circuit breaker fires, try the smartest unstick path first:
+   * travel to a different zone whose level/content matches the agent. Only fall
+   * back to focus rotation (gather→craft→cook) if no better zone is available.
+   *
+   * Returns true if a rescue plan was enqueued / applied.
+   */
+  private async tryZoneRescueOrFocusRotation(
+    currentType: string,
+    failure: FailureMemoryEntry,
+  ): Promise<boolean> {
+    const entity = this.entityId ? getWorldEntity(this.entityId) : null;
+    const level = entity?.level ?? 1;
+    const allowed = this.currentCaps.allowedZones;
+
+    // Path 1: Zone mismatch — build a level-band chain to a better zone.
+    const isZoneIssue =
+      failure.key.startsWith("quest-combat:no-targets")
+      || failure.key.startsWith("quest-combat:no-safe-targets")
+      || failure.key.startsWith("combat:no-targets")
+      || failure.key.startsWith("combat:no-safe-targets")
+      || failure.key.startsWith("combat:level-mismatch");
+
+    if (isZoneIssue) {
+      const chain = buildLevelBandChain(level, this.currentRegion, allowed);
+      if (chain) {
+        const rescueZone = chain[0].targetZone ?? "unknown";
+        console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} stuck ${failure.consecutive}x → zone rescue ${rescueZone}`);
+        void this.logActivity(`[ZONE RESCUE] ${this.currentRegion} has no targets for Lv${level} — heading to ${rescueZone}`);
+        this.logError("action", `Zone rescue: ${currentType} → ${rescueZone} after ${failure.consecutive} blocks`, {
+          fromScript: currentType,
+          toZone: rescueZone,
+          reason: failure.reason,
+        });
+        await this.enqueueActions(chain, true);
+        return true;
+      }
+    }
+
+    // Path 2: Focus rotation — try a different activity in the same zone.
+    const fallback = this.pickCircuitBreakerFocus(currentType);
+    if (fallback) {
+      console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to ${fallback}`);
+      void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to ${fallback}`);
+      this.logError("action", `Circuit breaker fired: ${currentType} → ${fallback} after ${failure.consecutive} blocks`, {
+        fromScript: currentType,
+        toFocus: fallback,
+        reason: failure.reason,
+      });
+      void patchAgentConfig(this.userWallet, { focus: fallback });
+      return true;
+    }
+
+    return false;
+  }
+
   private maybeScheduleBlockedTrigger(failure: FailureMemoryEntry): void {
     const threshold = failure.category === "strategic" ? 2 : 3;
     if (failure.consecutive < threshold) return;
@@ -976,7 +1130,7 @@ export class AgentRunner {
     };
   }
 
-  private handleActionResult(script: BotScript | null, result: ActionResult): void {
+  private async handleActionResult(script: BotScript | null, result: ActionResult): Promise<void> {
     this.lastActionResult = result;
     this.telemetry.actionResults[result.status] = (this.telemetry.actionResults[result.status] ?? 0) + 1;
 
@@ -1011,23 +1165,20 @@ export class AgentRunner {
         void this.logActivity(`[STUCK] ${what} blocked 10x in a row: ${why} — may need a different approach`);
       }
 
-      // ── Circuit breaker: 15 consecutive blocks → rotate to a different focus ──
-      if (failure.consecutive >= 15) {
+      // ── Circuit breaker: escape loops ──
+      // Strategic failures (no_targets, no_safe_targets, underleveled etc.) fire
+      // FAST — 5 consecutive blocks means the zone/script combination is broken
+      // and retrying won't help. Transient failures (API errors, timing) get the
+      // higher threshold since they often self-heal.
+      const isStrategic = failure.category === "strategic";
+      const breakerThreshold = isStrategic ? 5 : 15;
+      if (failure.consecutive >= breakerThreshold) {
         const currentType = script?.type ?? "unknown";
-        const fallback = this.pickCircuitBreakerFocus(currentType);
-        if (fallback) {
-          console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to ${fallback}`);
-          void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to ${fallback}`);
-          this.logError("action", `Circuit breaker fired: ${currentType} → ${fallback} after ${failure.consecutive} blocks`, {
-            fromScript: currentType,
-            toFocus: fallback,
-            reason: failure.reason,
-          });
+        const handled = await this.tryZoneRescueOrFocusRotation(currentType, failure);
+        if (handled) {
           this.currentScript = null;
           this.ticksSinceLastDecision = MAX_STALE_TICKS;
-          // Clear the failure so the counter resets for the new focus
           this.clearFailure(failure.key);
-          void patchAgentConfig(this.userWallet, { focus: fallback });
         }
       }
       return;
@@ -1376,8 +1527,17 @@ export class AgentRunner {
       getLiquidationInventory: () => self.getLiquidationInventory(),
       setScript: (s) => { self.currentScript = s; self.ticksOnCurrentScript = 0; },
       get currentScript() { return self.currentScript; },
+      enqueueActions: (scripts, clearExisting) => self.enqueueActions(scripts, clearExisting ?? false),
+      get homeZone() { return self.homeZone; },
+      get ignoreWeakMobs() { return self.ignoreWeakMobsFlag; },
+      isQuestStuck: (id) => self.isQuestStuck(id),
+      markQuestStuck: (id, reason) => self.markQuestStuck(id, reason),
+      get committedTargetId() { return self.getCommittedTargetId(); },
+      commitTarget: (id, ttlTicks) => self.commitTarget(id, ttlTicks),
+      clearCommittedTarget: () => self.clearCommittedTarget(),
       buyItem: (id) => self.buyItem(id),
       equipItem: (id, instanceId) => self.equipItem(id, instanceId),
+      equipItemWithReason: (id, instanceId) => self.equipItemWithReason(id, instanceId),
       learnProfession: (id) => self.learnProfession(id),
       recycleItem: (id, quantity) => self.recycleItem(id, quantity),
       askSummoner: async (text, choices, context) => {
@@ -1459,6 +1619,10 @@ export class AgentRunner {
       gatherNodeType?: GatherPreference;
       targetZone?: string;
       objectives?: AgentObjective[];
+      standingOrders?: string;
+      autoProgress?: boolean;
+      ignoreWeakMobs?: boolean;
+      homeZone?: string;
     },
     strategy: AgentStrategy,
   ): Promise<void> {
@@ -1508,11 +1672,16 @@ export class AgentRunner {
       this.lastTrigger = trigger;
       console.log(`[agent:${this.walletTag}] Trigger [${trigger.type}]: ${trigger.detail}`);
 
-      // Include the user's actual latest chat message + active objective so the supervisor honors directives
+      // Include the user's actual latest chat message + active objective + standing
+      // orders so the supervisor honors durable user directives, not just recent chat.
       let userDirective = focusToDirective(config.focus, config.targetZone);
       if (activeObj) {
         const pct = activeObj.target ? ` (${activeObj.progress ?? 0}/${activeObj.target})` : "";
         userDirective = `OBJECTIVE: ${activeObj.label}${pct} — ${userDirective}`;
+      }
+      if (config.standingOrders && config.standingOrders.trim().length > 0) {
+        // Standing orders are PERSISTENT — always surfaced, not timeboxed.
+        userDirective = `STANDING ORDERS: ${config.standingOrders.trim()} — ${userDirective}`;
       }
       try {
         const recentChat = await getChatHistory(this.userWallet, 5);
@@ -1529,16 +1698,25 @@ export class AgentRunner {
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
       } else if (trigger.type === "level_up") {
         const lvl = entity.level ?? 1;
-        // Only auto-travel to a new zone if there's no active objective driving focus
-        const bestZone = this.findNextZoneForLevel(lvl);
-        if (!activeObj && bestZone && bestZone !== this.currentRegion
-          && lvl >= (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1)
-          && lvl < (ZONE_LEVEL_REQUIREMENTS[bestZone] ?? 1) + 2) {
-          console.log(`[agent:${this.walletTag}] Level ${lvl} unlocked ${bestZone}, heading there`);
-          void this.logActivity(`Level ${lvl}! New zone unlocked — heading to ${bestZone}`);
-          await patchAgentConfig(this.userWallet, { focus: "traveling", targetZone: bestZone });
-          this.currentScript = { type: "travel", targetZone: bestZone, reason: `Level ${lvl} unlocked ${bestZone}` };
-          this.ticksOnCurrentScript = 0;
+        const autoProgressEnabled = config.autoProgress !== false;
+
+        // Auto-progress: enqueue a travel→quest chain to the best zone we now
+        // qualify for. Queued chains suppress autonomous triggers so the agent
+        // actually completes the zone advance without getting yanked back.
+        // Previous code had a `+2` upper bound that blocked most level-ups.
+        if (autoProgressEnabled && !activeObj) {
+          const allowed = this.currentCaps.allowedZones;
+          const chain = buildProgressChain(lvl, this.currentRegion, allowed);
+          if (chain) {
+            console.log(`[agent:${this.walletTag}] Level ${lvl} → enqueueing progress chain to ${chain[0].targetZone}`);
+            void this.logActivity(`Level ${lvl}! Auto-progressing → ${chain[0].targetZone}`);
+            await this.enqueueActions(chain, true);
+            this.ticksOnCurrentScript = 0;
+          } else {
+            this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
+            this.ticksOnCurrentScript = 0;
+            void this.logActivity(`Level ${lvl}! Continuing ${config.focus}`);
+          }
         } else {
           this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
           this.ticksOnCurrentScript = 0;
@@ -1634,7 +1812,24 @@ export class AgentRunner {
 
     const executedScript = this.currentScript;
     const actionResult = await this.executeCurrentScript(entity, entities, strategy);
-    this.handleActionResult(executedScript, actionResult);
+    await this.handleActionResult(executedScript, actionResult);
+
+    // Track homeZone: when the agent is productively questing/combating in a zone
+    // (script progressed without a failure), remember that zone so detour chains
+    // (shop/learn/etc.) can return there instead of stranding in village-square.
+    if (
+      actionResult.status === "progressed"
+      && executedScript
+      && (executedScript.type === "combat" || executedScript.type === "quest" || executedScript.type === "dungeon")
+      && !FARM_ZONES.has(this.currentRegion)
+      && this.currentRegion !== "village-square"
+    ) {
+      if (this.homeZone !== this.currentRegion) {
+        this.homeZone = this.currentRegion;
+        void patchAgentConfig(this.userWallet, { homeZone: this.currentRegion });
+        console.log(`[agent:${this.walletTag}] homeZone → ${this.currentRegion}`);
+      }
+    }
 
     // Idle recovery: if the script produced no useful work, force a re-evaluation
     // so the agent doesn't sit doing nothing until the stale timer fires.
@@ -1808,8 +2003,18 @@ export class AgentRunner {
 
     while (this.running) {
       const loopStartedAt = performance.now();
+      this.tickCounter++;
       try {
         this.cachedZoneState = null;
+
+        // Auto-release target commitment if the mob has died or left the zone.
+        // Commitment TTL expiry is handled lazily by getCommittedTargetId().
+        if (this.committedTarget) {
+          const committed = getWorldEntity(this.committedTarget.targetId);
+          if (!committed || committed.hp <= 0) {
+            this.clearCommittedTarget();
+          }
+        }
 
         const config = await getAgentConfig(this.userWallet);
         if (!config?.enabled) {
@@ -1820,6 +2025,9 @@ export class AgentRunner {
         }
 
         this.currentCaps = TIER_CAPABILITIES[config.tier ?? "free"];
+        // Refresh flags that behaviors reference via ctx each tick.
+        this.ignoreWeakMobsFlag = config.ignoreWeakMobs !== false;
+        if (config.homeZone) this.homeZone = config.homeZone;
 
         // Session timeout
         if (this.currentCaps.sessionLimitMs != null && config.sessionStartedAt) {

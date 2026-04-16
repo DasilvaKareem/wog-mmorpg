@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "moonpetal-pool",
+      "name": "Moonpetal Reflecting Pool",
+      "type": "landmark",
+      "position": { "x": 340, "z": 330 },
+      "radius": 17,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "garden-temple",
+      "name": "Temple of Petals",
+      "type": "structure",
+      "position": { "x": 250, "z": 230 },
+      "radius": 22,
+      "tags": ["heal"],
+      "structure": { "kind": "temple", "capacity": 6, "services": ["heal", "bless"], "npcs": ["priestess"] }
+    },
+    {
+      "id": "gardener-house",
+      "name": "Head Gardener's Cottage",
+      "type": "structure",
+      "position": { "x": 430, "z": 440 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest"], "npcs": ["gardener"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "garden-path",
+      "name": "Garden Path",
+      "nodes": ["garden-temple", "moonpetal-pool", "gardener-house"]
+    }
+  ]
 }

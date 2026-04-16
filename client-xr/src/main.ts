@@ -35,12 +35,14 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage } from "./api.js";
-import { getAuthToken } from "./auth.js";
+import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter } from "./api.js";
+import { getAuthToken, getCachedToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
+import { GauntletCursor } from "./hud/GauntletCursor.js";
 import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 
+let gauntletCursor: GauntletCursor | null = null;
 const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
 const API_BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://wog.urbantech.dev" : "");
 
@@ -274,6 +276,7 @@ const hudFps = document.getElementById("hud-fps")!;
 const hudLock = document.getElementById("lock-indicator")!;
 
 function setGameplayHudVisible(visible: boolean) {
+  gauntletCursor?.setEnabled(visible);
   const ids = [
     "hud",
     "lock-indicator",
@@ -310,9 +313,55 @@ let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
 let lastQuestPollTime = 0;
 let questLogData: QuestLogResponse | null = null;
+let logoutInFlight = false;
 const QUEST_POLL_INTERVAL = 5_000;
 const processedRecentEventIds = new Map<string, number>();
 const DEFAULT_RUN_ENERGY = 100;
+
+async function logoutOwnCharacter(reason: string) {
+  if (logoutInFlight || !ownWalletAddress || !ownEntityId) return;
+
+  const ownEntity = entities.getEntity(ownEntityId);
+  const zoneId = ownEntity?.zoneId;
+  if (!zoneId) return;
+
+  logoutInFlight = true;
+  try {
+    const token = getCachedToken(ownWalletAddress) ?? await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const result = await logoutCharacter(token, { zoneId, entityId: ownEntityId });
+    if (!result.ok) {
+      console.warn(`[logout] Failed during ${reason}: ${result.error ?? "unknown error"}`);
+    }
+  } catch (error) {
+    console.warn(`[logout] Failed during ${reason}:`, error);
+  } finally {
+    logoutInFlight = false;
+  }
+}
+
+function queueLogoutOnExit(reason: string) {
+  if (logoutInFlight || !ownWalletAddress || !ownEntityId) return;
+
+  const ownEntity = entities.getEntity(ownEntityId);
+  const zoneId = ownEntity?.zoneId;
+  const token = ownWalletAddress ? getCachedToken(ownWalletAddress) : null;
+  if (!zoneId || !token) return;
+
+  logoutInFlight = true;
+  void fetch(`${API_BASE}/logout`, {
+    method: "POST",
+    keepalive: true,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ zoneId, entityId: ownEntityId }),
+  }).catch((error) => {
+    console.warn(`[logout] keepalive failed during ${reason}:`, error);
+    logoutInFlight = false;
+  });
+}
 
 function updateRunPanelFromEntity(entity: Entity | null | undefined) {
   if (!ownWalletAddress || !ownEntityId || !entity || entity.id !== ownEntityId) {
@@ -743,6 +792,11 @@ async function pollNearbyZones() {
     }
 
     const visibleIntents = Array.from(mergedIntents.values());
+    // Filter events before sync so we can feed combat metadata (crit/block/dodge)
+    // into this tick's HP-delta damage numbers via preSync().
+    const newEvents = filterNewZoneEvents(allEvents);
+    entities.setOwnEntityId(ownEntityId);
+    entities.preSync(newEvents);
     entities.sync(merged, visibleIntents);
     intentLines.sync(merged, visibleIntents);
     intentTooltip.setText(intentLines.getPrimaryIntentLabel());
@@ -756,7 +810,6 @@ async function pollNearbyZones() {
 
     sky.update(gameTime);
 
-    const newEvents = filterNewZoneEvents(allEvents);
     if (newEvents.length > 0) {
       agentChat.addEvents(newEvents);
       effects.processEvents(newEvents);
@@ -897,6 +950,15 @@ async function pollProfessions() {
 const raycaster = new THREE.Raycaster();
 const ndcMouse = new THREE.Vector2();
 
+gauntletCursor = new GauntletCursor(
+  renderer.domElement,
+  camera,
+  () => entities.group,
+  (hits) => entities.getEntityAt(hits),
+);
+// Disable cursor raycasting while on landing/character-select screens
+gauntletCursor.setEnabled(false);
+
 renderer.domElement.addEventListener("click", (e) => {
   if (landing?.isActive()) return;
   if (isAnimationLab) return;
@@ -1014,6 +1076,14 @@ window.addEventListener("resize", () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   toonPipeline.setSize(window.innerWidth, window.innerHeight);
+});
+
+window.addEventListener("pagehide", () => {
+  queueLogoutOnExit("pagehide");
+});
+
+window.addEventListener("beforeunload", () => {
+  queueLogoutOnExit("beforeunload");
 });
 
 // ── VR button ───────────────────────────────────────────────────────

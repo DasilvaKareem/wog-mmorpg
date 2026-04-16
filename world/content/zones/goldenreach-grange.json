@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "golden-sundial",
+      "name": "Golden Sundial",
+      "type": "landmark",
+      "position": { "x": 310, "z": 340 },
+      "radius": 16,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "grange-emporium",
+      "name": "Grange Emporium",
+      "type": "structure",
+      "position": { "x": 400, "z": 250 },
+      "radius": 23,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 8, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "grange-tavern",
+      "name": "The Gilded Barrel",
+      "type": "structure",
+      "position": { "x": 210, "z": 420 },
+      "radius": 24,
+      "tags": ["rest"],
+      "structure": { "kind": "tavern", "capacity": 12, "services": ["rest", "quest"], "npcs": ["innkeeper", "bard"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "grange-avenue",
+      "name": "Grange Avenue",
+      "nodes": ["grange-emporium", "golden-sundial", "grange-tavern"]
+    }
+  ]
 }

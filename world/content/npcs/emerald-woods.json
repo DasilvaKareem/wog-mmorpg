@@ -1,0 +1,342 @@
+{
+  "zoneId": "emerald-woods",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Verdant Sentinel Brann - Warrior Trainer",
+      "x": 60,
+      "y": 340,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Greenward Paladin Aldric - Paladin Trainer",
+      "x": 200,
+      "y": 340,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Thorn Stalker Ivy - Rogue Trainer",
+      "x": 340,
+      "y": 340,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Wildbow Cassandra - Ranger Trainer",
+      "x": 480,
+      "y": 340,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Sage Mirelle - Mage Trainer",
+      "x": 60,
+      "y": 400,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Grove Priestess Dahlia - Cleric Trainer",
+      "x": 200,
+      "y": 400,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Root Weaver Nadia - Warlock Trainer",
+      "x": 340,
+      "y": 400,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Forest Hermit Koji - Monk Trainer",
+      "x": 480,
+      "y": 400,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Verdant Warden Sylva",
+      "x": 320,
+      "y": 280,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Herbalist Fern",
+      "x": 380,
+      "y": 320,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Grom Artisan Borik",
+      "x": 200,
+      "y": 470,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Grom Forge Blacksmith",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Greenmarket Talia",
+      "x": 250,
+      "y": 470,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Emerald Oath Warden",
+      "x": 300,
+      "y": 470,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Selerion Archivist Maelis",
+      "x": 420,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Grom Workshop Forge",
+      "x": 160,
+      "y": 550,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Forest Apothecary",
+      "x": 260,
+      "y": 550,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Grove Enchanting Altar",
+      "x": 360,
+      "y": 550,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Wildwood Champion Thorne",
+      "x": 400,
+      "y": 470,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Thorned Treant",
+      "x": 480,
+      "y": 380,
+      "hp": 554,
+      "level": 20,
+      "xpReward": 350
+    },
+    {
+      "type": "mob",
+      "name": "Thorned Treant",
+      "x": 520,
+      "y": 450,
+      "hp": 554,
+      "level": 20,
+      "xpReward": 350
+    },
+    {
+      "type": "mob",
+      "name": "Thorned Treant",
+      "x": 560,
+      "y": 380,
+      "hp": 554,
+      "level": 20,
+      "xpReward": 350
+    },
+    {
+      "type": "mob",
+      "name": "Emerald Serpent",
+      "x": 130,
+      "y": 130,
+      "hp": 594,
+      "level": 21,
+      "xpReward": 380
+    },
+    {
+      "type": "mob",
+      "name": "Emerald Serpent",
+      "x": 180,
+      "y": 200,
+      "hp": 594,
+      "level": 21,
+      "xpReward": 380
+    },
+    {
+      "type": "mob",
+      "name": "Emerald Serpent",
+      "x": 100,
+      "y": 250,
+      "hp": 594,
+      "level": 21,
+      "xpReward": 380
+    },
+    {
+      "type": "mob",
+      "name": "Feral Worg",
+      "x": 400,
+      "y": 550,
+      "hp": 545,
+      "level": 22,
+      "xpReward": 410
+    },
+    {
+      "type": "mob",
+      "name": "Feral Worg",
+      "x": 500,
+      "y": 580,
+      "hp": 545,
+      "level": 22,
+      "xpReward": 410
+    },
+    {
+      "type": "mob",
+      "name": "Feral Worg",
+      "x": 580,
+      "y": 520,
+      "hp": 545,
+      "level": 22,
+      "xpReward": 410
+    },
+    {
+      "type": "mob",
+      "name": "Selerion Specter",
+      "x": 450,
+      "y": 100,
+      "hp": 549,
+      "level": 23,
+      "xpReward": 440
+    },
+    {
+      "type": "mob",
+      "name": "Selerion Specter",
+      "x": 550,
+      "y": 80,
+      "hp": 549,
+      "level": 23,
+      "xpReward": 440
+    },
+    {
+      "type": "mob",
+      "name": "Selerion Specter",
+      "x": 500,
+      "y": 200,
+      "hp": 549,
+      "level": 23,
+      "xpReward": 440
+    },
+    {
+      "type": "mob",
+      "name": "Ancient Guardian",
+      "x": 560,
+      "y": 160,
+      "hp": 620,
+      "level": 24,
+      "xpReward": 470
+    },
+    {
+      "type": "mob",
+      "name": "Ancient Guardian",
+      "x": 580,
+      "y": 280,
+      "hp": 620,
+      "level": 24,
+      "xpReward": 470
+    },
+    {
+      "type": "boss",
+      "name": "Grom Sentinel",
+      "x": 550,
+      "y": 150,
+      "hp": 1800,
+      "level": 25,
+      "xpReward": 750
+    }
+  ]
+}

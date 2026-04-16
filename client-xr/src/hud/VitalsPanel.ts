@@ -55,14 +55,18 @@ export class VitalsPanel {
   }
 
   private buildHtml(own: Entity, party: PartyMember[]): string {
-    const xp = own.xp ?? 0;
-    const xpToNext = this.xpForLevel((own.level ?? 1) + 1);
+    const level = own.level ?? 1;
+    const totalXp = own.xp ?? 0;
+    const floor = this.xpForLevel(level);
+    const ceiling = this.xpForLevel(level + 1);
+    const xpInLevel = Math.max(0, totalXp - floor);
+    const xpSpan = Math.max(0, ceiling - floor);
     let out = this.buildFrame(
       own.name,
-      own.level ?? 1,
+      level,
       own.hp, own.maxHp,
       own.essence ?? 0, own.maxEssence ?? 0,
-      xp, xpToNext,
+      xpInLevel, xpSpan,
       true,
     );
 
@@ -120,9 +124,10 @@ export class VitalsPanel {
     return html;
   }
 
-  /** Simple XP curve matching the server's formula */
+  /** Cumulative XP required to reach a given level. Mirrors shard/leveling.ts. */
   private xpForLevel(level: number): number {
-    return Math.floor(100 * Math.pow(level, 1.5));
+    if (level <= 1) return 0;
+    return 100 * level * level;
   }
 
   private injectStyles() {

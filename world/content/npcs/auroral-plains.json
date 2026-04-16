@@ -1,0 +1,331 @@
+{
+  "zoneId": "auroral-plains",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Stormborn Kellan - Warrior Trainer",
+      "x": 60,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Dawn Knight Seraphina - Paladin Trainer",
+      "x": 200,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Windshade Ren - Rogue Trainer",
+      "x": 340,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Sky Hunter Faelen - Ranger Trainer",
+      "x": 480,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Auroriel - Mage Trainer",
+      "x": 60,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Lightweaver Brielle - Cleric Trainer",
+      "x": 200,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Void Caller Ashara - Warlock Trainer",
+      "x": 340,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Windwalker Mei - Monk Trainer",
+      "x": 480,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Windcaller Aelara",
+      "x": 200,
+      "y": 180,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Auroral Trader Fenwick",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        28,
+        29,
+        42,
+        43,
+        77,
+        78,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Auroral Anvil Blacksmith",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Skymarket Orielle",
+      "x": 260,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Windsworn Registrar Hale",
+      "x": 300,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Aurora Sage Lysander",
+      "x": 480,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Windswept Anvil",
+      "x": 140,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Plains Alchemist Table",
+      "x": 240,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Windswept Enchanting Altar",
+      "x": 340,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Stormduelist Kiran",
+      "x": 400,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Plains Stalker",
+      "x": 100,
+      "y": 100,
+      "hp": 461,
+      "level": 15,
+      "xpReward": 220
+    },
+    {
+      "type": "mob",
+      "name": "Plains Stalker",
+      "x": 200,
+      "y": 80,
+      "hp": 461,
+      "level": 15,
+      "xpReward": 220
+    },
+    {
+      "type": "mob",
+      "name": "Plains Stalker",
+      "x": 300,
+      "y": 120,
+      "hp": 461,
+      "level": 15,
+      "xpReward": 220
+    },
+    {
+      "type": "mob",
+      "name": "Aurora Wisp",
+      "x": 400,
+      "y": 100,
+      "hp": 461,
+      "level": 16,
+      "xpReward": 245
+    },
+    {
+      "type": "mob",
+      "name": "Aurora Wisp",
+      "x": 500,
+      "y": 180,
+      "hp": 461,
+      "level": 16,
+      "xpReward": 245
+    },
+    {
+      "type": "mob",
+      "name": "Aurora Wisp",
+      "x": 560,
+      "y": 100,
+      "hp": 461,
+      "level": 16,
+      "xpReward": 245
+    },
+    {
+      "type": "mob",
+      "name": "Windborne Harpy",
+      "x": 350,
+      "y": 220,
+      "hp": 501,
+      "level": 17,
+      "xpReward": 270
+    },
+    {
+      "type": "mob",
+      "name": "Windborne Harpy",
+      "x": 450,
+      "y": 300,
+      "hp": 501,
+      "level": 17,
+      "xpReward": 270
+    },
+    {
+      "type": "mob",
+      "name": "Windborne Harpy",
+      "x": 550,
+      "y": 250,
+      "hp": 501,
+      "level": 17,
+      "xpReward": 270
+    },
+    {
+      "type": "mob",
+      "name": "Essence Wraith",
+      "x": 100,
+      "y": 300,
+      "hp": 507,
+      "level": 18,
+      "xpReward": 295
+    },
+    {
+      "type": "mob",
+      "name": "Essence Wraith",
+      "x": 150,
+      "y": 400,
+      "hp": 507,
+      "level": 18,
+      "xpReward": 295
+    },
+    {
+      "type": "mob",
+      "name": "Essence Wraith",
+      "x": 80,
+      "y": 500,
+      "hp": 507,
+      "level": 18,
+      "xpReward": 295
+    },
+    {
+      "type": "mob",
+      "name": "Storm Elemental",
+      "x": 500,
+      "y": 480,
+      "hp": 467,
+      "level": 19,
+      "xpReward": 320
+    },
+    {
+      "type": "mob",
+      "name": "Storm Elemental",
+      "x": 560,
+      "y": 400,
+      "hp": 467,
+      "level": 19,
+      "xpReward": 320
+    },
+    {
+      "type": "boss",
+      "name": "Skyward Drake",
+      "x": 500,
+      "y": 450,
+      "hp": 1200,
+      "level": 20,
+      "xpReward": 500
+    }
+  ]
+}

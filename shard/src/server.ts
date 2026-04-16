@@ -33,6 +33,7 @@ import { registerTechniqueRoutes } from "./combat/techniqueRoutes.js";
 import { registerEnchantingRoutes } from "./professions/enchanting.js";
 import { registerEventRoutes } from "./social/eventRoutes.js";
 import { registerTerrainRoutes } from "./world/terrainRoutes.js";
+import { registerNpcRoutes } from "./world/npcRoutes.js";
 import { registerSkinningRoutes } from "./professions/skinning.js";
 import { registerCookingRoutes } from "./professions/cooking.js";
 import { registerPartyRoutes } from "./social/partySystem.js";
@@ -88,7 +89,7 @@ import { enqueueGoldMint, getTxStats } from "./blockchain/blockchain.js";
 import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
 import { getChainIntentStats, listChainIntents } from "./blockchain/chainIntentStore.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllEntities, getEntity, restoreLivePlayersFromPostgres, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, removeLivePlayerEntityEventually, restoreLivePlayersFromPostgres, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
@@ -720,7 +721,10 @@ server.post<{
       (e as any).taggedAtTick = undefined;
     }
   }
-  if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
+  if (entity.walletAddress) {
+    unregisterSpawnedWallet(entity.walletAddress);
+    removeLivePlayerEntityEventually(entity.walletAddress, "logout");
+  }
   getAllEntities().delete(entityId);
 
   server.log.info(`[logout] ${entity.name} saved and despawned from ${foundZoneId}`);
@@ -787,6 +791,7 @@ registerTechniqueRoutes(server);
 registerEnchantingRoutes(server);
 registerEventRoutes(server);
 registerTerrainRoutes(server);
+registerNpcRoutes(server);
 registerSkinningRoutes(server);
 registerCookingRoutes(server);
 registerPartyRoutes(server);
@@ -933,15 +938,14 @@ const start = async () => {
     await pvpBattleManager.restoreFromRedis().catch((err: any) => {
       server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
     });
+    await restoreLivePlayersFromPostgres().then((count) => {
+      if (count > 0) {
+        server.log.info(`[live-player] Restored ${count} active player session(s) from Postgres`);
+      }
+    }).catch((err: any) => {
+      server.log.warn(`[live-player] Postgres restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
   }
-
-  await restoreLivePlayersFromPostgres().then((count) => {
-    if (count > 0) {
-      server.log.info(`[live-player] Restored ${count} active player session(s) from Postgres`);
-    }
-  }).catch((err: any) => {
-    server.log.warn(`[live-player] Postgres restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
 
   startAgentRuntimeReconciler(server.log);
 

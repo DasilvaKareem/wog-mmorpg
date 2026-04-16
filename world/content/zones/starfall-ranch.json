@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "starfall-monolith",
+      "name": "Starfall Monolith",
+      "type": "landmark",
+      "position": { "x": 330, "z": 350 },
+      "radius": 16,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "starfall-barracks",
+      "name": "Starfall Barracks",
+      "type": "structure",
+      "position": { "x": 230, "z": 250 },
+      "radius": 23,
+      "tags": ["train"],
+      "structure": { "kind": "barracks", "capacity": 8, "services": ["train", "quest"], "npcs": ["marshal"] }
+    },
+    {
+      "id": "rancher-house",
+      "name": "Rancher's Homestead",
+      "type": "structure",
+      "position": { "x": 440, "z": 450 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest", "rest"], "npcs": ["rancher"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "starfall-trail",
+      "name": "Starfall Trail",
+      "nodes": ["starfall-barracks", "starfall-monolith", "rancher-house"]
+    }
+  ]
 }

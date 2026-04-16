@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "thorn-hitching-post",
+      "name": "Thornwall Hitching Post",
+      "type": "landmark",
+      "position": { "x": 320, "z": 280 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "ranch-barracks",
+      "name": "Ranch Barracks",
+      "type": "structure",
+      "position": { "x": 440, "z": 350 },
+      "radius": 23,
+      "tags": ["train"],
+      "structure": { "kind": "barracks", "capacity": 8, "services": ["train"], "npcs": ["drill-sergeant"] }
+    },
+    {
+      "id": "ranch-supply",
+      "name": "Ranch Supply Shop",
+      "type": "structure",
+      "position": { "x": 200, "z": 210 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "ranch-fence-road",
+      "name": "Fence Line Road",
+      "nodes": ["ranch-supply", "thorn-hitching-post", "ranch-barracks"]
+    }
+  ]
 }

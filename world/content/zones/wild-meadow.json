@@ -4,5 +4,118 @@
   "biome": "grassland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "waystone",
+      "name": "Meadow Waystone",
+      "type": "landmark",
+      "position": { "x": 320, "z": 320 },
+      "radius": 18,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "rangers-lodge",
+      "name": "Ranger's Lodge",
+      "type": "structure",
+      "position": { "x": 260, "z": 240 },
+      "radius": 25,
+      "tags": ["train"],
+      "structure": { "kind": "barracks", "capacity": 8, "services": ["train"], "npcs": ["ranger-trainer"] }
+    },
+    {
+      "id": "meadow-smithy",
+      "name": "Meadow Smithy",
+      "type": "structure",
+      "position": { "x": 400, "z": 260 },
+      "radius": 25,
+      "tags": ["craft"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell", "repair"], "npcs": ["blacksmith"] }
+    },
+    {
+      "id": "herb-cottage",
+      "name": "Herb Cottage",
+      "type": "structure",
+      "position": { "x": 220, "z": 400 },
+      "radius": 22,
+      "tags": ["craft"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["buy", "sell"], "npcs": ["herbalist"] }
+    },
+    {
+      "id": "wayfarer-inn",
+      "name": "Wayfarer's Inn",
+      "type": "structure",
+      "position": { "x": 380, "z": 400 },
+      "radius": 25,
+      "tags": ["rest"],
+      "structure": { "kind": "tavern", "capacity": 15, "services": ["rest", "rumor"], "npcs": ["innkeeper"] }
+    },
+    {
+      "id": "supply-post",
+      "name": "Supply Post",
+      "type": "structure",
+      "position": { "x": 320, "z": 180 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "village-gate",
+      "name": "Village Gate",
+      "type": "portal",
+      "position": { "x": 80, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "village-square", "destinationPoi": "meadow-exit" }
+    },
+    {
+      "id": "forest-trail",
+      "name": "Forest Trail",
+      "type": "portal",
+      "position": { "x": 560, "z": 320 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "dark-forest", "destinationPoi": "meadow-path" }
+    },
+    {
+      "id": "plains-gate",
+      "name": "Plains Path",
+      "type": "portal",
+      "position": { "x": 320, "z": 560 },
+      "radius": 12,
+      "tags": [],
+      "portal": { "destinationZone": "auroral-plains", "destinationPoi": "meadow-gate" }
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-road",
+      "name": "Main Road",
+      "nodes": ["village-gate", "waystone", "forest-trail"]
+    },
+    {
+      "id": "north-path",
+      "name": "North Path",
+      "nodes": ["supply-post", "waystone"]
+    },
+    {
+      "id": "south-loop",
+      "name": "South Loop",
+      "nodes": ["herb-cottage", "waystone", "wayfarer-inn"]
+    },
+    {
+      "id": "smithy-road",
+      "name": "Smithy Road",
+      "nodes": ["waystone", "meadow-smithy"]
+    },
+    {
+      "id": "lodge-path",
+      "name": "Lodge Path",
+      "nodes": ["waystone", "rangers-lodge"]
+    },
+    {
+      "id": "south-road",
+      "name": "South Road",
+      "nodes": ["waystone", "plains-gate"]
+    }
+  ]
 }

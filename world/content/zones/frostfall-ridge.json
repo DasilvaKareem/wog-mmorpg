@@ -4,5 +4,44 @@
   "biome": "mountain",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "frozen-cairn",
+      "name": "Frozen Cairn",
+      "type": "landmark",
+      "position": { "x": 320, "z": 310 },
+      "radius": 19,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "icewatch-barracks",
+      "name": "Icewatch Barracks",
+      "type": "structure",
+      "position": { "x": 200, "z": 430 },
+      "radius": 25,
+      "tags": ["train"],
+      "structure": { "kind": "barracks", "capacity": 10, "services": ["train"], "npcs": ["drill-sergeant", "quartermaster"] }
+    },
+    {
+      "id": "frostfall-shrine",
+      "name": "Frostfall Shrine",
+      "type": "structure",
+      "position": { "x": 450, "z": 190 },
+      "radius": 22,
+      "tags": ["heal", "bless"],
+      "structure": { "kind": "temple", "capacity": 8, "services": ["heal", "bless"], "npcs": ["frost-priestess"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "ridge-ascent",
+      "name": "Ridge Ascent",
+      "nodes": ["icewatch-barracks", "frozen-cairn", "frostfall-shrine"]
+    },
+    {
+      "id": "summit-loop",
+      "name": "Summit Loop",
+      "nodes": ["frostfall-shrine", "icewatch-barracks"]
+    }
+  ]
 }

@@ -1,0 +1,333 @@
+{
+  "zoneId": "viridian-range",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Ironpeak Commander Voss - Warrior Trainer",
+      "x": 60,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Mountain Templar Gideon - Paladin Trainer",
+      "x": 200,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Summit Blade Petra - Rogue Trainer",
+      "x": 340,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Eagle Eye Kaius - Ranger Trainer",
+      "x": 480,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Arcanum Elder Thessara - Mage Trainer",
+      "x": 60,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "High Priestess Ophelia - Cleric Trainer",
+      "x": 200,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Abyss Speaker Cael - Warlock Trainer",
+      "x": 340,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Peak Ascetic Tenzen - Monk Trainer",
+      "x": 480,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Gemloch Overseer Barak",
+      "x": 320,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Prospector Helga",
+      "x": 250,
+      "y": 260,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Mountain Provisioner Hilda",
+      "x": 170,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Mountain Blacksmith Gorath",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Summit Broker Grimaldi",
+      "x": 220,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Peak Warden Registrar",
+      "x": 270,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Gemloch Historian Petra",
+      "x": 280,
+      "y": 180,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Mountain Forge",
+      "x": 120,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Alpine Alchemy Station",
+      "x": 220,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Summit Enchanting Altar",
+      "x": 320,
+      "y": 520,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Cragfist Arena Master",
+      "x": 370,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Mountain Yeti",
+      "x": 80,
+      "y": 120,
+      "hp": 669,
+      "level": 25,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Mountain Yeti",
+      "x": 140,
+      "y": 200,
+      "hp": 669,
+      "level": 25,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Mountain Yeti",
+      "x": 80,
+      "y": 280,
+      "hp": 669,
+      "level": 25,
+      "xpReward": 500
+    },
+    {
+      "type": "mob",
+      "name": "Rock Basilisk",
+      "x": 400,
+      "y": 100,
+      "hp": 629,
+      "level": 26,
+      "xpReward": 530
+    },
+    {
+      "type": "mob",
+      "name": "Rock Basilisk",
+      "x": 500,
+      "y": 180,
+      "hp": 629,
+      "level": 26,
+      "xpReward": 530
+    },
+    {
+      "type": "mob",
+      "name": "Rock Basilisk",
+      "x": 560,
+      "y": 100,
+      "hp": 629,
+      "level": 26,
+      "xpReward": 530
+    },
+    {
+      "type": "mob",
+      "name": "Storm Condor",
+      "x": 420,
+      "y": 280,
+      "hp": 645,
+      "level": 27,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Storm Condor",
+      "x": 500,
+      "y": 350,
+      "hp": 645,
+      "level": 27,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Storm Condor",
+      "x": 480,
+      "y": 420,
+      "hp": 645,
+      "level": 27,
+      "xpReward": 560
+    },
+    {
+      "type": "mob",
+      "name": "Gemloch Golem",
+      "x": 350,
+      "y": 150,
+      "hp": 745,
+      "level": 28,
+      "xpReward": 590
+    },
+    {
+      "type": "mob",
+      "name": "Gemloch Golem",
+      "x": 300,
+      "y": 300,
+      "hp": 745,
+      "level": 28,
+      "xpReward": 590
+    },
+    {
+      "type": "mob",
+      "name": "Frost Giant",
+      "x": 520,
+      "y": 520,
+      "hp": 734,
+      "level": 29,
+      "xpReward": 620
+    },
+    {
+      "type": "mob",
+      "name": "Frost Giant",
+      "x": 560,
+      "y": 450,
+      "hp": 734,
+      "level": 29,
+      "xpReward": 620
+    },
+    {
+      "type": "boss",
+      "name": "Avalanche Titan",
+      "x": 500,
+      "y": 500,
+      "hp": 2500,
+      "level": 30,
+      "xpReward": 1000
+    }
+  ]
+}

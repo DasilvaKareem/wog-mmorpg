@@ -899,26 +899,98 @@ interface SpeechBubble {
   duration: number;
 }
 
-// ── Floating combat text ────────────────────────────────────────────
+// ── Floating combat text (stylized) ─────────────────────────────────
 
-function makeFloatingText(text: string, color: string): THREE.Sprite {
+type FloatingKind = "damage" | "crit" | "heal" | "xp" | "dodge" | "block" | "miss" | "levelup";
+
+interface FloatingStyle {
+  fontPx: number;
+  topHex: string;
+  midHex: string;
+  bottomHex: string;
+  strokeHex: string;
+  glowHex: string;
+  scaleX: number;
+  scaleY: number;
+}
+
+const FLOATING_STYLES: Record<FloatingKind, FloatingStyle> = {
+  damage:  { fontPx: 88,  topHex: "#fff4b4", midHex: "#ff6a2a", bottomHex: "#c41212", strokeHex: "#1a0000", glowHex: "#ff3322", scaleX: 2.2, scaleY: 1.4 },
+  crit:    { fontPx: 128, topHex: "#ffffff", midHex: "#ffd53b", bottomHex: "#ff4400", strokeHex: "#200000", glowHex: "#ffbb22", scaleX: 3.4, scaleY: 2.1 },
+  heal:    { fontPx: 84,  topHex: "#f6fff0", midHex: "#7bff96", bottomHex: "#1fb244", strokeHex: "#042010", glowHex: "#44ff88", scaleX: 2.1, scaleY: 1.3 },
+  xp:      { fontPx: 76,  topHex: "#fff8d4", midHex: "#ffda5a", bottomHex: "#e09a10", strokeHex: "#2a1a00", glowHex: "#ffcc44", scaleX: 2.3, scaleY: 1.3 },
+  dodge:   { fontPx: 64,  topHex: "#ffffff", midHex: "#cfe2ff", bottomHex: "#7aa3ff", strokeHex: "#0a1428", glowHex: "#aaccff", scaleX: 2.0, scaleY: 1.2 },
+  block:   { fontPx: 64,  topHex: "#ffffff", midHex: "#ddd6a8", bottomHex: "#9d9250", strokeHex: "#1a1608", glowHex: "#d8c48a", scaleX: 2.0, scaleY: 1.2 },
+  miss:    { fontPx: 60,  topHex: "#ffffff", midHex: "#dddddd", bottomHex: "#888888", strokeHex: "#111111", glowHex: "#ffffff", scaleX: 1.8, scaleY: 1.1 },
+  levelup: { fontPx: 104, topHex: "#ffffff", midHex: "#fff0a0", bottomHex: "#ffaa22", strokeHex: "#3c1a00", glowHex: "#ffcc44", scaleX: 3.6, scaleY: 1.6 },
+};
+
+function makeFloatingNumber(text: string, kind: FloatingKind): THREE.Sprite {
+  const s = FLOATING_STYLES[kind];
+  const canvasW = 640;
+  const canvasH = 200;
   const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 64;
+  canvas.width = canvasW;
+  canvas.height = canvasH;
   const ctx = canvas.getContext("2d")!;
-  ctx.font = "bold 36px monospace";
+
   ctx.textAlign = "center";
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 4;
-  ctx.strokeText(text, 64, 44);
-  ctx.fillStyle = color;
-  ctx.fillText(text, 64, 44);
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${s.fontPx}px "Impact", "Arial Black", "Helvetica Neue", sans-serif`;
+  ctx.lineJoin = "round";
+  ctx.miterLimit = 2;
+
+  const cx = canvasW / 2;
+  const cy = canvasH / 2;
+
+  // Tri-stop vertical gradient gives the glossy "WoW damage" look
+  const grad = ctx.createLinearGradient(0, cy - s.fontPx * 0.55, 0, cy + s.fontPx * 0.55);
+  grad.addColorStop(0, s.topHex);
+  grad.addColorStop(0.45, s.midHex);
+  grad.addColorStop(1, s.bottomHex);
+
+  // Outer radial glow — two passes for a stronger halo
+  ctx.shadowColor = s.glowHex;
+  ctx.shadowBlur = s.fontPx * 0.8;
+  ctx.fillStyle = s.glowHex;
+  ctx.fillText(text, cx, cy);
+  ctx.shadowBlur = s.fontPx * 0.45;
+  ctx.fillText(text, cx, cy);
+
+  // Thick dark outline
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = s.strokeHex;
+  ctx.lineWidth = Math.max(6, s.fontPx * 0.14);
+  ctx.strokeText(text, cx, cy);
+
+  // Main gradient fill
+  ctx.fillStyle = grad;
+  ctx.fillText(text, cx, cy);
+
+  // Top-half specular sheen
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, canvasW, cy - s.fontPx * 0.05);
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fillText(text, cx, cy);
+  ctx.restore();
+
+  // Crisp inner highlight stroke
+  ctx.strokeStyle = "rgba(255,255,255,0.35)";
+  ctx.lineWidth = Math.max(1.5, s.fontPx * 0.03);
+  ctx.strokeText(text, cx, cy);
+
   const tex = new THREE.CanvasTexture(canvas);
   tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
   const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
   const sprite = new THREE.Sprite(mat);
   sprite.layers.set(NO_OUTLINE_LAYER);
-  sprite.scale.set(1.2, 0.6, 1);
+  sprite.scale.set(s.scaleX, s.scaleY, 1);
+  sprite.userData.kind = kind;
+  sprite.userData.baseScaleX = s.scaleX;
+  sprite.userData.baseScaleY = s.scaleY;
   return sprite;
 }
 
@@ -1116,6 +1188,11 @@ interface FloatingText {
   sprite: THREE.Sprite;
   elapsed: number;
   startY: number;
+  riseAmount: number;
+  lifetime: number;
+  drift: number;
+  kind: FloatingKind;
+  offsetX: number;
 }
 
 type EntityLifeState = "alive" | "dying" | "dead-hidden";
@@ -1138,6 +1215,7 @@ interface EntityObject {
   hpBarBg: THREE.Mesh | null;
   entity: Entity;
   prevHp: number;
+  prevXp: number;
   bodyMesh: THREE.Mesh | null;
   headMesh: THREE.Mesh | null;
   isMoving: boolean;
@@ -1177,6 +1255,10 @@ export class EntityManager {
   private speechBubbles: SpeechBubble[] = [];
   private elevationProvider: ElevationProvider | null = null;
   private envAssets: EnvironmentAssets | null = null;
+  /** ID of the local player's entity — used to gate XP-gain floating text */
+  private ownEntityId: string | null = null;
+  /** Combat metadata keyed by targetId, populated by preSync() from the latest events batch */
+  private pendingCombatMeta = new Map<string, { critical: boolean; blocked: boolean; dodged: boolean; damage: number }>();
   private charAssets: import("./CharacterAssets.js").CharacterAssets | null = null;
   private armorSystem: import("./ArmorSystem.js").ArmorSystem | null = null;
   private avatarAssets = new AvatarAssets();
@@ -1205,6 +1287,37 @@ export class EntityManager {
   /** Link to an elevation provider (WorldManager or TerrainRenderer) */
   setElevationProvider(ep: ElevationProvider) {
     this.elevationProvider = ep;
+  }
+
+  /** Tell the manager which entity is the local player (for XP-gain text, etc.) */
+  setOwnEntityId(id: string | null) {
+    this.ownEntityId = id;
+  }
+
+  /**
+   * Pre-sync hook: scan the incoming event batch for combat hits and record per-target
+   * metadata (critical/blocked/dodged). sync() then uses this when HP-delta fires so the
+   * floating damage number is styled correctly for the current tick.
+   */
+  preSync(events: import("../types.js").ZoneEvent[]) {
+    this.pendingCombatMeta.clear();
+    for (const ev of events) {
+      if (ev.type !== "combat" && ev.type !== "ability") continue;
+      if (!ev.targetId || !ev.data) continue;
+      const d = ev.data as Record<string, unknown>;
+      const damage = typeof d.damage === "number" ? d.damage : 0;
+      const critical = d.critical === true;
+      const blocked = d.blocked === true;
+      const dodged = d.dodged === true;
+      if (!critical && !blocked && !dodged && damage <= 0) continue;
+      // Keep the most significant hit per target (prefer crit, then damage magnitude)
+      const existing = this.pendingCombatMeta.get(ev.targetId);
+      if (!existing
+        || (critical && !existing.critical)
+        || damage > existing.damage) {
+        this.pendingCombatMeta.set(ev.targetId, { critical, blocked, dodged, damage });
+      }
+    }
   }
 
   /** Convert server world coords to 3D world coords */
@@ -1295,9 +1408,13 @@ export class EntityManager {
 
         // Detect HP changes → trigger animations
         const hpDelta = ent.hp - existing.prevHp;
+        const meta = this.pendingCombatMeta.get(id);
         if (wasAlive && hpDelta < 0 && existing.prevHp > 0) {
-          // Took damage
-          this.triggerDamage(existing, -hpDelta);
+          // Took damage — use combat event metadata if available this tick
+          this.triggerDamage(existing, -hpDelta, {
+            critical: meta?.critical,
+            blocked: meta?.blocked,
+          });
         } else if (wasAlive && hpDelta > 0) {
           // Healed
           this.triggerHeal(existing, hpDelta);
@@ -1306,6 +1423,18 @@ export class EntityManager {
         // Death detection
         if (wasAlive && ent.hp <= 0 && existing.prevHp > 0) {
           this.triggerDeath(existing);
+        }
+
+        // XP gain floating text (local player only, to avoid spamming the scene)
+        if (this.ownEntityId === id && wasAlive && ent.hp > 0) {
+          const xpNow = ent.xp ?? 0;
+          const xpDelta = xpNow - existing.prevXp;
+          if (xpDelta > 0 && xpDelta < 1_000_000 /* guard against first-sight seed values */) {
+            this.triggerXpGain(existing, xpDelta);
+          }
+          existing.prevXp = xpNow;
+        } else if (existing.prevXp === 0 && ent.xp) {
+          existing.prevXp = ent.xp;
         }
 
         existing.prevHp = ent.hp;
@@ -1500,17 +1629,48 @@ export class EntityManager {
       }
     }
 
-    // Update floating text
+    // Update floating text — pop-in bounce, rise, drift, fade out
     for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
       const ft = this.floatingTexts[i];
       ft.elapsed += dt;
-      const t = ft.elapsed / 1.2;
-      ft.sprite.position.y = ft.startY + t * 2;
-      (ft.sprite.material as THREE.SpriteMaterial).opacity = 1 - t;
+      const t = ft.elapsed / ft.lifetime;
+
       if (t >= 1) {
         ft.sprite.parent?.remove(ft.sprite);
+        const mat = ft.sprite.material as THREE.SpriteMaterial;
+        mat.map?.dispose();
+        mat.dispose();
         this.floatingTexts.splice(i, 1);
+        continue;
       }
+
+      // Rise along an ease-out arc, with sideways drift
+      const riseEase = 1 - Math.pow(1 - t, 2);
+      ft.sprite.position.y = ft.startY + riseEase * ft.riseAmount;
+      ft.sprite.position.x = ft.offsetX + ft.drift * riseEase;
+
+      // Scale: aggressive pop-in, small bounce, hold, then shrink on fade
+      const baseX = ft.sprite.userData.baseScaleX as number;
+      const baseY = ft.sprite.userData.baseScaleY as number;
+      let scaleMul: number;
+      if (t < 0.1) {
+        scaleMul = 0.2 + (t / 0.1) * 1.2; // 0.2 → 1.4
+      } else if (t < 0.22) {
+        scaleMul = 1.4 - ((t - 0.1) / 0.12) * 0.4; // 1.4 → 1.0
+      } else if (t < 0.75) {
+        scaleMul = 1.0;
+      } else {
+        scaleMul = 1.0 - ((t - 0.75) / 0.25) * 0.25; // 1.0 → 0.75
+      }
+      // Crits pump an extra heartbeat pulse
+      if (ft.kind === "crit" || ft.kind === "levelup") {
+        scaleMul *= 1 + Math.sin(t * Math.PI * 4) * 0.06;
+      }
+      ft.sprite.scale.set(baseX * scaleMul, baseY * scaleMul, 1);
+
+      // Opacity: full until 70%, then fade out
+      const fade = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
+      (ft.sprite.material as THREE.SpriteMaterial).opacity = fade;
     }
 
     // Update speech bubbles
@@ -1703,7 +1863,58 @@ export class EntityManager {
 
   // ── Animation triggers ────────────────────────────────────────────
 
-  private triggerDamage(obj: EntityObject, amount: number) {
+  /** Spawn a stylized floating number/banner above an entity */
+  private spawnFloating(
+    obj: EntityObject,
+    text: string,
+    kind: FloatingKind,
+    opts?: { startY?: number; riseAmount?: number; lifetime?: number; drift?: number; offsetX?: number },
+  ) {
+    const sprite = makeFloatingNumber(text, kind);
+    const startY = opts?.startY ?? 2.0;
+    const offsetX = opts?.offsetX ?? (Math.random() - 0.5) * 0.35;
+    sprite.position.set(offsetX, startY, 0);
+    obj.group.add(sprite);
+    const lifetime = opts?.lifetime
+      ?? (kind === "crit" ? 1.8
+        : kind === "levelup" ? 2.8
+        : kind === "xp" ? 1.6
+        : 1.3);
+    const riseAmount = opts?.riseAmount
+      ?? (kind === "crit" ? 3.2
+        : kind === "levelup" ? 2.2
+        : kind === "xp" ? 2.6
+        : 2.2);
+    const drift = opts?.drift ?? (Math.random() - 0.5) * 0.8;
+    this.floatingTexts.push({
+      sprite, elapsed: 0, startY, riseAmount, lifetime, drift, kind, offsetX,
+    });
+  }
+
+  private flashBodyEmissive(obj: EntityObject, color: number, intensity: number, durationMs: number) {
+    if (!obj.bodyMesh) return;
+    const mat = obj.bodyMesh.material as THREE.MeshToonMaterial;
+    if (!mat.emissive) return;
+    mat.emissive.setHex(color);
+    mat.emissiveIntensity = intensity;
+    const startTime = performance.now();
+    const fade = () => {
+      const t = (performance.now() - startTime) / durationMs;
+      if (t >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+      mat.emissiveIntensity = intensity * (1 - t);
+      requestAnimationFrame(fade);
+    };
+    requestAnimationFrame(fade);
+  }
+
+  private triggerDamage(
+    obj: EntityObject,
+    amount: number,
+    opts?: { critical?: boolean; blocked?: boolean },
+  ) {
+    const critical = !!opts?.critical;
+    const blocked = !!opts?.blocked;
+
     // GLB mob damage: flash red on all meshes
     if (obj.hasGlbModel) {
       const glbRoot = obj.group.getObjectByName("glb_mob");
@@ -1712,13 +1923,14 @@ export class EntityManager {
           if (c instanceof THREE.Mesh && c.material) {
             const mat = c.material as THREE.MeshStandardMaterial;
             if (mat.emissive) {
-              mat.emissive.setHex(0xff2200);
-              mat.emissiveIntensity = 0.8;
+              mat.emissive.setHex(critical ? 0xffaa22 : 0xff2200);
+              mat.emissiveIntensity = critical ? 1.2 : 0.8;
               const start = performance.now();
+              const dur = critical ? 650 : 400;
               const fade = () => {
-                const t = (performance.now() - start) / 400;
+                const t = (performance.now() - start) / dur;
                 if (t >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
-                mat.emissiveIntensity = 0.8 * (1 - t);
+                mat.emissiveIntensity = (critical ? 1.2 : 0.8) * (1 - t);
                 requestAnimationFrame(fade);
               };
               requestAnimationFrame(fade);
@@ -1730,56 +1942,224 @@ export class EntityManager {
 
     this.playOneShot(obj, "damage");
 
-    // Flash body emissive
-    if (obj.bodyMesh) {
-      const mat = obj.bodyMesh.material as THREE.MeshToonMaterial;
-      if (mat.emissive) {
-        mat.emissive.setHex(0xff2200);
-        mat.emissiveIntensity = 0.7;
-        // Fade out over 0.5s
-        const startTime = performance.now();
-        const fadeEmissive = () => {
-          const elapsed = (performance.now() - startTime) / 500;
-          if (elapsed >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
-          mat.emissiveIntensity = 0.7 * (1 - elapsed);
-          requestAnimationFrame(fadeEmissive);
-        };
-        requestAnimationFrame(fadeEmissive);
-      }
+    this.flashBodyEmissive(obj, critical ? 0xffaa22 : 0xff2200, critical ? 1.1 : 0.7, critical ? 650 : 500);
+
+    // Main damage number
+    this.spawnFloating(obj, String(amount), critical ? "crit" : "damage", {
+      startY: 2.0,
+    });
+
+    // "CRITICAL!" banner on big hits
+    if (critical) {
+      this.spawnFloating(obj, "CRITICAL!", "crit", {
+        startY: 2.9,
+        riseAmount: 2.2,
+        lifetime: 1.6,
+      });
     }
 
-    // Floating damage number
-    const ft = makeFloatingText(`-${amount}`, "#ff4444");
-    ft.position.set(0, 2.0, 0);
-    obj.group.add(ft);
-    this.floatingTexts.push({ sprite: ft, elapsed: 0, startY: 2.0 });
-
+    if (blocked) {
+      this.spawnFloating(obj, "BLOCK", "block", {
+        startY: 2.6,
+        riseAmount: 1.8,
+        lifetime: 1.1,
+      });
+    }
   }
 
   private triggerHeal(obj: EntityObject, amount: number) {
     this.playOneShot(obj, "heal");
+    this.flashBodyEmissive(obj, 0x44ff66, 0.7, 800);
+    this.spawnFloating(obj, `+${amount}`, "heal", { startY: 2.1 });
+  }
 
-    // Green glow
+  private triggerDodge(obj: EntityObject) {
+    this.spawnFloating(obj, "DODGE!", "dodge", { startY: 2.3, riseAmount: 2.0, lifetime: 1.1 });
+  }
+
+  private triggerBlock(obj: EntityObject) {
+    this.spawnFloating(obj, "BLOCK", "block", { startY: 2.3, riseAmount: 2.0, lifetime: 1.1 });
+  }
+
+  private triggerXpGain(obj: EntityObject, amount: number) {
+    this.spawnFloating(obj, `+${amount} XP`, "xp", {
+      startY: 2.6,
+      riseAmount: 3.0,
+      lifetime: 1.8,
+      drift: (Math.random() - 0.5) * 0.4,
+    });
+  }
+
+  /** WoW-style "engulfed in light" level-up burst: pillar + expanding ring + body glow + banner */
+  private triggerLevelUp(obj: EntityObject) {
+    // Banner text
+    this.spawnFloating(obj, "LEVEL UP!", "levelup", {
+      startY: 3.0,
+      riseAmount: 1.6,
+      lifetime: 2.8,
+      drift: 0,
+      offsetX: 0,
+    });
+
+    // Pulsing body emissive: deep gold that swells, then fades
     if (obj.bodyMesh) {
       const mat = obj.bodyMesh.material as THREE.MeshToonMaterial;
       if (mat.emissive) {
-        mat.emissive.setHex(0x44ff66);
-        mat.emissiveIntensity = 0.6;
         const startTime = performance.now();
-        const fadeEmissive = () => {
-          const elapsed = (performance.now() - startTime) / 800;
-          if (elapsed >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
-          mat.emissiveIntensity = 0.6 * (1 - elapsed);
-          requestAnimationFrame(fadeEmissive);
+        const duration = 2200;
+        mat.emissive.setHex(0xffcc44);
+        const pulse = () => {
+          const t = (performance.now() - startTime) / duration;
+          if (t >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+          const env = Math.sin(t * Math.PI);
+          const flicker = 0.85 + Math.sin(t * 28) * 0.15;
+          mat.emissiveIntensity = 1.4 * env * flicker;
+          requestAnimationFrame(pulse);
         };
-        requestAnimationFrame(fadeEmissive);
+        requestAnimationFrame(pulse);
+      }
+    }
+    // Also flash any GLB meshes
+    if (obj.hasGlbModel) {
+      const glbRoot = obj.group.getObjectByName("glb_mob");
+      if (glbRoot) {
+        glbRoot.traverse((c) => {
+          if (c instanceof THREE.Mesh && c.material) {
+            const mat = c.material as THREE.MeshStandardMaterial;
+            if (!mat.emissive) return;
+            mat.emissive.setHex(0xffcc44);
+            const start = performance.now();
+            const pulse = () => {
+              const t = (performance.now() - start) / 2200;
+              if (t >= 1) { mat.emissive.setHex(0x000000); mat.emissiveIntensity = 0; return; }
+              mat.emissiveIntensity = 1.2 * Math.sin(t * Math.PI);
+              requestAnimationFrame(pulse);
+            };
+            requestAnimationFrame(pulse);
+          }
+        });
       }
     }
 
-    const ft = makeFloatingText(`+${amount}`, "#44ff66");
-    ft.position.set(0, 2.0, 0);
-    obj.group.add(ft);
-    this.floatingTexts.push({ sprite: ft, elapsed: 0, startY: 2.0 });
+    // Pillar of light (radiant gold cylinder, additive-blended)
+    const pillarGeo = new THREE.CylinderGeometry(0.9, 1.25, 7, 24, 1, true);
+    const pillarMat = new THREE.MeshBasicMaterial({
+      color: 0xffddaa,
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+    pillar.layers.set(NO_OUTLINE_LAYER);
+    pillar.position.y = 3.2;
+    pillar.scale.setScalar(0.01);
+    obj.group.add(pillar);
+
+    // Inner bright core column
+    const coreGeo = new THREE.CylinderGeometry(0.35, 0.55, 6.5, 16, 1, true);
+    const coreMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    core.layers.set(NO_OUTLINE_LAYER);
+    core.position.y = 3.0;
+    obj.group.add(core);
+
+    // Ground ring rapidly expanding outward
+    const ringGeo = new THREE.RingGeometry(0.6, 1.1, 48);
+    ringGeo.rotateX(-Math.PI / 2);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0xffe6aa,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.layers.set(NO_OUTLINE_LAYER);
+    ring.position.y = 0.06;
+    ring.scale.setScalar(0.1);
+    obj.group.add(ring);
+
+    // Halo disc rising upward through the pillar
+    const haloGeo = new THREE.RingGeometry(0.5, 1.2, 32);
+    haloGeo.rotateX(-Math.PI / 2);
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xfff2bf,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const halo = new THREE.Mesh(haloGeo, haloMat);
+    halo.layers.set(NO_OUTLINE_LAYER);
+    halo.position.y = 0.1;
+    obj.group.add(halo);
+
+    const start = performance.now();
+    const duration = 2200;
+    const animate = () => {
+      // If entity despawned, clean up immediately
+      if (!pillar.parent) {
+        pillarGeo.dispose(); pillarMat.dispose();
+        coreGeo.dispose(); coreMat.dispose();
+        ringGeo.dispose(); ringMat.dispose();
+        haloGeo.dispose(); haloMat.dispose();
+        return;
+      }
+      const t = (performance.now() - start) / duration;
+      if (t >= 1) {
+        obj.group.remove(pillar);
+        obj.group.remove(core);
+        obj.group.remove(ring);
+        obj.group.remove(halo);
+        pillarGeo.dispose(); pillarMat.dispose();
+        coreGeo.dispose(); coreMat.dispose();
+        ringGeo.dispose(); ringMat.dispose();
+        haloGeo.dispose(); haloMat.dispose();
+        return;
+      }
+
+      // Pillar: punch up fast then shimmy + fade
+      const growT = Math.min(1, t / 0.18);
+      const grow = 1 - Math.pow(1 - growT, 3);
+      const shimmer = 1 + Math.sin(t * 18) * 0.08;
+      pillar.scale.set(grow * shimmer, grow * (1 + t * 0.3), grow * shimmer);
+      pillarMat.opacity = 0.85 * Math.pow(1 - t, 1.4);
+      pillar.rotation.y += 0.03;
+
+      core.scale.set(grow * (0.9 + Math.sin(t * 14) * 0.1), grow, grow * (0.9 + Math.sin(t * 14) * 0.1));
+      coreMat.opacity = 0.95 * Math.pow(1 - t, 1.6);
+      core.rotation.y -= 0.04;
+
+      // Ground ring: expand aggressively, fade
+      const ringScale = 0.1 + t * 5.5;
+      ring.scale.setScalar(ringScale);
+      ringMat.opacity = 0.95 * (1 - t);
+
+      // Halo rises up through the pillar
+      halo.position.y = 0.1 + t * 6.5;
+      const haloPulse = 1 + Math.sin(t * 8) * 0.08;
+      halo.scale.setScalar((0.8 + t * 1.3) * haloPulse);
+      haloMat.opacity = 0.9 * (1 - t * 0.85);
+
+      requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+
+    // Play the rig's levelup animation if available
+    if (obj.rig || obj.hasGlbModel) {
+      this.playOneShot(obj, "levelup");
+    }
   }
 
   private triggerDeath(obj: EntityObject) {
@@ -1912,6 +2292,15 @@ export class EntityManager {
           this.faceTarget(obj, ev.targetId);
           this.playCombatAnim(obj, anim, undefined, ev.targetId, isMelee);
         }
+
+        // Dodge / block callouts on the target (no HP delta fires for these)
+        if (ev.targetId && ev.data?.dodged === true) {
+          const target = this.entities.get(ev.targetId);
+          if (target && target.lifeState === "alive") this.triggerDodge(target);
+        } else if (ev.targetId && ev.data?.blocked === true && typeof ev.data?.damage !== "number") {
+          const target = this.entities.get(ev.targetId);
+          if (target && target.lifeState === "alive") this.triggerBlock(target);
+        }
       }
 
       // ── Ability: technique resolved (PRIMARY animation driver) ──
@@ -1948,11 +2337,11 @@ export class EntityManager {
         }
       }
 
-      // ── Level-up ──
+      // ── Level-up: "engulfed in light" burst + banner + anim ──
       if (ev.type === "levelup" && ev.entityId) {
         const obj = this.entities.get(ev.entityId);
-        if (obj && (obj.rig || obj.hasGlbModel)) {
-          this.playOneShot(obj, "levelup");
+        if (obj && obj.lifeState === "alive") {
+          this.triggerLevelUp(obj);
         }
       }
     }
@@ -2187,7 +2576,7 @@ export class EntityManager {
       group, targetX: pos.x, targetZ: pos.z, prevTargetX: pos.x, prevTargetZ: pos.z,
       velocityX: 0, velocityZ: 0, targetAge: 0,
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
-      prevHp: ent.hp, bodyMesh, headMesh,
+      prevHp: ent.hp, prevXp: ent.xp ?? 0, bodyMesh, headMesh,
       isMoving: false, movingSmooth: 0,
       rig, mixer, actions: new Map(), clipOverrides, currentAnim: null,
       leftLeg, rightLeg, leftArm, rightArm,

@@ -225,7 +225,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/worker.*shirt|work.*shirt/i,                            "worker_shirt"],
   [/vest/i,                                                 "worker_vest"],
   [/viking.*chest|fur.*chest|barbarian/i,                   "viking_chest"],
-  [/warrior.*chest|mercenary.*armor|gladiator.*armor/i,     "warrior_chest"],
+  [/warrior.*chest|mercenary.*(?:armor|cuirass)|gladiator.*armor|cuirass/i, "warrior_chest"],
   [/dress.*shirt|fine.*shirt|classy.*shirt/i,               "oldclassy_shirt"],
   [/zombie|undead.*rag|tattered/i,                          "zombie_rags"],
   [/robe|cloak/i,                                           "wizard_robe"],

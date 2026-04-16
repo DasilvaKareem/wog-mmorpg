@@ -1,0 +1,254 @@
+{
+  "zoneId": "wild-meadow",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Forge Master Kira - Blacksmith",
+      "x": 160,
+      "y": 60,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Tormund the Broker",
+      "x": 320,
+      "y": 60,
+      "hp": 999
+    },
+    {
+      "type": "arena-master",
+      "name": "Pit Fighter Kael",
+      "x": 480,
+      "y": 60,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Druid Caelum",
+      "x": 160,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Warden Sylvara",
+      "x": 480,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Sage Thessaly",
+      "x": 560,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "essence-forge",
+      "name": "Essence Shaper Korvus",
+      "x": 320,
+      "y": 320,
+      "hp": 9999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Warden Grimjaw",
+      "x": 160,
+      "y": 60,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Ranger Thornwood",
+      "x": 320,
+      "y": 140,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Forest Bear",
+      "x": 70,
+      "y": 70,
+      "hp": 200,
+      "level": 6,
+      "xpReward": 138
+    },
+    {
+      "type": "mob",
+      "name": "Forest Bear",
+      "x": 180,
+      "y": 70,
+      "hp": 200,
+      "level": 6,
+      "xpReward": 138
+    },
+    {
+      "type": "mob",
+      "name": "Forest Bear",
+      "x": 70,
+      "y": 180,
+      "hp": 200,
+      "level": 6,
+      "xpReward": 138
+    },
+    {
+      "type": "mob",
+      "name": "Forest Bear",
+      "x": 180,
+      "y": 180,
+      "hp": 200,
+      "level": 6,
+      "xpReward": 138
+    },
+    {
+      "type": "mob",
+      "name": "Venom Spider",
+      "x": 400,
+      "y": 80,
+      "hp": 225,
+      "level": 7,
+      "xpReward": 170
+    },
+    {
+      "type": "mob",
+      "name": "Venom Spider",
+      "x": 500,
+      "y": 160,
+      "hp": 225,
+      "level": 7,
+      "xpReward": 170
+    },
+    {
+      "type": "mob",
+      "name": "Venom Spider",
+      "x": 580,
+      "y": 80,
+      "hp": 225,
+      "level": 7,
+      "xpReward": 170
+    },
+    {
+      "type": "mob",
+      "name": "Venom Spider",
+      "x": 400,
+      "y": 240,
+      "hp": 225,
+      "level": 7,
+      "xpReward": 170
+    },
+    {
+      "type": "mob",
+      "name": "Venom Spider",
+      "x": 500,
+      "y": 320,
+      "hp": 225,
+      "level": 7,
+      "xpReward": 170
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Bandit",
+      "x": 350,
+      "y": 420,
+      "hp": 250,
+      "level": 8,
+      "xpReward": 205
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Bandit",
+      "x": 460,
+      "y": 500,
+      "hp": 250,
+      "level": 8,
+      "xpReward": 205
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Bandit",
+      "x": 560,
+      "y": 420,
+      "hp": 250,
+      "level": 8,
+      "xpReward": 205
+    },
+    {
+      "type": "mob",
+      "name": "Rogue Bandit",
+      "x": 460,
+      "y": 580,
+      "hp": 250,
+      "level": 8,
+      "xpReward": 205
+    },
+    {
+      "type": "mob",
+      "name": "Corrupted Ent",
+      "x": 80,
+      "y": 350,
+      "hp": 280,
+      "level": 9,
+      "xpReward": 238
+    },
+    {
+      "type": "mob",
+      "name": "Corrupted Ent",
+      "x": 80,
+      "y": 470,
+      "hp": 280,
+      "level": 9,
+      "xpReward": 238
+    },
+    {
+      "type": "mob",
+      "name": "Corrupted Ent",
+      "x": 80,
+      "y": 580,
+      "hp": 280,
+      "level": 9,
+      "xpReward": 238
+    },
+    {
+      "type": "mob",
+      "name": "Dire Wolf",
+      "x": 300,
+      "y": 560,
+      "hp": 350,
+      "level": 10,
+      "xpReward": 275
+    }
+  ]
+}

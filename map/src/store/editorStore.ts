@@ -1,8 +1,24 @@
 import { create } from "zustand";
 import { TILE } from "../tiles/tileTypes";
+import { PREFABS, rotatePrefab, type Prefab } from "../tiles/prefabs";
 
-export type Tool = "brush" | "eraser" | "fill" | "rect" | "eyedropper";
-export type Layer = "ground" | "overlay" | "elevation";
+export type Tool = "brush" | "eraser" | "fill" | "rect" | "eyedropper" | "stamp";
+export type Layer = "ground" | "overlay" | "elevation" | "npcs";
+
+/** NPC entry as stored in world/content/npcs/<zoneId>.json (zoneId is implicit) */
+export interface EditorNpc {
+  type: string;
+  name: string;
+  /** zone-local game units (1 tile = 10 units) */
+  x: number;
+  y: number;
+  hp: number;
+  level?: number;
+  xpReward?: number;
+  shopItems?: number[];
+  teachesProfession?: string;
+  teachesClass?: string;
+}
 
 export interface MapState {
   // Map data
@@ -36,6 +52,18 @@ export interface MapState {
   // Rect tool state
   rectStart: { x: number; y: number } | null;
 
+  // Prefab tool state
+  selectedPrefabId: string;
+  /** Number of 90° CW rotations applied to the current prefab (0-3) */
+  prefabRotation: 0 | 1 | 2 | 3;
+  /** When on, stamping flattens the elevation under the footprint to the anchor tile's height */
+  flattenUnderStamp: boolean;
+
+  // NPC layer state
+  npcs: EditorNpc[];
+  selectedNpcIndex: number | null;
+  npcsDirty: boolean;
+
   // Actions
   setTool: (tool: Tool) => void;
   setLayer: (layer: Layer) => void;
@@ -55,6 +83,23 @@ export interface MapState {
   rectFill: (x1: number, y1: number, x2: number, y2: number) => void;
   eyedrop: (x: number, y: number) => void;
   setRectStart: (pos: { x: number; y: number } | null) => void;
+
+  // Prefab actions
+  setSelectedPrefab: (id: string) => void;
+  rotatePrefabCW: () => void;
+  toggleFlattenUnderStamp: () => void;
+  stampPrefab: (x: number, y: number) => void;
+  /** Returns the currently selected prefab with rotation applied. */
+  getActivePrefab: () => Prefab;
+
+  // NPC actions (x/y in game units; tile × 10)
+  setNpcs: (npcs: EditorNpc[]) => void;
+  addNpc: (npc: EditorNpc) => void;
+  updateNpc: (index: number, patch: Partial<EditorNpc>) => void;
+  removeNpc: (index: number) => void;
+  moveNpc: (index: number, x: number, y: number) => void;
+  selectNpc: (index: number | null) => void;
+  markNpcsClean: () => void;
 
   // Undo/redo
   pushUndo: () => void;
@@ -113,6 +158,14 @@ export const useEditorStore = create<MapState>((set, get) => ({
   redoStack: [],
 
   rectStart: null,
+
+  selectedPrefabId: PREFABS[0].id,
+  prefabRotation: 0,
+  flattenUnderStamp: true,
+
+  npcs: [],
+  selectedNpcIndex: null,
+  npcsDirty: false,
 
   setTool: (tool) => set({ tool }),
   setLayer: (layer) => set({ layer }),
@@ -235,6 +288,98 @@ export const useEditorStore = create<MapState>((set, get) => ({
   },
 
   setRectStart: (pos) => set({ rectStart: pos }),
+
+  setSelectedPrefab: (id) => set({ selectedPrefabId: id, prefabRotation: 0 }),
+
+  rotatePrefabCW: () =>
+    set((s) => ({ prefabRotation: (((s.prefabRotation + 1) % 4) as 0 | 1 | 2 | 3) })),
+
+  toggleFlattenUnderStamp: () =>
+    set((s) => ({ flattenUnderStamp: !s.flattenUnderStamp })),
+
+  getActivePrefab: () => {
+    const s = get();
+    const base = PREFABS.find((p) => p.id === s.selectedPrefabId) ?? PREFABS[0];
+    let p = base;
+    for (let i = 0; i < s.prefabRotation; i++) p = rotatePrefab(p);
+    return p;
+  },
+
+  setNpcs: (npcs) =>
+    set({ npcs, selectedNpcIndex: null, npcsDirty: false }),
+
+  addNpc: (npc) =>
+    set((s) => ({
+      npcs: [...s.npcs, npc],
+      selectedNpcIndex: s.npcs.length,
+      npcsDirty: true,
+    })),
+
+  updateNpc: (index, patch) =>
+    set((s) => {
+      if (index < 0 || index >= s.npcs.length) return s;
+      const next = [...s.npcs];
+      next[index] = { ...next[index], ...patch };
+      return { npcs: next, npcsDirty: true };
+    }),
+
+  removeNpc: (index) =>
+    set((s) => {
+      if (index < 0 || index >= s.npcs.length) return s;
+      const next = s.npcs.filter((_, i) => i !== index);
+      return {
+        npcs: next,
+        selectedNpcIndex: null,
+        npcsDirty: true,
+      };
+    }),
+
+  moveNpc: (index, x, y) =>
+    set((s) => {
+      if (index < 0 || index >= s.npcs.length) return s;
+      const next = [...s.npcs];
+      next[index] = { ...next[index], x, y };
+      return { npcs: next, npcsDirty: true };
+    }),
+
+  selectNpc: (index) => set({ selectedNpcIndex: index }),
+
+  markNpcsClean: () => set({ npcsDirty: false }),
+
+  stampPrefab: (x, y) => {
+    const s = get();
+    const p = s.getActivePrefab();
+    const ground = [...s.ground];
+    const overlay = [...s.overlay];
+    const elevation = [...s.elevation];
+
+    // Flatten elevation under footprint using the anchor tile's current height
+    // (prefab cells that explicitly set .elevation still win over the flatten value)
+    const anchorInBounds = x >= 0 && x < s.width && y >= 0 && y < s.height;
+    const flattenTo = s.flattenUnderStamp && anchorInBounds
+      ? s.elevation[y * s.width + x]
+      : null;
+
+    for (let dy = 0; dy < p.height; dy++) {
+      for (let dx = 0; dx < p.width; dx++) {
+        const tx = x + dx;
+        const ty = y + dy;
+        if (tx < 0 || tx >= s.width || ty < 0 || ty >= s.height) continue;
+        const cell = p.cells[dy * p.width + dx];
+        const idx = ty * s.width + tx;
+
+        // Flatten first so an explicit cell.elevation still overrides
+        if (flattenTo !== null) elevation[idx] = flattenTo;
+
+        if (!cell) continue;
+        if (cell.ground !== undefined) ground[idx] = cell.ground;
+        if (cell.overlay !== undefined) overlay[idx] = cell.overlay;
+        if (cell.elevation !== undefined) elevation[idx] = cell.elevation;
+      }
+    }
+
+    set({ ground, overlay, elevation });
+  },
 
   pushUndo: () =>
     set((s) => ({

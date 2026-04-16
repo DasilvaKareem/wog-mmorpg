@@ -1,0 +1,169 @@
+{
+  "zoneId": "thornwall-ranch",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Dusty",
+      "x": 90,
+      "y": 90,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Ranch Supplier Callista",
+      "x": 220,
+      "y": 90,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Fence Master Drake",
+      "x": 350,
+      "y": 90,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Drylands Grower Sage",
+      "x": 470,
+      "y": 90,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 540,
+      "y": 90,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 595,
+      "y": 90,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Cactus Elemental",
+      "x": 130,
+      "y": 230,
+      "hp": 200,
+      "level": 10,
+      "xpReward": 50
+    },
+    {
+      "type": "mob",
+      "name": "Rock Scorpion",
+      "x": 270,
+      "y": 250,
+      "hp": 250,
+      "level": 12,
+      "xpReward": 63
+    },
+    {
+      "type": "mob",
+      "name": "Fence Rattler",
+      "x": 400,
+      "y": 240,
+      "hp": 215,
+      "level": 11,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
+      "name": "Mesa Lion",
+      "x": 530,
+      "y": 270,
+      "hp": 310,
+      "level": 14,
+      "xpReward": 78
+    },
+    {
+      "type": "mob",
+      "name": "Dust Wraith",
+      "x": 140,
+      "y": 390,
+      "hp": 275,
+      "level": 13,
+      "xpReward": 69
+    },
+    {
+      "type": "mob",
+      "name": "Ranch Zombie",
+      "x": 300,
+      "y": 410,
+      "hp": 350,
+      "level": 15,
+      "xpReward": 88
+    },
+    {
+      "type": "mob",
+      "name": "Thorn Beetle",
+      "x": 450,
+      "y": 400,
+      "hp": 210,
+      "level": 11,
+      "xpReward": 53
+    },
+    {
+      "type": "mob",
+      "name": "Barbed Viper",
+      "x": 570,
+      "y": 380,
+      "hp": 245,
+      "level": 12,
+      "xpReward": 61
+    },
+    {
+      "type": "mob",
+      "name": "Stone Golem",
+      "x": 190,
+      "y": 530,
+      "hp": 380,
+      "level": 16,
+      "xpReward": 95
+    },
+    {
+      "type": "mob",
+      "name": "Prairie Ghost",
+      "x": 410,
+      "y": 550,
+      "hp": 190,
+      "level": 10,
+      "xpReward": 48
+    }
+  ]
+}

@@ -97,6 +97,19 @@ export interface AgentConfig {
   objectives?: AgentObjective[];
   /** Ordered combat edicts (gambit rules) — evaluated top-to-bottom each tick */
   edicts?: Edict[];
+  /** Persistent free-form directive — always injected into supervisor prompt
+   *  (unlike chat messages, does not expire after 2 minutes). */
+  standingOrders?: string;
+  /** When true, on level-up or outlevel detection the agent enqueues a
+   *  travel→quest chain toward the best accessible zone. Default: true. */
+  autoProgress?: boolean;
+  /** When true, combat target selection excludes mobs 7+ levels below the agent,
+   *  regardless of strategy. Default: true. */
+  ignoreWeakMobs?: boolean;
+  /** The zone the agent considers its "home" for grinding. Updated automatically
+   *  when the agent is productively questing/combating in a zone. Detour chains
+   *  (shop, learn, etc.) travel back here when they complete. */
+  homeZone?: string;
 }
 
 export interface AgentEntityRef {
@@ -135,6 +148,8 @@ export function defaultConfig(): AgentConfig {
     focus: "questing",
     strategy: "balanced",
     lastUpdated: Date.now(),
+    autoProgress: true,
+    ignoreWeakMobs: true,
   };
 }
 

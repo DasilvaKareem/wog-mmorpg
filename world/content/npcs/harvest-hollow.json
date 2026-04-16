@@ -1,0 +1,169 @@
+{
+  "zoneId": "harvest-hollow",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Barnaby",
+      "x": 110,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Harvest Merchant Roslyn",
+      "x": 220,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Hollow Keeper Merritt",
+      "x": 330,
+      "y": 80,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Greenthumb Iris",
+      "x": 440,
+      "y": 80,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 530,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 590,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Harvest Scarecrow",
+      "x": 100,
+      "y": 220,
+      "hp": 100,
+      "level": 5,
+      "xpReward": 25
+    },
+    {
+      "type": "mob",
+      "name": "Vine Lurker",
+      "x": 250,
+      "y": 240,
+      "hp": 120,
+      "level": 6,
+      "xpReward": 30
+    },
+    {
+      "type": "mob",
+      "name": "Corn Stalker",
+      "x": 370,
+      "y": 260,
+      "hp": 140,
+      "level": 7,
+      "xpReward": 35
+    },
+    {
+      "type": "mob",
+      "name": "Burrow Rat",
+      "x": 480,
+      "y": 230,
+      "hp": 90,
+      "level": 5,
+      "xpReward": 22
+    },
+    {
+      "type": "mob",
+      "name": "Mud Golem",
+      "x": 150,
+      "y": 370,
+      "hp": 160,
+      "level": 8,
+      "xpReward": 40
+    },
+    {
+      "type": "mob",
+      "name": "Irrigation Sprite",
+      "x": 290,
+      "y": 390,
+      "hp": 110,
+      "level": 6,
+      "xpReward": 28
+    },
+    {
+      "type": "mob",
+      "name": "Root Worm",
+      "x": 420,
+      "y": 380,
+      "hp": 130,
+      "level": 7,
+      "xpReward": 33
+    },
+    {
+      "type": "mob",
+      "name": "Grain Weevil",
+      "x": 540,
+      "y": 350,
+      "hp": 85,
+      "level": 5,
+      "xpReward": 20
+    },
+    {
+      "type": "mob",
+      "name": "Windmill Bat",
+      "x": 200,
+      "y": 500,
+      "hp": 100,
+      "level": 6,
+      "xpReward": 26
+    },
+    {
+      "type": "mob",
+      "name": "Terraced Beetle",
+      "x": 400,
+      "y": 520,
+      "hp": 150,
+      "level": 8,
+      "xpReward": 38
+    }
+  ]
+}

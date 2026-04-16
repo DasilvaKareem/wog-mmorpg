@@ -32,6 +32,41 @@ const SLASH_COMMANDS = [
   { cmd: "/speak",    desc: "Speak publicly as your champion" },
 ];
 
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (c) =>
+    c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === "\"" ? "&quot;" : "&#39;",
+  );
+}
+
+function formatScriptTarget(s: { targetZone?: string | null; targetName?: string | null; nodeType?: string | null }): string {
+  const parts: string[] = [];
+  if (s.targetName) parts.push(`→ ${escapeHtml(s.targetName)}`);
+  if (s.targetZone) parts.push(`@ ${escapeHtml(s.targetZone.replace(/-/g, " "))}`);
+  if (s.nodeType) parts.push(`[${escapeHtml(s.nodeType)}]`);
+  return parts.length > 0 ? `<span class="ai-script-target">${parts.join(" ")}</span>` : "";
+}
+
+const SCRIPT_LABELS: Record<string, string> = {
+  combat: "Fighting mobs",
+  gather: "Gathering resources",
+  travel: "Traveling",
+  shop: "Shopping",
+  craft: "Crafting",
+  quest: "Questing",
+  dungeon: "Running dungeon",
+  idle: "Idling",
+  follow: "Following party",
+  rest: "Resting",
+};
+
+function humanizeScript(s: { type: string; targetZone?: string | null; targetName?: string | null; nodeType?: string | null }): string {
+  const base = SCRIPT_LABELS[s.type] ?? s.type.replace(/-/g, " ");
+  if (s.type === "travel" && s.targetZone) return `Traveling to ${s.targetZone.replace(/-/g, " ")}`;
+  if (s.type === "gather" && s.nodeType) return `Gathering ${s.nodeType}`;
+  if (s.targetName) return `${base} → ${s.targetName}`;
+  return base;
+}
+
 const EVENT_COLORS: Record<string, string> = {
   combat: "#ff8866",
   death: "#cc4444",
@@ -49,9 +84,35 @@ const EVENT_COLORS: Record<string, string> = {
  * Unified chat console: zone events + agent command input + slash commands.
  * Press Enter or T to focus, type a command, Enter to send.
  */
+type ActiveTab = "chat" | "ai";
+
+interface AgentStatus {
+  currentActivity: string | null;
+  currentScript: {
+    type: string;
+    reason: string | null;
+    targetZone?: string | null;
+    targetName?: string | null;
+    nodeType?: string | null;
+  } | null;
+  actionQueue: Array<{
+    type: string;
+    reason: string | null;
+    targetZone?: string | null;
+    targetName?: string | null;
+    nodeType?: string | null;
+  }>;
+  recentActivities: string[];
+  running: boolean;
+  entity?: { name: string; level: number; hp: number | null; maxHp: number | null } | null;
+  zoneId?: string | null;
+}
+
 export class AgentChat {
   private root: HTMLDivElement;
+  private tabBar: HTMLDivElement;
   private log: HTMLDivElement;
+  private aiPanel: HTMLDivElement;
   private input: HTMLInputElement;
   private autocompleteEl: HTMLDivElement;
   private messages: ChatEntry[] = [];
@@ -62,13 +123,23 @@ export class AgentChat {
   private entityId: string | null = null;
   private suggestions: typeof SLASH_COMMANDS = [];
   private selectedSuggestion = 0;
+  private activeTab: ActiveTab = "chat";
+  private aiStatus: AgentStatus | null = null;
+  private aiPollTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     this.root = document.createElement("div");
     this.root.id = "agent-chat";
 
+    this.tabBar = document.createElement("div");
+    this.tabBar.className = "agent-chat-tabs";
+
     this.log = document.createElement("div");
     this.log.className = "agent-chat-log";
+
+    this.aiPanel = document.createElement("div");
+    this.aiPanel.className = "agent-chat-ai";
+    this.aiPanel.hidden = true;
 
     this.autocompleteEl = document.createElement("div");
     this.autocompleteEl.className = "agent-chat-autocomplete";
@@ -81,7 +152,11 @@ export class AgentChat {
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
 
+    this.renderTabs();
+
+    this.root.appendChild(this.tabBar);
     this.root.appendChild(this.log);
+    this.root.appendChild(this.aiPanel);
     this.root.appendChild(this.autocompleteEl);
     this.root.appendChild(this.input);
     document.body.appendChild(this.root);
@@ -89,6 +164,143 @@ export class AgentChat {
     this.injectStyles();
     this.bindEvents();
     this.collapse();
+  }
+
+  // ── Tab management ───────────────────────────────────────────────
+
+  setTab(tab: ActiveTab) {
+    if (this.activeTab === tab) return;
+    this.activeTab = tab;
+    this.renderTabs();
+    const isAi = tab === "ai";
+    this.log.hidden = isAi;
+    this.aiPanel.hidden = !isAi;
+    this.input.style.display = isAi ? "none" : "";
+    if (isAi) {
+      this.startAiPolling();
+      void this.refreshAiStatus();
+    } else {
+      this.stopAiPolling();
+    }
+  }
+
+  private renderTabs() {
+    this.tabBar.innerHTML = "";
+    for (const [id, label] of [["chat", "Chat"], ["ai", "Bot"]] as const) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "agent-chat-tab" + (this.activeTab === id ? " active" : "");
+      btn.textContent = label;
+      btn.addEventListener("click", () => this.setTab(id));
+      this.tabBar.appendChild(btn);
+    }
+  }
+
+  // ── AI status polling + render ───────────────────────────────────
+
+  private startAiPolling() {
+    if (this.aiPollTimer) return;
+    this.aiPollTimer = setInterval(() => void this.refreshAiStatus(), 2500);
+  }
+
+  private stopAiPolling() {
+    if (this.aiPollTimer) { clearInterval(this.aiPollTimer); this.aiPollTimer = null; }
+  }
+
+  private aiError: string | null = null;
+
+  private async refreshAiStatus() {
+    if (!this.walletAddress) {
+      this.aiError = "Not signed in — no wallet address available.";
+      this.aiStatus = null;
+      this.renderAiPanel();
+      return;
+    }
+    const token = await getAuthToken(this.walletAddress);
+    if (!token) {
+      this.aiError = "No auth token — sign in again.";
+      this.renderAiPanel();
+      return;
+    }
+    let lastErr = "";
+    for (const base of CANDIDATE_BASES) {
+      try {
+        const res = await fetch(toUrl(base, `/agent/status/${this.walletAddress}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          lastErr = `HTTP ${res.status} from ${base || "same-origin"}`;
+          continue;
+        }
+        this.aiStatus = await res.json();
+        this.aiError = null;
+        this.renderAiPanel();
+        return;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+      }
+    }
+    this.aiError = lastErr || "Agent status fetch failed";
+    this.renderAiPanel();
+  }
+
+  private renderAiPanel() {
+    const s = this.aiStatus;
+    if (!s) {
+      const msg = this.aiError ?? "Loading bot status...";
+      this.aiPanel.innerHTML = `<div class="ai-empty" style="color:#ffcc44">${escapeHtml(msg)}</div>`;
+      return;
+    }
+    // Defensive: server may omit these fields if the runner isn't spun up yet.
+    const actionQueue = Array.isArray(s.actionQueue) ? s.actionQueue : [];
+    const recentActivities = Array.isArray(s.recentActivities) ? s.recentActivities : [];
+    s.actionQueue = actionQueue;
+    s.recentActivities = recentActivities;
+
+    const running = s.running;
+    const headerHtml = `
+      <div class="ai-header">
+        <span class="ai-status-dot ${running ? "running" : "idle"}"></span>
+        <span class="ai-status-text">${running ? "BOT RUNNING" : "BOT IDLE"}</span>
+        ${s.entity ? `<span class="ai-entity">${escapeHtml(s.entity.name)} · Lv${s.entity.level}</span>` : ""}
+      </div>`;
+
+    const currentLabel = s.currentScript ? humanizeScript(s.currentScript) : (s.currentActivity ?? "Idle");
+    const activityHtml = `
+      <div class="ai-section">
+        <div class="ai-label">CURRENTLY</div>
+        <div class="ai-current">${escapeHtml(currentLabel)}</div>
+        ${s.currentScript ? `
+          <div class="ai-script">
+            <span class="ai-script-type">${escapeHtml(s.currentScript.type)}</span>
+            ${formatScriptTarget(s.currentScript)}
+            ${s.currentScript.reason ? `<div class="ai-script-reason">Why: ${escapeHtml(s.currentScript.reason)}</div>` : ""}
+          </div>
+        ` : ""}
+      </div>`;
+
+    const queueHtml = `
+      <div class="ai-section">
+        <div class="ai-label">NEXT UP <span class="ai-count">${s.actionQueue.length}</span></div>
+        ${s.actionQueue.length === 0
+          ? `<div class="ai-empty">Nothing queued — supervisor will pick next action</div>`
+          : s.actionQueue.map((q, i) => `
+              <div class="ai-queue-item">
+                <span class="ai-queue-index">${i + 1}</span>
+                <div class="ai-queue-body">
+                  <div class="ai-queue-title">${escapeHtml(humanizeScript(q))}</div>
+                  ${q.reason ? `<div class="ai-script-reason">${escapeHtml(q.reason)}</div>` : ""}
+                </div>
+              </div>`).join("")}
+      </div>`;
+
+    const recentHtml = s.recentActivities.length > 0 ? `
+      <div class="ai-section">
+        <div class="ai-label">HISTORY</div>
+        ${s.recentActivities.slice().reverse().map((a) => `<div class="ai-recent-item">${escapeHtml(a)}</div>`).join("")}
+      </div>` : "";
+
+    this.aiPanel.innerHTML = headerHtml + activityHtml + queueHtml + recentHtml;
   }
 
   setWallet(address: string | null) {
@@ -123,8 +335,12 @@ export class AgentChat {
     this.show();
     this.expanded = true;
     this.root.classList.add("expanded");
-    this.input.focus();
+    if (this.activeTab === "chat") this.input.focus();
     this.scrollToBottom();
+    if (this.activeTab === "ai") {
+      this.startAiPolling();
+      void this.refreshAiStatus();
+    }
   }
 
   /** Collapse and blur */
@@ -134,6 +350,7 @@ export class AgentChat {
     this.input.blur();
     this.input.value = "";
     this.hideAutocomplete();
+    this.stopAiPolling();
   }
 
   /** Whether the chat panel is visible at all (not display:none) */
@@ -439,6 +656,191 @@ export class AgentChat {
         background: rgba(8, 6, 4, 0.85);
         border: 1px solid rgba(239, 201, 127, 0.18);
         backdrop-filter: blur(6px);
+      }
+
+      .agent-chat-tabs {
+        display: flex;
+        border-bottom: 1px solid rgba(239, 201, 127, 0.12);
+        background: rgba(8, 6, 4, 0.75);
+        border: 1px solid rgba(239, 201, 127, 0.12);
+        border-radius: 8px 8px 0 0;
+        overflow: hidden;
+        pointer-events: auto;
+      }
+
+      #agent-chat.expanded .agent-chat-tabs {
+        background: rgba(0, 0, 0, 0.35);
+        border: none;
+        border-bottom: 1px solid rgba(239, 201, 127, 0.12);
+      }
+
+      .agent-chat-tab {
+        flex: 1;
+        padding: 6px 10px;
+        background: transparent;
+        border: none;
+        color: rgba(239, 201, 127, 0.5);
+        font: 600 10px/1 'Courier New', monospace;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        cursor: pointer;
+      }
+
+      .agent-chat-tab:hover { color: rgba(239, 201, 127, 0.85); }
+      .agent-chat-tab.active {
+        color: #efc97f;
+        background: rgba(239, 201, 127, 0.1);
+        border-bottom: 2px solid #efc97f;
+      }
+
+      .agent-chat-ai {
+        display: none;
+        padding: 8px 10px;
+        max-height: 260px;
+        overflow-y: auto;
+        pointer-events: auto;
+        background: rgba(8, 6, 4, 0.75);
+        border-left: 1px solid rgba(239, 201, 127, 0.12);
+        border-right: 1px solid rgba(239, 201, 127, 0.12);
+        border-bottom: 1px solid rgba(239, 201, 127, 0.12);
+        border-radius: 0 0 8px 8px;
+      }
+
+      .agent-chat-ai:not([hidden]) {
+        display: block;
+      }
+
+      #agent-chat.expanded .agent-chat-ai:not([hidden]) {
+        max-height: 320px;
+        background: transparent;
+        border: none;
+      }
+
+      .ai-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(239, 201, 127, 0.1);
+        margin-bottom: 8px;
+      }
+
+      .ai-status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .ai-status-dot.running { background: #54f28b; box-shadow: 0 0 8px #54f28b; animation: aiPulse 1.5s ease-in-out infinite; }
+      .ai-status-dot.idle { background: #666; }
+
+      @keyframes aiPulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      .ai-status-text {
+        font-size: 10px;
+        letter-spacing: 0.1em;
+        color: #efc97f;
+        font-weight: bold;
+      }
+
+      .ai-entity {
+        margin-left: auto;
+        color: #7fd6be;
+        font-size: 11px;
+      }
+
+      .ai-section { margin-bottom: 12px; }
+
+      .ai-label {
+        color: rgba(239, 201, 127, 0.55);
+        font-size: 9px;
+        letter-spacing: 0.18em;
+        margin-bottom: 4px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .ai-count {
+        color: #efc97f;
+        background: rgba(239, 201, 127, 0.12);
+        padding: 1px 6px;
+        border-radius: 8px;
+        font-size: 9px;
+      }
+
+      .ai-current {
+        color: #f4ead0;
+        font-size: 12px;
+        font-weight: bold;
+        margin-bottom: 4px;
+      }
+
+      .ai-script, .ai-queue-item {
+        padding: 4px 8px;
+        background: rgba(0, 0, 0, 0.3);
+        border-left: 2px solid rgba(127, 214, 190, 0.4);
+        margin-bottom: 4px;
+        font-size: 11px;
+      }
+
+      .ai-queue-item {
+        border-left-color: rgba(239, 201, 127, 0.4);
+        display: flex;
+        gap: 8px;
+      }
+
+      .ai-queue-index {
+        color: rgba(239, 201, 127, 0.5);
+        font-size: 10px;
+        min-width: 14px;
+      }
+
+      .ai-queue-body { flex: 1; min-width: 0; }
+
+      .ai-queue-title {
+        color: #f4ead0;
+        font-size: 11px;
+        font-weight: bold;
+      }
+
+      .ai-script-type {
+        color: #7fd6be;
+        text-transform: uppercase;
+        font-size: 10px;
+        font-weight: bold;
+        letter-spacing: 0.08em;
+      }
+
+      .ai-script-target {
+        color: rgba(244, 234, 208, 0.7);
+        font-size: 10px;
+        margin-left: 4px;
+      }
+
+      .ai-script-reason {
+        color: rgba(244, 234, 208, 0.5);
+        font-style: italic;
+        font-size: 10px;
+        margin-top: 2px;
+      }
+
+      .ai-recent-item {
+        padding: 2px 8px;
+        color: rgba(244, 234, 208, 0.55);
+        font-size: 10px;
+        border-left: 1px solid rgba(239, 201, 127, 0.15);
+        margin-bottom: 1px;
+      }
+
+      .ai-empty {
+        color: rgba(239, 201, 127, 0.4);
+        font-size: 10px;
+        font-style: italic;
+        padding: 4px 0;
       }
 
       .agent-chat-log {

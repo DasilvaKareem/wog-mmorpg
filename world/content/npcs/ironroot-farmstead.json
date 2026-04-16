@@ -1,0 +1,169 @@
+{
+  "zoneId": "ironroot-farmstead",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Magnus",
+      "x": 90,
+      "y": 90,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Ironhill Supplier Greta",
+      "x": 220,
+      "y": 90,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Farmstead Captain Aldric",
+      "x": 350,
+      "y": 90,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Stonefield Tiller Ingrid",
+      "x": 470,
+      "y": 90,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 540,
+      "y": 90,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 595,
+      "y": 90,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Iron Root Golem",
+      "x": 130,
+      "y": 230,
+      "hp": 450,
+      "level": 20,
+      "xpReward": 113
+    },
+    {
+      "type": "mob",
+      "name": "Highland Wolf",
+      "x": 270,
+      "y": 250,
+      "hp": 500,
+      "level": 22,
+      "xpReward": 125
+    },
+    {
+      "type": "mob",
+      "name": "Stone Terrace Guard",
+      "x": 410,
+      "y": 270,
+      "hp": 560,
+      "level": 24,
+      "xpReward": 140
+    },
+    {
+      "type": "mob",
+      "name": "Fortified Scarecrow",
+      "x": 540,
+      "y": 240,
+      "hp": 475,
+      "level": 21,
+      "xpReward": 119
+    },
+    {
+      "type": "mob",
+      "name": "Mountain Boar",
+      "x": 150,
+      "y": 390,
+      "hp": 530,
+      "level": 23,
+      "xpReward": 133
+    },
+    {
+      "type": "mob",
+      "name": "Rock Crawler",
+      "x": 300,
+      "y": 410,
+      "hp": 590,
+      "level": 25,
+      "xpReward": 148
+    },
+    {
+      "type": "mob",
+      "name": "Iron Beetle",
+      "x": 450,
+      "y": 400,
+      "hp": 495,
+      "level": 22,
+      "xpReward": 124
+    },
+    {
+      "type": "mob",
+      "name": "Terrace Viper",
+      "x": 580,
+      "y": 380,
+      "hp": 555,
+      "level": 24,
+      "xpReward": 139
+    },
+    {
+      "type": "mob",
+      "name": "Highland Eagle",
+      "x": 190,
+      "y": 530,
+      "hp": 620,
+      "level": 26,
+      "xpReward": 155
+    },
+    {
+      "type": "mob",
+      "name": "Stone Sentinel",
+      "x": 420,
+      "y": 550,
+      "hp": 680,
+      "level": 28,
+      "xpReward": 170
+    }
+  ]
+}

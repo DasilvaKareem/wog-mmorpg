@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "hollow-fountain",
+      "name": "Harvest Fountain",
+      "type": "landmark",
+      "position": { "x": 330, "z": 290 },
+      "radius": 16,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "hollow-tavern",
+      "name": "The Golden Sheaf Tavern",
+      "type": "structure",
+      "position": { "x": 420, "z": 220 },
+      "radius": 24,
+      "tags": ["rest"],
+      "structure": { "kind": "tavern", "capacity": 10, "services": ["rest", "quest"], "npcs": ["innkeeper"] }
+    },
+    {
+      "id": "hollow-shop",
+      "name": "Hollow Provisions",
+      "type": "structure",
+      "position": { "x": 230, "z": 370 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "hollow-lane",
+      "name": "Hollow Lane",
+      "nodes": ["hollow-tavern", "hollow-fountain", "hollow-shop"]
+    }
+  ]
 }

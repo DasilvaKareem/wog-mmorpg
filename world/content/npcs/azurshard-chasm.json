@@ -1,0 +1,269 @@
+{
+  "zoneId": "azurshard-chasm",
+  "npcs": [
+    {
+      "type": "quest-giver",
+      "name": "Dragonkin Watcher Azael",
+      "x": 220,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Crystal Sage Velara",
+      "x": 280,
+      "y": 450,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Chasm Depths Trader Vexis",
+      "x": 160,
+      "y": 340,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Chasm Depths Blacksmith",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Azure Vault Auctioneer Nethys",
+      "x": 260,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Dragonsworn Registrar",
+      "x": 360,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Dragon Sage Zephyria",
+      "x": 320,
+      "y": 170,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Dragonfire Forge",
+      "x": 100,
+      "y": 500,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Azure Essence Lab",
+      "x": 200,
+      "y": 500,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Nexus Enchanting Altar",
+      "x": 300,
+      "y": 500,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Draconic Arena Lord Vyraxis",
+      "x": 460,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Azure Dragonkin",
+      "x": 130,
+      "y": 130,
+      "hp": 1169,
+      "level": 45,
+      "xpReward": 1300
+    },
+    {
+      "type": "mob",
+      "name": "Azure Dragonkin",
+      "x": 200,
+      "y": 200,
+      "hp": 1169,
+      "level": 45,
+      "xpReward": 1300
+    },
+    {
+      "type": "mob",
+      "name": "Azure Dragonkin",
+      "x": 100,
+      "y": 250,
+      "hp": 1169,
+      "level": 45,
+      "xpReward": 1300
+    },
+    {
+      "type": "mob",
+      "name": "Void Weaver",
+      "x": 380,
+      "y": 430,
+      "hp": 1207,
+      "level": 46,
+      "xpReward": 1400
+    },
+    {
+      "type": "mob",
+      "name": "Void Weaver",
+      "x": 430,
+      "y": 500,
+      "hp": 1207,
+      "level": 46,
+      "xpReward": 1400
+    },
+    {
+      "type": "mob",
+      "name": "Void Weaver",
+      "x": 460,
+      "y": 430,
+      "hp": 1207,
+      "level": 46,
+      "xpReward": 1400
+    },
+    {
+      "type": "mob",
+      "name": "Shard Sentinel",
+      "x": 500,
+      "y": 120,
+      "hp": 1169,
+      "level": 47,
+      "xpReward": 1500
+    },
+    {
+      "type": "mob",
+      "name": "Shard Sentinel",
+      "x": 560,
+      "y": 200,
+      "hp": 1169,
+      "level": 47,
+      "xpReward": 1500
+    },
+    {
+      "type": "mob",
+      "name": "Shard Sentinel",
+      "x": 580,
+      "y": 300,
+      "hp": 1169,
+      "level": 47,
+      "xpReward": 1500
+    },
+    {
+      "type": "mob",
+      "name": "Chasm Wyrm",
+      "x": 520,
+      "y": 400,
+      "hp": 1225,
+      "level": 48,
+      "xpReward": 1600
+    },
+    {
+      "type": "mob",
+      "name": "Chasm Wyrm",
+      "x": 560,
+      "y": 500,
+      "hp": 1225,
+      "level": 48,
+      "xpReward": 1600
+    },
+    {
+      "type": "mob",
+      "name": "Essence Devourer",
+      "x": 480,
+      "y": 250,
+      "hp": 1260,
+      "level": 49,
+      "xpReward": 1700
+    },
+    {
+      "type": "mob",
+      "name": "Essence Devourer",
+      "x": 550,
+      "y": 150,
+      "hp": 1260,
+      "level": 49,
+      "xpReward": 1700
+    },
+    {
+      "type": "boss",
+      "name": "Azurshard Dragon",
+      "x": 500,
+      "y": 300,
+      "hp": 7000,
+      "level": 50,
+      "xpReward": 3500
+    }
+  ]
+}

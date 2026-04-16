@@ -1,0 +1,430 @@
+{
+  "zoneId": "village-square",
+  "npcs": [
+    {
+      "type": "quest-giver",
+      "name": "Guard Captain Marcus",
+      "x": 50,
+      "y": 40,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Scout Kaela",
+      "x": 110,
+      "y": 108,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Grimwald the Trader",
+      "x": 180,
+      "y": 260,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        4,
+        6,
+        7,
+        8,
+        10,
+        12,
+        13,
+        14,
+        15,
+        16,
+        27,
+        41,
+        76,
+        227
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Bron the Blacksmith",
+      "x": 320,
+      "y": 260,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Lysandra the Auctioneer",
+      "x": 180,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Grizzled Miner Torvik",
+      "x": 100,
+      "y": 420,
+      "hp": 999,
+      "teachesProfession": "mining"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Master Smith Durgan",
+      "x": 230,
+      "y": 420,
+      "hp": 999,
+      "teachesProfession": "blacksmithing"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Herbalist Willow",
+      "x": 360,
+      "y": 420,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Alchemist Mirelle",
+      "x": 490,
+      "y": 420,
+      "hp": 999,
+      "teachesProfession": "alchemy"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Huntsman Greaves",
+      "x": 100,
+      "y": 500,
+      "hp": 999,
+      "teachesProfession": "skinning"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Chef Gastron",
+      "x": 230,
+      "y": 500,
+      "hp": 999,
+      "teachesProfession": "cooking"
+    },
+    {
+      "type": "forge",
+      "name": "Ancient Forge",
+      "x": 80,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Mystical Cauldron",
+      "x": 280,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Enchanter's Altar",
+      "x": 180,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Cooking Campfire",
+      "x": 380,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "tanning-rack",
+      "name": "Sturdy Tanning Rack",
+      "x": 480,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "jewelers-bench",
+      "name": "Jeweler's Workbench",
+      "x": 580,
+      "y": 580,
+      "hp": 9999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Tanner Hilda",
+      "x": 360,
+      "y": 500,
+      "hp": 999,
+      "teachesProfession": "leatherworking"
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Gemcutter Orik",
+      "x": 490,
+      "y": 500,
+      "hp": 999,
+      "teachesProfession": "jewelcrafting"
+    },
+    {
+      "type": "trainer",
+      "name": "Thrain Ironforge - Warrior Trainer",
+      "x": 60,
+      "y": 80,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Sister Elara - Paladin Trainer",
+      "x": 200,
+      "y": 80,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Shade Whisper - Rogue Trainer",
+      "x": 340,
+      "y": 80,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Sylvan Swiftarrow - Ranger Trainer",
+      "x": 480,
+      "y": 80,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Archmage Aldric - Mage Trainer",
+      "x": 60,
+      "y": 160,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Father Benedict - Cleric Trainer",
+      "x": 200,
+      "y": 160,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Malakai Darkbane - Warlock Trainer",
+      "x": 340,
+      "y": 160,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Master Li Chen - Monk Trainer",
+      "x": 480,
+      "y": 160,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "arena-master",
+      "name": "Gladiator Varro",
+      "x": 460,
+      "y": 260,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Scholar Elowen",
+      "x": 50,
+      "y": 400,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Elder Mirael",
+      "x": 50,
+      "y": 240,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Chronicler Orin",
+      "x": 50,
+      "y": 320,
+      "hp": 999
+    },
+    {
+      "type": "essence-forge",
+      "name": "Essence Weaver Lyanna",
+      "x": 560,
+      "y": 160,
+      "hp": 9999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Guildmaster Theron",
+      "x": 320,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Hungry Wolf",
+      "x": 400,
+      "y": 200,
+      "hp": 65,
+      "level": 2,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
+      "name": "Hungry Wolf",
+      "x": 490,
+      "y": 270,
+      "hp": 65,
+      "level": 2,
+      "xpReward": 54
+    },
+    {
+      "type": "mob",
+      "name": "Goblin Raider",
+      "x": 570,
+      "y": 190,
+      "hp": 90,
+      "level": 3,
+      "xpReward": 84
+    },
+    {
+      "type": "mob",
+      "name": "Mire Slime",
+      "x": 570,
+      "y": 380,
+      "hp": 110,
+      "level": 3,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Giant Rat",
+      "x": 460,
+      "y": 70,
+      "hp": 40,
+      "level": 1,
+      "xpReward": 36
+    },
+    {
+      "type": "mob",
+      "name": "Giant Rat",
+      "x": 550,
+      "y": 70,
+      "hp": 40,
+      "level": 1,
+      "xpReward": 36
+    },
+    {
+      "type": "mob",
+      "name": "Giant Rat",
+      "x": 500,
+      "y": 140,
+      "hp": 40,
+      "level": 1,
+      "xpReward": 36
+    },
+    {
+      "type": "mob",
+      "name": "Wild Boar",
+      "x": 340,
+      "y": 480,
+      "hp": 55,
+      "level": 2,
+      "xpReward": 48
+    },
+    {
+      "type": "mob",
+      "name": "Wild Boar",
+      "x": 440,
+      "y": 550,
+      "hp": 55,
+      "level": 2,
+      "xpReward": 48
+    },
+    {
+      "type": "mob",
+      "name": "Wild Boar",
+      "x": 540,
+      "y": 480,
+      "hp": 55,
+      "level": 2,
+      "xpReward": 48
+    },
+    {
+      "type": "mob",
+      "name": "Bandit Scout",
+      "x": 460,
+      "y": 340,
+      "hp": 120,
+      "level": 4,
+      "xpReward": 105
+    },
+    {
+      "type": "mob",
+      "name": "Bandit Scout",
+      "x": 570,
+      "y": 280,
+      "hp": 120,
+      "level": 4,
+      "xpReward": 105
+    },
+    {
+      "type": "mob",
+      "name": "Bandit Scout",
+      "x": 580,
+      "y": 440,
+      "hp": 120,
+      "level": 4,
+      "xpReward": 105
+    },
+    {
+      "type": "mob",
+      "name": "Diseased Wolf",
+      "x": 580,
+      "y": 550,
+      "hp": 180,
+      "level": 5,
+      "xpReward": 126
+    }
+  ]
+}

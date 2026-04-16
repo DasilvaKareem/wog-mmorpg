@@ -4,5 +4,126 @@
   "biome": "village",
   "width": 640,
   "height": 640,
-  "pois": ["fountain", "general-store", "tavern"]
+  "pois": [
+    {
+      "id": "fountain",
+      "name": "Village Fountain",
+      "type": "landmark",
+      "position": { "x": 320, "z": 320 },
+      "radius": 25,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "elders-hall",
+      "name": "Elder's Hall",
+      "type": "structure",
+      "position": { "x": 320, "z": 200 },
+      "radius": 30,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 10, "services": ["quest"], "npcs": ["elder"] }
+    },
+    {
+      "id": "general-store",
+      "name": "General Store",
+      "type": "structure",
+      "position": { "x": 200, "z": 320 },
+      "radius": 30,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 8, "services": ["buy", "sell", "repair"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "guard-post",
+      "name": "Guard Post",
+      "type": "structure",
+      "position": { "x": 440, "z": 320 },
+      "radius": 30,
+      "tags": ["train"],
+      "structure": { "kind": "barracks", "capacity": 12, "services": ["train"], "npcs": ["guard"] }
+    },
+    {
+      "id": "tavern",
+      "name": "The Rusty Flagon",
+      "type": "structure",
+      "position": { "x": 320, "z": 440 },
+      "radius": 30,
+      "tags": ["rest"],
+      "structure": { "kind": "tavern", "capacity": 20, "services": ["rest", "rumor"], "npcs": ["innkeeper"] }
+    },
+    {
+      "id": "temple",
+      "name": "Temple of Light",
+      "type": "structure",
+      "position": { "x": 200, "z": 200 },
+      "radius": 30,
+      "tags": ["heal"],
+      "structure": { "kind": "temple", "capacity": 10, "services": ["heal"], "npcs": ["priest"] }
+    },
+    {
+      "id": "blacksmith",
+      "name": "Ironforge Smithy",
+      "type": "structure",
+      "position": { "x": 440, "z": 200 },
+      "radius": 30,
+      "tags": ["craft"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell", "repair"], "npcs": ["blacksmith"] }
+    },
+    {
+      "id": "herbalist",
+      "name": "Herbalist's Hut",
+      "type": "structure",
+      "position": { "x": 200, "z": 440 },
+      "radius": 25,
+      "tags": ["craft"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["buy", "sell"], "npcs": ["herbalist"] }
+    },
+    {
+      "id": "market",
+      "name": "Village Market",
+      "type": "landmark",
+      "position": { "x": 320, "z": 260 },
+      "radius": 18,
+      "tags": ["market"]
+    },
+    {
+      "id": "meadow-exit",
+      "name": "East Gate",
+      "type": "portal",
+      "position": { "x": 560, "z": 320 },
+      "radius": 15,
+      "tags": [],
+      "portal": { "destinationZone": "wild-meadow", "destinationPoi": "village-gate" }
+    }
+  ],
+  "roads": [
+    {
+      "id": "main-ring",
+      "name": "Village Ring Road",
+      "nodes": ["elders-hall", "blacksmith", "guard-post", "tavern", "herbalist", "temple", "elders-hall"]
+    },
+    {
+      "id": "north-south",
+      "name": "High Street",
+      "nodes": ["elders-hall", "fountain", "tavern"]
+    },
+    {
+      "id": "east-west",
+      "name": "Market Road",
+      "nodes": ["general-store", "fountain", "guard-post"]
+    },
+    {
+      "id": "east-road",
+      "name": "East Road",
+      "nodes": ["guard-post", "meadow-exit"]
+    },
+    {
+      "id": "temple-road",
+      "name": "Temple Path",
+      "nodes": ["temple", "fountain"]
+    },
+    {
+      "id": "herb-road",
+      "name": "Herb Lane",
+      "nodes": ["herbalist", "fountain"]
+    }
+  ]
 }

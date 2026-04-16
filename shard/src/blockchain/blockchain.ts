@@ -728,8 +728,10 @@ export async function enqueueItemMint(
 ): Promise<string> {
   if (isPostgresConfigured()) {
     await addWalletItem(toAddress, tokenId, quantity);
-    itemCache.invalidate(toAddress.toLowerCase());
   }
+  // Always invalidate the item cache so a stale balance=0 doesn't block
+  // an immediate /equipment/equip right after the purchase.
+  itemCache.invalidate(toAddress.toLowerCase());
   const record = await createChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
     toAddress,
     tokenId: tokenId.toString(),

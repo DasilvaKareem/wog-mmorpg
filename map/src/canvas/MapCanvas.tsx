@@ -5,6 +5,10 @@ import { loadTilesheet } from "./tilesheetLoader";
 import { tileName } from "../tiles/tileTypes";
 
 const TILE_PX = 16;
+/** Game units per tile — must match server TILE_SIZE. */
+const GAME_UNITS_PER_TILE = 10;
+/** NPC hit radius in editor pixels (zoom-aware). */
+const NPC_HIT_RADIUS_PX = 8;
 
 export function MapCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -14,6 +18,7 @@ export function MapCanvas() {
   const [rectEnd, setRectEnd] = useState<{ x: number; y: number } | null>(null);
   const isPanning = useRef(false);
   const isPainting = useRef(false);
+  const isDraggingNpc = useRef(false);
   const lastPan = useRef({ x: 0, y: 0 });
   const rafId = useRef<number>(0);
   const canvasSize = useRef({ w: 0, h: 0 });
@@ -87,6 +92,7 @@ export function MapCanvas() {
 
       const s = store.getState();
       const rectStart = s.rectStart;
+      const prefabPreview = s.tool === "stamp" ? s.getActivePrefab() : null;
 
       renderMap({
         ctx,
@@ -98,6 +104,7 @@ export function MapCanvas() {
           rectStart && rectEnd
             ? { x1: rectStart.x, y1: rectStart.y, x2: rectEnd.x, y2: rectEnd.y }
             : null,
+        prefabPreview,
       });
 
       rafId.current = requestAnimationFrame(draw);
@@ -125,6 +132,42 @@ export function MapCanvas() {
     [store],
   );
 
+  /** Screen-space → zone-local game units (1 tile = 10 units). */
+  const screenToGame = useCallback(
+    (clientX: number, clientY: number): { x: number; y: number } => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { x: 0, y: 0 };
+      const rect = canvas.getBoundingClientRect();
+      const s = store.getState();
+      const wx = (clientX - rect.left - s.panX) / s.zoom;
+      const wy = (clientY - rect.top - s.panY) / s.zoom;
+      const unitsPerPx = GAME_UNITS_PER_TILE / TILE_PX;
+      return { x: wx * unitsPerPx, y: wy * unitsPerPx };
+    },
+    [store],
+  );
+
+  /** Returns the index of the NPC under the cursor, or null. */
+  const pickNpc = useCallback(
+    (clientX: number, clientY: number): number | null => {
+      const s = store.getState();
+      if (s.npcs.length === 0) return null;
+      const g = screenToGame(clientX, clientY);
+      const hitR = (NPC_HIT_RADIUS_PX * GAME_UNITS_PER_TILE) / TILE_PX / s.zoom;
+      const hitR2 = hitR * hitR;
+      let best: { idx: number; d2: number } | null = null;
+      for (let i = 0; i < s.npcs.length; i++) {
+        const n = s.npcs[i];
+        const dx = n.x - g.x;
+        const dy = n.y - g.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 <= hitR2 && (!best || d2 < best.d2)) best = { idx: i, d2 };
+      }
+      return best?.idx ?? null;
+    },
+    [screenToGame, store],
+  );
+
   const applyTool = useCallback(
     (tx: number, ty: number) => {
       const s = store.getState();
@@ -143,6 +186,9 @@ export function MapCanvas() {
         case "eyedropper":
           s.eyedrop(tx, ty);
           break;
+        case "stamp":
+          s.stampPrefab(tx, ty);
+          break;
       }
     },
     [store],
@@ -160,8 +206,21 @@ export function MapCanvas() {
 
       if (e.button !== 0) return;
 
-      const tile = screenToTile(e.clientX, e.clientY);
       const s = store.getState();
+
+      // NPC layer has its own interaction model: click to select/deselect + drag to move
+      if (s.layer === "npcs") {
+        const hit = pickNpc(e.clientX, e.clientY);
+        if (hit !== null) {
+          s.selectNpc(hit);
+          isDraggingNpc.current = true;
+        } else {
+          s.selectNpc(null);
+        }
+        return;
+      }
+
+      const tile = screenToTile(e.clientX, e.clientY);
 
       if (s.tool === "rect") {
         s.pushUndo();
@@ -171,10 +230,11 @@ export function MapCanvas() {
       }
 
       s.pushUndo();
-      isPainting.current = true;
+      // Stamp is one-shot: no drag continuation
+      isPainting.current = s.tool !== "stamp";
       applyTool(tile.x, tile.y);
     },
-    [screenToTile, applyTool, store],
+    [screenToTile, applyTool, pickNpc, store],
   );
 
   const onMouseMove = useCallback(
@@ -192,6 +252,19 @@ export function MapCanvas() {
       setHoverTile(tile);
 
       const s = store.getState();
+
+      // NPC drag
+      if (isDraggingNpc.current && s.selectedNpcIndex !== null) {
+        const g = screenToGame(e.clientX, e.clientY);
+        // Clamp inside zone bounds (width/height are tile counts × game units)
+        const maxX = s.width * GAME_UNITS_PER_TILE;
+        const maxY = s.height * GAME_UNITS_PER_TILE;
+        const clampedX = Math.max(0, Math.min(maxX, Math.round(g.x)));
+        const clampedY = Math.max(0, Math.min(maxY, Math.round(g.y)));
+        s.moveNpc(s.selectedNpcIndex, clampedX, clampedY);
+        return;
+      }
+
       if (s.tool === "rect" && s.rectStart) {
         setRectEnd(tile);
         return;
@@ -201,13 +274,18 @@ export function MapCanvas() {
         applyTool(tile.x, tile.y);
       }
     },
-    [screenToTile, applyTool, store],
+    [screenToTile, screenToGame, applyTool, store],
   );
 
   const onMouseUp = useCallback(
     (e: React.MouseEvent) => {
       if (isPanning.current) {
         isPanning.current = false;
+        return;
+      }
+
+      if (isDraggingNpc.current) {
+        isDraggingNpc.current = false;
         return;
       }
 
@@ -270,6 +348,17 @@ export function MapCanvas() {
         s.setTool("rect");
       } else if (e.key === "i") {
         s.setTool("eyedropper");
+      } else if (e.key === "p") {
+        s.setTool("stamp");
+      } else if (e.key === "t" && s.tool === "stamp") {
+        s.rotatePrefabCW();
+      } else if (e.key === "Escape" && s.tool === "stamp") {
+        s.setTool("brush");
+      } else if ((e.key === "Delete" || e.key === "Backspace") && s.layer === "npcs" && s.selectedNpcIndex !== null) {
+        e.preventDefault();
+        s.removeNpc(s.selectedNpcIndex);
+      } else if (e.key === "Escape" && s.layer === "npcs") {
+        s.selectNpc(null);
       } else if (e.key === "h") {
         s.toggleGrid();
       } else if (e.key === "f") {
@@ -303,7 +392,7 @@ export function MapCanvas() {
   return (
     <div
       ref={containerRef}
-      className="relative flex-1 cursor-crosshair overflow-hidden"
+      className={`relative flex-1 overflow-hidden ${layer === "npcs" ? "cursor-pointer" : "cursor-crosshair"}`}
       onContextMenu={(e) => e.preventDefault()}
     >
       <canvas

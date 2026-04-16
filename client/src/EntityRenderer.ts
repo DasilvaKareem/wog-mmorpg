@@ -871,7 +871,7 @@ export class EntityRenderer {
 
     // Elevation-aware depth: base 10 + elevation * 2
     const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
-    const entityDepth = 10 + elev * 2;
+    const entityDepth = 10 + (elev / 30) * 6;
 
     // Scale up mob/boss sprites so they're more visible
     const mobScale = entity.type === "boss" ? BOSS_SCALE
@@ -1093,7 +1093,7 @@ export class EntityRenderer {
 
     // Update elevation-based depth
     const elev = this.elevationQuery ? this.elevationQuery(entity.x, entity.y) : 0;
-    const entityDepth = 10 + elev * 2;
+    const entityDepth = 10 + (elev / 30) * 6;
     visual.sprite.setDepth(entityDepth);
     visual.label.setDepth(entityDepth + 1);
     visual.hpBg.setDepth(entityDepth);

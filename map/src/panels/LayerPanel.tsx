@@ -1,7 +1,13 @@
 import { Eye, EyeOff } from "lucide-react";
 import { useEditorStore, type Layer } from "../store/editorStore";
 
-const LAYERS: { id: Layer; label: string; visKey: "showGround" | "showOverlay" | "showElevation" }[] = [
+interface TileLayerRow {
+  id: Exclude<Layer, "npcs">;
+  label: string;
+  visKey: "showGround" | "showOverlay" | "showElevation";
+}
+
+const TILE_LAYERS: TileLayerRow[] = [
   { id: "ground", label: "Ground", visKey: "showGround" },
   { id: "overlay", label: "Overlay", visKey: "showOverlay" },
   { id: "elevation", label: "Elevation", visKey: "showElevation" },
@@ -14,6 +20,7 @@ export function LayerPanel() {
   const showOverlay = useEditorStore((s) => s.showOverlay);
   const showElevation = useEditorStore((s) => s.showElevation);
   const toggleVis = useEditorStore((s) => s.toggleLayerVisibility);
+  const npcCount = useEditorStore((s) => s.npcs.length);
 
   const vis = { showGround, showOverlay, showElevation };
 
@@ -23,17 +30,14 @@ export function LayerPanel() {
         Layers
       </div>
       <div className="flex flex-col gap-1">
-        {LAYERS.map((l) => (
+        {TILE_LAYERS.map((l) => (
           <div
             key={l.id}
             className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
               layer === l.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"
             }`}
           >
-            <button
-              onClick={() => setLayer(l.id)}
-              className="flex-1 text-left"
-            >
+            <button onClick={() => setLayer(l.id)} className="flex-1 text-left">
               {l.label}
             </button>
             <button
@@ -45,6 +49,16 @@ export function LayerPanel() {
             </button>
           </div>
         ))}
+        <div
+          className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
+            layer === "npcs" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"
+          }`}
+        >
+          <button onClick={() => setLayer("npcs")} className="flex-1 text-left">
+            NPCs
+          </button>
+          <span className="text-[10px] text-zinc-500">{npcCount}</span>
+        </div>
       </div>
     </div>
   );

@@ -70,6 +70,85 @@ function internalFetch(url: string, init?: RequestInit): Promise<Response> {
 
 // Gemini client is initialized in geminiClient.ts
 
+/**
+ * Scan a chat message for durable progression directives and persist them as
+ * typed AgentConfig flags. Returns the list of captured directive labels so
+ * the caller can log them and force a supervisor re-run.
+ *
+ * Captures:
+ *  - "ignore weak mobs" / "stop killing rats" → ignoreWeakMobs=true
+ *  - "fight everything" / "kill weak mobs"    → ignoreWeakMobs=false
+ *  - "auto progress" / "progress through zones" → autoProgress=true
+ *  - "stop auto progressing" / "stay put"     → autoProgress=false
+ *  - "stay in <zone>" / "home is <zone>"      → homeZone=<zone>
+ *  - Any of the above also append the phrase to standingOrders so the supervisor
+ *    sees the user's actual intent.
+ */
+async function captureDirectives(userWallet: string, message: string): Promise<string[]> {
+  const text = message.trim().toLowerCase();
+  if (!text) return [];
+
+  const patch: Record<string, any> = {};
+  const captured: string[] = [];
+  const standingAdds: string[] = [];
+
+  if (/\b(ignore|skip|stop\s+(?:killing|fighting|attacking))\s+(?:weak|low[\s-]level|trash|low)\b/.test(text)
+    || /\bdon'?t\s+(?:kill|fight|attack)\s+(?:weak|low[\s-]level|trash)\b/.test(text)
+    || /\b(?:no|stop)\s+weak\s+mobs?\b/.test(text)) {
+    patch.ignoreWeakMobs = true;
+    captured.push("ignoreWeakMobs=on");
+    standingAdds.push("ignore weak mobs");
+  } else if (/\bfight\s+everything\b/.test(text) || /\bkill\s+(?:weak|all)\s+mobs?\b/.test(text)) {
+    patch.ignoreWeakMobs = false;
+    captured.push("ignoreWeakMobs=off");
+  }
+
+  if (/\b(?:auto[\s-]?progress|progress\s+through|level\s+through|move\s+up\s+zones?)\b/.test(text)
+    || /\b(?:advance|push|climb)\s+(?:to\s+)?(?:harder|higher|progressively)\b/.test(text)) {
+    patch.autoProgress = true;
+    captured.push("autoProgress=on");
+    standingAdds.push("auto-progress through zones");
+  } else if (/\bstop\s+auto[\s-]?progress/.test(text) || /\bstay\s+put\b/.test(text)) {
+    patch.autoProgress = false;
+    captured.push("autoProgress=off");
+  }
+
+  // "stay in X zone" / "home is X" / "don't leave X"
+  const stayMatch = text.match(/\b(?:stay\s+in|home\s+(?:is|zone\s+is)|don'?t\s+leave)\s+([a-z][a-z0-9-]+)\b/);
+  if (stayMatch) {
+    const zoneCandidate = stayMatch[1].replace(/\s+/g, "-");
+    const resolved = resolveRegionId(zoneCandidate);
+    if (resolved) {
+      patch.homeZone = resolved;
+      captured.push(`homeZone=${resolved}`);
+      standingAdds.push(`stay in ${resolved}`);
+    }
+  }
+
+  // "stop going back to village-square" / "no village-square"
+  if (/\b(?:stop\s+going\s+back\s+to|no\s+more|don'?t\s+(?:return\s+to|go\s+back\s+to))\s+village[\s-]square\b/.test(text)) {
+    patch.autoProgress = patch.autoProgress ?? true;
+    captured.push("autoProgress=on (village-square avoidance)");
+    standingAdds.push("do not return to village-square unless critical");
+  }
+
+  if (standingAdds.length > 0) {
+    const existing = (await getAgentConfig(userWallet))?.standingOrders ?? "";
+    // De-dupe — don't append a phrase that's already present
+    const merged = existing
+      ? [existing, ...standingAdds.filter((p) => !existing.toLowerCase().includes(p))].join("; ")
+      : standingAdds.join("; ");
+    patch.standingOrders = merged.slice(0, 500);
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await patchAgentConfig(userWallet, patch);
+    console.log(`[agent/chat] Captured directives for ${userWallet.slice(0, 8)}: ${captured.join(", ")}`);
+  }
+
+  return captured;
+}
+
 function inferInteractionMode(message: string): "directive" | "question" | "conversation" {
   const text = message.trim().toLowerCase();
   if (!text) return "conversation";
@@ -501,7 +580,23 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const runner = agentManager.getRunner(authWallet);
     const currentActivity = runner?.currentActivity ?? null;
     const script = runner?.script ?? null;
-    const currentScript = script ? { type: script.type, reason: script.reason ?? null } : null;
+    const currentScript = script
+      ? {
+          type: script.type,
+          reason: script.reason ?? null,
+          targetZone: script.targetZone ?? null,
+          targetName: script.targetName ?? null,
+          nodeType: script.nodeType ?? null,
+        }
+      : null;
+    const actionQueue = (runner?.getQueue() ?? []).map((s) => ({
+      type: s.type,
+      reason: s.reason ?? null,
+      targetZone: s.targetZone ?? null,
+      targetName: s.targetName ?? null,
+      nodeType: s.nodeType ?? null,
+    }));
+    const recentActivities = runner?.recentActivities ? [...runner.recentActivities].slice(-12) : [];
     const telemetry = runner?.getSnapshot().telemetry ?? null;
 
     // Compute session time remaining
@@ -526,6 +621,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entitySource,
       currentActivity,
       currentScript,
+      actionQueue,
+      recentActivities,
       telemetry,
     });
   });
@@ -1062,6 +1159,15 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
           isCommand: true,
         });
       }
+    }
+
+    // ── Natural-language directive capture ────────────────────────────────
+    // Scan the message for durable instructions and persist them as typed flags
+    // / standing orders so they survive past the 2-minute chat-injection window.
+    const captured = await captureDirectives(authWallet, message);
+    if (captured.length > 0) {
+      const runner = agentManager.getRunner(authWallet);
+      if (runner) runner.clearScript();
     }
 
     const config = await getAgentConfig(authWallet);
@@ -2267,6 +2373,67 @@ Strategy options: aggressive, balanced, defensive`;
     if (runner) {
       runner.clearScript();
     }
+
+    return reply.send({ ok: true, updated: patch });
+  });
+
+  // ── PATCH /agent/standing-orders — persistent directive + progression flags ──
+  // Unlike chat messages (which the supervisor only sees for 2 minutes), standing
+  // orders are always injected into the supervisor prompt. Use this for durable
+  // instructions like "ignore weak mobs", "auto progress", "stay in X zone".
+  server.patch<{
+    Body: {
+      standingOrders?: string | null;
+      autoProgress?: boolean;
+      ignoreWeakMobs?: boolean;
+      homeZone?: string | null;
+    };
+  }>("/agent/standing-orders", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { standingOrders, autoProgress, ignoreWeakMobs, homeZone } = request.body ?? {};
+
+    const patch: Record<string, any> = {};
+    if (standingOrders !== undefined) {
+      if (standingOrders === null || standingOrders === "") {
+        patch.standingOrders = undefined;
+      } else if (typeof standingOrders === "string") {
+        patch.standingOrders = standingOrders.trim().slice(0, 500);
+      } else {
+        return reply.code(400).send({ error: "standingOrders must be a string or null" });
+      }
+    }
+    if (typeof autoProgress === "boolean") patch.autoProgress = autoProgress;
+    if (typeof ignoreWeakMobs === "boolean") patch.ignoreWeakMobs = ignoreWeakMobs;
+    if (homeZone !== undefined) {
+      if (homeZone === null || homeZone === "") {
+        patch.homeZone = undefined;
+      } else if (typeof homeZone === "string") {
+        const validation = await validateTravelTargetForWallet(authWallet, homeZone);
+        if (!validation.normalizedTargetZone) {
+          return reply.code(400).send({ error: validation.error ?? `Unknown zone: ${homeZone}` });
+        }
+        patch.homeZone = validation.normalizedTargetZone;
+      } else {
+        return reply.code(400).send({ error: "homeZone must be a string or null" });
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return reply.code(400).send({ error: "No valid fields to update" });
+    }
+
+    await patchAgentConfig(authWallet, patch);
+
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[STANDING ORDERS] ${JSON.stringify(patch)}`,
+      ts: Date.now(),
+    });
+
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) runner.clearScript();
 
     return reply.send({ ok: true, updated: patch });
   });

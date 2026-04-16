@@ -329,6 +329,13 @@ export async function sendInboxMessage(
   return postJsonWithFallback("/inbox/send", token, body);
 }
 
+export async function logoutCharacter(
+  token: string,
+  body: { zoneId: string; entityId: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/logout", token, body);
+}
+
 export async function sendNpcDialogue(
   token: string,
   npcEntityId: string,
@@ -425,6 +432,67 @@ export async function joinPvpQueue(
 export async function fetchPvpLeaderboard(): Promise<PvpLeaderboardEntry[]> {
   const data = await fetchJsonWithFallback<{ leaderboard: PvpLeaderboardEntry[] }>("/api/pvp/leaderboard");
   return data?.leaderboard ?? [];
+}
+
+export async function fetchActiveBattles(): Promise<ActiveBattle[]> {
+  const data = await fetchJsonWithFallback<{ battles: ActiveBattle[] }>("/api/pvp/battles/active");
+  return data?.battles ?? [];
+}
+
+export async function fetchQueueStatus(agentId?: string): Promise<{ queues: QueueStatusEntry[]; queuedFormats: string[] }> {
+  const url = agentId ? `/api/pvp/queue/all?agentId=${encodeURIComponent(agentId)}` : "/api/pvp/queue/all";
+  const data = await fetchJsonWithFallback<{ queues: QueueStatusEntry[]; queuedFormats?: string[] }>(url);
+  return { queues: data?.queues ?? [], queuedFormats: data?.queuedFormats ?? [] };
+}
+
+export async function leavePvpQueue(
+  token: string,
+  body: { agentId: string; format: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/api/pvp/queue/leave", token, body);
+}
+
+export async function fetchCurrentBattle(agentId: string): Promise<{ inBattle: boolean; battleId?: string; status?: string } | null> {
+  return fetchJsonWithFallback<{ inBattle: boolean; battleId?: string; status?: string }>(`/api/pvp/player/${encodeURIComponent(agentId)}/current-battle`);
+}
+
+export async function fetchBattleDetails(battleId: string): Promise<BattleDetails | null> {
+  return fetchJsonWithFallback<BattleDetails>(`/api/pvp/battle/${encodeURIComponent(battleId)}`);
+}
+
+export interface ActiveBattle {
+  battleId: string;
+  status: string;
+  config: {
+    format: string;
+    arena: { name: string };
+    teamRed: Array<{ name: string }>;
+    teamBlue: Array<{ name: string }>;
+  };
+  turnCount: number;
+  winner?: "red" | "blue";
+}
+
+export interface QueueStatusEntry {
+  format: string;
+  playersInQueue: number;
+  playersNeeded: number;
+  averageWaitTime: number;
+}
+
+export interface BattleDetails {
+  battleId: string;
+  status: string;
+  turnCount: number;
+  winner?: "red" | "blue";
+  config: {
+    format: string;
+    arena: { name: string };
+    teamRed: Array<{ name: string; hp: number; maxHp: number; level: number }>;
+    teamBlue: Array<{ name: string; hp: number; maxHp: number; level: number }>;
+  };
+  combatLog?: Array<{ turn: number; description: string }>;
+  mvp?: { name: string; damage: number };
 }
 
 // ── Professions ───────────────────────────────────────────────────
