@@ -241,7 +241,7 @@ def export_selection(output_path: Path, objects: list[bpy.types.Object]) -> None
         export_texcoords=True,
         export_normals=True,
         export_skins=True,
-        export_animations=False,
+        export_animations=True,
         export_materials="EXPORT",
     )
 
