@@ -85,7 +85,7 @@ const UNIQUE_CLASS_MODELS: Record<string, string> = {
  * Use the authored class looks in live rendering. Generic casual bodies remain
  * as a fallback when a class-specific asset is missing.
  */
-const ENABLE_UNIQUE_CLASS_MODELS = true;
+const ENABLE_UNIQUE_CLASS_MODELS = false;
 
 /** NPC type → model */
 const NPC_MODEL: Record<string, string> = {
