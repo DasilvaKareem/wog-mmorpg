@@ -16,6 +16,11 @@ const CHAR_BASE = new URL(
   "models/characters/",
   new URL(import.meta.env.BASE_URL, window.location.href),
 ).href;
+const CHARACTER_MODEL_VERSION = "2026-04-15c";
+
+function characterModelUrl(name: string, ext: "glb" | "gltf"): string {
+  return `${CHAR_BASE}${name}.${ext}?v=${CHARACTER_MODEL_VERSION}`;
+}
 
 /* ── WoG class → Quaternius model mapping ─────────────────────────── */
 
@@ -419,7 +424,7 @@ export class CharacterAssets {
       const fail = (url: string, err: unknown, allowFallback: boolean) => {
         if (allowFallback) {
           console.warn(`[CharAssets] Failed to load ${url}, trying .gltf fallback`);
-          load(CHAR_BASE + name + ".gltf", false);
+          load(characterModelUrl(name, "gltf"), false);
           return;
         }
         console.error(`[CharAssets] Failed to load ${url}:`, err);
@@ -439,7 +444,7 @@ export class CharacterAssets {
         );
       };
 
-      load(CHAR_BASE + name + ".glb", true);
+      load(characterModelUrl(name, "glb"), true);
     });
 
     this.loading.set(name, promise);
