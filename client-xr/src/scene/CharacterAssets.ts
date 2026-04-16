@@ -16,10 +16,27 @@ const CHAR_BASE = new URL(
   "models/characters/",
   new URL(import.meta.env.BASE_URL, window.location.href),
 ).href;
-const CHARACTER_MODEL_VERSION = "2026-04-15c";
+const CHARACTER_MODEL_VERSION = "2026-04-15d";
+
+function appendCharacterVersion(url: string): string {
+  if (!url || url.startsWith("data:") || url.startsWith("blob:")) return url;
+  if (/[?&]v=/.test(url)) return url;
+  const separator = url.includes("?") ? "&" : "?";
+  return `${url}${separator}v=${CHARACTER_MODEL_VERSION}`;
+}
 
 function characterModelUrl(name: string, ext: "glb" | "gltf"): string {
-  return `${CHAR_BASE}${name}.${ext}?v=${CHARACTER_MODEL_VERSION}`;
+  return appendCharacterVersion(`${CHAR_BASE}${name}.${ext}`);
+}
+
+function createCharacterLoader(): GLTFLoader {
+  const manager = new THREE.LoadingManager();
+  manager.setURLModifier((url) => {
+    if (!url) return url;
+    if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+    return appendCharacterVersion(url);
+  });
+  return new GLTFLoader(manager);
 }
 
 /* ── WoG class → Quaternius model mapping ─────────────────────────── */
@@ -172,7 +189,7 @@ interface CachedModel {
 export class CharacterAssets {
   private cache = new Map<string, CachedModel>();
   private loading = new Map<string, Promise<CachedModel>>();
-  private loader = new GLTFLoader();
+  private loader = createCharacterLoader();
   private baseReady = false;
 
   /** Preload BaseCharacter + all class models so first spawn is instant */
