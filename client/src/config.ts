@@ -1,6 +1,34 @@
-/** API URL - use env when provided, otherwise hit the local shard directly in dev. */
-export const API_URL =
-  import.meta.env.VITE_API_URL || (import.meta.env.DEV ? "http://127.0.0.1:3000" : "");
+/** API URL resolution:
+ *  1) Use explicit env override when sane
+ *  2) In browser prod, prefer same-origin for worldofgeneva.com deployments
+ *  3) Local dev fallback to localhost shard
+ */
+function resolveApiUrl(): string {
+  const envUrl = (import.meta.env.VITE_API_URL || "").trim();
+  if (import.meta.env.DEV) {
+    return envUrl || "http://127.0.0.1:3000";
+  }
+
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname.toLowerCase();
+    const origin = window.location.origin;
+    const onWorldOfGeneva =
+      host === "worldofgeneva.com" ||
+      host === "www.worldofgeneva.com" ||
+      host.endsWith(".worldofgeneva.com");
+
+    // If the bundle was built with the legacy API host, force same-origin when
+    // running on worldofgeneva.com to avoid dead endpoint/CORS loops.
+    if (onWorldOfGeneva) {
+      if (!envUrl) return origin;
+      if (envUrl.includes("wog.urbantech.dev")) return origin;
+    }
+  }
+
+  return envUrl || "";
+}
+
+export const API_URL = resolveApiUrl();
 
 /** Asset CDN base URL — Cloudflare R2 in prod, local fallback in dev */
 export const ASSET_BASE_URL = import.meta.env.VITE_ASSET_BASE_URL || "";

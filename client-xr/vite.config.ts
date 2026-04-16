@@ -6,7 +6,7 @@ export default defineConfig(({ mode }) => {
   const apiUrl =
     env.VITE_API_URL ||
     env.API_URL ||
-    (isProd ? "https://wog.urbantech.dev" : "https://wog.urbantech.dev");
+    "http://127.0.0.1:3000";
 
   const proxyOpts = { target: apiUrl, changeOrigin: true, secure: true };
 
