@@ -1,31 +1,17 @@
 /** API URL resolution:
  *  1) Use explicit env override when sane
- *  2) In browser prod, prefer same-origin for worldofgeneva.com deployments
+ *  2) In browser prod, default to canonical shard host
  *  3) Local dev fallback to localhost shard
  */
+const PRODUCTION_API_FALLBACK = "https://wog.preyanshu.me";
+
 function resolveApiUrl(): string {
   const envUrl = (import.meta.env.VITE_API_URL || "").trim();
   if (import.meta.env.DEV) {
     return envUrl || "http://127.0.0.1:3000";
   }
 
-  if (typeof window !== "undefined") {
-    const host = window.location.hostname.toLowerCase();
-    const origin = window.location.origin;
-    const onWorldOfGeneva =
-      host === "worldofgeneva.com" ||
-      host === "www.worldofgeneva.com" ||
-      host.endsWith(".worldofgeneva.com");
-
-    // If the bundle was built with the legacy API host, force same-origin when
-    // running on worldofgeneva.com to avoid dead endpoint/CORS loops.
-    if (onWorldOfGeneva) {
-      if (!envUrl) return origin;
-      if (envUrl.includes("wog.urbantech.dev")) return origin;
-    }
-  }
-
-  return envUrl || "";
+  return envUrl || PRODUCTION_API_FALLBACK;
 }
 
 export const API_URL = resolveApiUrl();
