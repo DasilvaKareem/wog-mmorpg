@@ -76,7 +76,7 @@ export function registerForgedTechniqueRoutes(server: FastifyInstance): void {
         return reply.status(404).send({ error: "Player entity not found" });
       }
 
-      if (!verifyEntityOwnership(player.walletAddress, authenticatedWallet)) {
+      if (!(await verifyEntityOwnership(player.walletAddress, authenticatedWallet, playerEntityId))) {
         return reply.status(403).send({ error: "Not authorized to control this player" });
       }
 

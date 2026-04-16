@@ -110,7 +110,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
 
     // Verify ownership
-    if (!verifyEntityOwnership(player.walletAddress, authenticatedWallet)) {
+    if (!(await verifyEntityOwnership(player.walletAddress, authenticatedWallet, playerEntityId))) {
       return reply.status(403).send({ error: "Not authorized to control this player" });
     }
 
@@ -261,7 +261,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
 
     // Verify ownership
-    if (!verifyEntityOwnership(caster.walletAddress, authenticatedWallet)) {
+    if (!(await verifyEntityOwnership(caster.walletAddress, authenticatedWallet, casterEntityId))) {
       return reply.status(403).send({ error: "Not authorized to control this caster" });
     }
 

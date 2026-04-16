@@ -19,7 +19,7 @@ const CHAR_BASE = new URL(
 
 /* ── WoG class → Quaternius model mapping ─────────────────────────── */
 
-/** Which GLB to load for each WoG class — base clothed models with class-tinted outfit */
+/** Generic fallback bodies used when a class-specific asset is unavailable. */
 const CLASS_TO_MODEL: Record<string, string> = {
   warrior:  "Casual_Male",
   mage:     "Casual2_Male",
@@ -31,7 +31,7 @@ const CLASS_TO_MODEL: Record<string, string> = {
   monk:     "Casual3_Male",
 };
 
-/** Female overrides */
+/** Female generic fallback bodies. */
 const CLASS_TO_MODEL_FEMALE: Record<string, string> = {
   warrior:  "Casual_Female",
   mage:     "Casual2_Female",
@@ -44,26 +44,26 @@ const CLASS_TO_MODEL_FEMALE: Record<string, string> = {
 };
 
 /**
- * Hand-authored class bodies from the stripped Quaternius RPG pack.
- * These are self-contained looks, so we prefer them over the generic casual set.
+ * Hand-authored default class bodies from the stripped Quaternius RPG pack.
+ * These point at our tintable re-exports: the outfit stays authored and baked,
+ * while skin and hair are split into separate tintable layers.
  */
 const UNIQUE_CLASS_MODELS: Record<string, string> = {
-  warrior: "Warrior",
-  paladin: "Warrior",
-  cleric: "Cleric",
-  ranger: "Ranger",
-  rogue: "Rogue",
-  monk: "Monk",
-  mage: "Wizard",
-  warlock: "Wizard",
+  warrior: "Warrior_Tintable",
+  paladin: "Warrior_Tintable",
+  cleric: "Cleric_Tintable",
+  ranger: "Ranger_Tintable",
+  rogue: "Rogue_Tintable",
+  monk: "Monk_Tintable",
+  mage: "Wizard_Tintable",
+  warlock: "Wizard_Tintable",
 };
 
 /**
- * Keep imported class bodies disabled in live player rendering until each model
- * has been validated end-to-end. The armor donor pipeline can still use the
- * modular exports independently.
+ * Use the authored class looks in live rendering. Generic casual bodies remain
+ * as a fallback when a class-specific asset is missing.
  */
-const ENABLE_UNIQUE_CLASS_MODELS = false;
+const ENABLE_UNIQUE_CLASS_MODELS = true;
 
 /** NPC type → model */
 const NPC_MODEL: Record<string, string> = {

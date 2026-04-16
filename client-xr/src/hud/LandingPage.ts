@@ -39,22 +39,22 @@ export class LandingPage {
           <div class="xr-landing-logo-mark">W</div>
           <div class="xr-landing-logo-copy">
             <span class="xr-landing-kicker">World of Geneva</span>
-            <h1>Sign In</h1>
+            <h1 data-brand-title>Sign In</h1>
           </div>
         </div>
-        <p>Choose a sign-in method, then enter the world and continue into character selection.</p>
+        <p data-brand-subtitle>Choose a sign-in method, then enter the world and continue into character selection.</p>
       </div>
 
       <div class="xr-landing-auth-pill" hidden>Signed in</div>
 
       <section class="xr-landing-view active">
-        <div class="xr-landing-copy">
+        <div class="xr-landing-copy" data-signin-only>
           <h2>One account flow</h2>
           <p>Sign in once, then use Enter World to open the character flow.</p>
         </div>
-        <div class="xr-landing-socials" data-socials="sign-in"></div>
-        <div class="xr-landing-divider"><span>or with email</span></div>
-        <div class="xr-landing-form" data-email-flow>
+        <div class="xr-landing-socials" data-socials="sign-in" data-signin-only></div>
+        <div class="xr-landing-divider" data-signin-only><span>or with email</span></div>
+        <div class="xr-landing-form" data-email-flow data-signin-only>
           <label class="xr-landing-field">
             <span>Email</span>
             <input name="email" type="email" autocomplete="email" placeholder="you@example.com" />
@@ -69,7 +69,7 @@ export class LandingPage {
           </div>
         </div>
         <div class="xr-landing-actions xr-landing-actions-stack">
-          <button type="button" class="xr-landing-btn xr-landing-btn-secondary" data-action="continue-world" disabled>Enter World</button>
+          <button type="button" class="xr-landing-btn xr-landing-btn-primary xr-landing-btn-play" data-action="continue-world" disabled>Enter World</button>
         </div>
         <button type="button" class="xr-landing-quiet xr-landing-signout" data-action="sign-out" hidden>Sign Out</button>
       </section>
@@ -242,10 +242,23 @@ export class LandingPage {
   private refreshActionState() {
     const signedIn = Boolean(this.walletAddress);
     this.continueBtn.disabled = !this.ready || !signedIn;
-    this.continueBtn.textContent = "Enter World";
+    this.continueBtn.textContent = signedIn ? "Play Now" : "Enter World";
     this.authPill.hidden = !signedIn;
     this.authPill.textContent = signedIn ? `Signed in · ${this.truncateAddress(this.walletAddress!)}` : "Signed in";
     this.signOutBtn.hidden = !signedIn;
+
+    this.panel.querySelectorAll<HTMLElement>("[data-signin-only]").forEach((el) => {
+      el.style.display = signedIn ? "none" : "";
+    });
+
+    const title = this.panel.querySelector<HTMLElement>("[data-brand-title]");
+    const subtitle = this.panel.querySelector<HTMLElement>("[data-brand-subtitle]");
+    if (title) title.textContent = signedIn ? "Welcome Back" : "Sign In";
+    if (subtitle) {
+      subtitle.textContent = signedIn
+        ? "You're signed in. Jump back into the world and continue your adventure."
+        : "Choose a sign-in method, then enter the world and continue into character selection.";
+    }
   }
 
   private async runBusy(label: string, fn: () => Promise<void>) {

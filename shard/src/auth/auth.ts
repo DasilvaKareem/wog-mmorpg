@@ -255,12 +255,25 @@ export function registerAuthRoutes(server: FastifyInstance): void {
 }
 
 /**
- * Helper to verify wallet owns the entity they're trying to control
+ * Helper to verify wallet owns the entity they're trying to control.
+ * Checks direct match, then custodial wallet, then agent entity ref.
  */
-export function verifyEntityOwnership(
+export async function verifyEntityOwnership(
   entityWallet: string | undefined,
-  requestWallet: string
-): boolean {
+  requestWallet: string,
+  entityId?: string,
+): Promise<boolean> {
   if (!entityWallet) return false;
-  return entityWallet.toLowerCase() === requestWallet.toLowerCase();
+  if (entityWallet.toLowerCase() === requestWallet.toLowerCase()) return true;
+
+  const { getAgentCustodialWallet, getAgentEntityRef } = await import("../agents/agentConfigStore.js");
+  const custodial = await getAgentCustodialWallet(requestWallet);
+  if (custodial && entityWallet.toLowerCase() === custodial.toLowerCase()) return true;
+
+  if (entityId) {
+    const ref = await getAgentEntityRef(requestWallet);
+    if (ref && ref.entityId === entityId) return true;
+  }
+
+  return false;
 }

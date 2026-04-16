@@ -32,6 +32,7 @@ import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
+import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
 import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage } from "./api.js";
@@ -286,6 +287,7 @@ function setGameplayHudVisible(visible: boolean) {
     "intent-tooltip",
     "intent-mode-badge",
     "quest-panel",
+    "vitals-panel",
   ];
 
   for (const id of ids) {
@@ -644,6 +646,7 @@ const questPanel = new QuestPanel({
 
 const bagPanel = new BagPanel();
 const skillsPanel = new SkillsPanel();
+const vitalsPanel = new VitalsPanel();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
 const INVENTORY_POLL_INTERVAL = 10_000;
@@ -778,6 +781,7 @@ async function pollNearbyZones() {
     }
 
     updateRunPanelFromEntity(ownEntityId ? merged[ownEntityId] : null);
+    vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
 
     // Minimap — pass camera in server coords
     minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
