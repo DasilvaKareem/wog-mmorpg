@@ -22,7 +22,7 @@ jobs:
           host: ${{ secrets.WOG_VM_HOST }}
           username: ${{ secrets.WOG_VM_USER }}
           key: ${{ secrets.WOG_VM_SSH_KEY }}
-          port: ${{ secrets.WOG_VM_PORT || '22' }}
+          port: ${{ secrets.WOG_VM_PORT }}
           script_stop: true
           script: |
             set -euo pipefail
