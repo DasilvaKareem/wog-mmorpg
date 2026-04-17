@@ -31,8 +31,7 @@ run-demo-agent.ts
 # Test scripts
 test-*.sh
 
-# Local data
-shard/data/
+
 
 # Logs
 /tmp/
