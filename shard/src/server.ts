@@ -865,9 +865,9 @@ registerCharacterRoutes(server);
 registerTradeRoutes(server);
 registerEquipmentRoutes(server);
 registerAuctionHouseRoutes(server);
-if (RUN_BACKGROUND_WORKERS) registerAuctionHouseTick(server);
+registerAuctionHouseTick(server);
 registerGuildRoutes(server);
-if (RUN_BACKGROUND_WORKERS) registerGuildTick(server);
+registerGuildTick(server);
 registerGuildVaultRoutes(server);
 registerMiningRoutes(server);
 registerProfessionRoutes(server);
@@ -910,7 +910,7 @@ registerNameServiceRoutes(server);
 registerDungeonGateRoutes(server);
 registerEssenceTechniqueRoutes(server);
 registerForgedTechniqueRoutes(server);
-if (RUN_BACKGROUND_WORKERS) registerDungeonGateTick(server);
+registerDungeonGateTick(server);
 registerFarmingRoutes(server);
 registerPlotRoutes(server);
 registerBuildingRoutes(server);
@@ -919,13 +919,9 @@ registerDiaryRoutes(server);
 registerNotificationRoutes(server);
 registerWebPushRoutes(server);
 initDungeonLootTables();
-if (RUN_BACKGROUND_WORKERS) {
-  startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
-}
+startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
 spawnNpcs();
-if (!RUN_BACKGROUND_WORKERS) {
-  server.log.info("[merchant] RUN_BACKGROUND_WORKERS=false — merchant tick disabled on this node");
-} else if (SKIP_MERCHANT_BOOTSTRAP) {
+if (SKIP_MERCHANT_BOOTSTRAP) {
   server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
 } else {
   registerMerchantAgentTick(server);
@@ -942,11 +938,9 @@ spawnNectarNodes();
 spawnCropNodes();
 
 // Mob respawner - check every 5 seconds
-if (RUN_BACKGROUND_WORKERS) {
-  setInterval(() => {
-    tickMobRespawner();
-  }, MOB_RESPAWNER_INTERVAL_MS);
-}
+setInterval(() => {
+  tickMobRespawner();
+}, MOB_RESPAWNER_INTERVAL_MS);
 
 const start = async () => {
   server.log.info(
