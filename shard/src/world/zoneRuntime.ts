@@ -503,6 +503,7 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 250; // 4 ticks per second — tighter combat + smoother motion
 const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
+const ZONE_RESPONSE_CACHE_MS = Math.max(50, Number.parseInt(process.env.ZONE_RESPONSE_CACHE_MS ?? "500", 10) || 500);
 const WALK_MOVE_SPEED = 7.5; // units per tick (was 30/tick @ 1s; same real speed at 250ms)
 const RUN_MOVE_SPEED = 15; // units per tick (was 60/tick @ 1s)
 const DEFAULT_RUN_ENERGY = 100;
@@ -523,6 +524,7 @@ interface PartyTargetLock {
 const partyTargetLocks = new Map<string, PartyTargetLock>();
 const LIVE_PLAYER_IDS_KEY = "world:live-players";
 const LIVE_PLAYER_KEY_PREFIX = "world:live-player:";
+const zoneResponseCache = new Map<string, { expiresAt: number; payload: unknown }>();
 
 interface PersistedLivePlayer {
   entity: Record<string, unknown>;
@@ -3630,7 +3632,18 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
-      return buildZoneDetail(zoneId);
+      const cacheKey = `zone:${zoneId}`;
+      const now = Date.now();
+      const cached = zoneResponseCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return cached.payload;
+      }
+      const payload = buildZoneDetail(zoneId);
+      zoneResponseCache.set(cacheKey, {
+        expiresAt: now + ZONE_RESPONSE_CACHE_MS,
+        payload,
+      });
+      return payload;
     }
   );
 

@@ -70,7 +70,8 @@ gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
 echo "[5/5] Restarting PM2..."
 gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
   sudo -iu $PM2_RUNTIME_USER env PM2_HOME=$PM2_RUNTIME_HOME bash -lc 'cd $REMOTE_DIR && \
-    (pm2 restart wog-mmorpg 2>/dev/null || pm2 restart wog-shard 2>/dev/null || pm2 start $REMOTE_DIR/dist/server.js --name wog-mmorpg --cwd $REMOTE_DIR) && \
+    (RUN_BLOCKCHAIN_WORKERS=false pm2 restart wog-mmorpg --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=false pm2 restart wog-shard --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=false pm2 start $REMOTE_DIR/dist/server.js --name wog-mmorpg --cwd $REMOTE_DIR) && \
+    (RUN_BLOCKCHAIN_WORKERS=true pm2 restart wog-blockchain-worker --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=true pm2 start $REMOTE_DIR/dist/blockchainWorker.js --name wog-blockchain-worker --cwd $REMOTE_DIR) && \
     (pm2 restart wog-mcp 2>/dev/null || pm2 start $REMOTE_DIR/mcp/dist/index.js --name wog-mcp --cwd $REMOTE_DIR/mcp) && \
     pm2 save' && \
   SHARD_ATTEMPT=1 && \
@@ -83,6 +84,16 @@ gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
     SHARD_ATTEMPT=\$((SHARD_ATTEMPT + 1)); \
     sleep 5; \
   done && echo ' <- shard OK' && \
+  WORKER_ATTEMPT=1 && \
+  until curl --max-time 10 -sf http://localhost:3002/health; do \
+    if [ \$WORKER_ATTEMPT -ge 12 ]; then \
+      echo 'Blockchain worker health check failed after 12 attempts'; \
+      exit 1; \
+    fi; \
+    echo \"waiting for blockchain worker health (\$WORKER_ATTEMPT/12)\"; \
+    WORKER_ATTEMPT=\$((WORKER_ATTEMPT + 1)); \
+    sleep 5; \
+  done && echo ' <- blockchain worker OK' && \
   MCP_ATTEMPT=1 && \
   until curl --max-time 10 -sf http://localhost:3001/health; do \
     if [ \$MCP_ATTEMPT -ge 12 ]; then \

@@ -17,12 +17,18 @@ import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
+import { isPostgresConfigured, postgresQuery } from "../db/postgres.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { logDiary, narrativeSpawn } from "../social/diary.js";
 import { getWorldLayout, getZoneOffset } from "./worldLayout.js";
 import { rehydratePartyMembership } from "../social/partySystem.js";
+import {
+  enqueueCharacterBootstrap,
+  loadCharacterBootstrapJob,
+  processCharacterBootstrapJob,
+} from "../character/characterBootstrap.js";
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -93,6 +99,29 @@ function parseAgentId(value: string | undefined): bigint | undefined {
   }
 }
 
+async function resolvePreferredWalletCharacterName(walletAddress: string): Promise<string | null> {
+  if (!isPostgresConfigured()) return null;
+  try {
+    const normalized = walletAddress.toLowerCase();
+    const { rows } = await postgresQuery<{ character_name: string | null }>(
+      `
+        select character_name
+        from game.wallet_links
+        where custodial_wallet = $1
+          and character_name is not null
+          and btrim(character_name) <> ''
+        order by updated_at desc
+        limit 1
+      `,
+      [normalized]
+    );
+    const value = rows[0]?.character_name?.trim();
+    return value && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 export function registerSpawnOrders(server: FastifyInstance) {
   async function controlsWallet(authenticatedWallet: string, targetWallet: string | undefined): Promise<boolean> {
     if (!targetWallet) return false;
@@ -106,23 +135,32 @@ export function registerSpawnOrders(server: FastifyInstance) {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
     const {
-      zoneId, type, name, x = 0, y = 0, hp,
+      zoneId, type, name: requestedName, x = 0, y = 0, hp,
       walletAddress, level, xp, xpReward, characterTokenId, raceId, classId, calling, gender,
       skinColor, hairStyle, eyeColor, origin, agentId,
     } = request.body;
 
     const authenticatedWallet = (request as any).walletAddress;
 
-    if (!zoneId || !type || !name) {
+    if (!zoneId || !type || !requestedName) {
       reply.code(400);
       return { error: "zoneId, type, and name are required" };
     }
+    let name = requestedName;
 
     // Verify authenticated wallet matches the entity's wallet (for players)
     if (type === "player" && walletAddress) {
       if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
         reply.code(403);
         return { error: "Not authorized to spawn entity for this wallet" };
+      }
+
+      // Canonicalize spawn name from wallet_links so stale client-side names
+      // cannot reintroduce old aliases after reconnect/restart.
+      const preferredName = await resolvePreferredWalletCharacterName(walletAddress);
+      if (preferredName && preferredName.toLowerCase() !== name.toLowerCase()) {
+        server.log.info(`[spawn] Canonicalized ${walletAddress} name "${name}" -> "${preferredName}" from wallet_links`);
+        name = preferredName;
       }
 
       // Enforce one player per wallet across the entire shard
@@ -305,6 +343,30 @@ export function registerSpawnOrders(server: FastifyInstance) {
         maxRunEnergy: resolvedMaxRunEnergy,
         runModeEnabled: resolvedRunModeEnabled,
       });
+
+      // First-save spawn path can create a durable character row without passing
+      // through /character/create. Ensure bootstrap is queued exactly once so we
+      // don't leave unregistered characters behind and don't duplicate active jobs.
+      if (!verifiedIdentityPatch.agentId) {
+        try {
+          const existingJob = await loadCharacterBootstrapJob(walletAddress, entity.name);
+          const hasActiveJob = existingJob != null
+            && !["completed", "failed_retryable", "failed_permanent"].includes(existingJob.status);
+          if (!hasActiveJob) {
+            await enqueueCharacterBootstrap(
+              walletAddress,
+              entity.name,
+              "spawn:first-save",
+              ["wog:a2a-enabled"]
+            );
+            void processCharacterBootstrapJob(walletAddress, entity.name, server.log);
+          }
+        } catch (err) {
+          server.log.warn(
+            `[spawn] Failed to auto-queue bootstrap for ${walletAddress}:${entity.name}: ${String((err as Error)?.message ?? err).slice(0, 160)}`
+          );
+        }
+      }
     }
 
     zone.entities.set(entity.id, entity);

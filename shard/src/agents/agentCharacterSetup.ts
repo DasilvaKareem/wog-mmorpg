@@ -17,7 +17,7 @@ import {
   defaultConfig,
 } from "./agentConfigStore.js";
 import { authenticateWithWallet } from "../auth/authHelper.js";
-import { loadCharacter } from "../character/characterStore.js";
+import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
 import { extractRawCharacterName } from "./agentUtils.js";
@@ -99,7 +99,8 @@ export async function setupAgentCharacter(
   characterName: string,
   raceId: string,
   classId: string,
-  calling?: "adventurer" | "farmer" | "merchant" | "craftsman"
+  calling?: "adventurer" | "farmer" | "merchant" | "craftsman",
+  options?: { preventCreateIfMissing?: boolean }
 ): Promise<CharacterSetupResult> {
   const existing = await getAgentCustodialWallet(userWallet);
   const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
@@ -212,6 +213,20 @@ export async function setupAgentCharacter(
   const existingSave = await loadCharacter(custodialAddress, characterName);
   if (existingSave) {
     console.log(`[agentSetup] Character "${characterName}" already saved (L${existingSave.level}) — skipping create`);
+  } else if (options?.preventCreateIfMissing) {
+    // Deterministic deploy path: never auto-create a second same-name character.
+    // If owner has this character, mirror state into custodial storage; otherwise fail.
+    const ownerSave = await loadCharacter(userWallet, characterName);
+    if (!ownerSave) {
+      throw new Error(`Selected character "${characterName}" not found for deploy (auto-create disabled)`);
+    }
+    await saveCharacter(custodialAddress, characterName, {
+      ...ownerSave,
+      name: characterName,
+      raceId: ownerSave.raceId ?? raceId,
+      classId: ownerSave.classId ?? classId,
+    });
+    console.log(`[agentSetup] Mirrored owner character "${characterName}" into custodial state for deterministic deploy`);
   } else {
     try {
       await apiCall("POST", "/character/create", {

@@ -11,7 +11,7 @@ import { getContract, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { mintTo, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
 import { thirdwebClient, skaleBase } from "../blockchain/chain.js";
-import { createManagedFeeProvider, resolveManagedFeeOverrides } from "../blockchain/feePolicy.js";
+import { createManagedFeeProvider, resolveManagedFeeOverrides, toManagedTxFeeFields } from "../blockchain/feePolicy.js";
 import { getCatalogItemsInChainOrder } from "./itemTokenMapping.js";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -103,14 +103,11 @@ async function main() {
           nft: DEV_ENABLED ? toInlineMetadataUri(nftMetadata) : nftMetadata,
         });
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
-        const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
+        const txFees = toManagedTxFeeFields(managedFees);
+        const txWithManagedFees: any = { ...tx, ...txFees };
+        delete txWithManagedFees.type;
         const receipt = await sendTransaction({
-          transaction: {
-            ...tx,
-            gasPrice: undefined,
-            ...eip1559Fees,
-            type: undefined,
-          },
+          transaction: txWithManagedFees,
           account: serverAccount,
         });
         console.log(`  tx: ${receipt.transactionHash}`);

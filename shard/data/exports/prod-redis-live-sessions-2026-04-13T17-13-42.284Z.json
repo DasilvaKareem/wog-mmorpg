@@ -1,0 +1,3502 @@
+{
+  "exportedAt": "2026-04-13T17:13:42.282Z",
+  "source": {
+    "type": "redis",
+    "keySet": "world:live-players",
+    "keyPrefix": "world:live-player:"
+  },
+  "counts": {
+    "liveSessions": 35
+  },
+  "liveSessions": [
+    {
+      "walletAddress": "0x089839d8c27b6c294c499dcf9ac4939ac02ef033",
+      "entityId": "255152ee-ef95-49b0-9817-6bfe39cd2e9b",
+      "zoneId": "stormbreak-pass",
+      "sessionState": {
+        "entity": {
+          "id": "255152ee-ef95-49b0-9817-6bfe39cd2e9b",
+          "type": "player",
+          "name": "bartholomew",
+          "x": 1600,
+          "y": -320,
+          "hp": 108,
+          "maxHp": 108,
+          "essence": 222,
+          "maxEssence": 222,
+          "createdAt": 1774415157140,
+          "walletAddress": "0x089839d8c27b6c294c499dcf9ac4939ac02ef033",
+          "level": 13,
+          "xp": 16900,
+          "raceId": "elf",
+          "classId": "warlock",
+          "stats": {
+            "str": 24,
+            "def": 24,
+            "hp": 108,
+            "agi": 34,
+            "int": 89,
+            "mp": 98,
+            "faith": 41,
+            "luck": 73,
+            "essence": 250
+          },
+          "kills": 3322,
+          "activeQuests": [],
+          "completedQuests": [
+            "welcome_adventurer",
+            "traders_bargain",
+            "blacksmiths_offer",
+            "mining_101",
+            "blacksmithing_101",
+            "rat_extermination",
+            "mining_102",
+            "wolf_hunter_1",
+            "boar_bounty",
+            "blacksmithing_102",
+            "goblin_menace",
+            "slime_cleanup",
+            "bandit_problem",
+            "alpha_threat",
+            "herbalism_101",
+            "herbalism_102",
+            "dwarven_exile",
+            "shadows_of_the_chasm",
+            "felsrock_memories"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "warlock_shadow_bolt",
+            "warlock_curse_of_weakness",
+            "warlock_drain_life",
+            "warlock_soul_shield"
+          ],
+          "pendingQuestApprovals": [
+            "voice_of_the_woods",
+            "bear_necessities"
+          ],
+          "equipment": {},
+          "effectiveStats": {
+            "str": 24,
+            "def": 24,
+            "hp": 108,
+            "agi": 34,
+            "int": 89,
+            "mp": 98,
+            "faith": 41,
+            "luck": 73,
+            "essence": 250
+          },
+          "region": "stormbreak-pass",
+          "gotoMode": false,
+          "lastCombatTick": 8599,
+          "cooldowns": {
+            "warlock_soul_shield": 8611,
+            "warlock_curse_of_weakness": 8598,
+            "warlock_shadow_bolt": 8586,
+            "warlock_drain_life": 8589
+          },
+          "lastTechniqueId": "warlock_shadow_bolt",
+          "lastTechniqueTick": 8582,
+          "activeEffects": []
+        },
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863311869
+      },
+      "summary": {
+        "name": "bartholomew",
+        "level": 13,
+        "classId": "warlock",
+        "raceId": "elf",
+        "x": 1600,
+        "y": -320,
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863311869
+      }
+    },
+    {
+      "walletAddress": "0x149ef0c596ca55d33ac1b841cc80ebed45c3682d",
+      "entityId": "f0d6aae3-3ad0-4643-a2e7-84a83790041d",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "f0d6aae3-3ad0-4643-a2e7-84a83790041d",
+          "type": "player",
+          "name": "Boellis",
+          "x": 306,
+          "y": 260,
+          "hp": 122,
+          "maxHp": 122,
+          "essence": 113,
+          "maxEssence": 113,
+          "createdAt": 1775956451398,
+          "walletAddress": "0x149ef0c596ca55d33ac1b841cc80ebed45c3682d",
+          "level": 6,
+          "xp": 4694,
+          "raceId": "beastkin",
+          "classId": "paladin",
+          "gender": "male",
+          "skinColor": "pale",
+          "hairStyle": "braided",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 49,
+            "def": 61,
+            "hp": 122,
+            "agi": 19,
+            "int": 12,
+            "mp": 24,
+            "faith": 61,
+            "luck": 20,
+            "essence": 122
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 27,
+          "activeQuests": [
+            {
+              "questId": "blacksmithing_102",
+              "progress": 1,
+              "startedAt": 1775956480763
+            }
+          ],
+          "completedQuests": [
+            "mining_101",
+            "blacksmithing_101",
+            "rat_extermination",
+            "mining_102"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 49,
+            "def": 61,
+            "hp": 122,
+            "agi": 19,
+            "int": 12,
+            "mp": 24,
+            "faith": 61,
+            "luck": 20,
+            "essence": 122
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "order": {
+            "action": "move",
+            "x": 320,
+            "y": 260
+          },
+          "lastCombatTick": 12193,
+          "activeEffects": [],
+          "equipment": {
+            "weapon": {
+              "tokenId": 41,
+              "name": "Basic Sickle",
+              "xrVisualId": null,
+              "durability": 29,
+              "maxDurability": 35,
+              "broken": false
+            }
+          }
+        },
+        "professions": [
+          "alchemy",
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100418615
+      },
+      "summary": {
+        "name": "Boellis",
+        "level": 6,
+        "classId": "paladin",
+        "raceId": "beastkin",
+        "x": 306,
+        "y": 260,
+        "professions": [
+          "alchemy",
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100418615
+      }
+    },
+    {
+      "walletAddress": "0x1b75a1349ab32202a92abbee905fc425545810f1",
+      "entityId": "79338572-5bd4-4199-910a-da2206c5d52d",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "79338572-5bd4-4199-910a-da2206c5d52d",
+          "type": "player",
+          "name": "TheSpiralArchitect",
+          "x": 315.97458993343247,
+          "y": 289.58094917087266,
+          "hp": 285,
+          "maxHp": 285,
+          "essence": 231,
+          "maxEssence": 231,
+          "createdAt": 1774331180697,
+          "walletAddress": "0x1b75a1349ab32202a92abbee905fc425545810f1",
+          "level": 35,
+          "xp": 124096,
+          "characterTokenId": "360",
+          "raceId": "beastkin",
+          "classId": "monk",
+          "stats": {
+            "str": 158,
+            "def": 88,
+            "hp": 281,
+            "agi": 203,
+            "int": 33,
+            "mp": 35,
+            "faith": 53,
+            "luck": 232,
+            "essence": 299
+          },
+          "kills": 6337,
+          "activeQuests": [
+            {
+              "questId": "rat_extermination",
+              "progress": 0,
+              "startedAt": 1774458782826
+            }
+          ],
+          "completedQuests": [
+            "blacksmithing_101"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "monk_palm_strike",
+            "monk_inner_focus",
+            "monk_disable",
+            "monk_chi_burst",
+            "monk_meditation"
+          ],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_102"
+          ],
+          "equipment": {
+            "chest": {
+              "tokenId": 8,
+              "name": "Leather Vest",
+              "durability": 70,
+              "maxDurability": 70,
+              "broken": false
+            }
+          },
+          "effectiveStats": {
+            "str": 158,
+            "def": 92,
+            "hp": 285,
+            "agi": 203,
+            "int": 33,
+            "mp": 35,
+            "faith": 53,
+            "luck": 232,
+            "essence": 299
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "cooldowns": {
+            "monk_inner_focus": 60480,
+            "monk_disable": 60486,
+            "monk_chi_burst": 60477,
+            "monk_palm_strike": 60468
+          },
+          "activeEffects": [],
+          "lastCombatTick": 77
+        },
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1775863311686
+      },
+      "summary": {
+        "name": "TheSpiralArchitect",
+        "level": 35,
+        "classId": "monk",
+        "raceId": "beastkin",
+        "x": 315.97458993343247,
+        "y": 289.58094917087266,
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1775863311686
+      }
+    },
+    {
+      "walletAddress": "0x21fe805ba5a60b63afcc654009a18b0820425856",
+      "entityId": "0dfcf1e3-9af3-4a8c-a23f-cc6cba4ffb42",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "0dfcf1e3-9af3-4a8c-a23f-cc6cba4ffb42",
+          "type": "player",
+          "name": "millis",
+          "x": 291.26330032585463,
+          "y": 495.5201424529332,
+          "hp": 153,
+          "maxHp": 153,
+          "essence": 109,
+          "maxEssence": 109,
+          "createdAt": 1775946943263,
+          "walletAddress": "0x21fe805ba5a60b63afcc654009a18b0820425856",
+          "level": 19,
+          "xp": 39281,
+          "characterTokenId": "465",
+          "raceId": "beastkin",
+          "classId": "rogue",
+          "gender": "male",
+          "skinColor": "dark",
+          "hairStyle": "braided",
+          "eyeColor": "amber",
+          "stats": {
+            "str": 61,
+            "def": 41,
+            "hp": 153,
+            "agi": 118,
+            "int": 19,
+            "mp": 20,
+            "faith": 20,
+            "luck": 202,
+            "essence": 143
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 326,
+          "activeQuests": [
+            {
+              "questId": "blacksmithing_103",
+              "progress": 0,
+              "startedAt": 1775947333122
+            },
+            {
+              "questId": "mining_104",
+              "progress": 0,
+              "startedAt": 1775948703867
+            },
+            {
+              "questId": "skinning_103",
+              "progress": 0,
+              "startedAt": 1775951778464
+            }
+          ],
+          "completedQuests": [
+            "mining_101",
+            "blacksmithing_101",
+            "rat_extermination",
+            "mining_102",
+            "wolf_hunter_1",
+            "blacksmithing_102",
+            "boar_bounty",
+            "goblin_menace",
+            "slime_cleanup",
+            "bandit_problem",
+            "alpha_threat",
+            "herbalism_101",
+            "herbalism_102",
+            "mining_103",
+            "herbalism_103",
+            "herbalism_104",
+            "alchemy_101",
+            "alchemy_102",
+            "alchemy_103",
+            "skinning_101",
+            "skinning_102"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 61,
+            "def": 41,
+            "hp": 153,
+            "agi": 118,
+            "int": 19,
+            "mp": 20,
+            "faith": 20,
+            "luck": 202,
+            "essence": 143
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "lastCombatTick": 148737,
+          "equipment": {},
+          "activeEffects": []
+        },
+        "professions": [
+          "alchemy",
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100417869
+      },
+      "summary": {
+        "name": "millis",
+        "level": 19,
+        "classId": "rogue",
+        "raceId": "beastkin",
+        "x": 291.26330032585463,
+        "y": 495.5201424529332,
+        "professions": [
+          "alchemy",
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100417869
+      }
+    },
+    {
+      "walletAddress": "0x34fdcdbec5448fb5aaa90348f6d782dd6ad20dc9",
+      "entityId": "5fdf04ea-1d37-4c1f-8f9b-a0b66e0b24e4",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "5fdf04ea-1d37-4c1f-8f9b-a0b66e0b24e4",
+          "type": "player",
+          "name": "neo7",
+          "x": 140.26194498817736,
+          "y": 158.58648389901654,
+          "hp": 113,
+          "maxHp": 113,
+          "essence": 70,
+          "maxEssence": 70,
+          "createdAt": 1775539867538,
+          "walletAddress": "0x34fdcdbec5448fb5aaa90348f6d782dd6ad20dc9",
+          "level": 11,
+          "xp": 13468,
+          "raceId": "human",
+          "classId": "rogue",
+          "stats": {
+            "str": 45,
+            "def": 30,
+            "hp": 113,
+            "agi": 83,
+            "int": 15,
+            "mp": 15,
+            "faith": 15,
+            "luck": 135,
+            "essence": 105
+          },
+          "kills": 2080,
+          "activeQuests": [],
+          "completedQuests": [
+            "mining_101"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_102",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 45,
+            "def": 30,
+            "hp": 113,
+            "agi": 83,
+            "int": 15,
+            "mp": 15,
+            "faith": 15,
+            "luck": 135,
+            "essence": 105
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775863314487
+      },
+      "summary": {
+        "name": "neo7",
+        "level": 11,
+        "classId": "rogue",
+        "raceId": "human",
+        "x": 140.26194498817736,
+        "y": 158.58648389901654,
+        "professions": [],
+        "savedAt": 1775863314487
+      }
+    },
+    {
+      "walletAddress": "0x3f2ace32fb20fee3c11d535e82d486e5c78b0f89",
+      "entityId": "cb4740d7-8775-48b5-8cb0-8c4502b4abea",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "cb4740d7-8775-48b5-8cb0-8c4502b4abea",
+          "type": "player",
+          "name": "saf",
+          "x": 307.99509904002434,
+          "y": 267.20294057598534,
+          "hp": 144,
+          "maxHp": 144,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1774556559000,
+          "walletAddress": "0x3f2ace32fb20fee3c11d535e82d486e5c78b0f89",
+          "level": 10,
+          "xp": 10958,
+          "raceId": "human",
+          "classId": "warrior",
+          "stats": {
+            "str": 79,
+            "def": 72,
+            "hp": 144,
+            "agi": 36,
+            "int": 14,
+            "mp": 22,
+            "faith": 22,
+            "luck": 43,
+            "essence": 115
+          },
+          "kills": 36,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 79,
+            "def": 72,
+            "hp": 144,
+            "agi": 36,
+            "int": 14,
+            "mp": 22,
+            "faith": 22,
+            "luck": 43,
+            "essence": 115
+          },
+          "region": "village-square",
+          "gotoMode": true,
+          "order": {
+            "action": "move",
+            "x": 320,
+            "y": 260
+          },
+          "lastCombatTick": 317,
+          "characterTokenId": "379",
+          "equipment": {}
+        },
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1775863312608
+      },
+      "summary": {
+        "name": "saf",
+        "level": 10,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 307.99509904002434,
+        "y": 267.20294057598534,
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1775863312608
+      }
+    },
+    {
+      "walletAddress": "0x3ff896c14e80d38dc39635b6490004a84ead703e",
+      "entityId": "36348912-638a-45bf-a543-db911f94f4bd",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "36348912-638a-45bf-a543-db911f94f4bd",
+          "type": "player",
+          "name": "Alament",
+          "x": 346.01640518400717,
+          "y": 501.5212123307281,
+          "hp": 135,
+          "maxHp": 135,
+          "essence": 90,
+          "maxEssence": 90,
+          "createdAt": 1776093598862,
+          "walletAddress": "0x3ff896c14e80d38dc39635b6490004a84ead703e",
+          "level": 13,
+          "xp": 17042,
+          "raceId": "beastkin",
+          "classId": "ranger",
+          "gender": "male",
+          "skinColor": "light",
+          "hairStyle": "bald",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 49,
+            "def": 41,
+            "hp": 130,
+            "agi": 85,
+            "int": 39,
+            "mp": 24,
+            "faith": 24,
+            "luck": 107,
+            "essence": 146
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 157,
+          "activeQuests": [
+            {
+              "questId": "old_tales",
+              "progress": 0,
+              "startedAt": 1776093749432
+            },
+            {
+              "questId": "chronicles_of_arcadia",
+              "progress": 0,
+              "startedAt": 1776093759633
+            },
+            {
+              "questId": "essence_primer",
+              "progress": 0,
+              "startedAt": 1776094504811
+            },
+            {
+              "questId": "spiders_in_the_canopy",
+              "progress": 0,
+              "startedAt": 1776095242184
+            },
+            {
+              "questId": "skinning_103",
+              "progress": 0,
+              "startedAt": 1776096669263
+            },
+            {
+              "questId": "wolf_hunter_1",
+              "progress": 0,
+              "startedAt": 1776099765542
+            },
+            {
+              "questId": "leatherworking_102",
+              "progress": 0,
+              "startedAt": 1776100290095
+            }
+          ],
+          "completedQuests": [
+            "mining_101",
+            "blacksmithing_101",
+            "mining_102",
+            "rat_extermination",
+            "leatherworking_101",
+            "skinning_101",
+            "voice_of_the_woods",
+            "skinning_102",
+            "blacksmithing_102"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "ranger_aimed_shot",
+            "ranger_hunters_mark"
+          ],
+          "effectiveStats": {
+            "str": 49,
+            "def": 46,
+            "hp": 135,
+            "agi": 88,
+            "int": 39,
+            "mp": 24,
+            "faith": 24,
+            "luck": 107,
+            "essence": 146
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "order": {
+            "action": "move",
+            "x": 360,
+            "y": 500
+          },
+          "characterTokenId": "467",
+          "lastCombatTick": 153348,
+          "activeEffects": [],
+          "cooldowns": {
+            "ranger_aimed_shot": 149221,
+            "ranger_hunters_mark": 149238
+          },
+          "equipment": {
+            "weapon": {
+              "tokenId": 28,
+              "name": "Iron Pickaxe",
+              "xrVisualId": null,
+              "durability": 57,
+              "maxDurability": 60,
+              "broken": false
+            },
+            "chest": {
+              "tokenId": 91,
+              "name": "Tanned Leather Vest",
+              "xrVisualId": "worker_vest",
+              "durability": 43,
+              "maxDurability": 55,
+              "broken": false
+            }
+          },
+          "lastTechniqueId": "ranger_aimed_shot",
+          "lastTechniqueTick": 149215
+        },
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100418756
+      },
+      "summary": {
+        "name": "Alament",
+        "level": 13,
+        "classId": "ranger",
+        "raceId": "beastkin",
+        "x": 346.01640518400717,
+        "y": 501.5212123307281,
+        "professions": [
+          "herbalism",
+          "mining"
+        ],
+        "savedAt": 1776100418756
+      }
+    },
+    {
+      "walletAddress": "0x42a2f946cea07f26543d6b517887811a79159021",
+      "entityId": "420a0062-61e2-4f55-8702-075c14e7e357",
+      "zoneId": "northwind-hollow",
+      "sessionState": {
+        "entity": {
+          "id": "420a0062-61e2-4f55-8702-075c14e7e357",
+          "type": "player",
+          "name": "Preyanshu",
+          "x": 7,
+          "y": -4.2,
+          "hp": 100,
+          "maxHp": 100,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1775382203903,
+          "walletAddress": "0x42a2f946cea07f26543d6b517887811a79159021",
+          "level": 1,
+          "xp": 0,
+          "raceId": "human",
+          "classId": "warrior",
+          "stats": {
+            "str": 55,
+            "def": 50,
+            "hp": 100,
+            "agi": 25,
+            "int": 10,
+            "mp": 15,
+            "faith": 15,
+            "luck": 30,
+            "essence": 80
+          },
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [],
+          "effectiveStats": {
+            "str": 55,
+            "def": 50,
+            "hp": 100,
+            "agi": 25,
+            "int": 10,
+            "mp": 15,
+            "faith": 15,
+            "luck": 30,
+            "essence": 80
+          },
+          "region": "northwind-hollow"
+        },
+        "professions": [],
+        "savedAt": 1775863313591
+      },
+      "summary": {
+        "name": "Preyanshu",
+        "level": 1,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 7,
+        "y": -4.2,
+        "professions": [],
+        "savedAt": 1775863313591
+      }
+    },
+    {
+      "walletAddress": "0x42fd354502efe6e266f73667e8bdf8d4b516c0b7",
+      "entityId": "baf4d124-a801-430a-bab5-a25265f571e1",
+      "zoneId": "auroral-plains",
+      "sessionState": {
+        "entity": {
+          "id": "baf4d124-a801-430a-bab5-a25265f571e1",
+          "type": "player",
+          "name": "PercyJackson",
+          "x": 769.1867048317738,
+          "y": -128.89228022527493,
+          "hp": 225,
+          "maxHp": 225,
+          "essence": 253,
+          "maxEssence": 253,
+          "createdAt": 1775416368834,
+          "walletAddress": "0x42fd354502efe6e266f73667e8bdf8d4b516c0b7",
+          "level": 28,
+          "xp": 78539,
+          "characterTokenId": "356",
+          "agentId": "68",
+          "raceId": "human",
+          "classId": "ranger",
+          "stats": {
+            "str": 84,
+            "def": 70,
+            "hp": 225,
+            "agi": 140,
+            "int": 70,
+            "mp": 42,
+            "faith": 42,
+            "luck": 169,
+            "essence": 253
+          },
+          "kills": 26972,
+          "activeQuests": [],
+          "completedQuests": [
+            "welcome_adventurer",
+            "rat_extermination",
+            "wolf_hunter_1",
+            "dwarven_exile",
+            "alchemy_101",
+            "jewelcrafting_101",
+            "alchemy_102",
+            "emerald_wardens_call",
+            "auroral_welcome",
+            "auroral_stalker_hunt"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "ranger_quick_shot",
+            "ranger_natures_blessing",
+            "ranger_multi_shot_r2",
+            "ranger_multi_shot",
+            "ranger_entangling_roots",
+            "ranger_pack_tactics",
+            "ranger_eagle_eye",
+            "ranger_hunters_mark_r2",
+            "ranger_hunters_mark",
+            "ranger_volley",
+            "ranger_aimed_shot_r3",
+            "ranger_aimed_shot_r2",
+            "ranger_aimed_shot"
+          ],
+          "pendingQuestApprovals": [
+            "auroral_wisp_dance"
+          ],
+          "equipment": {},
+          "effectiveStats": {
+            "str": 84,
+            "def": 70,
+            "hp": 225,
+            "agi": 140,
+            "int": 70,
+            "mp": 42,
+            "faith": 42,
+            "luck": 169,
+            "essence": 253
+          },
+          "region": "auroral-plains",
+          "gotoMode": true,
+          "lastTechniqueId": "ranger_aimed_shot",
+          "lastTechniqueTick": 24277,
+          "activeEffects": [],
+          "lastCombatTick": 59334
+        },
+        "professions": [
+          "herbalism",
+          "blacksmithing",
+          "mining",
+          "skinning",
+          "cooking"
+        ],
+        "savedAt": 1775863313648
+      },
+      "summary": {
+        "name": "PercyJackson",
+        "level": 28,
+        "classId": "ranger",
+        "raceId": "human",
+        "x": 769.1867048317738,
+        "y": -128.89228022527493,
+        "professions": [
+          "herbalism",
+          "blacksmithing",
+          "mining",
+          "skinning",
+          "cooking"
+        ],
+        "savedAt": 1775863313648
+      }
+    },
+    {
+      "walletAddress": "0x4489db07fd759bb3268666fa965eace9a960cfbc",
+      "entityId": "50bb63e7-20e8-491b-b81e-3edc8c07432c",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "50bb63e7-20e8-491b-b81e-3edc8c07432c",
+          "type": "player",
+          "name": "Artioa",
+          "x": 471,
+          "y": 627,
+          "hp": 169,
+          "maxHp": 169,
+          "essence": 135,
+          "maxEssence": 135,
+          "createdAt": 1775953818983,
+          "walletAddress": "0x4489db07fd759bb3268666fa965eace9a960cfbc",
+          "level": 14,
+          "xp": 22454,
+          "characterTokenId": "246",
+          "raceId": "human",
+          "classId": "warrior",
+          "gender": "female",
+          "skinColor": "olive",
+          "hairStyle": "mohawk",
+          "eyeColor": "gray",
+          "stats": {
+            "str": 93,
+            "def": 84,
+            "hp": 169,
+            "agi": 42,
+            "int": 17,
+            "mp": 25,
+            "faith": 25,
+            "luck": 51,
+            "essence": 135
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": true,
+          "isRunning": false,
+          "kills": 47,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 93,
+            "def": 84,
+            "hp": 169,
+            "agi": 42,
+            "int": 17,
+            "mp": 25,
+            "faith": 25,
+            "luck": 51,
+            "essence": 135
+          },
+          "region": "village-square",
+          "lastCombatTick": 149598,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1776100418286
+      },
+      "summary": {
+        "name": "Artioa",
+        "level": 14,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 471,
+        "y": 627,
+        "professions": [],
+        "savedAt": 1776100418286
+      }
+    },
+    {
+      "walletAddress": "0x46b2b55088a118c88b69148c049e213fa0eea3ee",
+      "entityId": "49e4fb07-c3cc-49b1-916f-a144d04b1117",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "49e4fb07-c3cc-49b1-916f-a144d04b1117",
+          "type": "player",
+          "name": "Boellis",
+          "x": 161.03138593997278,
+          "y": 138.35145976173362,
+          "hp": 104,
+          "maxHp": 104,
+          "essence": 100,
+          "maxEssence": 100,
+          "createdAt": 1775956287856,
+          "walletAddress": "0x46b2b55088a118c88b69148c049e213fa0eea3ee",
+          "level": 2,
+          "xp": 602,
+          "characterTokenId": "353",
+          "agentId": "398",
+          "raceId": "beastkin",
+          "classId": "paladin",
+          "gender": "male",
+          "skinColor": "dark",
+          "hairStyle": "short",
+          "eyeColor": "green",
+          "origin": "ironvow",
+          "stats": {
+            "str": 42,
+            "def": 52,
+            "hp": 104,
+            "agi": 16,
+            "int": 10,
+            "mp": 21,
+            "faith": 52,
+            "luck": 17,
+            "essence": 104
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": true,
+          "isRunning": false,
+          "kills": 8,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 42,
+            "def": 52,
+            "hp": 104,
+            "agi": 16,
+            "int": 10,
+            "mp": 21,
+            "faith": 52,
+            "luck": 17,
+            "essence": 104
+          },
+          "region": "village-square",
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1776100418393
+      },
+      "summary": {
+        "name": "Boellis",
+        "level": 2,
+        "classId": "paladin",
+        "raceId": "beastkin",
+        "x": 161.03138593997278,
+        "y": 138.35145976173362,
+        "professions": [],
+        "savedAt": 1776100418393
+      }
+    },
+    {
+      "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+      "entityId": "8aae6f87-8a9c-47c9-95ef-db810320d640",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "8aae6f87-8a9c-47c9-95ef-db810320d640",
+          "type": "player",
+          "name": "LancerOfRed",
+          "x": 600.1118657901956,
+          "y": 484.1910797260868,
+          "hp": 169,
+          "maxHp": 169,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1775956296461,
+          "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+          "level": 14,
+          "xp": 19618,
+          "characterTokenId": "409",
+          "raceId": "human",
+          "classId": "warrior",
+          "gender": "male",
+          "skinColor": "light",
+          "hairStyle": "braided",
+          "eyeColor": "green",
+          "stats": {
+            "str": 93,
+            "def": 84,
+            "hp": 169,
+            "agi": 42,
+            "int": 17,
+            "mp": 25,
+            "faith": 25,
+            "luck": 51,
+            "essence": 135
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": true,
+          "isRunning": false,
+          "kills": 615,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 93,
+            "def": 84,
+            "hp": 169,
+            "agi": 42,
+            "int": 17,
+            "mp": 25,
+            "faith": 25,
+            "luck": 51,
+            "essence": 135
+          },
+          "region": "village-square",
+          "lastCombatTick": 147956,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1776100418493
+      },
+      "summary": {
+        "name": "LancerOfRed",
+        "level": 14,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 600.1118657901956,
+        "y": 484.1910797260868,
+        "professions": [],
+        "savedAt": 1776100418493
+      }
+    },
+    {
+      "walletAddress": "0x5325b4402064f57681788813730fe29e1ae2d07f",
+      "entityId": "ca33f482-7a23-478d-85dd-4f3f89fe4cc5",
+      "zoneId": "ironroot-farmstead",
+      "sessionState": {
+        "entity": {
+          "id": "ca33f482-7a23-478d-85dd-4f3f89fe4cc5",
+          "type": "player",
+          "name": "Junoka",
+          "x": 3015.655525343753,
+          "y": -974.9642603036199,
+          "hp": 418,
+          "maxHp": 418,
+          "essence": 444,
+          "maxEssence": 444,
+          "createdAt": 1775030925499,
+          "walletAddress": "0x5325b4402064f57681788813730fe29e1ae2d07f",
+          "level": 49,
+          "xp": 242599,
+          "characterTokenId": "273",
+          "raceId": "human",
+          "classId": "monk",
+          "stats": {
+            "str": 235,
+            "def": 131,
+            "hp": 418,
+            "agi": 287,
+            "int": 52,
+            "mp": 52,
+            "faith": 78,
+            "luck": 313,
+            "essence": 444
+          },
+          "kills": 22266,
+          "activeQuests": [],
+          "completedQuests": [
+            "welcome_adventurer",
+            "traders_bargain",
+            "blacksmiths_offer",
+            "mining_101",
+            "blacksmithing_101",
+            "rat_extermination",
+            "mining_102",
+            "voice_of_the_woods",
+            "wolf_hunter_1",
+            "boar_bounty",
+            "goblin_menace"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "monk_inner_focus",
+            "monk_disable",
+            "monk_palm_strike_r2",
+            "monk_palm_strike",
+            "monk_windwalkers_grace",
+            "monk_flying_kick",
+            "monk_chi_attunement",
+            "monk_meditation_r2",
+            "monk_meditation",
+            "monk_whirlwind_kick",
+            "monk_zen_meditation",
+            "monk_chi_burst_r4",
+            "monk_chi_burst_r3",
+            "monk_chi_burst_r2",
+            "monk_chi_burst",
+            "monk_hundred_fists",
+            "monk_dragon_strike",
+            "monk_inner_peace",
+            "monk_one_thousand_palms",
+            "monk_perfect_balance",
+            "monk_transcendence",
+            "monk_spirit_bond"
+          ],
+          "pendingQuestApprovals": [
+            "auroral_welcome",
+            "viridian_overseers_task",
+            "viridian_helga_intro"
+          ],
+          "equipment": {},
+          "effectiveStats": {
+            "str": 235,
+            "def": 131,
+            "hp": 418,
+            "agi": 287,
+            "int": 52,
+            "mp": 52,
+            "faith": 78,
+            "luck": 313,
+            "essence": 444
+          },
+          "region": "ironroot-farmstead",
+          "gotoMode": false,
+          "cooldowns": {
+            "monk_inner_focus": 30568,
+            "monk_disable": 30569,
+            "monk_one_thousand_palms": 30570,
+            "monk_dragon_strike": 30562,
+            "monk_windwalkers_grace": 30561,
+            "monk_chi_burst_r4": 30564,
+            "monk_hundred_fists": 30592,
+            "monk_zen_meditation": 30614,
+            "monk_chi_burst_r3": 30489,
+            "monk_inner_peace": 30610,
+            "monk_perfect_balance": 30636,
+            "monk_meditation_r2": 30414,
+            "monk_meditation": 25174,
+            "monk_chi_burst_r2": 22577,
+            "monk_palm_strike_r2": 1621.5,
+            "monk_chi_burst": 1602,
+            "monk_flying_kick": 1581,
+            "monk_whirlwind_kick": 1502,
+            "monk_palm_strike": 761
+          },
+          "lastTechniqueId": "monk_hundred_fists",
+          "lastTechniqueTick": 30570,
+          "activeEffects": [],
+          "lastCombatTick": 58935
+        },
+        "professions": [
+          "herbalism",
+          "mining",
+          "alchemy"
+        ],
+        "savedAt": 1775863311628
+      },
+      "summary": {
+        "name": "Junoka",
+        "level": 49,
+        "classId": "monk",
+        "raceId": "human",
+        "x": 3015.655525343753,
+        "y": -974.9642603036199,
+        "professions": [
+          "herbalism",
+          "mining",
+          "alchemy"
+        ],
+        "savedAt": 1775863311628
+      }
+    },
+    {
+      "walletAddress": "0x570532a87bb068d24e5c72d4fb5ca90738583594",
+      "entityId": "7c6c1ad4-1d4a-49d2-9209-32abbd9bcb9a",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "7c6c1ad4-1d4a-49d2-9209-32abbd9bcb9a",
+          "type": "player",
+          "name": "Aria",
+          "x": 157,
+          "y": 145.8,
+          "hp": 76,
+          "maxHp": 76,
+          "essence": 99,
+          "maxEssence": 99,
+          "createdAt": 1775869829132,
+          "walletAddress": "0x570532A87bb068D24E5c72d4Fb5Ca90738583594",
+          "level": 1,
+          "xp": 0,
+          "raceId": "elf",
+          "classId": "ranger",
+          "stats": {
+            "str": 30,
+            "def": 25,
+            "hp": 76,
+            "agi": 53,
+            "int": 25,
+            "mp": 17,
+            "faith": 15,
+            "luck": 60,
+            "essence": 99
+          },
+          "kills": 0,
+          "completedQuests": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 30,
+            "def": 25,
+            "hp": 76,
+            "agi": 53,
+            "int": 25,
+            "mp": 17,
+            "faith": 15,
+            "luck": 60,
+            "essence": 99
+          },
+          "region": "village-square",
+          "characterTokenId": "463"
+        },
+        "professions": [],
+        "savedAt": 1775885888031
+      },
+      "summary": {
+        "name": "Aria",
+        "level": 1,
+        "classId": "ranger",
+        "raceId": "elf",
+        "x": 157,
+        "y": 145.8,
+        "professions": [],
+        "savedAt": 1775885888031
+      }
+    },
+    {
+      "walletAddress": "0x5b354565654dff9094262511084c34a38c23fc84",
+      "entityId": "165342d3-e0e6-4629-8778-9b20d5d63213",
+      "zoneId": "wild-meadow",
+      "sessionState": {
+        "entity": {
+          "id": "165342d3-e0e6-4629-8778-9b20d5d63213",
+          "type": "player",
+          "name": "Leary",
+          "x": 660.7917878361087,
+          "y": 40.83287102388854,
+          "hp": 164,
+          "maxHp": 164,
+          "essence": 130,
+          "maxEssence": 130,
+          "createdAt": 1774668381003,
+          "walletAddress": "0x5b354565654dff9094262511084c34a38c23fc84",
+          "level": 16,
+          "xp": 25611,
+          "raceId": "beastkin",
+          "classId": "cleric",
+          "stats": {
+            "str": 27,
+            "def": 55,
+            "hp": 164,
+            "agi": 29,
+            "int": 52,
+            "mp": 82,
+            "faith": 100,
+            "luck": 40,
+            "essence": 237
+          },
+          "kills": 3025,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 27,
+            "def": 55,
+            "hp": 164,
+            "agi": 29,
+            "int": 52,
+            "mp": 82,
+            "faith": 100,
+            "luck": 40,
+            "essence": 237
+          },
+          "region": "wild-meadow",
+          "gotoMode": false,
+          "characterTokenId": "381",
+          "lastCombatTick": 59069,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775863312666
+      },
+      "summary": {
+        "name": "Leary",
+        "level": 16,
+        "classId": "cleric",
+        "raceId": "beastkin",
+        "x": 660.7917878361087,
+        "y": 40.83287102388854,
+        "professions": [],
+        "savedAt": 1775863312666
+      }
+    },
+    {
+      "walletAddress": "0x631073c8924ca922314bb912cb6285bcdef61d17",
+      "entityId": "f98e4ca3-ffd5-427a-add7-d71c24deb857",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "f98e4ca3-ffd5-427a-add7-d71c24deb857",
+          "type": "player",
+          "name": "Jeremy",
+          "x": 320,
+          "y": 274,
+          "hp": 201,
+          "maxHp": 201,
+          "essence": 187,
+          "maxEssence": 187,
+          "createdAt": 1775946945197,
+          "walletAddress": "0x631073c8924ca922314bb912cb6285bcdef61d17",
+          "level": 20,
+          "xp": 42352,
+          "characterTokenId": "212",
+          "raceId": "elf",
+          "classId": "warrior",
+          "gender": "male",
+          "skinColor": "pale",
+          "hairStyle": "short",
+          "eyeColor": "amber",
+          "stats": {
+            "str": 117,
+            "def": 106,
+            "hp": 201,
+            "agi": 56,
+            "int": 21,
+            "mp": 35,
+            "faith": 32,
+            "luck": 64,
+            "essence": 187
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 25,
+          "activeQuests": [],
+          "completedQuests": [
+            "blacksmithing_101"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 117,
+            "def": 106,
+            "hp": 201,
+            "agi": 56,
+            "int": 21,
+            "mp": 35,
+            "faith": 32,
+            "luck": 64,
+            "essence": 187
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "order": {
+            "action": "move",
+            "x": 320,
+            "y": 260
+          },
+          "equipment": {
+            "weapon": {
+              "tokenId": 42,
+              "name": "Iron Sickle",
+              "xrVisualId": null,
+              "durability": 49,
+              "maxDurability": 55,
+              "broken": false
+            }
+          },
+          "lastCombatTick": 152886
+        },
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1776100408133
+      },
+      "summary": {
+        "name": "Jeremy",
+        "level": 20,
+        "classId": "warrior",
+        "raceId": "elf",
+        "x": 320,
+        "y": 274,
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1776100408133
+      }
+    },
+    {
+      "walletAddress": "0x66e50a611dd4463e9cdf1d3c450bde50c73755f0",
+      "entityId": "35a7a6b4-e83f-48eb-9a87-ff301bd2fab4",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "35a7a6b4-e83f-48eb-9a87-ff301bd2fab4",
+          "type": "player",
+          "name": "erc",
+          "x": 167.99509904002437,
+          "y": 252.79705942401463,
+          "hp": 104,
+          "maxHp": 104,
+          "essence": 100,
+          "maxEssence": 100,
+          "createdAt": 1775669549848,
+          "walletAddress": "0x66e50a611dd4463e9cdf1d3c450bde50c73755f0",
+          "level": 2,
+          "xp": 859,
+          "raceId": "human",
+          "classId": "paladin",
+          "gender": "male",
+          "skinColor": "light",
+          "hairStyle": "ponytail",
+          "eyeColor": "gray",
+          "stats": {
+            "str": 42,
+            "def": 52,
+            "hp": 104,
+            "agi": 16,
+            "int": 10,
+            "mp": 21,
+            "faith": 52,
+            "luck": 16,
+            "essence": 104
+          },
+          "kills": 12,
+          "activeQuests": [],
+          "completedQuests": [
+            "rat_extermination"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "mining_101",
+            "voice_of_the_woods",
+            "wolf_hunter_1"
+          ],
+          "effectiveStats": {
+            "str": 42,
+            "def": 52,
+            "hp": 104,
+            "agi": 16,
+            "int": 10,
+            "mp": 21,
+            "faith": 52,
+            "luck": 16,
+            "essence": 104
+          },
+          "region": "village-square",
+          "gotoMode": true,
+          "order": {
+            "action": "move",
+            "x": 180,
+            "y": 260
+          },
+          "equipment": {},
+          "lastCombatTick": 203
+        },
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863313709
+      },
+      "summary": {
+        "name": "erc",
+        "level": 2,
+        "classId": "paladin",
+        "raceId": "human",
+        "x": 167.99509904002437,
+        "y": 252.79705942401463,
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863313709
+      }
+    },
+    {
+      "walletAddress": "0x6be33521f2ac595b101b8de25dada8d517bad450",
+      "entityId": "30e9f26f-ab39-4f28-9349-f6ab42450b81",
+      "zoneId": "wild-meadow",
+      "sessionState": {
+        "entity": {
+          "id": "30e9f26f-ab39-4f28-9349-f6ab42450b81",
+          "type": "player",
+          "name": "Barbas",
+          "x": 767.8047916931098,
+          "y": 368.2328600699959,
+          "hp": 267,
+          "maxHp": 267,
+          "essence": 247,
+          "maxEssence": 247,
+          "createdAt": 1775752637347,
+          "walletAddress": "0x6be33521f2ac595b101b8de25dada8d517bad450",
+          "level": 28,
+          "xp": 78428,
+          "characterTokenId": "297",
+          "raceId": "elf",
+          "classId": "warrior",
+          "gender": "female",
+          "skinColor": "pale",
+          "hairStyle": "bangs",
+          "eyeColor": "blue",
+          "stats": {
+            "str": 154,
+            "def": 140,
+            "hp": 267,
+            "agi": 74,
+            "int": 28,
+            "mp": 46,
+            "faith": 42,
+            "luck": 84,
+            "essence": 247
+          },
+          "kills": 12132,
+          "activeQuests": [],
+          "completedQuests": [
+            "rat_extermination",
+            "welcome_adventurer",
+            "wolf_hunter_1",
+            "boar_bounty",
+            "goblin_menace",
+            "slime_cleanup",
+            "traders_bargain",
+            "blacksmiths_offer",
+            "mining_101",
+            "blacksmithing_101",
+            "mining_102",
+            "bandit_problem",
+            "alpha_threat",
+            "herbalism_101",
+            "herbalism_102",
+            "alchemy_101",
+            "skinning_101",
+            "cooking_101",
+            "leatherworking_101",
+            "jewelcrafting_101",
+            "warriors_wisdom",
+            "essence_primer",
+            "old_tales",
+            "chronicles_of_arcadia",
+            "blacksmithing_102",
+            "foragers_knowledge",
+            "cooks_secret",
+            "skinning_102",
+            "alchemy_102",
+            "miners_greeting",
+            "ready_for_battle",
+            "jewelcrafting_102",
+            "cruton_convergence",
+            "cooking_102",
+            "voice_of_the_woods",
+            "druids_perspective"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "warrior_shield_wall",
+            "warrior_intimidating_shout",
+            "warrior_heroic_strike",
+            "warrior_battle_rage_r2",
+            "warrior_battle_rage",
+            "warrior_cleave_r2",
+            "warrior_cleave",
+            "warrior_heroic_strike_r3"
+          ],
+          "pendingQuestApprovals": [
+            "corrupted_essence",
+            "spiders_in_the_canopy",
+            "bear_necessities"
+          ],
+          "equipment": {},
+          "effectiveStats": {
+            "str": 154,
+            "def": 140,
+            "hp": 267,
+            "agi": 74,
+            "int": 28,
+            "mp": 46,
+            "faith": 42,
+            "luck": 84,
+            "essence": 247
+          },
+          "region": "wild-meadow",
+          "gotoMode": false,
+          "lastCombatTick": 42889,
+          "cooldowns": {
+            "warrior_shield_wall": 78091,
+            "warrior_intimidating_shout": 78116,
+            "warrior_heroic_strike_r3": 78100,
+            "warrior_cleave_r2": 78106,
+            "warrior_heroic_strike": 78113,
+            "warrior_battle_rage_r2": 78125,
+            "warrior_battle_rage": 78117,
+            "warrior_cleave": 76022
+          },
+          "lastTechniqueId": "warrior_heroic_strike",
+          "lastTechniqueTick": 78107,
+          "activeEffects": []
+        },
+        "professions": [
+          "blacksmithing",
+          "herbalism",
+          "alchemy"
+        ],
+        "savedAt": 1775863314576
+      },
+      "summary": {
+        "name": "Barbas",
+        "level": 28,
+        "classId": "warrior",
+        "raceId": "elf",
+        "x": 767.8047916931098,
+        "y": 368.2328600699959,
+        "professions": [
+          "blacksmithing",
+          "herbalism",
+          "alchemy"
+        ],
+        "savedAt": 1775863314576
+      }
+    },
+    {
+      "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
+      "entityId": "ced61d17-c933-4796-aed7-c82eea9e04d4",
+      "zoneId": "starfall-ranch",
+      "sessionState": {
+        "entity": {
+          "id": "ced61d17-c933-4796-aed7-c82eea9e04d4",
+          "type": "player",
+          "name": "ShadowArcher",
+          "x": 2710,
+          "y": 1430,
+          "hp": 92,
+          "maxHp": 92,
+          "essence": 94,
+          "maxEssence": 94,
+          "createdAt": 1775945751847,
+          "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
+          "level": 2,
+          "xp": 420,
+          "characterTokenId": "392",
+          "raceId": "dwarf",
+          "classId": "ranger",
+          "gender": "female",
+          "skinColor": "medium",
+          "hairStyle": "bangs",
+          "eyeColor": "violet",
+          "stats": {
+            "str": 31,
+            "def": 29,
+            "hp": 92,
+            "agi": 47,
+            "int": 26,
+            "mp": 16,
+            "faith": 16,
+            "luck": 62,
+            "essence": 94
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 31,
+            "def": 29,
+            "hp": 92,
+            "agi": 47,
+            "int": 26,
+            "mp": 16,
+            "faith": 16,
+            "luck": 62,
+            "essence": 94
+          },
+          "region": "starfall-ranch",
+          "gotoMode": false
+        },
+        "professions": [],
+        "savedAt": 1775946316298
+      },
+      "summary": {
+        "name": "ShadowArcher",
+        "level": 2,
+        "classId": "ranger",
+        "raceId": "dwarf",
+        "x": 2710,
+        "y": 1430,
+        "professions": [],
+        "savedAt": 1775946316298
+      }
+    },
+    {
+      "walletAddress": "0x7a1545d3409fc3d4a25c61be47fa43b42f28bd91",
+      "entityId": "adf27358-3ed5-4aca-b69d-2fc176656db8",
+      "zoneId": "auroral-plains",
+      "sessionState": {
+        "entity": {
+          "id": "adf27358-3ed5-4aca-b69d-2fc176656db8",
+          "type": "player",
+          "name": "millis",
+          "x": 739.9716136611721,
+          "y": -140.01287501683825,
+          "hp": 41,
+          "maxHp": 75,
+          "essence": 70,
+          "maxEssence": 70,
+          "createdAt": 1775939022931,
+          "walletAddress": "0x7a1545d3409fc3d4a25c61be47fa43b42f28bd91",
+          "level": 1,
+          "xp": 169,
+          "characterTokenId": "464",
+          "raceId": "beastkin",
+          "classId": "rogue",
+          "gender": "male",
+          "skinColor": "medium",
+          "hairStyle": "bald",
+          "eyeColor": "violet",
+          "origin": "dawnkeeper",
+          "stats": {
+            "str": 30,
+            "def": 20,
+            "hp": 75,
+            "agi": 58,
+            "int": 10,
+            "mp": 10,
+            "faith": 10,
+            "luck": 99,
+            "essence": 70
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": true,
+          "isRunning": false,
+          "kills": 84,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 30,
+            "def": 20,
+            "hp": 75,
+            "agi": 58,
+            "int": 10,
+            "mp": 10,
+            "faith": 10,
+            "luck": 99,
+            "essence": 70
+          },
+          "region": "auroral-plains",
+          "order": {
+            "action": "attack",
+            "targetId": "810ecd5f-c6df-4e64-9cf2-3f7aa123f47f"
+          },
+          "lastCombatTick": 21154,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775945715219
+      },
+      "summary": {
+        "name": "millis",
+        "level": 1,
+        "classId": "rogue",
+        "raceId": "beastkin",
+        "x": 739.9716136611721,
+        "y": -140.01287501683825,
+        "professions": [],
+        "savedAt": 1775945715219
+      }
+    },
+    {
+      "walletAddress": "0x7c4f0a26a5bb3417cbcf81a39afdac90f35fb71f",
+      "entityId": "e1dec859-1b23-47e1-b9ef-e200de9cbc54",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "e1dec859-1b23-47e1-b9ef-e200de9cbc54",
+          "type": "player",
+          "name": "ZiGGi",
+          "x": 346,
+          "y": 420,
+          "hp": 117,
+          "maxHp": 117,
+          "essence": 70,
+          "maxEssence": 70,
+          "createdAt": 1775532447301,
+          "walletAddress": "0x7c4f0a26a5bb3417cbcf81a39afdac90f35fb71f",
+          "level": 12,
+          "xp": 14404,
+          "raceId": "beastkin",
+          "classId": "rogue",
+          "stats": {
+            "str": 47,
+            "def": 31,
+            "hp": 117,
+            "agi": 90,
+            "int": 15,
+            "mp": 16,
+            "faith": 16,
+            "luck": 155,
+            "essence": 109
+          },
+          "kills": 1339,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 47,
+            "def": 31,
+            "hp": 117,
+            "agi": 90,
+            "int": 15,
+            "mp": 16,
+            "faith": 16,
+            "luck": 155,
+            "essence": 109
+          },
+          "region": "village-square",
+          "gotoMode": true,
+          "activeEffects": [],
+          "order": {
+            "action": "move",
+            "x": 360,
+            "y": 420
+          },
+          "lastCombatTick": 485
+        },
+        "professions": [],
+        "savedAt": 1775863313895
+      },
+      "summary": {
+        "name": "ZiGGi",
+        "level": 12,
+        "classId": "rogue",
+        "raceId": "beastkin",
+        "x": 346,
+        "y": 420,
+        "professions": [],
+        "savedAt": 1775863313895
+      }
+    },
+    {
+      "walletAddress": "0x7fea651b1251dddc7204286c73653b08c4f25cb5",
+      "entityId": "bad1152a-eca7-4ff3-8251-2cdf5e2e7a34",
+      "zoneId": "starfall-ranch",
+      "sessionState": {
+        "entity": {
+          "id": "bad1152a-eca7-4ff3-8251-2cdf5e2e7a34",
+          "type": "player",
+          "name": "saf",
+          "x": 2878.947766001121,
+          "y": 1595.66302115815,
+          "hp": 73,
+          "maxHp": 73,
+          "essence": 140,
+          "maxEssence": 140,
+          "createdAt": 1774551480499,
+          "walletAddress": "0x7fea651b1251dddc7204286c73653b08c4f25cb5",
+          "level": 2,
+          "xp": 427,
+          "raceId": "human",
+          "classId": "warlock",
+          "stats": {
+            "str": 16,
+            "def": 16,
+            "hp": 73,
+            "agi": 21,
+            "int": 57,
+            "mp": 57,
+            "faith": 26,
+            "luck": 47,
+            "essence": 146
+          },
+          "kills": 10,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 16,
+            "def": 16,
+            "hp": 73,
+            "agi": 21,
+            "int": 57,
+            "mp": 57,
+            "faith": 26,
+            "luck": 47,
+            "essence": 146
+          },
+          "region": "starfall-ranch",
+          "gotoMode": false,
+          "characterTokenId": "376",
+          "lastCombatTick": 75047,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775863312536
+      },
+      "summary": {
+        "name": "saf",
+        "level": 2,
+        "classId": "warlock",
+        "raceId": "human",
+        "x": 2878.947766001121,
+        "y": 1595.66302115815,
+        "professions": [],
+        "savedAt": 1775863312536
+      }
+    },
+    {
+      "walletAddress": "0x8654b394089d1aa55c05ac3575d0a527757d2499",
+      "entityId": "593aaf68-a901-4d99-b239-08b02aad475a",
+      "zoneId": "wild-meadow",
+      "sessionState": {
+        "entity": {
+          "id": "593aaf68-a901-4d99-b239-08b02aad475a",
+          "type": "player",
+          "name": "binobotv0",
+          "x": 659.3102524838947,
+          "y": 54.75425935264872,
+          "hp": 164,
+          "maxHp": 164,
+          "essence": 130,
+          "maxEssence": 130,
+          "createdAt": 1774501742587,
+          "walletAddress": "0x8654b394089d1aa55c05ac3575d0a527757d2499",
+          "level": 16,
+          "xp": 25609,
+          "raceId": "human",
+          "classId": "cleric",
+          "stats": {
+            "str": 27,
+            "def": 55,
+            "hp": 164,
+            "agi": 27,
+            "int": 55,
+            "mp": 82,
+            "faith": 100,
+            "luck": 37,
+            "essence": 237
+          },
+          "kills": 7167,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 27,
+            "def": 55,
+            "hp": 164,
+            "agi": 27,
+            "int": 55,
+            "mp": 82,
+            "faith": 100,
+            "luck": 37,
+            "essence": 237
+          },
+          "region": "wild-meadow",
+          "gotoMode": false,
+          "lastCombatTick": 59308,
+          "characterTokenId": "374",
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775863312119
+      },
+      "summary": {
+        "name": "binobotv0",
+        "level": 16,
+        "classId": "cleric",
+        "raceId": "human",
+        "x": 659.3102524838947,
+        "y": 54.75425935264872,
+        "professions": [],
+        "savedAt": 1775863312119
+      }
+    },
+    {
+      "walletAddress": "0x89311735832bfccbd8272d9bfea4787497005fa4",
+      "entityId": "8aa06477-19e1-4772-8505-dc26b6ef869b",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "8aa06477-19e1-4772-8505-dc26b6ef869b",
+          "type": "player",
+          "name": "TestHero",
+          "x": 150.76284009162768,
+          "y": 149.32736936109592,
+          "hp": 100,
+          "maxHp": 100,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1775839714254,
+          "walletAddress": "0x89311735832bFCCBD8272d9BFEA4787497005fA4",
+          "level": 1,
+          "xp": 0,
+          "raceId": "human",
+          "classId": "warrior",
+          "stats": {
+            "str": 55,
+            "def": 50,
+            "hp": 100,
+            "agi": 25,
+            "int": 10,
+            "mp": 15,
+            "faith": 15,
+            "luck": 30,
+            "essence": 80
+          },
+          "kills": 0,
+          "completedQuests": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 55,
+            "def": 50,
+            "hp": 100,
+            "agi": 25,
+            "int": 10,
+            "mp": 15,
+            "faith": 15,
+            "luck": 30,
+            "essence": 80
+          },
+          "region": "village-square",
+          "characterTokenId": "462"
+        },
+        "professions": [],
+        "savedAt": 1775863314632
+      },
+      "summary": {
+        "name": "TestHero",
+        "level": 1,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 150.76284009162768,
+        "y": 149.32736936109592,
+        "professions": [],
+        "savedAt": 1775863314632
+      }
+    },
+    {
+      "walletAddress": "0x8f228254c13756725b829d00aaa911c392128481",
+      "entityId": "ec34440c-2eb4-4607-afe9-71bc8cc7d18f",
+      "zoneId": "goldenreach-grange",
+      "sessionState": {
+        "entity": {
+          "id": "ec34440c-2eb4-4607-afe9-71bc8cc7d18f",
+          "type": "player",
+          "name": "dante",
+          "x": 1160.9250381965976,
+          "y": -853.6721839185144,
+          "hp": 212,
+          "maxHp": 212,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1774983205487,
+          "walletAddress": "0x8f228254c13756725b829d00aaa911c392128481",
+          "level": 20,
+          "xp": 42318,
+          "raceId": "human",
+          "classId": "warrior",
+          "stats": {
+            "str": 117,
+            "def": 106,
+            "hp": 212,
+            "agi": 53,
+            "int": 21,
+            "mp": 32,
+            "faith": 32,
+            "luck": 64,
+            "essence": 170
+          },
+          "kills": 11253,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "warrior_heroic_strike",
+            "warrior_shield_wall"
+          ],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 117,
+            "def": 106,
+            "hp": 212,
+            "agi": 53,
+            "int": 21,
+            "mp": 32,
+            "faith": 32,
+            "luck": 64,
+            "essence": 170
+          },
+          "region": "goldenreach-grange",
+          "gotoMode": false,
+          "lastCombatTick": 59197,
+          "characterTokenId": "387",
+          "cooldowns": {
+            "warrior_shield_wall": 6092,
+            "warrior_heroic_strike": 6107
+          },
+          "lastTechniqueId": "warrior_heroic_strike",
+          "lastTechniqueTick": 6101,
+          "equipment": {},
+          "activeEffects": []
+        },
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863312942
+      },
+      "summary": {
+        "name": "dante",
+        "level": 20,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 1160.9250381965976,
+        "y": -853.6721839185144,
+        "professions": [
+          "herbalism"
+        ],
+        "savedAt": 1775863312942
+      }
+    },
+    {
+      "walletAddress": "0x94e70ef3090971c732284bbfb03935a57a8ae365",
+      "entityId": "7e997787-a960-4d62-9da0-ab4cbd2c9471",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "7e997787-a960-4d62-9da0-ab4cbd2c9471",
+          "type": "player",
+          "name": "Dean",
+          "x": 37.995099040024364,
+          "y": 312.79705942401466,
+          "hp": 104,
+          "maxHp": 104,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1775105157701,
+          "walletAddress": "0x94e70ef3090971c732284bbfb03935a57a8ae365",
+          "level": 2,
+          "xp": 633,
+          "raceId": "human",
+          "classId": "warrior",
+          "stats": {
+            "str": 57,
+            "def": 52,
+            "hp": 104,
+            "agi": 26,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 31,
+            "essence": 83
+          },
+          "kills": 11,
+          "activeQuests": [
+            {
+              "questId": "rat_extermination",
+              "progress": 0,
+              "startedAt": 1775105866301
+            },
+            {
+              "questId": "mining_101",
+              "progress": 0,
+              "startedAt": 1775105925526
+            },
+            {
+              "questId": "blacksmithing_101",
+              "progress": 0,
+              "startedAt": 1775105972116
+            },
+            {
+              "questId": "herbalism_101",
+              "progress": 0,
+              "startedAt": 1775106010697
+            },
+            {
+              "questId": "alchemy_101",
+              "progress": 0,
+              "startedAt": 1775106061425
+            },
+            {
+              "questId": "skinning_101",
+              "progress": 0,
+              "startedAt": 1775106094284
+            },
+            {
+              "questId": "cooking_101",
+              "progress": 0,
+              "startedAt": 1775106151615
+            },
+            {
+              "questId": "leatherworking_101",
+              "progress": 0,
+              "startedAt": 1775106176187
+            },
+            {
+              "questId": "jewelcrafting_101",
+              "progress": 0,
+              "startedAt": 1775106204580
+            },
+            {
+              "questId": "essence_primer",
+              "progress": 0,
+              "startedAt": 1775106370739
+            },
+            {
+              "questId": "old_tales",
+              "progress": 0,
+              "startedAt": 1775106452539
+            },
+            {
+              "questId": "chronicles_of_arcadia",
+              "progress": 0,
+              "startedAt": 1775106490900
+            }
+          ],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 57,
+            "def": 52,
+            "hp": 104,
+            "agi": 26,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 31,
+            "essence": 83
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "order": {
+            "action": "move",
+            "x": 50,
+            "y": 320
+          },
+          "characterTokenId": "394",
+          "lastCombatTick": 15613,
+          "travelTargetZone": "sunflower-fields",
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775863313534
+      },
+      "summary": {
+        "name": "Dean",
+        "level": 2,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 37.995099040024364,
+        "y": 312.79705942401466,
+        "professions": [],
+        "savedAt": 1775863313534
+      }
+    },
+    {
+      "walletAddress": "0x95ba0d8e427e72d343044da47980e938174cb644",
+      "entityId": "1f9f81d7-fede-434e-a1a3-c9dfc6d035de",
+      "zoneId": "wild-meadow",
+      "sessionState": {
+        "entity": {
+          "id": "1f9f81d7-fede-434e-a1a3-c9dfc6d035de",
+          "type": "player",
+          "name": "checking",
+          "x": 817.475942542691,
+          "y": 158.68145932316975,
+          "hp": 183,
+          "maxHp": 183,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1775927556743,
+          "walletAddress": "0x95ba0d8e427e72d343044da47980e938174cb644",
+          "level": 16,
+          "xp": 25617,
+          "characterTokenId": "358",
+          "raceId": "human",
+          "classId": "warrior",
+          "gender": "male",
+          "skinColor": "light",
+          "hairStyle": "short",
+          "eyeColor": "brown",
+          "origin": "veilborn",
+          "stats": {
+            "str": 100,
+            "def": 91,
+            "hp": 183,
+            "agi": 46,
+            "int": 18,
+            "mp": 27,
+            "faith": 27,
+            "luck": 55,
+            "essence": 146
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": true,
+          "isRunning": false,
+          "kills": 638,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 100,
+            "def": 91,
+            "hp": 183,
+            "agi": 46,
+            "int": 18,
+            "mp": 27,
+            "faith": 27,
+            "luck": 55,
+            "essence": 146
+          },
+          "region": "wild-meadow",
+          "lastCombatTick": 20192,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1775945714921
+      },
+      "summary": {
+        "name": "checking",
+        "level": 16,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 817.475942542691,
+        "y": 158.68145932316975,
+        "professions": [],
+        "savedAt": 1775945714921
+      }
+    },
+    {
+      "walletAddress": "0xa07d98d11dacaea338084e4a5b26e7ea93cfce95",
+      "entityId": "3b15a880-7d1b-4985-b04a-350679f0be12",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "3b15a880-7d1b-4985-b04a-350679f0be12",
+          "type": "player",
+          "name": "Aurelia Dawnstrider",
+          "x": 167.99509904002437,
+          "y": 332.79705942401466,
+          "hp": 89,
+          "maxHp": 89,
+          "essence": 99,
+          "maxEssence": 99,
+          "createdAt": 1775076920086,
+          "walletAddress": "0xA07d98d11dACAea338084E4a5B26E7EA93cFCe95",
+          "level": 5,
+          "xp": 3004,
+          "raceId": "elf",
+          "classId": "ranger",
+          "stats": {
+            "str": 35,
+            "def": 29,
+            "hp": 89,
+            "agi": 62,
+            "int": 29,
+            "mp": 19,
+            "faith": 18,
+            "luck": 71,
+            "essence": 116
+          },
+          "kills": 57,
+          "completedQuests": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 35,
+            "def": 29,
+            "hp": 89,
+            "agi": 62,
+            "int": 29,
+            "mp": 19,
+            "faith": 18,
+            "luck": 71,
+            "essence": 116
+          },
+          "region": "village-square",
+          "characterTokenId": "390",
+          "activeEffects": [],
+          "equipment": {
+            "weapon": {
+              "tokenId": 27,
+              "name": "Stone Pickaxe",
+              "durability": 11,
+              "maxDurability": 40,
+              "broken": false
+            }
+          },
+          "order": {
+            "action": "move",
+            "x": 180,
+            "y": 340
+          }
+        },
+        "professions": [
+          "mining",
+          "blacksmithing"
+        ],
+        "savedAt": 1775863313463
+      },
+      "summary": {
+        "name": "Aurelia Dawnstrider",
+        "level": 5,
+        "classId": "ranger",
+        "raceId": "elf",
+        "x": 167.99509904002437,
+        "y": 332.79705942401466,
+        "professions": [
+          "mining",
+          "blacksmithing"
+        ],
+        "savedAt": 1775863313463
+      }
+    },
+    {
+      "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
+      "entityId": "24990918-ec32-4dcc-b690-dd40676e14d6",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "24990918-ec32-4dcc-b690-dd40676e14d6",
+          "type": "player",
+          "name": "Supermage",
+          "x": 143,
+          "y": 154.2,
+          "hp": 143,
+          "maxHp": 143,
+          "essence": 330,
+          "maxEssence": 330,
+          "createdAt": 1775880334920,
+          "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
+          "level": 21,
+          "xp": 44610,
+          "characterTokenId": "167",
+          "raceId": "human",
+          "classId": "mage",
+          "gender": "female",
+          "skinColor": "fair",
+          "hairStyle": "bangs",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "region": "village-square"
+        },
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
+      },
+      "summary": {
+        "name": "Supermage",
+        "level": 21,
+        "classId": "mage",
+        "raceId": "human",
+        "x": 143,
+        "y": 154.2,
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
+      }
+    },
+    {
+      "walletAddress": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
+      "entityId": "cd738840-942b-4c2f-875e-b4465a717b68",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "cd738840-942b-4c2f-875e-b4465a717b68",
+          "type": "player",
+          "name": "SonoLuminae",
+          "x": 360,
+          "y": 434,
+          "hp": 104,
+          "maxHp": 104,
+          "essence": 154,
+          "maxEssence": 154,
+          "createdAt": 1775531273026,
+          "walletAddress": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
+          "level": 12,
+          "xp": 15118,
+          "raceId": "elf",
+          "classId": "warlock",
+          "stats": {
+            "str": 23,
+            "def": 23,
+            "hp": 104,
+            "agi": 33,
+            "int": 86,
+            "mp": 94,
+            "faith": 39,
+            "luck": 70,
+            "essence": 240
+          },
+          "kills": 2029,
+          "activeQuests": [
+            {
+              "questId": "mining_103",
+              "progress": 0,
+              "startedAt": 1775534467354
+            },
+            {
+              "questId": "blacksmithing_103",
+              "progress": 0,
+              "startedAt": 1775551828821
+            },
+            {
+              "questId": "herbalism_103",
+              "progress": 0,
+              "startedAt": 1775555170292
+            }
+          ],
+          "completedQuests": [
+            "rat_extermination",
+            "jewelcrafting_101",
+            "mining_101",
+            "mining_102",
+            "jewelcrafting_102",
+            "wolf_hunter_1",
+            "blacksmithing_101",
+            "herbalism_101",
+            "boar_bounty",
+            "blacksmithing_102",
+            "herbalism_102",
+            "goblin_menace",
+            "slime_cleanup"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "goblin_menace",
+            "blacksmithing_102"
+          ],
+          "effectiveStats": {
+            "str": 23,
+            "def": 23,
+            "hp": 104,
+            "agi": 33,
+            "int": 86,
+            "mp": 94,
+            "faith": 39,
+            "luck": 70,
+            "essence": 240
+          },
+          "region": "village-square",
+          "gotoMode": false,
+          "lastCombatTick": 59345,
+          "activeEffects": [],
+          "order": {
+            "action": "move",
+            "x": 360,
+            "y": 420
+          }
+        },
+        "professions": [],
+        "savedAt": 1775863313836
+      },
+      "summary": {
+        "name": "SonoLuminae",
+        "level": 12,
+        "classId": "warlock",
+        "raceId": "elf",
+        "x": 360,
+        "y": 434,
+        "professions": [],
+        "savedAt": 1775863313836
+      }
+    },
+    {
+      "walletAddress": "0xaeaaf3abbea5267b2cc28e91183ddb2be58b493d",
+      "entityId": "b19669ab-da22-48fe-987c-520bca387eeb",
+      "zoneId": "felsrock-citadel",
+      "sessionState": {
+        "entity": {
+          "id": "b19669ab-da22-48fe-987c-520bca387eeb",
+          "type": "player",
+          "name": "Megaman",
+          "x": 2847.995099040025,
+          "y": -282.79705942401404,
+          "hp": 335,
+          "maxHp": 335,
+          "essence": 818,
+          "maxEssence": 818,
+          "createdAt": 1775508371084,
+          "walletAddress": "0xaeaaf3abbea5267b2cc28e91183ddb2be58b493d",
+          "level": 50,
+          "xp": 250009,
+          "characterTokenId": "282",
+          "raceId": "elf",
+          "classId": "mage",
+          "stats": {
+            "str": 54,
+            "def": 80,
+            "hp": 331,
+            "agi": 113,
+            "int": 322,
+            "mp": 354,
+            "faith": 107,
+            "luck": 268,
+            "essence": 885
+          },
+          "kills": 1049,
+          "activeQuests": [],
+          "completedQuests": [
+            "welcome_adventurer",
+            "rat_extermination",
+            "traders_bargain",
+            "mining_101",
+            "blacksmithing_101",
+            "herbalism_101",
+            "alchemy_101",
+            "skinning_101",
+            "cooking_101",
+            "leatherworking_101",
+            "jewelcrafting_101",
+            "essence_primer",
+            "old_tales",
+            "chronicles_of_arcadia",
+            "blacksmiths_offer",
+            "warriors_wisdom",
+            "foragers_knowledge",
+            "wolf_hunter_1",
+            "mining_102",
+            "voice_of_the_woods",
+            "blacksmithing_102",
+            "glory_of_solaris",
+            "lake_lumina_legend",
+            "skinning_102",
+            "blacksmithing_102",
+            "herbalism_102",
+            "blacksmithing_102",
+            "herbalism_102",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "herbalism_102",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "herbalism_102",
+            "herbalism_102",
+            "skinning_102",
+            "cruton_convergence",
+            "cruton_convergence",
+            "dwarven_exile",
+            "cooking_102",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "skinning_102",
+            "cruton_convergence",
+            "dwarven_exile",
+            "lake_lumina_legend",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "herbalism_102",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "herbalism_102",
+            "dwarven_exile",
+            "dwarven_exile",
+            "dwarven_exile",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "cruton_convergence",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "lake_lumina_legend",
+            "dwarven_exile",
+            "dwarven_exile",
+            "leatherworking_102",
+            "leatherworking_102",
+            "dwarven_exile",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "dwarven_exile",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "shadows_of_the_chasm",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102",
+            "leatherworking_102"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [
+            "mage_frost_armor",
+            "mage_slow",
+            "mage_arcane_missiles_r2",
+            "mage_arcane_missiles",
+            "mage_flamestrike_r2",
+            "mage_flamestrike",
+            "mage_frost_nova",
+            "mage_mana_shield",
+            "mage_arcane_brilliance",
+            "mage_arcane_infusion",
+            "mage_temporal_shift",
+            "mage_fireball_r4",
+            "mage_fireball_r3",
+            "mage_fireball_r2",
+            "mage_fireball",
+            "mage_glacial_prison",
+            "mage_chrono_blessing",
+            "mage_meteor_strike",
+            "mage_time_warp",
+            "mage_arcane_cataclysm",
+            "mage_absolute_zero",
+            "mage_arcane_empowerment"
+          ],
+          "pendingQuestApprovals": [
+            "felsrock_memories",
+            "druids_perspective",
+            "lumina_priestess_plea"
+          ],
+          "equipment": {
+            "weapon": {
+              "tokenId": 108,
+              "name": "Reinforced Battle Axe",
+              "durability": 60,
+              "maxDurability": 119,
+              "broken": false
+            },
+            "chest": {
+              "tokenId": 8,
+              "name": "Leather Vest",
+              "durability": 11,
+              "maxDurability": 70,
+              "broken": false
+            }
+          },
+          "effectiveStats": {
+            "str": 77,
+            "def": 84,
+            "hp": 335,
+            "agi": 112,
+            "int": 322,
+            "mp": 354,
+            "faith": 107,
+            "luck": 268,
+            "essence": 885
+          },
+          "region": "felsrock-citadel",
+          "gotoMode": false,
+          "lastTechniqueId": "mage_slow",
+          "lastTechniqueTick": 3842,
+          "activeEffects": []
+        },
+        "professions": [
+          "alchemy",
+          "blacksmithing"
+        ],
+        "savedAt": 1775863311802
+      },
+      "summary": {
+        "name": "Megaman",
+        "level": 50,
+        "classId": "mage",
+        "raceId": "elf",
+        "x": 2847.995099040025,
+        "y": -282.79705942401404,
+        "professions": [
+          "alchemy",
+          "blacksmithing"
+        ],
+        "savedAt": 1775863311802
+      }
+    },
+    {
+      "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
+      "entityId": "f13384a4-9a3a-47a4-a505-5850019dbc70",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "f13384a4-9a3a-47a4-a505-5850019dbc70",
+          "type": "player",
+          "name": "Jeremy",
+          "x": 137.77495874253947,
+          "y": 156.82241931391204,
+          "hp": 126,
+          "maxHp": 126,
+          "essence": 88,
+          "maxEssence": 88,
+          "createdAt": 1775947473769,
+          "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
+          "level": 8,
+          "xp": 7842,
+          "characterTokenId": "441",
+          "raceId": "elf",
+          "classId": "warrior",
+          "gender": "female",
+          "skinColor": "fair",
+          "hairStyle": "ponytail",
+          "eyeColor": "gold",
+          "stats": {
+            "str": 73,
+            "def": 66,
+            "hp": 126,
+            "agi": 35,
+            "int": 13,
+            "mp": 22,
+            "faith": 20,
+            "luck": 40,
+            "essence": 117
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 109,
+          "activeQuests": [
+            {
+              "questId": "rat_extermination",
+              "progress": 1,
+              "startedAt": 1775947498089
+            }
+          ],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 73,
+            "def": 66,
+            "hp": 126,
+            "agi": 35,
+            "int": 13,
+            "mp": 22,
+            "faith": 20,
+            "luck": 40,
+            "essence": 117
+          },
+          "region": "village-square",
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1776100418186
+      },
+      "summary": {
+        "name": "Jeremy",
+        "level": 8,
+        "classId": "warrior",
+        "raceId": "elf",
+        "x": 137.77495874253947,
+        "y": 156.82241931391204,
+        "professions": [],
+        "savedAt": 1776100418186
+      }
+    },
+    {
+      "walletAddress": "0xbddbcbf49f7f248b85ddbebef06fbaad207974c6",
+      "entityId": "2ba53e32-b2de-4fd8-b8f1-43933d6ef610",
+      "zoneId": "emerald-woods",
+      "sessionState": {
+        "entity": {
+          "id": "2ba53e32-b2de-4fd8-b8f1-43933d6ef610",
+          "type": "player",
+          "name": "Fiona",
+          "x": 2227.9950990400243,
+          "y": 272.79705942401466,
+          "hp": 108,
+          "maxHp": 108,
+          "essence": 80,
+          "maxEssence": 80,
+          "createdAt": 1774976244373,
+          "walletAddress": "0xbddbcbf49f7f248b85ddbebef06fbaad207974c6",
+          "level": 3,
+          "xp": 1133,
+          "raceId": "beastkin",
+          "classId": "warrior",
+          "stats": {
+            "str": 60,
+            "def": 54,
+            "hp": 108,
+            "agi": 28,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 36,
+            "essence": 87
+          },
+          "kills": 7,
+          "activeQuests": [],
+          "completedQuests": [
+            "emerald_wardens_call"
+          ],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 60,
+            "def": 54,
+            "hp": 108,
+            "agi": 28,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 36,
+            "essence": 87
+          },
+          "region": "emerald-woods",
+          "gotoMode": false,
+          "order": {
+            "action": "move",
+            "x": 2240,
+            "y": 280
+          },
+          "lastCombatTick": 499619,
+          "characterTokenId": "385"
+        },
+        "professions": [],
+        "savedAt": 1775863312729
+      },
+      "summary": {
+        "name": "Fiona",
+        "level": 3,
+        "classId": "warrior",
+        "raceId": "beastkin",
+        "x": 2227.9950990400243,
+        "y": 272.79705942401466,
+        "professions": [],
+        "savedAt": 1775863312729
+      }
+    },
+    {
+      "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+      "entityId": "80008db5-8f39-4d84-a308-d09f72499bda",
+      "zoneId": "emerald-woods",
+      "sessionState": {
+        "entity": {
+          "id": "80008db5-8f39-4d84-a308-d09f72499bda",
+          "type": "player",
+          "name": "checking",
+          "x": 2220,
+          "y": 300,
+          "hp": 104,
+          "maxHp": 104,
+          "essence": 83,
+          "maxEssence": 83,
+          "createdAt": 1775946944255,
+          "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+          "level": 2,
+          "xp": 419,
+          "characterTokenId": "358",
+          "raceId": "human",
+          "classId": "warrior",
+          "gender": "male",
+          "skinColor": "medium",
+          "hairStyle": "braided",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 57,
+            "def": 52,
+            "hp": 104,
+            "agi": 26,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 31,
+            "essence": 83
+          },
+          "runEnergy": 100,
+          "maxRunEnergy": 100,
+          "runModeEnabled": false,
+          "isRunning": false,
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 57,
+            "def": 52,
+            "hp": 104,
+            "agi": 26,
+            "int": 10,
+            "mp": 16,
+            "faith": 16,
+            "luck": 31,
+            "essence": 83
+          },
+          "region": "emerald-woods",
+          "gotoMode": false,
+          "activeEffects": []
+        },
+        "professions": [],
+        "savedAt": 1776100407989
+      },
+      "summary": {
+        "name": "checking",
+        "level": 2,
+        "classId": "warrior",
+        "raceId": "human",
+        "x": 2220,
+        "y": 300,
+        "professions": [],
+        "savedAt": 1776100407989
+      }
+    },
+    {
+      "walletAddress": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
+      "entityId": "8fd0f77b-de7e-47dc-bb6c-a42084b42786",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "8fd0f77b-de7e-47dc-bb6c-a42084b42786",
+          "type": "player",
+          "name": "spellmaster",
+          "x": 67.9950990400244,
+          "y": 587.2029405759854,
+          "hp": 73,
+          "maxHp": 73,
+          "essence": 165,
+          "maxEssence": 165,
+          "createdAt": 1775516903855,
+          "walletAddress": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
+          "level": 5,
+          "xp": 3247,
+          "characterTokenId": "40",
+          "raceId": "elf",
+          "classId": "mage",
+          "stats": {
+            "str": 12,
+            "def": 18,
+            "hp": 73,
+            "agi": 25,
+            "int": 71,
+            "mp": 78,
+            "faith": 24,
+            "luck": 59,
+            "essence": 194
+          },
+          "kills": 113,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "pendingQuestApprovals": [
+            "rat_extermination",
+            "mining_101",
+            "blacksmithing_101"
+          ],
+          "effectiveStats": {
+            "str": 12,
+            "def": 18,
+            "hp": 73,
+            "agi": 25,
+            "int": 71,
+            "mp": 78,
+            "faith": 24,
+            "luck": 59,
+            "essence": 194
+          },
+          "region": "village-square",
+          "gotoMode": true,
+          "order": {
+            "action": "move",
+            "x": 80,
+            "y": 580
+          },
+          "lastCombatTick": 6939,
+          "activeEffects": [],
+          "equipment": {
+            "weapon": {
+              "tokenId": 28,
+              "name": "Iron Pickaxe",
+              "durability": 60,
+              "maxDurability": 60,
+              "broken": false
+            }
+          }
+        },
+        "professions": [
+          "herbalism",
+          "blacksmithing",
+          "mining"
+        ],
+        "savedAt": 1775863313779
+      },
+      "summary": {
+        "name": "spellmaster",
+        "level": 5,
+        "classId": "mage",
+        "raceId": "elf",
+        "x": 67.9950990400244,
+        "y": 587.2029405759854,
+        "professions": [
+          "herbalism",
+          "blacksmithing",
+          "mining"
+        ],
+        "savedAt": 1775863313779
+      }
+    }
+  ]
+}

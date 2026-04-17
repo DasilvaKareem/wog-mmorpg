@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "dev:blockchain-worker": "tsx watch src/blockchainWorker.ts",
     "build": "tsc",
     "start": "pnpm run build && node dist/server.js",
+    "start:blockchain-worker": "pnpm run build && node dist/blockchainWorker.js",
     "bench:character-bootstrap": "tsx scripts/benchmarkCharacterBootstrap.ts",
     "test": "tsx tests/runLocalFullFlowAuto.ts",
     "test:erc8004": "tsx tests/erc8004DevIntegration.test.ts",

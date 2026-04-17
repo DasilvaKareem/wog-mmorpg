@@ -150,6 +150,7 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
         body: JSON.stringify({
           walletAddress: address,
           characterName: character.name.replace(/\s+the\s+\w+$/i, ""),
+          characterTokenId: character.characterTokenId ?? character.tokenId,
           raceId: character.properties.race,
           classId: character.properties.class,
         }),

@@ -53,6 +53,9 @@ export class LandingPage {
           <p>Sign in once, then use Enter World to open the character flow.</p>
         </div>
         <div class="xr-landing-socials" data-socials="sign-in" data-signin-only></div>
+        <button type="button" class="xr-landing-social xr-landing-wallet-btn" data-action="connect-wallet" data-signin-only>
+          Connect Wallet (MetaMask)
+        </button>
         <div class="xr-landing-divider" data-signin-only><span>or with email</span></div>
         <div class="xr-landing-form" data-email-flow data-signin-only>
           <label class="xr-landing-field">
@@ -146,6 +149,9 @@ export class LandingPage {
     this.panel.querySelector("[data-action='verify-code']")?.addEventListener("click", () => {
       void this.verifyEmailCode();
     });
+    this.panel.querySelector("[data-action='connect-wallet']")?.addEventListener("click", () => {
+      void this.connectWallet();
+    });
   }
 
   private async hydrateExistingSession() {
@@ -236,6 +242,16 @@ export class LandingPage {
       this.walletAddress = address;
       this.refreshActionState();
       this.setStatus(`Signed in as ${this.truncateAddress(address)}. Enter world when ready.`);
+    });
+  }
+
+  private async connectWallet() {
+    await this.runBusy("Connecting wallet...", async () => {
+      const { xrAuth } = await this.loadAuthModule();
+      const address = await xrAuth.connectWallet();
+      this.walletAddress = address;
+      this.refreshActionState();
+      this.setStatus(`Wallet connected as ${this.truncateAddress(address)}. Enter world when ready.`);
     });
   }
 

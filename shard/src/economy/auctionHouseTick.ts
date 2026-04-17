@@ -10,7 +10,10 @@ import {
 import { reputationManager, ReputationCategory } from "./reputationManager.js";
 import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
 
-const TICK_INTERVAL_MS = 5000; // 5 seconds
+const TICK_INTERVAL_MS = Math.max(
+  2_000,
+  Number.parseInt(process.env.AUCTION_TICK_INTERVAL_MS ?? "5000", 10) || 5_000
+); // 5 seconds default
 const NEXT_ID_REFRESH_MS = 60_000; // only re-fetch nextAuctionId every 60s
 
 let cachedNextAuctionId = 0;

@@ -2363,9 +2363,11 @@ function ReputationGraph({ timeline, width, height }: { timeline: RepTimelinePoi
 function ReputationTab({
   ownerWallet,
   selectedCharacter,
+  onRefreshCharacters,
 }: {
   ownerWallet: string;
   selectedCharacter: CharacterNft | null;
+  onRefreshCharacters?: () => Promise<void> | void;
 }) {
   const [rep, setRep] = React.useState<RepScore | null>(null);
   const [timeline, setTimeline] = React.useState<RepTimelinePoint[]>([]);
@@ -2426,6 +2428,8 @@ function ReputationTab({
         return;
       }
 
+      const selectedToken = selectedCharacter.characterTokenId ?? selectedCharacter.tokenId ?? "";
+      const registrationTokenId = /^\d+$/.test(String(selectedToken).trim()) ? String(selectedToken).trim() : undefined;
       const res = await fetch(`${API_URL}/character/register`, {
         method: "POST",
         headers: {
@@ -2435,7 +2439,7 @@ function ReputationTab({
         body: JSON.stringify({
           walletAddress: ownerWallet,
           characterName: selectedCharacter.name,
-          characterTokenId: selectedCharacter.characterTokenId ?? selectedCharacter.tokenId,
+          ...(registrationTokenId ? { characterTokenId: registrationTokenId } : {}),
           raceId: selectedCharacter.properties?.race,
           classId: selectedCharacter.properties?.class,
         }),
@@ -2452,6 +2456,7 @@ function ReputationTab({
             ? "Registration is already in progress."
             : "Registration queued. Live status will update automatically."
       );
+      await onRefreshCharacters?.();
     } catch {
       setRegistrationMessage("Network error while queueing registration.");
     } finally {
@@ -3581,6 +3586,9 @@ export function ChampionsPage(): React.ReactElement {
                 <ReputationTab
                   ownerWallet={wallet}
                   selectedCharacter={selectedCharacter}
+                  onRefreshCharacters={async () => {
+                    await refreshCharacters(wallet, { background: true });
+                  }}
                 />
               )}
               {activeTab === "gold-shop"   && <GoldShopTab wallet={wallet} custodialWallet={custodialWallet} />}

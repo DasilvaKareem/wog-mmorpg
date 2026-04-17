@@ -275,6 +275,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     Body: {
       walletAddress: string;
       characterName?: string;
+      characterTokenId?: string;
       raceId?: string;
       classId?: string;
       calling?: "adventurer" | "farmer" | "merchant" | "craftsman";
@@ -298,6 +299,27 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     let characterName = request.body.characterName;
     let raceId = request.body.raceId ?? "human";
     let classId = request.body.classId ?? "warrior";
+    const requestedCharacterTokenId = typeof request.body.characterTokenId === "string" && /^\d+$/.test(request.body.characterTokenId.trim())
+      ? request.body.characterTokenId.trim()
+      : null;
+
+    // Prefer deterministic token-based resolution when client provides token id.
+    if (requestedCharacterTokenId) {
+      const ownerChars = await loadAllCharactersForWallet(authWallet).catch(() => []);
+      const custodial = await getAgentCustodialWallet(authWallet);
+      const custodialChars = custodial ? await loadAllCharactersForWallet(custodial).catch(() => []) : [];
+      const resolved = [...ownerChars, ...custodialChars].find((candidate) => {
+        const token = typeof candidate.characterTokenId === "string" ? candidate.characterTokenId.trim() : "";
+        return token === requestedCharacterTokenId;
+      });
+      if (!resolved) {
+        return reply.code(404).send({ error: `Selected character token ${requestedCharacterTokenId} not found` });
+      }
+      characterName = extractRawCharacterName(resolved.name) ?? resolved.name;
+      raceId = resolved.raceId ?? raceId;
+      classId = resolved.classId ?? classId;
+      server.log.info(`[agent/deploy] Resolved by token ${requestedCharacterTokenId}: "${characterName}" (${raceId}/${classId})`);
+    }
 
     // The client sends the formatted NFT name like "Zephyr the Mage".
     // Extract the raw name by stripping the " the ClassName" suffix.
@@ -364,7 +386,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
         characterName,
         raceId,
         classId,
-        request.body.calling
+        request.body.calling,
+        { preventCreateIfMissing: Boolean(requestedCharacterTokenId) }
       );
 
       // Mint starter gold for brand-new custodial wallets (0 balance) so the agent

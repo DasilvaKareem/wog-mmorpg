@@ -26,7 +26,7 @@ import {
   clearManagedFeeCache,
   createManagedFeeProvider,
   resolveManagedFeeOverrides,
-  toEip1559FeeOverrides,
+  toManagedTxFeeFields,
 } from "./feePolicy.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 import {
@@ -400,14 +400,17 @@ async function sendTransactionWithManagedGas(
         await ensureAccountHasGasBalance(account.address);
       }
       const managedFees = await resolveManagedFeeOverrides(skaleProvider);
-      const eip1559Fees = toEip1559FeeOverrides(managedFees);
+      const txFees = toManagedTxFeeFields(managedFees);
       const tx = {
         ...transaction,
-        gasPrice: undefined,
-        ...eip1559Fees,
-        type: undefined,
+        ...txFees,
         nonce: managedNonce ?? undefined,
       };
+      // thirdweb tx helpers can carry an incompatible `type` discriminator.
+      // Let thirdweb infer the envelope from gas fields instead.
+      if ("type" in tx) {
+        delete (tx as Record<string, unknown>).type;
+      }
       return await sendTransaction({ transaction: tx, account });
     } catch (err: any) {
       lastError = err;
@@ -917,9 +920,10 @@ async function processCharacterMintPayload(payload: CharacterMintPayload): Promi
     const tokenUri = await resolveCharacterMetadataUri(payload.nft);
     const receipt = await queueBiteTransaction(`character-mint:${payload.toAddress.toLowerCase()}`, async () => {
       const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+      const txFees = toManagedTxFeeFields(managedFees);
       const tx = await waitForBiteSubmission(
         characterWriteContract.mintTo(payload.toAddress, tokenUri, {
-          ...managedFees,
+          ...txFees,
           nonce: await reserveServerNonce() ?? undefined,
         })
       );
@@ -1223,10 +1227,10 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
 
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
-        const eip1559Fees = toEip1559FeeOverrides(managedFees);
+        const txFees = toManagedTxFeeFields(managedFees);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...eip1559Fees,
+            ...txFees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );
@@ -1945,10 +1949,10 @@ registerChainOperationProcessor("character-metadata-update", async (record: Chai
       const uri = await resolveCharacterMetadataUri(metadata);
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
-        const eip1559Fees = toEip1559FeeOverrides(managedFees);
+        const txFees = toManagedTxFeeFields(managedFees);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...eip1559Fees,
+            ...txFees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );

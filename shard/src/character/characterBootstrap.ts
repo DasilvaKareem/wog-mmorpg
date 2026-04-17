@@ -4,7 +4,11 @@ import {
   recoverCharacterTokenIdFromTransaction,
   registerIdentity,
 } from "../blockchain/blockchain.js";
-import { registerNameOnChain } from "../blockchain/nameServiceChain.js";
+import {
+  isNameServiceEnabled,
+  registerNameOnChain,
+  reverseLookupOnChain,
+} from "../blockchain/nameServiceChain.js";
 import { isWalletChainRegistered } from "../db/nameStore.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
@@ -59,6 +63,11 @@ const CHARACTER_BOOTSTRAP_MAX_RETRIES = Math.max(
   0,
   Number.parseInt(process.env.CHARACTER_BOOTSTRAP_MAX_RETRIES ?? "8", 10) || 8
 );
+const NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS = Number.parseInt(
+  process.env.NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS ?? "900000",
+  10,
+) || 900_000;
+const nextNameAutoRegisterAttemptAt = new Map<string, number>();
 
 export function getCharacterBootstrapMaxRetries(): number {
   return CHARACTER_BOOTSTRAP_MAX_RETRIES;
@@ -226,15 +235,33 @@ async function sanitizeSavedIdentityState(
 }
 
 async function ensureNameRegistered(walletAddress: string, characterName: string, logger?: FastifyBaseLogger): Promise<void> {
+  if (!isNameServiceEnabled()) return;
+  const walletKey = normalizeWallet(walletAddress);
+  const desiredName = collapseCharacterName(characterName).toLowerCase();
+  const now = Date.now();
+  const nextAllowedAttempt = nextNameAutoRegisterAttemptAt.get(walletKey) ?? 0;
+  if (now < nextAllowedAttempt) return;
   try {
     if (await isWalletChainRegistered(walletAddress)) return;
+    const currentName = await reverseLookupOnChain(walletAddress).catch(() => null);
+    if (currentName?.trim().toLowerCase() === desiredName) {
+      nextNameAutoRegisterAttemptAt.delete(walletKey);
+      return;
+    }
     const registered = await registerNameOnChain(walletAddress, characterName);
     if (registered) {
+      nextNameAutoRegisterAttemptAt.delete(walletKey);
       logger?.info(`[nameService] Auto-registered "${characterName}.wog" for ${walletAddress}`);
     } else {
-      logger?.debug(`[nameService] Auto-register did not complete for ${walletAddress}`);
+      nextNameAutoRegisterAttemptAt.set(walletKey, now + NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS);
+      logger?.warn(
+        `[nameService] Auto-register did not complete for ${walletAddress}; backing off for ${Math.round(
+          NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS / 1000,
+        )}s`,
+      );
     }
   } catch (err) {
+    nextNameAutoRegisterAttemptAt.set(walletKey, now + NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS);
     logger?.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
   }
 }
@@ -552,7 +579,9 @@ export async function processCharacterBootstrapJob(
     if (agentId != null) {
       reputationManager.ensureInitialized(agentId);
     }
-    await ensureNameRegistered(walletAddress, characterName, logger);
+    if (currentJob.status === "completed") {
+      await ensureNameRegistered(walletAddress, characterName, logger);
+    }
     return await loadCharacterBootstrapJob(walletAddress, characterName);
   } catch (err) {
     logger?.warn(`[character-bootstrap] ${walletAddress}:${characterName} failed: ${truncateError(err)}`);

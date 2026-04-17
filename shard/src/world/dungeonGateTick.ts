@@ -13,9 +13,15 @@ import { logZoneEvent } from "./zoneEvents.js";
 import { getDungeonInstances, cleanupDungeonInstance } from "./dungeonGate.js";
 
 // --- Configuration ---
-const SURGE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between surges
+const SURGE_INTERVAL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.DUNGEON_GATE_SURGE_INTERVAL_MS ?? String(5 * 60 * 1000), 10) || (5 * 60 * 1000)
+); // 5 minutes default between surges
 const GATE_LIFETIME_MS = 3 * 60 * 1000; // Gates despawn after 3 min if unopened
-const TICK_INTERVAL_MS = 5_000; // Check every 5 seconds
+const TICK_INTERVAL_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.DUNGEON_GATE_TICK_INTERVAL_MS ?? "5000", 10) || 5_000
+); // Check every 5 seconds default
 const GATES_PER_SURGE_MIN = 3;
 const GATES_PER_SURGE_MAX = 6;
 const DANGER_GATE_CHANCE = 0.05; // 5%
