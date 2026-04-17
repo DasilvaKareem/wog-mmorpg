@@ -1,4 +1,4 @@
-import { useEditorStore } from "../store/editorStore";
+import { useEditorStore, type EditorProp } from "../store/editorStore";
 
 export interface TerrainGridDataV2 {
   zoneId: string;
@@ -9,6 +9,7 @@ export interface TerrainGridDataV2 {
   overlay: number[];
   elevation: number[];
   biome: string;
+  props?: EditorProp[];
 }
 
 /**
@@ -26,7 +27,27 @@ export function exportToV2(): TerrainGridDataV2 {
     overlay: [...s.overlay],
     elevation: [...s.elevation],
     biome: s.biome,
+    props: s.props.map((p) => ({ ...p })),
   };
+}
+
+function parseProps(raw: unknown): EditorProp[] {
+  if (!Array.isArray(raw)) return [];
+  const out: EditorProp[] = [];
+  for (const p of raw) {
+    if (!p || typeof p !== "object") continue;
+    const o = p as Record<string, unknown>;
+    if (typeof o.model !== "string") continue;
+    if (typeof o.x !== "number" || typeof o.z !== "number") continue;
+    out.push({
+      model: o.model,
+      x: o.x,
+      z: o.z,
+      rotY: typeof o.rotY === "number" ? o.rotY : undefined,
+      scale: typeof o.scale === "number" ? o.scale : undefined,
+    });
+  }
+  return out;
 }
 
 /**
@@ -55,5 +76,6 @@ export function parseV2(data: unknown): TerrainGridDataV2 | null {
     overlay: d.overlay as number[],
     elevation: d.elevation as number[],
     biome: (d.biome as string) || "temperate",
+    props: parseProps(d.props),
   };
 }

@@ -745,6 +745,9 @@ export async function ensureGameSchema(): Promise<void> {
           normalized_name text not null unique,
           updated_at timestamptz not null default now()
         );
+
+        alter table game.wallet_names
+          add column if not exists chain_registered_at timestamptz;
       `);
       await client.query("commit");
     } catch (err) {

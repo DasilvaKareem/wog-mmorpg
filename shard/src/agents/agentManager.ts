@@ -15,6 +15,23 @@ import { getEntity as getWorldEntity } from "../world/zoneRuntime.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { loadAnyCharacterForWallet } from "../character/characterStore.js";
 import { extractRawCharacterName } from "./agentUtils.js";
+import { setEdictCache, clearEdictCache } from "../combat/edictCache.js";
+import { getDefaultGambits } from "../combat/defaultGambits.js";
+
+async function primeEdictCacheForWallet(userWallet: string): Promise<void> {
+  try {
+    const cfg = await getAgentConfig(userWallet);
+    if (cfg?.edicts && cfg.edicts.length > 0) {
+      setEdictCache(userWallet, cfg.edicts);
+      return;
+    }
+    const ref = await getAgentEntityRef(userWallet);
+    const classId = ref ? (getWorldEntity(ref.entityId)?.classId ?? "") : "";
+    setEdictCache(userWallet, getDefaultGambits(classId));
+  } catch {
+    // Non-fatal — zone tick will just use fallback AI.
+  }
+}
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -46,6 +63,10 @@ class AgentManager {
       this.loops.delete(key);
     }
 
+    // Prime the in-memory edict cache from Redis config so the very first
+    // zone tick after boot/start picks up the agent's gambits.
+    await primeEdictCacheForWallet(key);
+
     const runner = new AgentRunner(key);
     this.loops.set(key, runner);
     try {
@@ -68,6 +89,7 @@ class AgentManager {
     // Persist disabled state
     await patchAgentConfig(key, { enabled: false });
     await clearAgentRuntimeState(key);
+    clearEdictCache(key);
     console.log(`[AgentManager] Stopped agent for ${key.slice(0, 8)}`);
   }
 

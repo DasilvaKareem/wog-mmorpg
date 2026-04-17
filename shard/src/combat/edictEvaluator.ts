@@ -7,7 +7,7 @@
 import type { Edict, EdictCondition, EdictAction } from "./edicts.js";
 import { getTechniqueById, type TechniqueDefinition } from "./techniques.js";
 import type { Entity, ActiveEffect } from "../world/zoneRuntime.js";
-import { getPartyMembers } from "../social/partySystem.js";
+import { getPartyMembers, getPartyLeaderId } from "../social/partySystem.js";
 
 // ── Public result type ──────────────────────────────────────────────
 
@@ -106,9 +106,34 @@ function resolveSubject(
       }
       return lowest;
     }
+    case "leader":
+      return resolvePartyLeader(entity, zone);
+    case "leader_target":
+      return resolveLeaderTarget(entity, zone);
     default:
       return null;
   }
+}
+
+function resolvePartyLeader(entity: Entity, zone: ZoneView): Entity | null {
+  const leaderId = getPartyLeaderId(entity.id);
+  if (!leaderId || leaderId === entity.id) return null;
+  const leader = zone.entities.get(leaderId);
+  if (!leader || leader.hp <= 0) return null;
+  return leader;
+}
+
+function resolveLeaderTarget(entity: Entity, zone: ZoneView): Entity | null {
+  const leader = resolvePartyLeader(entity, zone);
+  if (!leader) return null;
+  const order = leader.order;
+  if (!order || (order.action !== "attack" && order.action !== "technique")) return null;
+  const targetId = order.targetId;
+  if (!targetId) return null;
+  const target = zone.entities.get(targetId);
+  if (!target || target.hp <= 0) return null;
+  if (target.type !== "mob" && target.type !== "boss" && target.type !== "player") return null;
+  return target;
 }
 
 function readField(
@@ -262,6 +287,17 @@ function resolveTargetPreference(
   action: EdictAction,
 ): EdictResult | null {
   const pref = action.targetPreference ?? "nearest";
+
+  if (pref === "leader_target") {
+    const lt = resolveLeaderTarget(entity, zone);
+    return lt ? { edict, targetOverride: lt } : null;
+  }
+
+  if (pref === "party_tagged") {
+    const tagged = resolvePartyTaggedTarget(entity, zone);
+    return tagged ? { edict, targetOverride: tagged } : null;
+  }
+
   let best: Entity | null = null;
   let bestScore = -Infinity;
   const RANGE = 100;
@@ -298,6 +334,29 @@ function resolveTargetPreference(
 
   if (!best) return null;
   return { edict, targetOverride: best };
+}
+
+function resolvePartyTaggedTarget(entity: Entity, zone: ZoneView): Entity | null {
+  const partyIds = new Set(getPartyMembers(entity.id));
+  if (partyIds.size <= 1) return null;
+
+  let best: Entity | null = null;
+  let bestDistSq = Infinity;
+  const RANGE_SQ = 100 * 100;
+
+  for (const e of zone.entities.values()) {
+    if (e.hp <= 0) continue;
+    if (e.type !== "mob" && e.type !== "boss") continue;
+    if (!e.taggedBy || !partyIds.has(e.taggedBy)) continue;
+    const dx = e.x - entity.x, dy = (e.y ?? 0) - (entity.y ?? 0);
+    const distSq = dx * dx + dy * dy;
+    if (distSq > RANGE_SQ) continue;
+    if (distSq < bestDistSq) {
+      bestDistSq = distSq;
+      best = e;
+    }
+  }
+  return best;
 }
 
 function resolveFlee(

@@ -42,6 +42,10 @@ export async function replaceEquipmentState(params: {
               item_state_json,
               updated_at
             ) values ($1, $2, $3, $4::jsonb, now())
+            on conflict (wallet_address, normalized_name, slot_id) do update
+            set
+              item_state_json = excluded.item_state_json,
+              updated_at = now()
           `,
           [walletAddress, normalizedName, slotId, JSON.stringify(itemState)]
         );

@@ -2,7 +2,7 @@ import { Eye, EyeOff } from "lucide-react";
 import { useEditorStore, type Layer } from "../store/editorStore";
 
 interface TileLayerRow {
-  id: Exclude<Layer, "npcs">;
+  id: Exclude<Layer, "npcs" | "props">;
   label: string;
   visKey: "showGround" | "showOverlay" | "showElevation";
 }
@@ -21,6 +21,7 @@ export function LayerPanel() {
   const showElevation = useEditorStore((s) => s.showElevation);
   const toggleVis = useEditorStore((s) => s.toggleLayerVisibility);
   const npcCount = useEditorStore((s) => s.npcs.length);
+  const propCount = useEditorStore((s) => s.props.length);
 
   const vis = { showGround, showOverlay, showElevation };
 
@@ -58,6 +59,16 @@ export function LayerPanel() {
             NPCs
           </button>
           <span className="text-[10px] text-zinc-500">{npcCount}</span>
+        </div>
+        <div
+          className={`flex items-center gap-2 rounded px-2 py-1 text-sm ${
+            layer === "props" ? "bg-zinc-800 text-zinc-100" : "text-zinc-400"
+          }`}
+        >
+          <button onClick={() => setLayer("props")} className="flex-1 text-left">
+            Props (3D)
+          </button>
+          <span className="text-[10px] text-zinc-500">{propCount}</span>
         </div>
       </div>
     </div>

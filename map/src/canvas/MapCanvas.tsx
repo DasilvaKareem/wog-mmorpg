@@ -19,6 +19,7 @@ export function MapCanvas() {
   const isPanning = useRef(false);
   const isPainting = useRef(false);
   const isDraggingNpc = useRef(false);
+  const isDraggingProp = useRef(false);
   const lastPan = useRef({ x: 0, y: 0 });
   const rafId = useRef<number>(0);
   const canvasSize = useRef({ w: 0, h: 0 });
@@ -132,6 +133,42 @@ export function MapCanvas() {
     [store],
   );
 
+  /** Screen-space → float tile coords (matches TerrainRenderer native). */
+  const screenToTileFloat = useCallback(
+    (clientX: number, clientY: number): { x: number; z: number } => {
+      const canvas = canvasRef.current;
+      if (!canvas) return { x: 0, z: 0 };
+      const rect = canvas.getBoundingClientRect();
+      const s = store.getState();
+      const wx = (clientX - rect.left - s.panX) / s.zoom;
+      const wy = (clientY - rect.top - s.panY) / s.zoom;
+      return { x: wx / TILE_PX, z: wy / TILE_PX };
+    },
+    [store],
+  );
+
+  /** Returns index of the prop under the cursor, or null. Uses a 8px screen-space hit radius. */
+  const pickProp = useCallback(
+    (clientX: number, clientY: number): number | null => {
+      const s = store.getState();
+      if (s.props.length === 0) return null;
+      const t = screenToTileFloat(clientX, clientY);
+      // 8 screen px → tiles at current zoom
+      const hitR = 8 / (TILE_PX * s.zoom);
+      const hitR2 = hitR * hitR;
+      let best: { idx: number; d2: number } | null = null;
+      for (let i = 0; i < s.props.length; i++) {
+        const p = s.props[i];
+        const dx = p.x - t.x;
+        const dz = p.z - t.z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 <= hitR2 && (!best || d2 < best.d2)) best = { idx: i, d2 };
+      }
+      return best?.idx ?? null;
+    },
+    [screenToTileFloat, store],
+  );
+
   /** Screen-space → zone-local game units (1 tile = 10 units). */
   const screenToGame = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } => {
@@ -220,6 +257,29 @@ export function MapCanvas() {
         return;
       }
 
+      // Props layer: brush places new prop (or selects existing hit), eraser deletes, drag moves.
+      if (s.layer === "props") {
+        const hit = pickProp(e.clientX, e.clientY);
+        if (s.tool === "eraser") {
+          if (hit !== null) s.removeProp(hit);
+          return;
+        }
+        if (hit !== null) {
+          s.selectProp(hit);
+          isDraggingProp.current = true;
+          return;
+        }
+        if (s.tool === "brush") {
+          const t = screenToTileFloat(e.clientX, e.clientY);
+          const cx = Math.max(0, Math.min(s.width, t.x));
+          const cz = Math.max(0, Math.min(s.height, t.z));
+          s.addProp({ model: s.selectedPropModel, x: cx, z: cz, rotY: 0, scale: 1 });
+        } else {
+          s.selectProp(null);
+        }
+        return;
+      }
+
       const tile = screenToTile(e.clientX, e.clientY);
 
       if (s.tool === "rect") {
@@ -234,7 +294,7 @@ export function MapCanvas() {
       isPainting.current = s.tool !== "stamp";
       applyTool(tile.x, tile.y);
     },
-    [screenToTile, applyTool, pickNpc, store],
+    [screenToTile, screenToTileFloat, applyTool, pickNpc, pickProp, store],
   );
 
   const onMouseMove = useCallback(
@@ -265,6 +325,15 @@ export function MapCanvas() {
         return;
       }
 
+      // Prop drag
+      if (isDraggingProp.current && s.selectedPropIndex !== null) {
+        const t = screenToTileFloat(e.clientX, e.clientY);
+        const clampedX = Math.max(0, Math.min(s.width, t.x));
+        const clampedZ = Math.max(0, Math.min(s.height, t.z));
+        s.moveProp(s.selectedPropIndex, clampedX, clampedZ);
+        return;
+      }
+
       if (s.tool === "rect" && s.rectStart) {
         setRectEnd(tile);
         return;
@@ -274,7 +343,7 @@ export function MapCanvas() {
         applyTool(tile.x, tile.y);
       }
     },
-    [screenToTile, screenToGame, applyTool, store],
+    [screenToTile, screenToGame, screenToTileFloat, applyTool, store],
   );
 
   const onMouseUp = useCallback(
@@ -286,6 +355,11 @@ export function MapCanvas() {
 
       if (isDraggingNpc.current) {
         isDraggingNpc.current = false;
+        return;
+      }
+
+      if (isDraggingProp.current) {
+        isDraggingProp.current = false;
         return;
       }
 
@@ -359,6 +433,11 @@ export function MapCanvas() {
         s.removeNpc(s.selectedNpcIndex);
       } else if (e.key === "Escape" && s.layer === "npcs") {
         s.selectNpc(null);
+      } else if ((e.key === "Delete" || e.key === "Backspace") && s.layer === "props" && s.selectedPropIndex !== null) {
+        e.preventDefault();
+        s.removeProp(s.selectedPropIndex);
+      } else if (e.key === "Escape" && s.layer === "props") {
+        s.selectProp(null);
       } else if (e.key === "h") {
         s.toggleGrid();
       } else if (e.key === "f") {

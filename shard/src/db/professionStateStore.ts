@@ -38,6 +38,12 @@ export async function replaceProfessionStateForWallet(params: {
               action_count,
               updated_at
             ) values ($1, $2, $3, $4, $5, now())
+            on conflict (wallet_address, profession_id) do update
+            set
+              skill_xp = excluded.skill_xp,
+              skill_level = excluded.skill_level,
+              action_count = excluded.action_count,
+              updated_at = now()
           `,
           [
             walletAddress,

@@ -110,6 +110,15 @@ export interface VisibleIntent {
   techniqueName?: string;
 }
 
+/** Free-form prop placed by a human in the map editor. Tile-unit coords. */
+export interface PropPlacement {
+  model: string;
+  x: number;
+  z: number;
+  rotY?: number;
+  scale?: number;
+}
+
 /** V2 terrain — full zone in one response */
 export interface TerrainData {
   zoneId: string;
@@ -120,6 +129,7 @@ export interface TerrainData {
   ground: number[];    // width*height
   overlay: number[];   // width*height
   elevation: number[]; // width*height
+  props?: PropPlacement[];
 }
 
 export interface WorldLayoutZone {

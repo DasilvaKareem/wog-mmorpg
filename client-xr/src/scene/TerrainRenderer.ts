@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { TerrainData } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { getGradientMap } from "./ToonPipeline.js";
+import { composeBuildings, WALL_OVERLAYS } from "./BuildingComposer.js";
 
 /**
  * Tile index → terrain type mapping.
@@ -262,6 +263,15 @@ export class TerrainRenderer {
     // ── Overlay objects ──
     const useGlb = this.envAssets?.isReady() ?? false;
 
+    // Compose buildings from contiguous interior-floor tile clusters.
+    // These tiles skip per-tile floor/wall/roof placement below.
+    let buildingHandled: Set<number> = new Set();
+    if (useGlb && this.envAssets!.isTownReady()) {
+      const { group: buildings, handledTiles } = composeBuildings(data, this.envAssets!);
+      this.group.add(buildings);
+      buildingHandled = handledTiles;
+    }
+
     for (let iz = 0; iz < H; iz++) {
       for (let ix = 0; ix < W; ix++) {
         const ti = iz * W + ix;
@@ -278,8 +288,13 @@ export class TerrainRenderer {
           this.waterMeshes.push(water);
         }
 
-        // Place 3D floor pieces under structure tiles (road for exterior, planks for interior)
-        if (useGlb && STRUCTURE_FLOOR_TILES.has(groundIdx)) {
+        // Place 3D floor pieces under exterior structure tiles (roads around buildings).
+        // Interior planks are handled by the building composer.
+        if (
+          useGlb &&
+          STRUCTURE_FLOOR_TILES.has(groundIdx) &&
+          !buildingHandled.has(ti)
+        ) {
           const floorAsset = (groundIdx === 34 || groundIdx === 35)
             ? "town_planks" : "town_road";
           const floor = this.envAssets!.place(floorAsset, wx, elev, wz);
@@ -288,6 +303,10 @@ export class TerrainRenderer {
 
         const ov = data.overlay[ti] ?? -1;
         if (ov < 0) continue;
+
+        // Skip wall/roof overlays inside composed buildings — the composer
+        // already placed proper walls and a flat roof for these tiles.
+        if (buildingHandled.has(ti) && WALL_OVERLAYS.has(ov)) continue;
 
         // Try GLB model first
         if (useGlb) {
@@ -349,6 +368,19 @@ export class TerrainRenderer {
           this.group.add(m);
           this.portalMeshes.push(m);
         }
+      }
+    }
+
+    // ── Free-form human-placed props ──
+    if (useGlb && data.props && data.props.length > 0) {
+      for (const p of data.props) {
+        const ix = Math.max(0, Math.min(W - 1, Math.floor(p.x)));
+        const iz = Math.max(0, Math.min(H - 1, Math.floor(p.z)));
+        const elev = (data.elevation[iz * W + ix] ?? 0) * ELEV_SCALE;
+        const obj = this.envAssets!.place(p.model, p.x, elev, p.z, p.scale ?? 1);
+        if (!obj) continue;
+        obj.rotation.y = p.rotY ?? 0;
+        this.group.add(obj);
       }
     }
 

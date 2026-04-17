@@ -9,7 +9,7 @@ CLIENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 echo "==> Building XR client (prod)..."
 cd "$CLIENT_DIR"
 rm -rf dist
-NODE_ENV=production pnpm build
+NODE_ENV=production VITE_API_URL="https://wog.preyanshu.me" pnpm build
 
 echo "==> Uploading to $BUCKET/$PREFIX/..."
 gcloud storage rsync --recursive dist/ "$BUCKET/$PREFIX/"

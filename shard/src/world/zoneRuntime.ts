@@ -501,17 +501,17 @@ export function getSpawnedWallets(): Map<string, SpawnedEntry> {
 // Tick loop — advances the world every interval
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
-const TICK_MS = 1000; // 1 tick per second
+const TICK_MS = 250; // 4 ticks per second — tighter combat + smoother motion
 const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
-const WALK_MOVE_SPEED = 30; // units per tick
-const RUN_MOVE_SPEED = 60; // units per tick
+const WALK_MOVE_SPEED = 7.5; // units per tick (was 30/tick @ 1s; same real speed at 250ms)
+const RUN_MOVE_SPEED = 15; // units per tick (was 60/tick @ 1s)
 const DEFAULT_RUN_ENERGY = 100;
-const RUN_ENERGY_DRAIN_PER_TICK = 2;
-const RUN_ENERGY_REGEN_PER_TICK = 1;
+const RUN_ENERGY_DRAIN_PER_TICK = 0.5; // same drain/sec as before
+const RUN_ENERGY_REGEN_PER_TICK = 0.25; // same regen/sec as before
 const MELEE_RANGE = 40; // units — fallback for melee / mobs
 const MIN_DAMAGE = 3;
 const FALLBACK_ATTACK = 15;
-const PARTY_TARGET_LOCK_TICKS = 6;
+const PARTY_TARGET_LOCK_TICKS = 24; // 6s at 250ms tick (was 6 ticks @ 1s)
 const PARTY_ANCHOR_PULL_RADIUS = 100;
 
 interface PartyTargetLock {
@@ -863,15 +863,15 @@ const GRAVEYARD_SPAWNS: Record<string, { x: number; y: number }> = {
 };
 
 const DEATH_XP_LOSS_PERCENT = 0.1; // Lose 10% of current XP on death
-const TAG_TIMEOUT_TICKS = 60;      // 60 ticks = 60s before mob tag expires
-const OOC_REGEN_DELAY_TICKS = 10;  // 10 ticks = 10s out of combat before regen starts
-const OOC_REGEN_PERCENT = 0.03;    // 3% of maxHp per tick while out of combat (mobs)
-// Player HP regen: base 0.5% maxHp/tick OOC + faith * 0.003% per tick
-const PLAYER_HP_REGEN_BASE = 0.005;
-const PLAYER_HP_REGEN_FAITH_COEFF = 0.003;
-// Essence regen: base 2%/tick + int * 0.02% per tick (casters regen ~50% faster)
-const ESSENCE_REGEN_BASE = 0.02;
-const ESSENCE_REGEN_INT_COEFF = 0.0002;
+const TAG_TIMEOUT_TICKS = 240;      // 60s before mob tag expires (240 ticks @ 250ms)
+const OOC_REGEN_DELAY_TICKS = 40;  // 10s out of combat before regen starts (40 ticks @ 250ms)
+const OOC_REGEN_PERCENT = 0.0075;  // 0.75%/tick = 3%/sec at 250ms tick (was 3%/s)
+// Player HP regen: base 0.125%/tick OOC + faith * 0.00075%/tick
+const PLAYER_HP_REGEN_BASE = 0.00125;
+const PLAYER_HP_REGEN_FAITH_COEFF = 0.00075;
+// Essence regen: base 0.5%/tick + int * 0.005%/tick
+const ESSENCE_REGEN_BASE = 0.005;
+const ESSENCE_REGEN_INT_COEFF = 0.00005;
 
 function emptyStats(): CharacterStats {
   return {
@@ -3136,7 +3136,7 @@ async function worldTick() {
     // each tick and ignores players entirely.
     const MOB_LEASH_RANGE = 150;
     const BOSS_LEASH_RANGE = 200;
-    const LEASH_REGEN_PCT = 0.05; // 5% maxHp per tick while walking home
+    const LEASH_REGEN_PCT = 0.0125; // 1.25%/tick = 5%/sec at 250ms tick
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.hp <= 0) continue;
@@ -3180,7 +3180,7 @@ async function worldTick() {
     // ── Mob roaming: idle mobs wander near their spawn point ─────────
     const MOB_ROAM_RADIUS = 50;
     const BOSS_ROAM_RADIUS = 30;
-    const ROAM_CHANCE_PER_TICK = 0.03; // ~3% per tick (500ms) → wander roughly every ~17s
+    const ROAM_CHANCE_PER_TICK = 0.0075; // ~0.75% per tick (250ms) → wander roughly every ~33s
     for (const entity of zone.entities.values()) {
       if (entity.type !== "mob" && entity.type !== "boss") continue;
       if (entity.order) continue;
@@ -3548,6 +3548,51 @@ export function registerZoneRuntime(server: FastifyInstance) {
     return result;
   });
 
+  const ZONE_EVENT_TYPES = ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"] as const;
+
+  function buildZoneDetail(zoneId: string) {
+    const zone = getOrCreateZone(zoneId);
+    return {
+      zoneId: zone.zoneId,
+      tick: zone.tick,
+      gameTime: getGameTime(zone.tick),
+      entities: Object.fromEntries(
+        Array.from(zone.entities.entries()).map(([id, entity]) => [
+          id,
+          toSerializableEntity(entity),
+        ])
+      ),
+      visibleIntents: buildVisibleIntents(zone),
+      recentEvents: getRecentZoneEvents(zone.zoneId, Date.now() - 8000, [...ZONE_EVENT_TYPES]),
+    };
+  }
+
+  server.get<{ Querystring: { ids?: string } }>(
+    "/zones/batch",
+    async (request, reply) => {
+      const raw = (request.query.ids ?? "").trim();
+      if (!raw) {
+        reply.code(400);
+        return { error: "Missing ids query parameter" };
+      }
+      const ids = raw.split(",").map((s) => s.trim()).filter(Boolean);
+      if (ids.length === 0) {
+        reply.code(400);
+        return { error: "No zone ids provided" };
+      }
+      if (ids.length > 20) {
+        reply.code(400);
+        return { error: "Too many ids (max 20)" };
+      }
+      const result: Record<string, ReturnType<typeof buildZoneDetail>> = {};
+      for (const zoneId of ids) {
+        if (!configuredZoneIds.includes(zoneId)) continue;
+        result[zoneId] = buildZoneDetail(zoneId);
+      }
+      return result;
+    }
+  );
+
   server.get("/players/active", async () => {
     const players = Array.from(getAllEntities().entries())
       .filter(([, entity]) => entity.type === "player")
@@ -3585,21 +3630,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
-      const zone = getOrCreateZone(zoneId);
-      const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 8000, ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"]);
-      return {
-        zoneId: zone.zoneId,
-        tick: zone.tick,
-        gameTime: getGameTime(zone.tick),
-        entities: Object.fromEntries(
-          Array.from(zone.entities.entries()).map(([id, entity]) => [
-            id,
-            toSerializableEntity(entity),
-          ])
-        ),
-        visibleIntents: buildVisibleIntents(zone),
-        recentEvents,
-      };
+      return buildZoneDetail(zoneId);
     }
   );
 

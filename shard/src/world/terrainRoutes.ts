@@ -132,6 +132,7 @@ export function registerTerrainRoutes(server: FastifyInstance): void {
         overlay: body.overlay,
         elevation: body.elevation,
         biome: body.biome ?? "temperate",
+        props: Array.isArray(body.props) ? body.props : [],
       };
 
       // Update in-memory cache + write to disk

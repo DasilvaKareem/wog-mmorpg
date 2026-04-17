@@ -243,15 +243,7 @@ async function assertConfiguredRpc(): Promise<void> {
   }
 }
 
-// Health check — GCP and you use this to know the shard is alive
-server.get("/health", async () => {
-  const rpc = await probeBiteRpc().catch(() => ({
-    ok: false,
-    rpcUrl: SKALE_BASE_RPC_URL,
-    chainId: null,
-    latestBlock: null,
-    error: "probe failed",
-  }));
+function buildLocalHealthPayload() {
   return {
     ok: true,
     uptime: process.uptime(),
@@ -260,6 +252,23 @@ server.get("/health", async () => {
       redisRequired: REQUIRE_REDIS_PERSISTENCE,
       memoryFallbackAllowed: isMemoryFallbackAllowed(),
     },
+  };
+}
+
+// Health check — cheap liveness only, safe for load balancers and deploy probes
+server.get("/health", async () => buildLocalHealthPayload());
+
+// Dependency-aware health check — use when you need RPC visibility too
+server.get("/health/dependencies", async () => {
+  const rpc = await probeBiteRpc().catch(() => ({
+    ok: false,
+    rpcUrl: SKALE_BASE_RPC_URL,
+    chainId: null,
+    latestBlock: null,
+    error: "probe failed",
+  }));
+  return {
+    ...buildLocalHealthPayload(),
     rpc,
   };
 });

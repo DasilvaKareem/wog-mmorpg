@@ -131,6 +131,7 @@ export async function saveToShard(): Promise<{ ok: boolean; error?: string }> {
       return { ok: false, error: err.error };
     }
 
+    useEditorStore.getState().markPropsClean();
     return { ok: true };
   } catch {
     return { ok: false, error: "Failed to connect to shard. Is it running on :3000?" };

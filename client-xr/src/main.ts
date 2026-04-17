@@ -35,7 +35,7 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZone, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter } from "./api.js";
+import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter } from "./api.js";
 import { getAuthToken, getCachedToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -765,10 +765,7 @@ async function pollNearbyZones() {
     const nearbyIds = world.getNearbyZoneIds(target.x, target.z, POLL_RADIUS);
     if (nearbyIds.length === 0) return;
 
-    // Fetch all nearby zones in parallel
-    const results = await Promise.all(
-      nearbyIds.map((id) => fetchZone(id).then((data) => ({ id, data })))
-    );
+    const batch = await fetchZonesBatch(nearbyIds);
 
     // Merge entities from all zones
     const merged: Record<string, Entity> = {};
@@ -777,7 +774,7 @@ async function pollNearbyZones() {
     const mergedIntents = new Map<string, VisibleIntent>();
     const allEvents: NonNullable<ZoneResponse["recentEvents"]> = [];
 
-    for (const { id, data } of results) {
+    for (const [id, data] of Object.entries(batch)) {
       if (!data) continue;
       for (const [eid, ent] of Object.entries(data.entities)) {
         ent.zoneId = id;

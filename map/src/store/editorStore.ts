@@ -3,7 +3,21 @@ import { TILE } from "../tiles/tileTypes";
 import { PREFABS, rotatePrefab, type Prefab } from "../tiles/prefabs";
 
 export type Tool = "brush" | "eraser" | "fill" | "rect" | "eyedropper" | "stamp";
-export type Layer = "ground" | "overlay" | "elevation" | "npcs";
+export type Layer = "ground" | "overlay" | "elevation" | "npcs" | "props";
+
+/** Free-form 3D prop placed by a human. Tile-unit coords match the TerrainRenderer. */
+export interface EditorProp {
+  /** Asset key in PROP_MODELS / client-xr ASSET_DEFS. */
+  model: string;
+  /** Tile-unit X (float, 0..width). */
+  x: number;
+  /** Tile-unit Z (float, 0..height). */
+  z: number;
+  /** Y rotation in radians; default 0. */
+  rotY?: number;
+  /** Scale multiplier; default 1. */
+  scale?: number;
+}
 
 /** NPC entry as stored in world/content/npcs/<zoneId>.json (zoneId is implicit) */
 export interface EditorNpc {
@@ -64,6 +78,12 @@ export interface MapState {
   selectedNpcIndex: number | null;
   npcsDirty: boolean;
 
+  // Props layer state
+  props: EditorProp[];
+  selectedPropIndex: number | null;
+  selectedPropModel: string;
+  propsDirty: boolean;
+
   // Actions
   setTool: (tool: Tool) => void;
   setLayer: (layer: Layer) => void;
@@ -101,6 +121,16 @@ export interface MapState {
   selectNpc: (index: number | null) => void;
   markNpcsClean: () => void;
 
+  // Prop actions (x/z in tile units; match TerrainRenderer native coords)
+  setProps: (props: EditorProp[]) => void;
+  addProp: (prop: EditorProp) => void;
+  updateProp: (index: number, patch: Partial<EditorProp>) => void;
+  removeProp: (index: number) => void;
+  moveProp: (index: number, x: number, z: number) => void;
+  selectProp: (index: number | null) => void;
+  setSelectedPropModel: (model: string) => void;
+  markPropsClean: () => void;
+
   // Undo/redo
   pushUndo: () => void;
   undo: () => void;
@@ -119,6 +149,7 @@ export interface MapState {
     ground: number[];
     overlay: number[];
     elevation: number[];
+    props?: EditorProp[];
   }) => void;
 }
 
@@ -166,6 +197,11 @@ export const useEditorStore = create<MapState>((set, get) => ({
   npcs: [],
   selectedNpcIndex: null,
   npcsDirty: false,
+
+  props: [],
+  selectedPropIndex: null,
+  selectedPropModel: "oak_tree",
+  propsDirty: false,
 
   setTool: (tool) => set({ tool }),
   setLayer: (layer) => set({ layer }),
@@ -346,6 +382,44 @@ export const useEditorStore = create<MapState>((set, get) => ({
 
   markNpcsClean: () => set({ npcsDirty: false }),
 
+  setProps: (props) => set({ props, selectedPropIndex: null, propsDirty: false }),
+
+  addProp: (prop) =>
+    set((s) => ({
+      props: [...s.props, prop],
+      selectedPropIndex: s.props.length,
+      propsDirty: true,
+    })),
+
+  updateProp: (index, patch) =>
+    set((s) => {
+      if (index < 0 || index >= s.props.length) return s;
+      const next = [...s.props];
+      next[index] = { ...next[index], ...patch };
+      return { props: next, propsDirty: true };
+    }),
+
+  removeProp: (index) =>
+    set((s) => {
+      if (index < 0 || index >= s.props.length) return s;
+      const next = s.props.filter((_, i) => i !== index);
+      return { props: next, selectedPropIndex: null, propsDirty: true };
+    }),
+
+  moveProp: (index, x, z) =>
+    set((s) => {
+      if (index < 0 || index >= s.props.length) return s;
+      const next = [...s.props];
+      next[index] = { ...next[index], x, z };
+      return { props: next, propsDirty: true };
+    }),
+
+  selectProp: (index) => set({ selectedPropIndex: index }),
+
+  setSelectedPropModel: (model) => set({ selectedPropModel: model }),
+
+  markPropsClean: () => set({ propsDirty: false }),
+
   stampPrefab: (x, y) => {
     const s = get();
     const p = s.getActivePrefab();
@@ -443,6 +517,9 @@ export const useEditorStore = create<MapState>((set, get) => ({
       width,
       height,
       ...makeEmpty(width, height),
+      props: [],
+      selectedPropIndex: null,
+      propsDirty: false,
       undoStack: [],
       redoStack: [],
       panX: 0,
@@ -460,6 +537,9 @@ export const useEditorStore = create<MapState>((set, get) => ({
       ground: data.ground,
       overlay: data.overlay,
       elevation: data.elevation,
+      props: data.props ?? [],
+      selectedPropIndex: null,
+      propsDirty: false,
       undoStack: [],
       redoStack: [],
       _needsFit: true,

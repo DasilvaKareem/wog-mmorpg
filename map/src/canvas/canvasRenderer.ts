@@ -2,6 +2,7 @@ import { mapOldTileToOverworld } from "../tiles/overworldMapping";
 import { getTilesheet, getTileRect } from "./tilesheetLoader";
 import type { MapState, EditorNpc } from "../store/editorStore";
 import type { Prefab } from "../tiles/prefabs";
+import { propColor, getPropModel } from "../tiles/propModels";
 
 /** Game units per tile — matches server TILE_SIZE. */
 const GAME_UNITS_PER_TILE = 10;
@@ -40,6 +41,8 @@ export interface RenderOpts {
     | "tool"
     | "npcs"
     | "selectedNpcIndex"
+    | "props"
+    | "selectedPropIndex"
   >;
   canvasWidth: number;
   canvasHeight: number;
@@ -242,6 +245,67 @@ export function renderMap(opts: RenderOpts) {
 
     // Dim non-NPC layers visually when in NPC layer mode so markers pop
     if (isNpcLayer) {
+      ctx.fillStyle = "rgba(0,0,0,0.05)";
+      ctx.fillRect(0, 0, mapPxW, mapPxH);
+    }
+  }
+
+  // Prop markers — tile-unit coords, square markers with rotation tick.
+  if (state.props.length > 0) {
+    const isPropLayer = state.layer === "props";
+    const size = Math.max(4, 7 / state.zoom);
+    const borderWidth = 1.5 / state.zoom;
+
+    for (let i = 0; i < state.props.length; i++) {
+      const p = state.props[i];
+      const px = p.x * tileSize;
+      const py = p.z * tileSize;
+      const isSelected = state.selectedPropIndex === i;
+      const color = propColor(p.model);
+
+      // Dark outline for contrast
+      ctx.fillStyle = "rgba(0,0,0,0.7)";
+      ctx.fillRect(px - size / 2 - 1 / state.zoom, py - size / 2 - 1 / state.zoom, size + 2 / state.zoom, size + 2 / state.zoom);
+      // Filled square
+      ctx.fillStyle = color;
+      ctx.fillRect(px - size / 2, py - size / 2, size, size);
+
+      // Rotation tick — line from center in facing direction
+      const rot = p.rotY ?? 0;
+      const tickLen = size * 0.75;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = borderWidth;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.lineTo(px + Math.sin(rot) * tickLen, py - Math.cos(rot) * tickLen);
+      ctx.stroke();
+
+      if (isSelected) {
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = borderWidth;
+        ctx.strokeRect(
+          px - size / 2 - 2 / state.zoom,
+          py - size / 2 - 2 / state.zoom,
+          size + 4 / state.zoom,
+          size + 4 / state.zoom,
+        );
+      }
+
+      if ((isPropLayer || state.zoom >= 1.5)) {
+        const fontPx = Math.max(8, 9 / state.zoom);
+        ctx.font = `${fontPx}px monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        const label = getPropModel(p.model)?.label ?? p.model;
+        const textY = py - size / 2 - 3 / state.zoom;
+        ctx.fillStyle = "rgba(0,0,0,0.85)";
+        ctx.fillText(label, px + 1 / state.zoom, textY + 1 / state.zoom);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(label, px, textY);
+      }
+    }
+
+    if (isPropLayer) {
       ctx.fillStyle = "rgba(0,0,0,0.05)";
       ctx.fillRect(0, 0, mapPxW, mapPxH);
     }

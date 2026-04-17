@@ -791,6 +791,18 @@ export async function doCombat(
       return actionProgressed(`Disengaging from ${activeTarget.name ?? "target"}`);
     }
 
+    // FF12-gambit rule: non-leader party members always follow the leader's
+    // target if the leader has switched. Check BEFORE committed-target stickiness
+    // so followers don't stay locked on a stale mob when leader moves on.
+    const isNonLeader = !!(partyId && partyLeaderId && partyLeaderId !== me.id);
+    if (isNonLeader) {
+      const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
+      if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy, false, weakMobFloor)) {
+        if (ctx.committedTargetId !== partyTarget.id) ctx.commitTarget(partyTarget.id);
+        return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
+      }
+    }
+
     // Stick with the previously committed target if it's still alive + allowed.
     // Prevents shortlist jitter from flipping targets every tick.
     const committedId = ctx.committedTargetId;
@@ -2366,6 +2378,18 @@ async function doQuestCombat(
 
     const weakMobFloor = ctx.ignoreWeakMobs;
     const partyLeaderId = getPartyLeaderId(ctx.entityId);
+    const partyId = getPlayerPartyId(ctx.entityId);
+
+    // FF12-gambit rule: non-leader party members follow the leader's target
+    // before honoring their own commit.
+    if (partyId && partyLeaderId && partyLeaderId !== me.id) {
+      const leaderTarget = pickPartyCombatTarget(me, ctx.currentRegion);
+      const leaderTargetIsQuest = leaderTarget ? questMobNames.has((leaderTarget.name ?? "").toLowerCase()) : false;
+      if (leaderTarget && isCombatTargetAllowed(me, leaderTarget, strategy, leaderTargetIsQuest, weakMobFloor)) {
+        if (ctx.committedTargetId !== leaderTarget.id) ctx.commitTarget(leaderTarget.id);
+        return engagePartyCombatTarget(ctx, me, entities, leaderTarget, partyLeaderId);
+      }
+    }
 
     // Honor target commitment — if we locked onto a quest mob already, keep
     // hunting it instead of re-picking every tick.

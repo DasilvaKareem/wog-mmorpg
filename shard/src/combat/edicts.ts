@@ -5,7 +5,7 @@
 
 // ── Condition model ─────────────────────────────────────────────────
 
-export type EdictSubject = "self" | "target" | "ally_lowest_hp";
+export type EdictSubject = "self" | "target" | "ally_lowest_hp" | "leader" | "leader_target";
 
 export type EdictOperator =
   | "lt" | "gt" | "gte" | "eq"     // numeric comparisons
@@ -37,7 +37,7 @@ export type EdictActionType =
   | "flee"              // disengage, move away
   | "skip";             // do nothing this tick
 
-export type EdictTargetPreference = "nearest" | "weakest" | "strongest" | "boss";
+export type EdictTargetPreference = "nearest" | "weakest" | "strongest" | "boss" | "leader_target" | "party_tagged";
 
 export interface EdictAction {
   type: EdictActionType;
@@ -72,7 +72,7 @@ const VALID_OPERATORS: Set<string> = new Set<EdictOperator>([
 ]);
 
 const VALID_SUBJECTS: Set<string> = new Set<EdictSubject>([
-  "self", "target", "ally_lowest_hp",
+  "self", "target", "ally_lowest_hp", "leader", "leader_target",
 ]);
 
 const VALID_ACTION_TYPES: Set<string> = new Set<EdictActionType>([

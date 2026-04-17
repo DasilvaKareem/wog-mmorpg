@@ -104,6 +104,20 @@ interface ZoneData {
   biome?: string;
 }
 
+/** Free-form 3D prop placed by a human in the map editor. Tile-unit coords (0..width, 0..height). */
+export interface PropPlacement {
+  /** Key into client-xr ASSET_DEFS / TOWN_ASSET_DEFS (e.g. "oak_tree", "town_fountain_round"). */
+  model: string;
+  /** Tile-unit X (float, 0..width). */
+  x: number;
+  /** Tile-unit Z (float, 0..height). */
+  z: number;
+  /** Y rotation in radians; omit for 0. */
+  rotY?: number;
+  /** Scale multiplier applied on top of the asset's base scale; omit for 1. */
+  scale?: number;
+}
+
 export interface GeneratedMap {
   zoneId: string;
   width: number;
@@ -113,6 +127,7 @@ export interface GeneratedMap {
   overlay: number[];
   elevation: number[];
   biome: string;
+  props?: PropPlacement[];
 }
 
 // ── Terrain file persistence ─────────────────────────────────────────

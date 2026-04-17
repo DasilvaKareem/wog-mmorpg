@@ -6,6 +6,7 @@ import { ZoneProperties } from "./panels/ZoneProperties";
 import { FalPanel } from "./panels/FalPanel";
 import { PrefabPalette } from "./panels/PrefabPalette";
 import { NpcEditorPanel } from "./panels/NpcEditorPanel";
+import { PropPalettePanel } from "./panels/PropPalettePanel";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { useEditorStore } from "./store/editorStore";
 
@@ -37,6 +38,7 @@ export function App() {
       <div className="flex w-64 flex-col gap-0 overflow-y-auto border-l border-zinc-800 bg-zinc-900">
         <LayerPanel />
         <NpcEditorPanel />
+        <PropPalettePanel />
         <ElevationPicker />
         <ZoneProperties />
         <FalPanel />

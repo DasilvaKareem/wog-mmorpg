@@ -47,3 +47,26 @@ export async function deleteWalletName(wallet: string): Promise<void> {
   if (!isPostgresConfigured()) return;
   await postgresQuery(`delete from game.wallet_names where wallet_address = $1`, [normWallet(wallet)]);
 }
+
+export async function isWalletChainRegistered(wallet: string): Promise<boolean> {
+  if (!isPostgresConfigured()) return false;
+  const { rows } = await postgresQuery<{ chain_registered_at: Date | null }>(
+    `select chain_registered_at from game.wallet_names where wallet_address = $1`,
+    [normWallet(wallet)]
+  );
+  return rows[0]?.chain_registered_at != null;
+}
+
+export async function markWalletChainRegistered(wallet: string, name: string): Promise<void> {
+  if (!isPostgresConfigured()) return;
+  await postgresQuery(
+    `insert into game.wallet_names (wallet_address, name, normalized_name, updated_at, chain_registered_at)
+     values ($1, $2, $3, now(), now())
+     on conflict (wallet_address) do update set
+       name = excluded.name,
+       normalized_name = excluded.normalized_name,
+       chain_registered_at = coalesce(game.wallet_names.chain_registered_at, now()),
+       updated_at = now()`,
+    [normWallet(wallet), name.trim(), normName(name)]
+  );
+}

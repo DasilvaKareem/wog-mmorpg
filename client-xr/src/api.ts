@@ -22,11 +22,15 @@ import type {
   ProfessionStatusResponse,
 } from "./types.js";
 
-// Prefer explicit env, then same-origin (dev proxy), then local shard fallback.
+// Prefer explicit env, then same-origin (dev proxy), then canonical prod shard,
+// then local shard fallback.
 const ENV_BASE = (import.meta.env.VITE_API_URL as string | undefined)?.trim() ?? "";
+const PRODUCTION_API_FALLBACK = "https://wog.preyanshu.me";
 export const CANDIDATE_BASES = ENV_BASE
   ? [ENV_BASE]
-  : ["", "http://localhost:3003", "http://127.0.0.1:3003", "http://localhost:3000", "http://127.0.0.1:3000"];
+  : import.meta.env.DEV
+    ? ["", "http://localhost:3003", "http://127.0.0.1:3003", "http://localhost:3000", "http://127.0.0.1:3000"]
+    : ["", PRODUCTION_API_FALLBACK];
 
 function normalizeBase(base: string): string {
   if (!base) return "";
@@ -84,6 +88,12 @@ async function fetchJsonWithFallback<T>(path: string): Promise<T | null> {
 
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   return fetchJsonWithFallback<ZoneResponse>(`/zones/${zoneId}`);
+}
+
+export async function fetchZonesBatch(zoneIds: string[]): Promise<Record<string, ZoneResponse>> {
+  if (zoneIds.length === 0) return {};
+  const query = encodeURIComponent(zoneIds.join(","));
+  return (await fetchJsonWithFallback<Record<string, ZoneResponse>>(`/zones/batch?ids=${query}`)) ?? {};
 }
 
 export async function fetchZoneList(): Promise<Record<string, { entityCount: number; tick: number }>> {

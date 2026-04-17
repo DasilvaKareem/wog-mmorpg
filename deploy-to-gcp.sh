@@ -3,6 +3,8 @@
 
 set -e
 
+APP_USER="${APP_USER:-preyanshu}"
+
 echo "🚀 Installing Node.js 20..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
 sudo apt-get install -y nodejs
@@ -12,7 +14,7 @@ sudo npm install -g pnpm
 
 echo "📁 Creating app directory..."
 sudo mkdir -p /opt/wog-mmorpg
-sudo chown $USER:$USER /opt/wog-mmorpg
+sudo chown $APP_USER:$APP_USER /opt/wog-mmorpg
 cd /opt/wog-mmorpg
 
 echo "📥 Waiting for code upload..."

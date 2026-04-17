@@ -17,7 +17,7 @@ import {
   processTrackedChainOperation,
   registerChainOperationProcessor,
 } from "./chainOperationStore.js";
-import { deleteWalletName, getNameByWallet, getWalletByName, isWalletNameAvailable, upsertWalletName } from "../db/nameStore.js";
+import { deleteWalletName, getNameByWallet, getWalletByName, isWalletNameAvailable, markWalletChainRegistered, upsertWalletName } from "../db/nameStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
 
 const NAME_SERVICE_ADDRESS = process.env.NAME_SERVICE_CONTRACT_ADDRESS;
@@ -55,6 +55,10 @@ const KEEP_OPTIMISTIC_LOCAL_NAME_CACHE = SKALE_BASE_CHAIN_ID === 31337;
 const NAME_REGISTER_OP = "name-register";
 const NAME_RELEASE_OP = "name-release";
 const BOOTSTRAP_CHAIN_PRIORITY = 10;
+const REGISTER_COOLDOWN_MS = 30_000;
+
+const registerInFlight = new Map<string, Promise<boolean>>();
+const registerCooldown = new Map<string, { name: string; at: number; ok: boolean }>();
 
 /** address (lowercase) → name */
 const addressToNameCache = new Map<string, CacheEntry>();
@@ -89,34 +93,69 @@ export async function registerNameOnChain(
   const addrKey = walletAddress.toLowerCase();
   const nameKey = name.toLowerCase();
   if (!nameServiceContract) return false;
-  if (isPostgresConfigured()) {
-    await upsertWalletName(walletAddress, name);
+
+  if (getCached(addressToNameCache, addrKey) === name) return true;
+
+  const inFlight = registerInFlight.get(addrKey);
+  if (inFlight) return inFlight;
+
+  const cooldown = registerCooldown.get(addrKey);
+  if (cooldown && cooldown.name === name && Date.now() - cooldown.at < REGISTER_COOLDOWN_MS) {
+    return cooldown.ok;
   }
-  const record = await createChainOperation(
-    NAME_REGISTER_OP,
-    walletAddress.toLowerCase(),
-    { walletAddress, name },
-    { priority: BOOTSTRAP_CHAIN_PRIORITY }
-  );
+
+  const task = (async () => {
+    if (isPostgresConfigured()) {
+      await upsertWalletName(walletAddress, name);
+    }
+    const record = await createChainOperation(
+      NAME_REGISTER_OP,
+      walletAddress.toLowerCase(),
+      { walletAddress, name },
+      { priority: BOOTSTRAP_CHAIN_PRIORITY }
+    );
+    try {
+      await processNameOperation(record.operationId);
+      const updated = await getChainOperation(record.operationId);
+      const success = updated?.status === "completed";
+      if (success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+        setCache(addressToNameCache, addrKey, name);
+        setCache(nameToAddressCache, nameKey, walletAddress);
+      }
+      if (success) {
+        await markWalletChainRegistered(walletAddress, name);
+      }
+      return success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE;
+    } catch (err) {
+      const errMsg = String((err as any)?.message ?? (err as any)?.reason ?? err ?? "");
+      if (errMsg.includes("WalletAlreadyHasName")) {
+        const existing = (await getNameByWallet(walletAddress)) ?? name;
+        setCache(addressToNameCache, addrKey, existing);
+        setCache(nameToAddressCache, existing.toLowerCase(), walletAddress);
+        await markWalletChainRegistered(walletAddress, existing);
+        return true;
+      }
+      if (KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
+        setCache(addressToNameCache, addrKey, name);
+        setCache(nameToAddressCache, nameKey, walletAddress);
+        return true;
+      }
+      addressToNameCache.delete(addrKey);
+      nameToAddressCache.delete(nameKey);
+      console.warn(`[nameServiceChain] registerName failed for ${walletAddress}:`, err);
+      return false;
+    }
+  })();
+
+  registerInFlight.set(addrKey, task);
   try {
-    await processNameOperation(record.operationId);
-    const updated = await getChainOperation(record.operationId);
-    const success = updated?.status === "completed";
-    if (success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
-      setCache(addressToNameCache, addrKey, name);
-      setCache(nameToAddressCache, nameKey, walletAddress);
+    const ok = await task;
+    registerCooldown.set(addrKey, { name, at: Date.now(), ok });
+    return ok;
+  } finally {
+    if (registerInFlight.get(addrKey) === task) {
+      registerInFlight.delete(addrKey);
     }
-    return success || KEEP_OPTIMISTIC_LOCAL_NAME_CACHE;
-  } catch (err) {
-    if (KEEP_OPTIMISTIC_LOCAL_NAME_CACHE) {
-      setCache(addressToNameCache, addrKey, name);
-      setCache(nameToAddressCache, nameKey, walletAddress);
-      return true;
-    }
-    addressToNameCache.delete(addrKey);
-    nameToAddressCache.delete(nameKey);
-    console.warn(`[nameServiceChain] registerName failed for ${walletAddress}:`, err);
-    return false;
   }
 }
 

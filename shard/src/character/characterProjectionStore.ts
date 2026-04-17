@@ -62,9 +62,13 @@ export async function upsertCharacterProjection(params: {
     eyeColor?: string;
     origin?: string;
   };
+  /** Full save data to persist in snapshot_json. When provided, this is stored
+   *  instead of the projection-only `character` object — preserving learnedTechniques,
+   *  completedQuests, kills, equipment, professions, etc. across server restarts. */
+  fullSnapshot?: Record<string, unknown>;
   source?: string;
 }): Promise<void> {
-  const { walletAddress, character, source = "redis-sync" } = params;
+  const { walletAddress, character, fullSnapshot, source = "redis-sync" } = params;
   const normalizedWallet = normalizeWallet(walletAddress);
   const normalizedName = normalizeCharacterName(character.name);
   const collapsedName = collapseCharacterName(character.name);
@@ -77,7 +81,7 @@ export async function upsertCharacterProjection(params: {
   }
   const level = Math.max(1, Number(character.level ?? 1) || 1);
   const xp = Math.max(0, Number(character.xp ?? 0) || 0);
-  const snapshotJson = JSON.stringify(character);
+  const snapshotJson = JSON.stringify(fullSnapshot ?? character);
 
   await withPostgresClient(async (client) => {
     await client.query("begin");

@@ -21,6 +21,8 @@ import { loadCharacter } from "../character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
 import { extractRawCharacterName } from "./agentUtils.js";
+import { getDefaultGambits } from "../combat/defaultGambits.js";
+import { setEdictCache } from "../combat/edictCache.js";
 
 const API_URL = process.env.API_URL || "http://localhost:3000";
 
@@ -292,7 +294,17 @@ export async function setupAgentCharacter(
     else if (calling === "farmer") config.focus = "cooking";
     else if (calling === "merchant") config.focus = "trading";
     else if (calling === "craftsman") config.focus = "crafting";
+    // Ship FF12-style gambits so party focus-fire works out of the box.
+    config.edicts = getDefaultGambits(spawnClass);
     await setAgentConfig(userWallet, config);
+    setEdictCache(userWallet, config.edicts);
+  } else if (!existingConfig.edicts || existingConfig.edicts.length === 0) {
+    // Backfill defaults for agents that predate the gambit system.
+    existingConfig.edicts = getDefaultGambits(spawnClass);
+    await setAgentConfig(userWallet, existingConfig);
+    setEdictCache(userWallet, existingConfig.edicts);
+  } else {
+    setEdictCache(userWallet, existingConfig.edicts);
   }
 
   console.log(`[agentSetup] Agent ready: entity=${entityId} zone=${resolvedZoneId}`);

@@ -1208,6 +1208,8 @@ interface EntityObject {
   velocityX: number;
   velocityZ: number;
   targetAge: number;
+  lastMoveSyncAt: number;
+  lerpDurationS: number;
   prevX: number;
   prevZ: number;
   targetYaw: number;
@@ -1397,13 +1399,31 @@ export class EntityManager {
         } else if (wasAlive) {
           const dx = pos.x - existing.targetX;
           const dz = pos.z - existing.targetZ;
-          existing.prevTargetX = existing.targetX;
-          existing.prevTargetZ = existing.targetZ;
-          existing.targetX = pos.x;
-          existing.targetZ = pos.z;
-          existing.velocityX = dx;
-          existing.velocityZ = dz;
-          existing.targetAge = 0;
+          const moved = Math.hypot(dx, dz);
+          const now = performance.now();
+          if (moved > 0.01) {
+            // New distinct target. Use the actual elapsed time since the last
+            // distinct-position sync as the lerp budget so visual speed tracks
+            // real movement speed regardless of poll/tick jitter.
+            const elapsed = existing.lastMoveSyncAt > 0
+              ? (now - existing.lastMoveSyncAt) / 1000
+              : 0.25;
+            existing.lerpDurationS = Math.max(0.08, Math.min(elapsed, 0.6));
+            existing.lastMoveSyncAt = now;
+            existing.prevTargetX = existing.group.position.x;
+            existing.prevTargetZ = existing.group.position.z;
+            existing.targetX = pos.x;
+            existing.targetZ = pos.z;
+            existing.velocityX = dx;
+            existing.velocityZ = dz;
+            existing.targetAge = 0;
+          } else {
+            // Entity is at rest — zero velocity so walk-anim fallback stops
+            // and extrapolation can't drift. Preserve current lerp state so we
+            // don't re-trigger a correction lerp every poll.
+            existing.velocityX = 0;
+            existing.velocityZ = 0;
+          }
         }
 
         // Detect HP changes → trigger animations
@@ -1460,39 +1480,50 @@ export class EntityManager {
 
   /** Lerp positions, billboard, animate */
   update(dt: number, camera?: THREE.Camera) {
-    const EXTRAPOLATE_MAX = 0.35;
+    // Each entity tracks its own lerpDurationS (measured at sync time from the
+    // actual interval between distinct server updates). This self-adjusts to
+    // poll/tick jitter and keeps visual speed constant even when arrival
+    // timing varies.
+    const FALLBACK_DURATION = 0.25;
+    const EXTRAPOLATE_MAX = 0.15;
+    const TELEPORT_THRESHOLD = 10; // client units; snap above this (zone load, etc.)
 
     for (const obj of this.entities.values()) {
       const g = obj.group;
       const isAlive = obj.lifeState === "alive";
-      const moveSpeed = obj.entity.isRunning ? 6.5 : 4.0;
-      const step = moveSpeed * dt;
       obj.targetAge += dt;
       obj.combatAnimHold = Math.max(0, obj.combatAnimHold - dt);
 
       if (isAlive) {
-        // ── Smooth constant-speed interpolation ──
-        const prevPosX = g.position.x;
-        const prevPosZ = g.position.z;
+        const gapX = obj.targetX - obj.prevTargetX;
+        const gapZ = obj.targetZ - obj.prevTargetZ;
+        const gapDist = Math.hypot(gapX, gapZ);
 
-        const extrapolateT = Math.min(obj.targetAge, EXTRAPOLATE_MAX);
-        const desiredX = obj.targetX + obj.velocityX * extrapolateT;
-        const desiredZ = obj.targetZ + obj.velocityZ * extrapolateT;
+        let desiredX: number;
+        let desiredZ: number;
 
-        const toX = desiredX - g.position.x;
-        const toZ = desiredZ - g.position.z;
-        const dist = Math.sqrt(toX * toX + toZ * toZ);
+        if (gapDist > TELEPORT_THRESHOLD) {
+          // Large jump (zone transition, server correction) — snap.
+          desiredX = obj.targetX;
+          desiredZ = obj.targetZ;
+        } else {
+          const interpDuration = obj.lerpDurationS > 0 ? obj.lerpDurationS : FALLBACK_DURATION;
+          const t = Math.min(obj.targetAge / interpDuration, 1);
+          desiredX = obj.prevTargetX + gapX * t;
+          desiredZ = obj.prevTargetZ + gapZ * t;
 
-        if (dist > 0.01) {
-          if (dist <= step) {
-            g.position.x = desiredX;
-            g.position.z = desiredZ;
-          } else {
-            const f = step / dist;
-            g.position.x += toX * f;
-            g.position.z += toZ * f;
+          // Brief dead-reckon for late polls using server velocity (units/poll
+          // → units/sec via the measured lerp duration).
+          if (obj.targetAge > interpDuration) {
+            const extrapolateT = Math.min(obj.targetAge - interpDuration, EXTRAPOLATE_MAX);
+            const velScale = 1 / interpDuration;
+            desiredX += obj.velocityX * velScale * extrapolateT;
+            desiredZ += obj.velocityZ * velScale * extrapolateT;
           }
         }
+
+        g.position.x = desiredX;
+        g.position.z = desiredZ;
 
         // Sample terrain elevation so entities sit on the ground
         if (this.elevationProvider) {
@@ -1502,19 +1533,17 @@ export class EntityManager {
           g.position.y += ((targetY + yOffset) - g.position.y) * Math.min(8 * dt, 1);
         }
 
-        // Compute facing direction from actual movement delta
-        const dx = g.position.x - prevPosX;
-        const dz = g.position.z - prevPosZ;
-        const moveDist = Math.sqrt(dx * dx + dz * dz);
-
-        // Track moving state with hysteresis
-        obj.isMoving = moveDist > 0.001 || Math.hypot(obj.velocityX, obj.velocityZ) > 0.05;
+        // isMoving and facing both driven by authoritative server velocity, not
+        // per-frame visual delta. This prevents settle-lerp corrections (which
+        // have velocity=0 but non-zero visual delta) from flipping the character
+        // around or forcing the walk animation on.
+        const velMag = Math.hypot(obj.velocityX, obj.velocityZ);
+        obj.isMoving = velMag > 0.05;
         const targetBlend = obj.isMoving ? 1 : 0;
         obj.movingSmooth += (targetBlend - obj.movingSmooth) * Math.min(8 * dt, 1);
 
-        // Only update yaw if actually moving
-        if (moveDist > 0.001) {
-          obj.targetYaw = Math.atan2(dx, dz);
+        if (velMag > 0.05) {
+          obj.targetYaw = Math.atan2(obj.velocityX, obj.velocityZ);
         }
 
         // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
@@ -2222,6 +2251,8 @@ export class EntityManager {
     obj.velocityX = 0;
     obj.velocityZ = 0;
     obj.targetAge = 0;
+    obj.lastMoveSyncAt = 0;
+    obj.lerpDurationS = 0.25;
 
     this.forEachEntityMaterial(obj, (mat) => {
       mat.opacity = 1;
@@ -2575,6 +2606,7 @@ export class EntityManager {
     const obj: EntityObject = {
       group, targetX: pos.x, targetZ: pos.z, prevTargetX: pos.x, prevTargetZ: pos.z,
       velocityX: 0, velocityZ: 0, targetAge: 0,
+      lastMoveSyncAt: 0, lerpDurationS: 0.25,
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
       prevHp: ent.hp, prevXp: ent.xp ?? 0, bodyMesh, headMesh,
       isMoving: false, movingSmooth: 0,

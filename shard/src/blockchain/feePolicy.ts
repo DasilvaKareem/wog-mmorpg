@@ -9,6 +9,11 @@ interface ManagedFeeOverrides {
   maxPriorityFeePerGas?: bigint;
 }
 
+export interface Eip1559FeeOverrides {
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas?: bigint;
+}
+
 interface CacheEntry {
   value: ManagedFeeOverrides;
   expiresAt: number;
@@ -79,6 +84,11 @@ export async function resolveManagedFeeOverrides(
   });
 
   return resolved;
+}
+
+export function toEip1559FeeOverrides(fees: ManagedFeeOverrides): Eip1559FeeOverrides {
+  const { gasPrice: _gasPrice, ...eip1559Fees } = fees;
+  return eip1559Fees;
 }
 
 export function clearManagedFeeCache(provider?: ethers.JsonRpcProvider): void {

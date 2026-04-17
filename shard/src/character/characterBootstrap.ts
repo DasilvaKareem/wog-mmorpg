@@ -5,6 +5,7 @@ import {
   registerIdentity,
 } from "../blockchain/blockchain.js";
 import { registerNameOnChain } from "../blockchain/nameServiceChain.js";
+import { isWalletChainRegistered } from "../db/nameStore.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
@@ -226,11 +227,12 @@ async function sanitizeSavedIdentityState(
 
 async function ensureNameRegistered(walletAddress: string, characterName: string, logger?: FastifyBaseLogger): Promise<void> {
   try {
+    if (await isWalletChainRegistered(walletAddress)) return;
     const registered = await registerNameOnChain(walletAddress, characterName);
     if (registered) {
       logger?.info(`[nameService] Auto-registered "${characterName}.wog" for ${walletAddress}`);
     } else {
-      logger?.warn(`[nameService] Auto-register did not complete for ${walletAddress}`);
+      logger?.debug(`[nameService] Auto-register did not complete for ${walletAddress}`);
     }
   } catch (err) {
     logger?.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);

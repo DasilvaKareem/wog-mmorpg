@@ -143,6 +143,28 @@ function parseActiveQuests(
   }
 }
 
+function parseProfessionSkills(
+  value: string | undefined
+): Record<string, { xp: number; level: number; actions: number }> {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const skills: Record<string, { xp: number; level: number; actions: number }> = {};
+    for (const [professionId, rawSkill] of Object.entries(parsed)) {
+      if (!rawSkill || typeof rawSkill !== "object" || Array.isArray(rawSkill)) continue;
+      skills[professionId] = {
+        xp: Math.max(0, Number((rawSkill as { xp?: unknown }).xp ?? 0) || 0),
+        level: Math.max(1, Number((rawSkill as { level?: unknown }).level ?? 1) || 1),
+        actions: Math.max(0, Number((rawSkill as { actions?: unknown }).actions ?? 0) || 0),
+      };
+    }
+    return skills;
+  } catch {
+    return {};
+  }
+}
+
 function parseCharacter(raw: Record<string, string>): CharacterSaveData {
   return {
     name: raw.name ?? "Unknown",
@@ -155,6 +177,7 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     chainRegistrationLastError: raw.chainRegistrationLastError || undefined,
     raceId: raw.raceId ?? "human",
     classId: raw.classId ?? "warrior",
+    calling: (raw.calling as CharacterCalling | undefined) ?? undefined,
     gender: raw.gender,
     skinColor: raw.skinColor || undefined,
     hairStyle: raw.hairStyle || undefined,
@@ -175,6 +198,7 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,
+    professionSkills: parseProfessionSkills(raw.professionSkills),
   };
 }
 
@@ -546,6 +570,9 @@ async function syncCharacterProjection(walletAddress: string, characterName: str
       eyeColor: saved.eyeColor,
       origin: saved.origin,
     },
+    // Store the FULL character save in snapshot_json so loadCharacter() can
+    // restore learnedTechniques, completedQuests, kills, equipment, etc.
+    fullSnapshot: saved as unknown as Record<string, unknown>,
   });
 
   await enqueueOutboxEvent({

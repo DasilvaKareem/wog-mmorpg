@@ -26,6 +26,7 @@ import {
   clearManagedFeeCache,
   createManagedFeeProvider,
   resolveManagedFeeOverrides,
+  toEip1559FeeOverrides,
 } from "./feePolicy.js";
 import { getCustodialWallet } from "./custodialWalletRedis.js";
 import {
@@ -399,7 +400,7 @@ async function sendTransactionWithManagedGas(
         await ensureAccountHasGasBalance(account.address);
       }
       const managedFees = await resolveManagedFeeOverrides(skaleProvider);
-      const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
+      const eip1559Fees = toEip1559FeeOverrides(managedFees);
       const tx = {
         ...transaction,
         gasPrice: undefined,
@@ -1222,9 +1223,10 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
 
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+        const eip1559Fees = toEip1559FeeOverrides(managedFees);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...managedFees,
+            ...eip1559Fees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );
@@ -1943,9 +1945,10 @@ registerChainOperationProcessor("character-metadata-update", async (record: Chai
       const uri = await resolveCharacterMetadataUri(metadata);
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+        const eip1559Fees = toEip1559FeeOverrides(managedFees);
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...managedFees,
+            ...eip1559Fees,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );
