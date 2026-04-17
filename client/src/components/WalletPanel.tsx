@@ -45,6 +45,14 @@ function CharacterSection({
 }): React.ReactElement {
   const [switching, setSwitching] = React.useState(false);
   const [showSwapMenu, setShowSwapMenu] = React.useState(false);
+  const deployableCharacters = React.useMemo(
+    () =>
+      characters.filter((character) => {
+        const token = (character.characterTokenId ?? character.tokenId ?? "").trim();
+        return /^\d+$/.test(token);
+      }),
+    [characters],
+  );
   const liveCharacterTokenId =
     characterProgress?.source === "live"
       ? characterProgress.characterTokenId ?? null
@@ -87,6 +95,16 @@ function CharacterSection({
     if (switching) return;
     const char = characters.find((c) => c.tokenId === tokenId);
     if (!char) return;
+    const characterTokenId = (char.characterTokenId ?? char.tokenId ?? "").trim();
+    if (!/^\d+$/.test(characterTokenId)) {
+      console.warn("[switch] Ignoring non-minted/projection character selection:", char.name, char.tokenId);
+      return;
+    }
+    if (liveCharacterTokenId && characterTokenId === String(liveCharacterTokenId).trim()) {
+      // Already deployed/live for this wallet — do not stop+redeploy.
+      gameBus.emit("lockToPlayer", { walletAddress });
+      return;
+    }
 
     setSwitching(true);
     try {
@@ -110,6 +128,7 @@ function CharacterSection({
         body: JSON.stringify({
           walletAddress,
           characterName: char.name,
+          characterTokenId,
           raceId: char.properties.race,
           classId: char.properties.class,
         }),
@@ -192,7 +211,7 @@ function CharacterSection({
               </button>
             )}
           </div>
-          {showSwapMenu && characters.length > 1 && (
+          {showSwapMenu && deployableCharacters.length > 0 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
               value={selectionValue}
@@ -211,7 +230,7 @@ function CharacterSection({
                   {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
                 </option>
               )}
-              {characters.map((c) => {
+              {deployableCharacters.map((c) => {
                 const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
@@ -258,7 +277,7 @@ function CharacterSection({
               </button>
             )}
           </div>
-          {showSwapMenu && characters.length > 1 && (
+          {showSwapMenu && deployableCharacters.length > 0 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
               value={selectionValue}
@@ -277,7 +296,7 @@ function CharacterSection({
                   {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
                 </option>
               )}
-              {characters.map((c) => {
+              {deployableCharacters.map((c) => {
                 const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"

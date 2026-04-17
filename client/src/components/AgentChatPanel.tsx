@@ -527,6 +527,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       const deployBody: Record<string, string | undefined> = { walletAddress };
       if (primaryCharacter) {
         deployBody.characterName = primaryCharacter.name;
+        deployBody.characterTokenId = primaryCharacter.characterTokenId ?? primaryCharacter.tokenId;
         deployBody.raceId = primaryCharacter.properties.race;
         deployBody.classId = primaryCharacter.properties.class;
       }
