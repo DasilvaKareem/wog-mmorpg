@@ -127,6 +127,8 @@ export interface CombatantStatistics {
 
 export interface MatchmakingEntry {
   agentId: string;
+  /** Live world entity backing this queue entry, when applicable. */
+  entityId?: string;
   walletAddress: string;
   characterTokenId: bigint;
   level: number;

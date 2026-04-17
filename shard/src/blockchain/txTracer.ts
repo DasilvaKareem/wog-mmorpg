@@ -6,6 +6,8 @@
  * The wrapper always re-throws so existing error handling is preserved.
  */
 
+export type TxFailureKind = "retryable" | "funding" | "permanent";
+
 export interface TxError {
   id: string;
   type: string;
@@ -56,14 +58,14 @@ export function getTxErrorSummary(): { total: number; byType: Record<string, num
   };
 }
 
-function classifyError(err: any): { code?: number | string; reason?: string; retryable: boolean } {
+export function classifyTxFailure(err: any): { code?: number | string; reason?: string; retryable: boolean; kind: TxFailureKind } {
   const msg = String(err?.message ?? err ?? "");
   const code = err?.code ?? err?.cause?.code ?? err?.data?.code;
   const reason = err?.reason ?? err?.shortMessage;
 
   // Nonce / ordering errors — retryable
   if (msg.includes("nonce") || msg.includes("replacement transaction")) {
-    return { code, reason, retryable: true };
+    return { code, reason, retryable: true, kind: "retryable" };
   }
   // RPC transient — retryable
   if (
@@ -77,14 +79,19 @@ function classifyError(err: any): { code?: number | string; reason?: string; ret
     msg.includes("503") ||
     code === "UND_ERR_SOCKET"
   ) {
-    return { code, reason, retryable: true };
+    return { code, reason, retryable: true, kind: "retryable" };
   }
   // Gas / balance — retryable after funding
-  if (msg.includes("insufficient funds") || msg.includes("Account balance is too low")) {
-    return { code, reason, retryable: true };
+  if (
+    msg.includes("insufficient funds") ||
+    msg.includes("Account balance is too low") ||
+    msg.includes("transfer amount exceeds balance") ||
+    msg.includes("Treasury not initialised")
+  ) {
+    return { code, reason, retryable: true, kind: "funding" };
   }
   // Revert / business logic — not retryable
-  return { code, reason, retryable: false };
+  return { code, reason, retryable: false, kind: "permanent" };
 }
 
 function recordError(entry: TxError): void {
@@ -119,7 +126,7 @@ export async function traceTx<T>(
   try {
     return await executor();
   } catch (err: any) {
-    const { code, reason, retryable } = classifyError(err);
+    const { code, reason, retryable } = classifyTxFailure(err);
     const entry: TxError = {
       id: `txerr_${++errorSeq}`,
       type,

@@ -3,18 +3,44 @@ import { authenticateRequest, requireWalletMatch } from "../auth/auth.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
 import { RACE_DEFINITIONS } from "./races.js";
 import { validateCharacterInput, computeCharacter } from "./characterCreate.js";
-import { getOwnedCharacters } from "../blockchain/blockchain.js";
-import { getAllEntities } from "../world/zoneRuntime.js";
-import { loadCharacter, saveCharacter, loadAllCharactersForWallet, type CharacterCalling } from "./characterStore.js";
+import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
+import { loadAllCharactersForWallet, loadCharacter, saveCharacter, type CharacterCalling, type CharacterSaveData } from "./characterStore.js";
 import { computeStatsAtLevel } from "./leveling.js";
 import { registerWalletWithWelcomeBonus } from "../blockchain/wallet.js";
+
+// ── Random appearance generation for new player characters ──────────
+const PLAYER_SKINS   = ["pale", "fair", "light", "medium", "tan", "olive", "brown", "dark"];
+const PLAYER_EYES    = ["brown", "blue", "green", "gold", "amber", "gray", "violet"];
+const PLAYER_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald", "topknot", "bangs"];
+const PLAYER_GENDERS: ("male" | "female")[] = ["male", "female"];
+
+function nameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+/** Generate deterministic random appearance from character name */
+function randomPlayerAppearance(name: string) {
+  const h = nameHash(name);
+  return {
+    gender:    PLAYER_GENDERS[h % PLAYER_GENDERS.length],
+    skinColor: PLAYER_SKINS[(h >>> 3) % PLAYER_SKINS.length],
+    eyeColor:  PLAYER_EYES[(h >>> 6) % PLAYER_EYES.length],
+    hairStyle: PLAYER_HAIRS[(h >>> 9) % PLAYER_HAIRS.length],
+  };
+}
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
+import { listCharacterProjectionsForWallets, type CharacterProjectionRecord } from "./characterProjectionStore.js";
 
 type CharacterListEntry = {
   tokenId: string;
   characterTokenId?: string | null;
   agentId?: string | null;
+  agentRegistrationTxHash?: string | null;
   chainRegistrationStatus?:
     | "unregistered"
     | "pending_mint"
@@ -23,6 +49,7 @@ type CharacterListEntry = {
     | "registered"
     | "failed_retryable"
     | "failed_permanent";
+  chainRegistrationLastError?: string | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"
@@ -43,6 +70,54 @@ type CharacterListEntry = {
   };
 };
 
+type LiveCharacterEntity = {
+  id: string;
+  level: number;
+  xp: number;
+  hp: number;
+  maxHp: number;
+  zoneId: string;
+  region: string;
+  name: string;
+  agentId: string | null;
+  characterTokenId: string | null;
+};
+
+function resolveBootstrapChainRegistrationStatus(
+  bootstrapStatus: string | null | undefined,
+  fallbackStatus: string | null | undefined,
+): CharacterListEntry["chainRegistrationStatus"] {
+  switch (bootstrapStatus) {
+    case "pending_mint":
+    case "pending_mint_receipt":
+      return "pending_mint";
+    case "mint_confirmed":
+      return "mint_confirmed";
+    case "identity_pending":
+      return "identity_pending";
+    case "completed":
+      return "registered";
+    case "failed_retryable":
+      return "failed_retryable";
+    case "failed_permanent":
+      return "failed_permanent";
+    default:
+      if (fallbackStatus === "pending_mint_receipt") return "pending_mint";
+      if (
+        fallbackStatus === "unregistered"
+        || fallbackStatus === "pending_mint"
+        || fallbackStatus === "mint_confirmed"
+        || fallbackStatus === "identity_pending"
+        || fallbackStatus === "registered"
+        || fallbackStatus === "failed_retryable"
+        || fallbackStatus === "failed_permanent"
+      ) {
+        return fallbackStatus;
+      }
+      return "unregistered";
+  }
+}
+
 function collapseCharacterName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -53,6 +128,42 @@ function stripCharacterClassSuffix(value: string): string {
 
 function normalizeCharacterKey(name: string, classId?: string | null): string {
   return `${stripCharacterClassSuffix(name).toLowerCase()}::${(classId ?? "").trim().toLowerCase()}`;
+}
+
+function serializeLiveCharacterEntity(
+  entity: {
+    id: string;
+    level?: number;
+    xp?: number;
+    hp: number;
+    maxHp: number;
+    region?: string;
+    name: string;
+    agentId?: string | number | bigint | null;
+    characterTokenId?: string | number | bigint | null;
+  },
+  fallbackZoneId?: string | null,
+): LiveCharacterEntity {
+  const zoneId = entity.region ?? fallbackZoneId ?? "unknown";
+  const serializeBigNumberish = (value: string | number | bigint | null | undefined): string | null => {
+    if (value == null) return null;
+    if (typeof value === "bigint") return value.toString();
+    if (typeof value === "number") return Number.isFinite(value) ? Math.trunc(value).toString() : null;
+    return value;
+  };
+
+  return {
+    id: entity.id,
+    level: entity.level ?? 1,
+    xp: entity.xp ?? 0,
+    hp: entity.hp,
+    maxHp: entity.maxHp,
+    zoneId,
+    region: zoneId,
+    name: entity.name,
+    agentId: serializeBigNumberish(entity.agentId),
+    characterTokenId: serializeBigNumberish(entity.characterTokenId),
+  };
 }
 
 function compareCharacterEntries(left: CharacterListEntry, right: CharacterListEntry): number {
@@ -71,58 +182,141 @@ function compareCharacterEntries(left: CharacterListEntry, right: CharacterListE
   return 0;
 }
 
-function buildCharacterEntryFromSaved(
-  saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
+function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
+  const byNameClass = new Map<string, CharacterListEntry>();
+
+  for (const character of characters) {
+    const classId = character.properties.class?.trim();
+    if (!classId) continue; // ghost row from legacy write path — skip
+    const key = normalizeCharacterKey(character.name, classId);
+    const existing = byNameClass.get(key);
+    if (!existing || compareCharacterEntries(existing, character) < 0) {
+      byNameClass.set(key, character);
+    }
+  }
+
+  // Second pass: if the same base name ended up with multiple class_ids for one
+  // wallet, keep only the highest-scored entry. Legitimate multi-class characters
+  // are rare; surfacing duplicates in the UI is worse than collapsing them.
+  const byName = new Map<string, CharacterListEntry>();
+  for (const character of byNameClass.values()) {
+    const baseKey = stripCharacterClassSuffix(character.name).toLowerCase();
+    const existing = byName.get(baseKey);
+    if (!existing || compareCharacterEntries(existing, character) < 0) {
+      byName.set(baseKey, character);
+    }
+  }
+
+  return Array.from(byName.values());
+}
+
+function buildCharacterEntryFromProjection(
+  projection: CharacterProjectionRecord,
+  saved: CharacterSaveData | null,
   bootstrapStatus: CharacterListEntry["bootstrapStatus"],
-  tokenId: string,
-  liveEntity?: {
-    level: number;
-    xp: number;
-    hp: number;
-    maxHp: number;
-    zoneId: string;
-    name: string;
-    agentId: string | null;
-    characterTokenId: string | null;
-  } | null
+  liveEntity?: LiveCharacterEntity | null
 ): CharacterListEntry {
-  const name = saved.name;
-  const classDef = CLASS_DEFINITIONS.find((c) => c.id === saved.classId);
-  const fullName = classDef ? `${name} the ${classDef.name}` : name;
-  const liveMatches = liveEntity && (name === liveEntity.name || fullName.startsWith(liveEntity.name));
-  const level = liveMatches ? liveEntity.level : saved.level;
-  const xp = liveMatches ? liveEntity.xp : saved.xp;
+  const liveName = liveEntity?.name ? stripCharacterClassSuffix(liveEntity.name) : null;
+  const liveMatches = Boolean(
+    liveEntity
+    && projection.characterTokenId
+    && liveEntity.characterTokenId
+    && projection.characterTokenId === liveEntity.characterTokenId
+    && liveName
+    && stripCharacterClassSuffix(projection.characterName).toLowerCase() === liveName.toLowerCase()
+  );
+  const level = liveMatches ? liveEntity!.level : projection.level;
+  const xp = liveMatches ? liveEntity!.xp : projection.xp;
+  const classDef = CLASS_DEFINITIONS.find((entry) => entry.id === projection.classId);
+  const fullName = classDef ? `${projection.characterName} the ${classDef.name}` : projection.characterName;
 
   return {
-    tokenId,
-    characterTokenId: saved.characterTokenId ?? null,
-    agentId: liveMatches ? liveEntity.agentId : saved.agentId ?? null,
-    chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
+    tokenId: saved?.characterTokenId ?? projection.characterTokenId ?? `projection-${projection.walletAddress}-${projection.normalizedName}-${projection.classId}`,
+    characterTokenId: saved?.characterTokenId ?? projection.characterTokenId ?? null,
+    agentId: liveMatches ? liveEntity!.agentId : (saved?.agentId ?? projection.agentId),
+    agentRegistrationTxHash: saved?.agentRegistrationTxHash ?? projection.agentRegistrationTxHash,
+    chainRegistrationStatus: resolveBootstrapChainRegistrationStatus(
+      bootstrapStatus,
+      saved?.chainRegistrationStatus ?? projection.chainRegistrationStatus,
+    ),
+    chainRegistrationLastError: saved?.chainRegistrationLastError ?? projection.chainRegistrationLastError,
     bootstrapStatus,
     name: fullName,
-    description: `Level ${level} ${saved.raceId} ${saved.classId}`,
+    description: `Level ${level} ${projection.raceId} ${projection.classId}`,
     properties: {
-      race: saved.raceId,
-      class: saved.classId,
+      race: projection.raceId,
+      class: projection.classId,
       level,
       xp,
-      stats: computeStatsAtLevel(saved.raceId, saved.classId, level),
+      stats: computeStatsAtLevel(projection.raceId, projection.classId, level),
     },
   };
 }
 
-function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterListEntry[] {
-  const deduped = new Map<string, CharacterListEntry>();
+async function buildProjectedCharacterEntries(
+  ownerWallet: string,
+  custodialWallet: string | null,
+  liveEntity?: LiveCharacterEntity | null,
+): Promise<CharacterListEntry[]> {
+  const wallets = [ownerWallet, custodialWallet].filter((wallet): wallet is string => Boolean(wallet));
+  const [projectedCharacters, ownerSavedCharacters, custodialSavedCharacters] = await Promise.all([
+    listCharacterProjectionsForWallets(wallets).catch(() => []),
+    loadAllCharactersForWallet(ownerWallet).catch(() => []),
+    custodialWallet ? loadAllCharactersForWallet(custodialWallet).catch(() => []) : Promise.resolve([]),
+  ]);
 
-  for (const character of characters) {
-    const key = normalizeCharacterKey(character.name, character.properties.class);
-    const existing = deduped.get(key);
-    if (!existing || compareCharacterEntries(existing, character) < 0) {
-      deduped.set(key, character);
-    }
-  }
+  const savedByKey = new Map<string, { walletAddress: string; saved: CharacterSaveData }>();
+  const rememberSaved = (walletAddress: string, saved: CharacterSaveData) => {
+    savedByKey.set(`${walletAddress.toLowerCase()}::${normalizeCharacterKey(saved.name, saved.classId)}`, { walletAddress, saved });
+  };
+  for (const saved of ownerSavedCharacters) rememberSaved(ownerWallet, saved);
+  for (const saved of custodialSavedCharacters) rememberSaved(custodialWallet ?? ownerWallet, saved);
 
-  return Array.from(deduped.values());
+  const projectedEntries = await Promise.all(
+    projectedCharacters.map(async (projection) => {
+      const savedMatch = savedByKey.get(
+        `${projection.walletAddress.toLowerCase()}::${normalizeCharacterKey(projection.characterName, projection.classId)}`
+      ) ?? null;
+      const job = await loadCharacterBootstrapJob(projection.walletAddress, projection.characterName).catch(() => null);
+      const bootstrapStatus = (job?.status ?? null) as CharacterListEntry["bootstrapStatus"];
+      return buildCharacterEntryFromProjection(projection, savedMatch?.saved ?? null, bootstrapStatus, liveEntity);
+    }),
+  );
+
+  const projectionKeys = new Set(
+    projectedCharacters.map((projection) => `${projection.walletAddress.toLowerCase()}::${normalizeCharacterKey(projection.characterName, projection.classId)}`),
+  );
+  const savedOnlyEntries = await Promise.all(
+    Array.from(savedByKey.entries())
+      .filter(([key]) => !projectionKeys.has(key))
+      .map(async ([, savedMatch]) => {
+        const { walletAddress: savedWallet, saved } = savedMatch;
+        const classDef = CLASS_DEFINITIONS.find((entry) => entry.id === saved.classId);
+        const fullName = classDef ? `${saved.name} the ${classDef.name}` : saved.name;
+        const job = await loadCharacterBootstrapJob(savedWallet, saved.name).catch(() => null);
+        const bootstrapStatus = (job?.status ?? null) as CharacterListEntry["bootstrapStatus"];
+        return {
+          tokenId: saved.characterTokenId ?? `saved-${savedWallet.toLowerCase()}-${normalizeCharacterKey(saved.name, saved.classId)}`,
+          characterTokenId: saved.characterTokenId ?? null,
+          agentId: saved.agentId ?? null,
+          agentRegistrationTxHash: saved.agentRegistrationTxHash ?? null,
+          chainRegistrationStatus: resolveBootstrapChainRegistrationStatus(bootstrapStatus, saved.chainRegistrationStatus),
+          chainRegistrationLastError: saved.chainRegistrationLastError ?? null,
+          bootstrapStatus,
+          name: fullName,
+          description: `Level ${saved.level} ${saved.raceId} ${saved.classId}`,
+          properties: {
+            race: saved.raceId,
+            class: saved.classId,
+            level: saved.level,
+            xp: saved.xp,
+            stats: computeStatsAtLevel(saved.raceId, saved.classId, saved.level),
+          },
+        } satisfies CharacterListEntry;
+      }),
+  );
+
+  return dedupeCharacterEntries([...projectedEntries, ...savedOnlyEntries]);
 }
 
 async function resolveSavedCharacter(
@@ -232,6 +426,7 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           return { error: "raceId and classId are required when the character has no saved registration state" };
         }
         targetWallet = custodialWallet ?? walletAddress;
+        const appearance = randomPlayerAppearance(rawName);
         await saveCharacter(targetWallet, rawName, {
           name: rawName,
           level: 1,
@@ -240,6 +435,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           chainRegistrationStatus: characterTokenId ? "mint_confirmed" : "unregistered",
           raceId,
           classId,
+          gender: appearance.gender,
+          skinColor: appearance.skinColor,
+          eyeColor: appearance.eyeColor,
+          hairStyle: appearance.hairStyle,
           zone: "village-square",
           x: 0,
           y: 0,
@@ -278,7 +477,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           alreadyQueued: true,
           bootstrap: {
             status: existingJob.status,
-            chainRegistrationStatus: saved.chainRegistrationStatus ?? "unregistered",
+            chainRegistrationStatus: resolveBootstrapChainRegistrationStatus(
+              existingJob.status,
+              saved.chainRegistrationStatus ?? "unregistered",
+            ),
           },
         });
       }
@@ -290,7 +492,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         ok: true,
         bootstrap: {
           status: job.status,
-          chainRegistrationStatus: saved.characterTokenId ? "mint_confirmed" : "unregistered",
+          chainRegistrationStatus: resolveBootstrapChainRegistrationStatus(
+            job.status,
+            saved.characterTokenId ? "mint_confirmed" : (saved.chainRegistrationStatus ?? "unregistered"),
+          ),
         },
       });
     } catch (err) {
@@ -379,8 +584,12 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     };
 
     try {
-      // Guarantee onboarding grant is applied even if client skipped /wallet/register.
-      const registration = await registerWalletWithWelcomeBonus(server, walletAddress);
+      // Queue wallet onboarding, but don't block character creation on treasury setup.
+      void registerWalletWithWelcomeBonus(server, walletAddress).catch((err) => {
+        server.log.warn(
+          `[character] Wallet onboarding queue failed for ${walletAddress}: ${String((err as Error)?.message ?? err).slice(0, 160)}`
+        );
+      });
 
       // Seed character store so level/xp are always in Redis from the start.
       // IMPORTANT: Only seed if no existing save exists — never overwrite progress.
@@ -421,19 +630,19 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       const needsCharacterMint = !existingSave?.characterTokenId;
       const needsIdentityRegistration = !existingSave?.agentId;
       let bootstrapStatus = "completed";
-      let chainRegistrationStatus = existingSave?.chainRegistrationStatus ?? (
+      let chainRegistrationStatus: CharacterListEntry["chainRegistrationStatus"] = existingSave?.chainRegistrationStatus === "pending_mint_receipt"
+        ? "pending_mint"
+        : existingSave?.chainRegistrationStatus ?? (
         existingSave?.characterTokenId && existingSave?.agentId ? "registered" : "unregistered"
       );
 
       if (!existingSave || needsCharacterMint || needsIdentityRegistration) {
         const job = await enqueueCharacterBootstrap(walletAddress, character.name, "character:create", ["wog:a2a-enabled"]);
         bootstrapStatus = job.status;
-        chainRegistrationStatus =
-          job.status === "completed"
-            ? "registered"
-            : job.status === "queued"
-              ? "unregistered"
-              : job.status;
+        chainRegistrationStatus = resolveBootstrapChainRegistrationStatus(
+          job.status,
+          existingSave?.chainRegistrationStatus ?? "unregistered",
+        );
         void processCharacterBootstrapJob(walletAddress, character.name, server.log);
       } else {
         server.log.info(`[character] Existing character "${character.name}" on ${walletAddress} already has NFT + ERC-8004 identity`);
@@ -450,7 +659,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       return {
         ok: true,
         existing: Boolean(existingSave),
-        walletRegistration: registration,
+        walletRegistration: {
+          ok: true,
+          message: "Wallet registration queued asynchronously",
+        },
         character: {
           name: metadata.name,
           description: metadata.description,
@@ -493,213 +705,50 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         const normalizedWallet = walletAddress.toLowerCase();
         const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
         const agentRef = await getAgentEntityRef(walletAddress);
-        let liveEntity: {
-          level: number;
-          xp: number;
-          hp: number;
-          maxHp: number;
-          zoneId: string;
-          name: string;
-          agentId: string | null;
-          characterTokenId: string | null;
-        } | null = null;
+        let liveEntity: LiveCharacterEntity | null = null;
         if (agentRef?.entityId) {
           const entity = getAllEntities().get(agentRef.entityId);
           if (entity?.type === "player") {
             const ew = entity.walletAddress?.toLowerCase();
             if (ew === normalizedWallet || ew === custodialWallet) {
-              liveEntity = {
-                level: entity.level ?? 1,
-                xp: entity.xp ?? 0,
-                hp: entity.hp,
-                maxHp: entity.maxHp,
-                zoneId: entity.region ?? agentRef.zoneId ?? "unknown",
-                name: entity.name,
-                agentId: entity.agentId != null ? String(entity.agentId) : agentRef.agentId ?? null,
-                characterTokenId: entity.characterTokenId != null ? entity.characterTokenId.toString() : agentRef.characterTokenId ?? null,
-              };
+              liveEntity = serializeLiveCharacterEntity({
+                ...entity,
+                agentId: entity.agentId ?? agentRef.agentId ?? null,
+                characterTokenId: entity.characterTokenId ?? agentRef.characterTokenId ?? null,
+              }, agentRef.zoneId);
             }
+          }
+        }
+        if (!liveEntity) {
+          for (const candidateWallet of [normalizedWallet, custodialWallet].filter((value): value is string => Boolean(value))) {
+            const spawned = isWalletSpawned(candidateWallet);
+            if (!spawned) continue;
+            const entity = getAllEntities().get(spawned.entityId);
+            if (!entity || entity.type !== "player") continue;
+            liveEntity = serializeLiveCharacterEntity(entity, spawned.zoneId);
+            break;
+          }
+        }
+        if (!liveEntity) {
+          const liveWorldEntity = Array.from(getAllEntities().values()).find((entity) => {
+            if (entity.type !== "player" || !entity.walletAddress) return false;
+            const entityWallet = entity.walletAddress.toLowerCase();
+            return entityWallet === normalizedWallet || entityWallet === custodialWallet;
+          });
+          if (liveWorldEntity) {
+            liveEntity = serializeLiveCharacterEntity(liveWorldEntity, liveWorldEntity.region ?? null);
           }
         }
         const deployedCharacterName = liveEntity
           ? liveEntity.name.replace(/\s+the\s+\w+$/i, "").trim()
           : null;
 
-        // Try on-chain NFT enumeration first (10s timeout to avoid Cloudflare 524s)
-        // Query both the owner wallet and the custodial wallet (characters are minted to custodial)
-        let nfts: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
-        try {
-          const lookups: Promise<Awaited<ReturnType<typeof getOwnedCharacters>>>[] = [
-            getOwnedCharacters(walletAddress),
-          ];
-          if (custodialWallet && custodialWallet !== normalizedWallet) {
-            lookups.push(getOwnedCharacters(custodialWallet));
-          }
-          const results = await Promise.race([
-            Promise.all(lookups),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error("NFT lookup timed out (10s)")), 10_000)
-            ),
-          ]);
-          // Merge and deduplicate by tokenId
-          const seen = new Set<string>();
-          for (const list of results) {
-            for (const nft of list) {
-              const id = nft.id.toString();
-              if (!seen.has(id)) {
-                seen.add(id);
-                nfts.push(nft);
-              }
-            }
-          }
-        } catch (nftErr) {
-          server.log.warn(`[characters] getOwnedNFTs failed for ${walletAddress}, falling back to Redis: ${(nftErr as Error).message}`);
-        }
-
-        // If on-chain returned results, use the NFT-based flow
-        if (nfts.length > 0) {
-          const characters = await Promise.all(
-            nfts.map(async (nft) => {
-              const props = nft.metadata.properties as Record<string, unknown> | undefined;
-              const nftName = (nft.metadata.name as string) ?? "";
-              const strippedName = nftName.replace(/\s+the\s+\w+$/i, "").trim();
-              const baseName = strippedName || nftName;
-
-              let saved = null;
-              let savedWallet: string | null = null;
-              let bootstrapJob = null;
-              if (baseName) {
-                try {
-                  ({ saved, savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, baseName));
-                  if (saved) {
-                    bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, baseName);
-                  }
-                } catch {
-                  saved = null;
-                  savedWallet = null;
-                  bootstrapJob = null;
-                }
-              }
-
-              if (liveEntity && baseName && nftName.startsWith(liveEntity.name)) {
-                return {
-                  tokenId: nft.id.toString(),
-                  characterTokenId: nft.id.toString(),
-                  agentId: liveEntity.agentId,
-                  chainRegistrationStatus: liveEntity.agentId ? "registered" : saved?.chainRegistrationStatus ?? "unregistered",
-                  bootstrapStatus: bootstrapJob?.status ?? null,
-                  name: String(nft.metadata.name ?? nft.id.toString()),
-                  description: String(nft.metadata.description ?? ""),
-                  properties: {
-                    ...(props ?? {}),
-                    level: liveEntity.level,
-                    xp: liveEntity.xp,
-                    stats: {
-                      ...(props?.stats as Record<string, unknown> ?? {}),
-                      hp: liveEntity.maxHp,
-                    },
-                  },
-                };
-              }
-
-              if (saved) {
-                return {
-                  tokenId: nft.id.toString(),
-                  characterTokenId: saved.characterTokenId ?? nft.id.toString(),
-                  agentId: saved.agentId ?? null,
-                  chainRegistrationStatus: saved.chainRegistrationStatus ?? (saved.agentId ? "registered" : "unregistered"),
-                  bootstrapStatus: bootstrapJob?.status ?? null,
-                  name: String(nft.metadata.name ?? nft.id.toString()),
-                  description: String(nft.metadata.description ?? ""),
-                  properties: {
-                    ...(props ?? {}),
-                    level: saved.level,
-                    xp: saved.xp,
-                  },
-                };
-              }
-
-              return {
-                tokenId: nft.id.toString(),
-                characterTokenId: nft.id.toString(),
-                agentId: null,
-                chainRegistrationStatus: "unregistered",
-                bootstrapStatus: null,
-                name: String(nft.metadata.name ?? nft.id.toString()),
-                description: String(nft.metadata.description ?? ""),
-                properties: props ?? {},
-              };
-            })
-          );
-
-          const savedCharacters = [
-            ...(await loadAllCharactersForWallet(walletAddress)),
-            ...(custodialWallet && custodialWallet !== normalizedWallet
-              ? await loadAllCharactersForWallet(custodialWallet)
-              : []),
-          ];
-          const seenSavedKeys = new Set<string>();
-          const mergedSavedCharacters = savedCharacters.filter((saved) => {
-            const dedupeKey = normalizeCharacterKey(saved.name, saved.classId);
-            if (seenSavedKeys.has(dedupeKey)) return false;
-            seenSavedKeys.add(dedupeKey);
-            return true;
-          });
-
-          const existingKeys = new Set(
-            (characters as CharacterListEntry[]).map((character) =>
-              normalizeCharacterKey(character.name, character.properties.class)
-            )
-          );
-
-          const pendingSavedCharacters = await Promise.all(
-            mergedSavedCharacters
-              .filter((saved) => !existingKeys.has(normalizeCharacterKey(saved.name, saved.classId)))
-              .map(async (saved, index) => {
-                const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, saved.name);
-                const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, saved.name);
-                return buildCharacterEntryFromSaved(
-                  saved,
-                  bootstrapJob?.status ?? null,
-                  `pending-${saved.characterTokenId ?? normalizeCharacterKey(saved.name, saved.classId)}-${index}`,
-                  liveEntity
-                );
-              })
-          );
-
-          return {
-            walletAddress,
-            liveEntity,
-            deployedCharacterName,
-            characters: dedupeCharacterEntries([
-              ...(characters as CharacterListEntry[]),
-              ...pendingSavedCharacters,
-            ]),
-          };
-        }
-
-        // Fallback: on-chain returned empty — build characters from Redis
-        // Check both the owner wallet and the custodial wallet
-        let savedChars = await loadAllCharactersForWallet(walletAddress);
-        if (savedChars.length === 0 && custodialWallet) {
-          savedChars = await loadAllCharactersForWallet(custodialWallet);
-        }
-        if (savedChars.length > 0) {
-          server.log.info(`[characters] On-chain empty for ${walletAddress}, serving ${savedChars.length} character(s) from Redis`);
-        }
-
-        const characters = await Promise.all(savedChars.map(async (saved, i) => {
-          const name = saved.name;
-          const { savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, name);
-          const bootstrapJob = await loadCharacterBootstrapJob(savedWallet ?? walletAddress, name);
-          return buildCharacterEntryFromSaved(saved, bootstrapJob?.status ?? null, `redis-${i}`, liveEntity);
-        }));
-
         return {
           walletAddress,
           liveEntity,
           deployedCharacterName,
-          characters: dedupeCharacterEntries(characters as CharacterListEntry[]),
+          characters: await buildProjectedCharacterEntries(walletAddress, custodialWallet, liveEntity),
+          sourceOfTruth: "postgres-projection",
         };
       } catch (err) {
         server.log.error(err, `Failed to fetch characters for ${walletAddress}`);

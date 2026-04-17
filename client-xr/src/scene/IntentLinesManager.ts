@@ -1,20 +1,27 @@
 import * as THREE from "three";
-import type { Entity, EntityOrder, VisibleIntent } from "../types.js";
+import type { Entity, VisibleIntent } from "../types.js";
 import type { IntentVisibilityMode } from "../hud/IntentModeBadge.js";
 import type { EntityManager } from "./EntityManager.js";
+import { NO_OUTLINE_LAYER } from "./ToonPipeline.js";
+import type { ZoneEvent } from "../types.js";
 
-type CombatOrder = Extract<EntityOrder, { action: "attack" | "technique" }>;
+/**
+ * Action lines driven by zone events (combat, ability, technique-start).
+ * Lines appear when an action happens and fade out when the action duration expires.
+ * Colors: red=attack, purple=debuff, green=heal/buff, blue=buff.
+ */
 
-interface ResolvedIntent {
+interface ActionLine {
   id: string;
   sourceId: string;
   sourceName: string;
   targetId: string;
   targetName: string;
-  category: VisibleIntent["category"];
-  delivery: VisibleIntent["delivery"];
-  state: VisibleIntent["state"];
+  category: "attack" | "heal" | "buff" | "debuff";
+  delivery: "melee" | "projectile" | "area" | "channel" | "instant";
   techniqueName?: string;
+  createdAt: number;
+  duration: number;
   color: number;
   width: number;
   pulseSpeed: number;
@@ -34,7 +41,7 @@ interface IntentVisual {
   glyphMaterial: THREE.SpriteMaterial;
 }
 
-const MAX_VISIBLE_INTENTS = 20;
+const MAX_VISIBLE_LINES = 20;
 const CURVE_SEGMENTS = 6;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
@@ -44,20 +51,23 @@ const SHAFT_GEO = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
 const MARKER_GEO = new THREE.SphereGeometry(1, 10, 8);
 const RING_GEO = new THREE.TorusGeometry(1, 0.18, 6, 20);
 const ARROW_GEO = new THREE.ConeGeometry(0.55, 1.2, 8);
-const GLYPH_TEXTURES: Record<VisibleIntent["category"], THREE.CanvasTexture> = {
+const GLYPH_TEXTURES: Record<string, THREE.CanvasTexture> = {
   attack: makeGlyphTexture("!"),
   heal: makeGlyphTexture("+"),
   buff: makeGlyphTexture("^"),
   debuff: makeGlyphTexture("x"),
 };
 
+/** Default line duration for combat actions (seconds) */
+const DEFAULT_DURATION = 0.8;
+/** Fade-out starts this many seconds before expiry */
+const FADE_LEAD = 0.3;
+
 export class IntentLinesManager {
   readonly group = new THREE.Group();
 
   private visuals: IntentVisual[] = [];
-  private intents: ResolvedIntent[] = [];
-  private entities: Record<string, Entity> = {};
-  private serverIntents: VisibleIntent[] = [];
+  private activeLines: ActionLine[] = [];
   private focusEntityId: string | null = null;
   private visibilityMode: IntentVisibilityMode = "minimal";
   private elapsed = 0;
@@ -65,25 +75,101 @@ export class IntentLinesManager {
 
   constructor(private entityMgr: EntityManager) {
     this.group.name = "intent-lines";
-    for (let i = 0; i < MAX_VISIBLE_INTENTS; i++) {
+    for (let i = 0; i < MAX_VISIBLE_LINES; i++) {
       this.visuals.push(this.createVisual());
     }
   }
 
-  sync(entities: Record<string, Entity>, intents: VisibleIntent[] = []) {
-    this.entities = entities;
-    this.serverIntents = intents;
-    this.rebuild();
+  /** Still called by main.ts for entity data — kept for anchor lookups */
+  sync(_entities: Record<string, Entity>, _intents: VisibleIntent[] = []) {
+    // Entity data accessed via entityMgr; intents no longer drive lines
+  }
+
+  /** Process zone events to create action lines */
+  processEvents(events: ZoneEvent[]) {
+    const now = performance.now();
+
+    for (const ev of events) {
+      if (ev.type === "combat" && ev.entityId && ev.targetId) {
+        this.addLine(ev.entityId, ev.targetId, "attack",
+          (ev.data?.animStyle as string) ?? "melee", undefined, DEFAULT_DURATION, now);
+      }
+
+      if (ev.type === "ability" && ev.entityId && ev.targetId) {
+        const category = classifyAbilityCategory(ev.data?.techniqueType as string, ev.data?.techniqueId as string);
+        const delivery = (ev.data?.animStyle as string) ?? "instant";
+        const techniqueName = ev.data?.techniqueName as string | undefined;
+        this.addLine(ev.entityId, ev.targetId, category, delivery, techniqueName, DEFAULT_DURATION, now);
+      }
+
+      if (ev.type === "technique-start" && ev.entityId && ev.targetId) {
+        const category = classifyAbilityCategory(ev.data?.techniqueType as string, ev.data?.techniqueId as string);
+        const delivery = (ev.data?.animStyle as string) ?? "instant";
+        const techniqueName = ev.data?.techniqueName as string | undefined;
+        const windupTicks = (ev.data?.windupTicks as number) ?? 2;
+        this.addLine(ev.entityId, ev.targetId, category, delivery, techniqueName, windupTicks * 1.0 + 0.5, now);
+      }
+    }
+  }
+
+  private addLine(
+    sourceId: string, targetId: string,
+    category: ActionLine["category"], delivery: string,
+    techniqueName: string | undefined, duration: number, now: number,
+  ) {
+    const source = this.entityMgr.getEntity(sourceId);
+    const target = this.entityMgr.getEntity(targetId);
+    if (!source || !target) return;
+
+    // Dedupe: if same source→target line already active, refresh it
+    const existing = this.activeLines.find((l) => l.sourceId === sourceId && l.targetId === targetId);
+    if (existing) {
+      existing.createdAt = now;
+      existing.duration = Math.max(existing.duration, duration);
+      existing.category = category;
+      existing.techniqueName = techniqueName;
+      const style = getLineStyle(category, delivery);
+      existing.color = style.color;
+      existing.width = style.width;
+      existing.pulseSpeed = style.pulseSpeed;
+      return;
+    }
+
+    const style = getLineStyle(category, delivery);
+    const priority = this.scoreLine(source, target, category);
+    if (priority <= 0) return;
+
+    this.activeLines.push({
+      id: `${sourceId}:${targetId}:${now}`,
+      sourceId,
+      sourceName: source.name,
+      targetId,
+      targetName: target.name,
+      category,
+      delivery: normalizeDelivery(delivery),
+      techniqueName,
+      createdAt: now,
+      duration,
+      color: style.color,
+      width: style.width,
+      pulseSpeed: style.pulseSpeed,
+      priority,
+    });
+
+    // Keep sorted by priority
+    this.activeLines.sort((a, b) => b.priority - a.priority);
+    // Cap active lines
+    if (this.activeLines.length > MAX_VISIBLE_LINES) {
+      this.activeLines.length = MAX_VISIBLE_LINES;
+    }
   }
 
   setFocusEntity(entityId: string | null) {
     this.focusEntityId = entityId;
-    this.rebuild();
   }
 
   setVisibilityMode(mode: IntentVisibilityMode) {
     this.visibilityMode = mode;
-    this.rebuild();
   }
 
   cycleVisibilityMode(): IntentVisibilityMode {
@@ -92,7 +178,6 @@ export class IntentLinesManager {
       : this.visibilityMode === "tactical"
         ? "spectator"
         : "minimal";
-    this.rebuild();
     return this.visibilityMode;
   }
 
@@ -106,29 +191,44 @@ export class IntentLinesManager {
 
   update(dt: number) {
     this.elapsed += dt;
+    const now = performance.now();
+
+    // Expire old lines
+    this.activeLines = this.activeLines.filter((l) => (now - l.createdAt) / 1000 < l.duration);
+
+    // Apply visibility limit
+    const limit = getVisibleLimit(this.visibilityMode);
+    const visible = this.activeLines.slice(0, limit);
+    this.primaryIntentLabel = visible[0] ? formatLabel(visible[0]) : null;
 
     for (let i = 0; i < this.visuals.length; i++) {
       const visual = this.visuals[i];
-      const intent = this.intents[i];
-      if (!intent) {
+      const line = visible[i];
+      if (!line) {
         this.setVisualVisible(visual, false);
         continue;
       }
 
-      const sourcePos = this.getAnchor(intent.sourceId, "source");
-      const targetPos = this.getAnchor(intent.targetId, "target");
+      const sourcePos = this.getAnchor(line.sourceId, "source");
+      const targetPos = this.getAnchor(line.targetId, "target");
       if (!sourcePos || !targetPos) {
         this.setVisualVisible(visual, false);
         continue;
       }
 
-      const pulse = 1 + Math.sin(this.elapsed * intent.pulseSpeed) * 0.12;
-      const width = intent.width * pulse;
-      const opacity = 0.4 + Math.min(intent.priority / 200, 0.35);
-      const markerOpacity = Math.min(1, opacity + 0.15);
-      const points = getCurvePoints(sourcePos, targetPos, CURVE_SEGMENTS, intent.delivery);
+      // Age & fade
+      const age = (now - line.createdAt) / 1000;
+      const remaining = line.duration - age;
+      const fadeFactor = remaining < FADE_LEAD ? remaining / FADE_LEAD : 1;
 
-      visual.shaftMaterial.color.setHex(intent.color);
+      const pulse = 1 + Math.sin(this.elapsed * line.pulseSpeed) * 0.12;
+      const width = line.width * pulse;
+      const baseOpacity = 0.4 + Math.min(line.priority / 200, 0.35);
+      const opacity = baseOpacity * fadeFactor;
+      const markerOpacity = Math.min(1, opacity + 0.15);
+      const points = getCurvePoints(sourcePos, targetPos, CURVE_SEGMENTS, line.delivery);
+
+      visual.shaftMaterial.color.setHex(line.color);
       visual.shaftMaterial.opacity = opacity;
       for (let segmentIdx = 0; segmentIdx < visual.shafts.length; segmentIdx++) {
         const shaft = visual.shafts[segmentIdx];
@@ -137,7 +237,7 @@ export class IntentLinesManager {
 
       visual.sourceMarker.position.copy(sourcePos);
       visual.sourceMarker.scale.setScalar(SOURCE_SCALE * pulse);
-      visual.sourceMaterial.color.setHex(intent.color);
+      visual.sourceMaterial.color.setHex(line.color);
       visual.sourceMaterial.opacity = markerOpacity;
 
       const finalDir = new THREE.Vector3().subVectors(points[points.length - 1], points[points.length - 2]).normalize();
@@ -145,119 +245,37 @@ export class IntentLinesManager {
       visual.targetRing.position.copy(targetPos);
       visual.targetRing.scale.setScalar(TARGET_RING_RADIUS * pulse);
       visual.targetRing.quaternion.setFromUnitVectors(Z_AXIS, finalDir);
-      visual.ringMaterial.color.setHex(intent.color);
+      visual.ringMaterial.color.setHex(line.color);
       visual.ringMaterial.opacity = markerOpacity;
 
       visual.arrowhead.position.copy(targetPos).addScaledVector(finalDir, -0.12);
       visual.arrowhead.scale.setScalar(0.12 + width * 0.9);
       visual.arrowhead.quaternion.setFromUnitVectors(Y_AXIS, finalDir);
-      visual.arrowMaterial.color.setHex(intent.color);
+      visual.arrowMaterial.color.setHex(line.color);
       visual.arrowMaterial.opacity = markerOpacity;
 
       visual.glyph.position.copy(targetPos);
       visual.glyph.position.y += 0.32;
       visual.glyph.scale.set(0.42 * pulse, 0.42 * pulse, 1);
-      visual.glyphMaterial.map = GLYPH_TEXTURES[intent.category];
-      visual.glyphMaterial.color.setHex(intent.color);
+      visual.glyphMaterial.map = GLYPH_TEXTURES[line.category] ?? GLYPH_TEXTURES.attack;
+      visual.glyphMaterial.color.setHex(line.color);
       visual.glyphMaterial.opacity = markerOpacity;
 
       this.setVisualVisible(visual, true);
     }
   }
 
-  private rebuild() {
-    const intents: ResolvedIntent[] = [];
-    const authoritative = this.serverIntents.length > 0
-      ? this.serverIntents
-      : this.buildFallbackIntents();
-
-    for (const intent of authoritative) {
-      const source = this.entities[intent.sourceId];
-      const target = this.entities[intent.targetId];
-      if (!source || !target) continue;
-
-      const priority = this.scoreIntent(source, target, intent);
-      if (priority <= 0) continue;
-
-      const style = getIntentStyle(
-        intent.category,
-        intent.delivery,
-        intent.severity === "dangerous",
-        intent.state === "casting",
-      );
-      intents.push({
-        id: intent.id,
-        sourceId: intent.sourceId,
-        sourceName: intent.sourceName,
-        targetId: intent.targetId,
-        targetName: intent.targetName,
-        category: intent.category,
-        delivery: intent.delivery,
-        state: intent.state,
-        techniqueName: intent.techniqueName,
-        color: style.color,
-        width: style.width,
-        pulseSpeed: style.pulseSpeed,
-        priority,
-      });
-    }
-
-    intents.sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
-    this.intents = intents.slice(0, getVisibleLimit(this.visibilityMode));
-    this.primaryIntentLabel = this.intents[0] ? formatIntentLabel(this.intents[0]) : null;
-  }
-
-  private buildFallbackIntents(): VisibleIntent[] {
-    const intents: VisibleIntent[] = [];
-
-    for (const entity of Object.values(this.entities)) {
-      const order = entity.order;
-      if (!order || order.action === "move") continue;
-      const combatOrder: CombatOrder = order;
-      const target = this.entities[combatOrder.targetId];
-      if (!target) continue;
-
-      const category = classifyCategory(combatOrder);
-      const delivery = classifyDelivery(combatOrder);
-      intents.push({
-        id: `${entity.id}:${combatOrder.action}:${combatOrder.action === "technique" ? combatOrder.techniqueId : combatOrder.targetId}`,
-        sourceId: entity.id,
-        sourceName: entity.name,
-        sourceType: entity.type,
-        targetId: target.id,
-        targetName: target.name,
-        targetType: target.type,
-        category,
-        delivery,
-        state: "queued",
-        severity: entity.type === "boss" || (category === "attack" && (delivery === "area" || delivery === "channel"))
-          ? "dangerous"
-          : "normal",
-        ...(combatOrder.action === "technique" && { techniqueName: prettifyTechniqueName(combatOrder.techniqueId) }),
-        ...(combatOrder.action === "technique" && { techniqueId: combatOrder.techniqueId }),
-      });
-    }
-
-    return intents;
-  }
-
-  private scoreIntent(source: Entity, target: Entity, intent: Pick<VisibleIntent, "category" | "severity">): number {
-    const isBoss = source.type === "boss" || intent.severity === "dangerous";
+  private scoreLine(source: Entity, target: Entity, category: string): number {
+    const isBoss = source.type === "boss";
     const isPlayerRelevant = source.type === "player" || target.type === "player";
     const involvesFocus = this.focusEntityId != null
       && (source.id === this.focusEntityId || target.id === this.focusEntityId);
 
     if (this.visibilityMode === "minimal") {
-      if (this.focusEntityId && !involvesFocus && !isBoss) {
-        return 0;
-      }
-      if (!this.focusEntityId && !isPlayerRelevant && !isBoss) {
-        return 0;
-      }
+      if (this.focusEntityId && !involvesFocus && !isBoss) return 0;
+      if (!this.focusEntityId && !isPlayerRelevant && !isBoss) return 0;
     } else if (this.visibilityMode === "tactical") {
-      if (!isPlayerRelevant && !isBoss && intent.severity !== "dangerous") {
-        return 0;
-      }
+      if (!isPlayerRelevant && !isBoss) return 0;
     }
 
     let score = 0;
@@ -266,11 +284,9 @@ export class IntentLinesManager {
     if (isBoss) score += 90;
     if (target.type === "player") score += 50;
     if (source.type === "player") score += 35;
-    if (intent.category !== "attack") score += 10;
-
-    if (intent.category === "heal") score += 15;
-    if (intent.category === "debuff") score += 10;
-
+    if (category !== "attack") score += 10;
+    if (category === "heal") score += 15;
+    if (category === "debuff") score += 10;
     return score;
   }
 
@@ -289,93 +305,68 @@ export class IntentLinesManager {
 
     const anchor = pos.clone();
     anchor.y += yOffset;
-
     if (endpoint === "target" && entityId === this.focusEntityId) {
       anchor.y += 0.08;
     }
-
     return anchor;
   }
 
   private createVisual(): IntentVisual {
     const shaftMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const shafts: THREE.Mesh[] = [];
     for (let i = 0; i < CURVE_SEGMENTS; i++) {
       const shaft = new THREE.Mesh(SHAFT_GEO, shaftMaterial);
+      shaft.layers.set(NO_OUTLINE_LAYER);
       shaft.visible = false;
       shafts.push(shaft);
       this.group.add(shaft);
     }
 
     const sourceMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const sourceMarker = new THREE.Mesh(MARKER_GEO, sourceMaterial);
+    sourceMarker.layers.set(NO_OUTLINE_LAYER);
     sourceMarker.visible = false;
     this.group.add(sourceMarker);
 
     const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const targetRing = new THREE.Mesh(RING_GEO, ringMaterial);
+    targetRing.layers.set(NO_OUTLINE_LAYER);
     targetRing.visible = false;
     this.group.add(targetRing);
 
     const arrowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      color: 0xffffff, transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const arrowhead = new THREE.Mesh(ARROW_GEO, arrowMaterial);
+    arrowhead.layers.set(NO_OUTLINE_LAYER);
     arrowhead.visible = false;
     this.group.add(arrowhead);
 
     const glyphMaterial = new THREE.SpriteMaterial({
-      map: GLYPH_TEXTURES.attack,
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
+      map: GLYPH_TEXTURES.attack, color: 0xffffff,
+      transparent: true, opacity: 0,
+      depthWrite: false, blending: THREE.AdditiveBlending,
     });
     const glyph = new THREE.Sprite(glyphMaterial);
+    glyph.layers.set(NO_OUTLINE_LAYER);
     glyph.visible = false;
     this.group.add(glyph);
 
-    return {
-      shafts,
-      shaftMaterial,
-      sourceMarker,
-      sourceMaterial,
-      targetRing,
-      ringMaterial,
-      arrowhead,
-      arrowMaterial,
-      glyph,
-      glyphMaterial,
-    };
+    return { shafts, shaftMaterial, sourceMarker, sourceMaterial, targetRing, ringMaterial, arrowhead, arrowMaterial, glyph, glyphMaterial };
   }
 
   private setVisualVisible(visual: IntentVisual, visible: boolean) {
-    for (const shaft of visual.shafts) {
-      shaft.visible = visible;
-    }
+    for (const shaft of visual.shafts) shaft.visible = visible;
     visual.sourceMarker.visible = visible;
     visual.targetRing.visible = visible;
     visual.arrowhead.visible = visible;
@@ -392,137 +383,71 @@ export class IntentLinesManager {
   }
 }
 
-function getCurvePoints(
-  from: THREE.Vector3,
-  to: THREE.Vector3,
-  segments: number,
-  delivery: VisibleIntent["delivery"],
-): THREE.Vector3[] {
-  const control = from.clone().lerp(to, 0.5);
-  const distance = from.distanceTo(to);
-  const liftMultiplier = delivery === "projectile"
-    ? 0.18
-    : delivery === "channel"
-      ? 0.1
-      : 0.12;
-  control.y += Math.min(0.8, Math.max(0.12, distance * liftMultiplier));
+// ── Helpers ────────────────────────────────────────────────────────────
 
-  const curve = new THREE.QuadraticBezierCurve3(from, control, to);
-  return curve.getPoints(segments);
-}
-
-function classifyCategory(order: CombatOrder): VisibleIntent["category"] {
-  if (order.action === "attack") return "attack";
-
-  const id = order.techniqueId.toLowerCase();
-
-  if (matchesAny(id, [
-    "holy_light", "renew", "lay_on_hands", "meditation", "healing", "heal_",
-    "_heal", "redemption", "prayer",
-  ])) {
-    return "heal";
+function classifyAbilityCategory(techniqueType?: string, techniqueId?: string): ActionLine["category"] {
+  if (techniqueType === "healing") return "heal";
+  if (techniqueType === "buff") return "buff";
+  if (techniqueType === "debuff") return "debuff";
+  // Fallback: check technique ID patterns
+  if (techniqueId) {
+    const id = techniqueId.toLowerCase();
+    if (/heal|holy_light|renew|lay_on_hands|prayer|redemption/.test(id)) return "heal";
+    if (/curse|slow|corruption|weakness|poison|intimidating|rend|siphon|drain/.test(id)) return "debuff";
+    if (/shield|armor|blessing|protection|battle_rage|wall|stealth|fortitude|aura/.test(id)) return "buff";
   }
-
-  if (matchesAny(id, [
-    "curse", "slow", "corruption", "weakness", "mark", "disable", "roots",
-    "poison", "howl", "judgment", "intimidating", "rend", "siphon", "drain",
-  ])) {
-    return "debuff";
-  }
-
-  if (matchesAny(id, [
-    "shield", "armor", "blessing", "protection", "battle_rage", "wall",
-    "stealth", "evasion", "fortitude", "resolve", "focus", "aura", "might",
-    "inner_focus", "natures_blessing",
-  ])) {
-    return "buff";
-  }
-
   return "attack";
 }
 
-function classifyDelivery(order: CombatOrder): VisibleIntent["delivery"] {
-  if (order.action === "attack") return "melee";
-
-  const id = order.techniqueId.toLowerCase();
-  if (matchesAny(id, ["volley", "nova", "flamestrike", "consecration", "roots", "howl"])) {
-    return "area";
-  }
-  if (matchesAny(id, ["drain_life", "siphon_soul", "meditation"])) {
-    return "channel";
-  }
-  if (matchesAny(id, ["shot", "bolt", "missiles", "fireball", "light", "smite", "burst", "mark", "renew"])) {
-    return "projectile";
+function normalizeDelivery(d: string): ActionLine["delivery"] {
+  if (d === "melee" || d === "projectile" || d === "area" || d === "channel" || d === "instant") {
+    return d;
   }
   return "instant";
 }
 
-function getIntentStyle(
-  category: VisibleIntent["category"],
-  delivery: VisibleIntent["delivery"],
-  isBoss: boolean,
-  isCasting: boolean,
-) {
+function getLineStyle(category: ActionLine["category"], delivery: string) {
   if (category === "attack") {
-    const dangerous = isBoss || delivery === "area" || delivery === "channel";
+    const dangerous = delivery === "area" || delivery === "channel";
     return {
       color: dangerous ? 0xff9933 : 0xff5555,
-      width: (dangerous ? 0.07 : 0.055) + (isCasting ? 0.012 : 0),
-      pulseSpeed: (dangerous ? 8 : 6) + (isCasting ? 2 : 0),
+      width: dangerous ? 0.07 : 0.055,
+      pulseSpeed: dangerous ? 8 : 6,
     };
   }
-  if (category === "heal") {
-    return { color: 0x5cff9d, width: 0.05 + (isCasting ? 0.01 : 0), pulseSpeed: 5 + (isCasting ? 2 : 0) };
-  }
-  if (category === "buff") {
-    return { color: 0x55bbff, width: 0.045 + (isCasting ? 0.008 : 0), pulseSpeed: 4 + (isCasting ? 2 : 0) };
-  }
-  return { color: 0xb86eff, width: 0.05 + (isCasting ? 0.01 : 0), pulseSpeed: 6 + (isCasting ? 2 : 0) };
+  if (category === "heal") return { color: 0x5cff9d, width: 0.05, pulseSpeed: 5 };
+  if (category === "buff") return { color: 0x55bbff, width: 0.045, pulseSpeed: 4 };
+  // debuff
+  return { color: 0xb86eff, width: 0.05, pulseSpeed: 6 };
 }
 
-function matchesAny(value: string, patterns: string[]): boolean {
-  return patterns.some((pattern) => value.includes(pattern));
+function getCurvePoints(
+  from: THREE.Vector3, to: THREE.Vector3,
+  segments: number, delivery: ActionLine["delivery"],
+): THREE.Vector3[] {
+  const control = from.clone().lerp(to, 0.5);
+  const distance = from.distanceTo(to);
+  const liftMultiplier = delivery === "projectile" ? 0.18
+    : delivery === "channel" ? 0.1 : 0.12;
+  control.y += Math.min(0.8, Math.max(0.12, distance * liftMultiplier));
+  const curve = new THREE.QuadraticBezierCurve3(from, control, to);
+  return curve.getPoints(segments);
 }
 
-function formatIntentLabel(intent: Pick<ResolvedIntent, "sourceName" | "targetName" | "category" | "techniqueName" | "state">): string {
-  if (intent.techniqueName) {
-    return intent.state === "casting"
-      ? `${intent.sourceName} is casting ${intent.techniqueName} on ${intent.targetName}`
-      : `${intent.sourceName} is using ${intent.techniqueName} on ${intent.targetName}`;
+function formatLabel(line: ActionLine): string {
+  if (line.techniqueName) {
+    return `${line.sourceName} uses ${line.techniqueName} on ${line.targetName}`;
   }
-  if (intent.category === "heal") {
-    return intent.state === "casting"
-      ? `${intent.sourceName} is preparing to heal ${intent.targetName}`
-      : `${intent.sourceName} is healing ${intent.targetName}`;
-  }
-  if (intent.category === "buff") {
-    return intent.state === "casting"
-      ? `${intent.sourceName} is preparing a buff for ${intent.targetName}`
-      : `${intent.sourceName} is buffing ${intent.targetName}`;
-  }
-  if (intent.category === "debuff") {
-    return intent.state === "casting"
-      ? `${intent.sourceName} is preparing to weaken ${intent.targetName}`
-      : `${intent.sourceName} is weakening ${intent.targetName}`;
-  }
-  return intent.state === "casting"
-    ? `${intent.sourceName} is lining up ${intent.targetName}`
-    : `${intent.sourceName} is targeting ${intent.targetName}`;
+  if (line.category === "heal") return `${line.sourceName} heals ${line.targetName}`;
+  if (line.category === "buff") return `${line.sourceName} buffs ${line.targetName}`;
+  if (line.category === "debuff") return `${line.sourceName} weakens ${line.targetName}`;
+  return `${line.sourceName} attacks ${line.targetName}`;
 }
 
 function getVisibleLimit(mode: IntentVisibilityMode): number {
   if (mode === "minimal") return 8;
   if (mode === "tactical") return 12;
-  return MAX_VISIBLE_INTENTS;
-}
-
-function prettifyTechniqueName(techniqueId: string): string {
-  return techniqueId
-    .replace(/_r\d+$/i, "")
-    .split("_")
-    .slice(1)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return MAX_VISIBLE_LINES;
 }
 
 function makeGlyphTexture(label: string): THREE.CanvasTexture {
@@ -539,7 +464,6 @@ function makeGlyphTexture(label: string): THREE.CanvasTexture {
   ctx.strokeText(label, canvas.width / 2, canvas.height / 2 + 2);
   ctx.fillStyle = "#ffffff";
   ctx.fillText(label, canvas.width / 2, canvas.height / 2 + 2);
-
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;

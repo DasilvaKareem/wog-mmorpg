@@ -4,6 +4,12 @@ import { getItemByTokenId } from "./itemCatalog.js";
 import { generateWeaponName, type GeneratedWeaponName } from "./weaponNameGenerator.js";
 import { randomUUID } from "crypto";
 import { getRedis } from "../redis.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import {
+  deleteCraftedItemInstance,
+  listCraftedItemInstances,
+  upsertCraftedItemInstance,
+} from "../db/itemInstanceStore.js";
 
 // ── Quality Tiers ──────────────────────────────────────────────────────
 
@@ -206,6 +212,9 @@ function hydrateInstance(raw: CraftedItemInstance): CraftedItemInstance {
 }
 
 async function persistInstanceToRedis(instance: CraftedItemInstance, previousOwner?: string): Promise<void> {
+  if (isPostgresConfigured()) {
+    await upsertCraftedItemInstance(instance);
+  }
   const redis = getRedis();
   if (!redis) return;
 
@@ -221,6 +230,9 @@ async function persistInstanceToRedis(instance: CraftedItemInstance, previousOwn
 }
 
 async function removeInstanceFromRedis(instance: CraftedItemInstance): Promise<void> {
+  if (isPostgresConfigured()) {
+    await deleteCraftedItemInstance(instance.instanceId);
+  }
   const redis = getRedis();
   if (!redis) return;
 
@@ -245,6 +257,22 @@ function removeInstanceEventually(instance: CraftedItemInstance): void {
 }
 
 async function restoreInstancesFromRedis(): Promise<void> {
+  if (isPostgresConfigured()) {
+    try {
+      const instances = await listCraftedItemInstances();
+      if (instances.length > 0) {
+        for (const raw of instances) {
+          const parsed = hydrateInstance(raw);
+          instanceRegistry.set(parsed.instanceId, parsed);
+          addInstanceToOwnerIndex(parsed.ownerWallet, parsed.instanceId);
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn("[itemRng] Failed to restore instances from Postgres:", err);
+    }
+  }
+
   const redis = getRedis();
   if (!redis) return;
 

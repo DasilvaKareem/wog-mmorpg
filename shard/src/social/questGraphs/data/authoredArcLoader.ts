@@ -130,7 +130,9 @@ function resolveJsonDirectory(): string {
 export function loadAuthoredQuestArcsFromJson(): QuestArcDefinition[] {
   const jsonDir = resolveJsonDirectory();
   const files = fs.readdirSync(jsonDir)
-    .filter((file) => file.endsWith(".json"))
+    // Skip macOS AppleDouble resource-fork files (`._foo.json`) that
+    // occasionally slip through tarballs and break JSON.parse.
+    .filter((file) => file.endsWith(".json") && !file.startsWith("._"))
     .sort();
 
   return files.map((fileName) => {

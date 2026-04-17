@@ -4,10 +4,19 @@
  */
 
 import { patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
-import { ZONE_LEVEL_REQUIREMENTS, getZoneConnections } from "../world/worldLayout.js";
+import { ZONE_LEVEL_REQUIREMENTS, FARM_ZONES, getZoneConnections } from "../world/worldLayout.js";
 import type { AgentContext } from "./agentUtils.js";
 import { COOKING_RECIPES } from "../professions/cooking.js";
 import { getPotionEffect } from "../professions/potionEffects.js";
+import { buildProgressChain } from "./agentChains.js";
+
+/**
+ * Agents at or above this level are considered "established" — forced focus
+ * changes from the early-game survival logic (copper farming, gathering cycle)
+ * no longer fire. Higher-level agents progress through quests/combat/chains,
+ * not through the babysitter priorities that help new characters bootstrap.
+ */
+const ESTABLISHED_LEVEL = 10;
 
 /** Token IDs of cooked food (usable via /cooking/consume). */
 const FOOD_TOKEN_IDS = new Set(COOKING_RECIPES.map((r) => Number(r.outputTokenId)));
@@ -133,6 +142,19 @@ export async function checkSelfAdaptation(
     const hasWeapon = Boolean(equipment.weapon);
     const currentFocus = state.currentFocus;
 
+    const myLevel = entity.level ?? 1;
+    const isEstablished = myLevel >= ESTABLISHED_LEVEL;
+
+    // Farm zone escape: if stuck in a farm zone without a farming focus, leave.
+    // Established agents go home (their grind zone); new agents to village-square.
+    if (FARM_ZONES.has(ctx.currentRegion) && currentFocus !== "farming") {
+      const exitZone = isEstablished && ctx.homeZone ? ctx.homeZone : "village-square";
+      console.log(`[agent:${ctx.walletTag}] Self-adapt: stuck in farm zone ${ctx.currentRegion} with focus ${currentFocus} — traveling to ${exitZone}`);
+      void ctx.logActivity(`Wrong zone for ${currentFocus} — heading to ${exitZone}`);
+      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: exitZone });
+      return true;
+    }
+
     // Crafting escape hatch: stuck in gathering/crafting for 250+ ticks (~5 min) → return to questing
     // This gives agents enough time to actually gather materials and craft items.
     // Skip if user has an active objective — they explicitly want this focus.
@@ -147,9 +169,9 @@ export async function checkSelfAdaptation(
       return true;
     }
 
-    // Priority 0: Early-game bootstrap — keep killing mobs until 50 copper
-    // Skip if user has an active objective — respect their goal over gold bootstrapping.
-    if (!state.hasActiveObjective && copper < 50 && currentFocus !== "combat" && currentFocus !== "shopping" && currentFocus !== "gathering") {
+    // Priority 0: Early-game bootstrap — keep killing mobs until 50 copper.
+    // ONLY for low-level agents — a Lv25 character doesn't need forced copper farming.
+    if (!isEstablished && !state.hasActiveObjective && copper < 50 && currentFocus !== "combat" && currentFocus !== "shopping" && currentFocus !== "gathering") {
       console.log(`[agent:${ctx.walletTag}] Self-adapt: only ${copper}c, need 50c — staying in combat`);
       void ctx.logActivity(`Only ${copper}c — killing mobs for starter gold`);
       await patchAgentConfig(ctx.userWallet, { focus: "combat" });
@@ -198,7 +220,10 @@ export async function checkSelfAdaptation(
 
     // Priority 2b: Periodic gathering → crafting cycle (skip if objective is active)
     // Triggers every ~5 min of combat/questing — professions are a key leveling path
+    // for NEW characters. Established agents shouldn't get yanked out of productive
+    // questing to farm copper ore for 5 min.
     if (
+      !isEstablished &&
       !state.hasActiveObjective &&
       state.ticksSinceFocusChange > 250 &&
       (currentFocus === "questing" || currentFocus === "combat")
@@ -209,15 +234,15 @@ export async function checkSelfAdaptation(
       return true;
     }
 
-    // Priority 3: Outleveled current zone → travel (skip if objective is active)
-    const myLevel = entity.level ?? 1;
+    // Priority 3: Outleveled current zone → enqueue a progress chain.
+    // Uses the action queue so the supervisor can't interrupt mid-transition.
     const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[ctx.currentRegion] ?? 1;
     if (!state.hasActiveObjective && myLevel >= currentZoneLevelReq + 2) {
-      const nextZone = state.findNextZoneForLevel(myLevel);
-      if (nextZone && nextZone !== ctx.currentRegion) {
-        console.log(`[agent:${ctx.walletTag}] Self-adapt: level ${myLevel} outleveled ${ctx.currentRegion}, traveling to ${nextZone}`);
-        void ctx.logActivity(`Outleveled ${ctx.currentRegion} (Lv${myLevel}) — traveling to ${nextZone}`);
-        await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: nextZone });
+      const chain = buildProgressChain(myLevel, ctx.currentRegion, ctx.currentCaps.allowedZones);
+      if (chain && chain.length > 0) {
+        console.log(`[agent:${ctx.walletTag}] Self-adapt: Lv${myLevel} outleveled ${ctx.currentRegion}, enqueueing chain → ${chain[0].targetZone}`);
+        void ctx.logActivity(`Outleveled ${ctx.currentRegion} — auto-progressing to ${chain[0].targetZone}`);
+        await ctx.enqueueActions(chain, true);
         return true;
       }
     }
@@ -230,7 +255,7 @@ export async function checkSelfAdaptation(
     ) {
       const neighbors = getZoneConnections(ctx.currentRegion).filter((z) => {
         const req = ZONE_LEVEL_REQUIREMENTS[z] ?? 1;
-        return myLevel >= req && z !== ctx.currentRegion;
+        return myLevel >= req && z !== ctx.currentRegion && !FARM_ZONES.has(z);
       });
       if (neighbors.length > 0) {
         const pick = neighbors[Math.floor(Math.random() * neighbors.length)];

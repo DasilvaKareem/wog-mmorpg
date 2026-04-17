@@ -2,10 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import {
   formatGold,
-  getAvailableGold,
-  recordGoldSpend,
-  reserveGold,
-  unreserveGold,
+  getAvailableGoldAsync,
+  recordGoldSpendAsync,
 } from "../blockchain/goldLedger.js";
 import {
   createGuildOnChain,
@@ -102,15 +100,17 @@ export function registerGuildRoutes(server: FastifyInstance) {
     const zoneId = request.params.zoneId ?? entity.region ?? "unknown";
 
     try {
-      // Get all guilds
+      // Get all guilds (IDs start at 1; 0 is the "no guild" sentinel)
       const nextId = await getNextGuildId();
       const activeGuilds = [];
 
-      for (let i = 0; i < nextId; i++) {
-        const guild = await getGuildFromChain(i);
-        if (guild.status === GuildStatus.Active) {
-          activeGuilds.push(formatGuildForResponse(guild));
-        }
+      for (let i = 1; i < nextId; i++) {
+        try {
+          const guild = await getGuildFromChain(i);
+          if (guild.status === GuildStatus.Active) {
+            activeGuilds.push(formatGuildForResponse(guild));
+          }
+        } catch { /* skip unreadable guild */ }
       }
 
       return {
@@ -193,7 +193,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
       // Check gold balance
       const onChainGold = parseFloat(await getGoldBalance(founderAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(founderAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(founderAddress, safeOnChainGold);
 
       if (availableGold < totalCost) {
         reply.code(400);
@@ -219,7 +219,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
       );
 
       // Record gold spend (deposit + fee)
-      recordGoldSpend(founderAddress, totalCost);
+      await recordGoldSpendAsync(founderAddress, totalCost);
       await refreshGuildNameCache().catch((err) => {
         server.log.warn(`[guild] Failed to refresh guild cache after create: ${String((err as Error)?.message ?? err).slice(0, 120)}`);
       });
@@ -233,7 +233,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
         deposit: fixedDeposit,
         creationFee,
         totalCost,
-        remainingGold: formatGold(getAvailableGold(founderAddress, safeOnChainGold)),
+        remainingGold: formatGold(await getAvailableGoldAsync(founderAddress, safeOnChainGold)),
         txHash,
       };
     } catch (err) {
@@ -252,11 +252,13 @@ export function registerGuildRoutes(server: FastifyInstance) {
       const nextId = await getNextGuildId();
       const guilds = [];
 
-      for (let i = 0; i < nextId; i++) {
-        const guild = await getGuildFromChain(i);
-        if (guild.status === GuildStatus.Active) {
-          guilds.push(formatGuildForResponse(guild));
-        }
+      for (let i = 1; i < nextId; i++) {
+        try {
+          const guild = await getGuildFromChain(i);
+          if (guild.status === GuildStatus.Active) {
+            guilds.push(formatGuildForResponse(guild));
+          }
+        } catch { /* skip unreadable guild */ }
       }
 
       return guilds;
@@ -477,7 +479,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
       // Check gold balance
       const onChainGold = parseFloat(await getGoldBalance(memberAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(memberAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(memberAddress, safeOnChainGold);
 
       if (availableGold < amount) {
         reply.code(400);
@@ -491,7 +493,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
       const txHash = await depositGoldOnChain(guildId, memberAddress, amount);
 
       // Record gold spend
-      recordGoldSpend(memberAddress, amount);
+      await recordGoldSpendAsync(memberAddress, amount);
 
       server.log.info(`${memberAddress} deposited ${amount} gold to guild ${guildId}`);
 
@@ -499,7 +501,7 @@ export function registerGuildRoutes(server: FastifyInstance) {
         ok: true,
         guildId,
         amount,
-        remainingGold: formatGold(getAvailableGold(memberAddress, safeOnChainGold)),
+        remainingGold: formatGold(await getAvailableGoldAsync(memberAddress, safeOnChainGold)),
         txHash,
       };
     } catch (err) {

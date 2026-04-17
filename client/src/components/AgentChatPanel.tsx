@@ -5,6 +5,7 @@
  */
 
 import * as React from "react";
+import { cn } from "@/lib/utils";
 import { API_URL } from "@/config";
 import { getAuthToken, clearCachedToken } from "@/lib/agentAuth";
 import { PaymentGate } from "@/components/PaymentGate";
@@ -12,6 +13,7 @@ import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
 import { useWalletContext } from "@/context/WalletContext";
 import { ChatLog } from "@/components/ChatLog";
+import { EdictsDialog } from "@/components/EdictsDialog";
 import { trackGiveInstruction, trackAgentTaskStarted, trackAgentTaskCompleted, trackAgentProgressTick } from "@/lib/analytics";
 
 interface InboxMessage {
@@ -72,6 +74,8 @@ interface AgentStatusData {
     level: number;
     hp: number;
     maxHp: number;
+    classId?: string;
+    learnedTechniques?: string[];
   } | null;
   entitySource?: "live" | "saved" | null;
   currentActivity: string | null;
@@ -97,6 +101,7 @@ const FOCUS_COLORS: Record<string, string> = {
   crafting: "#b48efa",
   alchemy: "#54dbb8",
   cooking: "#f2a854",
+  homestead: "#7dd3a7",
   enchanting: "#c792ea",
   idle: "#8b9abc",
 };
@@ -293,6 +298,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const [authLoading, setAuthLoading] = React.useState(true);
   const [collapsed, setCollapsed] = React.useState(false);
   const [showStopConfirm, setShowStopConfirm] = React.useState(false);
+  const [showEdicts, setShowEdicts] = React.useState(false);
   const [viewMode, setViewMode] = React.useState<"chat" | "zonelog">("chat");
   const [pendingGoto, setPendingGoto] = React.useState<{ entityId: string; zoneId: string; name: string; teachesProfession?: string; action?: string; questId?: string; questTitle?: string } | null>(null);
   const [cmdSuggestions, setCmdSuggestions] = React.useState<typeof SLASH_COMMANDS>([]);
@@ -305,6 +311,37 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const inboxReadMarker = React.useRef<InboxReadMarker | null>(null);
   const seededServerHistory = React.useRef(false);
   const lastProgressTickRef = React.useRef(0);
+  const primaryCharacter = React.useMemo(() => {
+    if (selectedCharacterTokenId) {
+      const selected = characters.find((character) => character.tokenId === selectedCharacterTokenId);
+      if (selected) return selected;
+    }
+
+    const liveByToken = status?.characterTokenId
+      ? characters.find((character) => (character.characterTokenId ?? character.tokenId) === status.characterTokenId)
+      : null;
+    if (liveByToken) return liveByToken;
+
+    const liveByName = status?.entity?.name
+      ? characters.find((character) => {
+          const baseName = character.name.replace(/\s+the\s+\w+$/i, "").trim();
+          const liveBaseName = status.entity?.name?.replace(/\s+the\s+\w+$/i, "").trim();
+          return Boolean(liveBaseName) && (baseName === liveBaseName || character.name === status.entity?.name);
+        })
+      : null;
+    if (liveByName) return liveByName;
+
+    const sorted = [...characters].sort((left, right) => {
+      const leftLevel = Number(left.properties?.level ?? 1);
+      const rightLevel = Number(right.properties?.level ?? 1);
+      if (leftLevel !== rightLevel) return rightLevel - leftLevel;
+      const leftXp = Number(left.properties?.xp ?? 0);
+      const rightXp = Number(right.properties?.xp ?? 0);
+      if (leftXp !== rightXp) return rightXp - leftXp;
+      return left.name.localeCompare(right.name);
+    });
+    return sorted[0] ?? null;
+  }, [characters, selectedCharacterTokenId, status?.characterTokenId, status?.entity?.name]);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
@@ -349,13 +386,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     return () => { cancelled = true; };
   }, [walletAddress]);
 
-  // Poll agent status every 3s
+  // Poll agent status with lighter cadence to avoid API pressure.
   React.useEffect(() => {
     if (!token) return;
     let cancelled = false;
 
     async function pollStatus() {
       if (cancelled || !token) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const res = await fetch(`${API_URL}/agent/status/${walletAddress}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -418,7 +456,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     }
 
     pollStatus();
-    const id = setInterval(pollStatus, 3000);
+    const id = setInterval(pollStatus, 10_000);
     return () => { cancelled = true; clearInterval(id); };
   }, [token, walletAddress]);
 
@@ -428,6 +466,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     let cancelled = false;
 
     async function pollInbox() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const res = await fetch(`${API_URL}/inbox/${walletAddress}/history?limit=50`);
         if (!res.ok || cancelled) return;
@@ -470,7 +509,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     void pollInbox();
     const id = setInterval(() => {
       void pollInbox();
-    }, 3000);
+    }, 15_000);
 
     return () => {
       cancelled = true;
@@ -485,17 +524,13 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     setDeploying(true);
     addSystemMsg("Deploying agent...");
     try {
-      // Send character info — use selected character if set, otherwise first
-      const primary = (selectedCharacterTokenId
-        ? characters.find((c) => c.tokenId === selectedCharacterTokenId)
-        : null) ?? characters[0];
       const deployBody: Record<string, string | undefined> = { walletAddress };
-      if (primary) {
-        deployBody.characterName = primary.name;
-        deployBody.raceId = primary.properties.race;
-        deployBody.classId = primary.properties.class;
+      if (primaryCharacter) {
+        deployBody.characterName = primaryCharacter.name;
+        deployBody.raceId = primaryCharacter.properties.race;
+        deployBody.classId = primaryCharacter.properties.class;
       }
-      trackAgentTaskStarted({ walletAddress, characterName: primary?.name });
+      trackAgentTaskStarted({ walletAddress, characterName: primaryCharacter?.name });
       const res = await fetch(`${API_URL}/agent/deploy`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -510,9 +545,8 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
         trackAgentTaskCompleted({ walletAddress, entityId: data.entityId, zoneId: data.zoneId });
         addSystemMsg(`Agent deployed! Entity: ${data.entityId} in ${data.zoneId}`);
         if (data.zoneId) {
-          gameBus.emit("switchZone", { zoneId: data.zoneId });
-        }
-        if (walletAddress) {
+          gameBus.emit("followPlayer", { zoneId: data.zoneId, walletAddress });
+        } else if (walletAddress) {
           gameBus.emit("lockToPlayer", { walletAddress });
         }
       } else {
@@ -685,6 +719,26 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     });
   }, []);
 
+  // Listen for empty-ground clicks — send agent to that position immediately
+  const agentRunning = status?.running ?? false;
+  React.useEffect(() => {
+    return gameBus.on("agentGoToPosition", async ({ x, y, zoneId }) => {
+      if (!token || !agentRunning) return;
+      addSystemMsg(`Moving agent to (${Math.round(x)}, ${Math.round(y)})...`);
+      try {
+        const res = await fetch(`${API_URL}/agent/goto-position`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ x, y, zoneId }),
+        });
+        const data = await res.json();
+        if (!res.ok) addSystemMsg(`[ERR] ${data.error ?? "Could not send agent"}`);
+      } catch (err: any) {
+        addSystemMsg(`[ERR] ${err.message}`);
+      }
+    });
+  }, [token, agentRunning]);
+
   async function confirmGoto(actionOverride?: string) {
     if (!pendingGoto || !token) return;
     const { entityId, zoneId, name, teachesProfession, action: pendingAction, questId, questTitle } = pendingGoto;
@@ -744,7 +798,11 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   return (
     <div
       data-tutorial-id="agent-chat-panel"
-      className={`flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000] ${collapsed ? "" : "h-full"} ${className}`}
+      className={cn(
+        "pointer-events-auto flex min-h-0 w-full max-w-none flex-col overflow-hidden border-2 border-[#54f28b] bg-[#060d12] font-mono shadow-[4px_4px_0_0_#000]",
+        className,
+        collapsed ? "h-auto" : "h-full",
+      )}
     >
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b-2 border-[#54f28b] bg-[#0a1a0e] px-3 py-1.5">
@@ -778,6 +836,15 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
               title={viewMode === "chat" ? "Show zone log" : "Show chat"}
             >
               {viewMode === "chat" ? "[log]" : "[chat]"}
+            </button>
+          )}
+          {isDeployed && (
+            <button
+              onClick={() => setShowEdicts(true)}
+              className="text-[11px] text-[#7a8b9e] hover:text-[#ffdd57] transition-colors uppercase tracking-widest"
+              title="Combat edicts"
+            >
+              [edicts]
             </button>
           )}
           {isDeployed && (
@@ -1207,6 +1274,16 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
           </div>
         </div>
       )}
+
+      {/* Edicts dialog */}
+      <EdictsDialog
+        open={showEdicts}
+        onOpenChange={setShowEdicts}
+        walletAddress={walletAddress}
+        token={token}
+        classId={status?.entity?.classId}
+        learnedTechniqueIds={status?.entity?.learnedTechniques}
+      />
 
       {/* Deploy payment overlay */}
       {showDeployPayment && (

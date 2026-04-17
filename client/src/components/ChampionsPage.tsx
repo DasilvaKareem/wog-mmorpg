@@ -9,6 +9,7 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { formatCopperString, formatGoldString } from "@/lib/currency";
 import { getAuthToken } from "@/lib/agentAuth";
 import { openOnboarding } from "@/lib/onboarding";
+import { getRegistrationStatusLabel, isRegistrationSettled, resolveRegistrationTxHash } from "@/lib/characterRegistration";
 import { PaymentGate } from "@/components/PaymentGate";
 
 // ── Types ─────────────────────────────────────────────────────────────────
@@ -1959,7 +1960,7 @@ function GuildTab({ custodialWallet, ownerWallet }: { custodialWallet: string | 
     async function fetchGuild() {
       try {
         const res = await fetch(`${API_URL}/guild/wallet/${custodialWallet}`);
-        if (!res.ok) return;
+        if (!res.ok) { if (!cancelled) setLoading(false); return; }
         const data = await res.json();
         if (cancelled) return;
         setInGuild(data.inGuild ?? false);
@@ -2360,11 +2361,9 @@ function ReputationGraph({ timeline, width, height }: { timeline: RepTimelinePoi
 }
 
 function ReputationTab({
-  agentId,
   ownerWallet,
   selectedCharacter,
 }: {
-  agentId: string | null;
   ownerWallet: string;
   selectedCharacter: CharacterNft | null;
 }) {
@@ -2376,9 +2375,13 @@ function ReputationTab({
   const [loading, setLoading] = React.useState(true);
   const [registering, setRegistering] = React.useState(false);
   const [registrationMessage, setRegistrationMessage] = React.useState<string | null>(null);
+  const registrationProgress = getCharacterRegistrationProgress(selectedCharacter);
+  const registrationTone = progressToneClasses(registrationProgress.tone);
+  const characterRegistrationSettled = isCharacterRegistrationSettled(selectedCharacter);
+  const effectiveAgentId = characterRegistrationSettled ? (selectedCharacter?.agentId ?? null) : null;
 
   React.useEffect(() => {
-    if (!agentId) {
+    if (!effectiveAgentId) {
       setRep(null);
       setTimeline([]);
       setHistory([]);
@@ -2389,11 +2392,11 @@ function ReputationTab({
     }
     setLoading(true);
     Promise.all([
-      fetch(`${API_URL}/api/agents/${agentId}/reputation`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/agents/${agentId}/reputation/timeline?limit=200`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/agents/${agentId}/reputation/history?limit=50`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/agents/${agentId}/identity`).then(r => r.ok ? r.json() : null),
-      fetch(`${API_URL}/api/agents/${agentId}/validations`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${effectiveAgentId}/reputation`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${effectiveAgentId}/reputation/timeline?limit=200`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${effectiveAgentId}/reputation/history?limit=50`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${effectiveAgentId}/identity`).then(r => r.ok ? r.json() : null),
+      fetch(`${API_URL}/api/agents/${effectiveAgentId}/validations`).then(r => r.ok ? r.json() : null),
     ]).then(([repData, tlData, histData, identityData, validationsData]) => {
       if (repData?.reputation) setRep(repData.reputation);
       if (tlData?.timeline) setTimeline(tlData.timeline);
@@ -2407,10 +2410,10 @@ function ReputationTab({
           : []
       );
     }).catch(() => {}).finally(() => setLoading(false));
-  }, [agentId]);
+  }, [effectiveAgentId]);
 
   const hasActiveBootstrap = ["queued", "pending_mint", "mint_confirmed", "identity_pending"].includes(selectedCharacter?.bootstrapStatus ?? "");
-  const canManuallyRegister = Boolean(selectedCharacter && !agentId && !hasActiveBootstrap);
+  const canManuallyRegister = Boolean(selectedCharacter && !characterRegistrationSettled && !hasActiveBootstrap);
 
   async function handleManualRegister() {
     if (!selectedCharacter || registering) return;
@@ -2447,7 +2450,7 @@ function ReputationTab({
           ? "This character is already registered."
           : data.alreadyQueued
             ? "Registration is already in progress."
-            : "Registration queued. Refresh the page in a few seconds."
+            : "Registration queued. Live status will update automatically."
       );
     } catch {
       setRegistrationMessage("Network error while queueing registration.");
@@ -2456,19 +2459,63 @@ function ReputationTab({
     }
   }
 
-  if (!agentId) {
+  if (!effectiveAgentId) {
     return (
       <div className="py-8 text-center">
-        <p className="text-[12px] text-[#7a84a8]">Identity registration pending. Reputation will appear once the agent is registered on-chain.</p>
+        <p className={`text-[12px] ${registrationTone.faint}`}>{registrationProgress.detail}</p>
+        <div className="mx-auto mt-4 max-w-md border-2 border-[#2a3450] bg-[#0b1020] p-3 text-left">
+          <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.2em]">
+            <span className={registrationTone.text}>{registrationProgress.title}</span>
+            <span className="text-[#9aa7cc]">{registrationProgress.percent}%</span>
+          </div>
+          <div className="mt-2 h-3 overflow-hidden border border-[#2a3450] bg-[#050814]">
+            <div
+              className={`h-full transition-all duration-700 ${registrationTone.fill}`}
+              style={{ width: `${registrationProgress.percent}%` }}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-3 text-[10px] uppercase tracking-wide">
+            <span className="text-[#7a84a8]">Live shard status</span>
+            <span className={registrationTone.text}>
+              {((selectedCharacter?.bootstrapStatus ?? selectedCharacter?.chainRegistrationStatus ?? "unregistered")).replace(/_/g, " ")}
+            </span>
+          </div>
+          {registrationProgress.active && (
+            <p className="mt-2 text-[10px] text-[#7a84a8]">Auto-refreshing every 4 seconds while bootstrap is active.</p>
+          )}
+        </div>
         {selectedCharacter?.chainRegistrationStatus && (
-          <p className="mt-2 text-[10px] uppercase tracking-wide text-[#9aa7cc]">
-            Status: {selectedCharacter.chainRegistrationStatus.replaceAll("_", " ")}
+          <p className={`mt-3 text-[10px] uppercase tracking-wide ${selectedCharacter.chainRegistrationStatus.startsWith("failed") ? "text-[#ff6b6b]" : "text-[#9aa7cc]"}`}>
+            Chain: {selectedCharacter.chainRegistrationStatus.replace(/_/g, " ")}
+          </p>
+        )}
+        {selectedCharacter?.chainRegistrationLastError && (
+          <p className="mt-1 text-[10px] text-[#ff6b6b]">
+            Error: {selectedCharacter.chainRegistrationLastError}
           </p>
         )}
         {selectedCharacter?.bootstrapStatus && (
-          <p className="mt-1 text-[10px] uppercase tracking-wide text-[#5dadec]">
-            Queue: {selectedCharacter.bootstrapStatus.replaceAll("_", " ")}
+          <p className={`mt-1 text-[10px] uppercase tracking-wide ${selectedCharacter.bootstrapStatus.startsWith("failed") ? "text-[#ff6b6b]" : "text-[#5dadec]"}`}>
+            Worker: {selectedCharacter.bootstrapStatus.replace(/_/g, " ")}
           </p>
+        )}
+        {characterRegistrationSettled && selectedCharacter?.agentRegistrationTxHash && (
+          <div className="mt-3 text-[10px] text-[#9aa7cc]">
+            <span className="uppercase tracking-wide text-[#7a84a8]">Registration tx</span>
+            <div className="mt-1 break-all text-[#d6deff]">
+              {selectedCharacter.agentRegistrationTxHash}
+            </div>
+            {getSkaleExplorerTxUrl(selectedCharacter.agentRegistrationTxHash) && (
+              <a
+                href={getSkaleExplorerTxUrl(selectedCharacter.agentRegistrationTxHash) ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-block text-[#5dadec] underline underline-offset-2"
+              >
+                View on explorer
+              </a>
+            )}
+          </div>
         )}
         {canManuallyRegister && (
           <button
@@ -2496,60 +2543,63 @@ function ReputationTab({
   }
 
   const rankColor = RANK_COLORS[rep.rank] ?? "#95A5A6";
-  const registrationTxUrl = getSkaleExplorerTxUrl(identity?.registrationTxHash, identity?.chainId);
+  const registrationTxHash = resolveRegistrationTxHash({
+    character: selectedCharacter,
+  });
+  const registrationTxUrl = getSkaleExplorerTxUrl(registrationTxHash, identity?.chainId);
+  const displayCharacterTokenId = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? null;
+  const registrationStatusLabel = getRegistrationStatusLabel(selectedCharacter);
 
   return (
     <div className="space-y-4">
-      {(identity || validations.length > 0) && (
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
-            <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Identity</p>
-            <p className="mt-1 text-[12px] font-bold text-[#d6deff]">
-              {identity?.onChainRegistered ? "Registered On-Chain" : "Pending Registration"}
-            </p>
-            {identity?.characterTokenId && (
-              <p className="mt-1 text-[10px] text-[#9aa7cc]">Character Token #{identity.characterTokenId}</p>
-            )}
-            {identity?.registrationTxHash && (
-              <p className="mt-1 text-[9px] text-[#9aa7cc]">
-                {registrationTxUrl ? (
-                  <a
-                    href={registrationTxUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[#5dadec] underline underline-offset-2"
-                  >
-                    {registrationTxUrl}
-                  </a>
-                ) : (
-                  "Registration TX recorded"
-                )}
-              </p>
-            )}
-            {identity?.endpoint && (
-              <p className="mt-1 truncate text-[9px] text-[#5dadec]">{identity.endpoint}</p>
-            )}
-          </div>
-          <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
-            <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Validations</p>
-            {validations.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-2">
-                {validations.map((claimType) => (
-                  <span
-                    key={claimType}
-                    className="border px-2 py-1 text-[9px] font-bold uppercase tracking-wide"
-                    style={{ borderColor: "#54f28b55", color: "#54f28b", backgroundColor: "#54f28b11" }}
-                  >
-                    {claimType}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-1 text-[10px] text-[#9aa7cc]">No validation claims published yet.</p>
-            )}
-          </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
+          <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Identity</p>
+          <p className="mt-1 text-[12px] font-bold text-[#d6deff]">
+            {registrationStatusLabel}
+          </p>
+          {displayCharacterTokenId && (
+            <p className="mt-1 text-[10px] text-[#9aa7cc]">Character Token #{displayCharacterTokenId}</p>
+          )}
+          {registrationTxHash && (
+            <div className="mt-2 text-[9px] text-[#9aa7cc]">
+              <p className="uppercase tracking-wide text-[#7a84a8]">Registration Tx</p>
+              <p className="mt-1 break-all text-[#d6deff]">{registrationTxHash}</p>
+              {registrationTxUrl && (
+                <a
+                  href={registrationTxUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-[#5dadec] underline underline-offset-2"
+                >
+                  View on explorer
+                </a>
+              )}
+            </div>
+          )}
+          {identity?.endpoint && (
+            <p className="mt-1 truncate text-[9px] text-[#5dadec]">{identity.endpoint}</p>
+          )}
         </div>
-      )}
+        <div className="border-2 border-[#2a3450] bg-[#0b1020] p-3">
+          <p className="text-[10px] uppercase tracking-wide text-[#7a84a8]">Validations</p>
+          {validations.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {validations.map((claimType) => (
+                <span
+                  key={claimType}
+                  className="border px-2 py-1 text-[9px] font-bold uppercase tracking-wide"
+                  style={{ borderColor: "#54f28b55", color: "#54f28b", backgroundColor: "#54f28b11" }}
+                >
+                  {claimType}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-1 text-[10px] text-[#9aa7cc]">No validation claims published yet.</p>
+          )}
+        </div>
+      </div>
 
       {/* Header: Overall + Rank */}
       <div className="flex items-center justify-between border-b border-[#2a3450] pb-3">
@@ -3007,6 +3057,7 @@ interface CharacterNft {
   tokenId: string;
   characterTokenId?: string | null;
   agentId?: string | null;
+  agentRegistrationTxHash?: string | null;
   chainRegistrationStatus?:
     | "unregistered"
     | "pending_mint"
@@ -3015,6 +3066,7 @@ interface CharacterNft {
     | "registered"
     | "failed_retryable"
     | "failed_permanent";
+  chainRegistrationLastError?: string | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"
@@ -3034,15 +3086,175 @@ interface CharacterNft {
   };
 }
 
+type CharacterProgressTone = "active" | "done" | "failed" | "idle";
+
+function getCharacterRegistrationProgress(character: CharacterNft | null | undefined): {
+  percent: number;
+  title: string;
+  detail: string;
+  tone: CharacterProgressTone;
+  active: boolean;
+} {
+  const bootstrapStatus = character?.bootstrapStatus ?? null;
+  const chainStatus = character?.chainRegistrationStatus ?? null;
+  const lastError = character?.chainRegistrationLastError?.trim();
+  const hasActiveBootstrap = ["queued", "pending_mint", "mint_confirmed", "identity_pending", "failed_retryable"].includes(bootstrapStatus ?? "");
+
+  if (bootstrapStatus === "failed_permanent" || chainStatus === "failed_permanent") {
+    return {
+      percent: 100,
+      title: "Registration failed",
+      detail: lastError || "The worker hit a permanent failure. Re-queue registration to retry.",
+      tone: "failed",
+      active: false,
+    };
+  }
+
+  if (bootstrapStatus === "failed_retryable" || chainStatus === "failed_retryable") {
+    return {
+      percent: 92,
+      title: "Retrying registration",
+      detail: lastError || "The worker will retry this on-chain step automatically.",
+      tone: "failed",
+      active: true,
+    };
+  }
+
+  if (bootstrapStatus === "identity_pending" || chainStatus === "identity_pending") {
+    return {
+      percent: 82,
+      title: "Registering agent identity",
+      detail: "Character mint is done. The worker is now registering the agent on-chain.",
+      tone: "active",
+      active: true,
+    };
+  }
+
+  if (bootstrapStatus === "mint_confirmed" || chainStatus === "mint_confirmed") {
+    return {
+      percent: 64,
+      title: "Character minted",
+      detail: "The NFT exists on-chain. Identity registration is next.",
+      tone: "active",
+      active: true,
+    };
+  }
+
+  if (bootstrapStatus === "pending_mint" || chainStatus === "pending_mint") {
+    return {
+      percent: 38,
+      title: "Minting character NFT",
+      detail: "The worker is sending the mint transaction now.",
+      tone: "active",
+      active: true,
+    };
+  }
+
+  if (bootstrapStatus === "queued") {
+    return {
+      percent: 16,
+      title: "Queued for bootstrap",
+      detail: "Waiting for the background worker to pick up the on-chain job.",
+      tone: "active",
+      active: true,
+    };
+  }
+
+  if (
+    !hasActiveBootstrap
+    && (chainStatus === "registered" || bootstrapStatus === "completed")
+    && (Boolean(character?.agentRegistrationTxHash) || Boolean(character?.agentId))
+  ) {
+    return {
+      percent: 100,
+      title: "Registration complete",
+      detail: "Your champion is registered on-chain and reputation is available.",
+      tone: "done",
+      active: false,
+    };
+  }
+
+  if (chainStatus === "unregistered") {
+    return {
+      percent: 0,
+      title: "Not registered on-chain",
+      detail: "Queue registration to mint the character and register the agent identity.",
+      tone: "idle",
+      active: false,
+    };
+  }
+
+  return {
+    percent: 0,
+    title: "Registration status unknown",
+    detail: "Waiting for the latest character status from the shard.",
+    tone: "idle",
+    active: false,
+  };
+}
+
+function isCharacterRegistrationSettled(character: CharacterNft | null | undefined): boolean {
+  return isRegistrationSettled(character);
+}
+
+function isCharacterBootstrapActive(character: CharacterNft | null | undefined): boolean {
+  return getCharacterRegistrationProgress(character).active;
+}
+
+function progressToneClasses(tone: CharacterProgressTone): { fill: string; text: string; faint: string } {
+  switch (tone) {
+    case "done":
+      return { fill: "bg-[#54f28b]", text: "text-[#54f28b]", faint: "text-[#9de8b6]" };
+    case "failed":
+      return { fill: "bg-[#ff6b6b]", text: "text-[#ff6b6b]", faint: "text-[#ff9b9b]" };
+    case "idle":
+      return { fill: "bg-[#7a84a8]", text: "text-[#9aa7cc]", faint: "text-[#7a84a8]" };
+    default:
+      return { fill: "bg-[#5dadec]", text: "text-[#5dadec]", faint: "text-[#9aa7cc]" };
+  }
+}
+
 function CharacterSwitcher({
   characters,
   selectedCharacterTokenId,
+  liveCharacterTokenId,
+  loading,
   onSelect,
 }: {
   characters: CharacterNft[];
   selectedCharacterTokenId: string | null;
+  liveCharacterTokenId: string | null;
+  loading?: boolean;
   onSelect: (tokenId: string) => void;
 }) {
+  if (loading) {
+    return (
+      <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] font-mono">
+        <div className="border-b-2 border-[#2a3450] bg-[#1a2240] px-3 py-1.5 flex items-center justify-between gap-3">
+          <span className="text-[10px] uppercase tracking-widest text-[#7a84a8]">My Champions</span>
+          <span className="text-[9px] uppercase tracking-wide text-[#5dadec] animate-pulse">Loading</span>
+        </div>
+        <div className="p-2 flex flex-col gap-1.5">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <div
+              key={index}
+              className="border-2 border-[#2a3450] bg-[#10162a] px-3 py-2 animate-pulse"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="h-3 w-24 bg-[#2a3450]" />
+                <div className="h-3 w-10 bg-[#2a3450]" />
+              </div>
+              <div className="mt-2 h-2 w-20 bg-[#1a2240]" />
+              <div className="mt-3 h-1.5 overflow-hidden border border-[#2a3450] bg-[#0a0f1a]">
+                <div className="h-full w-1/3 bg-[#24314f]" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (characters.length <= 1) return null;
   return (
     <div className="border-4 border-black bg-[linear-gradient(180deg,#121a2c,#0b1020)] shadow-[4px_4px_0_0_#000] font-mono">
@@ -3052,44 +3264,55 @@ function CharacterSwitcher({
       <div className="p-2 flex flex-col gap-1.5">
         {characters.map((c) => {
           const baseName = c.name.includes(" the ") ? c.name.split(" the ")[0] : c.name;
+          const displayTokenId = c.characterTokenId ?? c.tokenId;
           const lv = c.properties?.level ?? 1;
           const lc = levelColor(lv);
           const isActive = selectedCharacterTokenId === c.tokenId || (!selectedCharacterTokenId && characters[0]?.tokenId === c.tokenId);
-          const pendingStatus =
-            c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
-              ? "Minting..."
-              : c.bootstrapStatus === "mint_confirmed" || c.bootstrapStatus === "identity_pending"
-                ? "Registering..."
-                : null;
-          const isPending = pendingStatus != null;
+          const isLive = Boolean(liveCharacterTokenId && displayTokenId === liveCharacterTokenId);
+          const progress = getCharacterRegistrationProgress(c);
+          const isPending = progress.active;
+          const tone = progressToneClasses(progress.tone);
           return (
             <button
               key={c.tokenId}
               onClick={() => onSelect(c.tokenId)}
-              disabled={isPending}
+              disabled={false}
               className={`text-left px-3 py-2 border-2 transition ${
                 isActive
                   ? "border-[#ffcc00]/60 bg-[#2a2210]"
                   : isPending
-                    ? "border-[#2a3450] bg-[#10162a] opacity-70"
+                    ? "border-[#2a3450] bg-[#10162a]"
                     : "border-[#2a3450] bg-[#0b1020] hover:bg-[#1a2240]/40 hover:border-[#3a4460]"
               }`}
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold text-[#d6deff] truncate">{baseName}</span>
-                <span className="text-[10px] shrink-0" style={{ color: isPending ? "#7a84a8" : lc }}>
-                  {isPending ? pendingStatus : `Lv ${lv}`}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {isLive && (
+                    <span className="text-[9px] font-bold uppercase tracking-wide text-[#54f28b]">Live</span>
+                  )}
+                  <span className="text-[10px]" style={{ color: isPending ? "#7a84a8" : lc }}>
+                    {isPending ? `${progress.percent}%` : `Lv ${lv}`}
+                  </span>
+                </div>
               </div>
               {c.properties?.race && (
                 <span className="text-[9px] capitalize text-[#7a84a8]">
                   {c.properties.race} {c.properties.class}
                 </span>
               )}
+              <div className="mt-1 text-[9px] text-[#596a8a]">Token #{displayTokenId}</div>
               {isPending && (
-                <p className="mt-1 text-[9px] uppercase tracking-wide text-[#ffcc00]">
-                  Character creation in progress
-                </p>
+                <div className="mt-2">
+                  <div className="flex items-center justify-between gap-2 text-[9px] uppercase tracking-wide">
+                    <span className={tone.text}>{progress.title}</span>
+                    <span className="text-[#7a84a8]">{progress.percent}%</span>
+                  </div>
+                  <div className="mt-1 h-1.5 overflow-hidden border border-[#2a3450] bg-[#0a0f1a]">
+                    <div className={`h-full transition-all duration-500 ${tone.fill}`} style={{ width: `${progress.percent}%` }} />
+                  </div>
+                  <div className="mt-1 text-[9px] text-[#7a84a8]">{progress.detail}</div>
+                </div>
               )}
             </button>
           );
@@ -3117,27 +3340,44 @@ export function ChampionsPage(): React.ReactElement {
   const [items, setItems]                   = React.useState<InventoryItem[]>([]);
   const [inventoryLoading, setInventoryLoading] = React.useState(false);
   const [loading, setLoading]               = React.useState(false);
+  const [characterListLoading, setCharacterListLoading] = React.useState(false);
+  const [characterListHydrated, setCharacterListHydrated] = React.useState(false);
   const [activeTab, setActiveTab]           = React.useState<Tab>("inventory");
   const [characters, setCharacters]         = React.useState<CharacterNft[]>([]);
   const [selectedCharacterTokenId, setSelectedCharacterTokenId] = React.useState<string | null>(null);
+  const [liveCharacterTokenId, setLiveCharacterTokenId] = React.useState<string | null>(null);
   const selectedCharacter = React.useMemo(
     () => characters.find((character) => character.tokenId === selectedCharacterTokenId) ?? null,
     [characters, selectedCharacterTokenId],
   );
+  const hasAnyActiveBootstrap = React.useMemo(
+    () => characters.some((character) => isCharacterBootstrapActive(character)),
+    [characters],
+  );
 
-  // Step 1 — resolve custodial wallet + fetch all owned characters
-  React.useEffect(() => {
-    if (!wallet) return;
-    Promise.all([
-      fetch(`${API_URL}/agent/wallet/${wallet}`).then((r) => r.json()).catch(() => ({})),
-      fetch(`${API_URL}/character/${wallet}`).then((r) => r.json()).catch(() => ({ characters: [] })),
-    ]).then(([agentData, charData]) => {
+  const refreshCharacters = React.useCallback(async (walletAddress: string, options?: { background?: boolean }) => {
+    const isBackground = options?.background === true;
+    if (!isBackground) {
+      setCharacterListLoading(true);
+    }
+    try {
+      const [agentData, charData] = await Promise.all([
+        fetch(`${API_URL}/agent/wallet/${walletAddress}`).then((r) => r.json()).catch(() => ({})),
+        fetch(`${API_URL}/character/${walletAddress}`).then((r) => r.json()).catch(() => ({ characters: [] })),
+      ]);
       setCustodialWallet(agentData.custodialWallet ?? null);
       setAgentEntityId(agentData.entityId ?? null);
       setAgentZoneId(agentData.zoneId ?? null);
       const chars: CharacterNft[] = charData.characters ?? [];
+      const liveToken = typeof charData.liveEntity?.characterTokenId === "string"
+        ? charData.liveEntity.characterTokenId
+        : typeof charData.liveEntity?.characterTokenId === "number"
+          ? String(charData.liveEntity.characterTokenId)
+          : null;
+      setLiveCharacterTokenId(liveToken);
       setCharacters(chars);
       if (chars.length === 0) {
+        setLiveCharacterTokenId(null);
         setSelectedCharacterTokenId(null);
         return;
       }
@@ -3145,15 +3385,45 @@ export function ChampionsPage(): React.ReactElement {
       setSelectedCharacterTokenId((current) => {
         if (current && chars.some((character) => character.tokenId === current)) return current;
 
+        const liveCharacter = liveToken
+          ? chars.find((character) => (character.characterTokenId ?? character.tokenId) === liveToken)
+          : null;
         const deployed =
-          chars.find((character) => agentData.characterTokenId && (character.characterTokenId ?? character.tokenId) === agentData.characterTokenId)
-          ?? chars.find((character) => agentData.agentId && character.agentId === agentData.agentId)
+          liveCharacter
+          ?? chars.find((character) => isCharacterBootstrapActive(character))
           ?? chars[0];
 
         return deployed?.tokenId ?? null;
       });
-    });
-  }, [wallet]);
+      setCharacterListHydrated(true);
+    } finally {
+      if (!isBackground) {
+        setCharacterListLoading(false);
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!liveCharacterTokenId) return;
+    const liveCharacter = characters.find((character) => (character.characterTokenId ?? character.tokenId) === liveCharacterTokenId);
+    if (!liveCharacter) return;
+    setSelectedCharacterTokenId((current) => current ?? liveCharacter.tokenId);
+  }, [characters, liveCharacterTokenId]);
+
+  // Step 1 — resolve custodial wallet + fetch all owned characters
+  React.useEffect(() => {
+    if (!wallet) return;
+    void refreshCharacters(wallet);
+  }, [wallet, refreshCharacters]);
+
+  React.useEffect(() => {
+    if (!wallet) return;
+    const intervalMs = hasAnyActiveBootstrap ? 4000 : 15000;
+    const interval = setInterval(() => {
+      void refreshCharacters(wallet, { background: true });
+    }, intervalMs);
+    return () => clearInterval(interval);
+  }, [wallet, hasAnyActiveBootstrap, refreshCharacters]);
 
   // Step 2 — poll live entity from world state
   React.useEffect(() => {
@@ -3161,9 +3431,6 @@ export function ChampionsPage(): React.ReactElement {
     if (!searchWallet) return;
     const selectedAgentId = selectedCharacter?.agentId ?? null;
     const selectedCharacterToken = selectedCharacter?.characterTokenId ?? selectedCharacter?.tokenId ?? null;
-    const selectedBaseName = selectedCharacter?.name?.includes(" the ")
-      ? selectedCharacter.name.split(" the ")[0]
-      : selectedCharacter?.name ?? null;
 
     async function fetchLiveEntity() {
       try {
@@ -3175,9 +3442,7 @@ export function ChampionsPage(): React.ReactElement {
             if (e.type !== "player") continue;
             if (e.walletAddress?.toLowerCase() !== searchWallet) continue;
             if (selectedAgentId && String(e.agentId ?? "") !== selectedAgentId) continue;
-            if (!selectedAgentId && selectedCharacterToken && String(e.characterTokenId ?? "") !== selectedCharacterToken) {
-              if (!selectedBaseName || !e.name?.toLowerCase().startsWith(selectedBaseName.toLowerCase())) continue;
-            }
+            if (!selectedAgentId && selectedCharacterToken && String(e.characterTokenId ?? "") !== selectedCharacterToken) continue;
             setAgentEntityId(e.id ?? null);
             setAgentZoneId(zId);
             setEntity({
@@ -3288,6 +3553,8 @@ export function ChampionsPage(): React.ReactElement {
             <CharacterSwitcher
               characters={characters}
               selectedCharacterTokenId={selectedCharacterTokenId}
+              liveCharacterTokenId={liveCharacterTokenId}
+              loading={characterListLoading && !characterListHydrated}
               onSelect={setSelectedCharacterTokenId}
             />
             <ChampionSidebar entity={entity} wallet={wallet} zoneId={zoneId} kills={kills} deaths={deaths} />
@@ -3312,7 +3579,6 @@ export function ChampionsPage(): React.ReactElement {
               {activeTab === "friends"     && <FriendsTab ownerWallet={wallet} custodialWallet={custodialWallet} entityId={agentEntityId} entityZoneId={agentZoneId} />}
               {activeTab === "reputation"  && (
                 <ReputationTab
-                  agentId={entity?.agentId ?? selectedCharacter?.agentId ?? null}
                   ownerWallet={wallet}
                   selectedCharacter={selectedCharacter}
                 />

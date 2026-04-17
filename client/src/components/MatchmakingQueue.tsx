@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { useWallet } from "@/hooks/useWallet";
-import { useGameContext } from "@/context/GameContext";
 import { getAuthToken } from "@/lib/agentAuth";
 import { gameBus } from "@/lib/eventBus";
 import { WalletManager } from "@/lib/walletManager";
@@ -43,9 +42,34 @@ export function MatchmakingQueue(): React.ReactElement {
   const [inQueue, setInQueue] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [queuedAgentId, setQueuedAgentId] = React.useState<string | null>(null);
-  const { address, isConnected, characterProgress, deployedCharacterName } = useWallet();
-  const { gameRef } = useGameContext();
+  const { address, isConnected, characterProgress } = useWallet();
   const { notify } = useToast();
+
+  // Resolve identity once and reuse it for queue checks
+  const agentIdRef = React.useRef<string | null>(null);
+
+  // On mount, resolve identity and check if already queued server-side
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const identity = await resolveQueueIdentity();
+        if (cancelled || !identity) return;
+        agentIdRef.current = identity.agentId;
+        // Check server for existing queue membership
+        const res = await fetch(`${API_URL}/api/pvp/queue/all?agentId=${encodeURIComponent(identity.agentId)}`);
+        if (cancelled || !res.ok) return;
+        const data = await res.json();
+        setQueues(data.queues);
+        if (data.queuedFormats?.length > 0) {
+          setInQueue(true);
+          setQueuedAgentId(identity.agentId);
+          setSelectedFormat(data.queuedFormats[0]);
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
+  }, [address]);
 
   React.useEffect(() => {
     fetchQueues();
@@ -66,23 +90,13 @@ export function MatchmakingQueue(): React.ReactElement {
         const data = await response.json();
 
         if (data.inBattle && data.battleId) {
-          // Match found! Transition to battle arena
+          // Match found! The server teleports the player entity to the arena zone.
+          // The WorldScene camera will naturally follow.
           setInQueue(false);
           setQueuedAgentId(null);
           notify("Match found! Entering arena...", "success");
 
-          // Emit event for any listeners
-          gameBus.emit("matchFound", {
-            battleId: data.battleId,
-            status: data.status,
-          });
-
-          // Switch Phaser scene: sleep WorldScene, start BattleScene
-          const game = gameRef.current;
-          if (game) {
-            game.scene.sleep("WorldScene");
-            game.scene.start("BattleScene", { battleId: data.battleId });
-          }
+          gameBus.emit("matchFound", { battleId: data.battleId, status: data.status });
         }
       } catch (error) {
         console.error("Failed to poll for match:", error);
@@ -94,13 +108,29 @@ export function MatchmakingQueue(): React.ReactElement {
     void pollForMatch();
 
     return () => clearInterval(interval);
-  }, [inQueue, queuedAgentId, gameRef, notify]);
+  }, [inQueue, queuedAgentId, notify]);
 
   const fetchQueues = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/pvp/queue/all`);
+      const agentId = agentIdRef.current;
+      const url = agentId
+        ? `${API_URL}/api/pvp/queue/all?agentId=${encodeURIComponent(agentId)}`
+        : `${API_URL}/api/pvp/queue/all`;
+      const response = await fetch(url);
       const data = await response.json();
       setQueues(data.queues);
+      // Sync local queue state with server truth
+      if (agentId && data.queuedFormats) {
+        const serverQueued = data.queuedFormats.length > 0;
+        if (serverQueued && !inQueue) {
+          setInQueue(true);
+          setQueuedAgentId(agentId);
+          setSelectedFormat(data.queuedFormats[0]);
+        } else if (!serverQueued && inQueue) {
+          setInQueue(false);
+          setQueuedAgentId(null);
+        }
+      }
     } catch (error) {
       console.error("Failed to fetch queues:", error);
     }
@@ -124,10 +154,6 @@ export function MatchmakingQueue(): React.ReactElement {
     }
 
     const snapshot = (await response.json()) as StateSnapshot;
-    const preferredName = deployedCharacterName?.trim().toLowerCase() ?? null;
-    const liveName =
-      characterProgress?.source === "live" ? characterProgress.name.trim().toLowerCase() : null;
-
     const allPlayers = Object.values(snapshot.zones ?? {}).flatMap((zone) =>
       Object.entries(zone.entities ?? {}).flatMap(([entityId, entity]) => {
         if (entity.type !== "player") return [];
@@ -142,21 +168,43 @@ export function MatchmakingQueue(): React.ReactElement {
     }
 
     const withIdentity = allPlayers.filter((entity) => entity.agentId && entity.characterTokenId);
-    if (withIdentity.length === 0) {
-      return null;
+    if (withIdentity.length > 0) {
+      const activeToken = characterProgress?.characterTokenId
+        ? String(characterProgress.characterTokenId)
+        : null;
+      const selected = activeToken
+        ? (withIdentity.find((entity) => String(entity.characterTokenId) === activeToken) ?? null)
+        : (withIdentity.length === 1 ? withIdentity[0] : null);
+      if (!selected) {
+        return null;
+      }
+
+      return {
+        agentId: String(selected.agentId),
+        characterTokenId: String(selected.characterTokenId),
+        level: selected.level ?? characterProgress?.level ?? 1,
+      };
     }
 
-    const selected =
-      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === preferredName) ??
-      withIdentity.find((entity) => entity.name?.trim().toLowerCase() === liveName) ??
-      withIdentity[0];
+    // Fallback: resolve canonical active identity for this wallet.
+    try {
+      const walletRes = await fetch(`${API_URL}/agent/wallet/${encodeURIComponent(address)}`);
+      if (walletRes.ok) {
+        const walletData = await walletRes.json();
+        if (walletData.agentId && walletData.characterTokenId) {
+          return {
+            agentId: String(walletData.agentId),
+            characterTokenId: String(walletData.characterTokenId),
+            level: characterProgress?.level ?? 1,
+          };
+        }
+      }
+    } catch {
+      // fall through
+    }
 
-    return {
-      agentId: String(selected.agentId),
-      characterTokenId: String(selected.characterTokenId),
-      level: selected.level ?? characterProgress?.level ?? 1,
-    };
-  }, [address, characterProgress, deployedCharacterName]);
+    return null;
+  }, [address, characterProgress]);
 
   const handleJoinQueue = async () => {
     if (!address) {
@@ -189,6 +237,7 @@ export function MatchmakingQueue(): React.ReactElement {
       });
 
       if (response.ok) {
+        agentIdRef.current = queueIdentity.agentId;
         setInQueue(true);
         setQueuedAgentId(queueIdentity.agentId);
         notify(`Joined ${selectedFormat} queue`, "success");

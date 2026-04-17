@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { formatGold, getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getItemByTokenId, getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG, type EquipmentSlot } from "./itemCatalog.js";
 import { getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
@@ -20,6 +20,7 @@ import { getItemInstance, getWalletInstances, isItemInstanceOwnedBy, upsertItemI
 import { logDiary, narrativeEquip, narrativeUnequip, narrativeRepair } from "../social/diary.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { hasActiveRentalRight } from "../marketplace/rentService.js";
+import { listWalletItemBalances } from "../db/walletBalanceStore.js";
 
 const EQUIPMENT_SLOTS: EquipmentSlot[] = [
   "weapon",
@@ -325,6 +326,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     entity.equipment[item.equipSlot] = {
       tokenId: Number(item.tokenId),
       name: itemInstance?.displayName ?? item.name,
+      xrVisualId: item.xrVisualId ?? null,
       durability,
       maxDurability,
       broken: false,
@@ -541,7 +543,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
     const goldCost = copperToGold(totalCost); // convert to on-chain gold
     const onChainGold = parseFloat(await getGoldBalance(owner));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(owner, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(owner, safeOnChainGold);
     if (availableGold < goldCost) {
       reply.code(400);
       return {
@@ -559,7 +561,7 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       syncEquippedInstance(owner, equipped);
     }
     recalculateEntityVitals(entity);
-    recordGoldSpend(owner, goldCost);
+    await recordGoldSpendAsync(owner, goldCost);
 
     // Log repair diary entry
     if (owner) {
@@ -580,14 +582,14 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
       },
       playerLevel,
       totalCost,
-      remainingGold: formatGold(getAvailableGold(owner, safeOnChainGold)),
+      remainingGold: formatGold(await getAvailableGoldAsync(owner, safeOnChainGold)),
       repairs,
       ...serializeEntityEquipment(entity),
     };
   });
 
   // ── GET /inventory/:walletAddress ─────────────────────────────────────────
-  // Returns on-chain ERC-1155 item balances + equipped status for a wallet.
+  // Returns authoritative game inventory balances + equipped status for a wallet.
   server.get<{ Params: { walletAddress: string } }>(
     "/inventory/:walletAddress",
     async (request, reply) => {
@@ -623,13 +625,11 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         instancesByToken.set(inst.baseTokenId, arr);
       }
 
-      // Fetch all on-chain balances in parallel
-      const balances = await Promise.all(
-        ITEM_CATALOG.map(async (item) => {
-          const qty = await getItemBalance(walletAddress, item.tokenId);
-          return { tokenId: Number(item.tokenId), qty: Number(qty) };
-        })
-      );
+      const dbBalances = await listWalletItemBalances(walletAddress);
+      const balances = ITEM_CATALOG.map((item) => ({
+        tokenId: Number(item.tokenId),
+        qty: dbBalances.get(Number(item.tokenId)) ?? 0,
+      }));
 
       const items = balances
         .filter(({ tokenId, qty }) => qty > 0 || equippedByTokenId[tokenId] !== undefined)

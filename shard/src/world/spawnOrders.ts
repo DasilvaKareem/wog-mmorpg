@@ -16,6 +16,7 @@ import { computeStatsAtLevel } from "../character/leveling.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -44,6 +45,30 @@ interface SpawnOrderBody {
   hairStyle?: string;
   eyeColor?: string;
   origin?: string;
+}
+
+// ── Appearance backfill for legacy characters ─────────────────────
+const SPAWN_SKINS   = ["pale", "fair", "light", "medium", "tan", "olive", "brown", "dark"];
+const SPAWN_EYES    = ["brown", "blue", "green", "gold", "amber", "gray", "violet"];
+const SPAWN_HAIRS   = ["short", "long", "braided", "mohawk", "ponytail", "bald", "topknot", "bangs"];
+const SPAWN_GENDERS: ("male" | "female")[] = ["male", "female"];
+
+function spawnNameHash(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return Math.abs(h);
+}
+
+function randomSpawnAppearance(name: string) {
+  const h = spawnNameHash(name);
+  return {
+    gender:    SPAWN_GENDERS[h % SPAWN_GENDERS.length] as "male" | "female",
+    skinColor: SPAWN_SKINS[(h >>> 3) % SPAWN_SKINS.length],
+    eyeColor:  SPAWN_EYES[(h >>> 6) % SPAWN_EYES.length],
+    hairStyle: SPAWN_HAIRS[(h >>> 9) % SPAWN_HAIRS.length],
+  };
 }
 
 function parseOnChainTokenId(value: string | undefined): bigint | undefined {
@@ -129,19 +154,33 @@ export function registerSpawnOrders(server: FastifyInstance) {
     const resolvedLevel = Math.max(1, Number(saved?.level ?? level ?? 1) || 1);
     const resolvedRaceId = saved?.raceId ?? raceId;
     const resolvedClassId = saved?.classId ?? classId;
+    const resolvedMaxRunEnergy = Math.max(1, Number(saved?.maxRunEnergy ?? 100) || 100);
+    const resolvedRunEnergy = Math.max(0, Math.min(Number(saved?.runEnergy ?? resolvedMaxRunEnergy) || 0, resolvedMaxRunEnergy));
+    const resolvedRunModeEnabled = saved?.runModeEnabled ?? false;
     const resolvedCalling = (saved?.calling as "adventurer" | "farmer" | "merchant" | "craftsman" | undefined) ?? calling;
-    const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender;
-    const resolvedSkinColor = saved?.skinColor ?? skinColor;
-    const resolvedHairStyle = saved?.hairStyle ?? hairStyle;
-    const resolvedEyeColor = saved?.eyeColor ?? eyeColor;
+    // Backfill appearance for legacy characters that lack it
+    const needsAppearance = type === "player" && !saved?.gender && !gender;
+    const backfillAppearance = needsAppearance ? randomSpawnAppearance(name) : null;
+    const resolvedGender = (saved?.gender as "male" | "female" | undefined) ?? gender ?? backfillAppearance?.gender;
+    const resolvedSkinColor = saved?.skinColor ?? skinColor ?? backfillAppearance?.skinColor;
+    const resolvedHairStyle = saved?.hairStyle ?? hairStyle ?? backfillAppearance?.hairStyle;
+    const resolvedEyeColor = saved?.eyeColor ?? eyeColor ?? backfillAppearance?.eyeColor;
     const resolvedOrigin = saved?.origin ?? origin;
     const derivedStats =
       type === "player" && resolvedRaceId && resolvedClassId
         ? computeStatsAtLevel(resolvedRaceId, resolvedClassId, resolvedLevel)
         : undefined;
     const resolvedHp = hp ?? derivedStats?.hp ?? 100;
-    const resolvedTokenId = parseOnChainTokenId(saved?.characterTokenId ?? characterTokenId);
-    const resolvedAgentId = parseAgentId(saved?.agentId ?? agentId);
+    const verifiedResolvedIdentity = type === "player" && walletAddress
+      ? await buildVerifiedIdentityPatch(walletAddress, {
+          characterTokenId: saved?.characterTokenId ?? characterTokenId,
+          agentId: saved?.agentId ?? agentId,
+          agentRegistrationTxHash: saved?.agentRegistrationTxHash,
+          chainRegistrationStatus: saved?.chainRegistrationStatus,
+        })
+      : {};
+    const resolvedTokenId = parseOnChainTokenId(verifiedResolvedIdentity.characterTokenId ?? characterTokenId);
+    const resolvedAgentId = parseAgentId(verifiedResolvedIdentity.agentId ?? agentId);
 
     // Saved coords may be raw world-space, normalized-world from the bad layout shift,
     // or legacy zone-local values. Prefer an explicit in-zone world-space match first.
@@ -183,12 +222,17 @@ export function registerSpawnOrders(server: FastifyInstance) {
       ...(resolvedEyeColor != null && { eyeColor: resolvedEyeColor }),
       ...(resolvedOrigin != null && { origin: resolvedOrigin }),
       ...(derivedStats != null && { stats: derivedStats }),
+      ...(type === "player" && {
+        runEnergy: resolvedRunEnergy,
+        maxRunEnergy: resolvedMaxRunEnergy,
+        runModeEnabled: resolvedRunModeEnabled,
+        isRunning: false,
+      }),
       kills: saved?.kills ?? 0,
       activeQuests: saved?.activeQuests ?? [],
       completedQuests: saved?.completedQuests ?? [],
       storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
-      pendingQuestApprovals: saved?.pendingQuestApprovals ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
@@ -218,14 +262,28 @@ export function registerSpawnOrders(server: FastifyInstance) {
       );
     }
 
+    // Persist backfilled appearance to Redis so it sticks across respawns
+    if (backfillAppearance && saved && walletAddress && type === "player") {
+      void saveCharacter(walletAddress, entity.name, {
+        ...saved,
+        gender: resolvedGender,
+        skinColor: resolvedSkinColor,
+        hairStyle: resolvedHairStyle,
+        eyeColor: resolvedEyeColor,
+      }).catch(() => {});
+    }
+
     // First-time spawn: save initial character data
     if (!saved && walletAddress && type === "player") {
+      const verifiedIdentityPatch = await buildVerifiedIdentityPatch(walletAddress, {
+        characterTokenId: entity.characterTokenId?.toString(),
+        agentId: entity.agentId?.toString(),
+      });
       await saveCharacter(walletAddress, entity.name, {
         name: entity.name,
         level: entity.level ?? 1,
         xp: entity.xp ?? 0,
-        ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
-        ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+        ...verifiedIdentityPatch,
         raceId: resolvedRaceId ?? "human",
         classId: resolvedClassId ?? "warrior",
         calling: resolvedCalling,
@@ -243,7 +301,9 @@ export function registerSpawnOrders(server: FastifyInstance) {
         storyFlags: [],
         learnedTechniques: [],
         professions: [],
-        pendingQuestApprovals: [],
+        runEnergy: resolvedRunEnergy,
+        maxRunEnergy: resolvedMaxRunEnergy,
+        runModeEnabled: resolvedRunModeEnabled,
       });
     }
 

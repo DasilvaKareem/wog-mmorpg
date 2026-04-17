@@ -3,7 +3,7 @@
  * 4 building types × 4 stages each. Each stage requires specific materials.
  */
 
-import { getPlotById, isPlotOwner, setPlotBuilding, type PlotState } from "./plotSystem.js";
+import { getPlotByIdAsync, isPlotOwnerAsync, setPlotBuilding, type PlotState } from "./plotSystem.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -252,21 +252,26 @@ export function startBuilding(
   plotId: string,
   walletAddress: string,
   buildingType: string
-): { ok: boolean; error?: string; plot?: PlotState } {
-  const plot = getPlotById(plotId);
-  if (!plot) return { ok: false, error: "Plot not found." };
-  if (!isPlotOwner(plotId, walletAddress)) {
-    return { ok: false, error: "You don't own this plot." };
-  }
-  if (plot.buildingType) {
-    return { ok: false, error: "A building already exists on this plot. Demolish first." };
-  }
+): Promise<{ ok: boolean; error?: string; plot?: PlotState }> {
+  return (async () => {
+    const plot = await getPlotByIdAsync(plotId);
+    if (!plot) return { ok: false, error: "Plot not found." };
+    if (!(await isPlotOwnerAsync(plotId, walletAddress))) {
+      return { ok: false, error: "You don't own this plot." };
+    }
+    if (plot.buildingType) {
+      return { ok: false, error: "A building already exists on this plot. Demolish first." };
+    }
 
-  const bp = getBlueprint(buildingType);
-  if (!bp) return { ok: false, error: `Unknown building type: ${buildingType}` };
+    const bp = getBlueprint(buildingType);
+    if (!bp) return { ok: false, error: `Unknown building type: ${buildingType}` };
 
-  setPlotBuilding(plotId, buildingType, 0);
-  return { ok: true, plot: getPlotById(plotId)! };
+    await setPlotBuilding(plotId, buildingType, 0);
+    return {
+      ok: true,
+      plot: (await getPlotByIdAsync(plotId)) ?? undefined,
+    };
+  })();
 }
 
 /**
@@ -274,20 +279,22 @@ export function startBuilding(
  */
 export function getNextStageRequirements(
   plotId: string
-): { ok: boolean; error?: string; stage?: BuildingStage; currentStage?: number } {
-  const plot = getPlotById(plotId);
-  if (!plot) return { ok: false, error: "Plot not found." };
-  if (!plot.buildingType) return { ok: false, error: "No building started on this plot." };
+): Promise<{ ok: boolean; error?: string; stage?: BuildingStage; currentStage?: number }> {
+  return (async () => {
+    const plot = await getPlotByIdAsync(plotId);
+    if (!plot) return { ok: false, error: "Plot not found." };
+    if (!plot.buildingType) return { ok: false, error: "No building started on this plot." };
 
-  const bp = getBlueprint(plot.buildingType);
-  if (!bp) return { ok: false, error: "Unknown building type." };
+    const bp = getBlueprint(plot.buildingType);
+    if (!bp) return { ok: false, error: "Unknown building type." };
 
-  const nextStageIdx = plot.buildingStage; // stages are 1-indexed but array is 0-indexed
-  if (nextStageIdx >= bp.stages.length) {
-    return { ok: false, error: "Building is already fully constructed.", currentStage: plot.buildingStage };
-  }
+    const nextStageIdx = plot.buildingStage;
+    if (nextStageIdx >= bp.stages.length) {
+      return { ok: false, error: "Building is already fully constructed.", currentStage: plot.buildingStage };
+    }
 
-  return { ok: true, stage: bp.stages[nextStageIdx], currentStage: plot.buildingStage };
+    return { ok: true, stage: bp.stages[nextStageIdx], currentStage: plot.buildingStage };
+  })();
 }
 
 /**
@@ -296,24 +303,30 @@ export function getNextStageRequirements(
 export function advanceBuildingStage(
   plotId: string,
   walletAddress: string
-): { ok: boolean; error?: string; newStage?: number; complete?: boolean } {
-  const plot = getPlotById(plotId);
-  if (!plot) return { ok: false, error: "Plot not found." };
-  if (!isPlotOwner(plotId, walletAddress)) {
-    return { ok: false, error: "You don't own this plot." };
-  }
-  if (!plot.buildingType) return { ok: false, error: "No building started." };
+): Promise<{ ok: boolean; error?: string; newStage?: number; complete?: boolean }> {
+  return (async () => {
+    const plot = await getPlotByIdAsync(plotId);
+    if (!plot) return { ok: false, error: "Plot not found." };
+    if (!(await isPlotOwnerAsync(plotId, walletAddress))) {
+      return { ok: false, error: "You don't own this plot." };
+    }
+    if (!plot.buildingType) return { ok: false, error: "No building started." };
 
-  const bp = getBlueprint(plot.buildingType);
-  if (!bp) return { ok: false, error: "Unknown building type." };
+    const bp = getBlueprint(plot.buildingType);
+    if (!bp) return { ok: false, error: "Unknown building type." };
 
-  const nextStage = plot.buildingStage + 1;
-  if (nextStage > bp.stages.length) {
-    return { ok: false, error: "Building is already complete." };
-  }
+    const nextStage = plot.buildingStage + 1;
+    if (nextStage > bp.stages.length) {
+      return { ok: false, error: "Building is already complete." };
+    }
 
-  setPlotBuilding(plotId, plot.buildingType, nextStage);
-  return { ok: true, newStage: nextStage, complete: nextStage >= bp.stages.length };
+    await setPlotBuilding(plotId, plot.buildingType, nextStage);
+    return {
+      ok: true,
+      newStage: nextStage,
+      complete: nextStage >= bp.stages.length,
+    };
+  })();
 }
 
 /**
@@ -323,16 +336,18 @@ export function advanceBuildingStage(
 export function demolishBuilding(
   plotId: string,
   walletAddress: string
-): { ok: boolean; error?: string } {
-  const plot = getPlotById(plotId);
-  if (!plot) return { ok: false, error: "Plot not found." };
-  if (!isPlotOwner(plotId, walletAddress)) {
-    return { ok: false, error: "You don't own this plot." };
-  }
-  if (!plot.buildingType) return { ok: false, error: "No building to demolish." };
+): Promise<{ ok: boolean; error?: string }> {
+  return (async () => {
+    const plot = await getPlotByIdAsync(plotId);
+    if (!plot) return { ok: false, error: "Plot not found." };
+    if (!(await isPlotOwnerAsync(plotId, walletAddress))) {
+      return { ok: false, error: "You don't own this plot." };
+    }
+    if (!plot.buildingType) return { ok: false, error: "No building to demolish." };
 
-  setPlotBuilding(plotId, null, 0);
-  return { ok: true };
+    await setPlotBuilding(plotId, null, 0);
+    return { ok: true };
+  })();
 }
 
 export function getBuildingStatus(plotId: string): {
@@ -343,23 +358,33 @@ export function getBuildingStatus(plotId: string): {
   maxStages: number;
   stageName: string | null;
   complete: boolean;
-} | null {
-  const plot = getPlotById(plotId);
-  if (!plot) return null;
+} | null | Promise<{
+  plotId: string;
+  buildingType: string | null;
+  buildingName: string | null;
+  stage: number;
+  maxStages: number;
+  stageName: string | null;
+  complete: boolean;
+} | null> {
+  return (async () => {
+    const plot = await getPlotByIdAsync(plotId);
+    if (!plot) return null;
 
-  const bp = plot.buildingType ? getBlueprint(plot.buildingType) : null;
-  const maxStages = bp ? bp.stages.length : 0;
-  const stageName = bp && plot.buildingStage > 0 && plot.buildingStage <= maxStages
-    ? bp.stages[plot.buildingStage - 1].name
-    : null;
+    const bp = plot.buildingType ? getBlueprint(plot.buildingType) : null;
+    const maxStages = bp ? bp.stages.length : 0;
+    const stageName = bp && plot.buildingStage > 0 && plot.buildingStage <= maxStages
+      ? bp.stages[plot.buildingStage - 1].name
+      : null;
 
-  return {
-    plotId,
-    buildingType: plot.buildingType,
-    buildingName: bp?.name ?? null,
-    stage: plot.buildingStage,
-    maxStages,
-    stageName,
-    complete: plot.buildingStage >= maxStages && maxStages > 0,
-  };
+    return {
+      plotId,
+      buildingType: plot.buildingType,
+      buildingName: bp?.name ?? null,
+      stage: plot.buildingStage,
+      maxStages,
+      stageName,
+      complete: plot.buildingStage >= maxStages && maxStages > 0,
+    };
+  })();
 }

@@ -1,13 +1,14 @@
-import type { FastifyBaseLogger } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance } from "fastify";
 import {
-  getOwnedCharacters,
-  getOwnedCharacterTokenIdsFromTransfers,
   mintCharacterWithIdentity,
   recoverCharacterTokenIdFromTransaction,
   registerIdentity,
-  findIdentityByCharacterTokenId,
 } from "../blockchain/blockchain.js";
-import { reverseLookupOnChain, registerNameOnChain } from "../blockchain/nameServiceChain.js";
+import {
+  isNameServiceEnabled,
+  registerNameOnChain,
+  reverseLookupOnChain,
+} from "../blockchain/nameServiceChain.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
@@ -15,10 +16,20 @@ import { RACE_DEFINITIONS } from "./races.js";
 import { loadCharacter, saveCharacter } from "./characterStore.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { computeStatsAtLevel } from "./leveling.js";
+import {
+  getCharacterBootstrapJobRecord,
+  listDueCharacterBootstrapJobs,
+  listDueCharacterBootstrapJobKeys,
+  upsertCharacterBootstrapJob,
+} from "../db/walletInfraStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import { listAllCharacterProjections } from "./characterProjectionStore.js";
+import { ensureWalletRegistrationQueued } from "../blockchain/wallet.js";
 
 export type CharacterBootstrapStatus =
   | "queued"
   | "pending_mint"
+  | "pending_mint_receipt"
   | "mint_confirmed"
   | "identity_pending"
   | "completed"
@@ -38,6 +49,7 @@ export interface CharacterBootstrapJob {
   lastAttemptAt?: number;
   completedAt?: number;
   lastError?: string;
+  mintTxHash?: string;
 }
 
 const memoryJobs = new Map<string, CharacterBootstrapJob>();
@@ -50,6 +62,11 @@ const CHARACTER_BOOTSTRAP_MAX_RETRIES = Math.max(
   0,
   Number.parseInt(process.env.CHARACTER_BOOTSTRAP_MAX_RETRIES ?? "8", 10) || 8
 );
+const NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS = Number.parseInt(
+  process.env.NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS ?? "900000",
+  10,
+) || 900_000;
+const nextNameAutoRegisterAttemptAt = new Map<string, number>();
 
 export function getCharacterBootstrapMaxRetries(): number {
   return CHARACTER_BOOTSTRAP_MAX_RETRIES;
@@ -89,6 +106,7 @@ function serializeJob(job: CharacterBootstrapJob): Record<string, string> {
     ...(job.lastAttemptAt != null && { lastAttemptAt: String(job.lastAttemptAt) }),
     ...(job.completedAt != null && { completedAt: String(job.completedAt) }),
     ...(job.lastError ? { lastError: job.lastError } : {}),
+    ...(job.mintTxHash ? { mintTxHash: job.mintTxHash } : {}),
   };
 }
 
@@ -114,10 +132,14 @@ function parseJob(raw: Record<string, string>): CharacterBootstrapJob | null {
     ...(raw.lastAttemptAt ? { lastAttemptAt: Number(raw.lastAttemptAt) || 0 } : {}),
     ...(raw.completedAt ? { completedAt: Number(raw.completedAt) || 0 } : {}),
     ...(raw.lastError ? { lastError: raw.lastError } : {}),
+    ...(raw.mintTxHash ? { mintTxHash: raw.mintTxHash } : {}),
   };
 }
 
 async function saveJob(job: CharacterBootstrapJob): Promise<void> {
+  if (isPostgresConfigured()) {
+    await upsertCharacterBootstrapJob(key(job.walletAddress, job.characterName), job);
+  }
   const redis = getRedis();
   if (redis) {
     await redis.hset(key(job.walletAddress, job.characterName), serializeJob(job));
@@ -125,6 +147,7 @@ async function saveJob(job: CharacterBootstrapJob): Promise<void> {
     if (job.lastError == null) staleFields.push("lastError");
     if (job.completedAt == null) staleFields.push("completedAt");
     if (job.lastAttemptAt == null) staleFields.push("lastAttemptAt");
+    if (job.mintTxHash == null) staleFields.push("mintTxHash");
     if (staleFields.length > 0) {
       await redis.hdel(key(job.walletAddress, job.characterName), ...staleFields);
     }
@@ -146,6 +169,10 @@ async function saveJob(job: CharacterBootstrapJob): Promise<void> {
 }
 
 export async function loadCharacterBootstrapJob(walletAddress: string, characterName: string): Promise<CharacterBootstrapJob | null> {
+  if (isPostgresConfigured()) {
+    const job = await getCharacterBootstrapJobRecord(key(walletAddress, characterName));
+    if (job) return job;
+  }
   const redis = getRedis();
   if (redis) {
     const raw = await redis.hgetall(key(walletAddress, characterName));
@@ -186,60 +213,6 @@ function normalizeCharacterKey(name: string, classId?: string | null): string {
   return `${stripped}::${(classId ?? "").trim().toLowerCase()}`;
 }
 
-async function reconcileCharacterTokenFromChain(walletAddress: string, characterName: string, classId: string): Promise<bigint | null> {
-  const desiredKey = normalizeCharacterKey(characterName, classId);
-  try {
-    const tokenIds = await Promise.race([
-      getOwnedCharacterTokenIdsFromTransfers(walletAddress),
-      new Promise<bigint[]>((resolve) => setTimeout(() => resolve([]), 10_000)),
-    ]);
-    if (tokenIds.length === 1) {
-      return tokenIds[0] ?? null;
-    }
-  } catch {
-    // Fall through to the richer metadata-based lookup below.
-  }
-
-  let owned: Awaited<ReturnType<typeof getOwnedCharacters>> = [];
-  try {
-    owned = await Promise.race([
-      getOwnedCharacters(walletAddress),
-      new Promise<Awaited<ReturnType<typeof getOwnedCharacters>>>((resolve) => setTimeout(() => resolve([]), 10_000)),
-    ]);
-  } catch {
-    owned = [];
-  }
-  for (const nft of owned) {
-    const props = (nft.metadata?.properties ?? {}) as Record<string, unknown>;
-    const candidateKey = normalizeCharacterKey(String(nft.metadata?.name ?? ""), typeof props.class === "string" ? props.class : null);
-    if (candidateKey !== desiredKey) continue;
-    try {
-      return BigInt(nft.id.toString());
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
-async function waitForCharacterTokenRecovery(
-  walletAddress: string,
-  characterName: string,
-  classId: string,
-  timeoutMs = 90_000,
-  intervalMs = 3_000
-): Promise<bigint | null> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const recovered = await reconcileCharacterTokenFromChain(walletAddress, characterName, classId);
-    if (recovered != null) {
-      return recovered;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return null;
-}
-
 function updateRuntimeProjection(walletAddress: string, characterName: string, tokenId?: bigint | null, agentId?: bigint | null): void {
   const normalizedWallet = normalizeWallet(walletAddress);
   const normalizedName = collapseCharacterName(characterName);
@@ -252,56 +225,41 @@ function updateRuntimeProjection(walletAddress: string, characterName: string, t
   }
 }
 
-async function findIdentityByCharacterTokenIdWithTimeout(
-  tokenId: bigint,
-  walletAddress: string,
-  timeoutMs = 10_000
-): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
-  try {
-    const ownedMatch = await Promise.race([
-      findIdentityByCharacterTokenId(tokenId, walletAddress),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-    if (ownedMatch?.agentId != null) {
-      return ownedMatch;
-    }
-    return await Promise.race([
-      findIdentityByCharacterTokenId(tokenId),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
-    ]);
-  } catch {
-    return null;
-  }
-}
-
-async function waitForIdentityRecovery(
-  tokenId: bigint,
-  walletAddress: string,
-  timeoutMs = 90_000,
-  intervalMs = 3_000,
-): Promise<Awaited<ReturnType<typeof findIdentityByCharacterTokenId>> | null> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const recovered = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress, 10_000);
-    if (recovered?.agentId != null) {
-      return recovered;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  return null;
+async function sanitizeSavedIdentityState(
+  _walletAddress: string,
+  _characterName: string,
+  saved: NonNullable<Awaited<ReturnType<typeof loadCharacter>>>,
+): Promise<NonNullable<Awaited<ReturnType<typeof loadCharacter>>>> {
+  return saved;
 }
 
 async function ensureNameRegistered(walletAddress: string, characterName: string, logger?: FastifyBaseLogger): Promise<void> {
+  if (!isNameServiceEnabled()) return;
+  const walletKey = normalizeWallet(walletAddress);
+  const desiredName = collapseCharacterName(characterName).toLowerCase();
+  const now = Date.now();
+  const nextAllowedAttempt = nextNameAutoRegisterAttemptAt.get(walletKey) ?? 0;
+  if (now < nextAllowedAttempt) return;
   try {
-    const existing = await reverseLookupOnChain(walletAddress);
-    if (existing) return;
+    const currentName = await reverseLookupOnChain(walletAddress).catch(() => null);
+    if (currentName?.trim().toLowerCase() === desiredName) {
+      nextNameAutoRegisterAttemptAt.delete(walletKey);
+      return;
+    }
     const registered = await registerNameOnChain(walletAddress, characterName);
     if (registered) {
+      nextNameAutoRegisterAttemptAt.delete(walletKey);
       logger?.info(`[nameService] Auto-registered "${characterName}.wog" for ${walletAddress}`);
     } else {
-      logger?.warn(`[nameService] Auto-register did not complete for ${walletAddress}`);
+      nextNameAutoRegisterAttemptAt.set(walletKey, now + NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS);
+      logger?.warn(
+        `[nameService] Auto-register did not complete for ${walletAddress}; backing off for ${Math.round(
+          NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS / 1000,
+        )}s`,
+      );
     }
   } catch (err) {
+    nextNameAutoRegisterAttemptAt.set(walletKey, now + NAME_AUTO_REGISTER_RETRY_COOLDOWN_MS);
     logger?.warn(`[nameService] Auto-register failed for ${walletAddress}: ${(err as Error).message}`);
   }
 }
@@ -319,6 +277,7 @@ function toCharacterRegistrationStatus(
 ): NonNullable<Awaited<ReturnType<typeof loadCharacter>>>["chainRegistrationStatus"] {
   switch (status) {
     case "pending_mint":
+    case "pending_mint_receipt":
       return "pending_mint";
     case "mint_confirmed":
       return "mint_confirmed";
@@ -477,15 +436,51 @@ export async function processCharacterBootstrapJob(
   const heartbeat = startLockHeartbeat(walletAddress, characterName);
 
   try {
-    const saved = await loadCharacter(walletAddress, characterName);
-    if (!saved) {
+    const loaded = await loadCharacter(walletAddress, characterName);
+    if (!loaded) {
       return await markPermanent(job, "Character save missing");
     }
+    const saved = await sanitizeSavedIdentityState(walletAddress, characterName, loaded);
 
     const metadata = buildCharacterMetadata(saved);
     let tokenId = saved.characterTokenId ? BigInt(saved.characterTokenId) : null;
     let agentId = saved.agentId ? BigInt(saved.agentId) : null;
     let currentJob = job;
+
+    if (tokenId == null) {
+      let mintIdentityTxHash: string | null = null;
+      if (currentJob.mintTxHash) {
+        const recoveredTokenId = await recoverCharacterTokenIdFromTransaction(currentJob.mintTxHash);
+        if (recoveredTokenId != null) {
+          tokenId = recoveredTokenId;
+          await saveCharacter(walletAddress, characterName, {
+            characterTokenId: tokenId.toString(),
+            chainRegistrationStatus: "mint_confirmed",
+            chainRegistrationLastError: "",
+          });
+          updateRuntimeProjection(walletAddress, characterName, tokenId, agentId);
+          currentJob = {
+            ...currentJob,
+            status: agentId != null ? "completed" : "mint_confirmed",
+            updatedAt: Date.now(),
+            lastError: undefined,
+            ...(agentId != null && { completedAt: Date.now() }),
+          };
+          await saveJob(currentJob);
+        } else {
+          currentJob = {
+            ...currentJob,
+            status: "pending_mint_receipt",
+            nextAttemptAt: Date.now() + 5_000,
+            updatedAt: Date.now(),
+            lastError: undefined,
+          };
+          await saveJob(currentJob);
+          await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
+          return currentJob;
+        }
+      }
+    }
 
     if (tokenId == null) {
       let mintIdentityTxHash: string | null = null;
@@ -497,39 +492,30 @@ export async function processCharacterBootstrapJob(
       await saveJob(currentJob);
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
-      const recoveredTokenId = await reconcileCharacterTokenFromChain(walletAddress, characterName, saved.classId);
-      if (recoveredTokenId != null) {
-        tokenId = recoveredTokenId;
-      } else {
-        const mintResult = await mintCharacterWithIdentity(
-          walletAddress,
-          metadata,
-          currentJob.validationTags,
-          { skipIdentityRegistration: true }
-        );
-        if (mintResult.tokenId == null) {
-          let recoveredAfterMint = mintResult.txHash
-            ? await recoverCharacterTokenIdFromTransaction(mintResult.txHash)
-            : null;
-          if (recoveredAfterMint == null) {
-            recoveredAfterMint = await waitForCharacterTokenRecovery(
-              walletAddress,
-              characterName,
-              saved.classId
-            );
-          }
-          if (recoveredAfterMint == null) {
-            throw new Error("Character mint completed without tokenId");
-          }
-          tokenId = recoveredAfterMint;
-        } else {
-          tokenId = mintResult.tokenId;
-        }
-        if (mintResult.identity?.agentId != null) {
-          agentId = mintResult.identity.agentId;
-        }
-        mintIdentityTxHash = mintResult.identity?.txHash ?? null;
+      const mintResult = await mintCharacterWithIdentity(
+        walletAddress,
+        metadata,
+        currentJob.validationTags,
+        { skipIdentityRegistration: true }
+      );
+      if (mintResult.tokenId == null) {
+        currentJob = {
+          ...currentJob,
+          status: "pending_mint_receipt",
+          mintTxHash: mintResult.txHash,
+          nextAttemptAt: Date.now() + 5_000,
+          updatedAt: Date.now(),
+          lastError: undefined,
+        };
+        await saveJob(currentJob);
+        await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
+        return currentJob;
       }
+      tokenId = mintResult.tokenId;
+      if (mintResult.identity?.agentId != null) {
+        agentId = mintResult.identity.agentId;
+      }
+      mintIdentityTxHash = mintResult.identity?.txHash ?? null;
 
       await saveCharacter(walletAddress, characterName, {
         characterTokenId: tokenId.toString(),
@@ -542,6 +528,7 @@ export async function processCharacterBootstrapJob(
       currentJob = {
         ...currentJob,
         status: agentId != null ? "completed" : "mint_confirmed",
+        mintTxHash: mintResult.txHash,
         updatedAt: Date.now(),
         lastError: undefined,
         ...(agentId != null && { completedAt: Date.now() }),
@@ -558,26 +545,14 @@ export async function processCharacterBootstrapJob(
       await saveJob(currentJob);
       await syncCharacterRegistrationState(walletAddress, characterName, currentJob);
 
-      const recoveredIdentity = await findIdentityByCharacterTokenIdWithTimeout(tokenId, walletAddress);
-      let identityTxHash: string | null = null;
-      if (recoveredIdentity?.agentId != null) {
-        agentId = recoveredIdentity.agentId;
-      } else {
-        const identityResult = await registerIdentity(tokenId, walletAddress, "", {
-          validationTags: currentJob.validationTags,
-        });
-        identityTxHash = identityResult.txHash ?? null;
-        if (identityResult.agentId == null) {
-          const recoveredAfterRegister = await waitForIdentityRecovery(tokenId, walletAddress);
-          if (recoveredAfterRegister?.agentId != null) {
-            agentId = recoveredAfterRegister.agentId;
-          } else {
-            throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
-          }
-        } else {
-          agentId = identityResult.agentId;
-        }
+      const identityResult = await registerIdentity(tokenId, walletAddress, "", {
+        validationTags: currentJob.validationTags,
+      });
+      const identityTxHash = identityResult.txHash ?? null;
+      if (identityResult.agentId == null) {
+        throw new Error(`Identity registration did not return agentId for characterTokenId=${tokenId.toString()}`);
       }
+      agentId = identityResult.agentId;
 
       await saveCharacter(walletAddress, characterName, {
         agentId: agentId.toString(),
@@ -602,7 +577,9 @@ export async function processCharacterBootstrapJob(
     if (agentId != null) {
       reputationManager.ensureInitialized(agentId);
     }
-    await ensureNameRegistered(walletAddress, characterName, logger);
+    if (currentJob.status === "completed") {
+      await ensureNameRegistered(walletAddress, characterName, logger);
+    }
     return await loadCharacterBootstrapJob(walletAddress, characterName);
   } catch (err) {
     logger?.warn(`[character-bootstrap] ${walletAddress}:${characterName} failed: ${truncateError(err)}`);
@@ -614,17 +591,31 @@ export async function processCharacterBootstrapJob(
   }
 }
 
-async function listDueJobs(now: number): Promise<string[]> {
+async function listDueJobs(now: number): Promise<Array<{ walletAddress: string; characterName: string }>> {
+  if (isPostgresConfigured()) {
+    const jobs = await listDueCharacterBootstrapJobs(now);
+    if (jobs.length > 0) {
+      return jobs.map((job) => ({
+        walletAddress: normalizeWallet(job.walletAddress),
+        characterName: collapseCharacterName(job.characterName),
+      }));
+    }
+  }
   const redis = getRedis();
   if (redis) {
-    return await redis.zrangebyscore(pendingIndexKey, 0, now);
+    const values = await redis.zrangebyscore(pendingIndexKey, 0, now);
+    return values
+      .map((value: string) => parseJobId(value))
+      .filter((value: { walletAddress: string; characterName: string } | null): value is { walletAddress: string; characterName: string } => value != null);
   }
 
   if (!isMemoryFallbackAllowed()) {
     assertRedisAvailable("characterBootstrap.listDueJobs");
     return [];
   }
-  return Array.from(memoryPending.values());
+  return Array.from(memoryPending.values())
+    .map((value: string) => parseJobId(value))
+    .filter((value: { walletAddress: string; characterName: string } | null): value is { walletAddress: string; characterName: string } => value != null);
 }
 
 function parseJobId(value: string): { walletAddress: string; characterName: string } | null {
@@ -639,29 +630,112 @@ function parseJobId(value: string): { walletAddress: string; characterName: stri
 export async function processPendingCharacterBootstraps(logger?: FastifyBaseLogger): Promise<number> {
   const dueJobs = await listDueJobs(Date.now());
   let processed = 0;
-  for (const value of dueJobs) {
-    const parsed = parseJobId(value);
-    if (!parsed) continue;
-    await processCharacterBootstrapJob(parsed.walletAddress, parsed.characterName, logger);
+  for (const due of dueJobs) {
+    await processCharacterBootstrapJob(due.walletAddress, due.characterName, logger);
     processed++;
   }
   return processed;
 }
 
-export async function startCharacterBootstrapWorker(logger?: FastifyBaseLogger): Promise<void> {
+function shouldAutoQueueBootstrap(params: {
+  chainRegistrationStatus: string | null | undefined;
+  agentId: string | null | undefined;
+  existingJob: CharacterBootstrapJob | null;
+}): boolean {
+  const status = params.chainRegistrationStatus ?? "unregistered";
+  if (params.agentId) return false;
+  if (status === "registered" || status === "failed_permanent") return false;
+
+  const job = params.existingJob;
+  if (!job) return true;
+  if (job.status === "completed" || job.status === "failed_permanent") {
+    return status !== "registered";
+  }
+  return false;
+}
+
+export async function reconcileMissingCharacterBootstrapJobs(logger?: FastifyBaseLogger): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+
+  const projections = await listAllCharacterProjections();
+  let enqueued = 0;
+
+  for (const projection of projections) {
+    const existingJob = await loadCharacterBootstrapJob(projection.walletAddress, projection.characterName);
+    if (!shouldAutoQueueBootstrap({
+      chainRegistrationStatus: projection.chainRegistrationStatus,
+      agentId: projection.agentId,
+      existingJob,
+    })) {
+      continue;
+    }
+
+    await enqueueCharacterBootstrap(
+      projection.walletAddress,
+      projection.characterName,
+      "character:auto-reconcile",
+      ["wog:a2a-enabled"]
+    );
+    enqueued++;
+  }
+
+  if (enqueued > 0) {
+    logger?.info(`[character-bootstrap] Auto-enqueued ${enqueued} missing bootstrap job(s) from persisted character state`);
+  }
+
+  return enqueued;
+}
+
+export async function reconcileImportedPlayerBootstrap(server: FastifyInstance): Promise<{
+  walletQueued: number;
+  walletAlreadyQueued: number;
+  characterQueued: number;
+}> {
+  if (!isPostgresConfigured()) {
+    return { walletQueued: 0, walletAlreadyQueued: 0, characterQueued: 0 };
+  }
+
+  const projections = await listAllCharacterProjections();
+  const seenWallets = new Set<string>();
+  let walletQueued = 0;
+  let walletAlreadyQueued = 0;
+
+  for (const projection of projections) {
+    const walletAddress = normalizeWallet(projection.walletAddress);
+    if (seenWallets.has(walletAddress)) continue;
+    seenWallets.add(walletAddress);
+
+    const result = await ensureWalletRegistrationQueued(server, walletAddress);
+    if (result === "queued") walletQueued += 1;
+    if (result === "already_queued") walletAlreadyQueued += 1;
+  }
+
+  const characterQueued = await reconcileMissingCharacterBootstrapJobs(server.log);
+  if (walletQueued > 0 || walletAlreadyQueued > 0 || characterQueued > 0) {
+    server.log.info(
+      `[bootstrap-reconcile] queued wallets=${walletQueued}, active-wallet-ops=${walletAlreadyQueued}, character-jobs=${characterQueued}`
+    );
+  }
+
+  return { walletQueued, walletAlreadyQueued, characterQueued };
+}
+
+export async function startCharacterBootstrapWorker(server: FastifyInstance): Promise<void> {
   if (workerTimer) return;
+
+  await reconcileImportedPlayerBootstrap(server);
 
   const run = async () => {
     if (workerInFlight) return;
     workerInFlight = true;
     try {
-      await processPendingCharacterBootstraps(logger);
+      await processPendingCharacterBootstraps(server.log);
     } finally {
       workerInFlight = false;
     }
   };
 
-  await run();
+  void run();
   workerTimer = setInterval(() => {
     void run();
   }, 5_000);

@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { ZoneEvent, Entity, ElevationProvider } from "../types.js";
 import type { EntityManager } from "./EntityManager.js";
 import { CLASS_COLORS } from "./EntityManager.js";
+import { NO_OUTLINE_LAYER } from "./ToonPipeline.js";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -184,6 +185,7 @@ export class EffectsManager {
     });
 
     this.particlePoints = new THREE.Points(this.particleGeo, this.particleMat);
+    this.particlePoints.layers.set(NO_OUTLINE_LAYER);
     this.particlePoints.frustumCulled = false;
     this.group.add(this.particlePoints);
 
@@ -200,6 +202,7 @@ export class EffectsManager {
       const glow = new THREE.Mesh(orbGlowGeo, glowMat);
       glow.name = "glow";
       core.add(glow);
+      core.layers.set(NO_OUTLINE_LAYER);
       core.visible = false;
       this.group.add(core);
       this.projectiles.push(core);
@@ -215,6 +218,7 @@ export class EffectsManager {
         depthWrite: false, blending: THREE.AdditiveBlending,
       });
       const mesh = new THREE.Mesh(ringGeo, mat);
+      mesh.layers.set(NO_OUTLINE_LAYER);
       mesh.visible = false;
       this.group.add(mesh);
       this.rings.push(mesh);
@@ -228,6 +232,7 @@ export class EffectsManager {
         color: 0x66bbff, transparent: true, opacity: 0.2, side: THREE.DoubleSide, depthWrite: false,
       });
       const mesh = new THREE.Mesh(shieldGeo, mat);
+      mesh.layers.set(NO_OUTLINE_LAYER);
       mesh.visible = false;
       this.group.add(mesh);
       this.shields.push(mesh);

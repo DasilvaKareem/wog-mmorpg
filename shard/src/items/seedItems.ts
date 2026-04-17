@@ -11,6 +11,7 @@ import { getContract, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
 import { mintTo, nextTokenIdToMint } from "thirdweb/extensions/erc1155";
 import { thirdwebClient, skaleBase } from "../blockchain/chain.js";
+import { createManagedFeeProvider, resolveManagedFeeOverrides } from "../blockchain/feePolicy.js";
 import { getCatalogItemsInChainOrder } from "./itemTokenMapping.js";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -30,6 +31,9 @@ const itemsContract = getContract({
   chain: skaleBase,
   address: process.env.ITEMS_CONTRACT_ADDRESS!,
 });
+const skaleProvider = createManagedFeeProvider(
+  process.env.SKALE_BASE_RPC_URL || "https://skale-base.skalenodes.com/v1/base"
+);
 
 function isNonceConflict(err: any): boolean {
   const msg = String(err?.message ?? err ?? "").toLowerCase();
@@ -98,7 +102,17 @@ async function main() {
           supply: 1n,
           nft: DEV_ENABLED ? toInlineMetadataUri(nftMetadata) : nftMetadata,
         });
-        const receipt = await sendTransaction({ transaction: tx, account: serverAccount });
+        const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+        const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
+        const receipt = await sendTransaction({
+          transaction: {
+            ...tx,
+            gasPrice: undefined,
+            ...eip1559Fees,
+            type: undefined,
+          },
+          account: serverAccount,
+        });
         console.log(`  tx: ${receipt.transactionHash}`);
         nextChainTokenId = chainTokenId + 1n;
         break;

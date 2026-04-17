@@ -126,3 +126,20 @@ export function assertRedisAvailable(context: string): void {
   const suffix = lastRedisError ? ` (${lastRedisError})` : "";
   throw new Error(`[redis] ${context}: Redis is required but unavailable${suffix}`);
 }
+
+export async function scanKeys(pattern: string, count = 200): Promise<string[]> {
+  if (!redis) {
+    assertRedisAvailable("scanKeys");
+    return [];
+  }
+  let cursor = "0";
+  const keys: string[] = [];
+  do {
+    const [nextCursor, batch] = await redis.scan(cursor, "MATCH", pattern, "COUNT", count);
+    cursor = nextCursor;
+    if (Array.isArray(batch) && batch.length > 0) {
+      keys.push(...batch);
+    }
+  } while (cursor !== "0");
+  return keys;
+}

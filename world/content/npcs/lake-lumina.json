@@ -1,0 +1,333 @@
+{
+  "zoneId": "lake-lumina",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Tidecrusher Warlord Korrin - Warrior Trainer",
+      "x": 60,
+      "y": 260,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Luminarch Crusader Vesper - Paladin Trainer",
+      "x": 200,
+      "y": 260,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Depthwalker Shade Revyn - Rogue Trainer",
+      "x": 340,
+      "y": 260,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Stormtide Archer Ondine - Ranger Trainer",
+      "x": 480,
+      "y": 260,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Abyssal Archmage Nethys - Mage Trainer",
+      "x": 60,
+      "y": 320,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Radiant Oracle Solara - Cleric Trainer",
+      "x": 200,
+      "y": 320,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Void Sovereign Xalith - Warlock Trainer",
+      "x": 340,
+      "y": 320,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Grandmaster of the Abyss Ryu - Monk Trainer",
+      "x": 480,
+      "y": 320,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Lumen Priestess Aurelia",
+      "x": 280,
+      "y": 320,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Tide Alchemist Nereus",
+      "x": 340,
+      "y": 350,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Solaris Outfitter Caius",
+      "x": 350,
+      "y": 220,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Lumina Shores Blacksmith",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Crystal Shore Auctioneer Lyris",
+      "x": 450,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Lumen Covenant Registrar",
+      "x": 550,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Sunken Temple Scholar Mira",
+      "x": 280,
+      "y": 480,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Lumen Forge",
+      "x": 100,
+      "y": 100,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Crystal Alchemy Basin",
+      "x": 200,
+      "y": 100,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Luminous Enchanting Altar",
+      "x": 300,
+      "y": 100,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Tideblade Gladiator Nereus",
+      "x": 500,
+      "y": 100,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Luminous Wraith",
+      "x": 130,
+      "y": 430,
+      "hp": 1001,
+      "level": 40,
+      "xpReward": 1000
+    },
+    {
+      "type": "mob",
+      "name": "Luminous Wraith",
+      "x": 180,
+      "y": 500,
+      "hp": 1001,
+      "level": 40,
+      "xpReward": 1000
+    },
+    {
+      "type": "mob",
+      "name": "Luminous Wraith",
+      "x": 100,
+      "y": 520,
+      "hp": 1001,
+      "level": 40,
+      "xpReward": 1000
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Golem",
+      "x": 480,
+      "y": 380,
+      "hp": 1016,
+      "level": 41,
+      "xpReward": 1050
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Golem",
+      "x": 540,
+      "y": 430,
+      "hp": 1016,
+      "level": 41,
+      "xpReward": 1050
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Golem",
+      "x": 520,
+      "y": 500,
+      "hp": 1016,
+      "level": 41,
+      "xpReward": 1050
+    },
+    {
+      "type": "mob",
+      "name": "Drowned Knight",
+      "x": 350,
+      "y": 480,
+      "hp": 1050,
+      "level": 42,
+      "xpReward": 1100
+    },
+    {
+      "type": "mob",
+      "name": "Drowned Knight",
+      "x": 400,
+      "y": 550,
+      "hp": 1050,
+      "level": 42,
+      "xpReward": 1100
+    },
+    {
+      "type": "mob",
+      "name": "Drowned Knight",
+      "x": 300,
+      "y": 560,
+      "hp": 1050,
+      "level": 42,
+      "xpReward": 1100
+    },
+    {
+      "type": "mob",
+      "name": "Lumen Serpent",
+      "x": 200,
+      "y": 560,
+      "hp": 1065,
+      "level": 43,
+      "xpReward": 1150
+    },
+    {
+      "type": "mob",
+      "name": "Lumen Serpent",
+      "x": 100,
+      "y": 580,
+      "hp": 1065,
+      "level": 43,
+      "xpReward": 1150
+    },
+    {
+      "type": "mob",
+      "name": "Sunken Horror",
+      "x": 430,
+      "y": 560,
+      "hp": 1100,
+      "level": 44,
+      "xpReward": 1200
+    },
+    {
+      "type": "mob",
+      "name": "Sunken Horror",
+      "x": 500,
+      "y": 580,
+      "hp": 1100,
+      "level": 44,
+      "xpReward": 1200
+    },
+    {
+      "type": "boss",
+      "name": "Solaris Warden",
+      "x": 450,
+      "y": 550,
+      "hp": 5000,
+      "level": 45,
+      "xpReward": 2000
+    }
+  ]
+}

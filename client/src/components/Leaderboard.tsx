@@ -71,7 +71,7 @@ export function Leaderboard({ className }: LeaderboardProps): React.ReactElement
   const { entries, loading, error } = useLeaderboard({ limit: 10, sortBy, pollInterval: 5000 });
 
   return (
-    <Card className={cn("pointer-events-auto", className)}>
+    <Card className={cn("pointer-events-auto", className, collapsed ? "h-auto" : "h-full")}>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center justify-between">
           <div className="flex items-center gap-2">

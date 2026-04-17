@@ -19,6 +19,7 @@ export interface NectarProperties {
   respawnTicks: number;
   /** Minimum sickle tier needed to gather (reuses herbalism tools). */
   requiredSickleTier: number;
+  requiredSkillLevel: number; // Minimum herbalism skill level (1-300) needed
 }
 
 export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
@@ -30,6 +31,7 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 150n,
     respawnTicks: 120,
     requiredSickleTier: 1,
+    requiredSkillLevel: 1,
   },
   // Uncommon (Tier 2)
   "suncrest-nectar": {
@@ -39,6 +41,7 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 151n,
     respawnTicks: 180,
     requiredSickleTier: 2,
+    requiredSkillLevel: 25,
   },
   // Rare (Tier 3)
   "moonpetal-nectar": {
@@ -48,6 +51,7 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 152n,
     respawnTicks: 250,
     requiredSickleTier: 3,
+    requiredSkillLevel: 50,
   },
   "emberveil-nectar": {
     label: "Emberveil Nectar Vent",
@@ -56,6 +60,7 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 153n,
     respawnTicks: 280,
     requiredSickleTier: 3,
+    requiredSkillLevel: 55,
   },
   // Epic (Tier 4)
   "gloomveil-nectar": {
@@ -65,6 +70,7 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 154n,
     respawnTicks: 320,
     requiredSickleTier: 4,
+    requiredSkillLevel: 75,
   },
   "stormwell-nectar": {
     label: "Stormwell Nectar Fissure",
@@ -73,5 +79,6 @@ export const NECTAR_CATALOG: Record<NectarType, NectarProperties> = {
     tokenId: 155n,
     respawnTicks: 320,
     requiredSickleTier: 4,
+    requiredSkillLevel: 80,
   },
 };

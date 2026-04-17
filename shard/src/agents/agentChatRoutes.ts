@@ -21,6 +21,8 @@ import {
   clearAgentEntityRef,
   appendChatMessage,
   getChatHistory,
+  getAgentErrors,
+  getGlobalAgentErrors,
   defaultConfig,
   getDeployCount,
   incrementDeployCount,
@@ -32,21 +34,24 @@ import {
   clearCompletedObjectives,
   createObjectiveId,
   type AgentFocus,
+  type GatherPreference,
   type AgentStrategy,
   type AgentObjective,
 } from "./agentConfigStore.js";
+import type { BotScript } from "../types/botScriptTypes.js";
 import { sendAgentPush } from "./agentPushService.js";
 import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
-import { mintGold, getGoldBalance } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getRedis } from "../redis.js";
 import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { getLearnedTechniques } from "../combat/techniques.js";
-import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
+import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
+import { buildPartyCoordinationReport } from "../social/partyReport.js";
+import { getPartyMemberIdsByPartyId } from "../social/partySystem.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { sendPushToWallet } from "../social/webPushService.js";
 import { fetchLiquidationInventory, sleep, extractRawCharacterName } from "./agentUtils.js";
@@ -54,6 +59,9 @@ import { getAgentOrigin } from "./agentDialogue.js";
 import { handleSlashCommand } from "./slashCommands.js";
 import type { AgentMcpClient } from "./mcpClient.js";
 import { QUEST_CATALOG } from "../social/questSystem.js";
+import { validateEdicts, type Edict } from "../combat/edicts.js";
+import { setEdictCache } from "../combat/edictCache.js";
+import { getPromoCode, hasRedeemedPromoCode, redeemPromoCode, upsertPromoCode } from "../db/runtimeMetaStore.js";
 
 /** Internal fetch with 5s timeout — used for self-calls to avoid hanging forever. */
 function internalFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -61,6 +69,85 @@ function internalFetch(url: string, init?: RequestInit): Promise<Response> {
 }
 
 // Gemini client is initialized in geminiClient.ts
+
+/**
+ * Scan a chat message for durable progression directives and persist them as
+ * typed AgentConfig flags. Returns the list of captured directive labels so
+ * the caller can log them and force a supervisor re-run.
+ *
+ * Captures:
+ *  - "ignore weak mobs" / "stop killing rats" → ignoreWeakMobs=true
+ *  - "fight everything" / "kill weak mobs"    → ignoreWeakMobs=false
+ *  - "auto progress" / "progress through zones" → autoProgress=true
+ *  - "stop auto progressing" / "stay put"     → autoProgress=false
+ *  - "stay in <zone>" / "home is <zone>"      → homeZone=<zone>
+ *  - Any of the above also append the phrase to standingOrders so the supervisor
+ *    sees the user's actual intent.
+ */
+async function captureDirectives(userWallet: string, message: string): Promise<string[]> {
+  const text = message.trim().toLowerCase();
+  if (!text) return [];
+
+  const patch: Record<string, any> = {};
+  const captured: string[] = [];
+  const standingAdds: string[] = [];
+
+  if (/\b(ignore|skip|stop\s+(?:killing|fighting|attacking))\s+(?:weak|low[\s-]level|trash|low)\b/.test(text)
+    || /\bdon'?t\s+(?:kill|fight|attack)\s+(?:weak|low[\s-]level|trash)\b/.test(text)
+    || /\b(?:no|stop)\s+weak\s+mobs?\b/.test(text)) {
+    patch.ignoreWeakMobs = true;
+    captured.push("ignoreWeakMobs=on");
+    standingAdds.push("ignore weak mobs");
+  } else if (/\bfight\s+everything\b/.test(text) || /\bkill\s+(?:weak|all)\s+mobs?\b/.test(text)) {
+    patch.ignoreWeakMobs = false;
+    captured.push("ignoreWeakMobs=off");
+  }
+
+  if (/\b(?:auto[\s-]?progress|progress\s+through|level\s+through|move\s+up\s+zones?)\b/.test(text)
+    || /\b(?:advance|push|climb)\s+(?:to\s+)?(?:harder|higher|progressively)\b/.test(text)) {
+    patch.autoProgress = true;
+    captured.push("autoProgress=on");
+    standingAdds.push("auto-progress through zones");
+  } else if (/\bstop\s+auto[\s-]?progress/.test(text) || /\bstay\s+put\b/.test(text)) {
+    patch.autoProgress = false;
+    captured.push("autoProgress=off");
+  }
+
+  // "stay in X zone" / "home is X" / "don't leave X"
+  const stayMatch = text.match(/\b(?:stay\s+in|home\s+(?:is|zone\s+is)|don'?t\s+leave)\s+([a-z][a-z0-9-]+)\b/);
+  if (stayMatch) {
+    const zoneCandidate = stayMatch[1].replace(/\s+/g, "-");
+    const resolved = resolveRegionId(zoneCandidate);
+    if (resolved) {
+      patch.homeZone = resolved;
+      captured.push(`homeZone=${resolved}`);
+      standingAdds.push(`stay in ${resolved}`);
+    }
+  }
+
+  // "stop going back to village-square" / "no village-square"
+  if (/\b(?:stop\s+going\s+back\s+to|no\s+more|don'?t\s+(?:return\s+to|go\s+back\s+to))\s+village[\s-]square\b/.test(text)) {
+    patch.autoProgress = patch.autoProgress ?? true;
+    captured.push("autoProgress=on (village-square avoidance)");
+    standingAdds.push("do not return to village-square unless critical");
+  }
+
+  if (standingAdds.length > 0) {
+    const existing = (await getAgentConfig(userWallet))?.standingOrders ?? "";
+    // De-dupe — don't append a phrase that's already present
+    const merged = existing
+      ? [existing, ...standingAdds.filter((p) => !existing.toLowerCase().includes(p))].join("; ")
+      : standingAdds.join("; ");
+    patch.standingOrders = merged.slice(0, 500);
+  }
+
+  if (Object.keys(patch).length > 0) {
+    await patchAgentConfig(userWallet, patch);
+    console.log(`[agent/chat] Captured directives for ${userWallet.slice(0, 8)}: ${captured.join(", ")}`);
+  }
+
+  return captured;
+}
 
 function inferInteractionMode(message: string): "directive" | "question" | "conversation" {
   const text = message.trim().toLowerCase();
@@ -288,8 +375,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           const existingGold = Number(existingGoldStr ?? "0");
           if (!Number.isFinite(existingGold) || existingGold < 0.001) {
             const starterCopper = 200; // 0.02 gold — enough for the cheapest weapon
-            await mintGold(result.custodialWallet, copperToGold(starterCopper).toString());
-            server.log.info(`[agent/deploy] Minted ${starterCopper}c starter gold to ${result.custodialWallet}`);
+            const operationId = await enqueueGoldMint(result.custodialWallet, copperToGold(starterCopper).toString());
+            server.log.info(`[agent/deploy] Queued ${starterCopper}c starter gold to ${result.custodialWallet}: ${operationId}`);
           }
         } catch (err: any) {
           server.log.warn(`[agent/deploy] Starter gold mint failed (non-fatal): ${err.message}`);
@@ -453,7 +540,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     // Pick only serializable fields from the raw zone entity (avoid BigInt crash)
-    let entity: { name: string; level: number; hp: number | null; maxHp: number | null } | null = null;
+    let entity: { name: string; level: number; hp: number | null; maxHp: number | null; classId?: string; learnedTechniques?: string[] } | null = null;
     let entitySource: "live" | "saved" | null = null;
     if (ref) {
       const raw = await getEntityState(ref.entityId, ref.zoneId);
@@ -463,6 +550,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           level: Number(raw.level ?? 1),
           hp: raw.hp != null ? Number(raw.hp) : null,
           maxHp: raw.maxHp != null ? Number(raw.maxHp) : null,
+          classId: raw.classId,
+          learnedTechniques: raw.learnedTechniques,
         };
         entitySource = "live";
       }
@@ -478,6 +567,8 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
             level: saved.level ?? 1,
             hp: null,
             maxHp: null,
+            classId: saved.classId,
+            learnedTechniques: saved.learnedTechniques,
           };
           entitySource = "saved";
         }
@@ -489,7 +580,23 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     const runner = agentManager.getRunner(authWallet);
     const currentActivity = runner?.currentActivity ?? null;
     const script = runner?.script ?? null;
-    const currentScript = script ? { type: script.type, reason: script.reason ?? null } : null;
+    const currentScript = script
+      ? {
+          type: script.type,
+          reason: script.reason ?? null,
+          targetZone: script.targetZone ?? null,
+          targetName: script.targetName ?? null,
+          nodeType: script.nodeType ?? null,
+        }
+      : null;
+    const actionQueue = (runner?.getQueue() ?? []).map((s) => ({
+      type: s.type,
+      reason: s.reason ?? null,
+      targetZone: s.targetZone ?? null,
+      targetName: s.targetName ?? null,
+      nodeType: s.nodeType ?? null,
+    }));
+    const recentActivities = runner?.recentActivities ? [...runner.recentActivities].slice(-12) : [];
     const telemetry = runner?.getSnapshot().telemetry ?? null;
 
     // Compute session time remaining
@@ -514,8 +621,73 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entitySource,
       currentActivity,
       currentScript,
+      actionQueue,
+      recentActivities,
       telemetry,
     });
+  });
+
+  // ── GET /party/report/:partyId ──────────────────────────────────────────
+  server.get<{
+    Params: { partyId: string };
+  }>("/party/report/:partyId", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { partyId } = request.params;
+    const memberIds = getPartyMemberIdsByPartyId(partyId);
+    if (!memberIds || memberIds.length === 0) {
+      return reply.code(404).send({ error: "Party not found" });
+    }
+
+    const authCustodialWallet = await getAgentCustodialWallet(authWallet);
+    const authorizedWallets = new Set([
+      authWallet.toLowerCase(),
+      authCustodialWallet?.toLowerCase() ?? "",
+    ]);
+    const hasAccess = memberIds.some((memberId) => {
+      const member = getWorldEntity(memberId) as { walletAddress?: string } | null;
+      return !!member?.walletAddress && authorizedWallets.has(member.walletAddress.toLowerCase());
+    });
+    if (!hasAccess) {
+      return reply.code(403).send({ error: "Cannot inspect another party's report" });
+    }
+
+    const report = buildPartyCoordinationReport(partyId);
+    if (!report) {
+      return reply.code(404).send({ error: "Party report unavailable" });
+    }
+
+    return reply.send(report);
+  });
+
+  // ── GET /agent/errors/:walletAddress ─────────────────────────────────────
+  // Returns the error log for a specific agent.
+  server.get<{
+    Params: { walletAddress: string };
+    Querystring: { limit?: string };
+  }>("/agent/errors/:walletAddress", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { walletAddress } = request.params;
+    if (walletAddress.toLowerCase() !== authWallet.toLowerCase()) {
+      return reply.code(403).send({ error: "Cannot view another user's agent errors" });
+    }
+    const limit = Math.min(parseInt(request.query.limit ?? "100", 10) || 100, 200);
+    const errors = await getAgentErrors(authWallet, limit);
+    return reply.send({ errors });
+  });
+
+  // ── GET /agent/errors — all agents (admin) ────────────────────────────────
+  // Returns the global error stream across all agents. No auth for now so
+  // you can quickly pull it from a dashboard / CLI.
+  server.get<{
+    Querystring: { limit?: string };
+  }>("/agent/errors", async (request, reply) => {
+    const limit = Math.min(parseInt(request.query.limit ?? "200", 10) || 200, 500);
+    const errors = await getGlobalAgentErrors(limit);
+    return reply.send({ errors });
   });
 
   // ── GET /agent/wallet/:ownerWallet ───────────────────────────────────────
@@ -928,6 +1100,39 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
     });
   });
 
+  // ── GET /agent/edicts/:wallet — load edicts ───────────────────────────────
+  server.get<{
+    Params: { wallet: string };
+  }>("/agent/edicts/:wallet", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const wallet = request.params.wallet.toLowerCase();
+    const config = await getAgentConfig(wallet);
+    return reply.send({ edicts: config?.edicts ?? [] });
+  });
+
+  // ── PUT /agent/edicts — save full edict list ─────────────────────────────
+  server.put<{
+    Body: { edicts: Edict[] };
+  }>("/agent/edicts", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { edicts } = request.body;
+
+    const validation = validateEdicts(edicts);
+    if (!validation.valid) {
+      return reply.code(400).send({ error: validation.error });
+    }
+
+    await patchAgentConfig(authWallet, { edicts });
+    // Update in-memory cache so zone tick picks it up immediately
+    setEdictCache(authWallet, edicts as Edict[]);
+
+    server.log.info(`[edicts] ${authWallet.slice(0, 8)} saved ${(edicts as Edict[]).length} edicts`);
+    return reply.send({ ok: true, edicts });
+  });
+
   // ── POST /agent/chat ──────────────────────────────────────────────────────
   server.post<{
     Body: { message: string };
@@ -956,6 +1161,15 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       }
     }
 
+    // ── Natural-language directive capture ────────────────────────────────
+    // Scan the message for durable instructions and persist them as typed flags
+    // / standing orders so they survive past the 2-minute chat-injection window.
+    const captured = await captureDirectives(authWallet, message);
+    if (captured.length > 0) {
+      const runner = agentManager.getRunner(authWallet);
+      if (runner) runner.clearScript();
+    }
+
     const config = await getAgentConfig(authWallet);
     const gameState = await getFullGameState(authWallet);
     const custodialWallet = await getAgentCustodialWallet(authWallet);
@@ -966,7 +1180,13 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
     }
 
     // Self-heal: restart agent loop if it should be running but isn't
-    if (config.enabled && !agentManager.isRunning(authWallet)) {
+    if (!config.enabled) {
+      // Re-enable expired session — reset timer so the agent gets a fresh window
+      await patchAgentConfig(authWallet, { enabled: true, sessionStartedAt: Date.now() });
+      config.enabled = true;
+      config.sessionStartedAt = Date.now();
+    }
+    if (!agentManager.isRunning(authWallet)) {
       await agentManager.ensureRunning(authWallet);
     }
 
@@ -1074,8 +1294,10 @@ RULES:
 8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
 9. Use send_message to talk to nearby players.
 10. After tool results, explain briefly as yourself. No bracket tags.
+11. For MULTI-STEP plans ("mine ore then craft then travel"), use queue_actions to queue them in order. The agent will execute each one sequentially. For single actions, update_focus is fine.
+12. If the user says "stop", "cancel", or wants to change plans, use clear_queue to clear the action queue.
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, shopping, trading, traveling, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
 
     // Get MCP client from the runner if available
@@ -1085,13 +1307,13 @@ Strategy options: aggressive, balanced, defensive`;
     const chatToolDecls: FunctionDeclaration[] = [
       {
         name: "update_focus",
-        description: "Update the agent's activity focus and combat strategy",
+        description: "Update the agent's activity focus and combat strategy. For mining, set focus=gathering and nodeType=ore. For herbalism, set focus=gathering and nodeType=herb.",
         parameters: {
           type: "OBJECT" as Type,
           properties: {
             focus: {
               type: "STRING" as Type,
-              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
               description: "The new activity focus",
             },
             strategy: {
@@ -1102,6 +1324,11 @@ Strategy options: aggressive, balanced, defensive`;
             targetZone: {
               type: "STRING" as Type,
               description: "Optional target zone to move to",
+            },
+            nodeType: {
+              type: "STRING" as Type,
+              enum: ["ore", "herb", "both"],
+              description: "Gathering only: which resource nodes to target",
             },
           },
           required: ["focus"],
@@ -1187,13 +1414,64 @@ Strategy options: aggressive, balanced, defensive`;
           required: ["toWallet", "body"],
         },
       },
+      {
+        name: "queue_actions",
+        description: "Queue multiple actions to execute in sequence. Use this when the user gives multi-step instructions like 'mine ore then craft a sword then travel to dark-forest'. Each action runs until completion, then the next one starts. The queue takes priority over autonomous behavior.",
+        parameters: {
+          type: "OBJECT" as Type,
+          properties: {
+            actions: {
+              type: "ARRAY" as Type,
+              items: {
+                type: "OBJECT" as Type,
+                properties: {
+                  type: {
+                    type: "STRING" as Type,
+                    enum: ["quest", "combat", "gather", "craft", "brew", "cook", "enchant", "leatherwork", "jewelcraft", "farm", "shop", "trade", "travel", "idle"],
+                    description: "The action type",
+                  },
+                  targetZone: {
+                    type: "STRING" as Type,
+                    description: "For travel: the destination zone",
+                  },
+                  nodeType: {
+                    type: "STRING" as Type,
+                    enum: ["ore", "herb", "both"],
+                    description: "For gather: which resource nodes to target",
+                  },
+                  maxLevelOffset: {
+                    type: "NUMBER" as Type,
+                    description: "For combat: max level offset for mobs to fight",
+                  },
+                  reason: {
+                    type: "STRING" as Type,
+                    description: "Short reason for this action",
+                  },
+                },
+                required: ["type"],
+              },
+              description: "Array of actions to queue in order",
+            },
+            clearExisting: {
+              type: "BOOLEAN" as Type,
+              description: "If true, clear the existing queue before adding new actions. Default true.",
+            },
+          },
+          required: ["actions"],
+        },
+      },
+      {
+        name: "clear_queue",
+        description: "Clear all queued actions and return to autonomous behavior. Use when the user says stop, cancel, or wants to do something different.",
+        parameters: { type: "OBJECT" as Type, properties: {} },
+      },
     ];
 
     // When MCP is connected, replace hardcoded read tools with curated MCP subset
     // Using chatOnly=true to keep tool count low (~13 MCP + 3 local = ~16 total)
     // instead of dumping all ~60 MCP tools which bloats token count and confuses the LLM
     if (mcpClient) {
-      const localOnlyTools = new Set(["update_focus", "take_action", "send_message"]);
+      const localOnlyTools = new Set(["update_focus", "take_action", "send_message", "queue_actions", "clear_queue"]);
       const localTools = chatToolDecls.filter((t) => localOnlyTools.has(t.name!));
       const mcpTools = mcpClient.getGeminiTools(/* includeBlocking */ true, /* supervisorOnly */ false, /* chatOnly */ true);
       chatToolDecls.length = 0;
@@ -1457,6 +1735,7 @@ Strategy options: aggressive, balanced, defensive`;
               focus: AgentFocus;
               strategy?: AgentStrategy;
               targetZone?: string;
+              nodeType?: GatherPreference;
             };
             const patch: any = { focus: input.focus };
             if (input.strategy) patch.strategy = input.strategy;
@@ -1473,13 +1752,14 @@ Strategy options: aggressive, balanced, defensive`;
               // Prevent stale travel directives from overriding non-travel focus.
               patch.targetZone = undefined;
             }
+            patch.gatherNodeType = input.focus === "gathering" ? (input.nodeType ?? "both") : undefined;
             await patchAgentConfig(authWallet, patch);
             configUpdated = true;
             actionsTaken.push(
-              `[switched to ${patch.focus}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
+              `[switched to ${patch.focus}${patch.gatherNodeType ? `, ${patch.gatherNodeType}` : ""}${input.strategy ? `, ${input.strategy} strategy` : ""}${patch.targetZone ? `, destination ${patch.targetZone}` : ""}]`
             );
             server.log.info(
-              `[agent/chat] Config updated: focus=${patch.focus} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
+              `[agent/chat] Config updated: focus=${patch.focus} gatherNodeType=${patch.gatherNodeType ?? "none"} strategy=${input.strategy ?? "unchanged"} targetZone=${patch.targetZone ?? "none"}`
             );
 
             const runner = agentManager.getRunner(authWallet);
@@ -1549,7 +1829,13 @@ Strategy options: aggressive, balanced, defensive`;
               };
               const newFocus = focusMap[input.professionId];
               if (newFocus) {
-                await patchAgentConfig(authWallet, { focus: newFocus });
+                await patchAgentConfig(authWallet, {
+                  focus: newFocus,
+                  gatherNodeType:
+                    input.professionId === "mining" ? "ore" :
+                    input.professionId === "herbalism" ? "herb" :
+                    newFocus === "gathering" ? "both" : undefined,
+                });
                 configUpdated = true;
               }
             } else if (input.action === "learn_technique") {
@@ -1722,6 +2008,52 @@ Strategy options: aggressive, balanced, defensive`;
           }
         }
 
+        else if (fnName === "queue_actions") {
+          try {
+            const input = fnArgs as {
+              actions: Array<{ type: string; targetZone?: string; nodeType?: string; maxLevelOffset?: number; reason?: string }>;
+              clearExisting?: boolean;
+            };
+            if (!input.actions || input.actions.length === 0) {
+              toolResults.push({ name: fnName, content: JSON.stringify({ error: "At least one action is required" }) });
+            } else {
+              const scripts: BotScript[] = input.actions.map((a) => ({
+                type: a.type as BotScript["type"],
+                targetZone: a.targetZone,
+                nodeType: a.nodeType as BotScript["nodeType"],
+                maxLevelOffset: a.maxLevelOffset ?? 2,
+                reason: a.reason ?? `Queued: ${a.type}`,
+              }));
+              const runner = agentManager.getRunner(authWallet);
+              if (runner) {
+                await runner.enqueueActions(scripts, input.clearExisting !== false);
+                runner.clearScript(); // start executing immediately
+              }
+              const summary = scripts.map((s) => s.type).join(" → ");
+              actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
+              server.log.info(`[agent/chat] queue_actions: ${summary}`);
+              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary }) });
+            }
+          } catch {
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
+          }
+        }
+
+        else if (fnName === "clear_queue") {
+          try {
+            const runner = agentManager.getRunner(authWallet);
+            if (runner) {
+              await runner.clearQueue();
+              runner.clearScript();
+            }
+            actionsTaken.push("[cleared action queue]");
+            server.log.info("[agent/chat] clear_queue");
+            toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, message: "Queue cleared, returning to autonomous behavior" }) });
+          } catch {
+            toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to clear queue" }) });
+          }
+        }
+
         // ── MCP tools (fallback for any tool not handled locally) ──
         else if (mcpClient && mcpClient.hasTool(fnName)) {
           try {
@@ -1790,18 +2122,23 @@ Strategy options: aggressive, balanced, defensive`;
             tools: [{
               functionDeclarations: [{
                 name: "update_focus",
-                description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel.",
+                description: "Update the agent's activity focus and combat strategy. Use this for ANY request to change what the agent is doing: fight, quest, gather, craft, shop, brew, cook, idle, travel. For mining use focus=gathering with nodeType=ore. For herbalism use focus=gathering with nodeType=herb.",
                 parameters: {
                   type: "OBJECT" as Type,
                   properties: {
                     focus: {
                       type: "STRING" as Type,
-                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "trading", "shopping", "traveling", "learning", "idle"],
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {
                       type: "STRING" as Type,
                       enum: ["aggressive", "balanced", "defensive"],
+                    },
+                    nodeType: {
+                      type: "STRING" as Type,
+                      enum: ["ore", "herb", "both"],
+                      description: "Gathering only: which resource nodes to target",
                     },
                   },
                   required: ["focus"],
@@ -1904,6 +2241,7 @@ Strategy options: aggressive, balanced, defensive`;
     await patchAgentConfig(authWallet, {
       focus: "goto",
       gotoTarget: { entityId, zoneId, name, action, profession, questId },
+      gotoPosition: undefined,
     });
 
     const logText = action === "learn-profession" && profession
@@ -1912,6 +2250,8 @@ Strategy options: aggressive, balanced, defensive`;
       ? `[QUEST] Sending agent to accept quest from ${name ?? entityId}`
       : action === "complete-quest" && questId
       ? `[QUEST] Sending agent to turn in quest at ${name ?? entityId}`
+      : action === "talk-quest"
+      ? `[QUEST] Sending agent to talk to ${name ?? entityId} for quest`
       : `[GOTO] Sending agent to ${name ?? entityId} in ${zoneId}`;
 
     await appendChatMessage(authWallet, {
@@ -1926,6 +2266,47 @@ Strategy options: aggressive, balanced, defensive`;
     }
 
     return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
+  });
+
+  // ── POST /agent/goto-position — Send agent to a world position (map click) ──
+  server.post<{
+    Body: { x: number; y: number; zoneId: string };
+  }>("/agent/goto-position", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { x, y, zoneId } = request.body ?? {};
+
+    if (x == null || y == null || !zoneId) {
+      return reply.code(400).send({ error: "x, y, and zoneId are required" });
+    }
+
+    // Clamp to zone's world-space bounds (zones have offsets in the global world)
+    const layout = getWorldLayout();
+    const zone = layout.zones[zoneId];
+    const offset = zone?.offset ?? { x: 0, z: 0 };
+    const size = zone?.size ?? { width: 640, height: 640 };
+    const cx = Math.max(offset.x, Math.min(offset.x + size.width, x));
+    const cy = Math.max(offset.z, Math.min(offset.z + size.height, y));
+
+    await patchAgentConfig(authWallet, {
+      focus: "goto",
+      gotoPosition: { x: cx, y: cy, zoneId },
+      gotoTarget: undefined,
+    });
+
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[GOTO] Moving to position (${Math.round(cx)}, ${Math.round(cy)}) in ${zoneId}`,
+      ts: Date.now(),
+    });
+
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) {
+      runner.setGotoPosition(cx, cy, zoneId);
+    }
+
+    return reply.send({ ok: true, gotoPosition: { x: cx, y: cy, zoneId } });
   });
 
   // ── PATCH /agent/config — Direct manual control (bypasses AI) ─────────────
@@ -1996,6 +2377,67 @@ Strategy options: aggressive, balanced, defensive`;
     return reply.send({ ok: true, updated: patch });
   });
 
+  // ── PATCH /agent/standing-orders — persistent directive + progression flags ──
+  // Unlike chat messages (which the supervisor only sees for 2 minutes), standing
+  // orders are always injected into the supervisor prompt. Use this for durable
+  // instructions like "ignore weak mobs", "auto progress", "stay in X zone".
+  server.patch<{
+    Body: {
+      standingOrders?: string | null;
+      autoProgress?: boolean;
+      ignoreWeakMobs?: boolean;
+      homeZone?: string | null;
+    };
+  }>("/agent/standing-orders", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const authWallet = (request as any).walletAddress as string;
+    const { standingOrders, autoProgress, ignoreWeakMobs, homeZone } = request.body ?? {};
+
+    const patch: Record<string, any> = {};
+    if (standingOrders !== undefined) {
+      if (standingOrders === null || standingOrders === "") {
+        patch.standingOrders = undefined;
+      } else if (typeof standingOrders === "string") {
+        patch.standingOrders = standingOrders.trim().slice(0, 500);
+      } else {
+        return reply.code(400).send({ error: "standingOrders must be a string or null" });
+      }
+    }
+    if (typeof autoProgress === "boolean") patch.autoProgress = autoProgress;
+    if (typeof ignoreWeakMobs === "boolean") patch.ignoreWeakMobs = ignoreWeakMobs;
+    if (homeZone !== undefined) {
+      if (homeZone === null || homeZone === "") {
+        patch.homeZone = undefined;
+      } else if (typeof homeZone === "string") {
+        const validation = await validateTravelTargetForWallet(authWallet, homeZone);
+        if (!validation.normalizedTargetZone) {
+          return reply.code(400).send({ error: validation.error ?? `Unknown zone: ${homeZone}` });
+        }
+        patch.homeZone = validation.normalizedTargetZone;
+      } else {
+        return reply.code(400).send({ error: "homeZone must be a string or null" });
+      }
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return reply.code(400).send({ error: "No valid fields to update" });
+    }
+
+    await patchAgentConfig(authWallet, patch);
+
+    await appendChatMessage(authWallet, {
+      role: "activity",
+      text: `[STANDING ORDERS] ${JSON.stringify(patch)}`,
+      ts: Date.now(),
+    });
+
+    const runner = agentManager.getRunner(authWallet);
+    if (runner) runner.clearScript();
+
+    return reply.send({ ok: true, updated: patch });
+  });
+
   // ── GET /agent/tier/:wallet — public tier lookup ────────────────────────
   server.get<{ Params: { wallet: string } }>("/agent/tier/:wallet", async (request, reply) => {
     const wallet = request.params.wallet;
@@ -2009,8 +2451,7 @@ Strategy options: aggressive, balanced, defensive`;
   });
 
   // ── Promo codes ─────────────────────────────────────────────────────────
-  // Codes stored in Redis: promo:{CODE} → JSON { tier, maxUses, uses, goldBonus? }
-  // Seed codes via POST /agent/promo/create (admin) or manually in Redis.
+  // Codes are stored durably in Postgres and may be mirrored to Redis if needed.
 
   interface PromoCode {
     tier: AgentTier;
@@ -2023,10 +2464,15 @@ Strategy options: aggressive, balanced, defensive`;
   function promoUsedKey(code: string, wallet: string) { return `promo:used:${code.toUpperCase().trim()}:${wallet.toLowerCase()}`; }
 
   async function getPromo(code: string): Promise<PromoCode | null> {
-    const redis = getRedis();
-    if (!redis) return null;
-    const raw = await redis.get(promoKey(code));
-    return raw ? (JSON.parse(raw) as PromoCode) : null;
+    const promo = await getPromoCode(code);
+    return promo
+      ? {
+          tier: promo.tier as AgentTier,
+          maxUses: promo.maxUses,
+          uses: promo.uses,
+          goldBonus: promo.goldBonus,
+        }
+      : null;
   }
 
   // ── POST /agent/promo/create — create a promo code (admin) ─────────────
@@ -2041,10 +2487,8 @@ Strategy options: aggressive, balanced, defensive`;
     if (!code || !tier || !maxUses) {
       return reply.code(400).send({ error: "code, tier, and maxUses required" });
     }
-    const redis = getRedis();
-    if (!redis) return reply.code(500).send({ error: "Redis unavailable" });
     const promo: PromoCode = { tier, maxUses, uses: 0, goldBonus };
-    await redis.set(promoKey(code), JSON.stringify(promo));
+    await upsertPromoCode({ code, tier, maxUses, uses: 0, goldBonus });
     return reply.send({ ok: true, code: code.toUpperCase().trim(), promo });
   });
 
@@ -2085,7 +2529,6 @@ Strategy options: aggressive, balanced, defensive`;
     let promoApplied = false;
     let promoGoldBonus = 0;
     if (promoCode) {
-      const redis = getRedis();
       const promo = await getPromo(promoCode);
       if (!promo) {
         return reply.code(400).send({ error: "Invalid promo code." });
@@ -2099,20 +2542,23 @@ Strategy options: aggressive, balanced, defensive`;
         return reply.code(400).send({ error: "This promo code has reached its usage limit." });
       }
       // Check if wallet already used this code
-      if (redis) {
-        const alreadyUsed = await redis.get(promoUsedKey(promoCode, authWallet));
-        if (alreadyUsed) {
-          return reply.code(400).send({ error: "You have already used this promo code." });
-        }
+      if (await hasRedeemedPromoCode(promoCode, authWallet)) {
+        return reply.code(400).send({ error: "You have already used this promo code." });
       }
       // Redeem
-      promo.uses += 1;
-      if (redis) {
-        await redis.set(promoKey(promoCode), JSON.stringify(promo));
-        await redis.set(promoUsedKey(promoCode, authWallet), "1");
+      const redeemed = await redeemPromoCode(promoCode, authWallet);
+      if (!redeemed) {
+        const latest = await getPromo(promoCode);
+        if (latest && latest.uses >= latest.maxUses) {
+          return reply.code(400).send({ error: "This promo code has reached its usage limit." });
+        }
+        if (await hasRedeemedPromoCode(promoCode, authWallet)) {
+          return reply.code(400).send({ error: "You have already used this promo code." });
+        }
+        return reply.code(409).send({ error: "Promo redemption conflicted. Please retry." });
       }
       promoApplied = true;
-      promoGoldBonus = promo.goldBonus ?? 0;
+      promoGoldBonus = redeemed.goldBonus ?? 0;
       server.log.info(`[upgrade-tier] Promo ${promoCode.toUpperCase()} redeemed by ${authWallet} for ${tier} tier`);
     }
 
@@ -2142,8 +2588,8 @@ Strategy options: aggressive, balanced, defensive`;
       const custodial = await getAgentCustodialWallet(authWallet);
       if (custodial) {
         try {
-          await mintGold(custodial, goldBonus.toString());
-          server.log.info(`[upgrade-tier] Minted ${goldBonus} gold to ${custodial} for ${tier} tier upgrade`);
+          const operationId = await enqueueGoldMint(custodial, goldBonus.toString());
+          server.log.info(`[upgrade-tier] Queued ${goldBonus} gold to ${custodial} for ${tier} tier upgrade: ${operationId}`);
         } catch (err: any) {
           server.log.warn(`[upgrade-tier] Gold mint failed (non-fatal): ${err.message}`);
         }

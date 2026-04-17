@@ -5,12 +5,21 @@
  */
 import {
   getReputationOnChain,
+  hasChainFeedback,
   initReputationOnChain,
   registerReputationChainListener,
   submitFeedbackOnChain,
 } from "../erc8004/reputation.js";
 import { getRedis } from "../redis.js";
 import { normalizeAgentId } from "../erc8004/agentResolution.js";
+import {
+  getReputationScore,
+  insertReputationFeedback,
+  listReputationFeedback,
+  listReputationTimeline,
+  upsertReputationScore,
+} from "../db/reputationStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 export enum ReputationCategory {
   Combat = 0,
@@ -82,6 +91,9 @@ export class ReputationManager {
   }
 
   private persistScore(agentId: string, rep: ReputationScore): void {
+    if (isPostgresConfigured()) {
+      void upsertReputationScore(agentId, rep).catch(() => {});
+    }
     const redis = getRedis();
     if (!redis) return;
     redis.hset(`reputation:agent:${agentId}`, {
@@ -103,7 +115,11 @@ export class ReputationManager {
   }
 
   private scheduleChainReconcile(agentId: string | bigint): void {
-    this.chainSyncNeeded.add(normalizeAgentId(agentId));
+    const key = normalizeAgentId(agentId);
+    // Only reconcile entities that have had feedback written on-chain.
+    // Entities with no chain feedback will always get CALL_EXCEPTION from getClients().
+    if (!hasChainFeedback(key)) return;
+    this.chainSyncNeeded.add(key);
   }
 
   private async reconcileFromChain(agentId: string | bigint): Promise<ReputationScore | null> {
@@ -197,6 +213,19 @@ export class ReputationManager {
       lastUpdated: Date.now(),
     });
     // Fire-and-forget Redis restore — overwrites defaults if persisted data exists
+    if (isPostgresConfigured()) {
+      void getReputationScore(key).then((stored) => {
+        if (stored) {
+          this.scores.set(key, stored);
+        }
+        this.scheduleChainInit(key, stored ? "postgres-restore" : "fresh-init");
+        this.scheduleChainReconcile(key);
+      }).catch(() => {
+        this.scheduleChainInit(key, "postgres-read-failed");
+        this.scheduleChainReconcile(key);
+      });
+      return;
+    }
     const redis = getRedis();
     if (redis) {
       redis.hgetall(`reputation:agent:${key}`).then((stored: Record<string, string> | null) => {
@@ -295,6 +324,18 @@ export class ReputationManager {
       this.feedbackLog = this.feedbackLog.slice(-2500);
     }
 
+    const feedbackEntry: ReputationFeedback = {
+      submitter,
+      agentId: key,
+      category,
+      delta,
+      reason,
+      timestamp: Date.now(),
+    };
+    if (isPostgresConfigured()) {
+      void insertReputationFeedback(feedbackEntry).catch(() => {});
+    }
+
     this.scheduleChainInit(key, "submitFeedback");
     this.scheduleChainReconcile(key);
     submitFeedbackOnChain(key, category, delta, reason).catch(() => {});
@@ -343,9 +384,22 @@ export class ReputationManager {
       .reverse();
   }
 
+  async getFeedbackHistoryEventuallyConsistent(agentId: string | bigint, limit: number = 20): Promise<ReputationFeedback[]> {
+    const key = normalizeAgentId(agentId);
+    if (isPostgresConfigured()) {
+      const rows = await listReputationFeedback(key, limit);
+      if (rows.length > 0) return rows;
+    }
+    return this.getFeedbackHistory(key, limit);
+  }
+
   /** Get reputation timeline snapshots from Redis */
   async getTimeline(agentId: string | bigint, limit: number = 100): Promise<Array<{ ts: number; combat: number; economic: number; social: number; crafting: number; agent: number; overall: number; category?: string; delta?: number; reason?: string }>> {
     const key = normalizeAgentId(agentId);
+    if (isPostgresConfigured()) {
+      const rows = await listReputationTimeline(key, limit);
+      if (rows.length > 0) return rows;
+    }
     const redis = getRedis();
     if (!redis) return [];
     try {

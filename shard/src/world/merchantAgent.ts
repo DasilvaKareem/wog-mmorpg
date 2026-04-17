@@ -1,12 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import { NPC_DEFS, type NpcDef } from "./npcSpawner.js";
 import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
-import { mintGold, mintItem, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold } from "../blockchain/goldLedger.js";
+import { enqueueGoldMint, enqueueItemMint, getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
+import { getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { getEntitiesInRegion, type Entity } from "./zoneRuntime.js";
 import { logZoneEvent } from "./zoneEvents.js";
 import { getRedis } from "../redis.js";
+import { getMerchantStateProjection, listMerchantStates, upsertMerchantState } from "../db/merchantStateStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Data Structures ──────────────────────────────────────────────
 
@@ -37,10 +39,22 @@ export interface MerchantState {
 
 // ── Constants ────────────────────────────────────────────────────
 
-const MERCHANT_TICK_INTERVAL = 10_000;
-const INVENTORY_SYNC_INTERVAL = 180_000;
-const PRICE_UPDATE_INTERVAL = 30_000;
-const RESTOCK_INTERVAL = 120_000;
+const MERCHANT_TICK_INTERVAL = Math.max(
+  5_000,
+  Number.parseInt(process.env.MERCHANT_TICK_INTERVAL_MS ?? "10000", 10) || 10_000
+);
+const INVENTORY_SYNC_INTERVAL = Math.max(
+  30_000,
+  Number.parseInt(process.env.MERCHANT_INVENTORY_SYNC_INTERVAL_MS ?? "180000", 10) || 180_000
+);
+const PRICE_UPDATE_INTERVAL = Math.max(
+  10_000,
+  Number.parseInt(process.env.MERCHANT_PRICE_UPDATE_INTERVAL_MS ?? "30000", 10) || 30_000
+);
+const RESTOCK_INTERVAL = Math.max(
+  30_000,
+  Number.parseInt(process.env.MERCHANT_RESTOCK_INTERVAL_MS ?? "120000", 10) || 120_000
+);
 const ANNOUNCEMENT_COOLDOWN = 300_000;
 const INITIAL_GOLD_SEED = 500;
 const INITIAL_STOCK_PER_ITEM = 5;
@@ -140,12 +154,16 @@ function hydrateMerchantState(state: PersistedMerchantState): MerchantState {
 }
 
 async function persistMerchantState(state: MerchantState): Promise<void> {
+  const stableId = merchantStableId(state.zoneId, state.npcName);
+  const serialized = serializeMerchantState(state);
+  if (isPostgresConfigured()) {
+    await upsertMerchantState(stableId, state.zoneId, state.npcName, state.walletAddress, serialized);
+  }
   const redis = getRedis();
   if (!redis) return;
 
-  const stableId = merchantStableId(state.zoneId, state.npcName);
   const key = merchantStateKey(stableId);
-  const payload = JSON.stringify(serializeMerchantState(state));
+  const payload = JSON.stringify(serialized);
   const tx = redis.multi();
   tx.sadd(MERCHANT_STATE_IDS_KEY, stableId);
   tx.set(key, payload);
@@ -159,6 +177,37 @@ function persistMerchantStateEventually(state: MerchantState, context: string): 
 }
 
 export async function restoreMerchantStatesFromRedis(): Promise<number> {
+  if (isPostgresConfigured()) {
+    const rows = await listMerchantStates();
+    if (rows.length > 0) {
+      let restored = 0;
+      for (const row of rows) {
+        try {
+          const persistedState = hydrateMerchantState(row.payload as PersistedMerchantState);
+          const entity = getEntitiesInRegion(persistedState.zoneId).find(
+            (candidate) =>
+              candidate.type === "merchant" &&
+              (candidate.id === persistedState.entityId || candidate.name === persistedState.npcName)
+          );
+          if (!entity || entity.type !== "merchant") continue;
+          const previousEntityId = persistedState.entityId;
+          const state: MerchantState = { ...persistedState, entityId: entity.id };
+          entity.walletAddress = state.walletAddress;
+          merchantStates.set(entity.id, state);
+          merchantEntityAliases.set(previousEntityId, entity.id);
+          merchantEntityAliases.set(entity.id, entity.id);
+          restored++;
+        } catch (err) {
+          console.warn(`[merchant] Failed to restore Postgres merchant state for ${row.merchantId}:`, err);
+        }
+      }
+      if (restored > 0) {
+        console.log(`[merchant] Restored ${restored} merchant state(s) from Postgres`);
+        return restored;
+      }
+    }
+  }
+
   const redis = getRedis();
   if (!redis) return 0;
 
@@ -283,6 +332,16 @@ export async function initMerchantWallets(): Promise<void> {
         continue;
       }
 
+      const persistedProjection = await getMerchantStateProjection(stableId).catch(() => null);
+      if (persistedProjection) {
+        const persistedState = hydrateMerchantState(persistedProjection as PersistedMerchantState);
+        entity.walletAddress = persistedState.walletAddress;
+        const state: MerchantState = { ...persistedState, entityId: entity.id };
+        merchantStates.set(entity.id, state);
+        merchantEntityAliases.set(entity.id, entity.id);
+        continue;
+      }
+
       const existingRaw = redis ? await redis.get(merchantStateKey(stableId)) : null;
       if (existingRaw) {
         continue;
@@ -297,7 +356,7 @@ export async function initMerchantWallets(): Promise<void> {
       entity.walletAddress = walletInfo.address;
 
       // Mint seed gold
-      await mintGold(walletInfo.address, String(INITIAL_GOLD_SEED));
+      await enqueueGoldMint(walletInfo.address, String(INITIAL_GOLD_SEED));
 
       // Mint initial stock of each item
       const inventory = new Map<number, MerchantInventoryEntry>();
@@ -305,7 +364,7 @@ export async function initMerchantWallets(): Promise<void> {
         const item = getItemByTokenId(BigInt(tokenId));
         if (!item) continue;
 
-        await mintItem(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
+        await enqueueItemMint(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
 
         inventory.set(tokenId, {
           tokenId,
@@ -366,13 +425,13 @@ async function retryFailedMerchants(defs: NpcDef[], attempt = 1): Promise<void> 
     try {
       const walletInfo = await createCustodialWallet();
       entity.walletAddress = walletInfo.address;
-      await mintGold(walletInfo.address, String(INITIAL_GOLD_SEED));
+      await enqueueGoldMint(walletInfo.address, String(INITIAL_GOLD_SEED));
 
       const inventory = new Map<number, MerchantInventoryEntry>();
       for (const tokenId of def.shopItems!) {
         const item = getItemByTokenId(BigInt(tokenId));
         if (!item) continue;
-        await mintItem(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
+        await enqueueItemMint(walletInfo.address, BigInt(tokenId), BigInt(INITIAL_STOCK_PER_ITEM));
         inventory.set(tokenId, {
           tokenId, quantity: INITIAL_STOCK_PER_ITEM, basePrice: item.copperPrice,
           currentPrice: item.copperPrice, targetStock: DEFAULT_TARGET_STOCK,
@@ -408,7 +467,7 @@ async function syncInventory(state: MerchantState): Promise<void> {
   try {
     // Sync gold
     const rawGold = parseFloat(await getGoldBalance(state.walletAddress));
-    state.goldBalance = Number.isFinite(rawGold) ? getAvailableGold(state.walletAddress, rawGold) : 0;
+    state.goldBalance = Number.isFinite(rawGold) ? await getAvailableGoldAsync(state.walletAddress, rawGold) : 0;
 
     // Sync item balances
     for (const [tokenId, entry] of state.inventory) {
@@ -440,7 +499,7 @@ async function restockItems(state: MerchantState): Promise<void> {
       if (restockQty <= 0) continue;
 
       try {
-        await mintItem(state.walletAddress, BigInt(entry.tokenId), BigInt(restockQty));
+        await enqueueItemMint(state.walletAddress, BigInt(entry.tokenId), BigInt(restockQty));
         entry.quantity += restockQty;
         entry.lastRestockedAt = now;
 

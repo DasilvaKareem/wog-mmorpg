@@ -6,8 +6,18 @@
  * When Redis is configured, Redis is authoritative.
  */
 
-import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed, scanKeys } from "../redis.js";
 import { CLASS_DEFINITIONS } from "./classes.js";
+import {
+  deleteCharacterProjection,
+  getCharacterSnapshotForWallet,
+  listCharacterSnapshotsForWallet,
+  upsertCharacterProjection,
+} from "./characterProjectionStore.js";
+import { enqueueOutboxEvent } from "../db/outbox.js";
+import { replaceProfessionStateForWallet } from "../db/professionStateStore.js";
+import { replaceEquipmentState } from "../db/equipmentStateStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 export type CharacterCalling = "adventurer" | "farmer" | "merchant" | "craftsman";
 
@@ -18,7 +28,7 @@ export interface CharacterSaveData {
   characterTokenId?: string;
   agentId?: string;
   agentRegistrationTxHash?: string;
-  chainRegistrationStatus?: "unregistered" | "pending_mint" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
+  chainRegistrationStatus?: "unregistered" | "pending_mint" | "pending_mint_receipt" | "mint_confirmed" | "identity_pending" | "registered" | "failed_retryable" | "failed_permanent";
   chainRegistrationLastError?: string;
   raceId: string;
   classId: string;
@@ -41,7 +51,9 @@ export interface CharacterSaveData {
   storyFlags: string[];
   learnedTechniques: string[];
   professions: string[];
-  pendingQuestApprovals?: string[];
+  runEnergy?: number;
+  maxRunEnergy?: number;
+  runModeEnabled?: boolean;
   signatureTechniqueId?: string;
   ultimateTechniqueId?: string;
   /** Serialized equipment map — persisted as JSON string in Redis */
@@ -49,6 +61,10 @@ export interface CharacterSaveData {
   /** Per-profession skill XP/level/actions */
   professionSkills?: Record<string, { xp: number; level: number; actions: number }>;
 }
+
+export type CharacterSavePatch = {
+  [K in keyof CharacterSaveData]?: CharacterSaveData[K] | null;
+};
 
 // In-memory fallback (always available)
 const memoryStore = new Map<string, Record<string, string>>();
@@ -153,11 +169,20 @@ function parseCharacter(raw: Record<string, string>): CharacterSaveData {
     storyFlags: parseStringArray(raw.storyFlags),
     learnedTechniques: parseStringArray(raw.learnedTechniques),
     professions: parseStringArray(raw.professions),
-    pendingQuestApprovals: parseStringArray(raw.pendingQuestApprovals),
+    runEnergy: raw.runEnergy != null ? parseFloat(raw.runEnergy) : undefined,
+    maxRunEnergy: raw.maxRunEnergy != null ? parseFloat(raw.maxRunEnergy) : undefined,
+    runModeEnabled: raw.runModeEnabled === "true" ? true : raw.runModeEnabled === "false" ? false : undefined,
     signatureTechniqueId: raw.signatureTechniqueId || undefined,
     ultimateTechniqueId: raw.ultimateTechniqueId || undefined,
     equipment: raw.equipment ? (() => { try { return JSON.parse(raw.equipment); } catch { return undefined; } })() : undefined,
   };
+}
+
+function isRenderableCharacterRecord(raw: Record<string, string>): boolean {
+  const name = raw.name?.trim();
+  const raceId = raw.raceId?.trim();
+  const classId = raw.classId?.trim();
+  return Boolean(name && raceId && classId);
 }
 
 async function resolveFallbackKey(
@@ -187,7 +212,7 @@ async function resolveFallbackKey(
   }
 
   try {
-    const keys: string[] = await redis.keys(`${prefix}*`);
+    const keys: string[] = await scanKeys(`${prefix}*`);
     for (const k of keys) {
       if (k === exactKey) continue;
       const storedName = k.slice(prefix.length);
@@ -205,23 +230,71 @@ async function resolveFallbackKey(
 export async function saveCharacter(
   walletAddress: string,
   characterName: string,
-  data: Partial<CharacterSaveData>
+  data: CharacterSavePatch
 ): Promise<void> {
+  if (isPostgresConfigured()) {
+    const existing = (await loadCharacter(walletAddress, characterName)) ?? ({
+      name: characterName,
+      level: 1,
+      xp: 0,
+      raceId: "human",
+      classId: "warrior",
+      zone: "village-square",
+      x: 0,
+      y: 0,
+      kills: 0,
+      completedQuests: [],
+      storyFlags: [],
+      learnedTechniques: [],
+      professions: [],
+    } satisfies CharacterSaveData);
+    const merged: CharacterSaveData = { ...existing };
+    for (const [k, v] of Object.entries(data) as Array<[keyof CharacterSaveData, CharacterSavePatch[keyof CharacterSaveData]]>) {
+      if (v === undefined) continue;
+      if (v === null) {
+        delete (merged as Partial<CharacterSaveData>)[k];
+        continue;
+      }
+      (merged as unknown as Record<string, unknown>)[k] = v;
+    }
+    await syncCharacterProjection(walletAddress, characterName, merged).catch((err) => {
+      console.warn(`[characterProjection] Failed to sync ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+    });
+
+    const redis = getRedis();
+    if (!redis) {
+      return;
+    }
+  }
+
   // Flatten to string values for Redis HSET
   const flat: Record<string, string> = {};
+  const fieldsToDelete: string[] = [];
   for (const [k, v] of Object.entries(data)) {
-    if (v === undefined || v === null) continue;
+    if (v === undefined) continue;
+    if (v === null) {
+      fieldsToDelete.push(k);
+      continue;
+    }
     flat[k] = (Array.isArray(v) || typeof v === "object") ? JSON.stringify(v) : String(v);
   }
 
-  if (Object.keys(flat).length === 0) return;
+  if (Object.keys(flat).length === 0 && fieldsToDelete.length === 0) return;
 
   const k = key(walletAddress, characterName);
   const redis = getRedis();
 
   if (redis) {
     try {
-      await redis.hset(k, flat);
+      if (Object.keys(flat).length > 0) {
+        await redis.hset(k, flat);
+      }
+      if (fieldsToDelete.length > 0) {
+        await redis.hdel(k, ...fieldsToDelete);
+      }
+      await syncCharacterProjection(walletAddress, characterName).catch((err) => {
+        console.warn(`[characterProjection] Failed to sync ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+      });
       return;
     } catch (err) {
       if (!isMemoryFallbackAllowed()) throw err;
@@ -230,18 +303,31 @@ export async function saveCharacter(
 
   assertRedisAvailable("saveCharacter");
   const existing = memoryStore.get(k) ?? {};
-  memoryStore.set(k, { ...existing, ...flat });
+  const next = { ...existing, ...flat };
+  for (const field of fieldsToDelete) {
+    delete next[field];
+  }
+  memoryStore.set(k, next);
+  await syncCharacterProjection(walletAddress, characterName).catch((err) => {
+    console.warn(`[characterProjection] Failed to sync ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
 }
 
 export async function loadCharacter(
   walletAddress: string,
   characterName: string
 ): Promise<CharacterSaveData | null> {
+  if (isPostgresConfigured()) {
+    const snapshot = await getCharacterSnapshotForWallet(walletAddress, characterName);
+    if (snapshot && Object.keys(snapshot).length > 0) {
+      return snapshot as unknown as CharacterSaveData;
+    }
+  }
   let raw: Record<string, string> = {};
   const k = key(walletAddress, characterName);
   let resolvedKey = k;
 
-  // Try Redis first.
+  // Try Redis first — always check, postgres may not have migrated data yet
   const redis = getRedis();
   if (redis) {
     try {
@@ -250,7 +336,9 @@ export async function loadCharacter(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("loadCharacter");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("loadCharacter");
+    }
   }
 
   // Fall back to in-memory only in local/dev mode.
@@ -281,6 +369,7 @@ export async function loadCharacter(
 
   // Empty hash = no saved character
   if (Object.keys(raw).length === 0) return null;
+  if (!isRenderableCharacterRecord(raw)) return null;
 
   return parseCharacter(raw);
 }
@@ -303,17 +392,24 @@ export async function loadAnyCharacterForWallet(
 export async function loadAllCharactersForWallet(
   walletAddress: string
 ): Promise<CharacterSaveData[]> {
+  if (isPostgresConfigured()) {
+    const snapshots = await listCharacterSnapshotsForWallet(walletAddress);
+    if (snapshots.length > 0) {
+      return snapshots as unknown as CharacterSaveData[];
+    }
+  }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
   const seen = new Set<string>();
   const results: CharacterSaveData[] = [];
 
+  // Always fall through to Redis — postgres may not have migrated data yet
   const redis = getRedis();
   if (redis) {
     try {
-      const keys: string[] = await redis.keys(`${prefix}*`);
+      const keys: string[] = await scanKeys(`${prefix}*`);
       for (const k of keys) {
         const raw = await redis.hgetall(k);
-        if (raw && Object.keys(raw).length > 0) {
+        if (raw && Object.keys(raw).length > 0 && isRenderableCharacterRecord(raw)) {
           const parsed = parseCharacter(raw);
           seen.add(k);
           results.push(parsed);
@@ -323,13 +419,15 @@ export async function loadAllCharactersForWallet(
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("loadAllCharactersForWallet");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("loadAllCharactersForWallet");
+    }
   }
 
   if (isMemoryFallbackAllowed()) {
     for (const [k, raw] of memoryStore.entries()) {
       if (!k.startsWith(prefix) || seen.has(k)) continue;
-      if (raw && Object.keys(raw).length > 0) {
+      if (raw && Object.keys(raw).length > 0 && isRenderableCharacterRecord(raw)) {
         results.push(parseCharacter(raw));
       }
     }
@@ -343,13 +441,20 @@ export async function loadAllCharactersForWallet(
  * Used by the professions endpoint to serve offline champions.
  */
 export async function getProfessionsForWallet(walletAddress: string): Promise<string[]> {
+  if (isPostgresConfigured()) {
+    const snapshots = await listCharacterSnapshotsForWallet(walletAddress);
+    for (const snapshot of snapshots) {
+      const professions = Array.isArray(snapshot.professions) ? snapshot.professions.map(String) : [];
+      if (professions.length > 0) return professions;
+    }
+  }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
 
-  // Try Redis scan first
+  // Always check Redis — postgres may not have migrated data yet
   const redis = getRedis();
   if (redis) {
     try {
-      const keys: string[] = await redis.keys(`${prefix}*`);
+      const keys: string[] = await scanKeys(`${prefix}*`);
       for (const k of keys) {
         const data: Record<string, string> = await redis.hgetall(k);
         if (data?.professions) {
@@ -360,7 +465,9 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
       if (!isMemoryFallbackAllowed()) throw err;
     }
   } else {
-    assertRedisAvailable("getProfessionsForWallet");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("getProfessionsForWallet");
+    }
   }
 
   // In-memory fallback (local/dev only)
@@ -377,10 +484,22 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
 
 export async function deleteCharacter(walletAddress: string, characterName: string): Promise<void> {
   const k = key(walletAddress, characterName);
+  if (isPostgresConfigured()) {
+    await deleteCharacterProjection({ walletAddress, characterName }).catch((err) => {
+      console.warn(`[characterProjection] Failed to delete ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+    });
+    const redis = getRedis();
+    if (!redis) {
+      return;
+    }
+  }
   const redis = getRedis();
   if (redis) {
     try {
       await redis.del(k);
+      await deleteCharacterProjection({ walletAddress, characterName }).catch((err) => {
+        console.warn(`[characterProjection] Failed to delete ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+      });
       if (isMemoryFallbackAllowed()) {
         memoryStore.delete(k);
       }
@@ -390,6 +509,78 @@ export async function deleteCharacter(walletAddress: string, characterName: stri
     }
   }
 
-  assertRedisAvailable("deleteCharacter");
+  if (!isPostgresConfigured()) {
+    assertRedisAvailable("deleteCharacter");
+  }
   memoryStore.delete(k);
+  await deleteCharacterProjection({ walletAddress, characterName }).catch((err) => {
+    console.warn(`[characterProjection] Failed to delete ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+}
+
+async function syncCharacterProjection(walletAddress: string, characterName: string, savedOverride?: CharacterSaveData): Promise<void> {
+  const saved = savedOverride ?? await loadCharacter(walletAddress, characterName);
+  if (!saved) {
+    await deleteCharacterProjection({ walletAddress, characterName });
+    return;
+  }
+
+  await upsertCharacterProjection({
+    walletAddress,
+    character: {
+      name: saved.name,
+      classId: saved.classId,
+      raceId: saved.raceId,
+      level: saved.level,
+      xp: saved.xp,
+      characterTokenId: saved.characterTokenId ?? null,
+      agentId: saved.agentId ?? null,
+      agentRegistrationTxHash: saved.agentRegistrationTxHash ?? null,
+      chainRegistrationStatus: saved.chainRegistrationStatus ?? null,
+      chainRegistrationLastError: saved.chainRegistrationLastError ?? null,
+      zone: saved.zone,
+      calling: saved.calling,
+      gender: saved.gender,
+      skinColor: saved.skinColor,
+      hairStyle: saved.hairStyle,
+      eyeColor: saved.eyeColor,
+      origin: saved.origin,
+    },
+  });
+
+  await enqueueOutboxEvent({
+    topic: "character.saved",
+    aggregateType: "character",
+    aggregateKey: `${walletAddress.toLowerCase()}:${saved.name.toLowerCase()}:${saved.classId}`,
+    payload: {
+      walletAddress: walletAddress.toLowerCase(),
+      characterName: saved.name,
+      classId: saved.classId,
+      raceId: saved.raceId,
+      level: saved.level,
+      xp: saved.xp,
+      characterTokenId: saved.characterTokenId ?? null,
+      agentId: saved.agentId ?? null,
+      chainRegistrationStatus: saved.chainRegistrationStatus ?? null,
+      zoneId: saved.zone,
+    },
+  }).catch((err) => {
+    console.warn(`[outbox] Failed to enqueue character.saved for ${walletAddress}:${saved.name}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
+  await replaceProfessionStateForWallet({
+    walletAddress,
+    professions: saved.professions ?? [],
+    skills: saved.professionSkills ?? {},
+  }).catch((err) => {
+    console.warn(`[professionState] Failed to sync ${walletAddress}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
+  await replaceEquipmentState({
+    walletAddress,
+    characterName: saved.name,
+    equipment: saved.equipment,
+  }).catch((err) => {
+    console.warn(`[equipmentState] Failed to sync ${walletAddress}:${saved.name}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
 }

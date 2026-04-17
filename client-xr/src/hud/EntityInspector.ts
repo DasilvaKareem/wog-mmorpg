@@ -1,5 +1,12 @@
 import type { Entity } from "../types.js";
 
+interface EntityInspectorOptions {
+  canActOnPlayer?: (entity: Entity) => boolean;
+  onAddFriend?: (entity: Entity) => Promise<string>;
+  onTrade?: (entity: Entity) => Promise<string>;
+  onDuel?: (entity: Entity) => Promise<string>;
+}
+
 /**
  * HTML overlay panel showing inspected entity details.
  * Positioned near the entity in screen space.
@@ -8,8 +15,13 @@ export class EntityInspector {
   private panel: HTMLDivElement;
   private currentEntity: Entity | null = null;
   private _locked = false;
+  private readonly options: EntityInspectorOptions;
+  private actionFeedback = "";
+  private activeAction: "friend" | "trade" | "duel" | null = null;
+  private lastAnchor: { x: number; y: number } | null = null;
 
-  constructor() {
+  constructor(options: EntityInspectorOptions = {}) {
+    this.options = options;
     this.panel = document.createElement("div");
     this.panel.id = "entity-inspector";
     this.panel.style.cssText = `
@@ -21,7 +33,7 @@ export class EntityInspector {
       padding: 12px 16px;
       color: #ddd;
       font: 13px/1.5 monospace;
-      pointer-events: none;
+      pointer-events: auto;
       z-index: 20;
       min-width: 200px;
       max-width: 300px;
@@ -29,6 +41,7 @@ export class EntityInspector {
       transition: opacity 0.3s, background 0.3s;
     `;
     document.body.appendChild(this.panel);
+    this.panel.addEventListener("click", this.onPanelClick);
 
     // Close on click elsewhere
     document.addEventListener("mousedown", (e) => {
@@ -40,7 +53,10 @@ export class EntityInspector {
 
   show(entity: Entity, screenX: number, screenY: number) {
     this.currentEntity = entity;
-    this.panel.innerHTML = this.buildContent(entity);
+    this.actionFeedback = "";
+    this.activeAction = null;
+    this.lastAnchor = { x: screenX, y: screenY };
+    this.render(entity);
     this.panel.style.display = "block";
 
     if (this._locked) {
@@ -49,6 +65,10 @@ export class EntityInspector {
       this.applyDefaultStyle();
     }
 
+    this.positionAt(screenX, screenY);
+  }
+
+  private positionAt(screenX: number, screenY: number) {
     // Position near click, clamped to viewport
     const w = this.panel.offsetWidth;
     const h = this.panel.offsetHeight;
@@ -60,6 +80,13 @@ export class EntityInspector {
 
     this.panel.style.left = `${x}px`;
     this.panel.style.top = `${y}px`;
+  }
+
+  private render(entity: Entity) {
+    this.panel.innerHTML = this.buildContent(entity);
+    if (this.lastAnchor && !this._locked) {
+      this.positionAt(this.lastAnchor.x, this.lastAnchor.y);
+    }
   }
 
   /** Switch to locked mode: compact, transparent, pinned to top-right corner */
@@ -94,6 +121,9 @@ export class EntityInspector {
   hide() {
     this.panel.style.display = "none";
     this.currentEntity = null;
+    this.actionFeedback = "";
+    this.activeAction = null;
+    this.lastAnchor = null;
   }
 
   get inspectedEntity(): Entity | null {
@@ -157,12 +187,70 @@ export class EntityInspector {
       }
     }
 
+    if (e.type === "player" && this.options.canActOnPlayer?.(e)) {
+      html += `
+        <div style="margin-top:10px; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px;">
+          ${this.renderActionButton("friend", "Add Friend")}
+          ${this.renderActionButton("trade", "Trade")}
+          ${this.renderActionButton("duel", "Duel")}
+        </div>
+      `;
+      if (this.actionFeedback) {
+        html += `<div style="margin-top:8px; font-size:11px; color:#9edbff;">${esc(this.actionFeedback)}</div>`;
+      }
+    }
+
     // Position
     html += `<div style="margin-top:6px; font-size:10px; color:#666;">
       pos: ${Math.round(e.x)}, ${Math.round(e.y)}
     </div>`;
 
     return html;
+  }
+
+  private renderActionButton(action: "friend" | "trade" | "duel", label: string): string {
+    const busy = this.activeAction === action;
+    return `
+      <button
+        type="button"
+        data-action="${action}"
+        ${busy ? "disabled" : ""}
+        style="padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:#dfe8ff; font:11px monospace; cursor:${busy ? "wait" : "pointer"};"
+      >${busy ? "..." : label}</button>
+    `;
+  }
+
+  private onPanelClick = (e: MouseEvent) => {
+    const btn = (e.target as HTMLElement).closest<HTMLButtonElement>("[data-action]");
+    if (!btn || !this.currentEntity) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = btn.dataset.action as "friend" | "trade" | "duel";
+    void this.handleAction(action, this.currentEntity);
+  };
+
+  private async handleAction(action: "friend" | "trade" | "duel", entity: Entity) {
+    const handlers = {
+      friend: this.options.onAddFriend,
+      trade: this.options.onTrade,
+      duel: this.options.onDuel,
+    } as const;
+    const handler = handlers[action];
+    if (!handler) return;
+
+    this.activeAction = action;
+    this.actionFeedback = "";
+    this.render(entity);
+    try {
+      this.actionFeedback = await handler(entity);
+    } catch (err) {
+      this.actionFeedback = err instanceof Error ? err.message : "Action failed";
+    } finally {
+      this.activeAction = null;
+      if (this.currentEntity?.id === entity.id) {
+        this.render(this.currentEntity);
+      }
+    }
   }
 }
 

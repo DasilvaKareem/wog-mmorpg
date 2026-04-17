@@ -15,6 +15,13 @@ import { getAllEntities } from "../world/zoneRuntime.js";
 import { reputationManager } from "../economy/reputationManager.js";
 import { reverseLookupOnChain, resolveNameOnChain } from "../blockchain/nameServiceChain.js";
 import { resolvePreferredAgentIdForWallet } from "../erc8004/agentResolution.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import {
+  listFreshFriendRequests,
+  listFriends,
+  replaceFriendRequests,
+  replaceFriends,
+} from "../db/friendsStore.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -72,6 +79,9 @@ export async function areFriends(walletA: string, walletB: string): Promise<bool
 async function persistRequests(wallet: string, requests: FriendRequest[]): Promise<void> {
   const key = norm(wallet);
   requestStore.set(key, requests);
+  if (isPostgresConfigured()) {
+    await replaceFriendRequests(key, requests, REQUEST_TTL_MS);
+  }
   const redis = getRedis();
   if (redis) {
     await redis.set(`${REDIS_REQUEST_KEY_PREFIX}${key}`, JSON.stringify(requests));
@@ -80,6 +90,12 @@ async function persistRequests(wallet: string, requests: FriendRequest[]): Promi
 
 async function freshRequests(wallet: string): Promise<FriendRequest[]> {
   const key = norm(wallet);
+  if (isPostgresConfigured()) {
+    const persisted = await listFreshFriendRequests(key, Date.now());
+    requestStore.set(key, persisted);
+    return persisted;
+  }
+
   const redis = getRedis();
   if (redis) {
     try {
@@ -101,22 +117,23 @@ async function freshRequests(wallet: string): Promise<FriendRequest[]> {
   return list;
 }
 
-/** Persist friends list to Redis (fire-and-forget). */
-function persistFriends(wallet: string): void {
+/** Persist friends list to durable storage and cache. */
+async function persistFriends(wallet: string): Promise<void> {
   const key = norm(wallet);
   const friends = friendsStore.get(key) ?? [];
+  if (isPostgresConfigured()) {
+    await replaceFriends(key, friends);
+  }
   const redis = getRedis();
   if (redis) {
-    redis
-      .set(`${REDIS_KEY_PREFIX}${key}`, JSON.stringify(friends))
-      .catch((err: unknown) =>
-        console.error(`[friends] Redis write failed for ${key}:`, err),
-      );
+    await redis.set(`${REDIS_KEY_PREFIX}${key}`, JSON.stringify(friends)).catch((err: unknown) =>
+      console.error(`[friends] Redis write failed for ${key}:`, err),
+    );
   }
 }
 
 /** Add friend to both sides + persist. */
-function addMutualFriend(walletA: string, walletB: string): void {
+async function addMutualFriend(walletA: string, walletB: string): Promise<void> {
   const now = Date.now();
   const a = norm(walletA);
   const b = norm(walletB);
@@ -130,12 +147,12 @@ function addMutualFriend(walletA: string, walletB: string): void {
     if (!list.some((f) => f.wallet === other)) {
       list.push({ wallet: other, addedAt: now });
     }
-    persistFriends(self);
+    await persistFriends(self);
   }
 }
 
 /** Remove friend from both sides + persist. */
-function removeMutualFriend(walletA: string, walletB: string): void {
+async function removeMutualFriend(walletA: string, walletB: string): Promise<void> {
   const a = norm(walletA);
   const b = norm(walletB);
 
@@ -146,7 +163,7 @@ function removeMutualFriend(walletA: string, walletB: string): void {
         self,
         list.filter((f) => f.wallet !== other),
       );
-      persistFriends(self);
+      await persistFriends(self);
     }
   }
 }
@@ -155,6 +172,14 @@ function removeMutualFriend(walletA: string, walletB: string): void {
 async function ensureLoaded(wallet: string): Promise<void> {
   const key = norm(wallet);
   if (friendsStore.has(key)) return;
+
+  if (isPostgresConfigured()) {
+    const persisted = await listFriends(key);
+    if (persisted.length > 0) {
+      friendsStore.set(key, persisted);
+      return;
+    }
+  }
 
   const redis = getRedis();
   if (redis) {
@@ -342,7 +367,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     }
 
     // Mutual add
-    addMutualFriend(wallet, request.fromWallet);
+    await addMutualFriend(wallet, request.fromWallet);
 
     // Remove the accepted request
     await persistRequests(
@@ -399,7 +424,7 @@ export function registerFriendsRoutes(server: FastifyInstance): void {
     await ensureLoaded(wallet);
     await ensureLoaded(target);
 
-    removeMutualFriend(wallet, target);
+    await removeMutualFriend(wallet, target);
 
     return reply.send({ success: true });
   });

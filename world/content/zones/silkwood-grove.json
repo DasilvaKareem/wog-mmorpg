@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "silk-loom-stone",
+      "name": "Silk Loom Stone",
+      "type": "landmark",
+      "position": { "x": 300, "z": 270 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "weaver-house",
+      "name": "Weaver's House",
+      "type": "structure",
+      "position": { "x": 400, "z": 360 },
+      "radius": 20,
+      "tags": ["quest", "craft"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest", "craft"], "npcs": ["weaver"] }
+    },
+    {
+      "id": "grove-shop",
+      "name": "Silkwood Textiles",
+      "type": "structure",
+      "position": { "x": 200, "z": 190 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "grove-lane",
+      "name": "Grove Lane",
+      "nodes": ["grove-shop", "silk-loom-stone", "weaver-house"]
+    }
+  ]
 }

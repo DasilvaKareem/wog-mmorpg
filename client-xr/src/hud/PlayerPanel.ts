@@ -20,23 +20,17 @@ export class PlayerPanel {
   private players: ActivePlayer[] = [];
   private playersById = new Map<string, ActivePlayer>();
   private zonePlayers: Map<string, ActivePlayer[]> = new Map();
+  private expandedZones = new Set<string>();
   private callbacks: PanelCallbacks;
-  private visible = true;
-  private toggleBtn: HTMLButtonElement;
+  private visible = false;
 
   constructor(callbacks: PanelCallbacks) {
     this.callbacks = callbacks;
 
-    // Toggle button
-    this.toggleBtn = document.createElement("button");
-    this.toggleBtn.id = "panel-toggle";
-    this.toggleBtn.textContent = "Hide Players";
-    this.toggleBtn.addEventListener("click", () => this.toggle());
-    document.body.appendChild(this.toggleBtn);
-
     // Main container
     this.container = document.createElement("div");
     this.container.id = "player-panel";
+    this.container.style.display = "none";
 
     // Tab bar
     this.tabBar = document.createElement("div");
@@ -87,8 +81,6 @@ export class PlayerPanel {
   toggle() {
     this.visible = !this.visible;
     this.container.style.display = this.visible ? "flex" : "none";
-    this.toggleBtn.textContent = this.visible ? "Hide Players" : "Show Players";
-    this.toggleBtn.classList.toggle("collapsed", !this.visible);
   }
 
   /** Call every poll with the global active player list */
@@ -102,6 +94,16 @@ export class PlayerPanel {
       const zoneId = player.zoneId || "unknown";
       if (!this.zonePlayers.has(zoneId)) this.zonePlayers.set(zoneId, []);
       this.zonePlayers.get(zoneId)!.push(player);
+    }
+
+    // Auto-expand the most populated zone if nothing is expanded yet
+    if (this.expandedZones.size === 0 && this.zonePlayers.size > 0) {
+      let best = "";
+      let bestCount = 0;
+      for (const [zoneId, zp] of this.zonePlayers) {
+        if (zp.length > bestCount) { bestCount = zp.length; best = zoneId; }
+      }
+      if (best) this.expandedZones.add(best);
     }
 
     this.render();
@@ -127,23 +129,28 @@ export class PlayerPanel {
     for (const [zoneId, players] of zones) {
       players.sort((a, b) => (b.level ?? 0) - (a.level ?? 0));
       const label = zoneId.replace(/-/g, " ");
+      const expanded = this.expandedZones.has(zoneId);
+      const arrow = expanded ? "\u25BC" : "\u25B6";
 
       html += `<div class="pp-zone">`;
-      html += `<div class="pp-zone-header" data-zone="${zoneId}">`;
+      html += `<div class="pp-zone-header" data-zone-toggle="${zoneId}">`;
+      html += `<span class="pp-zone-arrow">${arrow}</span>`;
       html += `<span class="pp-zone-name">${label}</span>`;
-      html += `<span class="pp-zone-count">${players.length} online</span>`;
+      html += `<span class="pp-zone-count">${players.length}</span>`;
       html += `</div>`;
 
-      for (const player of players) {
-        const lvl = player.level ?? 1;
-        const hpPct = player.maxHp > 0 ? Math.round((player.hp / player.maxHp) * 100) : 100;
-        const cls = player.classId ? ` [${player.classId}]` : "";
-        html += `<div class="pp-row" data-eid="${player.id}">`;
-        html += `<span class="pp-icon" style="color:#44ddff">&#9679;</span>`;
-        html += `<span class="pp-name">${player.name}${cls}</span>`;
-        html += `<span class="pp-lvl">Lv${lvl}</span>`;
-        html += `<span class="pp-hp" style="color:${hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44"}">${hpPct}%</span>`;
-        html += `</div>`;
+      if (expanded) {
+        for (const player of players) {
+          const lvl = player.level ?? 1;
+          const hpPct = player.maxHp > 0 ? Math.round((player.hp / player.maxHp) * 100) : 100;
+          const cls = player.classId ? ` [${player.classId}]` : "";
+          html += `<div class="pp-row" data-eid="${player.id}">`;
+          html += `<span class="pp-icon" style="color:#44ddff">&#9679;</span>`;
+          html += `<span class="pp-name">${player.name}${cls}</span>`;
+          html += `<span class="pp-lvl">Lv${lvl}</span>`;
+          html += `<span class="pp-hp" style="color:${hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44"}">${hpPct}%</span>`;
+          html += `</div>`;
+        }
       }
 
       html += `</div>`;
@@ -189,28 +196,12 @@ export class PlayerPanel {
   private injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
-      #panel-toggle {
-        position: fixed;
-        top: 12px;
-        left: 180px;
-        z-index: 20;
-        padding: 6px 14px;
-        background: rgba(20, 30, 50, 0.85);
-        border: 1px solid #4f8;
-        border-radius: 6px;
-        color: #4f8;
-        font: bold 12px monospace;
-        cursor: pointer;
-      }
-      #panel-toggle:hover { background: rgba(30, 50, 70, 0.95); }
-      #panel-toggle.collapsed { opacity: 0.6; }
-
       #player-panel {
         position: fixed;
         top: 44px;
         left: 12px;
         width: 260px;
-        max-height: calc(100vh - 60px);
+        max-height: min(420px, calc(100vh - 200px));
         background: rgba(10, 16, 28, 0.92);
         border: 1px solid rgba(68, 255, 136, 0.25);
         border-radius: 8px;
@@ -269,15 +260,17 @@ export class PlayerPanel {
       .pp-zone { margin-bottom: 2px; }
       .pp-zone-header {
         display: flex;
-        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
         padding: 6px 10px;
         background: rgba(30, 50, 70, 0.5);
         cursor: pointer;
         user-select: none;
       }
       .pp-zone-header:hover { background: rgba(40, 70, 90, 0.7); }
-      .pp-zone-name { color: #8bf; font-weight: bold; text-transform: capitalize; }
-      .pp-zone-count { color: #667; font-size: 11px; }
+      .pp-zone-arrow { color: #667; font-size: 9px; width: 12px; flex-shrink: 0; }
+      .pp-zone-name { color: #8bf; font-weight: bold; text-transform: capitalize; flex: 1; }
+      .pp-zone-count { color: #667; font-size: 11px; flex-shrink: 0; }
 
       .pp-row {
         display: flex;
@@ -307,9 +300,23 @@ export class PlayerPanel {
         if (player) this.callbacks.onPlayerClick(player);
         return;
       }
+      // Zone header: toggle expand/collapse; double-click navigates
       const zone = (e.target as HTMLElement).closest(".pp-zone-header") as HTMLElement;
-      if (zone?.dataset.zone) {
-        this.callbacks.onZoneClick(zone.dataset.zone);
+      if (zone?.dataset.zoneToggle) {
+        const zoneId = zone.dataset.zoneToggle;
+        if (this.expandedZones.has(zoneId)) {
+          this.expandedZones.delete(zoneId);
+        } else {
+          this.expandedZones.add(zoneId);
+        }
+        this.render();
+        return;
+      }
+    });
+    this.listEl.addEventListener("dblclick", (e) => {
+      const zone = (e.target as HTMLElement).closest(".pp-zone-header") as HTMLElement;
+      if (zone?.dataset.zoneToggle) {
+        this.callbacks.onZoneClick(zone.dataset.zoneToggle);
       }
     });
   }

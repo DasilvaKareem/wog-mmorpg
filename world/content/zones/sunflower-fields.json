@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "field-well",
+      "name": "Field Well",
+      "type": "landmark",
+      "position": { "x": 300, "z": 320 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "farm-store",
+      "name": "Farm Store",
+      "type": "structure",
+      "position": { "x": 360, "z": 260 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "old-farmhouse",
+      "name": "Old Farmhouse",
+      "type": "structure",
+      "position": { "x": 240, "z": 380 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest"], "npcs": ["farmer"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "farm-road",
+      "name": "Farm Road",
+      "nodes": ["farm-store", "field-well", "old-farmhouse"]
+    }
+  ]
 }

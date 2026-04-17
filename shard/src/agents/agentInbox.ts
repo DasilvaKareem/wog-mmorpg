@@ -9,6 +9,16 @@
  */
 
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "../redis.js";
+import {
+  ackInboxMessageIds,
+  appendInboxHistory,
+  countInboxMessages,
+  countNewInboxMessages,
+  listInboxHistory,
+  listInboxMessages,
+  upsertInboxMessage,
+} from "../db/agentInboxStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +27,6 @@ export type InboxMessageType =
   | "trade-request"    // "I want to buy/sell X"
   | "party-invite"     // "Join my party"
   | "broadcast"        // zone-wide announcement
-  | "quest-approval"   // champion asks summoner to approve a quest
   | "system";          // game event notification (level-up, death, quest complete)
 
 export interface InboxMessage {
@@ -106,6 +115,18 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
     ts,
   };
 
+  if (isPostgresConfigured()) {
+    const id = `pg-${ts}-${++memIdCounter}`;
+    logEntry.id = id;
+    await upsertInboxMessage(to, logEntry);
+    void appendToHistory(to, logEntry);
+
+    const redis = getRedis();
+    if (!redis) {
+      return id;
+    }
+  }
+
   if (redis) {
     try {
       // XADD with MAXLEN ~ for auto-trimming (approximate for perf)
@@ -124,7 +145,9 @@ export async function sendInboxMessage(params: SendMessageParams): Promise<strin
       console.warn(`[inbox] Redis XADD failed, using in-memory: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("sendInboxMessage");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("sendInboxMessage");
+    }
   }
 
   // In-memory fallback
@@ -170,6 +193,11 @@ export async function readInbox(
   limit = DEFAULT_READ_LIMIT,
   since?: string,
 ): Promise<InboxMessage[]> {
+  if (isPostgresConfigured()) {
+    const sinceTs = since ? Number(since.split("-")[1] ? since.split("-")[0] : since.split("-")[0]) : undefined;
+    const rows = await listInboxMessages(wallet, limit, sinceTs);
+    if (rows.length > 0) return rows;
+  }
   const redis = getRedis();
   const key = inboxKey(wallet);
 
@@ -184,7 +212,9 @@ export async function readInbox(
       console.warn(`[inbox] Redis XRANGE failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("readInbox");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("readInbox");
+    }
   }
 
   // In-memory fallback
@@ -204,6 +234,10 @@ export async function peekInbox(
   wallet: string,
   limit = 5,
 ): Promise<InboxMessage[]> {
+  if (isPostgresConfigured()) {
+    const rows = await listInboxMessages(wallet, limit);
+    if (rows.length > 0) return rows.slice(-limit);
+  }
   const redis = getRedis();
   const key = inboxKey(wallet);
 
@@ -217,7 +251,9 @@ export async function peekInbox(
       console.warn(`[inbox] Redis XREVRANGE failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("peekInbox");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("peekInbox");
+    }
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -232,6 +268,11 @@ export async function peekInbox(
  */
 export async function ackInboxMessages(wallet: string, messageIds: string[]): Promise<number> {
   if (messageIds.length === 0) return 0;
+  if (isPostgresConfigured()) {
+    const count = await ackInboxMessageIds(wallet, messageIds);
+    const redis = getRedis();
+    if (!redis) return count;
+  }
   const redis = getRedis();
   const key = inboxKey(wallet);
 
@@ -244,7 +285,9 @@ export async function ackInboxMessages(wallet: string, messageIds: string[]): Pr
       console.warn(`[inbox] Redis XDEL failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("ackInboxMessages");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("ackInboxMessages");
+    }
   }
 
   // In-memory fallback
@@ -263,6 +306,10 @@ export async function ackInboxMessages(wallet: string, messageIds: string[]): Pr
  * Get the number of messages in an agent's inbox.
  */
 export async function countInbox(wallet: string): Promise<number> {
+  if (isPostgresConfigured()) {
+    const count = await countInboxMessages(wallet);
+    if (count > 0) return count;
+  }
   const redis = getRedis();
   const key = inboxKey(wallet);
 
@@ -274,7 +321,9 @@ export async function countInbox(wallet: string): Promise<number> {
       console.warn(`[inbox] Redis XLEN failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("countInbox");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("countInbox");
+    }
   }
 
   return (memInbox.get(wallet.toLowerCase()) ?? []).length;
@@ -284,6 +333,11 @@ export async function countInbox(wallet: string): Promise<number> {
  * Count messages received since a given stream ID (for "new message" badge).
  */
 export async function countNewMessages(wallet: string, since: string): Promise<number> {
+  if (isPostgresConfigured()) {
+    const sinceTs = Number(since.split("-")[0] ?? "0");
+    const count = await countNewInboxMessages(wallet, sinceTs);
+    if (count > 0) return count;
+  }
   const redis = getRedis();
   const key = inboxKey(wallet);
 
@@ -297,7 +351,9 @@ export async function countNewMessages(wallet: string, since: string): Promise<n
       console.warn(`[inbox] Redis XRANGE count failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("countNewMessages");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("countNewMessages");
+    }
   }
 
   const list = memInbox.get(wallet.toLowerCase()) ?? [];
@@ -312,6 +368,9 @@ export async function countNewMessages(wallet: string, since: string): Promise<n
  * Fire-and-forget — never blocks the sender.
  */
 function appendToHistory(wallet: string, msg: InboxMessage): void {
+  if (isPostgresConfigured()) {
+    void appendInboxHistory(wallet, msg).catch(() => {});
+  }
   const redis = getRedis();
   const key = historyKey(wallet);
 
@@ -341,6 +400,10 @@ export async function getMessageHistory(
   limit = 100,
   offset = 0,
 ): Promise<{ messages: InboxMessage[]; total: number }> {
+  if (isPostgresConfigured()) {
+    const history = await listInboxHistory(wallet, limit, offset);
+    if (history.total > 0) return history;
+  }
   const redis = getRedis();
   const key = historyKey(wallet);
 
@@ -358,7 +421,9 @@ export async function getMessageHistory(
       console.warn(`[inbox] History read failed: ${err.message}`);
     }
   } else {
-    assertRedisAvailable("getMessageHistory");
+    if (!isPostgresConfigured()) {
+      assertRedisAvailable("getMessageHistory");
+    }
   }
 
   const list = memHistory.get(wallet.toLowerCase()) ?? [];

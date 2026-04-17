@@ -64,15 +64,13 @@ export function detectTrigger(
   // Script-specific triggers
   switch (state.currentScript.type) {
     case "combat": {
-      const offset = state.currentScript.maxLevelOffset ?? 2;
       const hasTargets = Object.values(entities).some(
         (e: any) =>
           (e.type === "mob" || e.type === "boss") &&
-          e.hp > 0 &&
-          (e.level ?? 1) <= level + offset,
+          e.hp > 0,
       );
       if (!hasTargets) {
-        return { type: "no_targets", detail: "No eligible mobs in zone — zone may be cleared" };
+        return { type: "no_targets", detail: "No living mobs in zone — zone may be cleared" };
       }
       break;
     }

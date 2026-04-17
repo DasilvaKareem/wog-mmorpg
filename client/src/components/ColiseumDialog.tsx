@@ -95,14 +95,14 @@ export function ColiseumDialog(): React.ReactElement {
     return () => clearInterval(interval);
   }, [open, selectedBattleId, fetchBattlesAndLeaderboard]);
 
-  // Auto-close dialog when a match is found (player transitions to BattleScene)
+  // Auto-close dialog when a match is found (player teleports to arena zone)
   useGameBridge("matchFound", () => {
     setOpen(false);
   });
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[85vh] max-w-5xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
+      <DialogContent className="max-h-[85dvh] max-w-5xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
         <DialogHeader className="border-b-2 border-[#29334d] bg-[#1a2340] p-4">
           <DialogTitle className="font-mono text-sm text-[#00ff88]">
             {npc ? `${npc.name} - PvP Coliseum` : "PvP Coliseum"}
@@ -148,7 +148,7 @@ export function ColiseumDialog(): React.ReactElement {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {activeBattles.map((battle) => (
+                      {activeBattles.filter((b) => b.config).map((battle) => (
                         <button
                           key={battle.battleId}
                           className="w-full border-2 border-[#29334d] bg-[#1a2340] p-3 text-left transition hover:border-[#00ff88]"
@@ -157,10 +157,10 @@ export function ColiseumDialog(): React.ReactElement {
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <Badge variant="secondary">
-                                {battle.config.format.toUpperCase()}
+                                {battle.config.format?.toUpperCase() ?? "PVP"}
                               </Badge>
                               <span className="text-[10px] font-bold text-[#f1f5ff]">
-                                {battle.config.arena.name}
+                                {battle.config.arena?.name ?? "Arena"}
                               </span>
                             </div>
                             <Badge

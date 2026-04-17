@@ -26,7 +26,19 @@ import { useToast } from "@/components/ui/toast";
 import { useGameBridge } from "@/hooks/useGameBridge";
 import { useWallet } from "@/hooks/useWallet";
 import { useWogNames } from "@/hooks/useWogNames";
+import { getAuthToken } from "@/lib/agentAuth";
+import { WalletManager } from "@/lib/walletManager";
 import type { Entity } from "@/types";
+
+interface InventoryItem {
+  tokenId: number;
+  name: string;
+  quantity: number;
+  category: string;
+  rarity: string;
+  equipped: boolean;
+  equippedCount: number;
+}
 
 interface Auction {
   auctionId: string;
@@ -76,6 +88,10 @@ export function AuctionHouseDialog(): React.ReactElement {
   const [createDuration, setCreateDuration] = React.useState("60");
   const [createBuyoutPrice, setCreateBuyoutPrice] = React.useState(0);
   const [creating, setCreating] = React.useState(false);
+
+  // Inventory for item picker
+  const [inventory, setInventory] = React.useState<InventoryItem[]>([]);
+  const [loadingInventory, setLoadingInventory] = React.useState(false);
 
   // Bid tracking
   const [bidAmounts, setBidAmounts] = React.useState<Record<string, number>>({});
@@ -128,6 +144,29 @@ export function AuctionHouseDialog(): React.ReactElement {
     }
   }, []);
 
+  // Fetch inventory when Create tab is selected
+  const loadInventory = React.useCallback(async () => {
+    if (!address) return;
+    setLoadingInventory(true);
+    try {
+      const custodial = WalletManager.getInstance().custodialAddress;
+      const itemWallet = custodial ?? address;
+      const res = await fetch(`${API_URL}/inventory/${itemWallet}`);
+      if (res.ok) {
+        const data = await res.json();
+        const listable = (data.items ?? []).filter(
+          (i: InventoryItem) => i.quantity - i.equippedCount > 0,
+        );
+        setInventory(listable);
+      }
+    } catch { /* ignore */ }
+    finally { setLoadingInventory(false); }
+  }, [address]);
+
+  React.useEffect(() => {
+    if (activeTab === "create" && open) void loadInventory();
+  }, [activeTab, open, loadInventory]);
+
   // Poll while open
   React.useEffect(() => {
     if (!open) return;
@@ -147,15 +186,19 @@ export function AuctionHouseDialog(): React.ReactElement {
     const amount = bidAmounts[auction.auctionId] ?? 0;
     if (!amount || !address) return;
 
+    const authWallet = WalletManager.getInstance().custodialAddress ?? address;
+    const token = await getAuthToken(authWallet);
+    if (!token) { notify("Not authenticated", "error"); return; }
+
     setBiddingId(auction.auctionId);
     try {
       const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/bid`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           auctionId: auction.auctionId,
-          bidder: address,
-          amount,
+          bidderAddress: authWallet,
+          bidAmount: amount,
         }),
       });
 
@@ -177,14 +220,18 @@ export function AuctionHouseDialog(): React.ReactElement {
   const handleBuyout = async (auction: Auction) => {
     if (!address || !auction.buyoutPrice) return;
 
+    const authWallet = WalletManager.getInstance().custodialAddress ?? address;
+    const token = await getAuthToken(authWallet);
+    if (!token) { notify("Not authenticated", "error"); return; }
+
     setBiddingId(auction.auctionId);
     try {
       const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/buyout`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           auctionId: auction.auctionId,
-          buyer: address,
+          buyerAddress: authWallet,
         }),
       });
 
@@ -205,11 +252,15 @@ export function AuctionHouseDialog(): React.ReactElement {
   const handleCancel = async (auctionId: string) => {
     if (!address) return;
 
+    const authWallet = WalletManager.getInstance().custodialAddress ?? address;
+    const token = await getAuthToken(authWallet);
+    if (!token) { notify("Not authenticated", "error"); return; }
+
     try {
       const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/cancel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ auctionId, seller: address }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ auctionId, sellerAddress: authWallet }),
       });
 
       if (res.ok) {
@@ -227,13 +278,17 @@ export function AuctionHouseDialog(): React.ReactElement {
   const handleCreate = async () => {
     if (!address || !createTokenId || !createStartPrice) return;
 
+    const authWallet = WalletManager.getInstance().custodialAddress ?? address;
+    const token = await getAuthToken(authWallet);
+    if (!token) { notify("Not authenticated", "error"); return; }
+
     setCreating(true);
     try {
       const res = await fetch(`${API_URL}/auctionhouse/${zoneId}/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          seller: address,
+          sellerAddress: authWallet,
           tokenId: parseInt(createTokenId),
           quantity: parseInt(createQuantity) || 1,
           startPrice: createStartPrice,
@@ -270,7 +325,7 @@ export function AuctionHouseDialog(): React.ReactElement {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-h-[80vh] max-w-4xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
+      <DialogContent className="max-h-[80dvh] max-w-4xl overflow-y-auto border-4 border-[#29334d] bg-[#11182b] p-0 text-[#f1f5ff]">
         <DialogHeader className="border-b-2 border-[#29334d] bg-[#1a2340] p-4">
           <DialogTitle className="font-mono text-sm text-[#00ff88]">
             {npcInfo ? `${npcInfo.npcName} - Auction House` : "Auction House"}
@@ -401,14 +456,38 @@ export function AuctionHouseDialog(): React.ReactElement {
             <TabsContent value="create" className="mt-4">
               <div className="mx-auto max-w-md space-y-3">
                 <div className="space-y-1">
-                  <label className="text-[8px] text-[#9aa7cc]">Token ID</label>
-                  <Input
-                    type="number"
-                    placeholder="Item token ID..."
-                    value={createTokenId}
-                    onChange={(e) => setCreateTokenId(e.target.value)}
-                    className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
-                  />
+                  <label className="text-[8px] text-[#9aa7cc]">Select Item</label>
+                  {loadingInventory ? (
+                    <div className="text-[9px] text-[#9aa7cc] animate-pulse p-2">Loading inventory...</div>
+                  ) : inventory.length === 0 ? (
+                    <div className="border-2 border-[#29334d] bg-[#0a0f1a] p-3 text-center text-[9px] text-[#565f89]">
+                      No items available to list
+                    </div>
+                  ) : (
+                    <div className="max-h-40 overflow-y-auto border-2 border-[#29334d] bg-[#0a0f1a]">
+                      {inventory.map((item) => {
+                        const available = item.quantity - item.equippedCount;
+                        const selected = createTokenId === String(item.tokenId);
+                        return (
+                          <button
+                            key={item.tokenId}
+                            className={`flex w-full items-center justify-between p-2 text-left transition ${
+                              selected
+                                ? "bg-[#29334d] text-[#00ff88]"
+                                : "text-[#f1f5ff] hover:bg-[#1a2340]"
+                            }`}
+                            onClick={() => {
+                              setCreateTokenId(String(item.tokenId));
+                              setCreateQuantity(String(Math.min(parseInt(createQuantity) || 1, available)));
+                            }}
+                          >
+                            <span className="text-[9px] font-semibold">{item.name}</span>
+                            <span className="text-[8px] text-[#9aa7cc]">x{available}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -418,6 +497,11 @@ export function AuctionHouseDialog(): React.ReactElement {
                     value={createQuantity}
                     onChange={(e) => setCreateQuantity(e.target.value)}
                     min="1"
+                    max={
+                      createTokenId
+                        ? String(inventory.find((i) => i.tokenId === parseInt(createTokenId))?.quantity ?? 1)
+                        : undefined
+                    }
                     className="h-7 border-2 border-[#29334d] bg-[#0a0f1a] text-[9px] text-[#f1f5ff]"
                   />
                 </div>

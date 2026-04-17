@@ -7,9 +7,12 @@ import {
   ProposalType,
   refreshGuildNameCache,
 } from "./guildChain.js";
-import { recordGoldSpend, unreserveGold } from "../blockchain/goldLedger.js";
+import { recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 
-const TICK_INTERVAL_MS = 30_000; // 30 seconds (was 10s — proposals have 24hr voting)
+const TICK_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.GUILD_TICK_INTERVAL_MS ?? "30000", 10) || 30_000
+); // 30 seconds default
 
 // Track known-active proposal IDs to avoid scanning all proposals each tick
 const activeProposals = new Set<number>();
@@ -111,7 +114,7 @@ async function guildTick(server: FastifyInstance) {
               const taxRate = 0.03;
               const taxAmount = proposal.targetAmount * taxRate;
               if (taxAmount > 0 && proposal.targetAddress) {
-                recordGoldSpend(proposal.targetAddress, taxAmount);
+                await recordGoldSpendAsync(proposal.targetAddress, taxAmount);
                 server.log.info(
                   `Guild withdrawal tax: ${taxAmount.toFixed(4)} gold (3%) from ${proposal.targetAmount} gold to ${proposal.targetAddress}`
                 );

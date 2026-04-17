@@ -116,6 +116,13 @@ export class WorldScene extends Phaser.Scene {
   private lastViewportSyncY = Number.NaN;
   private lastViewportSyncZoom = Number.NaN;
 
+  /** Click-to-move: tracks whether an entity sprite was clicked this frame */
+  private entityClickedThisFrame = false;
+  /** Click-to-move: waypoint ring shown at the clicked position */
+  private waypointMarker: Phaser.GameObjects.Graphics | null = null;
+  private waypointTween: Phaser.Tweens.Tween | null = null;
+  private waypointTimer: Phaser.Time.TimerEvent | null = null;
+
   // LOD overview mode — rendered when zoom drops below OVERVIEW_ENTER
   private overviewMode = false;
   private overviewGraphics: Phaser.GameObjects.Graphics | null = null;
@@ -181,6 +188,7 @@ export class WorldScene extends Phaser.Scene {
     this.floatingText = new FloatingTextLayer(this);
 
     this.entityRenderer.onClick((entity) => {
+      this.entityClickedThisFrame = true;
       // Dedicated dialogs for specialized NPC types
       if (entity.type === "guild-registrar") {
         gameBus.emit("guildRegistrarClick", entity);
@@ -188,6 +196,12 @@ export class WorldScene extends Phaser.Scene {
         gameBus.emit("auctioneerClick", entity);
       } else if (entity.type === "arena-master") {
         gameBus.emit("arenaMasterClick", entity);
+      } else if (entity.type === "dungeon-gate") {
+        gameBus.emit("dungeonGateClick", entity);
+      } else if (entity.type === "enchanting-altar") {
+        gameBus.emit("enchantingAltarClick", entity);
+      } else if (entity.type === "alchemy-lab") {
+        gameBus.emit("alchemyLabClick", entity);
       }
 
       // Inspect: open inspect panel for players, mobs, and bosses
@@ -211,7 +225,11 @@ export class WorldScene extends Phaser.Scene {
         "forge", "alchemy-lab", "enchanting-altar",
         "tanning-rack", "jewelers-bench", "campfire", "essence-forge",
       ]);
-      if (STATION_TYPES.has(entity.type)) {
+      if (
+        STATION_TYPES.has(entity.type)
+        && entity.type !== "enchanting-altar"
+        && entity.type !== "alchemy-lab"
+      ) {
         gameBus.emit("npcInfoClick", entity);
       }
 
@@ -232,6 +250,7 @@ export class WorldScene extends Phaser.Scene {
 
       // Spectate: click any entity -> snap camera, then follow
       this.followTarget = entity.id;
+      this.lockedWalletAddress = null; // release wallet lock so poll doesn't override
       this.isDragging = false;
       const px = entity.x * this.tilemapRenderer.coordScale;
       const py = entity.y * this.tilemapRenderer.coordScale;
@@ -257,6 +276,35 @@ export class WorldScene extends Phaser.Scene {
       const cam = this.cameras.main;
       cam.scrollX -= (pointer.x - pointer.prevPosition.x) / cam.zoom;
       cam.scrollY -= (pointer.y - pointer.prevPosition.y) / cam.zoom;
+    });
+
+    // Click-to-move: detect clicks on empty ground
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      // Skip if this was a drag (camera pan)
+      if (this.isDragging) return;
+      // Skip if an entity sprite was clicked (its handler already fired)
+      if (this.entityClickedThisFrame) {
+        this.entityClickedThisFrame = false;
+        return;
+      }
+      this.entityClickedThisFrame = false;
+      // Skip in overview mode
+      if (this.overviewMode) return;
+
+      this.releaseFollow();
+      gameBus.emit("clearEntityInspect", undefined as never);
+
+      const cam = this.cameras.main;
+      const worldPoint = cam.getWorldPoint(pointer.x, pointer.y);
+      const scale = this.tilemapRenderer.coordScale;
+      const gameX = worldPoint.x / scale;
+      const gameY = worldPoint.y / scale;
+      const zoneId = this.currentZoneLabel;
+      if (!zoneId) return;
+
+      // Show waypoint marker and emit event
+      this.showWaypointMarker(worldPoint.x, worldPoint.y);
+      gameBus.emit("agentGoToPosition", { x: gameX, y: gameY, zoneId });
     });
 
     this.input.on(
@@ -351,6 +399,7 @@ export class WorldScene extends Phaser.Scene {
     // Handle zone switching from ZoneSelector — scroll camera to zone center
     this.unsubscribeSwitchZone = gameBus.on("switchZone", ({ zoneId }) => {
       playSoundEffect("move_zone_transition");
+      this.clearWaypointMarker();
       this.scrollToZone(zoneId);
     });
 
@@ -536,6 +585,34 @@ export class WorldScene extends Phaser.Scene {
   private releaseFollow(): void {
     this.followTarget = null;
     this.lockedWalletAddress = null;
+  }
+
+  private showWaypointMarker(phaserX: number, phaserY: number): void {
+    this.clearWaypointMarker();
+
+    const g = this.add.graphics();
+    g.setPosition(phaserX, phaserY);
+    g.setDepth(500);
+    g.lineStyle(2, 0x54f28b, 0.8);
+    g.strokeCircle(0, 0, 12);
+    g.fillStyle(0x54f28b, 0.25);
+    g.fillCircle(0, 0, 6);
+
+    this.waypointMarker = g;
+    this.waypointTween = this.tweens.add({
+      targets: g,
+      alpha: { from: 0.9, to: 0.3 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+    });
+    this.waypointTimer = this.time.delayedCall(15_000, () => this.clearWaypointMarker());
+  }
+
+  private clearWaypointMarker(): void {
+    if (this.waypointTween) { this.waypointTween.destroy(); this.waypointTween = null; }
+    if (this.waypointTimer) { this.waypointTimer.destroy(); this.waypointTimer = null; }
+    if (this.waypointMarker) { this.waypointMarker.destroy(); this.waypointMarker = null; }
   }
 
   /**
@@ -886,6 +963,11 @@ export class WorldScene extends Phaser.Scene {
       lines.push("", "[Click] Auction house");
     } else if (e.type === "arena-master") {
       lines.push("", "[Click] PvP Coliseum");
+    } else if (e.type === "dungeon-gate") {
+      const rank = e.gateRank ? `Rank ${e.gateRank}` : "Dungeon";
+      const danger = e.isDangerGate ? " DANGER" : "";
+      lines.push("", `${rank}${danger} Gate`);
+      lines.push("[Click] Open dungeon gate");
     } else if (e.type === "mob" || e.type === "boss") {
       lines.push("");
       if (e.xpReward) lines.push(`XP reward: ${e.xpReward}`);
@@ -908,6 +990,7 @@ export class WorldScene extends Phaser.Scene {
       "guild-registrar": "[GUILD]",
       auctioneer: "[AUCTIONEER]",
       "arena-master": "[ARENA]",
+      "dungeon-gate": "[DUNGEON]",
       "ore-node": "[ORE]",
       "herb-node": "[HERB]",
     };
@@ -1224,6 +1307,9 @@ export class WorldScene extends Phaser.Scene {
       selected.add("village-square");
     }
 
+    // Always poll the arena zone so PvP matches are visible
+    selected.add("coliseum-arena");
+
     for (const zone of nearest.slice(0, 2)) {
       selected.add(zone.zoneId);
     }
@@ -1326,17 +1412,22 @@ export class WorldScene extends Phaser.Scene {
         }
       }
 
-      // Combat SFX
-      if (evt.type === "combat" && evtData) {
-        if (evtData.blocked) {
-          playSoundEffect("combat_defend");
-        } else if (evtData.dodged) {
-          playSoundEffect(isMelee ? "combat_melee_miss" : "combat_ranged_miss");
-        } else if (evtData.damage) {
-          playSoundEffect(isMelee ? "combat_melee_hit" : "combat_ranged_hit");
+      // Combat SFX — only when locked on to a participant
+      const isFollowedCombat =
+        this.followTarget != null &&
+        (evt.entityId === this.followTarget || evt.targetId === this.followTarget);
+      if (isFollowedCombat) {
+        if (evt.type === "combat" && evtData) {
+          if (evtData.blocked) {
+            playSoundEffect("combat_defend");
+          } else if (evtData.dodged) {
+            playSoundEffect(isMelee ? "combat_melee_miss" : "combat_ranged_miss");
+          } else if (evtData.damage) {
+            playSoundEffect(isMelee ? "combat_melee_hit" : "combat_ranged_hit");
+          }
+        } else if (evt.type === "ability" && evtData?.damage) {
+          playSoundEffect("combat_ranged_hit");
         }
-      } else if (evt.type === "ability" && evtData?.damage) {
-        playSoundEffect("combat_ranged_hit");
       }
 
       // Loot pickup sound
@@ -1385,6 +1476,17 @@ export class WorldScene extends Phaser.Scene {
           if (pos) {
             this.floatingText.showGatherText(evt.id + ":gather", pos, itemName, gatherType);
           }
+        }
+      }
+
+      // Profession skill-up — "SKILL UP! Mining 50"
+      if (evt.type === "profession" && evt.entityId && evtData?.newLevel) {
+        const pos = pixelPositions.get(evt.entityId);
+        if (pos) {
+          const prof = (evtData.profession as string) ?? "skill";
+          const lvl = evtData.newLevel as number;
+          const label = prof.charAt(0).toUpperCase() + prof.slice(1);
+          this.floatingText.showSkillUp(evt.id + ":skillup", pos, label, lvl);
         }
       }
     }
@@ -1464,8 +1566,11 @@ export class WorldScene extends Phaser.Scene {
         this.updateOverviewDots();
       }
 
-      // Re-apply wallet lock after each poll (entity may have just spawned)
-      if (this.lockedWalletAddress) {
+      // Re-apply wallet lock after each poll ONLY if we haven't found the entity yet
+      // (i.e. followTarget is still null — entity may not have spawned yet).
+      // Once followTarget is set the update() loop handles camera tracking,
+      // and if the user drags/pans away releaseFollow() clears both fields.
+      if (this.lockedWalletAddress && !this.followTarget) {
         this.lockToPlayerWallet(this.lockedWalletAddress);
       }
 

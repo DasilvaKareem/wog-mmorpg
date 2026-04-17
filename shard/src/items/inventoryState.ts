@@ -1,5 +1,6 @@
 import { loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
+import { listEquipmentStateForWallet } from "../db/equipmentStateStore.js";
 
 function normalizeCharacterName(name: string | undefined): string {
   return (name ?? "").trim().toLowerCase();
@@ -39,6 +40,20 @@ export async function getEquippedItemCounts(walletAddress: string): Promise<Map<
   }
 
   const savedCharacters = await loadAllCharactersForWallet(walletAddress);
+  const projectedEquipment = await listEquipmentStateForWallet(walletAddress).catch(() => []);
+  if (projectedEquipment.length > 0) {
+    const grouped = new Map<string, Record<string, unknown>>();
+    for (const record of projectedEquipment) {
+      if (!grouped.has(record.normalizedName)) grouped.set(record.normalizedName, {});
+      grouped.get(record.normalizedName)![record.slotId] = record.itemState;
+    }
+    for (const [normalizedName, equipment] of grouped) {
+      if (liveCharacterNames.has(normalizedName)) continue;
+      incrementEquippedCounts(equipment, counts);
+    }
+    return counts;
+  }
+
   for (const saved of savedCharacters) {
     if (liveCharacterNames.has(normalizeCharacterName(saved.name))) continue;
     incrementEquippedCounts(saved.equipment, counts);
@@ -60,6 +75,20 @@ export async function getEquippedInstanceIds(walletAddress: string): Promise<Set
   }
 
   const savedCharacters = await loadAllCharactersForWallet(walletAddress);
+  const projectedEquipment = await listEquipmentStateForWallet(walletAddress).catch(() => []);
+  if (projectedEquipment.length > 0) {
+    const grouped = new Map<string, Record<string, unknown>>();
+    for (const record of projectedEquipment) {
+      if (!grouped.has(record.normalizedName)) grouped.set(record.normalizedName, {});
+      grouped.get(record.normalizedName)![record.slotId] = record.itemState;
+    }
+    for (const [normalizedName, equipment] of grouped) {
+      if (liveCharacterNames.has(normalizedName)) continue;
+      collectEquippedInstanceIds(equipment, ids);
+    }
+    return ids;
+  }
+
   for (const saved of savedCharacters) {
     if (liveCharacterNames.has(normalizeCharacterName(saved.name))) continue;
     collectEquippedInstanceIds(saved.equipment, ids);

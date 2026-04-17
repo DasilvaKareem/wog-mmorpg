@@ -35,7 +35,7 @@ interface WalletContextValue {
   disconnect: () => void;
   syncAddress: (address: string) => Promise<void>;
   refreshBalance: () => Promise<void>;
-  refreshCharacterProgress: (force?: boolean) => Promise<void>;
+  refreshCharacterProgress: (force?: boolean) => Promise<WalletCharacterProgress | null>;
   refreshProfessions: () => Promise<void>;
   buyItem: (tokenId: number, quantity: number) => Promise<boolean>;
   equipItem: (tokenId: number) => Promise<boolean>;
@@ -102,13 +102,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       setCharacterProgress(null);
       setCharacters([]);
       setDeployedCharacterName(null);
-      return;
+      return null;
     }
 
     // Check cache - skip if data is fresh and not forced
     const now = Date.now();
     if (!force && (now - lastCharacterFetchRef.current) < characterCacheDuration) {
-      return;
+      return characterProgress;
     }
 
     // Only show loading spinner on first fetch — background refreshes update silently
@@ -127,25 +127,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
       if (liveCharacterGlobal) {
         const liveTokenId =
           liveCharacterGlobal.characterTokenId ??
-          ownedCharacters.find((character) => {
-            const baseName = character.name.replace(/\s+the\s+\w+$/i, "").trim();
-            const liveBaseName = liveCharacterGlobal.name.replace(/\s+the\s+\w+$/i, "").trim();
-            return character.tokenId === liveCharacterGlobal.characterTokenId || baseName === liveBaseName || character.name === liveCharacterGlobal.name;
-          })?.tokenId ??
           null;
         if (liveTokenId && selectedCharacterTokenId !== liveTokenId) {
           setSelectedCharacterTokenId(liveTokenId);
         }
         setCharacterProgress(liveCharacterGlobal);
         lastCharacterFetchRef.current = now;
-        return;
+        return liveCharacterGlobal;
       }
 
       // If user has manually selected a character, show that one
       if (selectedCharacterTokenId) {
         const selected = ownedCharacters.find((c) => c.tokenId === selectedCharacterTokenId);
         if (selected) {
-          setCharacterProgress({
+          const nextProgress = {
             name: selected.name,
             level: selected.properties.level,
             xp: selected.properties.xp,
@@ -153,15 +148,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }): Rea
             maxHp: selected.properties.stats.hp,
             characterTokenId: selected.characterTokenId ?? selected.tokenId,
             source: "nft",
-          });
+          } satisfies WalletCharacterProgress;
+          setCharacterProgress(nextProgress);
           lastCharacterFetchRef.current = now;
-          return;
+          return nextProgress;
         }
       }
 
       // Default: pick highest-level character
-      setCharacterProgress(pickPrimaryCharacterProgress(ownedCharacters));
+      const nextProgress = pickPrimaryCharacterProgress(ownedCharacters);
+      setCharacterProgress(nextProgress);
       lastCharacterFetchRef.current = now;
+      return nextProgress;
     } finally {
       setCharacterLoading(false);
     }

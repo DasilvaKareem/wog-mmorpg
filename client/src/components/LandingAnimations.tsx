@@ -59,9 +59,9 @@ function PixelCloud({ y, scale, dur, delay }: { y: number; scale: number; dur: n
   );
 }
 
-export function DriftingClouds(): React.ReactElement | null {
+export function DriftingClouds({ disabled = false }: { disabled?: boolean }): React.ReactElement | null {
   const reduced = useReducedMotion();
-  if (reduced) return null;
+  if (disabled || reduced) return null;
   return (
     <svg
       className="absolute inset-0 h-full w-full pointer-events-none"
@@ -109,9 +109,9 @@ function Sparkle({ x, y, color, dur, delay }: { x: number; y: number; color: str
   );
 }
 
-export function LogoSparkles(): React.ReactElement | null {
+export function LogoSparkles({ disabled = false }: { disabled?: boolean }): React.ReactElement | null {
   const reduced = useReducedMotion();
-  if (reduced) return null;
+  if (disabled || reduced) return null;
   return (
     <svg
       className="absolute inset-0 h-full w-full pointer-events-none"
@@ -134,9 +134,9 @@ export function LogoSparkles(): React.ReactElement | null {
 
 /* ── 3. RADAR PING (Live World stats) ── */
 
-export function RadarPing({ color }: { color: string }): React.ReactElement | null {
+export function RadarPing({ color, disabled = false }: { color: string; disabled?: boolean }): React.ReactElement | null {
   const reduced = useReducedMotion();
-  if (reduced) return null;
+  if (disabled || reduced) return null;
   return (
     <svg
       className="absolute inset-0 h-full w-full pointer-events-none"
@@ -276,9 +276,9 @@ function EssenceParticle({ x, color, dur, delay }: { x: number; color: string; d
   );
 }
 
-export function EssenceParticles(): React.ReactElement | null {
+export function EssenceParticles({ disabled = false }: { disabled?: boolean }): React.ReactElement | null {
   const reduced = useReducedMotion();
-  if (reduced) return null;
+  if (disabled || reduced) return null;
   return (
     <svg
       className="absolute inset-0 h-full w-full pointer-events-none"
@@ -302,8 +302,9 @@ export function EssenceParticles(): React.ReactElement | null {
 
 /* ── 6. CTA DRAW-IN BORDER ── */
 
-export function CtaBorderDraw(): React.ReactElement {
+export function CtaBorderDraw({ disabled = false }: { disabled?: boolean }): React.ReactElement {
   const reduced = useReducedMotion();
+  const animate = !disabled && !reduced;
   return (
     <div className="mb-6 w-full">
       <svg
@@ -323,9 +324,9 @@ export function CtaBorderDraw(): React.ReactElement {
             width="7"
             height="4"
             fill="#ffcc00"
-            opacity={reduced ? "0.8" : "0"}
+            opacity={animate ? "0" : "0.8"}
           >
-            {!reduced && (
+            {animate && (
               <animate
                 attributeName="opacity"
                 from="0"
@@ -338,7 +339,7 @@ export function CtaBorderDraw(): React.ReactElement {
           </rect>
         ))}
         {/* After draw-in: traveling glow */}
-        {!reduced && (
+        {animate && (
           <rect x="0" y="0" width="50" height="8" fill="#ffffff" opacity="0">
             <animate
               attributeName="opacity"

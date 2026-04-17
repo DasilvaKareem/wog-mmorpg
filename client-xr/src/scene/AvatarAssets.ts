@@ -7,6 +7,35 @@ const SKIN_COLORS: Record<string, number> = {
   tan: 0xc49560, olive: 0xb08850, brown: 0x8b5e3c, dark: 0x6b4226,
 };
 
+// Hair color palette — independent of style. Derived from entity name hash.
+const HAIR_COLOR_PALETTE = [
+  0x1a1008,  // near-black
+  0x2a1a0e,  // very dark brown
+  0x4a3728,  // dark brown
+  0x6b4c30,  // medium brown
+  0x8b6b42,  // light brown
+  0xa88550,  // sandy brown
+  0xc4a46e,  // dirty blonde
+  0xd4b87a,  // golden blonde
+  0xe8d4a0,  // platinum blonde
+  0x7a3520,  // auburn
+  0xaa4422,  // copper red
+  0xcc2222,  // bright red
+  0x1a1a2e,  // blue-black
+  0x3a2818,  // warm black
+  0xf0e0c0,  // silver/white
+];
+
+/** Deterministic hair color from entity name — same name always gives same color */
+function hashHairColor(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+  }
+  return HAIR_COLOR_PALETTE[Math.abs(h) % HAIR_COLOR_PALETTE.length];
+}
+
+// Legacy fallback only
 const HAIR_COLORS: Record<string, number> = {
   short: 0x4a3728, long: 0xc4a46e, mohawk: 0xcc2222,
   ponytail: 0x1a1a2e, braided: 0x7a5530, bald: 0x000000,
@@ -94,13 +123,15 @@ export class AvatarAssets {
     const isDwarf = race === "dwarf";
     const classBody = CLASS_BODY[classId] ?? CLASS_BODY.warrior;
 
-    const raceScale = isDwarf ? 0.78 : isElf ? 1.12 : 1.0;
-    const raceWidthX = isDwarf ? 1.25 : isElf ? 0.9 : 1.0;
-    const raceWidthZ = isDwarf ? 1.15 : isElf ? 0.9 : 1.0;
+    const isBeastkin = race === "beastkin";
+    const raceScale = isDwarf ? 0.78 : isElf ? 1.12 : isBeastkin ? 1.05 : 1.0;
+    const raceWidthX = isDwarf ? 1.25 : isElf ? 0.9 : isBeastkin ? 1.08 : 1.0;
+    const raceWidthZ = isDwarf ? 1.15 : isElf ? 0.9 : isBeastkin ? 1.05 : 1.0;
+    // Female chest is narrower (hourglass top), male is broader (V-shape top)
     const bodyScale = {
-      x: classBody.sx * (isFemale ? 0.88 : 1.0) * raceWidthX,
-      y: classBody.sy * (isFemale ? 0.95 : 1.0) * raceScale,
-      z: classBody.sz * (isFemale ? 0.92 : 1.0) * raceWidthZ,
+      x: classBody.sx * (isFemale ? 0.82 : 1.0) * raceWidthX,
+      y: classBody.sy * (isFemale ? 0.92 : 1.0) * raceScale,
+      z: classBody.sz * (isFemale ? 0.88 : 1.0) * raceWidthZ,
     };
 
     const avatar: AvatarDefinition = {
@@ -111,12 +142,13 @@ export class AvatarAssets {
         raceWidthX,
         raceWidthZ,
         bodyScale,
-        armScale: (isFemale ? 0.9 : 1.0) * raceScale,
-        headScale: isFemale ? 0.95 : isDwarf ? 1.05 : 1.0,
+        armScale: (isFemale ? 0.88 : 1.0) * raceScale,
+        // Female head slightly larger relative to body (reads as more expressive)
+        headScale: isFemale ? 1.0 : isDwarf ? 1.05 : 1.0,
       },
       colors: {
         skinHex: SKIN_COLORS[ent.skinColor ?? "medium"] ?? 0xd4a574,
-        hairHex: HAIR_COLORS[hairStyle] ?? 0x4a3728,
+        hairHex: hashHairColor(ent.name ?? hairStyle), // unique per character name
         eyeHex: EYE_COLORS[ent.eyeColor ?? "brown"] ?? 0x6b3a1f,
         bodyHex: classBody.color,
       },
@@ -163,7 +195,7 @@ export class AvatarAssets {
       },
       colors: {
         skinHex: ent.skinColor ? (SKIN_COLORS[ent.skinColor] ?? color) : color,
-        hairHex: HAIR_COLORS[hairStyle] ?? 0x4a3728,
+        hairHex: hashHairColor(ent.name ?? hairStyle),
         eyeHex: ent.eyeColor ? (EYE_COLORS[ent.eyeColor] ?? 0x333333) : 0x333333,
         bodyHex: color,
       },

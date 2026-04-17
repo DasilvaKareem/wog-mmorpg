@@ -2,10 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { burnItem, getGoldBalance, getItemBalance, mintItem } from "../blockchain/blockchain.js";
 import {
   formatGold,
-  getAvailableGold,
-  recordGoldSpend,
-  reserveGold,
-  unreserveGold,
+  getAvailableGoldAsync,
+  recordGoldSpendAsync,
+  reserveGoldAsync,
+  unreserveGoldAsync,
 } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { assignItemInstanceOwner, getAuctionEscrowInstance, getWalletInstanceByToken } from "../items/itemRng.js";
@@ -234,7 +234,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       // Ensure seller can pay the listing fee.
       const onChainGold = parseFloat(await getGoldBalance(sellerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(sellerAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(sellerAddress, safeOnChainGold);
       if (availableGold < AUCTION_LISTING_FEE) {
         reply.code(400);
         return {
@@ -272,7 +272,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         escrowedInstanceId = escrowed.instanceId;
       }
 
-      recordGoldSpend(sellerAddress, AUCTION_LISTING_FEE);
+      await recordGoldSpendAsync(sellerAddress, AUCTION_LISTING_FEE);
       server.log.info(
         `Auction ${auctionId} created in ${zoneId} by ${sellerAddress}: tokenId=${tokenId} qty=${quantity} escrowTx=${escrowBurnTx}${escrowedInstanceId ? ` instance=${escrowedInstanceId}` : ""}`
       );
@@ -392,7 +392,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       // Check bidder has enough gold
       const onChainGold = parseFloat(await getGoldBalance(bidderAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(bidderAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(bidderAddress, safeOnChainGold);
 
       if (availableGold < bidAmount) {
         reply.code(400);
@@ -404,7 +404,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       }
 
       // Reserve bidder's gold
-      reserveGold(bidderAddress, bidAmount);
+      await reserveGoldAsync(bidderAddress, bidAmount);
 
       // Place bid on-chain
       const bidderAgentId = resolveZoneAgentId(zoneId, bidderAddress);
@@ -417,7 +417,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
 
       // Unreserve previous bidder's gold (if any)
       if (previousBidder !== "0x0000000000000000000000000000000000000000" && previousBid > 0) {
-        unreserveGold(previousBidder, previousBid);
+        await unreserveGoldAsync(previousBidder, previousBid);
         server.log.info(
           `Auction ${auctionId}: Unreserved ${previousBid} gold for previous bidder ${previousBidder}`
         );
@@ -431,13 +431,13 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         ok: true,
         auctionId,
         bidAmount,
-        remainingGold: formatGold(getAvailableGold(bidderAddress, safeOnChainGold)),
+        remainingGold: formatGold(await getAvailableGoldAsync(bidderAddress, safeOnChainGold)),
         txHash,
       };
     } catch (err) {
       // Unreserve gold if bid failed
       try {
-        unreserveGold(bidderAddress, bidAmount);
+        await unreserveGoldAsync(bidderAddress, bidAmount);
       } catch {}
 
       server.log.error(err, `Failed to place bid on auction ${auctionId}`);
@@ -492,7 +492,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       // Check buyer has enough gold
       const onChainGold = parseFloat(await getGoldBalance(buyerAddress));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(buyerAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(buyerAddress, safeOnChainGold);
 
       if (availableGold < auction.buyoutPrice) {
         reply.code(400);
@@ -505,7 +505,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
 
       // Unreserve previous bidder if any
       if (auction.highBidder !== "0x0000000000000000000000000000000000000000" && auction.highBid > 0) {
-        unreserveGold(auction.highBidder, auction.highBid);
+        await unreserveGoldAsync(auction.highBidder, auction.highBid);
       }
 
       // Execute buyout on-chain
@@ -523,7 +523,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       }
 
       // Record gold spend
-      recordGoldSpend(buyerAddress, auction.buyoutPrice);
+      await recordGoldSpendAsync(buyerAddress, auction.buyoutPrice);
 
       server.log.info(
         `Auction ${auctionId} bought out by ${buyerAddress} for ${auction.buyoutPrice} gold`
@@ -533,7 +533,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
         ok: true,
         auctionId,
         buyoutPrice: auction.buyoutPrice,
-        remainingGold: formatGold(getAvailableGold(buyerAddress, safeOnChainGold)),
+        remainingGold: formatGold(await getAvailableGoldAsync(buyerAddress, safeOnChainGold)),
         itemTx: mintTx,
         txHash,
       };
@@ -590,7 +590,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       // Charge cancellation fee (25 copper)
       const onChainGold = parseFloat(await getGoldBalance(authenticatedWallet));
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(authenticatedWallet, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(authenticatedWallet, safeOnChainGold);
       if (availableGold < AUCTION_CANCEL_FEE) {
         reply.code(400);
         return {
@@ -611,7 +611,7 @@ export function registerAuctionHouseRoutes(server: FastifyInstance) {
       if (escrowedInstance) {
         await assignItemInstanceOwner(escrowedInstance.instanceId, authenticatedWallet);
       }
-      recordGoldSpend(authenticatedWallet, AUCTION_CANCEL_FEE);
+      await recordGoldSpendAsync(authenticatedWallet, AUCTION_CANCEL_FEE);
 
       server.log.info(`Auction ${auctionId} cancelled and escrow returned via ${restoreTx}`);
 

@@ -43,11 +43,11 @@ export interface RigParams {
 
 const DEFAULT_RIG: Required<RigParams> = {
   scale: 1,
-  shoulderWidth: 0.30,
-  hipWidth: 0.10,
+  shoulderWidth: 0.34,
+  hipWidth: 0.16,
   torsoHeight: 0.80,
   legLength: 0.45,
-  armLength: 0.42,
+  armLength: 0.52,
   isFemale: false,
 };
 
@@ -90,11 +90,11 @@ export class CharacterRig {
     const p = { ...DEFAULT_RIG, ...params };
     const s = p.scale;
     const fem = p.isFemale;
-    const sw = p.shoulderWidth * s * (fem ? 0.88 : 1);
-    const hw = p.hipWidth * s * (fem ? 1.2 : 1);
-    const th = p.torsoHeight * s * (fem ? 0.95 : 1);
-    const ll = p.legLength * s * (fem ? 1.05 : 1);
-    const al = p.armLength * s * (fem ? 0.9 : 1);
+    const sw = p.shoulderWidth * s * (fem ? 0.82 : 1);   // noticeably narrower shoulders
+    const hw = p.hipWidth * s * (fem ? 1.35 : 1);         // clearly wider hips
+    const th = p.torsoHeight * s * (fem ? 0.92 : 1);      // shorter torso
+    const ll = p.legLength * s * (fem ? 1.08 : 1);        // proportionally longer legs
+    const al = p.armLength * s * (fem ? 0.92 : 1);        // slightly shorter arms
 
     // Create all bones
     const root = this.makeBone("Root");
@@ -137,12 +137,12 @@ export class CharacterRig {
 
     // Set rest positions (local offsets)
     // Root is at ground level, hip is at the hip joint height
-    root.position.set(0, 0, 0);
+    root.position.set(0, 0.05, 0);          // lift slightly so feet sit above ground
     hip.position.set(0, ll + 0.15 * s, 0);           // hip height = leg length + small offset
     spine.position.set(0, 0.15 * s, 0);               // spine starts just above hip
     chest.position.set(0, th * 0.5, 0);               // chest is partway up the torso
     neck.position.set(0, th * 0.35, 0);               // neck at top of chest
-    head.position.set(0, 0.35 * s, 0);                // head on top of neck (raised to clear body)
+    head.position.set(0, 0.22 * s, 0);                // head sits on neck
 
     lShoulder.position.set(-sw, th * 0.3, 0);         // left shoulder offset
     rShoulder.position.set(sw, th * 0.3, 0);          // right shoulder offset

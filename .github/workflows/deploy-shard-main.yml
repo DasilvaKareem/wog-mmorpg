@@ -1,0 +1,72 @@
+name: Deploy Shard (Main)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-shard-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.WOG_VM_HOST }}
+          username: ${{ secrets.WOG_VM_USER }}
+          key: ${{ secrets.WOG_VM_SSH_KEY }}
+          port: ${{ secrets.WOG_VM_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            APP_DIR="/opt/wog-mmorpg"
+            SHARD_DIR="$APP_DIR/shard"
+
+            echo "[deploy] Updating repo to origin/main..."
+            cd "$APP_DIR"
+            git fetch origin
+            git reset --hard origin/main
+            git clean -fd
+
+            echo "[deploy] Installing shard dependencies..."
+            cd "$SHARD_DIR"
+            npm ci --no-audit --no-fund
+
+            echo "[deploy] Building shard..."
+            npm run build
+
+            echo "[deploy] Forcing workers OFF in runtime env..."
+            cd "$APP_DIR"
+            if grep -q '^RUN_BACKGROUND_WORKERS=' .env; then
+              sed -i 's/^RUN_BACKGROUND_WORKERS=.*/RUN_BACKGROUND_WORKERS=false/' .env
+            else
+              printf '\nRUN_BACKGROUND_WORKERS=false\n' >> .env
+            fi
+
+            echo "[deploy] Restarting PM2 app..."
+            pm2 delete wog-mmorpg >/dev/null 2>&1 || true
+            pm2 delete wog-shard >/dev/null 2>&1 || true
+            RUN_BACKGROUND_WORKERS=false pm2 start "$SHARD_DIR/dist/server.js" --name wog-mmorpg --cwd "$SHARD_DIR"
+
+            echo "[deploy] Health check..."
+            for i in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:3000/health >/dev/null; then
+                echo "[deploy] shard healthy"
+                pm2 env wog-mmorpg | grep RUN_BACKGROUND_WORKERS || true
+                pm2 status
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "[deploy] shard health check failed"
+            pm2 logs wog-mmorpg --lines 120 --nostream || true
+            exit 1

@@ -15,7 +15,7 @@ import {
   type Entity,
 } from "./zoneRuntime.js";
 import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
-import { getItemBalance, burnItem, mintItem } from "../blockchain/blockchain.js";
+import { getItemBalance, enqueueItemBurn, enqueueItemMint } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
@@ -129,6 +129,16 @@ const MOB_NAMES: Record<GateRank, { regular: string[]; boss: string }> = {
 
 const DUNGEON_SIZE = 400;
 const GATE_PROXIMITY = 50; // Must be within 50 units of gate
+
+async function controlsWallet(
+  authenticatedWallet: string,
+  targetWallet: string | undefined | null
+): Promise<boolean> {
+  if (!targetWallet) return false;
+  if (authenticatedWallet.toLowerCase() === targetWallet.toLowerCase()) return true;
+  const custodialWallet = await getAgentCustodialWallet(authenticatedWallet);
+  return custodialWallet?.toLowerCase() === targetWallet.toLowerCase();
+}
 
 // --- In-memory dungeon instances ---
 
@@ -348,7 +358,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -375,6 +385,11 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       return { error: "Player entity not found" };
     }
 
+    if (!(await controlsWallet(authenticatedWallet, entity.walletAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to control this player" };
+    }
+
     // Find enchanting altar
     const altar = zone.entities.get(altarId);
     if (!altar || altar.type !== "enchanting-altar") {
@@ -395,7 +410,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Burn reagent
     try {
-      await burnItem(walletAddress, BigInt(reagentTokenId), 1n);
+      await enqueueItemBurn(walletAddress, BigInt(reagentTokenId), 1n);
     } catch (err) {
       server.log.error(err, `[dungeon] Failed to burn reagent ${reagentTokenId}`);
       reply.code(500);
@@ -404,7 +419,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Mint key
     try {
-      const tx = await mintItem(walletAddress, BigInt(keyTokenId), 1n);
+      const tx = await enqueueItemMint(walletAddress, BigInt(keyTokenId), 1n);
       const keyItem = getItemByTokenId(BigInt(keyTokenId));
       const reagentItem = getItemByTokenId(BigInt(reagentTokenId));
 
@@ -453,7 +468,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }
@@ -489,6 +504,11 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
     if (!player || player.type !== "player") {
       reply.code(404);
       return { error: "Player entity not found" };
+    }
+
+    if (!(await controlsWallet(authenticatedWallet, player.walletAddress))) {
+      reply.code(403);
+      return { error: "Not authorized to control this player" };
     }
 
     // Player must be in a party
@@ -549,7 +569,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Burn key
     try {
-      await burnItem(walletAddress, keyTokenId, 1n);
+      await enqueueItemBurn(walletAddress, keyTokenId, 1n);
     } catch (err) {
       server.log.error(err, `[dungeon] Failed to burn key ${keyTokenId}`);
       reply.code(500);
@@ -707,7 +727,7 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
       return { error: "Invalid wallet address" };
     }
 
-    if (walletAddress.toLowerCase() !== authenticatedWallet.toLowerCase()) {
+    if (!(await controlsWallet(authenticatedWallet, walletAddress))) {
       reply.code(403);
       return { error: "Not authorized to use this wallet" };
     }

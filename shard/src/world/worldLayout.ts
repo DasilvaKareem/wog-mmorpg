@@ -80,6 +80,25 @@ export const ZONE_LEVEL_REQUIREMENTS: Record<string, number> = {
   "starfall-ranch": 1,
 };
 
+/** Farmland zones — used for farming/crops only, not questing or combat.
+ *  Agents should not roam into these unless they have a farming focus. */
+export const FARM_ZONES: ReadonlySet<string> = new Set([
+  "sunflower-fields", "harvest-hollow", "willowfen-pastures",
+  "bramblewood-homestead", "goldenreach-grange", "dewveil-orchard",
+  "thornwall-ranch", "moonpetal-gardens", "ironroot-farmstead",
+  "crystalbloom-terrace", "copperfield-meadow", "silkwood-grove",
+  "emberglow-estate", "starfall-ranch",
+]);
+
+/** Zones that have quest-giver NPCs with actual quest content.
+ *  Used by agent routing to avoid sending agents to empty zones. */
+export const QUEST_ZONES: ReadonlySet<string> = new Set([
+  "village-square", "wild-meadow", "dark-forest",
+  "auroral-plains", "emerald-woods", "viridian-range",
+  "moondancer-glade", "felsrock-citadel", "lake-lumina",
+  "azurshard-chasm", "sunflower-fields",
+]);
+
 // ── Connection graph (loaded from world.json) ───────────────────────
 
 interface WorldConnection {
@@ -217,10 +236,18 @@ function loadLayout(): WorldLayout {
     maxZ = Math.max(maxZ, offset.z + height);
   }
 
+  // Inject the PvP coliseum-arena zone into the layout
+  zones["coliseum-arena"] = {
+    id: "coliseum-arena",
+    offset: { x: 5000, z: 5000 },
+    size: { width: 600, height: 600 },
+    levelReq: 1,
+  };
+
   cachedLayout = {
     zones,
     tileSize: 10,
-    totalSize: { width: maxX - minX, height: maxZ - minZ },
+    totalSize: { width: Math.max(maxX - minX, 5600), height: Math.max(maxZ - minZ, 5600) },
   };
 
   console.log(

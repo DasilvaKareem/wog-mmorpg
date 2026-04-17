@@ -84,7 +84,12 @@ export function ColiseumViewer({ battleId, onBack }: ColiseumViewerProps): React
       const response = await fetch(`${API_URL}/api/pvp/battle/${battleId}`);
       if (!response.ok) throw new Error("Battle not found");
       const data = await response.json();
-      setBattle(data.battle);
+      const b = data.battle;
+      // Inject poolId from top-level response into battle config for PredictionMarketPanel
+      if (data.poolId && b?.config) {
+        b.config.marketPoolId = data.poolId;
+      }
+      setBattle(b);
       setLoading(false);
 
       if (data.battle.status === "completed" || data.battle.status === "cancelled") {

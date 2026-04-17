@@ -1,0 +1,169 @@
+{
+  "zoneId": "moonpetal-gardens",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Selene",
+      "x": 100,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Moonlit Merchant Faye",
+      "x": 230,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Garden Keeper Lunara",
+      "x": 360,
+      "y": 80,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Nightbloom Tender Thalia",
+      "x": 480,
+      "y": 80,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 550,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 600,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Moonpetal Sprite",
+      "x": 120,
+      "y": 220,
+      "hp": 340,
+      "level": 15,
+      "xpReward": 85
+    },
+    {
+      "type": "mob",
+      "name": "Lunar Moth",
+      "x": 270,
+      "y": 240,
+      "hp": 390,
+      "level": 17,
+      "xpReward": 98
+    },
+    {
+      "type": "mob",
+      "name": "Nightbloom Vine",
+      "x": 400,
+      "y": 260,
+      "hp": 410,
+      "level": 18,
+      "xpReward": 103
+    },
+    {
+      "type": "mob",
+      "name": "Glowing Slug",
+      "x": 530,
+      "y": 230,
+      "hp": 360,
+      "level": 16,
+      "xpReward": 90
+    },
+    {
+      "type": "mob",
+      "name": "Moonlit Fox",
+      "x": 140,
+      "y": 380,
+      "hp": 385,
+      "level": 17,
+      "xpReward": 96
+    },
+    {
+      "type": "mob",
+      "name": "Garden Phantom",
+      "x": 310,
+      "y": 400,
+      "hp": 450,
+      "level": 20,
+      "xpReward": 113
+    },
+    {
+      "type": "mob",
+      "name": "Petal Golem",
+      "x": 460,
+      "y": 390,
+      "hp": 430,
+      "level": 19,
+      "xpReward": 108
+    },
+    {
+      "type": "mob",
+      "name": "Luminous Beetle",
+      "x": 570,
+      "y": 370,
+      "hp": 355,
+      "level": 16,
+      "xpReward": 89
+    },
+    {
+      "type": "mob",
+      "name": "Silver Toad",
+      "x": 200,
+      "y": 520,
+      "hp": 400,
+      "level": 18,
+      "xpReward": 100
+    },
+    {
+      "type": "mob",
+      "name": "Enchanted Scarecrow",
+      "x": 420,
+      "y": 540,
+      "hp": 500,
+      "level": 22,
+      "xpReward": 125
+    }
+  ]
+}

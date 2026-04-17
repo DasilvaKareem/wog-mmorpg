@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "copper-cairn",
+      "name": "Copper Cairn",
+      "type": "landmark",
+      "position": { "x": 260, "z": 290 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "copper-trading-post",
+      "name": "Copper Trading Post",
+      "type": "structure",
+      "position": { "x": 370, "z": 200 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    },
+    {
+      "id": "miners-bunkhouse",
+      "name": "Miner's Bunkhouse",
+      "type": "structure",
+      "position": { "x": 180, "z": 400 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest", "rest"], "npcs": ["foreman"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "copper-track",
+      "name": "Copper Track",
+      "nodes": ["copper-trading-post", "copper-cairn", "miners-bunkhouse"]
+    }
+  ]
 }

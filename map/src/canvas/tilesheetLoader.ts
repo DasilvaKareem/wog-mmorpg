@@ -17,7 +17,7 @@ export function loadTilesheet(): Promise<HTMLImageElement> {
       resolve(img);
     };
     img.onerror = () => reject(new Error("Failed to load Overworld.png"));
-    img.src = "/assets/Overworld.png";
+    img.src = `${import.meta.env.BASE_URL}assets/Overworld.png`;
   });
 
   return loadPromise;

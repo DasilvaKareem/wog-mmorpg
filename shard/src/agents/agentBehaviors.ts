@@ -5,14 +5,13 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getAllZones, getOrCreateZone } from "../world/zoneRuntime.js";
-import { getPlayerPartyId } from "../social/partySystem.js";
+import { getEntity as getWorldEntity, getOrCreateZone, pickPartyFocusTarget } from "../world/zoneRuntime.js";
+import { getPartyLeaderId, getPartyMembers, getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
-import { sendInboxMessage } from "./agentInbox.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { isQuestNpc } from "../social/questSystem.js";
@@ -29,10 +28,12 @@ import {
   type AgentContext,
   type LiquidationInventoryItem,
 } from "./agentUtils.js";
+import { type BotScript } from "../types/botScriptTypes.js";
 
 const PROFESSION_HUB_ZONE = "village-square";
 const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
 const SICKLE_TOKENS: Record<number, number> = { 41: 1, 42: 2, 43: 3, 44: 4 };
+const HOE_TOKENS: Record<number, number> = { 220: 1, 221: 2, 222: 3, 223: 4 };
 const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
 const AUCTION_LISTING_FEE_COPPER = 50;
 const AUCTION_RELIST_COOLDOWN_MS = 10 * 60_000;
@@ -104,7 +105,68 @@ function getTechniqueCooldownExpiry(entity: any, techniqueId: string): number | 
   return undefined;
 }
 
-function pickCombatTechnique(entity: any, target: any, zoneTick: number): TechniqueDefinition | null {
+function getPartySupportMembers(entity: any, entities: Record<string, any>): any[] {
+  return getPartyMembers(entity.id)
+    .map((memberId) => entities[memberId] ?? getWorldEntity(memberId))
+    .filter((member): member is any => !!member && member.type === "player" && member.hp > 0);
+}
+
+function hasBuffFromCaster(entity: any, target: any): boolean {
+  return !!target?.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
+}
+
+function getLeaderFirstBuffTarget(entity: any, entities: Record<string, any>): any | null {
+  const members = getPartySupportMembers(entity, entities);
+  if (members.length <= 1) return null;
+
+  const leaderId = getPartyLeaderId(entity.id);
+  const leader = leaderId ? members.find((member) => member.id === leaderId) : undefined;
+  if (leader && leader.id !== entity.id && !hasBuffFromCaster(entity, leader)) return leader;
+
+  return members.find((member) => member.id !== entity.id && !hasBuffFromCaster(entity, member)) ?? null;
+}
+
+function getLowestHpAlly(entity: any, entities: Record<string, any>): any | null {
+  const members = getPartySupportMembers(entity, entities).filter((member) => member.id !== entity.id);
+  if (members.length === 0) return null;
+
+  const lowest = members.sort((a, b) => (a.hp / Math.max(1, a.maxHp)) - (b.hp / Math.max(1, b.maxHp)))[0];
+  if (!lowest) return null;
+  return (lowest.hp / Math.max(1, lowest.maxHp)) < 0.9 ? lowest : null;
+}
+
+function logPartyCoordination(
+  ctx: AgentContext,
+  me: any,
+  kind: string,
+  message: string,
+  data?: Record<string, unknown>,
+  cooldownMs = 3_000,
+): void {
+  ctx.recordPartyCoordination(kind);
+  const cooldownKey = `party-log:${kind}:${data?.targetId ?? data?.leaderId ?? ""}`;
+  if (ctx.isInteractionOnCooldown(cooldownKey)) return;
+  ctx.setInteractionCooldown(cooldownKey, cooldownMs);
+
+  logZoneEvent({
+    zoneId: ctx.currentRegion,
+    type: "party",
+    tick: 0,
+    message,
+    entityId: me.id,
+    entityName: me.name,
+    targetId: typeof data?.targetId === "string" ? data.targetId : undefined,
+    targetName: typeof data?.targetName === "string" ? data.targetName : undefined,
+    data: {
+      kind,
+      leaderId: data?.leaderId,
+      leaderName: data?.leaderName,
+      ...data,
+    },
+  });
+}
+
+function pickCombatTechnique(entity: any, target: any, zoneTick: number, entities: Record<string, any>): TechniqueDefinition | null {
   const learned = entity.learnedTechniques ?? [];
   if (learned.length === 0) return null;
 
@@ -132,6 +194,21 @@ function pickCombatTechnique(entity: any, target: any, zoneTick: number): Techni
     if (heal) return heal;
   }
 
+  const lowestHpAlly = getLowestHpAlly(entity, entities);
+  if (lowestHpAlly) {
+    const partyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "party");
+    if (partyHeal) return partyHeal;
+
+    const allyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "ally");
+    if (allyHeal) return allyHeal;
+  }
+
+  const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
+  if (leaderBuffTarget) {
+    const allyBuff = usable.find((technique) => technique.type === "buff" && technique.targetType === "ally");
+    if (allyBuff) return allyBuff;
+  }
+
   const hasDebuff = target.activeEffects?.some(
     (effect: any) => (effect.type === "debuff" || effect.type === "dot") && effect.casterId === entity.id,
   );
@@ -148,10 +225,56 @@ function pickCombatTechnique(entity: any, target: any, zoneTick: number): Techni
   return null;
 }
 
-function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition): string {
-  if (technique.targetType === "self" || technique.targetType === "ally") return entity.id;
+function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition, entities: Record<string, any>): string {
+  if (technique.targetType === "self" || technique.targetType === "party") return entity.id;
+  if (technique.targetType === "ally") {
+    const lowHpAlly = getLowestHpAlly(entity, entities);
+    if (technique.type === "healing" && lowHpAlly) return lowHpAlly.id;
+
+    const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
+    if (leaderBuffTarget) return leaderBuffTarget.id;
+
+    return entity.id;
+  }
   if (technique.type === "buff" || technique.type === "healing") return entity.id;
   return target.id;
+}
+
+function pickPartyCombatTarget(me: any, currentRegion: string): any | null {
+  const partyId = getPlayerPartyId(me.id);
+  if (!partyId) return null;
+
+  const partyMemberIds = getPartyMembers(me.id);
+  if (partyMemberIds.length <= 1) return null;
+
+  const zone = getOrCreateZone(currentRegion);
+  return pickPartyFocusTarget(
+    me,
+    zone,
+    Number.POSITIVE_INFINITY,
+    partyMemberIds,
+    partyId,
+    getPartyLeaderId(me.id),
+  );
+}
+
+function engagePartyCombatTarget(
+  ctx: AgentContext,
+  me: any,
+  entities: Record<string, any>,
+  partyTarget: any,
+  partyLeaderId?: string,
+): ActionResult {
+  const leader = partyLeaderId ? (entities[partyLeaderId] ?? getWorldEntity(partyLeaderId)) : null;
+  const leaderTargetId = leader?.order?.targetId;
+  const kind = leaderTargetId === partyTarget.id ? "assist-leader-target" : "assist-party-tag";
+  logPartyCoordination(ctx, me, kind, `${me.name ?? "Party member"} is assisting on ${partyTarget.name ?? "target"}`, {
+    targetId: partyTarget.id,
+    targetName: partyTarget.name,
+    leaderId: partyLeaderId,
+    leaderName: leader?.name,
+  });
+  return engageCombatTarget(ctx, me, partyTarget, entities);
 }
 
 function getCombatOrderTarget(me: any): any | null {
@@ -201,17 +324,26 @@ function isBossTarget(target: any): boolean {
   return target?.type === "boss";
 }
 
+const WEAK_MOB_LEVEL_GAP = 7;
+
 function isCombatTargetAllowed(
   me: any,
   target: any,
   strategy: AgentStrategy,
   questPriority = false,
+  ignoreWeakMobs = false,
 ): boolean {
   const myLevel = Number(me?.level ?? 1);
   const targetLevel = Number(target?.level ?? 1);
   const hpPct = (Number(me?.hp ?? 0) / Math.max(1, Number(me?.maxHp ?? 1)));
   const targetHpPct = (Number(target?.hp ?? 0) / Math.max(1, Number(target?.maxHp ?? 1)));
   const isBoss = isBossTarget(target);
+
+  // Hard floor — skip mobs many levels below the agent unless they're quest-relevant
+  // or we're specifically hunting them. Prevents Lv25 agents from smashing Lv1 rats.
+  if (ignoreWeakMobs && !questPriority && !isBoss && myLevel - targetLevel >= WEAK_MOB_LEVEL_GAP) {
+    return false;
+  }
 
   if (strategy !== "aggressive" && isBoss) return false;
 
@@ -290,14 +422,15 @@ function pickCombatTarget(
   me: any,
   candidates: Array<[string, any]>,
   strategy: AgentStrategy,
-  options?: { questMobNames?: Set<string> },
+  options?: { questMobNames?: Set<string>; ignoreWeakMobs?: boolean },
 ): any | null {
   const questMobNames = options?.questMobNames;
+  const ignoreWeakMobs = options?.ignoreWeakMobs ?? false;
   const scored = candidates
     .map((entry) => {
       const [, target] = entry;
       const questPriority = !!questMobNames?.has(String(target?.name ?? "").toLowerCase());
-      if (!isCombatTargetAllowed(me, target, strategy, questPriority)) return null;
+      if (!isCombatTargetAllowed(me, target, strategy, questPriority, ignoreWeakMobs)) return null;
       return {
         target,
         questPriority,
@@ -314,7 +447,7 @@ function pickCombatTarget(
   return shortlist[Math.floor(Math.random() * shortlist.length)]?.target ?? scored[0].target;
 }
 
-function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResult {
+function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: Record<string, any>): ActionResult {
   const activeTarget = getCombatOrderTarget(me);
   if (activeTarget) {
     if (me.order?.action === "technique") {
@@ -326,9 +459,10 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResu
   }
 
   const zoneTick = getOrCreateZone(ctx.currentRegion).tick;
-  const technique = pickCombatTechnique(me, target, zoneTick);
+  const technique = pickCombatTechnique(me, target, zoneTick, entities);
   if (technique) {
-    const targetId = getTechniqueTargetId(me, target, technique);
+    const targetId = getTechniqueTargetId(me, target, technique, entities);
+    const commandTarget = entities[targetId] ?? getWorldEntity(targetId) ?? target;
     const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: technique.id });
     if (!issued) {
       return actionBlocked(`Could not use ${technique.name}`, {
@@ -337,7 +471,33 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResu
         targetName: target.name ?? "target",
       });
     }
-    const targetLabel = targetId === me.id ? "self" : (target.name ?? "target");
+    if (technique.targetType === "party") {
+      logPartyCoordination(ctx, me, "party-technique", `${me.name ?? "Party member"} uses ${technique.name} for the party`, {
+        techniqueId: technique.id,
+        techniqueName: technique.name,
+      });
+    } else if (technique.targetType === "ally" && targetId !== me.id) {
+      const allyTarget = commandTarget;
+      const leaderId = getPartyLeaderId(me.id);
+      const isLeaderTarget = targetId === leaderId;
+      const kind = technique.type === "healing"
+        ? (isLeaderTarget ? "heal-leader" : "heal-ally")
+        : (isLeaderTarget ? "buff-leader" : "buff-ally");
+      logPartyCoordination(
+        ctx,
+        me,
+        kind,
+        `${me.name ?? "Party member"} uses ${technique.name} on ${allyTarget?.name ?? "an ally"}`,
+        {
+          targetId,
+          targetName: allyTarget?.name,
+          techniqueId: technique.id,
+          techniqueName: technique.name,
+          leaderId,
+        },
+      );
+    }
+    const targetLabel = targetId === me.id ? "self" : (commandTarget.name ?? "target");
     void ctx.logActivity(`Using ${technique.name} on ${targetLabel}`);
     return actionProgressed(`Using ${technique.name} on ${targetLabel}`);
   }
@@ -356,6 +516,14 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any): ActionResu
 
 type GatherPreference = "ore" | "herb" | "both";
 type GatheringToolKind = "pickaxe" | "sickle";
+
+/**
+ * Nodes blacklisted due to "skill too low" — prevents agents from
+ * hammering the same node hundreds of times. Entries expire after 5 minutes
+ * so the agent retries once its skill may have improved.
+ */
+const gatherSkillBlacklist = new Set<string>();
+setInterval(() => gatherSkillBlacklist.clear(), 5 * 60_000);
 
 function matchesTool(name: string | undefined, toolKind: GatheringToolKind): boolean {
   const lower = name?.toLowerCase() ?? "";
@@ -385,7 +553,8 @@ function findGatherNode(
   preference: GatherPreference,
 ): [string, any] | null {
   const matches = Object.entries(entities)
-    .filter(([, e]) => {
+    .filter(([id, e]) => {
+      if (gatherSkillBlacklist.has(id)) return false;
       const alive = !e.depletedAtTick && (e.charges ?? 0) > 0;
       if (preference === "ore") return e.type === "ore-node" && alive;
       if (preference === "herb") return e.type === "flower-node" && alive;
@@ -399,11 +568,34 @@ function findGatherNode(
   return matches[0] as [string, any] ?? null;
 }
 
-async function routeToProfessionHub(ctx: AgentContext, reason: string): Promise<boolean> {
+async function routeToProfessionHub(
+  ctx: AgentContext,
+  reason: string,
+  meLevel: number,
+): Promise<boolean> {
   if (ctx.currentRegion === PROFESSION_HUB_ZONE) return false;
+
+  // High-level agents should NOT get yanked back to village-square for a tool.
+  // Skip the detour — caller falls back to combat in the current zone.
+  if (meLevel >= 10) {
+    void ctx.logActivity(`Skipping hub detour at Lv${meLevel} — staying in ${ctx.currentRegion}`);
+    return false;
+  }
+
+  // Low-level agents: enqueue a round-trip (hub → return home) so we don't
+  // strand the agent in village-square.
+  const home = ctx.homeZone ?? ctx.currentRegion;
+  const chain: BotScript[] = [
+    { type: "travel", targetZone: PROFESSION_HUB_ZONE, reason },
+    { type: "shop", reason: "Buy gathering tool at hub" },
+  ];
+  if (home && home !== PROFESSION_HUB_ZONE) {
+    chain.push({ type: "travel", targetZone: home, reason: `Return to ${home}` });
+    chain.push({ type: "quest", reason: `Resume quest in ${home}` });
+  }
+  await ctx.enqueueActions(chain, true);
   void ctx.logActivity(reason);
-  ctx.setScript({ type: "travel", targetZone: PROFESSION_HUB_ZONE, reason });
-  return ctx.issueCommand({ action: "travel", targetZone: PROFESSION_HUB_ZONE });
+  return true;
 }
 
 async function ensureGatheringTool(
@@ -477,9 +669,11 @@ async function ensureGatheringTool(
   }
 
   const toolLabel = toolKind === "pickaxe" ? "pickaxe" : "sickle";
+  const meLevel = Number(me?.level ?? 1);
   const rerouted = await routeToProfessionHub(
     ctx,
     `Traveling to ${PROFESSION_HUB_ZONE} to buy a tier ${requiredTier} ${toolLabel}`,
+    meLevel,
   );
   if (!rerouted) {
     void ctx.logActivity(`No merchant here sells a tier ${requiredTier} ${toolLabel}`);
@@ -503,6 +697,26 @@ export async function doCombat(
     const zs = await ctx.getZoneState();
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
+    const partyId = getPlayerPartyId(ctx.entityId);
+    const partyLeaderId = getPartyLeaderId(ctx.entityId);
+
+    if (partyId && partyLeaderId && partyLeaderId !== me.id) {
+      const leader = entities[partyLeaderId];
+      if (leader?.type === "player" && leader.hp > 0) {
+        const distToLeader = Math.hypot((leader.x ?? 0) - (me.x ?? 0), (leader.y ?? 0) - (me.y ?? 0));
+        if (distToLeader > 60) {
+          const moving = await ctx.moveToEntity(me, leader, 30);
+          if (moving) {
+            logPartyCoordination(ctx, me, "follow-leader", `${me.name ?? "Party member"} is following ${leader.name ?? "leader"}`, {
+              leaderId: leader.id,
+              leaderName: leader.name,
+              distance: Math.round(distToLeader),
+            });
+            return actionProgressed(`Following party leader ${leader.name ?? "leader"}`);
+          }
+        }
+      }
+    }
 
     // Disengage if HP too low (only if retreat enabled)
     if (ctx.currentCaps.retreatEnabled) {
@@ -527,19 +741,44 @@ export async function doCombat(
     };
     const maxMobLevel = levelCap[strategy];
 
-    const eligible = Object.entries(entities).filter(
+    const livingMobs = Object.entries(entities).filter(
+      ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0,
+    );
+    const eligible = livingMobs.filter(
       ([, e]: any) => (e.type === "mob" || e.type === "boss") && e.hp > 0 && (e.level ?? 1) <= maxMobLevel,
     );
-    if (eligible.length === 0) {
+    if (livingMobs.length === 0) {
       return actionBlocked("No eligible mobs in zone", {
         failureKey: `combat:no-targets:${ctx.currentRegion}`,
         targetName: ctx.currentRegion,
+        category: "strategic",
       });
     }
 
+    // Early zone-mismatch detection: if every living mob is outside our ±4 level
+    // band, the zone fundamentally doesn't match the agent — bail with a
+    // strategic failure so the circuit breaker's zone-rescue path can take over
+    // immediately instead of spinning on "no safe targets" for 15 ticks.
+    const inBand = livingMobs.filter(([, e]: any) => {
+      const lvl = Number(e.level ?? 1);
+      return Math.abs(lvl - myLevel) <= 4;
+    });
+    if (inBand.length === 0) {
+      const avgMobLevel = livingMobs.reduce((acc, [, e]: any) => acc + Number(e.level ?? 1), 0) / livingMobs.length;
+      const direction = avgMobLevel > myLevel ? "too dangerous" : "outleveled";
+      return actionBlocked(`Zone ${direction} — Lv${myLevel} vs avg mob Lv${Math.round(avgMobLevel)}`, {
+        failureKey: `combat:level-mismatch:${ctx.currentRegion}`,
+        targetName: ctx.currentRegion,
+        category: "strategic",
+      });
+    }
+
+    const weakMobFloor = ctx.ignoreWeakMobs;
+
     const activeTarget = getCombatOrderTarget(me);
-    if (activeTarget && isCombatTargetAllowed(me, activeTarget, strategy)) {
-      return engageCombatTarget(ctx, me, activeTarget);
+    if (activeTarget && isCombatTargetAllowed(me, activeTarget, strategy, false, weakMobFloor)) {
+      ctx.commitTarget(activeTarget.id);
+      return engageCombatTarget(ctx, me, activeTarget, entities);
     }
 
     if (activeTarget) {
@@ -547,11 +786,30 @@ export async function doCombat(
       if (fallback) {
         ctx.issueCommand({ action: "move", x: fallback.x, y: fallback.z });
       }
+      ctx.clearCommittedTarget();
       void ctx.logActivity(`Disengaging from ${activeTarget.name ?? "target"} — too dangerous for ${strategy} strategy`);
       return actionProgressed(`Disengaging from ${activeTarget.name ?? "target"}`);
     }
 
-    const mob = pickCombatTarget(me, eligible, strategy);
+    // Stick with the previously committed target if it's still alive + allowed.
+    // Prevents shortlist jitter from flipping targets every tick.
+    const committedId = ctx.committedTargetId;
+    if (committedId) {
+      const committedMob = entities[committedId];
+      if (committedMob && committedMob.hp > 0 && isCombatTargetAllowed(me, committedMob, strategy, false, weakMobFloor)) {
+        return engageCombatTarget(ctx, me, committedMob, entities);
+      }
+      ctx.clearCommittedTarget();
+    }
+
+    const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
+    if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy, false, weakMobFloor)) {
+      ctx.commitTarget(partyTarget.id);
+      return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
+    }
+
+    const candidatePool = eligible.length > 0 ? eligible : livingMobs;
+    const mob = pickCombatTarget(me, candidatePool, strategy, { ignoreWeakMobs: weakMobFloor });
     if (!mob) {
       return actionBlocked("No safe combat targets for current strategy", {
         failureKey: `combat:no-safe-targets:${ctx.currentRegion}:${strategy}`,
@@ -559,7 +817,11 @@ export async function doCombat(
         category: "strategic",
       });
     }
-    return engageCombatTarget(ctx, me, mob);
+    ctx.commitTarget(mob.id);
+    if (eligible.length === 0) {
+      void ctx.logActivity(`No ideal targets nearby — fighting ${mob.name ?? "mob"} anyway`);
+    }
+    return engageCombatTarget(ctx, me, mob, entities);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] combat tick: ${reason.slice(0, 60)}`);
@@ -630,6 +892,17 @@ export async function doGathering(
         return actionCompleted(`Mined ${nodeEntity.name ?? "ore node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
+        if (/skill too low/i.test(reason)) {
+          gatherSkillBlacklist.add(nodeId);
+          void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
+          return actionBlocked(reason, {
+            failureKey: `mining:skill:${ctx.currentRegion}`,
+            endpoint: "/mining/gather",
+            targetId: nodeId,
+            targetName: nodeEntity.name,
+            category: "strategic",
+          });
+        }
         void ctx.logActivity(`Mining failed: ${reason}`);
         return actionBlocked(reason, {
           failureKey: `mining:${nodeId}`,
@@ -660,6 +933,18 @@ export async function doGathering(
         return actionCompleted(`Gathered ${nodeEntity.name ?? "flower node"}`);
       } catch (err: any) {
         const reason = formatAgentError(err);
+        // Skill too low — blacklist this node and try a lower-tier one
+        if (/skill too low/i.test(reason)) {
+          gatherSkillBlacklist.add(nodeId);
+          void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
+          return actionBlocked(reason, {
+            failureKey: `herbalism:skill:${ctx.currentRegion}`,
+            endpoint: "/herbalism/gather",
+            targetId: nodeId,
+            targetName: nodeEntity.name,
+            category: "strategic",
+          });
+        }
         void ctx.logActivity(`Herbalism failed: ${reason}`);
         return actionBlocked(reason, {
           failureKey: `herbalism:${nodeId}`,
@@ -673,6 +958,119 @@ export async function doGathering(
     const reason = formatAgentError(err);
     console.debug(`[agent] gathering tick: ${reason.slice(0, 60)}`);
     return actionBlocked(reason, { failureKey: `gather:error:${ctx.currentRegion}` });
+  }
+}
+
+// ── Farming ─────────────────────────────────────────────────────────────────
+
+function findCropNode(
+  entities: Record<string, any>,
+  me: any,
+): [string, any] | null {
+  const matches = Object.entries(entities)
+    .filter(([, e]) => e.type === "crop-node" && !e.depletedAtTick && (e.charges ?? 0) > 0)
+    .sort(([, a], [, b]) => {
+      const tierA = a.requiredHoeTier ?? 1;
+      const tierB = b.requiredHoeTier ?? 1;
+      const tierDiff = tierA - tierB;
+      if (tierDiff !== 0) return tierDiff;
+      return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
+    });
+  return matches[0] as [string, any] ?? null;
+}
+
+export async function doFarming(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+): Promise<ActionResult> {
+  try {
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    const node = findCropNode(entities, me);
+    if (!node) {
+      return fallbackToCombat(ctx, "No crop nodes in this zone — travel to a farmland zone", strategy);
+    }
+
+    const [nodeId, nodeEntity] = node;
+
+    // Ensure a hoe is equipped — buy one if needed
+    const equipped = me.equipment?.weapon;
+    const equippedHoeTier = equipped ? (HOE_TOKENS[equipped.tokenId] ?? 0) : 0;
+    if (equippedHoeTier === 0) {
+      const merchant = Object.entries(entities).find(
+        ([, e]) => e.type === "npc" && (e.npcRole === "merchant" || e.npcRole === "shop"),
+      );
+      if (merchant) {
+        const [, merchantEntity] = merchant;
+        const moving = await ctx.moveToEntity(me, merchantEntity);
+        if (moving) return actionProgressed("Moving to merchant to buy a hoe");
+        try {
+          await ctx.api("POST", "/shop/buy", {
+            walletAddress: ctx.custodialWallet,
+            zoneId: ctx.currentRegion,
+            entityId: ctx.entityId,
+            tokenId: "220",
+            quantity: 1,
+          });
+          await ctx.api("POST", "/equipment/equip", {
+            walletAddress: ctx.custodialWallet,
+            tokenId: "220",
+            entityId: ctx.entityId,
+          });
+          void ctx.logActivity("Bought and equipped Wooden Hoe");
+          return actionProgressed("Equipped a hoe — ready to farm");
+        } catch (err: any) {
+          return actionBlocked(formatAgentError(err), {
+            failureKey: "farm:buy-hoe",
+            endpoint: "/shop/buy",
+          });
+        }
+      }
+      return actionBlocked("No hoe equipped and no merchant nearby", { failureKey: "farm:no-hoe" });
+    }
+
+    // Move to crop node
+    const moving = await ctx.moveToEntity(me, nodeEntity);
+    if (moving) return actionProgressed(`Moving to ${nodeEntity.name ?? "crop node"}`);
+
+    // Harvest
+    try {
+      await ctx.api("POST", "/farming/harvest", {
+        walletAddress: ctx.custodialWallet,
+        zoneId: ctx.currentRegion,
+        entityId: ctx.entityId,
+        cropNodeId: nodeId,
+      });
+      void ctx.logActivity(`Harvested ${nodeEntity.name ?? "crop"}`);
+      logZoneEvent({
+        zoneId: ctx.currentRegion, type: "profession", tick: 0,
+        message: `${me.name} is harvesting ${nodeEntity.name ?? "crops"}`,
+        entityId: ctx.entityId, entityName: me.name,
+        data: { profession: "farming", target: nodeEntity.name },
+      });
+      emitAgentChat({
+        entityId: ctx.entityId, entityName: me.name ?? "Agent",
+        zoneId: ctx.currentRegion, event: "gathering",
+        origin: me.origin, classId: me.classId,
+        detail: nodeEntity.name,
+      });
+      return actionCompleted(`Harvested ${nodeEntity.name ?? "crop"}`);
+    } catch (err: any) {
+      const reason = formatAgentError(err);
+      void ctx.logActivity(`Farming failed: ${reason}`);
+      return actionBlocked(reason, {
+        failureKey: `farm:${nodeId}`,
+        endpoint: "/farming/harvest",
+        targetId: nodeId,
+        targetName: nodeEntity.name,
+      });
+    }
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    console.debug(`[agent] farming tick: ${reason.slice(0, 60)}`);
+    return actionBlocked(reason, { failureKey: `farm:error:${ctx.currentRegion}` });
   }
 }
 
@@ -1118,9 +1516,14 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
-    const merchant = ctx.findNearestEntity(entities, me, (e) => e.type === "merchant");
+    // Skip merchants that recently failed us (couldn't equip anything from their stock)
+    const merchant = ctx.findNearestEntity(entities, me, (e) => {
+      if (e.type !== "merchant") return false;
+      if (ctx.isInteractionOnCooldown(`shop:merchant:${e.id}`)) return false;
+      return true;
+    });
     if (!merchant) {
-      return fallbackToCombat(ctx, "No merchants in this zone", strategy);
+      return fallbackToCombat(ctx, "No usable merchants in this zone", strategy);
     }
 
     const [merchantId, merchantEntity] = merchant;
@@ -1146,16 +1549,44 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
 
     const { copper: copperBalance } = await ctx.getWalletBalance();
 
+    const meLevel = Number((me as any).level ?? 1);
+    const meClassId = String((me as any).classId ?? "").toLowerCase();
+
     for (const slot of emptySlots) {
       const matching = items.filter((item: any) => {
-        if (slot === "weapon") return item.equipSlot === "weapon" || item.category === "weapon";
-        return item.armorSlot === slot || item.equipSlot === slot;
+        // Must be equippable in this slot
+        const slotMatch = slot === "weapon"
+          ? (item.equipSlot === "weapon" || item.category === "weapon")
+          : (item.armorSlot === slot || item.equipSlot === slot);
+        if (!slotMatch) return false;
+        // Category must be one the equip endpoint accepts
+        if (item.category !== "armor" && item.category !== "weapon" && item.category !== "tool") return false;
+        // Must have durability metadata (required by /equipment/equip)
+        if (!item.maxDurability || Number(item.maxDurability) <= 0) return false;
+        // Respect any catalog-level restrictions (future-proof — shop endpoint may expose these)
+        if (Array.isArray(item.allowedClasses) && meClassId && !item.allowedClasses.map((c: string) => c.toLowerCase()).includes(meClassId)) return false;
+        if (typeof item.minLevel === "number" && meLevel < item.minLevel) return false;
+        return true;
       }).sort((a: any, b: any) => (a.copperPrice ?? a.buyPrice ?? 9999) - (b.copperPrice ?? b.buyPrice ?? 9999));
 
       if (matching.length === 0) continue;
-      const cheapest = matching[0];
+
+      // Pick first non-cooldowned item (don't re-try items that previously failed to equip)
+      let cheapest: any = null;
+      let tokenId = 0;
+      for (const candidate of matching) {
+        const cid = Number(candidate.tokenId);
+        if (ctx.isInteractionOnCooldown(`equip:fail:${cid}`)) continue;
+        cheapest = candidate;
+        tokenId = cid;
+        break;
+      }
+      if (!cheapest) continue;
+
       const priceCopper = cheapest.currentPrice ?? cheapest.copperPrice ?? cheapest.buyPrice ?? 0;
       if (priceCopper > copperBalance) continue;
+
+      const equipFailKey = `equip:fail:${tokenId}`;
 
       // Ask summoner before expensive purchases (> 50% of balance)
       if (priceCopper > copperBalance * 0.5) {
@@ -1169,11 +1600,32 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
         if (asked) return actionProgressed("Waiting for summoner approval on purchase");
       }
 
-      const tokenId = Number(cheapest.tokenId);
       const bought = await ctx.buyItem(tokenId);
       if (!bought) continue;
 
-      await ctx.equipItem(tokenId);
+      const equipResult = await ctx.equipItemWithReason(tokenId);
+      if (!equipResult.ok) {
+        const reason = equipResult.reason ?? "unknown";
+        // Ownership race after all 3 retries = chain tx is truly lagging.
+        // Short merchant cooldown so we don't hammer, but don't blacklist the item
+        // since we DID buy it and it'll show up eventually.
+        const isOwnershipRace = /does not own this item/i.test(reason);
+        if (isOwnershipRace) {
+          ctx.setInteractionCooldown(`shop:merchant:${merchantId}`, 60_000);
+          void ctx.logActivity(`Bought ${cheapest.name ?? `token #${tokenId}`} — chain tx still propagating, will try to equip next visit`);
+          return actionProgressed(`Bought ${cheapest.name ?? `token #${tokenId}`}, equip pending chain confirmation`);
+        }
+        // Real equip failure (wrong class, missing metadata, instance mismatch):
+        // blacklist the item for 15min AND the merchant for 3min.
+        ctx.setInteractionCooldown(equipFailKey, 15 * 60_000);
+        ctx.setInteractionCooldown(`shop:merchant:${merchantId}`, 3 * 60_000);
+        void ctx.logActivity(`Bought ${cheapest.name ?? `token #${tokenId}`} but equip rejected: ${reason.slice(0, 80)} — avoiding ${merchantEntity.name ?? "merchant"} for 3m`);
+        return actionBlocked(
+          `Equip rejected: ${reason.slice(0, 80)}`,
+          { failureKey: equipFailKey, endpoint: "/equipment/equip", category: "strategic" },
+        );
+      }
+
       console.log(`[agent:${ctx.walletTag}] Shopping: bought+equipped ${cheapest.name ?? tokenId} for slot=${slot}`);
       void ctx.logActivity(`Bought & equipped ${cheapest.name ?? `token #${tokenId}`} (${slot})`);
       emitAgentChat({
@@ -1185,6 +1637,9 @@ export async function doShopping(ctx: AgentContext, strategy: AgentStrategy): Pr
       return actionCompleted(`Bought ${cheapest.name ?? `token #${tokenId}`}`); // one purchase per tick
     }
 
+    // Nothing this merchant sells fits — cooldown them so we don't walk back next tick
+    ctx.setInteractionCooldown(`shop:merchant:${merchantId}`, 3 * 60_000);
+    void ctx.logActivity(`${merchantEntity.name ?? "Merchant"} has nothing useful — skipping for 3m`);
     return fallbackToCombat(ctx, "Can't afford any upgrades right now", strategy);
   } catch (err: any) {
     const reason = formatAgentError(err);
@@ -1372,6 +1827,60 @@ export async function doGotoNpc(
     ctx.setEntityGotoMode(true);
 
     const config = await getAgentConfig(ctx.userWallet);
+
+    // ── Position-based goto (click-to-move) ─────────────────────────────
+    const pos = config?.gotoPosition;
+    if (pos) {
+      // Wrong zone — travel there first
+      if (pos.zoneId !== ctx.currentRegion) {
+        const neighbors = getZoneConnections(ctx.currentRegion).map((zone) => ({
+          zone,
+          levelReq: ZONE_LEVEL_REQUIREMENTS[zone] ?? 1,
+        }));
+        const nextZone = neighbors.find((n) => n.zone === pos.zoneId)
+          ? pos.zoneId
+          : findNextZoneOnPath(neighbors, pos.zoneId);
+        if (nextZone) {
+          ctx.issueCommand({ action: "travel", targetZone: nextZone });
+          void ctx.logActivity(`Heading to ${pos.zoneId} for waypoint`);
+          return actionProgressed(`Traveling toward waypoint in ${pos.zoneId}`);
+        }
+        return actionBlocked(`No route to ${pos.zoneId}`, {
+          failureKey: `goto:route:${pos.zoneId}`,
+        });
+      }
+
+      // In the right zone — walk toward position
+      const zs = await ctx.getZoneState();
+      if (!zs) return actionIdle("Zone state unavailable");
+      const { me } = zs;
+
+      const dist = Math.hypot(pos.x - me.x, pos.y - me.y);
+      if (dist <= 35) {
+        // Arrived — clear position, idle
+        void ctx.logActivity(`Arrived at waypoint (${Math.round(pos.x)}, ${Math.round(pos.y)})`);
+        ctx.setEntityGotoMode(false);
+        await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
+        ctx.setScript(null);
+        return actionCompleted("Arrived at waypoint");
+      }
+
+      // Still walking — issue/reissue move command
+      const moving = await ctx.moveToEntity(me, { x: pos.x, y: pos.y, name: "waypoint" } as any);
+      if (moving) {
+        void ctx.logActivity(`Walking to waypoint (${Math.round(dist)} away)`);
+        return actionProgressed("Walking to waypoint");
+      }
+
+      // moveToEntity returned false = close enough
+      void ctx.logActivity(`Arrived at waypoint`);
+      ctx.setEntityGotoMode(false);
+      await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
+      ctx.setScript(null);
+      return actionCompleted("Arrived at waypoint");
+    }
+
+    // ── Entity-based goto (NPC click) ───────────────────────────────────
     const target = config?.gotoTarget;
     if (!target) {
       ctx.setEntityGotoMode(false);
@@ -1492,6 +2001,26 @@ export async function doGotoNpc(
         return actionBlocked(reason, {
           failureKey: `goto:accept-quest:${(target as any).questId}:${targetEntityId}`,
           endpoint: "/quests/accept",
+          targetId: targetEntityId,
+          targetName,
+        });
+      }
+    } else if (arrivalAction === "talk-quest" && ctx.custodialWallet) {
+      try {
+        await ctx.api("POST", "/quests/talk", {
+          zoneId: ctx.currentRegion,
+          entityId: ctx.entityId,
+          npcEntityId: targetEntityId,
+        });
+        void ctx.logActivity(`Talked to ${targetName ?? "NPC"} for quest`);
+        console.log(`[agent:${ctx.walletTag}] Talk quest at ${targetName ?? targetEntityId} (user-initiated)`);
+      } catch (questErr: any) {
+        const reason = formatAgentError(questErr);
+        void ctx.logActivity(`Could not talk for quest: ${reason}`);
+        ctx.setEntityGotoMode(false);
+        return actionBlocked(reason, {
+          failureKey: `goto:talk-quest:${targetEntityId}`,
+          endpoint: "/quests/talk",
           targetId: targetEntityId,
           targetName,
         });
@@ -1658,51 +2187,51 @@ export async function doQuesting(
       }
     }
 
-    // 3. Request quest approval from summoner (don't auto-accept)
+    // 3. Auto-accept available quests (up to 3 active)
     const currentActive = activeQuests.filter((aq: any) => !aq.complete).length;
-    const pendingApprovals: string[] = me.pendingQuestApprovals ?? [];
-    if (currentActive + pendingApprovals.length < 3) {
+    if (currentActive < 3) {
       try {
         const availRes = await ctx.api("GET", `/quests/zone/${ctx.currentRegion}/${ctx.entityId}`);
         const available: any[] = availRes?.quests ?? [];
-        // Filter out quests already pending approval
-        const pendingSet = new Set(pendingApprovals);
-        const requestable = available.filter((q: any) => !pendingSet.has(q.questId));
-        if (requestable.length > 0) {
-          const q = requestable[0];
-          // Mark as pending on the entity so we don't spam the summoner
-          if (!me.pendingQuestApprovals) me.pendingQuestApprovals = [];
-          me.pendingQuestApprovals.push(q.questId);
-          // Ask summoner for approval via inbox
-          const agentName = me.name ?? "Agent";
-          const origin = me.origin ?? undefined;
-          const classId = me.classId ?? undefined;
-          const askLine = pickLine(origin, classId, "summon_quest_accept")
-            ?? `I found a quest: "${q.title}". May I take it, summoner?`;
-          const askBody = askLine.replace(/\{detail\}/g, q.title ?? "a quest");
-          void sendInboxMessage({
-            from: ctx.custodialWallet,
-            fromName: agentName,
-            to: ctx.userWallet,
-            type: "quest-approval",
-            body: askBody,
-            data: {
-              questId: q.questId,
-              questTitle: q.title,
-              npcName: q.npcName,
-              rewards: q.rewards,
-              objective: q.objective,
-            },
+        if (available.length > 0) {
+          const q = available[0];
+          // Find the quest-giver NPC to accept from
+          const npcName = String(q.npcId ?? q.npcName ?? "").toLowerCase();
+          const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
+            if (!e) return false;
+            return String(e.name ?? "").toLowerCase() === npcName;
           });
-          void ctx.logActivity(`Requesting approval for quest: "${q.title}"`);
-          // Emit in-world chat about picking up the quest
-          emitAgentChat({
-            entityId: ctx.entityId, entityName: me.name ?? "Agent",
-            zoneId: ctx.currentRegion, event: "quest_accept",
-            origin, classId, detail: q.title,
-          });
-          return actionProgressed(`Awaiting summoner approval for ${q.title}`);
-        } else if (currentActive === 0 && requestable.length === 0 && pendingApprovals.length === 0) {
+          if (npcEntry) {
+            const [npcEntityId, npcEntity] = npcEntry;
+            const cooldownKey = `quest-accept:${q.questId}:${npcEntityId}`;
+            if (!ctx.isInteractionOnCooldown(cooldownKey)) {
+              const moving = await ctx.moveToEntity(me, npcEntity);
+              if (moving) {
+                void ctx.logActivity(`Walking to ${npcName} to accept "${q.title}"`);
+                return actionProgressed(`Walking to ${npcName}`);
+              }
+              try {
+                await ctx.api("POST", "/quests/accept", {
+                  zoneId: ctx.currentRegion, playerId: ctx.entityId,
+                  questId: q.questId, npcId: npcEntityId,
+                });
+                void ctx.logActivity(`Accepted quest: "${q.title}"`);
+                // Emit in-world chat about picking up the quest
+                emitAgentChat({
+                  entityId: ctx.entityId, entityName: me.name ?? "Agent",
+                  zoneId: ctx.currentRegion, event: "quest_accept",
+                  origin: me.origin ?? undefined, classId: me.classId ?? undefined,
+                  detail: q.title,
+                });
+                return actionCompleted(`Accepted quest: ${q.title}`);
+              } catch (err: any) {
+                const reason = formatAgentError(err);
+                ctx.setInteractionCooldown(cooldownKey, 20_000);
+                console.debug(`[agent:${ctx.walletTag}] quest accept failed: ${reason}`);
+              }
+            }
+          }
+        } else if (currentActive === 0) {
           const myLevel = me.level ?? 1;
           const nextZone = findNextZoneForLevel(myLevel);
           if (nextZone && nextZone !== ctx.currentRegion) {
@@ -1712,9 +2241,12 @@ export async function doQuesting(
             ctx.setScript(null);
             return actionProgressed(`Traveling to ${nextZone} for new quests`);
           }
+          // No quest zone available — fall through to combat grinding
+          void ctx.logActivity("All quests exhausted — grinding mobs for XP");
+          return fallbackToCombat(ctx, "All quests exhausted", strategy);
         }
       } catch (err: any) {
-        console.debug(`[agent:${ctx.walletTag}] quest approval request: ${err.message?.slice(0, 60)}`);
+        console.debug(`[agent:${ctx.walletTag}] quest accept: ${err.message?.slice(0, 60)}`);
       }
     }
 
@@ -1727,20 +2259,75 @@ export async function doQuesting(
     );
 
     if (killQuests.length > 0) {
+      // Filter out quests flagged as stuck (target mob unreachable / blocked recently).
+      // Stuck flags expire after 5 min so the agent will retry later.
+      const liveKillQuests = killQuests.filter((aq: any) => !ctx.isQuestStuck(aq.questId ?? aq.quest?.id ?? ""));
+
+      if (liveKillQuests.length === 0) {
+        // Every kill quest is flagged stuck — don't pretend to do quest combat.
+        if (hasGatherQuest) {
+          void ctx.logActivity("All kill quests stuck — gathering for quest instead");
+          return doGathering(ctx, strategy);
+        }
+        void ctx.logActivity("All kill quests stuck — grinding mobs for XP");
+        return fallbackToCombat(ctx, "All kill quests flagged stuck", strategy);
+      }
+
       // Prefer quest-specific mobs over random combat
       const questMobNames = new Set(
-        killQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
+        liveKillQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
       );
-      return doQuestCombat(ctx, strategy, questMobNames);
+
+      // Pre-flight: are any of the quest target mobs actually in this zone?
+      // If not, flag the quests stuck and fall through to gather/grind — no
+      // point firing doQuestCombat just to block on "no valid targets".
+      const zsCheck = await ctx.getZoneState();
+      const entitiesCheck = zsCheck?.entities ?? {};
+      const questMobPresent = Object.values(entitiesCheck).some((e: any) =>
+        (e.type === "mob" || e.type === "boss")
+        && e.hp > 0
+        && questMobNames.has(String(e.name ?? "").toLowerCase()),
+      );
+      if (!questMobPresent) {
+        for (const aq of liveKillQuests) {
+          const id = aq.questId ?? aq.quest?.id;
+          if (id) ctx.markQuestStuck(id, `target mob not in ${ctx.currentRegion}`);
+        }
+        if (hasGatherQuest) {
+          void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — gathering instead`);
+          return doGathering(ctx, strategy);
+        }
+        // Jump straight to the fallback path so the circuit breaker can rescue
+        // us to a zone that actually has the target.
+        return questBlockedFallback(ctx, strategy, "quest target not in zone", findNextZoneForLevel, me);
+      }
+
+      const combatResult = await doQuestCombat(ctx, strategy, questMobNames);
+
+      // If combat is blocked, do something productive instead of spinning
+      if (combatResult.status === "blocked") {
+        // Flag the active quests as stuck so subsequent ticks don't hammer them
+        for (const aq of liveKillQuests) {
+          const id = aq.questId ?? aq.quest?.id;
+          if (id) ctx.markQuestStuck(id, combatResult.reason ?? "quest-combat blocked");
+        }
+        // Try gather/craft quests first
+        if (hasGatherQuest) {
+          void ctx.logActivity("Quest combat blocked — gathering for quest instead");
+          return doGathering(ctx, strategy);
+        }
+        // Otherwise do any productive non-combat activity
+        return questBlockedFallback(ctx, strategy, combatResult.reason ?? "no safe targets", findNextZoneForLevel, me);
+      }
+      return combatResult;
     } else if (hasGatherQuest) {
       void ctx.logActivity("Gathering resources for quest");
       return doGathering(ctx, strategy);
     } else {
-      const pendingCount = (me.pendingQuestApprovals ?? []).length;
       const activeCount = activeQuests.filter((aq: any) => !aq.complete).length;
-      const detail = `active=${activeCount} pending=${pendingCount} total=${activeQuests.length}`;
-      console.warn(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
-      void ctx.logActivity(`No quest objectives — grinding mobs while waiting (${detail})`);
+      const detail = `active=${activeCount} total=${activeQuests.length}`;
+      console.debug(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
+      void ctx.logActivity(`No quest objectives — grinding mobs (${detail})`);
       return fallbackToCombat(ctx, `No quest objectives (${detail})`, strategy);
     }
   } catch (err: any) {
@@ -1777,7 +2364,35 @@ async function doQuestCombat(
       });
     }
 
-    const mob = pickCombatTarget(me, eligible, strategy, { questMobNames });
+    const weakMobFloor = ctx.ignoreWeakMobs;
+    const partyLeaderId = getPartyLeaderId(ctx.entityId);
+
+    // Honor target commitment — if we locked onto a quest mob already, keep
+    // hunting it instead of re-picking every tick.
+    const committedId = ctx.committedTargetId;
+    if (committedId) {
+      const committedMob = entities[committedId];
+      if (
+        committedMob
+        && committedMob.hp > 0
+        && (committedMob.type === "mob" || committedMob.type === "boss")
+      ) {
+        const committedIsQuest = questMobNames.has(String(committedMob.name ?? "").toLowerCase());
+        if (isCombatTargetAllowed(me, committedMob, strategy, committedIsQuest, weakMobFloor)) {
+          return engageCombatTarget(ctx, me, committedMob, entities);
+        }
+      }
+      ctx.clearCommittedTarget();
+    }
+
+    const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
+    const partyTargetIsQuestMob = partyTarget ? questMobNames.has((partyTarget.name ?? "").toLowerCase()) : false;
+    if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy, partyTargetIsQuestMob, weakMobFloor)) {
+      ctx.commitTarget(partyTarget.id);
+      return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
+    }
+
+    const mob = pickCombatTarget(me, eligible, strategy, { questMobNames, ignoreWeakMobs: weakMobFloor });
     if (!mob) {
       return actionBlocked("Quest targets are too dangerous for current strategy", {
         failureKey: `quest-combat:no-safe-targets:${ctx.currentRegion}:${strategy}`,
@@ -1785,8 +2400,9 @@ async function doQuestCombat(
         category: "strategic",
       });
     }
+    ctx.commitTarget(mob.id);
     const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
-    const result = engageCombatTarget(ctx, me, mob);
+    const result = engageCombatTarget(ctx, me, mob, entities);
     if (result.status === "progressed") {
       void ctx.logActivity(isQuestTarget
         ? `Hunting ${mob.name} for quest (Lv${mob.level ?? "?"})`
@@ -1798,6 +2414,44 @@ async function doQuestCombat(
     console.debug(`[agent] quest combat tick: ${reason.slice(0, 60)}`);
     return actionBlocked(reason, { failureKey: `quest-combat:error:${ctx.currentRegion}` });
   }
+}
+
+// ── Quest blocked fallback ──────────────────────────────────────────────────
+
+/**
+ * When quest combat is blocked (no safe targets), pick a productive fallback
+ * instead of spinning on the same blocked action forever.
+ */
+async function questBlockedFallback(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  reason: string,
+  findNextZoneForLevel: (level: number) => string | null,
+  me: any,
+): Promise<ActionResult> {
+  const myLevel = me.level ?? 1;
+
+  // Option 1: Zone is too hard — travel to an appropriate zone
+  const zoneReq = ZONE_LEVEL_REQUIREMENTS[ctx.currentRegion] ?? 1;
+  if (myLevel < zoneReq) {
+    const betterZone = findNextZoneForLevel(myLevel);
+    if (betterZone && betterZone !== ctx.currentRegion) {
+      console.log(`[agent:${ctx.walletTag}] Quest combat blocked, underleveled (Lv${myLevel} in L${zoneReq} zone) — traveling to ${betterZone}`);
+      void ctx.logActivity(`Too dangerous here (Lv${myLevel} in L${zoneReq} zone) — heading to ${betterZone}`);
+      await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone: betterZone });
+      ctx.setScript(null);
+      return actionProgressed(`Traveling to ${betterZone} — current zone too dangerous`);
+    }
+  }
+
+  // Option 2: Try gathering — always productive, earns profession XP
+  void ctx.logActivity(`Quest combat blocked (${reason}) — gathering while waiting`);
+  const gatherResult = await doGathering(ctx, strategy);
+  if (gatherResult.status !== "blocked") return gatherResult;
+
+  // Option 3: Try crafting with existing materials
+  void ctx.logActivity("Gathering blocked too — trying to craft");
+  return actionProgressed(`Quest combat paused: ${reason} — looking for other work`);
 }
 
 // ── Shared helper ────────────────────────────────────────────────────────────
@@ -1819,6 +2473,15 @@ async function fallbackToCombat(
 /** Rank → key token ID mapping */
 const RANK_TO_KEY_TOKEN: Record<string, bigint> = {
   E: 134n, D: 135n, C: 136n, B: 137n, A: 138n, S: 139n,
+};
+/** Rank → gate essence (reagent) token ID mapping */
+const RANK_TO_REAGENT_TOKEN: Record<string, bigint> = {
+  E: 128n, D: 129n, C: 130n, B: 131n, A: 132n, S: 133n,
+};
+/** Rank → alchemy recipe ID for brewing the gate essence */
+const RANK_TO_ESSENCE_RECIPE: Record<string, string> = {
+  E: "crude-gate-essence", D: "lesser-gate-essence", C: "gate-essence",
+  B: "greater-gate-essence", A: "superior-gate-essence", S: "supreme-gate-essence",
 };
 const RANK_LEVEL_REQS: Record<string, number> = {
   E: 3, D: 7, C: 12, B: 18, A: 28, S: 40,
@@ -1892,13 +2555,106 @@ export async function doDungeon(
     const rank = targetGate.gateRank as string;
     const keyTokenId = RANK_TO_KEY_TOKEN[rank];
 
-    // ── Phase 3: Check key ──────────────────────────────────────────────
+    // ── Phase 3: Check key — brew essence / forge key if missing ──────
     if (keyTokenId) {
       try {
         const keyBalance = await getItemBalance(ctx.custodialWallet, keyTokenId);
         if (keyBalance < 1n) {
-          void ctx.logActivity(`No ${rank}-Key to open gate — need to forge one`);
-          return fallbackToCombat(ctx, `Missing ${rank}-Key for dungeon gate`, strategy);
+          const reagentTokenId = RANK_TO_REAGENT_TOKEN[rank];
+          const essenceRecipeId = RANK_TO_ESSENCE_RECIPE[rank];
+
+          // Check if we already have the gate essence reagent
+          let hasReagent = false;
+          if (reagentTokenId) {
+            try {
+              const reagentBalance = await getItemBalance(ctx.custodialWallet, reagentTokenId);
+              hasReagent = reagentBalance >= 1n;
+            } catch {
+              // If balance check fails, try brewing first
+            }
+          }
+
+          if (hasReagent) {
+            // We have the reagent — forge the key at the enchanting altar
+            const altar = ctx.findNearestEntity(entities, me, (e) => e.type === "enchanting-altar");
+            if (!altar) {
+              void ctx.logActivity(`Have gate essence but no enchanting altar — fighting while waiting`);
+              return fallbackToCombat(ctx, `No enchanting altar to forge ${rank}-Key`, strategy);
+            }
+            const [altarId, altarEntity] = altar;
+            const moving = await ctx.moveToEntity(me, altarEntity);
+            if (moving) {
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Moving to enchanting altar to forge ${rank}-Key` });
+              return actionProgressed(`Moving to ${altarEntity.name ?? "enchanting altar"} to forge ${rank}-Key`);
+            }
+
+            try {
+              await ctx.api("POST", "/dungeon/forge-key", {
+                walletAddress: ctx.custodialWallet,
+                zoneId: ctx.currentRegion,
+                entityId: ctx.entityId,
+                altarId,
+                reagentTokenId: Number(reagentTokenId),
+              });
+              void ctx.logActivity(`Forged ${rank}-Key at ${altarEntity.name ?? "enchanting altar"}`);
+              logZoneEvent({
+                zoneId: ctx.currentRegion, type: "profession", tick: 0,
+                message: `${me.name} forged a ${rank}-Key at the enchanting altar`,
+                entityId: ctx.entityId, entityName: me.name,
+                data: { profession: "enchanting", target: `${rank}-Key` },
+              });
+              // Key forged — continue to Phase 4 (party + gate opening) on next tick
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `${rank}-Key forged — heading to gate` });
+              return actionProgressed(`Forged ${rank}-Key — heading to dungeon gate`);
+            } catch (err: any) {
+              const reason = formatAgentError(err);
+              void ctx.logActivity(`Key forging failed: ${reason}`);
+              return actionBlocked(reason, { failureKey: `dungeon:forge-key:${rank}` });
+            }
+          } else {
+            // No reagent — brew the gate essence at the alchemy lab
+            const learned = await ctx.learnProfession("alchemy");
+            if (!learned) {
+              return actionProgressed("Need alchemy to brew gate essence — learning");
+            }
+
+            const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
+            if (!lab) {
+              void ctx.logActivity(`Need gate essence but no alchemy lab — fighting while waiting`);
+              return fallbackToCombat(ctx, `No alchemy lab to brew ${rank} gate essence`, strategy);
+            }
+            const [labId, labEntity] = lab;
+            const moving = await ctx.moveToEntity(me, labEntity);
+            if (moving) {
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Moving to alchemy lab to brew gate essence` });
+              return actionProgressed(`Moving to ${labEntity.name ?? "alchemy lab"} to brew gate essence`);
+            }
+
+            try {
+              await ctx.api("POST", "/alchemy/brew", {
+                walletAddress: ctx.custodialWallet,
+                zoneId: ctx.currentRegion,
+                entityId: ctx.entityId,
+                alchemyLabId: labId,
+                recipeId: essenceRecipeId,
+              });
+              void ctx.logActivity(`Brewed gate essence for ${rank}-Key`);
+              logZoneEvent({
+                zoneId: ctx.currentRegion, type: "profession", tick: 0,
+                message: `${me.name} brewed a gate essence for ${rank}-Key`,
+                entityId: ctx.entityId, entityName: me.name,
+                data: { profession: "alchemy", target: essenceRecipeId },
+              });
+              // Essence brewed — next tick will forge the key
+              ctx.setScript({ type: "dungeon", gateEntityId: targetGateId!, gateRank: rank, reason: `Gate essence brewed — forge key next` });
+              return actionProgressed(`Brewed gate essence — will forge ${rank}-Key next`);
+            } catch (err: any) {
+              const reason = formatAgentError(err);
+              void ctx.logActivity(`Gate essence brewing failed: ${reason} — gathering materials`);
+              // Missing materials — go gather
+              return doGathering(ctx, strategy, "both");
+            }
+          }
         }
       } catch {
         // If blockchain check fails, try anyway
@@ -1989,7 +2745,7 @@ async function doDungeonCombat(ctx: AgentContext, strategy: AgentStrategy): Prom
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
     });
     const [, mob] = sorted[0] as [string, any];
-    const result = engageCombatTarget(ctx, me, mob);
+    const result = engageCombatTarget(ctx, me, mob, entities);
     if (result.status === "progressed") {
       void ctx.logActivity(`Dungeon: fighting ${mob.name ?? "mob"} (${mobs.length} remain)`);
     }

@@ -1,0 +1,333 @@
+{
+  "zoneId": "felsrock-citadel",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Ironbreaker General Thrain - Warrior Trainer",
+      "x": 60,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Forgeguard Paladin Aric - Paladin Trainer",
+      "x": 200,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Obsidian Fang Nyx - Rogue Trainer",
+      "x": 340,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Stone Eagle Marksman Vex - Ranger Trainer",
+      "x": 480,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Runeforge Archmage Zael - Mage Trainer",
+      "x": 60,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Anvil Priestess Diona - Cleric Trainer",
+      "x": 200,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Pit Lord Malachar - Warlock Trainer",
+      "x": 340,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Iron Fist Master Zan - Monk Trainer",
+      "x": 480,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Forgeguard Captain Haldor",
+      "x": 280,
+      "y": 370,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Runesmith Korra",
+      "x": 340,
+      "y": 400,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Citadel Quartermaster Ingrid",
+      "x": 220,
+      "y": 370,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Citadel Blacksmith Thordak",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Deep Auction Master Korrin",
+      "x": 340,
+      "y": 370,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Ironpact Registrar",
+      "x": 400,
+      "y": 370,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Essence Scholar Runara",
+      "x": 220,
+      "y": 420,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "The Great Forge",
+      "x": 280,
+      "y": 200,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Essence Foundry Lab",
+      "x": 220,
+      "y": 420,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Runic Enchanting Altar",
+      "x": 320,
+      "y": 200,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Ironclad Champion Volgar",
+      "x": 460,
+      "y": 370,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Iron Automaton",
+      "x": 130,
+      "y": 130,
+      "hp": 927,
+      "level": 35,
+      "xpReward": 800
+    },
+    {
+      "type": "mob",
+      "name": "Iron Automaton",
+      "x": 180,
+      "y": 200,
+      "hp": 927,
+      "level": 35,
+      "xpReward": 800
+    },
+    {
+      "type": "mob",
+      "name": "Iron Automaton",
+      "x": 100,
+      "y": 250,
+      "hp": 927,
+      "level": 35,
+      "xpReward": 800
+    },
+    {
+      "type": "mob",
+      "name": "Molten Forgebound",
+      "x": 400,
+      "y": 520,
+      "hp": 923,
+      "level": 36,
+      "xpReward": 840
+    },
+    {
+      "type": "mob",
+      "name": "Molten Forgebound",
+      "x": 460,
+      "y": 580,
+      "hp": 923,
+      "level": 36,
+      "xpReward": 840
+    },
+    {
+      "type": "mob",
+      "name": "Molten Forgebound",
+      "x": 520,
+      "y": 520,
+      "hp": 923,
+      "level": 36,
+      "xpReward": 840
+    },
+    {
+      "type": "mob",
+      "name": "Deep Dweller",
+      "x": 480,
+      "y": 430,
+      "hp": 880,
+      "level": 37,
+      "xpReward": 880
+    },
+    {
+      "type": "mob",
+      "name": "Deep Dweller",
+      "x": 540,
+      "y": 480,
+      "hp": 880,
+      "level": 37,
+      "xpReward": 880
+    },
+    {
+      "type": "mob",
+      "name": "Deep Dweller",
+      "x": 560,
+      "y": 400,
+      "hp": 880,
+      "level": 37,
+      "xpReward": 880
+    },
+    {
+      "type": "mob",
+      "name": "Rune Golem",
+      "x": 200,
+      "y": 100,
+      "hp": 880,
+      "level": 38,
+      "xpReward": 920
+    },
+    {
+      "type": "mob",
+      "name": "Rune Golem",
+      "x": 350,
+      "y": 100,
+      "hp": 880,
+      "level": 38,
+      "xpReward": 920
+    },
+    {
+      "type": "mob",
+      "name": "Corrupted Dwarf King",
+      "x": 420,
+      "y": 120,
+      "hp": 936,
+      "level": 39,
+      "xpReward": 960
+    },
+    {
+      "type": "mob",
+      "name": "Corrupted Dwarf King",
+      "x": 500,
+      "y": 80,
+      "hp": 936,
+      "level": 39,
+      "xpReward": 960
+    },
+    {
+      "type": "boss",
+      "name": "Forgemaster Infernal",
+      "x": 450,
+      "y": 100,
+      "hp": 4000,
+      "level": 40,
+      "xpReward": 1600
+    }
+  ]
+}

@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "willow-shrine",
+      "name": "Willow Shrine",
+      "type": "landmark",
+      "position": { "x": 280, "z": 350 },
+      "radius": 15,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "herbalist-cottage",
+      "name": "Herbalist Cottage",
+      "type": "structure",
+      "position": { "x": 190, "z": 260 },
+      "radius": 20,
+      "tags": ["craft"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["craft", "buy"], "npcs": ["herbalist"] }
+    },
+    {
+      "id": "shepherd-house",
+      "name": "Shepherd's House",
+      "type": "structure",
+      "position": { "x": 380, "z": 430 },
+      "radius": 20,
+      "tags": ["quest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["quest"], "npcs": ["shepherd"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "pasture-trail",
+      "name": "Pasture Trail",
+      "nodes": ["herbalist-cottage", "willow-shrine", "shepherd-house"]
+    }
+  ]
 }

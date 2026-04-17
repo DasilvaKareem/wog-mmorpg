@@ -7,8 +7,16 @@
  * Storage: in-memory map + Redis (tg:wallet:{addr} → chatId)
  */
 
-import { getRedis } from "../redis.js";
+import { getRedis, scanKeys } from "../redis.js";
 import { setDiaryAlertHook, readMergedDiary, type DiaryAction, type DiaryEntry } from "./diary.js";
+import {
+  deleteTelegramWalletLink,
+  getTelegramWalletLink,
+  listTelegramWalletLinks,
+  updateTelegramSummaryTimestamp,
+  upsertTelegramWalletLink,
+} from "../db/notificationStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 // ── In-memory storage ────────────────────────────────────────────────────
 const walletToChatId = new Map<string, string>();
@@ -52,6 +60,9 @@ async function sendTelegramMessage(chatId: string, text: string): Promise<void> 
 async function storeChatId(wallet: string, chatId: string): Promise<void> {
   const key = wallet.toLowerCase();
   walletToChatId.set(key, chatId);
+  if (isPostgresConfigured()) {
+    await upsertTelegramWalletLink(key, chatId);
+  }
   const redis = getRedis();
   if (redis) {
     await redis.set(tgWalletKey(key), chatId);
@@ -61,6 +72,13 @@ async function storeChatId(wallet: string, chatId: string): Promise<void> {
 export async function getTelegramChatId(wallet: string): Promise<string | null> {
   const key = wallet.toLowerCase();
   if (walletToChatId.has(key)) return walletToChatId.get(key)!;
+  if (isPostgresConfigured()) {
+    const chatId = await getTelegramWalletLink(key);
+    if (chatId) {
+      walletToChatId.set(key, chatId);
+      return chatId;
+    }
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -79,6 +97,9 @@ export async function getTelegramChatId(wallet: string): Promise<string | null> 
 export async function unlinkTelegramChat(wallet: string): Promise<void> {
   const key = wallet.toLowerCase();
   walletToChatId.delete(key);
+  if (isPostgresConfigured()) {
+    await deleteTelegramWalletLink(key);
+  }
   const redis = getRedis();
   if (redis) {
     await redis.del(tgWalletKey(key));
@@ -86,10 +107,25 @@ export async function unlinkTelegramChat(wallet: string): Promise<void> {
 }
 
 async function loadMappingsFromRedis(): Promise<void> {
+  if (isPostgresConfigured()) {
+    try {
+      const links = await listTelegramWalletLinks();
+      for (const link of links) {
+        walletToChatId.set(link.wallet, link.chatId);
+      }
+      if (walletToChatId.size > 0) {
+        console.log(`[telegram] Loaded ${walletToChatId.size} linked wallet(s) from Postgres`);
+      }
+      return;
+    } catch (err: any) {
+      console.warn("[telegram] Failed to load Postgres mappings:", err.message);
+    }
+    return;
+  }
   const redis = getRedis();
   if (!redis) return;
   try {
-    const keys: string[] = await redis.keys("tg:wallet:*");
+    const keys: string[] = await scanKeys("tg:wallet:*");
     for (const key of keys) {
       const chatId: string | null = await redis.get(key);
       if (chatId) {
@@ -137,6 +173,10 @@ function buildAlertText(action: DiaryAction, entry: DiaryEntry): string {
 async function runSummaryJob(): Promise<void> {
   const now = Date.now();
   const windowMs = 4 * 60 * 60 * 1000;
+  const persistedLinks = isPostgresConfigured() ? await listTelegramWalletLinks().catch(() => []) : [];
+  const persistedSummaryByWallet = new Map(
+    persistedLinks.map((link) => [link.wallet, link.lastSummaryAt ?? null])
+  );
 
   for (const [wallet, chatId] of walletToChatId) {
     try {
@@ -145,6 +185,9 @@ async function runSummaryJob(): Promise<void> {
       if (redis) {
         const stored: string | null = await redis.get(tgSummaryKey(wallet));
         if (stored) lastSummaryAt = parseInt(stored, 10);
+      } else if (isPostgresConfigured()) {
+        const stored = persistedSummaryByWallet.get(wallet);
+        if (stored) lastSummaryAt = stored;
       }
 
       const entries = await readMergedDiary(wallet, 200, 0);
@@ -184,6 +227,9 @@ async function runSummaryJob(): Promise<void> {
 
       if (redis) {
         await redis.set(tgSummaryKey(wallet), String(now));
+      }
+      if (isPostgresConfigured()) {
+        await updateTelegramSummaryTimestamp(wallet, now);
       }
     } catch (err: any) {
       console.warn(`[telegram] Summary failed for ${wallet}:`, err.message);

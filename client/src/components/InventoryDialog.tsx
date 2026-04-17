@@ -70,6 +70,7 @@ export function InventoryDialog(): React.ReactElement | null {
   const [error, setError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<number | null>(null);
+  const [fetchSeq, setFetchSeq] = React.useState(0);
 
   // Custodial wallet (holds items on-chain). Resolved async from agent API.
   const [custodialWallet, setCustodialWallet] = React.useState<string | null>(null);
@@ -124,6 +125,7 @@ export function InventoryDialog(): React.ReactElement | null {
       setError(null);
       setNotice(null);
       setSelected(null);
+      setFetchSeq((n) => n + 1);
     });
   }, []);
 
@@ -132,10 +134,10 @@ export function InventoryDialog(): React.ReactElement | null {
     if (open) void resolveCustodial();
   }, [open, resolveCustodial]);
 
-  // Fetch inventory once itemWallet is available and dialog is open
+  // Fetch inventory every time the dialog opens (fetchSeq bumps on each open event)
   React.useEffect(() => {
     if (open && itemWallet) void fetchInventory();
-  }, [open, itemWallet, fetchInventory]);
+  }, [open, itemWallet, fetchInventory, fetchSeq]);
 
   /* ── Keyboard ─────────────────────────────────────────── */
 

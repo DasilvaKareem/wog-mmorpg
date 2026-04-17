@@ -1,0 +1,169 @@
+{
+  "zoneId": "crystalbloom-terrace",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Opaline",
+      "x": 100,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Terrace Merchant Jasper",
+      "x": 230,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Crystal Guardian Isolde",
+      "x": 360,
+      "y": 80,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Prismatic Gardener Quill",
+      "x": 480,
+      "y": 80,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 550,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 600,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Sprite",
+      "x": 120,
+      "y": 220,
+      "hp": 590,
+      "level": 25,
+      "xpReward": 148
+    },
+    {
+      "type": "mob",
+      "name": "Prismatic Moth",
+      "x": 270,
+      "y": 240,
+      "hp": 640,
+      "level": 27,
+      "xpReward": 160
+    },
+    {
+      "type": "mob",
+      "name": "Bloom Golem",
+      "x": 400,
+      "y": 260,
+      "hp": 670,
+      "level": 28,
+      "xpReward": 168
+    },
+    {
+      "type": "mob",
+      "name": "Lakeside Serpent",
+      "x": 530,
+      "y": 230,
+      "hp": 610,
+      "level": 26,
+      "xpReward": 153
+    },
+    {
+      "type": "mob",
+      "name": "Terrace Guardian",
+      "x": 150,
+      "y": 390,
+      "hp": 730,
+      "level": 30,
+      "xpReward": 183
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Crawler",
+      "x": 310,
+      "y": 400,
+      "hp": 635,
+      "level": 27,
+      "xpReward": 159
+    },
+    {
+      "type": "mob",
+      "name": "Greenhouse Phantom",
+      "x": 460,
+      "y": 390,
+      "hp": 700,
+      "level": 29,
+      "xpReward": 175
+    },
+    {
+      "type": "mob",
+      "name": "Prismatic Beetle",
+      "x": 570,
+      "y": 370,
+      "hp": 605,
+      "level": 26,
+      "xpReward": 151
+    },
+    {
+      "type": "mob",
+      "name": "Bloom Wisp",
+      "x": 200,
+      "y": 520,
+      "hp": 585,
+      "level": 25,
+      "xpReward": 146
+    },
+    {
+      "type": "mob",
+      "name": "Crystal Sentinel",
+      "x": 420,
+      "y": 540,
+      "hp": 790,
+      "level": 32,
+      "xpReward": 198
+    }
+  ]
+}

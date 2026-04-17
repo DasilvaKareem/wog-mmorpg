@@ -1,5 +1,4 @@
 import * as THREE from "three";
-import { createSwordshieldattackClip } from "./generated/swordShieldAttackClip.js";
 
 /**
  * Pre-built AnimationClips for humanoid characters.
@@ -1933,6 +1932,704 @@ function createCraftClip(): THREE.AnimationClip {
   ]);
 }
 
+// ── Mine ────────────────────────────────────────────────────────────
+// 1.6s one-shot — overhead pickaxe swing, wide stance, two strikes
+
+function createMineClip(): THREE.AnimationClip {
+  const d = 1.6;
+  const h = d / 2;
+
+  return new THREE.AnimationClip("mine", d, [
+    // Wide squat stance
+    quatTrack("L_Hip", [0, 0.15, h, h + 0.15, d], [
+      [0, 0, 0],
+      [0.25, 0, -0.1],
+      [0.25, 0, -0.1],
+      [0.25, 0, -0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.15, h, h + 0.15, d], [
+      [0, 0, 0],
+      [0.25, 0, 0.1],
+      [0.25, 0, 0.1],
+      [0.25, 0, 0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.15, d], [
+      [0, 0, 0],
+      [0.35, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.15, d], [
+      [0, 0, 0],
+      [0.35, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Two overhead swings — raise, slam, raise, slam
+    quatTrack("R_Shoulder", [0, 0.25, 0.45, 0.55, h + 0.05, h + 0.25, d], [
+      [0, 0, -0.1],
+      [-2.2, 0, -0.3],   // wind up high
+      [0.6, 0, 0.1],     // STRIKE down
+      [0.3, 0, 0],       // recoil
+      [-2.2, 0, -0.3],   // wind up again
+      [0.6, 0, 0.1],     // STRIKE
+      [0, 0, -0.1],
+    ]),
+    quatTrack("R_Arm", [0, 0.25, 0.45, h + 0.05, h + 0.25, d], [
+      [0, 0, 0],
+      [-1.4, 0, 0],      // elbow back for wind-up
+      [-0.2, 0, 0],
+      [-1.4, 0, 0],
+      [-0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Left arm grips handle too
+    quatTrack("L_Shoulder", [0, 0.25, 0.45, h + 0.05, h + 0.25, d], [
+      [0, 0, 0],
+      [-1.8, 0, 0.3],
+      [0.4, 0, -0.1],
+      [-1.8, 0, 0.3],
+      [0.4, 0, -0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.25, 0.45, d], [
+      [0, 0, 0],
+      [-1.2, 0, 0],
+      [-0.3, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Torso leans into swings
+    quatTrack("Spine", [0, 0.25, 0.45, 0.55, h + 0.05, h + 0.25, d], [
+      [0, 0, 0],
+      [-0.15, 0, 0],
+      [0.3, 0, 0],       // lean forward on strike
+      [0.15, 0, 0],
+      [-0.15, 0, 0],
+      [0.3, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.45, h + 0.25, d], [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Forage ──────────────────────────────────────────────────────────
+// 2.0s one-shot — kneel down, gently pluck, examine, stand
+
+function createForageClip(): THREE.AnimationClip {
+  const d = 2.0;
+
+  return new THREE.AnimationClip("forage", d, [
+    // Deep kneel
+    quatTrack("L_Hip", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.7, 0, 0],
+      [0.7, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.5, 0, 0],
+      [0.5, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [1.1, 0, 0],       // deep knee bend
+      [1.1, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.8, 0, 0],
+      [0.8, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Lean forward to reach
+    quatTrack("Spine", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.5, 0, 0],
+      [0.45, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.3, 0, 0],
+      [0.25, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Right hand reaches down, plucks delicately, brings up to examine
+    quatTrack("R_Shoulder", [0, 0.5, 0.8, 1.0, 1.3, d], [
+      [0, 0, 0],
+      [1.6, 0, 0],       // reach down
+      [1.7, 0, 0.15],    // pluck (slight twist)
+      [1.4, 0, -0.1],    // pull up
+      [-0.3, 0, 0],      // bring to face to examine
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.5, 0.8, 1.3, d], [
+      [0, 0, 0],
+      [-0.2, 0, 0],
+      [-0.1, 0, 0.1],    // wrist twist for pluck
+      [-0.8, 0, 0],      // hold up to face
+      [0, 0, 0],
+    ]),
+    // Left arm braces on knee
+    quatTrack("L_Shoulder", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [0.8, 0, 0],
+      [0.8, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.5, 1.3, d], [
+      [0, 0, 0],
+      [-0.6, 0, 0],
+      [-0.6, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head looks down then up at item
+    quatTrack("Head", [0, 0.5, 1.0, 1.3, d], [
+      [0, 0, 0],
+      [0.3, 0, 0],       // look at ground
+      [0.3, 0, 0],
+      [-0.15, 0, 0],     // look at held item
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Skin ────────────────────────────────────────────────────────────
+// 1.8s one-shot — crouch beside carcass, lateral scraping strokes
+
+function createSkinClip(): THREE.AnimationClip {
+  const d = 1.8;
+
+  // 3 scraping strokes
+  const strokeTimes: number[] = [];
+  const rShoulderEulers: [number, number, number][] = [];
+  const rArmEulers: [number, number, number][] = [];
+  const chestEulers: [number, number, number][] = [];
+  for (let i = 0; i < 3; i++) {
+    const t = 0.35 + i * 0.4;
+    // Start of stroke (arm to one side)
+    strokeTimes.push(t);
+    rShoulderEulers.push([0.8, 0.4, 0]);
+    rArmEulers.push([-0.3, 0, 0]);
+    chestEulers.push([0.3, 0.1, 0]);
+    // End of stroke (sweep across)
+    strokeTimes.push(t + 0.25);
+    rShoulderEulers.push([0.8, -0.5, 0]);
+    rArmEulers.push([-0.2, 0, 0]);
+    chestEulers.push([0.3, -0.1, 0]);
+  }
+
+  return new THREE.AnimationClip("skin", d, [
+    // Crouch low beside target
+    quatTrack("L_Hip", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [0.6, 0, -0.15],
+      [0.6, 0, -0.15],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hip", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [0.4, 0, 0.1],
+      [0.4, 0, 0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [0.9, 0, 0],
+      [0.9, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Knee", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [0.7, 0, 0],
+      [0.7, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Spine", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [0.45, 0, 0],
+      [0.45, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Scraping strokes
+    quatTrack("R_Shoulder", strokeTimes, rShoulderEulers),
+    quatTrack("R_Arm", strokeTimes, rArmEulers),
+    quatTrack("Chest", strokeTimes, chestEulers),
+    // Left hand holds carcass steady
+    quatTrack("L_Shoulder", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [1.0, 0, 0],
+      [1.0, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.25, 1.55, d], [
+      [0, 0, 0],
+      [-0.5, 0, 0],
+      [-0.5, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head watches work
+    quatTrack("Head", [0, 0.25, d], [
+      [0, 0, 0],
+      [0.25, 0.1, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Brew ────────────────────────────────────────────────────────────
+// 2.2s one-shot — stand at cauldron, circular stirring, sprinkle ingredient
+
+function createBrewClip(): THREE.AnimationClip {
+  const d = 2.2;
+
+  // Circular stirring: 4 rotations of the right arm
+  const stirTimes: number[] = [];
+  const rShoulderEulers: [number, number, number][] = [];
+  const steps = 8;
+  for (let i = 0; i <= steps; i++) {
+    const t = 0.3 + (i / steps) * 1.4;
+    const angle = (i / steps) * Math.PI * 2 * 2; // 2 full circles
+    stirTimes.push(t);
+    rShoulderEulers.push([
+      0.6 + Math.sin(angle) * 0.3,
+      Math.cos(angle) * 0.25,
+      0,
+    ]);
+  }
+
+  return new THREE.AnimationClip("brew", d, [
+    // Slight lean forward over cauldron
+    quatTrack("Spine", [0, 0.2, 1.8, d], [
+      [0, 0, 0],
+      [0.2, 0, 0],
+      [0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.2, 1.8, d], [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Stirring arm
+    quatTrack("R_Shoulder", stirTimes, rShoulderEulers),
+    quatTrack("R_Arm", [0, 0.3, 1.7, d], [
+      [0, 0, 0],
+      [-0.6, 0, 0],
+      [-0.6, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Left hand: hold steady then sprinkle ingredient
+    quatTrack("L_Shoulder", [0, 0.2, 1.7, 1.85, 2.0, d], [
+      [0, 0, 0],
+      [0.3, 0, 0.2],     // holding edge
+      [0.3, 0, 0.2],
+      [-0.5, 0, 0.3],    // raise up with ingredient
+      [0.4, 0, 0.1],     // sprinkle in
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.2, 1.85, 2.0, d], [
+      [0, 0, 0],
+      [-0.3, 0, 0],
+      [-0.8, 0, 0],      // wrist tilt for sprinkle
+      [-0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head looks into cauldron
+    quatTrack("Head", [0, 0.2, 1.7, d], [
+      [0, 0, 0],
+      [0.2, 0, 0],
+      [0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Cook ────────────────────────────────────────────────────────────
+// 1.8s one-shot — chopping motion then toss into pan
+
+function createCookClip(): THREE.AnimationClip {
+  const d = 1.8;
+
+  // 4 chops
+  const chopTimes: number[] = [];
+  const rShoulderEulers: [number, number, number][] = [];
+  const rArmEulers: [number, number, number][] = [];
+  for (let i = 0; i < 4; i++) {
+    const t = 0.15 + i * 0.28;
+    // Raise knife
+    chopTimes.push(t);
+    rShoulderEulers.push([-0.8, 0, -0.1]);
+    rArmEulers.push([-0.6, 0, 0]);
+    // Chop down
+    chopTimes.push(t + 0.15);
+    rShoulderEulers.push([0.3, 0, 0]);
+    rArmEulers.push([-0.2, 0, 0]);
+  }
+
+  return new THREE.AnimationClip("cook", d, [
+    // Slight forward lean at counter
+    quatTrack("Spine", [0, 0.1, 1.3, d], [
+      [0, 0, 0],
+      [0.15, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Chopping arm
+    quatTrack("R_Shoulder", chopTimes, rShoulderEulers),
+    quatTrack("R_Arm", chopTimes, rArmEulers),
+    // Left hand steadies food
+    quatTrack("L_Shoulder", [0, 0.1, 1.3, 1.5, d], [
+      [0, 0, 0],
+      [0.5, 0, 0],       // hold food
+      [0.5, 0, 0],
+      [0.8, 0, 0.2],     // scoop and toss
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.1, 1.3, 1.5, d], [
+      [0, 0, 0],
+      [-0.4, 0, 0],
+      [-0.4, 0, 0],
+      [-0.2, 0, 0.1],    // flip wrist for toss
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.1, 1.3, d], [
+      [0, 0, 0],
+      [0.1, 0, 0],
+      [0.1, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head looks down at cutting
+    quatTrack("Head", [0, 0.1, 1.3, d], [
+      [0, 0, 0],
+      [0.2, 0, 0],
+      [0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Enchant ─────────────────────────────────────────────────────────
+// 2.4s one-shot — raise arms, channel energy, pulse, release
+
+function createEnchantClip(): THREE.AnimationClip {
+  const d = 2.4;
+
+  // Pulsing hand movement during channel
+  const pulseTimes: number[] = [];
+  const lShoulderEulers: [number, number, number][] = [];
+  const rShoulderEulers: [number, number, number][] = [];
+  for (let i = 0; i <= 6; i++) {
+    const t = 0.5 + (i / 6) * 1.4;
+    const pulse = Math.sin((i / 6) * Math.PI * 3) * 0.15;
+    pulseTimes.push(t);
+    lShoulderEulers.push([-1.2 + pulse, 0, 0.4 - pulse]);
+    rShoulderEulers.push([-1.2 - pulse, 0, -0.4 + pulse]);
+  }
+
+  return new THREE.AnimationClip("enchant", d, [
+    // Arms raise and channel
+    quatTrack("L_Shoulder", pulseTimes, lShoulderEulers),
+    quatTrack("R_Shoulder", pulseTimes, rShoulderEulers),
+    // Hands splay open during channel
+    quatTrack("L_Arm", [0, 0.5, 1.9, d], [
+      [0, 0, 0],
+      [-0.3, 0, -0.3],
+      [-0.3, 0, -0.3],
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.5, 1.9, d], [
+      [0, 0, 0],
+      [-0.3, 0, 0.3],
+      [-0.3, 0, 0.3],
+      [0, 0, 0],
+    ]),
+    // Spine arches back slightly then forward on release
+    quatTrack("Spine", [0, 0.5, 1.5, 1.9, d], [
+      [0, 0, 0],
+      [-0.1, 0, 0],      // lean back
+      [-0.15, 0, 0],     // deeper arch
+      [0.2, 0, 0],       // thrust forward on release
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.5, 1.5, 1.9, d], [
+      [0, 0, 0],
+      [-0.1, 0, 0],
+      [-0.12, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head tilts back during channel, snaps forward on release
+    quatTrack("Head", [0, 0.5, 1.5, 1.9, d], [
+      [0, 0, 0],
+      [-0.2, 0, 0],
+      [-0.25, 0, 0],
+      [0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Neck twist for mystical feel
+    quatTrack("Neck", [0, 0.5, 1.0, 1.5, 1.9, d], [
+      [0, 0, 0],
+      [0, 0.1, 0],
+      [0, -0.1, 0],
+      [0, 0.1, 0],
+      [0, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Carve ───────────────────────────────────────────────────────────
+// 2.0s one-shot — hunched over workpiece, small precise taps/cuts
+// Used for leatherworking and jewelcrafting
+
+function createCarveClip(): THREE.AnimationClip {
+  const d = 2.0;
+
+  // 5 precise taps
+  const tapTimes: number[] = [];
+  const rShoulderEulers: [number, number, number][] = [];
+  const rArmEulers: [number, number, number][] = [];
+  for (let i = 0; i < 5; i++) {
+    const t = 0.3 + i * 0.3;
+    // Raise (small)
+    tapTimes.push(t);
+    rShoulderEulers.push([0.3, 0, -0.05]);
+    rArmEulers.push([-0.5, 0, 0]);
+    // Tap
+    tapTimes.push(t + 0.12);
+    rShoulderEulers.push([0.6, 0, 0.05]);
+    rArmEulers.push([-0.25, 0, 0]);
+    // Settle
+    tapTimes.push(t + 0.22);
+    rShoulderEulers.push([0.5, 0, 0]);
+    rArmEulers.push([-0.3, 0, 0]);
+  }
+
+  return new THREE.AnimationClip("carve", d, [
+    // Hunched posture
+    quatTrack("Spine", [0, 0.2, 1.8, d], [
+      [0, 0, 0],
+      [0.35, 0, 0],
+      [0.35, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Chest", [0, 0.2, 1.8, d], [
+      [0, 0, 0],
+      [0.2, 0, 0],
+      [0.2, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Precise tapping hand
+    quatTrack("R_Shoulder", tapTimes, rShoulderEulers),
+    quatTrack("R_Arm", tapTimes, rArmEulers),
+    // Left hand holds workpiece, rotates it occasionally
+    quatTrack("L_Shoulder", [0, 0.2, 0.8, 1.4, 1.8, d], [
+      [0, 0, 0],
+      [0.5, 0, 0.1],
+      [0.5, 0.1, 0.1],   // rotate piece
+      [0.5, -0.1, 0.1],  // rotate other way
+      [0.5, 0, 0.1],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.2, 1.8, d], [
+      [0, 0, 0],
+      [-0.7, 0, 0],
+      [-0.7, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head peers closely at work
+    quatTrack("Head", [0, 0.2, 1.0, 1.8, d], [
+      [0, 0, 0],
+      [0.25, 0.1, 0],
+      [0.25, -0.1, 0],   // shift gaze
+      [0.25, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Mage Auto-Attack (Magic Bolt) ───────────────────────────────────
+// 0.50s — quick one-handed bolt throw. Right hand flicks forward.
+// 0-0.10 chamber | 0.10-0.18 THROW | 0.18-0.30 follow-through | 0.30-0.50 settle
+
+function createMagicBoltClip(): THREE.AnimationClip {
+  const d = 0.50;
+
+  return new THREE.AnimationClip("magicbolt", d, [
+    // Right arm: chambers back then flicks forward
+    quatTrack("R_Shoulder", [0, 0.10, 0.18, 0.30, d], [
+      [0, 0, 0],
+      [-1.0, 0, -0.3],          // chamber — hand back by ear
+      [0.7, 0, 0.15],           // THROW — arm snaps forward
+      [0.3, 0, 0.05],           // follow-through
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.10, 0.18, 0.30, d], [
+      [0, 0, 0],
+      [-1.0, 0, 0],             // elbow bent — loading
+      [-0.1, 0, 0],             // extends on throw
+      [-0.15, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Right hand: cups energy → FLINGS open
+    quatTrack("R_Hand", [0, 0.08, 0.16, 0.18, 0.30, d], [
+      [0, 0, 0],
+      [-0.3, 0, -0.3],          // fingers curling — gathering
+      [-0.4, 0, -0.4],          // cupped
+      [0.5, 0, 0.4],            // FLING — palm opens
+      [0.15, 0, 0.1],
+      [0, 0, 0],
+    ]),
+    // Left arm: stays low, slight stabilizing gesture
+    quatTrack("L_Shoulder", [0, 0.10, 0.18, d], [
+      [0, 0, 0],
+      [-0.3, 0, -0.15],         // slight lift
+      [-0.15, 0, -0.08],
+      [0, 0, 0],
+    ]),
+    // Chest: slight lean back then forward into throw
+    quatTrack("Chest", [0, 0.10, 0.18, 0.30, d], [
+      [0, 0, 0],
+      [0.12, 0.08, 0],          // lean back
+      [-0.25, -0.05, 0],        // thrust forward
+      [-0.08, 0, 0],
+      [0, 0, 0],
+    ]),
+    // Head: tracks target
+    quatTrack("Head", [0, 0.10, 0.18, d], [
+      [0, 0, 0],
+      [-0.05, 0.05, 0],         // slight tilt
+      [-0.10, 0, 0],            // focused on target
+      [0, 0, 0],
+    ]),
+    // Spine: minimal twist
+    quatTrack("Spine", [0, 0.10, 0.18, d], [
+      [0, 0, 0],
+      [0.05, 0.06, 0],
+      [-0.08, -0.03, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
+// ── Ranger Bow Shot ─────────────────────────────────────────────────
+// 0.70s — reach → nock → DRAW → hold → RELEASE → follow-through
+// Left arm stays extended (bow hand), right arm pulls back (string hand)
+// 0-0.12 reach | 0.12-0.28 draw | 0.28-0.34 hold | 0.34-0.38 RELEASE | 0.38-0.55 follow | 0.55-0.70 settle
+
+function createBowShotClip(): THREE.AnimationClip {
+  const d = 0.70;
+
+  return new THREE.AnimationClip("bowshot", d, [
+    // Left arm: extends forward holding bow — stays steady
+    quatTrack("L_Shoulder", [0, 0.12, 0.28, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [0.8, 0, 0.15],           // arm up and slightly out
+      [0.85, 0, 0.10],          // steady aim — bow arm locked
+      [0.75, 0, 0.12],          // slight recoil on release
+      [0.4, 0, 0.08],           // lowering
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Arm", [0, 0.12, 0.38, d], [
+      [0, 0, 0],
+      [-0.15, 0, 0],            // nearly straight — holding bow
+      [-0.10, 0, 0],            // locked
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Hand", [0, 0.12, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [-0.3, 0, 0.2],           // gripping bow
+      [-0.35, 0, 0.25],         // tight grip during draw
+      [-0.1, 0, 0.1],           // relax
+      [0, 0, 0],
+    ]),
+    // Right arm: reaches back to nock → DRAWS string → RELEASES
+    quatTrack("R_Shoulder", [0, 0.08, 0.12, 0.28, 0.34, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [-0.6, 0, -0.3],          // reach back for arrow
+      [-0.4, 0, -0.15],         // nocking
+      [-1.8, 0, -0.35],         // FULL DRAW — elbow way back
+      [-1.9, 0, -0.40],         // hold at anchor
+      [0.3, 0, 0.1],            // RELEASE — hand snaps forward
+      [0.15, 0, 0.05],          // follow-through
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Arm", [0, 0.12, 0.28, 0.34, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [-0.8, 0, 0],             // elbow bent reaching for arrow
+      [-1.6, 0, 0],             // deeply bent — string at full draw
+      [-1.7, 0, 0],             // anchor point
+      [-0.1, 0, 0],             // SNAP straight on release
+      [-0.15, 0, 0],            // settle
+      [0, 0, 0],
+    ]),
+    quatTrack("R_Hand", [0, 0.12, 0.28, 0.34, 0.38, d], [
+      [0, 0, 0],
+      [-0.4, 0, -0.2],          // fingers hooking string
+      [-0.5, 0, -0.3],          // pulling
+      [-0.5, 0, -0.3],          // HOLD — fingers on string
+      [0.5, 0, 0.3],            // RELEASE — fingers open
+      [0, 0, 0],
+    ]),
+    // Chest: slight rotation toward target, lean into draw
+    quatTrack("Chest", [0, 0.12, 0.28, 0.38, 0.55, d], [
+      [0, 0, 0],
+      [-0.08, 0.15, 0],         // rotate toward target, slight lean
+      [-0.12, 0.20, 0.05],      // full aim — chest opens
+      [-0.05, 0.05, 0],         // release — unwind
+      [-0.02, 0.02, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("Spine", [0, 0.12, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [-0.05, 0.10, 0],         // slight twist
+      [-0.08, 0.12, 0],         // aiming
+      [-0.02, 0.03, 0],
+      [0, 0, 0],
+    ]),
+    // Head: looks down at arrow → snaps to target → tracks release
+    quatTrack("Head", [0, 0.08, 0.12, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [-0.15, -0.10, 0],        // glance at arrow hand
+      [-0.08, 0.05, 0],         // look forward at target
+      [-0.12, 0.08, 0],         // focused aim — slight squint lean
+      [-0.05, 0, 0],            // watch arrow fly
+      [0, 0, 0],
+    ]),
+    // Hips: weight shifts to front foot during draw
+    quatTrack("Hip", [0, 0.12, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [0.03, 0.08, 0],          // slight rotation with chest
+      [0.05, 0.10, 0],          // weight forward
+      [0, 0.03, 0],
+      [0, 0, 0],
+    ]),
+    // Front leg braces
+    quatTrack("L_Hip", [0, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [0.15, 0, 0],             // brace
+      [0.08, 0, 0],
+      [0, 0, 0],
+    ]),
+    quatTrack("L_Knee", [0, 0.28, 0.38, d], [
+      [0, 0, 0],
+      [0.12, 0, 0],             // slight bend
+      [0.05, 0, 0],
+      [0, 0, 0],
+    ]),
+  ]);
+}
+
 // ── Library singleton ───────────────────────────────────────────────
 
 export class AnimationLibrary {
@@ -1945,7 +2642,8 @@ export class AnimationLibrary {
         createWalkClip(),
         createIdleClip(),
         createAttackClip(),
-        createSwordshieldattackClip(),
+        createMagicBoltClip(),
+        createBowShotClip(),
         createHeroicStrikeClip(),
         createCleaveClip(),
         createShieldWallClip(),
@@ -1964,6 +2662,13 @@ export class AnimationLibrary {
         createDeathClip(),
         createGatherClip(),
         createCraftClip(),
+        createMineClip(),
+        createForageClip(),
+        createSkinClip(),
+        createBrewClip(),
+        createCookClip(),
+        createEnchantClip(),
+        createCarveClip(),
       ];
       for (const c of all) {
         this.clips.set(c.name, c);

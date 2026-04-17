@@ -1,6 +1,7 @@
 import "../config/devLocalContracts.js";
 import { ethers } from "ethers";
 import { BITE } from "@skalenetwork/bite";
+import { createManagedFeeProvider } from "./feePolicy.js";
 
 /** SKALE Base Mainnet (ID 1187947933) — BITE V2 encryption */
 export const SKALE_BASE_CHAIN_ID = Number(process.env.SKALE_BASE_CHAIN_ID || 1187947933);
@@ -10,7 +11,7 @@ export const SKALE_BASE_RPC_URL =
   "https://skale-base.skalenodes.com/v1/base";
 
 /** JSON-RPC provider for SKALE Base mainnet. */
-export const biteProvider = new ethers.JsonRpcProvider(SKALE_BASE_RPC_URL);
+export const biteProvider = createManagedFeeProvider(SKALE_BASE_RPC_URL);
 
 export const biteSigner = process.env.SERVER_PRIVATE_KEY
   ? new ethers.Wallet(process.env.SERVER_PRIVATE_KEY, biteProvider)

@@ -1,0 +1,169 @@
+{
+  "zoneId": "dewveil-orchard",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Liora",
+      "x": 100,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Orchard Trader Finch",
+      "x": 230,
+      "y": 80,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Grove Warden Sylvia",
+      "x": 360,
+      "y": 80,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Orchardist Bramwell",
+      "x": 480,
+      "y": 80,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 550,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 600,
+      "y": 80,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Orchard Sprite",
+      "x": 120,
+      "y": 220,
+      "hp": 200,
+      "level": 10,
+      "xpReward": 50
+    },
+    {
+      "type": "mob",
+      "name": "Vine Strangler",
+      "x": 270,
+      "y": 250,
+      "hp": 250,
+      "level": 12,
+      "xpReward": 63
+    },
+    {
+      "type": "mob",
+      "name": "Fruit Bat Swarm",
+      "x": 400,
+      "y": 230,
+      "hp": 220,
+      "level": 11,
+      "xpReward": 55
+    },
+    {
+      "type": "mob",
+      "name": "Trellis Golem",
+      "x": 530,
+      "y": 260,
+      "hp": 300,
+      "level": 14,
+      "xpReward": 75
+    },
+    {
+      "type": "mob",
+      "name": "Dew Spider",
+      "x": 150,
+      "y": 380,
+      "hp": 280,
+      "level": 13,
+      "xpReward": 70
+    },
+    {
+      "type": "mob",
+      "name": "Apple Treant",
+      "x": 310,
+      "y": 400,
+      "hp": 340,
+      "level": 15,
+      "xpReward": 85
+    },
+    {
+      "type": "mob",
+      "name": "Orchard Wasp",
+      "x": 450,
+      "y": 390,
+      "hp": 210,
+      "level": 11,
+      "xpReward": 53
+    },
+    {
+      "type": "mob",
+      "name": "Grape Crawler",
+      "x": 570,
+      "y": 370,
+      "hp": 240,
+      "level": 12,
+      "xpReward": 60
+    },
+    {
+      "type": "mob",
+      "name": "Root Horror",
+      "x": 200,
+      "y": 520,
+      "hp": 370,
+      "level": 16,
+      "xpReward": 93
+    },
+    {
+      "type": "mob",
+      "name": "Blossom Wisp",
+      "x": 420,
+      "y": 540,
+      "hp": 195,
+      "level": 10,
+      "xpReward": 49
+    }
+  ]
+}

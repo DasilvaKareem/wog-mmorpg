@@ -13,6 +13,7 @@ import type {
 } from "../types/pvp.js";
 import { randomUUID } from "crypto";
 import { getMapByLevel, getMapByFormat } from "./coliseumMaps.js";
+import { resolveEntity } from "../world/zoneRuntime.js";
 
 const MAX_QUEUE_TIME_MS = 120000; // 2 minutes max queue time
 const ELO_RANGE_BASE = 100; // Initial ELO range for matching
@@ -80,6 +81,19 @@ export class MatchmakingSystem {
   }
 
   /**
+   * Return which formats an agent is currently queued in (empty if none).
+   */
+  getQueuedFormats(agentId: string): PvPFormat[] {
+    const formats: PvPFormat[] = [];
+    for (const [fmt, queue] of this.queues) {
+      if (queue.entries.some((e) => e.agentId === agentId)) {
+        formats.push(fmt);
+      }
+    }
+    return formats;
+  }
+
+  /**
    * Get queue status for a format
    */
   getQueueStatus(format: PvPFormat): {
@@ -117,6 +131,22 @@ export class MatchmakingSystem {
     const queue = this.queues.get(format);
     if (!queue) return null;
 
+    // Purge stale entries only when they include an explicit live entity reference.
+    // `agentId` is an identity key, not always a current world entity id.
+    const before = queue.entries.length;
+    queue.entries = queue.entries.filter((e) => {
+      if (!e.entityId) return true;
+      const entity = resolveEntity(e.entityId);
+      if (!entity) {
+        console.log(`[pvp-debug] purged stale queue entry: agent=${e.agentId} entity=${e.entityId} (entity gone)`);
+        return false;
+      }
+      return true;
+    });
+    if (queue.entries.length < before) {
+      console.log(`[pvp-debug] ${format} queue pruned: ${before} → ${queue.entries.length}`);
+    }
+
     // Not enough players
     if (queue.entries.length < queue.minPlayers) {
       return null;
@@ -148,6 +178,8 @@ export class MatchmakingSystem {
     // Sort by queue time (oldest first for fairness)
     entries.sort((a, b) => a.queuedAt - b.queuedAt);
 
+    console.log(`[pvp-debug] findBalancedMatch ${queue.format}: ${entries.length} entries, need ${queue.minPlayers}`);
+
     // For each potential match starter, try to build a team
     for (const starter of entries) {
       const timeInQueue = now - starter.queuedAt;
@@ -160,9 +192,14 @@ export class MatchmakingSystem {
         return Math.abs(e.elo - starter.elo) <= eloRange;
       });
 
+      if (candidates.length < queue.minPlayers) {
+        console.log(`[pvp-debug] starter agent=${starter.agentId} elo=${starter.elo} range=${eloRange}: ${candidates.length} candidates (not enough)`);
+      }
+
       if (candidates.length >= queue.minPlayers) {
         // Take the required number of players
         const matchPlayers = candidates.slice(0, queue.maxPlayers);
+        console.log(`[pvp-debug] match formed! players: ${matchPlayers.map((p) => `agent=${p.agentId} elo=${p.elo}`).join(", ")}`);
 
         // For team formats, balance teams by ELO
         if (queue.format !== "ffa") {
@@ -176,6 +213,7 @@ export class MatchmakingSystem {
     // Force match if someone has been waiting too long
     const oldestEntry = entries[0];
     if (oldestEntry && now - oldestEntry.queuedAt > MAX_QUEUE_TIME_MS) {
+      console.log(`[pvp-debug] force-match triggered: oldest waited ${Math.round((now - oldestEntry.queuedAt) / 1000)}s`);
       // Just take the first N players
       return entries.slice(0, queue.maxPlayers);
     }

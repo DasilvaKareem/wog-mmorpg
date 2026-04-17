@@ -4,5 +4,39 @@
   "biome": "farmland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "ember-hearth",
+      "name": "Ember Hearth",
+      "type": "landmark",
+      "position": { "x": 350, "z": 300 },
+      "radius": 16,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "estate-tavern",
+      "name": "The Smoldering Flagon",
+      "type": "structure",
+      "position": { "x": 460, "z": 380 },
+      "radius": 24,
+      "tags": ["rest"],
+      "structure": { "kind": "tavern", "capacity": 10, "services": ["rest", "quest"], "npcs": ["innkeeper"] }
+    },
+    {
+      "id": "estate-shop",
+      "name": "Estate Goods",
+      "type": "structure",
+      "position": { "x": 240, "z": 220 },
+      "radius": 22,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "estate-drive",
+      "name": "Estate Drive",
+      "nodes": ["estate-shop", "ember-hearth", "estate-tavern"]
+    }
+  ]
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest, walletsMatch } from "../auth/auth.js";
 import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
-import { mintGold, mintItem } from "../blockchain/blockchain.js";
+import { enqueueGoldMint, enqueueItemMint } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
@@ -2151,12 +2151,12 @@ export const QUEST_CATALOG: Quest[] = [
     id: "viridian_ore_expedition",
     title: "Ore Expedition",
     description:
-      "Barak runs his thumb along a gold nugget. 'The Range is rich in gold, but miners won't go near the upper veins. Bring me five Gold Ore and I'll make it worth your while.'",
+      "Barak runs his thumb along a gold nugget. 'The Range is rich in gold, but miners won't go near the upper veins. Bring me five chunks from the Gold Veins and I'll make it worth your while.'",
     npcId: "Gemloch Overseer Barak",
     prerequisiteQuestId: "viridian_overseers_task",
     objective: {
       type: "gather",
-      targetItemName: "Gold Ore",
+      targetItemName: "Gold",
       count: 5,
     },
     rewards: {
@@ -2859,10 +2859,10 @@ export const QUEST_CATALOG: Quest[] = [
     id: "emerald_fern_gather",
     title: "Roots of Renewal",
     description:
-      "Fern opens her satchel. 'I need Silverleaf — it only grows where ancient roots drink deep. Gather four bundles from the herb patches in the older groves.'",
+      "Fern opens her satchel. 'I need Sage — it only grows where ancient roots drink deep. Gather four bundles from the herb patches in the older groves.'",
     npcId: "Herbalist Fern",
     prerequisiteQuestId: "emerald_fern_intro",
-    objective: { type: "gather", targetItemName: "Silverleaf", count: 4 },
+    objective: { type: "gather", targetItemName: "Sage", count: 4 },
     rewards: { copper: 400, xp: 1000, items: [{ tokenId: 72, quantity: 2 }] },
   },
   {
@@ -2900,10 +2900,10 @@ export const QUEST_CATALOG: Quest[] = [
     id: "viridian_helga_ore",
     title: "Vein Tapping",
     description:
-      "Helga points to the glittering cliff face. 'Iron Ore — the backbone of every army. Mine five from the upper veins. I'll split the profits.'",
+      "Helga points to the glittering cliff face. 'Silver Ore — the backbone of every arsenal. Mine five from the upper veins. I'll split the profits.'",
     npcId: "Prospector Helga",
     prerequisiteQuestId: "viridian_helga_intro",
-    objective: { type: "gather", targetItemName: "Iron Ore", count: 5 },
+    objective: { type: "gather", targetItemName: "Silver", count: 5 },
     rewards: { copper: 500, xp: 1200, items: [{ tokenId: 73, quantity: 2 }] },
   },
   {
@@ -2982,10 +2982,10 @@ export const QUEST_CATALOG: Quest[] = [
     id: "felsrock_korra_salvage",
     title: "Salvage Run",
     description:
-      "Korra sketches furiously. 'The old armory has Mithril Ore sealed behind collapsed walls. Mine four chunks — I need them for rune-forging.'",
+      "Korra sketches furiously. 'The old armory has Gold Veins sealed behind collapsed walls. Mine four chunks — I need them for rune-forging.'",
     npcId: "Runesmith Korra",
     prerequisiteQuestId: "felsrock_korra_intro",
-    objective: { type: "gather", targetItemName: "Mithril Ore", count: 4 },
+    objective: { type: "gather", targetItemName: "Gold", count: 4 },
     rewards: { copper: 750, xp: 1700, items: [{ tokenId: 74, quantity: 2 }] },
   },
   {
@@ -3360,11 +3360,11 @@ export const QUEST_CATALOG: Quest[] = [
     id: "farm_jewel_sunstone",
     title: "Sunstone Prospecting",
     description:
-      "Farmhand Amos pulls a rough gem from his pocket. 'Found this in the fields last week. The soil here is full of minerals — perfect for a Jewelcrafter. Gather 3 gems from the ore nodes around the farmlands. Cut them and they'll fetch a fortune.'",
+      "Farmhand Amos pulls a rough gem from his pocket. 'Found this in the fields last week. The soil here is full of minerals — perfect for a Jewelcrafter. Defeat 3 creatures and collect the rough gems they drop. Cut them and they'll fetch a fortune.'",
     npcId: "Farmhand Amos",
     objective: {
       type: "gather",
-      targetItemName: "Rough Gem",
+      targetItemName: "Rough",
       count: 3,
     },
     rewards: {
@@ -3600,14 +3600,14 @@ export async function awardQuestRewards(
   // Award gold — convert copper reward to on-chain gold (10,000 copper = 1 gold)
   if (player.walletAddress && quest.rewards.copper > 0) {
     const goldReward = copperToGold(quest.rewards.copper);
-    await mintGold(player.walletAddress, goldReward.toString()).catch(
+    await enqueueGoldMint(player.walletAddress, goldReward.toString()).catch(
       (err) => console.error(`[quest] Failed to mint gold for ${player.name}:`, err)
     );
 
     // Award item rewards
     if (quest.rewards.items) {
       for (const item of quest.rewards.items) {
-        await mintItem(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
+        await enqueueItemMint(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
           (err) =>
             console.error(
               `[quest] Failed to mint item ${item.tokenId} x${item.quantity} for ${player.name}:`,
@@ -4114,10 +4114,11 @@ export function registerQuestRoutes(server: FastifyInstance) {
     );
 
     // NPC speaks during the talk quest interaction
+    const npcLine = pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title);
     const talkZoneId = request.body.zoneId ?? player.region ?? "unknown";
     logZoneEvent({
       zoneId: talkZoneId, type: "chat", tick: 0,
-      message: `${npcName}: ${pickNpcLine(NPC_QUEST_COMPLETE_LINES, player.name, quest.title)}`,
+      message: `${npcName}: ${npcLine}`,
       entityId: npcEntityId, entityName: npcName,
     });
     logZoneEvent({
@@ -4143,6 +4144,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
       },
       rewards: quest.rewards,
       totalCompleted: player.completedQuests.length,
+      npcDialogue: npcLine,
     };
   });
 
@@ -4193,6 +4195,7 @@ export function registerQuestRoutes(server: FastifyInstance) {
           required: quest?.objective.count ?? 0,
           complete: quest ? isQuestComplete(quest, aq.progress) : false,
           rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+          npcEntityId: quest ? (getNpcIdByName(quest.npcId) ?? null) : null,
         };
       });
 

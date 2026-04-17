@@ -894,13 +894,13 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
   "Sunflower Golem": {
     mobName: "Sunflower Golem",
     copperMin: 8, copperMax: 18,
-    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 3, chance: 0.5 }, { tokenId: 190n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 3, chance: 0.5 }, { tokenId: 190n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }, { tokenId: 116n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }], // Rough Ruby
     skinningDrops: [],
   },
   "Hay Elemental": {
     mobName: "Hay Elemental",
     copperMin: 10, copperMax: 22,
-    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }],
+    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, { tokenId: 117n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }], // Rough Sapphire
     skinningDrops: [],
   },
   "Corn Stalker": {
@@ -1004,6 +1004,75 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 65, copperMax: 120,
     autoDrops: [{ tokenId: 191n, minQuantity: 3, maxQuantity: 5, chance: 0.5 }, { tokenId: 195n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
     skinningDrops: [],
+  },
+  "Field Wraith": {
+    mobName: "Field Wraith",
+    copperMin: 20, copperMax: 40,
+    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, { tokenId: 190n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [],
+  },
+  "Petal Golem": {
+    mobName: "Petal Golem",
+    copperMin: 35, copperMax: 65,
+    autoDrops: [{ tokenId: 190n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }, { tokenId: 196n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [],
+  },
+  "Stone Terrace Guard": {
+    mobName: "Stone Terrace Guard",
+    copperMin: 45, copperMax: 80,
+    autoDrops: [{ tokenId: 191n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, { tokenId: 192n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }],
+    skinningDrops: [],
+  },
+  "Iron Beetle": {
+    mobName: "Iron Beetle",
+    copperMin: 40, copperMax: 70,
+    autoDrops: [{ tokenId: 192n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, { tokenId: 191n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [{ tokenId: 64n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }],
+  },
+  // sunflower-fields mobs
+  "Stray Dog": {
+    mobName: "Stray Dog",
+    copperMin: 3, copperMax: 7,
+    autoDrops: [{ tokenId: 1n, minQuantity: 1, maxQuantity: 1, chance: 0.4 }],
+    skinningDrops: [{ tokenId: 62n, minQuantity: 1, maxQuantity: 1, chance: 0.5 }],
+  },
+  "Garden Spider": {
+    mobName: "Garden Spider",
+    copperMin: 2, copperMax: 5,
+    autoDrops: [],
+    skinningDrops: [{ tokenId: 62n, minQuantity: 1, maxQuantity: 1, chance: 0.4 }],
+  },
+  "Barn Owl": {
+    mobName: "Barn Owl",
+    copperMin: 4, copperMax: 10,
+    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [{ tokenId: 68n, minQuantity: 1, maxQuantity: 1, chance: 0.5 }],
+  },
+  "Angry Rooster": {
+    mobName: "Angry Rooster",
+    copperMin: 3, copperMax: 8,
+    autoDrops: [{ tokenId: 1n, minQuantity: 1, maxQuantity: 1, chance: 0.4 }],
+    skinningDrops: [{ tokenId: 68n, minQuantity: 1, maxQuantity: 1, chance: 0.4 }],
+  },
+  "Crop Beetle": {
+    mobName: "Crop Beetle",
+    copperMin: 2, copperMax: 6,
+    autoDrops: [{ tokenId: 219n, minQuantity: 1, maxQuantity: 1, chance: 0.2 }],
+    skinningDrops: [{ tokenId: 62n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+  },
+  // goldenreach-grange
+  "Sun Scorpion": {
+    mobName: "Sun Scorpion",
+    copperMin: 8, copperMax: 18,
+    autoDrops: [{ tokenId: 193n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }],
+    skinningDrops: [{ tokenId: 63n, minQuantity: 1, maxQuantity: 1, chance: 0.5 }],
+  },
+  // moonpetal-gardens
+  "Luminous Beetle": {
+    mobName: "Luminous Beetle",
+    copperMin: 30, copperMax: 55,
+    autoDrops: [{ tokenId: 213n, minQuantity: 1, maxQuantity: 1, chance: 0.3 }, { tokenId: 118n, minQuantity: 1, maxQuantity: 1, chance: 0.1 }],
+    skinningDrops: [{ tokenId: 64n, minQuantity: 1, maxQuantity: 2, chance: 0.5 }],
   },
 };
 

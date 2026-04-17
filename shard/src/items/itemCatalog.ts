@@ -35,6 +35,8 @@ export interface ItemDefinition {
   category: "consumable" | "weapon" | "armor" | "material" | "tool";
   equipSlot?: EquipmentSlot;
   armorSlot?: ArmorSlot;
+  /** Explicit XR visual binding for equipped rendering. Null means intentionally unsupported. */
+  xrVisualId?: string | null;
   statBonuses?: ItemStatBonuses;
   maxDurability?: number;
 }
@@ -2097,7 +2099,151 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     statBonuses: { str: 16, faith: 8 },
     maxDurability: 105,
   },
+  // --- Warrior Modular Set (XR donor-backed) ---
+  {
+    tokenId: 243n,
+    name: "Mercenary Cuirass",
+    description: "A battle-worn cuirass built for bruisers who expect to be in the first clash. +11 DEF, +4 STR.",
+    copperPrice: 240,
+    category: "armor",
+    equipSlot: "chest",
+    armorSlot: "chest",
+    statBonuses: { def: 11, str: 4, hp: 10 },
+    maxDurability: 110,
+  },
+  {
+    tokenId: 244n,
+    name: "Raider Warhelm",
+    description: "A blunt iron warhelm with reinforced brow plates. +7 DEF, +2 STR.",
+    copperPrice: 170,
+    category: "armor",
+    equipSlot: "helm",
+    armorSlot: "helm",
+    statBonuses: { def: 7, str: 2, hp: 4 },
+    maxDurability: 90,
+  },
+  {
+    tokenId: 245n,
+    name: "Gladiator Greaves",
+    description: "Segmented greaves made to survive the arena and the road back from it. +9 DEF, +2 AGI.",
+    copperPrice: 210,
+    category: "armor",
+    equipSlot: "legs",
+    armorSlot: "legs",
+    statBonuses: { def: 9, agi: 2, hp: 6 },
+    maxDurability: 105,
+  },
+  {
+    tokenId: 246n,
+    name: "Mercenary Pauldrons",
+    description: "Wide, practical shoulder plates that favor coverage over ceremony. +8 DEF, +2 STR.",
+    copperPrice: 190,
+    category: "armor",
+    equipSlot: "shoulders",
+    armorSlot: "shoulders",
+    statBonuses: { def: 8, str: 2, hp: 4 },
+    maxDurability: 95,
+  },
+  {
+    tokenId: 247n,
+    name: "Raider Warbelt",
+    description: "A thick warbelt with plated fasteners that braces the core in heavy combat. +5 DEF, +8 HP.",
+    copperPrice: 160,
+    category: "armor",
+    equipSlot: "belt",
+    armorSlot: "belt",
+    statBonuses: { def: 5, hp: 8 },
+    maxDurability: 90,
+  },
+  {
+    tokenId: 248n,
+    name: "Arena Gauntlets",
+    description: "Reinforced gauntlets with ridged knuckles for close, ugly fights. +6 DEF, +3 STR.",
+    copperPrice: 175,
+    category: "armor",
+    equipSlot: "gloves",
+    armorSlot: "gloves",
+    statBonuses: { def: 6, str: 3, hp: 2 },
+    maxDurability: 95,
+  },
+  {
+    tokenId: 249n,
+    name: "Warpath Sabatons",
+    description: "Heavy sabatons built to hold ground under a charge. +7 DEF, +2 AGI.",
+    copperPrice: 180,
+    category: "armor",
+    equipSlot: "boots",
+    armorSlot: "boots",
+    statBonuses: { def: 7, agi: 2, hp: 3 },
+    maxDurability: 98,
+  },
 ];
+
+function resolveItemXrVisualId(item: Pick<ItemDefinition, "tokenId" | "equipSlot">): string | null {
+  switch (Number(item.tokenId)) {
+    case 7:   return "shield_wood";
+    case 8:   return "worker_vest";
+    case 9:   return "knight_plate";
+    case 10:  return "soldier_helm";
+    case 12:  return "ninja_legs";
+    case 13:  return "boots_leather";
+    case 14:  return "soldier_gear";
+    case 15:  return "gloves_leather";
+    case 16:  return "oldclassy_belt";
+    case 17:  return "knight_detail";
+    case 18:  return "boots_plate";
+    case 19:  return "gloves_plate";
+    case 20:  return "warrior_belt";
+    case 21:  return "knight_pauldrons";
+    case 93:  return "boots_leather";
+    case 91:  return "worker_vest";
+    case 92:  return "ninja_legs";
+    case 94:  return "worker_hat";
+    case 95:  return "soldier_gear";
+    case 96:  return "gloves_leather";
+    case 97:  return "elf_belt";
+    case 98:  return "ninja_suit";
+    case 99:  return "ninja_legs";
+    case 100: return "boots_leather";
+    case 101: return "elf_hood";
+    case 102: return "ninja_wraps";
+    case 103: return "gloves_plate";
+    case 104: return "elf_belt";
+    case 122: return "ring_ruby";
+    case 123: return "ring_sapphire";
+    case 124: return "ring_emerald";
+    case 125: return "amulet_diamond";
+    case 126: return "amulet_shadow_opal";
+    case 127: return "amulet_arcane_crystal";
+    case 185: return "knight_gold_plate";
+    case 186: return "warrior_helm";
+    case 187: return "warrior_legs";
+    case 188: return "boots_plate";
+    case 189: return "warrior_shoulders";
+    case 224: return "shield_kite";
+    case 225: return "shield_tower";
+    case 226: return "shield_bulwark";
+    case 227: return "cape_travelers";
+    case 228: return "cape_shadow";
+    case 229: return "cape_dragonscale";
+    case 230: return "cape_archmage";
+    case 243: return "warrior_chest";
+    case 244: return "warrior_helm";
+    case 245: return "warrior_legs";
+    case 246: return "warrior_shoulders";
+    case 247: return "warrior_belt";
+    case 248: return "gloves_plate";
+    case 249: return "boots_plate";
+    default:
+      return item.equipSlot ? null : null;
+  }
+}
+
+for (const item of ITEM_CATALOG) {
+  if (item.equipSlot) {
+    item.xrVisualId = resolveItemXrVisualId(item);
+  }
+}
 
 export function getItemByTokenId(tokenId: bigint): ItemDefinition | undefined {
   return ITEM_CATALOG.find((item) => item.tokenId === tokenId);

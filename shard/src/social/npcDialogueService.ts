@@ -147,6 +147,13 @@ function defaultSuggestedActions(persona: NpcPersona, questState: QuestStateView
   ];
 }
 
+/** Pick a random entry from an array, seeded loosely by the player message to avoid repeating on the same input */
+function pick<T>(arr: T[], seed: string): T {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = ((h << 5) - h + seed.charCodeAt(i)) | 0;
+  return arr[Math.abs(h) % arr.length];
+}
+
 function buildDeterministicDraft(
   persona: NpcPersona,
   npc: Entity,
@@ -156,6 +163,7 @@ function buildDeterministicDraft(
 ): NpcDialogueDraft {
   const text = message.trim().toLowerCase();
   const hasBriefing = (player.storyFlags ?? []).includes(SCOUT_KAELA_BRIEFED_FLAG);
+  const pName = player.name ?? "adventurer";
 
   if (npc.name === SCOUT_KAELA_NAME && !hasBriefing) {
     return {
@@ -168,10 +176,16 @@ function buildDeterministicDraft(
     };
   }
 
+  // ── Completable quest — ready to turn in ──
   if (questState.completable.length > 0) {
     const quest = questState.completable[0].quest;
+    const replies = [
+      `You've done the work on "${quest.title}". Come turn it in and claim what's yours, ${pName}.`,
+      `"${quest.title}" — finished, I take it? Report back and I'll see you rewarded.`,
+      `I can see it in your eyes, ${pName}. "${quest.title}" is done. Let's settle up.`,
+    ];
     return {
-      reply: `${persona.name === npc.name ? "" : `${npc.name} `}looks you over. "${quest.title}" is finished. If you're ready, send your champion to report in and collect the reward."`,
+      reply: pick(replies, text),
       intent: "quest_turn_in",
       referencesQuestId: quest.id,
       suggestedActions: [
@@ -181,6 +195,7 @@ function buildDeterministicDraft(
     };
   }
 
+  // ── Keyword: rewards/pay ──
   if (/\b(reward|pay|earn|gold|xp)\b/.test(text) && questState.active.length > 0) {
     const quest = questState.active[0].quest;
     return {
@@ -191,11 +206,12 @@ function buildDeterministicDraft(
     };
   }
 
+  // ── Keyword: directions ──
   if (/\b(where|lost|direction|directions|go next|next)\b/.test(text)) {
     if (questState.active.length > 0) {
       const quest = questState.active[0];
       return {
-        reply: `Stay focused on "${quest.quest.title}". Your next step is simple: ${objectiveLabel(quest.quest)}. You're ${quest.progress}/${quest.required} through it.`,
+        reply: `Stay focused on "${quest.quest.title}". Your next step: ${objectiveLabel(quest.quest)}. You're ${quest.progress}/${quest.required} through it.`,
         intent: "quest_progress",
         referencesQuestId: quest.quest.id,
         suggestedActions: defaultSuggestedActions(persona, questState),
@@ -212,28 +228,153 @@ function buildDeterministicDraft(
     }
   }
 
+  // ── Keyword: acceptance/enthusiasm ("lets do it", "accept", "I'll take it", "sure", "yes") ──
+  if (/\b(do it|accept|take it|i'm in|im in|sign me up|sure|yes|ready|let'?s go|on it)\b/.test(text)) {
+    if (questState.available.length > 0) {
+      const quest = questState.available[0];
+      const replies = [
+        `That's the spirit, ${pName}. "${quest.title}" is yours. ${objectiveLabel(quest)} — don't keep me waiting.`,
+        `Good. I need someone who doesn't hesitate. "${quest.title}": ${objectiveLabel(quest).toLowerCase()}. Get it done.`,
+        `Glad to hear it. Head out and ${objectiveLabel(quest).toLowerCase()} for "${quest.title}". Report back when it's finished.`,
+      ];
+      return {
+        reply: pick(replies, text),
+        intent: "offer_quest",
+        referencesQuestId: quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+    if (questState.active.length > 0) {
+      const quest = questState.active[0];
+      const replies = [
+        `You're already on "${quest.quest.title}" — ${quest.progress}/${quest.required}. Keep at it, ${pName}.`,
+        `I like the enthusiasm. You've got "${quest.quest.title}" in progress. ${objectiveLabel(quest.quest)} and you're ${quest.progress}/${quest.required} done.`,
+      ];
+      return {
+        reply: pick(replies, text),
+        intent: "quest_progress",
+        referencesQuestId: quest.quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+  }
+
+  // ── Keyword: greetings ──
+  if (/\b(hello|hi|hey|greetings|howdy|yo|sup|what'?s up|good (morning|evening|day))\b/.test(text)) {
+    if (questState.active.length > 0) {
+      const quest = questState.active[0];
+      const replies = [
+        `${pName}. I see you're working on "${quest.quest.title}" — ${quest.progress}/${quest.required}. Keep pushing.`,
+        `Back again? "${quest.quest.title}" won't finish itself. You're ${quest.progress}/${quest.required} through it.`,
+        `Good to see you, ${pName}. How's "${quest.quest.title}" going? ${quest.progress} of ${quest.required} so far.`,
+      ];
+      return {
+        reply: pick(replies, text),
+        intent: "quest_progress",
+        referencesQuestId: quest.quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+    if (questState.available.length > 0) {
+      const quest = questState.available[0];
+      const replies = [
+        `${pName}, good timing. I've got work that needs doing — "${quest.title}". Interested?`,
+        `Ah, a capable face. I could use your help with "${quest.title}". ${quest.description}`,
+        `Welcome, ${pName}. If you're looking for purpose, I've got "${quest.title}" on the board.`,
+      ];
+      return {
+        reply: pick(replies, text),
+        intent: "offer_quest",
+        referencesQuestId: quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+    return {
+      reply: pick([
+        `${pName}. Not much to report right now. Check back later — things change fast around here.`,
+        `Good to see you, ${pName}. No urgent work at the moment, but stay sharp.`,
+      ], text),
+      intent: "greeting",
+      suggestedActions: defaultSuggestedActions(persona, questState),
+    };
+  }
+
+  // ── Keyword: asking about quest/help/work ──
+  if (/\b(quest|job|work|task|mission|help|need|anything)\b/.test(text)) {
+    if (questState.active.length > 0) {
+      const quest = questState.active[0];
+      return {
+        reply: `You've already got "${quest.quest.title}" on your plate. ${objectiveLabel(quest.quest)} — ${quest.progress}/${quest.required} done. Focus on that first.`,
+        intent: "quest_progress",
+        referencesQuestId: quest.quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+    if (questState.available.length > 0) {
+      const quest = questState.available[0];
+      return {
+        reply: `Matter of fact, I do have something. "${quest.title}" — ${quest.description} Think you can handle it?`,
+        intent: "offer_quest",
+        referencesQuestId: quest.id,
+        suggestedActions: defaultSuggestedActions(persona, questState),
+      };
+    }
+  }
+
+  // ── Keyword: lore/story/tell me ──
+  if (/\b(lore|story|tell me|history|about|rumor|rumour|news)\b/.test(text)) {
+    const loreReplies = [
+      `${npc.name} leans in. "This land has its secrets, ${pName}. Keep your eyes open and your blade sharp."`,
+      `"Plenty of history in these walls. But history won't save you — skill will."`,
+      `"Word travels fast here. If something's brewing, you'll know soon enough."`,
+    ];
+    return {
+      reply: pick(loreReplies, text),
+      intent: "lore",
+      suggestedActions: defaultSuggestedActions(persona, questState),
+    };
+  }
+
+  // ── Fallback: active quest ──
   if (questState.active.length > 0) {
     const quest = questState.active[0];
+    const replies = [
+      `"${quest.quest.title}" — you're ${quest.progress}/${quest.required}. ${objectiveLabel(quest.quest)} and report back, ${pName}.`,
+      `Still working on "${quest.quest.title}"? You need ${quest.required - quest.progress} more. Get to it.`,
+      `Focus, ${pName}. "${quest.quest.title}" needs ${objectiveLabel(quest.quest).toLowerCase()}. You're ${quest.progress}/${quest.required} through.`,
+    ];
     return {
-      reply: `"${quest.quest.title}" is still in motion. ${objectiveLabel(quest.quest)}. You're ${quest.progress}/${quest.required} through it, so keep your champion on task.`,
+      reply: pick(replies, text),
       intent: "quest_progress",
       referencesQuestId: quest.quest.id,
       suggestedActions: defaultSuggestedActions(persona, questState),
     };
   }
 
+  // ── Fallback: available quest ──
   if (questState.available.length > 0) {
     const quest = questState.available[0];
+    const replies = [
+      `I've got work for you, ${pName}. "${quest.title}" — ${quest.description}`,
+      `${npc.name} sizes you up. "I need someone for '${quest.title}'. ${quest.description} You in?"`,
+      `There's a problem that needs solving — "${quest.title}". ${quest.description} Interested, ${pName}?`,
+    ];
     return {
-      reply: `${npc.name} sets their attention on you. "${quest.title}" is the work that matters right now. ${quest.description}`,
+      reply: pick(replies, text),
       intent: "offer_quest",
       referencesQuestId: quest.id,
       suggestedActions: defaultSuggestedActions(persona, questState),
     };
   }
 
+  // ── No quests at all ──
+  const idleReplies = [
+    `${npc.name} nods. "Nothing pressing right now, ${pName}. But stick around — things change."`,
+    `"You've done good work. I'll send word if something comes up, ${pName}."`,
+    `"No tasks at the moment. Rest up — you've earned it."`,
+  ];
   return {
-    reply: `${npc.name} keeps their tone ${persona.tone}. "I've said what matters. If you're looking for purpose, keep your eyes open and your champion moving."`,
+    reply: pick(idleReplies, text),
     intent: npc.name === SCOUT_KAELA_NAME ? "tutorial" : "greeting",
     suggestedActions: defaultSuggestedActions(persona, questState),
   };
@@ -435,7 +576,8 @@ export async function generateNpcDialogueResponse(
         draft = llmDraft;
         provider = "llm";
       }
-    } catch {
+    } catch (err: any) {
+      console.error(`[npc-dialogue] LLM call failed: ${err?.message ?? err}`);
       provider = "deterministic";
     }
   }

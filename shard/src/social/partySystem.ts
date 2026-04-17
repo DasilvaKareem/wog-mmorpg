@@ -2,7 +2,17 @@ import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { getEntity, getAllEntities } from "../world/zoneRuntime.js";
-import { getRedis } from "../redis.js";
+import { getRedis, scanKeys } from "../redis.js";
+import {
+  deletePersistedParty,
+  deletePersistedPartyWallet,
+  getPersistedPartyById,
+  getPersistedPartyForWallet,
+  listPersistedPartyIds,
+  savePersistedParty,
+} from "../db/partyStore.js";
+import { listFreshPartyInvites, replacePartyInvites } from "../db/runtimeMetaStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
 
 interface Party {
   id: string;
@@ -47,13 +57,17 @@ function entityIdForWallet(wallet: string): string | null {
 }
 
 async function loadPersistedParty(partyId: string): Promise<Party | null> {
-  const redis = getRedis();
-  if (!redis) return null;
+  const persisted =
+    await getPersistedPartyById(partyId).catch(() => null)
+    ?? await (async () => {
+      const redis = getRedis();
+      if (!redis) return null;
+      const raw = await redis.get(partyKey(partyId));
+      if (!raw) return null;
+      return JSON.parse(raw) as PersistedParty;
+    })();
+  if (!persisted) return null;
 
-  const raw = await redis.get(partyKey(partyId));
-  if (!raw) return null;
-
-  const persisted = JSON.parse(raw) as PersistedParty;
   const memberIds = persisted.memberWallets
     .map((wallet) => entityIdForWallet(wallet))
     .filter((entityId): entityId is string => !!entityId);
@@ -84,9 +98,6 @@ async function loadPersistedParty(partyId: string): Promise<Party | null> {
 
 /** Persist party to Redis (fire-and-forget). */
 function persistParty(party: Party): void {
-  const redis = getRedis();
-  if (!redis) return;
-
   // Resolve wallet addresses from entity IDs
   const memberWallets: string[] = [];
   let leaderWallet = "";
@@ -113,6 +124,13 @@ function persistParty(party: Party): void {
     shareGold: party.shareGold,
   };
 
+  void savePersistedParty(persisted).catch((err) => {
+    console.warn(`[party] Failed to persist Postgres party ${party.id}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
+  const redis = getRedis();
+  if (!redis) return;
+
   const tx = redis.multi();
   tx.sadd(PARTY_IDS_KEY, party.id);
   tx.set(partyKey(party.id), JSON.stringify(persisted));
@@ -124,6 +142,10 @@ function persistParty(party: Party): void {
 
 /** Remove party from Redis. */
 function unpersistParty(partyId: string, wallets: string[]): void {
+  void deletePersistedParty(partyId).catch((err) => {
+    console.warn(`[party] Failed to delete Postgres party ${partyId}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
+
   const redis = getRedis();
   if (!redis) return;
 
@@ -138,6 +160,9 @@ function unpersistParty(partyId: string, wallets: string[]): void {
 
 /** Remove a single wallet from Redis party mapping. */
 function unpersistWallet(wallet: string): void {
+  void deletePersistedPartyWallet(wallet).catch((err) => {
+    console.warn(`[party] Failed to delete Postgres wallet mapping for ${wallet}: ${String(err?.message ?? err).slice(0, 140)}`);
+  });
   const redis = getRedis();
   if (!redis) return;
   redis.del(walletPartyKey(wallet.toLowerCase())).catch(() => {});
@@ -151,19 +176,22 @@ export async function rehydratePartyMembership(entityId: string, walletAddress: 
   // Already linked in-memory (shouldn't happen, but guard)
   if (playerToParty.has(entityId)) return;
 
-  const redis = getRedis();
-  if (!redis) return;
-
   const wallet = walletAddress.toLowerCase();
 
   try {
-    const partyId = await redis.get(walletPartyKey(wallet));
+    const persisted = await getPersistedPartyForWallet(wallet).catch(() => null);
+    const partyId = persisted?.id ?? await (async () => {
+      const redis = getRedis();
+      if (!redis) return null;
+      return await redis.get(walletPartyKey(wallet));
+    })();
     if (!partyId) return;
 
     const party = parties.get(partyId) ?? await loadPersistedParty(partyId);
     if (!party) {
       // Stale wallet key — clean up
-      redis.del(walletPartyKey(wallet)).catch(() => {});
+      const redis = getRedis();
+      redis?.del(walletPartyKey(wallet)).catch(() => {});
       return;
     }
 
@@ -174,10 +202,15 @@ export async function rehydratePartyMembership(entityId: string, walletAddress: 
     playerToParty.set(entityId, partyId);
 
     // Resolve leader
-    const raw = await redis.get(partyKey(partyId));
-    const persisted = raw ? (JSON.parse(raw) as PersistedParty) : null;
-    if (persisted?.leaderWallet === wallet) party.leaderId = entityId;
-    if (persisted?.leaderWallet === wallet) party.leaderWallet = wallet;
+    const fallbackRaw = await (async () => {
+      const redis = getRedis();
+      if (!redis) return null;
+      return await redis.get(partyKey(partyId));
+    })();
+    const fallbackPersisted = fallbackRaw ? (JSON.parse(fallbackRaw) as PersistedParty) : null;
+    const leaderWallet = persisted?.leaderWallet ?? fallbackPersisted?.leaderWallet ?? null;
+    if (leaderWallet === wallet) party.leaderId = entityId;
+    if (leaderWallet === wallet) party.leaderWallet = wallet;
     // If leader hasn't spawned yet, assign first member as interim leader
     if (!party.leaderId && party.memberIds.length > 0 && party.leaderWallet === wallet) {
       party.leaderId = party.memberIds[0];
@@ -206,7 +239,11 @@ const PARTY_INVITE_KEY_PREFIX = "wog:party:invites:";
 function partyInviteKey(wallet: string): string { return `${PARTY_INVITE_KEY_PREFIX}${wallet.toLowerCase()}`; }
 
 async function persistInvites(wallet: string, invites: PartyInvite[]): Promise<void> {
-  pendingInvites.set(wallet.toLowerCase(), invites);
+  const normalized = wallet.toLowerCase();
+  pendingInvites.set(normalized, invites);
+  if (isPostgresConfigured()) {
+    await replacePartyInvites(normalized, invites, INVITE_TTL_MS);
+  }
   const redis = getRedis();
   if (!redis) return;
   if (invites.length === 0) {
@@ -221,6 +258,11 @@ async function persistInvites(wallet: string, invites: PartyInvite[]): Promise<v
 
 async function freshInvites(wallet: string): Promise<PartyInvite[]> {
   const normalized = wallet.toLowerCase();
+  if (isPostgresConfigured()) {
+    const persisted = await listFreshPartyInvites(normalized, Date.now());
+    pendingInvites.set(normalized, persisted);
+    return persisted;
+  }
   const redis = getRedis();
   if (redis) {
     try {
@@ -783,13 +825,15 @@ export function getPartyMembers(playerId: string): string[] {
 }
 
 export async function restorePartiesFromRedis(): Promise<number> {
-  const redis = getRedis();
-  if (!redis) return 0;
-
-  let partyIds = await redis.smembers(PARTY_IDS_KEY);
-  if (!Array.isArray(partyIds) || partyIds.length === 0) {
-    const legacyKeys = await redis.keys(`${PARTY_KEY_PREFIX}party_*`);
-    partyIds = legacyKeys.map((key) => key.slice(PARTY_KEY_PREFIX.length));
+  let partyIds = await listPersistedPartyIds().catch(() => []);
+  if ((!Array.isArray(partyIds) || partyIds.length === 0) && !isPostgresConfigured()) {
+    const redis = getRedis();
+    if (!redis) return 0;
+    partyIds = await redis.smembers(PARTY_IDS_KEY);
+    if (!Array.isArray(partyIds) || partyIds.length === 0) {
+      const legacyKeys = await scanKeys(`${PARTY_KEY_PREFIX}party_*`);
+      partyIds = legacyKeys.map((key: string) => key.slice(PARTY_KEY_PREFIX.length));
+    }
   }
   if (!Array.isArray(partyIds) || partyIds.length === 0) return 0;
 
@@ -817,6 +861,15 @@ export function areInSameParty(playerId1: string, playerId2: string): boolean {
 // Helper to get a player's party ID (or undefined if solo)
 export function getPlayerPartyId(playerId: string): string | undefined {
   return playerToParty.get(playerId);
+}
+
+export function getPartyMemberIdsByPartyId(partyId: string): string[] | null {
+  const party = parties.get(partyId);
+  return party ? [...party.memberIds] : null;
+}
+
+export function getPartyLeaderIdByPartyId(partyId: string): string | undefined {
+  return parties.get(partyId)?.leaderId;
 }
 
 // Helper to get a party leader ID (or the player themselves if solo)

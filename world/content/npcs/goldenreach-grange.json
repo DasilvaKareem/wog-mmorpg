@@ -1,0 +1,169 @@
+{
+  "zoneId": "goldenreach-grange",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Aurelia",
+      "x": 80,
+      "y": 100,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Prairie Supplier Holt",
+      "x": 200,
+      "y": 100,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Grange Overseer Cassandra",
+      "x": 320,
+      "y": 100,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Golden Harvester Rowan",
+      "x": 440,
+      "y": 100,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 530,
+      "y": 100,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 590,
+      "y": 100,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Prairie Wolf",
+      "x": 110,
+      "y": 240,
+      "hp": 95,
+      "level": 5,
+      "xpReward": 24
+    },
+    {
+      "type": "mob",
+      "name": "Windmill Golem",
+      "x": 260,
+      "y": 260,
+      "hp": 155,
+      "level": 8,
+      "xpReward": 39
+    },
+    {
+      "type": "mob",
+      "name": "Plateau Hawk",
+      "x": 390,
+      "y": 280,
+      "hp": 110,
+      "level": 6,
+      "xpReward": 28
+    },
+    {
+      "type": "mob",
+      "name": "Dust Devil",
+      "x": 510,
+      "y": 250,
+      "hp": 130,
+      "level": 7,
+      "xpReward": 33
+    },
+    {
+      "type": "mob",
+      "name": "Golden Scarecrow",
+      "x": 140,
+      "y": 390,
+      "hp": 175,
+      "level": 9,
+      "xpReward": 44
+    },
+    {
+      "type": "mob",
+      "name": "Grain Thief",
+      "x": 280,
+      "y": 410,
+      "hp": 105,
+      "level": 6,
+      "xpReward": 27
+    },
+    {
+      "type": "mob",
+      "name": "Sun Scorpion",
+      "x": 420,
+      "y": 400,
+      "hp": 125,
+      "level": 7,
+      "xpReward": 31
+    },
+    {
+      "type": "mob",
+      "name": "Field Wraith",
+      "x": 550,
+      "y": 380,
+      "hp": 200,
+      "level": 10,
+      "xpReward": 50
+    },
+    {
+      "type": "mob",
+      "name": "Harvest Spider",
+      "x": 170,
+      "y": 530,
+      "hp": 150,
+      "level": 8,
+      "xpReward": 38
+    },
+    {
+      "type": "mob",
+      "name": "Ranch Hand Skeleton",
+      "x": 380,
+      "y": 550,
+      "hp": 230,
+      "level": 11,
+      "xpReward": 58
+    }
+  ]
+}

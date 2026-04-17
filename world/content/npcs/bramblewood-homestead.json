@@ -1,0 +1,169 @@
+{
+  "zoneId": "bramblewood-homestead",
+  "npcs": [
+    {
+      "type": "merchant",
+      "name": "Plot Registrar Thornton",
+      "x": 100,
+      "y": 70,
+      "hp": 999,
+      "shopItems": [
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        220,
+        221,
+        222,
+        223
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Briar Merchant Eldon",
+      "x": 230,
+      "y": 70,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199
+      ]
+    },
+    {
+      "type": "quest-giver",
+      "name": "Homestead Warden Garrick",
+      "x": 360,
+      "y": 70,
+      "hp": 999
+    },
+    {
+      "type": "profession-trainer",
+      "name": "Thorn Cultivator Brenna",
+      "x": 480,
+      "y": 70,
+      "hp": 999,
+      "teachesProfession": "herbalism"
+    },
+    {
+      "type": "forge",
+      "name": "Farmer's Forge",
+      "x": 550,
+      "y": 70,
+      "hp": 9999
+    },
+    {
+      "type": "campfire",
+      "name": "Farm Campfire",
+      "x": 600,
+      "y": 70,
+      "hp": 9999
+    },
+    {
+      "type": "mob",
+      "name": "Thorn Sprite",
+      "x": 120,
+      "y": 210,
+      "hp": 150,
+      "level": 8,
+      "xpReward": 38
+    },
+    {
+      "type": "mob",
+      "name": "Bramble Wolf",
+      "x": 280,
+      "y": 230,
+      "hp": 200,
+      "level": 10,
+      "xpReward": 50
+    },
+    {
+      "type": "mob",
+      "name": "Mushroom Crawler",
+      "x": 420,
+      "y": 250,
+      "hp": 170,
+      "level": 9,
+      "xpReward": 43
+    },
+    {
+      "type": "mob",
+      "name": "Hedgerow Bear",
+      "x": 540,
+      "y": 220,
+      "hp": 260,
+      "level": 12,
+      "xpReward": 65
+    },
+    {
+      "type": "mob",
+      "name": "Bramble Viper",
+      "x": 150,
+      "y": 370,
+      "hp": 190,
+      "level": 10,
+      "xpReward": 48
+    },
+    {
+      "type": "mob",
+      "name": "Thorned Stag",
+      "x": 310,
+      "y": 390,
+      "hp": 220,
+      "level": 11,
+      "xpReward": 55
+    },
+    {
+      "type": "mob",
+      "name": "Forest Boar",
+      "x": 460,
+      "y": 380,
+      "hp": 165,
+      "level": 9,
+      "xpReward": 42
+    },
+    {
+      "type": "mob",
+      "name": "Root Elemental",
+      "x": 570,
+      "y": 360,
+      "hp": 290,
+      "level": 13,
+      "xpReward": 72
+    },
+    {
+      "type": "mob",
+      "name": "Bark Beetle",
+      "x": 200,
+      "y": 510,
+      "hp": 145,
+      "level": 8,
+      "xpReward": 36
+    },
+    {
+      "type": "mob",
+      "name": "Spore Walker",
+      "x": 400,
+      "y": 530,
+      "hp": 195,
+      "level": 10,
+      "xpReward": 49
+    }
+  ]
+}

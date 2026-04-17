@@ -9,7 +9,7 @@ import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest, verifyEntityOwnership } from "../auth/auth.js";
 import { saveCharacter } from "../character/characterStore.js";
-import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
 import { getOrCreateZone } from "../world/zoneRuntime.js";
@@ -76,7 +76,7 @@ export function registerForgedTechniqueRoutes(server: FastifyInstance): void {
         return reply.status(404).send({ error: "Player entity not found" });
       }
 
-      if (!verifyEntityOwnership(player.walletAddress, authenticatedWallet)) {
+      if (!(await verifyEntityOwnership(player.walletAddress, authenticatedWallet, playerEntityId))) {
         return reply.status(403).send({ error: "Not authorized to control this player" });
       }
 
@@ -156,7 +156,7 @@ export function registerForgedTechniqueRoutes(server: FastifyInstance): void {
       const onChainGoldStr = await getGoldBalance(player.walletAddress);
       const onChainGold = Number(onChainGoldStr);
       const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-      const availableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
+      const availableGold = await getAvailableGoldAsync(player.walletAddress, safeOnChainGold);
 
       const goldCost = copperToGold(constraints.goldCost);
       if (availableGold < goldCost) {
@@ -179,7 +179,7 @@ export function registerForgedTechniqueRoutes(server: FastifyInstance): void {
       }
 
       // Deduct gold
-      recordGoldSpend(player.walletAddress, goldCost);
+      await recordGoldSpendAsync(player.walletAddress, goldCost);
 
       // Add to learned techniques
       if (!player.learnedTechniques) player.learnedTechniques = [];
@@ -214,7 +214,7 @@ export function registerForgedTechniqueRoutes(server: FastifyInstance): void {
         },
       });
 
-      const newAvailableGold = getAvailableGold(player.walletAddress, safeOnChainGold);
+      const newAvailableGold = await getAvailableGoldAsync(player.walletAddress, safeOnChainGold);
 
       return reply.send({
         ok: true,

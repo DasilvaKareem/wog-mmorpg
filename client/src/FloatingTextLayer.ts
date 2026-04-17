@@ -150,6 +150,7 @@ export class FloatingTextLayer {
       gatherType === "mining" ? "#ffaa33" :
       gatherType === "herbalism" ? "#66dd88" :
       gatherType === "farming" ? "#ddbb44" :
+      gatherType === "skinning" ? "#cc8866" :
       "#ffffff";
 
     this.spawn(pos, {
@@ -159,6 +160,41 @@ export class FloatingTextLayer {
       offsetY: -18,
       duration: 1400,
       scatter: 4,
+    });
+  }
+
+  /**
+   * Show "SKILL UP!" floating text for profession level-ups.
+   * Bright gold, larger text, rises higher than normal.
+   */
+  showSkillUp(
+    eventId: string,
+    pos: Pos,
+    professionLabel: string,
+    newLevel: number,
+  ): void {
+    if (this.seen.has(eventId)) return;
+    this.seen.add(eventId);
+    this.pruneSeen();
+
+    // Main "SKILL UP!" text
+    this.spawn(pos, {
+      text: "SKILL UP!",
+      color: "#ffd700",
+      fontSize: 12,
+      offsetY: -22,
+      duration: 1800,
+      scatter: 0,
+    });
+
+    // Profession + level underneath
+    this.spawn(pos, {
+      text: `${professionLabel} ${newLevel}`,
+      color: "#ffee88",
+      fontSize: 10,
+      offsetY: -12,
+      duration: 1600,
+      scatter: 0,
     });
   }
 

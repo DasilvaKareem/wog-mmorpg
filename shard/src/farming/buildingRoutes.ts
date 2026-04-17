@@ -5,17 +5,13 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { authenticateRequest } from "../auth/auth.js";
-import { getAvailableGold, recordGoldSpend } from "../blockchain/goldLedger.js";
-import { burnItem, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
-import { copperToGold } from "../blockchain/currency.js";
 import {
   getAllBlueprints,
   getBuildingStatus,
-  getNextStageRequirements,
   startBuilding,
-  advanceBuildingStage,
   demolishBuilding,
 } from "./buildingSystem.js";
+import { constructBuildingStage } from "../services/buildingService.js";
 
 export function registerBuildingRoutes(server: FastifyInstance) {
   // GET /building/blueprints — list all building types and their stage requirements
@@ -42,7 +38,7 @@ export function registerBuildingRoutes(server: FastifyInstance) {
     "/building/status/:plotId",
     async (request, reply) => {
       const { plotId } = request.params;
-      const status = getBuildingStatus(plotId);
+      const status = await getBuildingStatus(plotId);
       if (!status) return reply.code(404).send({ error: "Plot not found" });
       return status;
     }
@@ -68,7 +64,7 @@ export function registerBuildingRoutes(server: FastifyInstance) {
         return reply.code(403).send({ error: "Not your character" });
       }
 
-      const result = startBuilding(plotId, walletAddress, buildingType);
+      const result = await startBuilding(plotId, walletAddress, buildingType);
       if (!result.ok) return reply.code(400).send({ error: result.error });
 
       return { ok: true, plot: result.plot, buildingType };
@@ -95,53 +91,14 @@ export function registerBuildingRoutes(server: FastifyInstance) {
         return reply.code(403).send({ error: "Not your character" });
       }
 
-      // Get stage requirements
-      const req = getNextStageRequirements(plotId);
-      if (!req.ok || !req.stage) {
-        return reply.code(400).send({ error: req.error });
-      }
-
-      // Check and deduct gold
-      const copperCost = req.stage.copperCost;
-      if (copperCost > 0) {
-        const goldCost = copperToGold(copperCost);
-        const onChainGold = parseFloat(await getGoldBalance(walletAddress));
-        const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-        const availableGold = getAvailableGold(walletAddress, safeOnChainGold);
-        if (availableGold < goldCost) {
-          return reply.code(400).send({ error: `Not enough gold. Need ${copperCost} copper.` });
-        }
-        recordGoldSpend(walletAddress, goldCost);
-      }
-
-      // Check material balances
-      for (const mat of req.stage.materials) {
-        const balance = await getItemBalance(walletAddress, mat.tokenId);
-        if (balance < BigInt(mat.quantity)) {
-          return reply.code(400).send({
-            error: `Not enough ${mat.name}. Need ${mat.quantity}, have ${balance.toString()}.`,
-          });
-        }
-      }
-
-      // Burn materials
-      for (const mat of req.stage.materials) {
-        try {
-          await burnItem(walletAddress, mat.tokenId, BigInt(mat.quantity));
-        } catch (err: any) {
-          return reply.code(500).send({ error: `Failed to burn ${mat.name}: ${err.message}` });
-        }
-      }
-
-      // Advance stage
-      const result = advanceBuildingStage(plotId, walletAddress);
+      const result = await constructBuildingStage(plotId, walletAddress);
       if (!result.ok) return reply.code(400).send({ error: result.error });
 
       return {
         ok: true,
         newStage: result.newStage,
         complete: result.complete,
-        status: getBuildingStatus(plotId),
+        status: result.status,
       };
     }
   );
@@ -166,7 +123,7 @@ export function registerBuildingRoutes(server: FastifyInstance) {
         return reply.code(403).send({ error: "Not your character" });
       }
 
-      const result = demolishBuilding(plotId, walletAddress);
+      const result = await demolishBuilding(plotId, walletAddress);
       if (!result.ok) return reply.code(400).send({ error: result.error });
 
       return { ok: true, demolished: true };

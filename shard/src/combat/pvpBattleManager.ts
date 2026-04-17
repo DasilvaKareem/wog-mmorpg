@@ -16,6 +16,8 @@ import type {
 import type { BattleAction } from "../types/battle.js";
 import { pvpReputationIntegration } from "./pvpReputationIntegration.js";
 import { getRedis } from "../redis.js";
+import { arenaManager, type ArenaMatchState, type ArenaMatchResult } from "./arenaManager.js";
+import { predictionPoolManager } from "../economy/predictionPoolManager.js";
 
 export interface PvPDatabase {
   // Player stats
@@ -74,6 +76,7 @@ interface PersistedActiveBattleSummary {
   createdAt: number;
 }
 
+const MVP_REWARD_GOLD = 100;
 const REDIS_PVP_PLAYER_STATS_KEY = "pvp:player-stats";
 const REDIS_PVP_MATCH_HISTORY_KEY = "pvp:match-history";
 const REDIS_PVP_QUEUES_KEY = "pvp:queues";
@@ -87,6 +90,7 @@ export class PvPBattleManager {
   private database: PvPDatabase;
   private battleEventHandlers: Map<string, Array<(state: PvPBattleState) => void>>;
   private matchmakingTickInFlight: boolean;
+  private battleToPoolMap: Map<string, string> = new Map();
 
   constructor() {
     this.activeBattles = new Map();
@@ -105,6 +109,11 @@ export class PvPBattleManager {
 
     // Cleanup old queue entries every minute
     setInterval(() => this.matchmaking.cleanupOldEntries(), 60000);
+
+    // Register for arena match completions to update stats/ELO/history
+    arenaManager.setOnMatchComplete((result) => {
+      this.handleArenaMatchCompletion(result);
+    });
   }
 
   private serializePlayerStats(): Record<string, PersistedPvPPlayerStats> {
@@ -268,6 +277,13 @@ export class PvPBattleManager {
   }
 
   /**
+   * Return which formats an agent is currently queued in.
+   */
+  getQueuedFormats(agentId: string): PvPFormat[] {
+    return this.matchmaking.getQueuedFormats(agentId);
+  }
+
+  /**
    * Matchmaking ticker - tries to create matches
    */
   private async tickMatchmaking(): Promise<void> {
@@ -278,9 +294,23 @@ export class PvPBattleManager {
 
     try {
       for (const format of formats) {
+        const queueStatus = this.matchmaking.getQueueStatus(format);
+        if (queueStatus.playersInQueue > 0) {
+          console.log(`[pvp-debug] ${format} queue: ${queueStatus.playersInQueue} players, need ${queueStatus.playersNeeded} more`);
+        }
         const config = this.matchmaking.tryCreateMatch(format);
         if (config) {
-          await this.createBattle(config);
+          const redIds = config.teamRed.map((c) => `${c.agentId}`).join(",");
+          const blueIds = config.teamBlue.map((c) => `${c.agentId}`).join(",");
+          console.log(`[pvp-debug] ${format} match found! red=[${redIds}] blue=[${blueIds}] arena=${config.arena.name}`);
+          try {
+            await this.createBattle(config);
+          } catch (err) {
+            console.error(`[pvp-debug] ${format} createBattle failed: ${(err as Error).message}`);
+            // tryCreateMatch already removed entries from the in-memory queue;
+            // persist so stale entries don't come back after restart
+            this.persistStateEventually("matchmaking-failed");
+          }
         }
       }
     } finally {
@@ -292,26 +322,29 @@ export class PvPBattleManager {
    * Create a new battle
    */
   async createBattle(config: PvPBattleConfig): Promise<string> {
-    const battle = new PvPBattleEngine(config);
+    // Use ArenaManager for in-world PvP — teleport real entities to arena zone
+    try {
+      const battleId = arenaManager.startArenaMatch({
+        teamRedEntityIds: config.teamRed.map((c) => c.agentId),
+        teamBlueEntityIds: config.teamBlue.map((c) => c.agentId),
+        format: config.format,
+        arena: config.arena,
+      });
+      console.log(`[pvp] Arena match started: ${battleId} (${config.format})`);
 
-    // Set to betting phase
-    battle.setBettingPhase();
+      // Create prediction pool for betting (non-blocking)
+      predictionPoolManager.createPool(battleId, 180, 15).then((poolId) => {
+        this.battleToPoolMap.set(battleId, poolId);
+        console.log(`[pvp] Prediction pool ${poolId} created for battle ${battleId}`);
+      }).catch((err) => {
+        console.warn(`[pvp] Prediction pool creation failed (non-fatal): ${(err as Error).message}`);
+      });
 
-    this.activeBattles.set(config.battleId, battle);
-    await this.flushPersistence("createBattle");
-
-    // Schedule battle start after bet lock time
-    setTimeout(() => {
-      if (this.activeBattles.has(config.battleId)) {
-        const b = this.activeBattles.get(config.battleId);
-        if (b && b.battleStatus === "betting") {
-          b.startBattle();
-          this.persistStateEventually("battleStart");
-        }
-      }
-    }, config.betLockTime * 1000);
-
-    return config.battleId;
+      return battleId;
+    } catch (err) {
+      console.error(`[pvp] Failed to start arena match: ${(err as Error).message}`);
+      throw err;
+    }
   }
 
   /**
@@ -325,8 +358,43 @@ export class PvPBattleManager {
    * Get battle state
    */
   getBattleState(battleId: string): PvPBattleState | null {
+    // Check arena manager first (in-world matches)
+    const arenaState = arenaManager.getMatchState(battleId);
+    if (arenaState) return this.arenaStateToLegacy(arenaState);
+    // Fallback to old engine for any lingering battles
     const battle = this.activeBattles.get(battleId);
     return battle ? battle.getState() : null;
+  }
+
+  private arenaStateToLegacy(a: ArenaMatchState): PvPBattleState {
+    const mapCombatant = (c: (typeof a.teamRed)[0], team: "red" | "blue") => ({
+      id: c.entityId, name: c.name, agentId: c.entityId, pvpTeam: team,
+      stats: { hp: c.hp, maxHp: c.maxHp, mp: 0, maxMp: 0, attack: 0, defense: 0, speed: 0 },
+      alive: c.alive, elo: 1000, position: { x: 0, y: 0 },
+    });
+    return {
+      battleId: a.battleId,
+      status: a.status,
+      config: {
+        battleId: a.battleId, format: a.format,
+        duration: Math.round(a.durationTicks / 2), betLockTime: 15, createdAt: Date.now(),
+        arena: { mapId: a.arenaName, name: a.arenaName, tileSet: "", width: 64, height: 64, spawnPoints: { red: [], blue: [] }, obstacles: [], powerUps: [], hazards: [] },
+        teamRed: a.teamRed.map((c) => mapCombatant(c, "red")),
+        teamBlue: a.teamBlue.map((c) => mapCombatant(c, "blue")),
+        executionOrder: "simultaneous", minLevel: 1, maxLevel: 99,
+      },
+      turnCount: Math.round(a.elapsedTicks / 2),
+      log: [],
+      statistics: {
+        teamRedDamage: a.statistics.teamRedDamage,
+        teamBlueDamage: a.statistics.teamBlueDamage,
+        teamRedKills: a.statistics.teamRedKills,
+        teamBlueKills: a.statistics.teamBlueKills,
+        teamRedHealing: 0, teamBlueHealing: 0,
+      },
+      winner: a.winner ?? undefined,
+      mvp: a.mvp?.entityId ?? undefined,
+    } as any;
   }
 
   /**
@@ -378,6 +446,122 @@ export class PvPBattleManager {
       this.activeBattles.delete(battleId);
       this.persistStateEventually("battleCleanup");
     }, 300000);
+  }
+
+  /**
+   * Handle completion of an ArenaManager match — update stats, ELO, and history.
+   */
+  private handleArenaMatchCompletion(result: ArenaMatchResult): void {
+    const isFFA = result.format === "ffa";
+
+    for (const combatant of result.combatants) {
+      const agentId = combatant.entityId;
+      let stats = this.database.playerStats.get(agentId);
+
+      if (!stats) {
+        stats = {
+          walletAddress: combatant.walletAddress ?? "",
+          elo: 1000,
+          wins: 0,
+          losses: 0,
+          currentStreak: 0,
+          bestStreak: 0,
+          totalDamage: 0,
+          totalKills: 0,
+          mvpCount: 0,
+        };
+        this.database.playerStats.set(agentId, stats);
+      }
+
+      // Determine win/loss
+      const won = isFFA
+        ? combatant.entityId === result.ffaWinnerId
+        : combatant.team === result.winner;
+
+      // Calculate ELO change using real stored ELO
+      const opponentElos = result.combatants
+        .filter((c) => (isFFA ? c.entityId !== agentId : c.team !== combatant.team))
+        .map((c) => this.database.playerStats.get(c.entityId)?.elo ?? 1000);
+      const avgOpponentElo = opponentElos.length > 0
+        ? opponentElos.reduce((a, b) => a + b, 0) / opponentElos.length
+        : 1000;
+
+      const expectedScore = 1 / (1 + Math.pow(10, (avgOpponentElo - stats.elo) / 400));
+      const eloChange = Math.round(32 * ((won ? 1 : 0) - expectedScore));
+
+      stats.elo = Math.max(0, stats.elo + eloChange);
+      stats.totalDamage += combatant.damageDealt;
+      stats.totalKills += combatant.kills;
+
+      if (won) {
+        stats.wins++;
+        stats.currentStreak = stats.currentStreak >= 0 ? stats.currentStreak + 1 : 1;
+      } else {
+        stats.losses++;
+        stats.currentStreak = stats.currentStreak <= 0 ? stats.currentStreak - 1 : -1;
+      }
+      stats.bestStreak = Math.max(stats.bestStreak, stats.currentStreak);
+
+      if (result.mvp && result.mvp.entityId === agentId) {
+        stats.mvpCount++;
+      }
+    }
+
+    // Build match history entry
+    const teamRedCombatants = result.combatants.filter((c) => c.team === "red");
+    const teamBlueCombatants = result.combatants.filter((c) => c.team === "blue");
+
+    const matchResult: PvPMatchResult = {
+      battleId: result.battleId,
+      winner: result.winner,
+      duration: result.duration,
+      teamRed: teamRedCombatants.map((c) => ({
+        agentId: c.entityId,
+        walletAddress: c.walletAddress ?? "",
+        eloChange: 0,
+        newElo: this.database.playerStats.get(c.entityId)?.elo ?? 1000,
+      })),
+      teamBlue: teamBlueCombatants.map((c) => ({
+        agentId: c.entityId,
+        walletAddress: c.walletAddress ?? "",
+        eloChange: 0,
+        newElo: this.database.playerStats.get(c.entityId)?.elo ?? 1000,
+      })),
+      mvp: {
+        agentId: result.mvp?.entityId ?? "",
+        walletAddress: result.combatants.find((c) => c.entityId === result.mvp?.entityId)?.walletAddress ?? "",
+        reward: BigInt(MVP_REWARD_GOLD) * BigInt(10 ** 18),
+      },
+    };
+
+    this.database.matchHistory.push({
+      battleId: result.battleId,
+      timestamp: Date.now(),
+      result: matchResult,
+    });
+    this.database.matchHistory = this.database.matchHistory.slice(-MAX_MATCH_HISTORY);
+
+    // Update on-chain reputation
+    void pvpReputationIntegration.updateReputationFromBattle(matchResult);
+
+    // Settle prediction pool
+    const poolId = this.battleToPoolMap.get(result.battleId);
+    if (poolId) {
+      predictionPoolManager.settlePool(poolId, result.winner).then(() => {
+        console.log(`[pvp] Prediction pool ${poolId} settled — winner: ${result.winner}`);
+      }).catch((err) => {
+        console.warn(`[pvp] Prediction pool settlement failed: ${(err as Error).message}`);
+      });
+      this.battleToPoolMap.delete(result.battleId);
+    }
+
+    this.persistStateEventually("arenaMatchCompletion");
+    console.log(`[pvp] Arena match ${result.battleId} stats updated — winner: ${isFFA ? result.ffaWinnerId : result.winner}`);
+  }
+
+  /** Get the prediction pool ID linked to a battle. */
+  getPoolForBattle(battleId: string): string | undefined {
+    return this.battleToPoolMap.get(battleId);
   }
 
   /**
@@ -543,27 +727,27 @@ export class PvPBattleManager {
   /**
    * Get all active battles
    */
-  getActiveBattles(): Array<{
-    battleId: string;
-    format: PvPFormat;
-    status: string;
-    playersCount: number;
-  }> {
-    const battles: Array<{
-      battleId: string;
-      format: PvPFormat;
-      status: string;
-      playersCount: number;
-    }> = [];
+  getActiveBattles(): PvPBattleState[] {
+    const battles: PvPBattleState[] = [];
+
+    for (const match of arenaManager.getActiveMatches()) {
+      const state = arenaManager.getMatchState(match.battleId);
+      if (!state) continue;
+      const legacyState = this.arenaStateToLegacy(state);
+      const poolId = this.getPoolForBattle(match.battleId);
+      if (poolId) {
+        legacyState.config.marketPoolId = poolId;
+      }
+      battles.push(legacyState);
+    }
 
     for (const [battleId, battle] of this.activeBattles.entries()) {
       const state = battle.getState();
-      battles.push({
-        battleId,
-        format: state.config.format,
-        status: state.status,
-        playersCount: state.config.teamRed.length + state.config.teamBlue.length,
-      });
+      const poolId = this.getPoolForBattle(battleId);
+      if (poolId) {
+        state.config.marketPoolId = poolId;
+      }
+      battles.push(state);
     }
 
     return battles;
@@ -580,6 +764,10 @@ export class PvPBattleManager {
    * Get the active battle a player is in (if any)
    */
   getActiveBattleForPlayer(agentId: string): { battleId: string; status: string } | null {
+    // Check arena manager first (agentId is actually entityId in the queue)
+    const arenaMatch = arenaManager.getMatchForPlayer(agentId);
+    if (arenaMatch) return { battleId: arenaMatch.battleId, status: arenaMatch.status };
+    // Legacy fallback
     for (const [battleId, battle] of this.activeBattles.entries()) {
       const state = battle.getState();
       if (state.status === "completed" || state.status === "cancelled") continue;
@@ -594,9 +782,11 @@ export class PvPBattleManager {
    * Cancel a battle (admin function)
    */
   cancelBattle(battleId: string): boolean {
+    // Try arena manager first
+    if (arenaManager.cancelMatch(battleId)) return true;
+    // Legacy fallback
     const battle = this.activeBattles.get(battleId);
     if (!battle) return false;
-
     battle.cancelBattle();
     this.activeBattles.delete(battleId);
     this.persistStateEventually("cancelBattle");

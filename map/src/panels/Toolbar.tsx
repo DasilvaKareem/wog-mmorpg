@@ -13,6 +13,9 @@ import {
   FilePlus,
   Loader2,
   Upload,
+  Home,
+  RotateCw,
+  Mountain,
 } from "lucide-react";
 import { useEditorStore, type Tool } from "../store/editorStore";
 import { downloadMap, pickAndLoadMap, loadFromShard, saveToShard, ZONE_IDS } from "../io/fileIO";
@@ -23,6 +26,7 @@ const tools: { id: Tool; icon: typeof Paintbrush; label: string; key: string }[]
   { id: "fill", icon: PaintBucket, label: "Fill", key: "G" },
   { id: "rect", icon: RectangleHorizontal, label: "Rect Fill", key: "R" },
   { id: "eyedropper", icon: Pipette, label: "Eyedropper", key: "I" },
+  { id: "stamp", icon: Home, label: "Stamp Prefab", key: "P" },
 ];
 
 export function Toolbar() {
@@ -32,6 +36,10 @@ export function Toolbar() {
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
+  const rotatePrefabCW = useEditorStore((s) => s.rotatePrefabCW);
+  const prefabRotation = useEditorStore((s) => s.prefabRotation);
+  const flattenUnderStamp = useEditorStore((s) => s.flattenUnderStamp);
+  const toggleFlattenUnderStamp = useEditorStore((s) => s.toggleFlattenUnderStamp);
   const [loadingZone, setLoadingZone] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -99,6 +107,29 @@ export function Toolbar() {
         >
           <Grid3x3 size={16} />
         </button>
+        {tool === "stamp" && (
+          <>
+            <button
+              onClick={rotatePrefabCW}
+              title="Rotate Prefab 90° CW (T)"
+              className="rounded p-1.5 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              <RotateCw size={16} />
+              <span className="ml-0.5 text-[10px] text-zinc-500">{prefabRotation * 90}°</span>
+            </button>
+            <button
+              onClick={toggleFlattenUnderStamp}
+              title={`Flatten elevation under stamp: ${flattenUnderStamp ? "ON" : "OFF"}`}
+              className={`rounded p-1.5 ${
+                flattenUnderStamp
+                  ? "bg-emerald-700/40 text-emerald-200"
+                  : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+              }`}
+            >
+              <Mountain size={16} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* Actions */}

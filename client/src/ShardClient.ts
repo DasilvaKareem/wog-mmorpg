@@ -15,9 +15,40 @@ import type {
 import { API_URL } from "./config.js";
 import { getAuthToken } from "./lib/agentAuth.js";
 
+const NETWORK_TIMEOUT_MS = 12_000;
+
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  retryCount = 2,
+): Promise<Response> {
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), NETWORK_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout);
+      if (response.status === 522 && attempt < retryCount) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      return response;
+    } catch (err) {
+      clearTimeout(timeout);
+      lastError = err;
+      if (attempt < retryCount) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  throw lastError ?? new Error("Network request failed");
+}
+
 export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
   try {
-    const res = await fetch(`${API_URL}/zones/${zoneId}`);
+    const res = await fetchWithRetry(`${API_URL}/zones/${zoneId}`);
     if (res.status === 404) {
       // Zone doesn't exist yet — treat as empty
       return { zoneId, tick: 0, entities: {} };
@@ -31,7 +62,7 @@ export async function fetchZone(zoneId: string): Promise<ZoneResponse | null> {
 
 export async function fetchZoneList(): Promise<ZoneListEntry[]> {
   try {
-    const res = await fetch(`${API_URL}/zones`);
+    const res = await fetchWithRetry(`${API_URL}/zones`);
     if (!res.ok) return [];
     const data: Record<string, { entityCount: number; tick: number }> =
       await res.json();
@@ -115,23 +146,26 @@ export async function fetchCharactersWithLive(
       console.error("Failed to fetch characters:", res.status, detail);
       return { characters: [], liveEntity: null, deployedCharacterName: null };
     }
-    const data: {
-      characters: Array<Partial<OwnedCharacter> & {
-        tokenId?: string;
-        characterTokenId?: string | null;
-        agentId?: string | null;
-        chainRegistrationStatus?: OwnedCharacter["chainRegistrationStatus"];
-        bootstrapStatus?: OwnedCharacter["bootstrapStatus"];
-        name?: string;
+      const data: {
+        characters: Array<Partial<OwnedCharacter> & {
+          tokenId?: string;
+          characterTokenId?: string | null;
+          agentId?: string | null;
+          agentRegistrationTxHash?: string | null;
+          chainRegistrationStatus?: OwnedCharacter["chainRegistrationStatus"];
+          bootstrapStatus?: OwnedCharacter["bootstrapStatus"];
+          name?: string;
         description?: string;
       }>;
       liveEntity?: {
+        id: string;
         name: string;
         level: number;
         xp: number;
         hp: number;
         maxHp: number;
         zoneId: string;
+        region?: string;
         agentId?: string | null;
         characterTokenId?: string | null;
       };
@@ -148,6 +182,7 @@ export async function fetchCharactersWithLive(
         tokenId: character.tokenId ?? "unknown",
         characterTokenId: character.characterTokenId ?? character.tokenId ?? null,
         agentId: character.agentId ?? null,
+        agentRegistrationTxHash: character.agentRegistrationTxHash ?? null,
         chainRegistrationStatus: character.chainRegistrationStatus ?? undefined,
         bootstrapStatus: character.bootstrapStatus ?? null,
         name: character.name ?? "Unnamed Character",
@@ -175,12 +210,15 @@ export async function fetchCharactersWithLive(
     if (data.liveEntity) {
       const le = data.liveEntity;
       liveEntity = {
+        id: le.id,
         name: le.name,
         level: le.level,
         xp: le.xp,
         hp: le.hp,
         maxHp: le.maxHp,
         zoneId: le.zoneId,
+        region: le.region ?? le.zoneId,
+        agentId: le.agentId ?? null,
         characterTokenId: le.characterTokenId ?? null,
         source: "live",
       };
@@ -202,12 +240,15 @@ export async function fetchCharacters(
 }
 
 export interface WalletCharacterProgress {
+  id?: string;
   name: string;
   level: number;
   xp: number;
   hp: number;
   maxHp: number;
   zoneId?: string;
+  region?: string;
+  agentId?: string | null;
   characterTokenId?: string | null;
   source: "live" | "nft";
 }
@@ -244,7 +285,7 @@ export async function fetchTerrainGrid(
   zoneId: string
 ): Promise<TerrainGridData | null> {
   try {
-    const res = await fetch(`${API_URL}/v1/terrain/zone/${zoneId}`);
+    const res = await fetchWithRetry(`${API_URL}/v1/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridData;
   } catch {
@@ -256,7 +297,7 @@ export async function fetchTerrainGridV2(
   zoneId: string
 ): Promise<TerrainGridDataV2 | null> {
   try {
-    const res = await fetch(`${API_URL}/v2/terrain/zone/${zoneId}`);
+    const res = await fetchWithRetry(`${API_URL}/v2/terrain/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as TerrainGridDataV2;
   } catch {
@@ -268,7 +309,7 @@ export async function fetchTerrainGridV2(
 
 export async function fetchChunkInfo(): Promise<ChunkInfo | null> {
   try {
-    const res = await fetch(`${API_URL}/v1/chunks/info`);
+    const res = await fetchWithRetry(`${API_URL}/v1/chunks/info`);
     if (!res.ok) return null;
     return (await res.json()) as ChunkInfo;
   } catch {
@@ -278,7 +319,7 @@ export async function fetchChunkInfo(): Promise<ChunkInfo | null> {
 
 export async function fetchZoneChunkInfo(zoneId: string): Promise<ZoneChunkInfo | null> {
   try {
-    const res = await fetch(`${API_URL}/v1/chunks/zone/${zoneId}`);
+    const res = await fetchWithRetry(`${API_URL}/v1/chunks/zone/${zoneId}`);
     if (!res.ok) return null;
     return (await res.json()) as ZoneChunkInfo;
   } catch {
@@ -290,7 +331,7 @@ export async function fetchChunkAt(
   zoneId: string, cx: number, cz: number
 ): Promise<ChunkPayloadV2 | null> {
   try {
-    const res = await fetch(`${API_URL}/v1/chunks/at?zone=${zoneId}&cx=${cx}&cz=${cz}`);
+    const res = await fetchWithRetry(`${API_URL}/v1/chunks/at?zone=${zoneId}&cx=${cx}&cz=${cz}`);
     if (!res.ok) return null;
     return (await res.json()) as ChunkPayloadV2;
   } catch {
@@ -302,7 +343,7 @@ export async function fetchChunkStream(
   zoneId: string, worldX: number, worldZ: number, radius = 2
 ): Promise<ChunkStreamResponse | null> {
   try {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `${API_URL}/v1/chunks/stream?zone=${zoneId}&x=${worldX}&z=${worldZ}&radius=${radius}`
     );
     if (!res.ok) return null;

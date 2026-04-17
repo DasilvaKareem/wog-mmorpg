@@ -38,8 +38,12 @@ const ROCK_TILES = new Set([50, 51]);
 const BUSH_TILES = new Set([52, 53]);
 const FENCE_TILES = new Set([58, 59]);
 const WATER_TILES = new Set([16, 17, 18, 19, 20, 21, 22, 23]);
+/** Structure ground tiles that should get a 3D floor piece (road/planks) */
+const STRUCTURE_FLOOR_TILES = new Set([24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]);
 
 const TILE_UNIT = 1;
+/** Elevation stored as 0-30 integers; this maps to world Y units (0 → 3.6) */
+const ELEV_SCALE = 0.12;
 
 // ── Texture loader (shared) ─────────────────────────────────────────
 const loader = new THREE.TextureLoader();
@@ -140,7 +144,7 @@ export class TerrainRenderer {
     const ix = Math.max(0, Math.min(this.gridWidth - 1, Math.floor(x)));
     const iz = Math.max(0, Math.min(this.gridHeight - 1, Math.floor(z)));
     const elev = this.elevationData[iz * this.gridWidth + ix] ?? 0;
-    return elev * 0.5;
+    return elev * ELEV_SCALE;
   }
 
   build(data: TerrainData) {
@@ -178,7 +182,7 @@ export class TerrainRenderer {
       for (let t = 0; t < tiles.length; t++) {
         const { ix, iz, tileIdx } = tiles[t];
         const ti = iz * W + ix;
-        const elev = (data.elevation[ti] ?? 0) * 0.5;
+        const elev = (data.elevation[ti] ?? 0) * ELEV_SCALE;
         const x0 = ix * TILE_UNIT;
         const z0 = iz * TILE_UNIT;
 
@@ -188,10 +192,10 @@ export class TerrainRenderer {
         // 4 vertices per tile quad
         const vi = t * 4;
         // v0: top-left, v1: top-right, v2: bottom-left, v3: bottom-right
-        const elev00 = (data.elevation[iz * W + ix] ?? 0) * 0.5;
-        const elev10 = (data.elevation[iz * W + Math.min(ix + 1, W - 1)] ?? 0) * 0.5;
-        const elev01 = (data.elevation[Math.min(iz + 1, H - 1) * W + ix] ?? 0) * 0.5;
-        const elev11 = (data.elevation[Math.min(iz + 1, H - 1) * W + Math.min(ix + 1, W - 1)] ?? 0) * 0.5;
+        const elev00 = (data.elevation[iz * W + ix] ?? 0) * ELEV_SCALE;
+        const elev10 = (data.elevation[iz * W + Math.min(ix + 1, W - 1)] ?? 0) * ELEV_SCALE;
+        const elev01 = (data.elevation[Math.min(iz + 1, H - 1) * W + ix] ?? 0) * ELEV_SCALE;
+        const elev11 = (data.elevation[Math.min(iz + 1, H - 1) * W + Math.min(ix + 1, W - 1)] ?? 0) * ELEV_SCALE;
 
         // Positions (XZ plane, Y = elevation)
         positions.push(x0, elev00, z0);                           // v0
@@ -263,7 +267,7 @@ export class TerrainRenderer {
         const ti = iz * W + ix;
         const wx = ix * TILE_UNIT + TILE_UNIT / 2;
         const wz = iz * TILE_UNIT + TILE_UNIT / 2;
-        const elev = (data.elevation[ti] ?? 0) * 0.5;
+        const elev = (data.elevation[ti] ?? 0) * ELEV_SCALE;
 
         // Water overlay shimmer planes
         const groundIdx = data.ground[ti] ?? 0;
@@ -272,6 +276,14 @@ export class TerrainRenderer {
           water.position.set(wx, 0.08 + elev, wz);
           this.group.add(water);
           this.waterMeshes.push(water);
+        }
+
+        // Place 3D floor pieces under structure tiles (road for exterior, planks for interior)
+        if (useGlb && STRUCTURE_FLOOR_TILES.has(groundIdx)) {
+          const floorAsset = (groundIdx === 34 || groundIdx === 35)
+            ? "town_planks" : "town_road";
+          const floor = this.envAssets!.place(floorAsset, wx, elev, wz);
+          if (floor) this.group.add(floor);
         }
 
         const ov = data.overlay[ti] ?? -1;

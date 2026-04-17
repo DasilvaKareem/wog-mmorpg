@@ -14,19 +14,20 @@ import {
 interface CommandBody {
   zoneId: string;
   entityId: string;
-  action: "move" | "attack" | "attack-nearest" | "travel";
+  action: "move" | "attack" | "attack-nearest" | "travel" | "set-run";
   x?: number;
   y?: number;
   targetId?: string;
   targetZone?: string;
   mobName?: string;
+  runEnabled?: boolean;
 }
 
 export function registerCommands(server: FastifyInstance) {
   server.post<{ Body: CommandBody }>("/command", {
     preHandler: authenticateRequest,
   }, async (request, reply) => {
-    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName } = request.body;
+    const { zoneId, entityId, action, x, y, targetId, targetZone, mobName, runEnabled } = request.body;
     const authenticatedWallet = (request as any).walletAddress;
 
     const entity = getEntity(entityId);
@@ -60,7 +61,7 @@ export function registerCommands(server: FastifyInstance) {
       return { error: "Not authorized to control this entity" };
     }
 
-    let order: Order;
+    let order: Order | undefined;
 
     if (action === "move") {
       if (x == null || y == null) {
@@ -124,12 +125,25 @@ export function registerCommands(server: FastifyInstance) {
       // Set move order toward the target region center (world-space)
       order = { action: "move", x: center.x, y: center.z };
       entity.travelTargetZone = targetZone;
+    } else if (action === "set-run") {
+      if (entity.type !== "player") {
+        reply.code(400);
+        return { error: "set-run requires a player entity" };
+      }
+      entity.runModeEnabled = typeof runEnabled === "boolean" ? runEnabled : !entity.runModeEnabled;
+      entity.maxRunEnergy = Math.max(1, entity.maxRunEnergy ?? 100);
+      entity.runEnergy = Math.max(0, Math.min(entity.runEnergy ?? entity.maxRunEnergy, entity.maxRunEnergy));
+      if (!entity.runModeEnabled) {
+        entity.isRunning = false;
+      }
     } else {
       reply.code(400);
       return { error: `Unknown action: ${action}` };
     }
 
-    entity.order = order;
+    if (order) {
+      entity.order = order;
+    }
 
     // Return enriched response with player state + quest progress
     const questProgress = (entity.activeQuests ?? []).map((aq: any) => ({
@@ -148,6 +162,10 @@ export function registerCommands(server: FastifyInstance) {
         level: entity.level,
         xp: entity.xp,
         region: entity.region,
+        runEnergy: entity.runEnergy,
+        maxRunEnergy: entity.maxRunEnergy,
+        runModeEnabled: entity.runModeEnabled,
+        isRunning: entity.isRunning,
       },
       questProgress: questProgress.length > 0 ? questProgress : undefined,
     };

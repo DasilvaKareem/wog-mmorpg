@@ -41,6 +41,8 @@ export interface SupervisorContext {
   apiCall: (method: string, path: string, body?: any) => Promise<any>;
   /** Real on-chain wallet balance in copper (pre-fetched by runner). entity.gold is always 0. */
   walletGoldCopper?: number;
+  /** User's configured focus (questing, combat, gathering, etc.) — used by defaultScript fallback */
+  configFocus?: string;
   /** MCP client — if connected, supervisor uses MCP tools instead of hardcoded ones. */
   mcpClient?: AgentMcpClient;
 }
@@ -106,7 +108,8 @@ Your job: Decide the next bot script to execute.
       * If inventory contains recyclable loot and funds are low, choose trade to recycle it into gold.
       * Has weapon + ≥ 100c: quest or combat based on zone and level.
   * If outleveled: travel to an easier zone.
-- DUNGEONS: Dungeon gates spawn every 5 minutes (gate surge). If you see a dungeon-gate entity in scan_zone, you can set script to "dungeon" with gateEntityId and gateRank. The agent will walk to it, form a party, and enter. Rank E needs L3+, D=L7+, C=L12+, B=L18+, A=L28+, S=L40+. Dungeons give excellent XP. You need a matching key (E-Key, D-Key, etc.) from forging gate essences.`.trim();
+- DUNGEONS: Dungeon gates spawn every 5 minutes (gate surge). If you see a dungeon-gate entity in scan_zone, you can set script to "dungeon" with gateEntityId and gateRank. The agent will walk to it, form a party, and enter. Rank E needs L3+, D=L7+, C=L12+, B=L18+, A=L28+, S=L40+. Dungeons give excellent XP. You need a matching key (E-Key, D-Key, etc.) from forging gate essences.
+- FARMING: Farmland zones (sunflower-fields, harvest-hollow, copperfield-meadow, etc.) have crop nodes. Set script to "farm" and travel to a farmland zone to harvest crops. Requires a hoe (buy from shop, cheapest is Wooden Hoe at 15c). Crops yield produce for cooking/alchemy/selling. Some crops are day-only or night-only.`.trim();
 }
 
 // ── set_script declaration (always present) ──────────────────────────────
@@ -119,8 +122,8 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
     properties: {
       type: {
         type: "STRING" as Type,
-        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon"],
-        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate.",
+        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon", "farm"],
+        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate, 'farm' to harvest crops in farmland zones.",
       },
       maxLevelOffset: {
         type: "NUMBER" as Type,
@@ -401,7 +404,26 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
     return { type: "combat", maxLevelOffset: 1, reason: "Action blocked — switching to reliable combat" };
   }
   if (event.type === "level_up") return { type: "combat", maxLevelOffset: 2, reason: "Leveled up — keep fighting" };
-  if (event.type === "zone_arrived") return { type: "quest", reason: "New region — check for quests" };
+  if (event.type === "zone_arrived") {
+    // Respect user's configured focus instead of always forcing quests
+    const focus = ctx.configFocus;
+    if (focus && focus !== "questing") {
+      const FOCUS_TO_SCRIPT: Record<string, BotScript> = {
+        combat:     { type: "combat", maxLevelOffset: 2, reason: `Arrived — continuing combat` },
+        gathering:  { type: "gather", reason: `Arrived — continuing gathering` },
+        crafting:   { type: "craft", reason: `Arrived — continuing crafting` },
+        alchemy:    { type: "brew", reason: `Arrived — continuing alchemy` },
+        cooking:    { type: "cook", reason: `Arrived — continuing cooking` },
+        enchanting: { type: "enchant", reason: `Arrived — continuing enchanting` },
+        shopping:   { type: "shop", reason: `Arrived — continuing shopping` },
+        trading:    { type: "trade", reason: `Arrived — continuing trading` },
+        farming:    { type: "farm", reason: `Arrived — continuing farming` },
+        idle:       { type: "idle", reason: `Arrived — staying idle as requested` },
+      };
+      if (FOCUS_TO_SCRIPT[focus]) return FOCUS_TO_SCRIPT[focus];
+    }
+    return { type: "quest", reason: "New region — check for quests" };
+  }
   if (event.type === "no_targets") {
     return { type: "travel", reason: "Area cleared — move on" };
   }

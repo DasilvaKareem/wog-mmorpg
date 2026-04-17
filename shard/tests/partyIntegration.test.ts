@@ -35,7 +35,7 @@ function shouldFriendlyFireBeBlocked(
 
 // ── Test: Party system helpers ──────────────────────────────────────────────
 
-import { getPartyMembers, areInSameParty, getPlayerPartyId } from "../src/social/partySystem.js";
+import { addEntityToParty, getPartyMembers, areInSameParty, getPlayerPartyId, removeEntityFromParty } from "../src/social/partySystem.js";
 
 section("Party helpers (solo player)");
 
@@ -86,6 +86,9 @@ import { MatchmakingSystem } from "../src/combat/matchmaking.js";
 import {
   clearPartyAutoCombatTargetLock,
   pickAutoCombatTarget,
+  pickPartyFocusTarget,
+  pickTechnique,
+  pickTechniqueTargetIdForAutoCombat,
   rememberPartyAutoCombatTarget,
   type Entity,
   type ZoneState,
@@ -340,8 +343,84 @@ section("Party auto-combat target focus");
   zone.entities.set(focusedMob.id, focusedMob);
   zone.entities.set(closerMob.id, closerMob);
 
-  const chosen = pickAutoCombatTarget(ally, zone, 80, [leader.id, ally.id]);
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [leader.id, ally.id], undefined, leader.id);
   assert(chosen?.id === focusedMob.id, "Party member prefers same-zone ally target over a closer mob");
+}
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-call",
+    type: "player",
+    name: "Leader Call",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+    order: { action: "attack", targetId: "mob-leader-call" },
+  };
+
+  const rogueMember: Entity = {
+    id: "rogue-member",
+    type: "player",
+    name: "Rogue Member",
+    x: 112,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+    order: { action: "attack", targetId: "mob-rogue-call" },
+  };
+
+  const ally: Entity = {
+    id: "ally-call",
+    type: "player",
+    name: "Ally Call",
+    x: 120,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const leaderMob: Entity = {
+    id: "mob-leader-call",
+    type: "mob",
+    name: "Leader Mob",
+    x: 145,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const rogueMob: Entity = {
+    id: "mob-rogue-call",
+    type: "mob",
+    name: "Rogue Mob",
+    x: 125,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(rogueMember.id, rogueMember);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(leaderMob.id, leaderMob);
+  zone.entities.set(rogueMob.id, rogueMob);
+
+  const chosen = pickAutoCombatTarget(ally, zone, 80, [leader.id, rogueMember.id, ally.id], undefined, leader.id);
+  assert(chosen?.id === leaderMob.id, "Party followers respect the leader's target call over other party members");
 }
 
 {
@@ -634,6 +713,267 @@ section("Party auto-combat target focus");
   assert(chosen?.id === closerMob.id, "Expired party target lock falls back to the nearest valid mob");
 
   clearPartyAutoCombatTargetLock(partyId);
+}
+
+{
+  const partyId = "party-focus-long-range";
+  clearPartyAutoCombatTargetLock(partyId);
+
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 10,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "leader-focus-range",
+    type: "player",
+    name: "Leader Focus Range",
+    x: 100,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const ally: Entity = {
+    id: "ally-focus-range",
+    type: "player",
+    name: "Ally Focus Range",
+    x: 260,
+    y: 100,
+    hp: 100,
+    maxHp: 100,
+    createdAt: Date.now(),
+  };
+
+  const lockedMob: Entity = {
+    id: "mob-focus-range",
+    type: "mob",
+    name: "Focus Range Mob",
+    x: 170,
+    y: 100,
+    hp: 60,
+    maxHp: 60,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(lockedMob.id, lockedMob);
+
+  rememberPartyAutoCombatTarget(ally.id, zone.zoneId, lockedMob.id, zone.tick, partyId);
+  const chosen = pickPartyFocusTarget(ally, zone, Number.POSITIVE_INFINITY, [leader.id, ally.id], partyId, leader.id);
+  assert(chosen?.id === lockedMob.id, "Party focus target can preserve the leader call even before the follower is in personal attack range");
+
+  clearPartyAutoCombatTargetLock(partyId);
+}
+
+section("Party techniques in auto-combat");
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const leader: Entity = {
+    id: "party-tech-leader",
+    type: "player",
+    name: "Party Leader",
+    classId: "warrior",
+    level: 15,
+    x: 100,
+    y: 100,
+    hp: 120,
+    maxHp: 120,
+    essence: 100,
+    maxEssence: 100,
+    createdAt: Date.now(),
+    learnedTechniques: ["warrior_battle_standard"],
+  };
+
+  const target: Entity = {
+    id: "party-tech-target",
+    type: "mob",
+    name: "Target Dummy",
+    level: 15,
+    x: 130,
+    y: 100,
+    hp: 150,
+    maxHp: 150,
+    createdAt: Date.now(),
+  };
+
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(target.id, target);
+
+  const chosen = pickTechnique(leader, target, zone);
+  assert(chosen?.id === "warrior_battle_standard", "Auto-combat can select party-targeted buffs");
+}
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const cleric: Entity = {
+    id: "cleric-healer",
+    type: "player",
+    name: "Cleric Healer",
+    classId: "cleric",
+    level: 18,
+    x: 100,
+    y: 100,
+    hp: 120,
+    maxHp: 120,
+    essence: 100,
+    maxEssence: 100,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+    learnedTechniques: ["cleric_holy_light", "cleric_greater_renew"],
+  };
+
+  const leader: Entity = {
+    id: "support-leader",
+    type: "player",
+    name: "Support Leader",
+    classId: "warrior",
+    level: 18,
+    x: 112,
+    y: 100,
+    hp: 30,
+    maxHp: 120,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const ally: Entity = {
+    id: "support-ally",
+    type: "player",
+    name: "Support Ally",
+    classId: "warrior",
+    level: 18,
+    x: 124,
+    y: 100,
+    hp: 90,
+    maxHp: 120,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const target: Entity = {
+    id: "support-target",
+    type: "mob",
+    name: "Support Target",
+    level: 18,
+    x: 138,
+    y: 100,
+    hp: 150,
+    maxHp: 150,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(cleric.id, cleric);
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(target.id, target);
+  addEntityToParty(leader.id, cleric.id, zone.zoneId);
+  addEntityToParty(leader.id, ally.id, zone.zoneId);
+
+  const chosen = pickTechnique(cleric, target, zone);
+  const targetId = chosen ? pickTechniqueTargetIdForAutoCombat(cleric, target, chosen, zone) : null;
+  assert(chosen?.targetType === "ally" || chosen?.targetType === "party", "Support auto-combat selects a healing technique for injured party members");
+  assert(targetId === leader.id, "Ally healing targets the lowest-HP party member");
+
+  removeEntityFromParty(cleric.id);
+  removeEntityFromParty(ally.id);
+}
+
+{
+  const zone: ZoneState = {
+    zoneId: "wild-meadow",
+    tick: 1,
+    entities: new Map<string, Entity>(),
+  };
+
+  const warlock: Entity = {
+    id: "warlock-buffer",
+    type: "player",
+    name: "Warlock Buffer",
+    classId: "warlock",
+    level: 18,
+    x: 100,
+    y: 100,
+    hp: 120,
+    maxHp: 120,
+    essence: 100,
+    maxEssence: 100,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+    learnedTechniques: ["warlock_dark_empowerment"],
+  };
+
+  const leader: Entity = {
+    id: "buff-leader",
+    type: "player",
+    name: "Buff Leader",
+    classId: "warrior",
+    level: 18,
+    x: 112,
+    y: 100,
+    hp: 120,
+    maxHp: 120,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const ally: Entity = {
+    id: "buff-ally",
+    type: "player",
+    name: "Buff Ally",
+    classId: "warrior",
+    level: 18,
+    x: 124,
+    y: 100,
+    hp: 120,
+    maxHp: 120,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  const target: Entity = {
+    id: "buff-target",
+    type: "mob",
+    name: "Buff Target",
+    level: 18,
+    x: 138,
+    y: 100,
+    hp: 150,
+    maxHp: 150,
+    createdAt: Date.now(),
+    region: "wild-meadow",
+  };
+
+  zone.entities.set(warlock.id, warlock);
+  zone.entities.set(leader.id, leader);
+  zone.entities.set(ally.id, ally);
+  zone.entities.set(target.id, target);
+  addEntityToParty(leader.id, warlock.id, zone.zoneId);
+  addEntityToParty(leader.id, ally.id, zone.zoneId);
+
+  const chosen = pickTechnique(warlock, target, zone);
+  const targetId = chosen ? pickTechniqueTargetIdForAutoCombat(warlock, target, chosen, zone) : null;
+  assert(chosen?.id === "warlock_dark_empowerment", "Support auto-combat selects ally buffs when the party leader needs one");
+  assert(targetId === leader.id, "Leader-first buffing targets the party leader before other allies");
+
+  removeEntityFromParty(warlock.id);
+  removeEntityFromParty(ally.id);
 }
 
 // ── Summary ─────────────────────────────────────────────────────────────────

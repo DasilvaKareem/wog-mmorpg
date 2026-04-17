@@ -35,6 +35,8 @@ export class AbilityEffectsLayer {
   private scene: Phaser.Scene;
   private seen = new Map<string, number>();
   private coordScale = COORD_SCALE;
+  private lastFlashTs = 0;
+  private onHitFreeze?: (entityId: string, durationMs: number) => void;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -43,6 +45,11 @@ export class AbilityEffectsLayer {
 
   setCoordScale(scale: number): void {
     this.coordScale = scale;
+  }
+
+  /** Wire up hit-freeze: parent pauses/resumes the target sprite's animation */
+  setHitFreezeHandler(handler: (entityId: string, durationMs: number) => void): void {
+    this.onHitFreeze = handler;
   }
 
   playEffect(event: ZoneEvent, entityPixelPositions: Map<string, Pos>): void {
@@ -65,6 +72,11 @@ export class AbilityEffectsLayer {
       (data?.targetX ?? data?.casterX ?? 0) as number,
       (data?.targetZ ?? data?.casterZ ?? 0) as number,
     );
+
+    // ── Hit-freeze: pause target sprite briefly on attack impacts ────
+    if (this.onHitFreeze && event.targetId && (techType === "attack" || techType === "debuff")) {
+      this.onHitFreeze(event.targetId, 50);
+    }
 
     // ── Technique-specific overrides with unique Phaser effects ──────
     if (this.playTechniqueOverride(techniqueId, signature, techType, casterPos, targetPos)) {
@@ -104,6 +116,54 @@ export class AbilityEffectsLayer {
         this.burst(sig, techType, src);
         this.fxScreenShake(5, 180);
         return true;
+      case "warrior_shield_wall": {
+        // Steel plate arcs rising around caster
+        for (let i = 0; i < 4; i++) {
+          const a = (Math.PI * 2 * i) / 4;
+          this.scene.time.delayedCall(i * 60, () => {
+            const plate = this.scene.add.graphics();
+            plate.setDepth(92);
+            plate.setBlendMode(Phaser.BlendModes.ADD);
+            plate.lineStyle(2.5, sig.accent, 0.85);
+            plate.beginPath();
+            plate.arc(src.x, src.y, 8, a - 0.4, a + 0.4, false);
+            plate.strokePath();
+            plate.lineStyle(5, sig.primary, 0.25);
+            plate.beginPath();
+            plate.arc(src.x, src.y, 8, a - 0.3, a + 0.3, false);
+            plate.strokePath();
+            this.scene.tweens.add({
+              targets: plate, scaleX: 2.5, scaleY: 2.5, alpha: 0, y: -4,
+              duration: 450, ease: "Sine.easeOut",
+              onComplete: () => plate.destroy(),
+            });
+          });
+        }
+        this.burst(sig, "buff", src);
+        return true;
+      }
+      case "warrior_battle_rage":
+      case "warrior_battle_rage_r2": {
+        // Rage flames erupting upward
+        const flames = this.scene.add.particles(0, 0, TEX_SPARK, {
+          x: src.x, y: src.y,
+          speed: { min: 15, max: 35 },
+          angle: { min: 245, max: 295 },
+          scale: { start: 0.5, end: 0 },
+          lifespan: 400,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary, 0xff2200],
+          alpha: { start: 0.9, end: 0 },
+          emitting: false,
+        });
+        flames.setDepth(90);
+        flames.explode(8, src.x, src.y);
+        this.scene.time.delayedCall(500, () => flames.destroy());
+        this.fxShockwave(src, sig, 2);
+        this.burst(sig, "buff", src);
+        this.fxScreenShake(3, 100);
+        return true;
+      }
 
       // ── MAGE ───────────────────────────────────────────────────────
       case "mage_fireball":
@@ -116,6 +176,40 @@ export class AbilityEffectsLayer {
       case "mage_flamestrike":
         this.fxMeteor(dst, sig);
         return true;
+      case "mage_slow": {
+        // Ice crystals forming in hex around target
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI * 2 * i) / 6;
+          this.scene.time.delayedCall(i * 40, () => {
+            const crystal = this.scene.add.graphics();
+            crystal.setDepth(92);
+            crystal.setBlendMode(Phaser.BlendModes.ADD);
+            crystal.lineStyle(1.5, sig.accent, 0.9);
+            const cx = dst.x + Math.cos(a) * 8;
+            const cy = dst.y + Math.sin(a) * 8;
+            crystal.beginPath();
+            crystal.moveTo(cx, cy - 4); crystal.lineTo(cx + 2, cy);
+            crystal.lineTo(cx, cy + 4); crystal.lineTo(cx - 2, cy);
+            crystal.closePath(); crystal.strokePath();
+            this.scene.tweens.add({
+              targets: crystal, alpha: 0, scaleX: 1.5, scaleY: 1.5,
+              duration: 400, delay: 100,
+              onComplete: () => crystal.destroy(),
+            });
+          });
+        }
+        const iceRing = this.scene.add.arc(dst.x, dst.y, 6, 0, 360, false);
+        iceRing.setStrokeStyle(1.5, sig.primary, 0.8);
+        iceRing.setFillStyle(); iceRing.setDepth(91);
+        iceRing.setBlendMode(Phaser.BlendModes.ADD);
+        this.scene.tweens.add({
+          targets: iceRing, scaleX: 3, scaleY: 3, alpha: 0,
+          duration: 500, ease: "Sine.easeOut",
+          onComplete: () => iceRing.destroy(),
+        });
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
 
       // ── MONK ───────────────────────────────────────────────────────
       case "monk_palm_strike":
@@ -127,6 +221,43 @@ export class AbilityEffectsLayer {
       case "monk_meditation":
         this.fxMeditation(src, sig);
         return true;
+      case "monk_disable": {
+        // Stun bolt zigzag + hex lock
+        const bolt = this.scene.add.graphics();
+        bolt.setDepth(93); bolt.setBlendMode(Phaser.BlendModes.ADD);
+        bolt.lineStyle(2, sig.accent, 0.9);
+        bolt.beginPath();
+        bolt.moveTo(dst.x - 3, dst.y - 8); bolt.lineTo(dst.x + 2, dst.y - 3);
+        bolt.lineTo(dst.x - 2, dst.y + 3); bolt.lineTo(dst.x + 3, dst.y + 8);
+        bolt.strokePath();
+        bolt.lineStyle(4, sig.primary, 0.3);
+        bolt.beginPath();
+        bolt.moveTo(dst.x - 3, dst.y - 8); bolt.lineTo(dst.x + 2, dst.y - 3);
+        bolt.lineTo(dst.x - 2, dst.y + 3); bolt.lineTo(dst.x + 3, dst.y + 8);
+        bolt.strokePath();
+        this.scene.tweens.add({
+          targets: bolt, scaleX: 2, scaleY: 2, alpha: 0,
+          duration: 200, ease: "Quad.easeOut",
+          onComplete: () => bolt.destroy(),
+        });
+        // Hex lock ring
+        const lock = this.scene.add.graphics();
+        lock.setDepth(92); lock.setBlendMode(Phaser.BlendModes.ADD);
+        lock.lineStyle(1.5, sig.primary, 0.8);
+        const hexPts: Phaser.Geom.Point[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI * 2 * i) / 6;
+          hexPts.push(new Phaser.Geom.Point(dst.x + Math.cos(a) * 7, dst.y + Math.sin(a) * 7));
+        }
+        lock.strokePoints(hexPts, true);
+        this.scene.tweens.add({
+          targets: lock, alpha: 0, scaleX: 2, scaleY: 2, angle: 30,
+          duration: 350, ease: "Quad.easeOut",
+          onComplete: () => lock.destroy(),
+        });
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
 
       // ── ROGUE ──────────────────────────────────────────────────────
       case "rogue_backstab":
@@ -138,6 +269,69 @@ export class AbilityEffectsLayer {
       case "rogue_poison_blade":
         this.fxPoisonSplash(dst, sig);
         return true;
+      case "rogue_stealth": {
+        // Inward-converging spiral motes → implosion vanish
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI * 2 * i) / 6;
+          const mote = this.scene.add.arc(
+            src.x + Math.cos(a) * 16, src.y + Math.sin(a) * 16,
+            1.5, 0, 360, false, sig.accent, 0.8,
+          );
+          mote.setDepth(92); mote.setBlendMode(Phaser.BlendModes.ADD);
+          this.scene.tweens.add({
+            targets: mote, x: src.x, y: src.y,
+            scaleX: 0.2, scaleY: 0.2, alpha: 0,
+            duration: 350, ease: "Quad.easeIn", delay: i * 35,
+            onComplete: () => mote.destroy(),
+          });
+        }
+        // Implosion flash — shrinks inward
+        this.scene.time.delayedCall(260, () => {
+          const flash = this.scene.add.arc(src.x, src.y, 8, 0, 360, false, sig.primary, 0.6);
+          flash.setDepth(91); flash.setBlendMode(Phaser.BlendModes.ADD);
+          this.scene.tweens.add({
+            targets: flash, scaleX: 0, scaleY: 0, alpha: 0,
+            duration: 150, ease: "Quad.easeIn",
+            onComplete: () => flash.destroy(),
+          });
+        });
+        return true;
+      }
+      case "rogue_evasion": {
+        // Flickering afterimage ghosts + speed lines
+        for (let i = 0; i < 4; i++) {
+          const ox = (Math.random() - 0.5) * 14;
+          const oy = (Math.random() - 0.5) * 8;
+          const ghost = this.scene.add.arc(
+            src.x + ox, src.y + oy,
+            3, 0, 360, false, sig.accent, 0.5 - i * 0.08,
+          );
+          ghost.setDepth(90); ghost.setBlendMode(Phaser.BlendModes.ADD);
+          this.scene.tweens.add({
+            targets: ghost,
+            x: src.x + ox + (Math.random() - 0.5) * 10,
+            alpha: 0, scaleX: 0.4, scaleY: 1.6,
+            duration: 250, delay: i * 40, ease: "Quad.easeOut",
+            onComplete: () => ghost.destroy(),
+          });
+        }
+        for (let i = 0; i < 3; i++) {
+          const line = this.scene.add.graphics();
+          line.setDepth(91); line.setBlendMode(Phaser.BlendModes.ADD);
+          line.lineStyle(1, sig.primary, 0.6);
+          line.beginPath();
+          line.moveTo(src.x - 8 + i * 4, src.y - 6);
+          line.lineTo(src.x - 8 + i * 4 + 6, src.y + 6);
+          line.strokePath();
+          this.scene.tweens.add({
+            targets: line, alpha: 0, x: 5,
+            duration: 200, delay: i * 30,
+            onComplete: () => line.destroy(),
+          });
+        }
+        this.burst(sig, "buff", src);
+        return true;
+      }
 
       // ── RANGER ─────────────────────────────────────────────────────
       case "ranger_aimed_shot":
@@ -146,6 +340,32 @@ export class AbilityEffectsLayer {
       case "ranger_multi_shot":
         this.fxMultiShot(src, dst, sig);
         return true;
+      case "ranger_hunters_mark":
+      case "ranger_hunters_mark_r2": {
+        // Targeting reticle: crosshair + circle snap onto target
+        const reticle = this.scene.add.graphics();
+        reticle.setDepth(92); reticle.setBlendMode(Phaser.BlendModes.ADD);
+        reticle.lineStyle(1, sig.accent, 0.85);
+        reticle.beginPath();
+        reticle.moveTo(dst.x - 10, dst.y); reticle.lineTo(dst.x + 10, dst.y);
+        reticle.moveTo(dst.x, dst.y - 10); reticle.lineTo(dst.x, dst.y + 10);
+        reticle.strokePath();
+        reticle.strokeCircle(dst.x, dst.y, 6);
+        reticle.setAlpha(0);
+        this.scene.tweens.add({
+          targets: reticle, alpha: 1,
+          duration: 120,
+          onComplete: () => {
+            this.scene.tweens.add({
+              targets: reticle, alpha: 0, scaleX: 0.5, scaleY: 0.5,
+              duration: 250, delay: 150,
+              onComplete: () => reticle.destroy(),
+            });
+          },
+        });
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
 
       // ── PALADIN ────────────────────────────────────────────────────
       case "paladin_holy_smite":
@@ -170,6 +390,48 @@ export class AbilityEffectsLayer {
       case "warlock_corruption":
         this.fxCorruption(dst, sig);
         return true;
+      case "warlock_curse_of_weakness": {
+        // Sickly yellow hex seal forming on target
+        const hex = this.scene.add.graphics();
+        hex.setDepth(92); hex.setBlendMode(Phaser.BlendModes.ADD);
+        hex.lineStyle(1.5, sig.primary, 0.9);
+        const hexPts2: Phaser.Geom.Point[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI * 2 * i) / 6;
+          hexPts2.push(new Phaser.Geom.Point(dst.x + Math.cos(a) * 8, dst.y + Math.sin(a) * 8));
+        }
+        hex.strokePoints(hexPts2, true);
+        hex.setAlpha(0);
+        this.scene.tweens.add({
+          targets: hex, alpha: 1, angle: 30,
+          duration: 200, ease: "Quad.easeOut",
+          onComplete: () => {
+            this.scene.tweens.add({
+              targets: hex, alpha: 0, scaleX: 2, scaleY: 2,
+              duration: 400, ease: "Sine.easeOut",
+              onComplete: () => hex.destroy(),
+            });
+          },
+        });
+        // Sickly descending particles
+        const sick = this.scene.add.particles(0, 0, TEX_SOFT, {
+          x: dst.x, y: dst.y - 10,
+          speed: { min: 4, max: 12 },
+          angle: { min: 70, max: 110 },
+          scale: { start: 0.4, end: 0.1 },
+          lifespan: 500,
+          blendMode: Phaser.BlendModes.ADD,
+          tint: [sig.primary, sig.secondary],
+          alpha: { start: 0.7, end: 0 },
+          gravityY: 15,
+          emitting: false,
+        });
+        sick.setDepth(90);
+        sick.explode(6, dst.x, dst.y - 8);
+        this.scene.time.delayedCall(600, () => sick.destroy());
+        this.burst(sig, "debuff", dst);
+        return true;
+      }
 
       // ── WARRIOR R2/R3 + NEW ──────────────────────────────────────────
       case "warrior_heroic_strike_r2":
@@ -297,6 +559,46 @@ export class AbilityEffectsLayer {
         this.burst(sig, techType, dst);
         this.fxScreenShake(4, 150);
         return true;
+      case "rogue_poison_blade_r2": {
+        this.fxPoisonSplash(dst, sig);
+        // Extra acid drip trail
+        for (let i = 0; i < 4; i++) {
+          this.scene.time.delayedCall(i * 80, () => {
+            const drop = this.scene.add.arc(
+              dst.x + (Math.random() - 0.5) * 10, dst.y + 2 + i * 2,
+              1.5, 0, 360, false, sig.primary, 0.7,
+            );
+            drop.setDepth(89); drop.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: drop, y: drop.y + 6, alpha: 0, scaleX: 0.3, scaleY: 0.3,
+              duration: 400, ease: "Quad.easeIn",
+              onComplete: () => drop.destroy(),
+            });
+          });
+        }
+        this.fxScreenShake(3, 80);
+        return true;
+      }
+      case "rogue_shadow_strike_r2": {
+        this.fxShadowStrike(src, dst, sig);
+        // Afterimage echoes at destination
+        this.scene.time.delayedCall(120, () => {
+          for (let i = 0; i < 3; i++) {
+            const ghost = this.scene.add.arc(
+              dst.x + (i - 1) * 5, dst.y,
+              3, 0, 360, false, sig.accent, 0.4 - i * 0.1,
+            );
+            ghost.setDepth(89); ghost.setBlendMode(Phaser.BlendModes.ADD);
+            this.scene.tweens.add({
+              targets: ghost, alpha: 0, scaleX: 0.3, scaleY: 1.5,
+              duration: 200, delay: i * 30,
+              onComplete: () => ghost.destroy(),
+            });
+          }
+        });
+        this.fxScreenShake(5, 120);
+        return true;
+      }
 
       // ── RANGER R2/R3 + NEW ───────────────────────────────────────────
       case "ranger_aimed_shot_r2":
@@ -1486,11 +1788,39 @@ export class AbilityEffectsLayer {
   private playChannel(signature: TechniqueVisual, techType: string, src: Pos, dst: Pos): void {
     // Outer glow beam
     const beam = this.scene.add.graphics();
-    const beamWidth = signature.beamPattern === "pulse" ? 5 : signature.beamPattern === "drain" ? 4 : 3;
+    const beamWidth = signature.beamPattern === "pulse" ? 5 : signature.beamPattern === "drain" ? 4 : signature.beamPattern === "chain" ? 2 : signature.beamPattern === "wave" ? 4 : 3;
     beam.lineStyle(beamWidth, signature.primary, 0.35);
     beam.beginPath();
-    beam.moveTo(src.x, src.y);
-    beam.lineTo(dst.x, dst.y);
+
+    if (signature.beamPattern === "chain") {
+      // Zigzag lightning path
+      const dx = dst.x - src.x, dy = dst.y - src.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const segs = Math.max(4, Math.floor(d / 12));
+      const nx = -dy / d, ny = dx / d; // perpendicular
+      beam.moveTo(src.x, src.y);
+      for (let i = 1; i < segs; i++) {
+        const t = i / segs;
+        const jitter = (i % 2 === 0 ? 1 : -1) * (3 + Math.random() * 4);
+        beam.lineTo(src.x + dx * t + nx * jitter, src.y + dy * t + ny * jitter);
+      }
+      beam.lineTo(dst.x, dst.y);
+    } else if (signature.beamPattern === "wave") {
+      // Sinusoidal wave path
+      const dx = dst.x - src.x, dy = dst.y - src.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      const nx = -dy / d, ny = dx / d;
+      beam.moveTo(src.x, src.y);
+      const waveSegs = Math.max(8, Math.floor(d / 6));
+      for (let i = 1; i <= waveSegs; i++) {
+        const t = i / waveSegs;
+        const wave = Math.sin(t * Math.PI * 3) * 5;
+        beam.lineTo(src.x + dx * t + nx * wave, src.y + dy * t + ny * wave);
+      }
+    } else {
+      beam.moveTo(src.x, src.y);
+      beam.lineTo(dst.x, dst.y);
+    }
     beam.strokePath();
     beam.setDepth(88);
     beam.setBlendMode(Phaser.BlendModes.ADD);
@@ -1675,35 +2005,348 @@ export class AbilityEffectsLayer {
   private burst(signature: TechniqueVisual, techType: string, pos: Pos): void {
     const cfg = this.getBurstCfg(signature, techType);
 
-    // Primary sharp particles
-    const emitter = this.buildBurstEmitter(cfg);
-    emitter.explode(signature.count, pos.x, pos.y);
-    this.scene.time.delayedCall(700, () => emitter.destroy());
+    // ── Screen flash overlay (rate-limited, no shader) ──────────────
+    const now = Date.now();
+    if (now - this.lastFlashTs > 200) {
+      this.lastFlashTs = now;
+      const cam = this.scene.cameras.main;
+      const fo = this.scene.add.rectangle(
+        cam.width / 2, cam.height / 2, cam.width, cam.height, signature.primary,
+      ).setScrollFactor(0).setAlpha(0).setDepth(9999);
+      this.scene.tweens.add({
+        targets: fo, alpha: 0.15, duration: 50,
+        yoyo: true, onComplete: () => fo.destroy(),
+      });
+    }
 
-    // Secondary soft glow particles — larger, slower, fewer
-    const glowCfg: BurstCfg = {
+    // ── Wave 1: Fast tight ring burst (FGO inner pop) ───────────────
+    // High speed + short life = crisp expanding ring
+    const w1 = this.buildBurstEmitter({
       ...cfg,
-      texture: TEX_SOFT,
-      count: Math.max(3, Math.floor(signature.count * 0.5)),
-      speed: { min: cfg.speed.min * 0.5, max: cfg.speed.max * 0.6 },
-      scale: { start: cfg.scale.start * 1.8, end: 0 },
-      lifespan: cfg.lifespan * 1.4,
-      alpha: { start: 0.55, end: 0 },
-    };
-    const glowEmitter = this.buildBurstEmitter(glowCfg);
-    glowEmitter.explode(glowCfg.count, pos.x, pos.y);
-    this.scene.time.delayedCall(900, () => glowEmitter.destroy());
-
-    // Flash circle at impact point
-    const flash = this.scene.add.arc(pos.x, pos.y, 3, 0, 360, false, signature.primary, 0.7);
-    flash.setDepth(91);
-    flash.setBlendMode(Phaser.BlendModes.ADD);
-    this.scene.tweens.add({
-      targets: flash,
-      scaleX: 3, scaleY: 3, alpha: 0,
-      duration: 250, ease: "Quad.easeOut",
-      onComplete: () => flash.destroy(),
+      speed: { min: cfg.speed.max * 1.4, max: cfg.speed.max * 2.5 },
+      scale: { start: cfg.scale.start * 0.5, end: 0 },
+      lifespan: Math.floor(cfg.lifespan * 0.4),
+      alpha: { start: 1, end: 0.15 },
     });
+    w1.explode(Math.min(signature.count, 8), pos.x, pos.y);
+    this.scene.time.delayedCall(400, () => w1.destroy());
+
+    // ── Wave 2: Slow wide pattern bloom (FGO outer glow) ────────────
+    // Particles placed along impactPattern geometry, drift outward
+    this.scene.time.delayedCall(40, () => {
+      const w2 = this.buildBurstEmitter({
+        ...cfg,
+        texture: TEX_SOFT,
+        speed: { min: cfg.speed.min * 0.4, max: cfg.speed.max * 0.6 },
+        scale: { start: cfg.scale.start * 2.2, end: 0 },
+        lifespan: Math.floor(cfg.lifespan * 2),
+        alpha: { start: 0.5, end: 0 },
+      });
+      const points = this.getBurstPatternPoints(signature, pos);
+      for (const pt of points) {
+        w2.emitParticleAt(pt.x, pt.y, 1);
+      }
+      this.scene.time.delayedCall(1200, () => w2.destroy());
+    });
+
+    // ── Shape-specific core flash ───────────────────────────────────
+    this.burstCoreFlash(signature, pos);
+  }
+
+  /** Emit positions for wave-2 bloom, shaped by impactPattern */
+  private getBurstPatternPoints(sig: TechniqueVisual, center: Pos): Pos[] {
+    const r = sig.ringRadius * 1.2;
+    const count = Math.max(4, Math.floor(sig.count * 0.6));
+    const pts: Pos[] = [];
+
+    switch (sig.impactPattern) {
+      case "spokes": {
+        for (let i = 0; i < count; i++) {
+          const a = (Math.PI * 2 * (i % 6)) / 6;
+          const d = r * (0.3 + Math.random() * 0.7);
+          pts.push({ x: center.x + Math.cos(a) * d, y: center.y + Math.sin(a) * d });
+        }
+        break;
+      }
+      case "diamond": {
+        const dirs = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }];
+        for (let i = 0; i < count; i++) {
+          const d = dirs[i % 4];
+          const dist = r * (0.4 + Math.random() * 0.6);
+          pts.push({ x: center.x + d.x * dist, y: center.y + d.y * dist });
+        }
+        break;
+      }
+      case "petals": {
+        for (let i = 0; i < count; i++) {
+          const base = (Math.PI / 2) * (i % 4);
+          const spread = (Math.random() - 0.5) * 0.5;
+          const dist = r * (0.4 + Math.random() * 0.6);
+          pts.push({ x: center.x + Math.cos(base + spread) * dist, y: center.y + Math.sin(base + spread) * dist });
+        }
+        break;
+      }
+      case "ward": {
+        for (let i = 0; i < count; i++) {
+          if (i % 2 === 0) {
+            const a = (Math.PI * 2 * i) / count;
+            pts.push({ x: center.x + Math.cos(a) * r, y: center.y + Math.sin(a) * r });
+          } else {
+            const half = r * 0.8;
+            const t = Math.random();
+            const edges: Pos[] = [
+              { x: center.x - half + t * half * 2, y: center.y - half },
+              { x: center.x + half, y: center.y - half + t * half * 2 },
+              { x: center.x + half - t * half * 2, y: center.y + half },
+              { x: center.x - half, y: center.y + half - t * half * 2 },
+            ];
+            pts.push(edges[i % 4]);
+          }
+        }
+        break;
+      }
+      case "slash": {
+        // X-shaped diagonal lines
+        for (let i = 0; i < count; i++) {
+          const diag = i % 2 === 0 ? Math.PI / 4 : -Math.PI / 4;
+          const sign = i % 4 < 2 ? 1 : -1;
+          const dist = r * (0.3 + Math.random() * 0.7);
+          pts.push({ x: center.x + Math.cos(diag) * dist * sign, y: center.y + Math.sin(diag) * dist * sign });
+        }
+        break;
+      }
+      case "spiral": {
+        for (let i = 0; i < count; i++) {
+          const t = (Math.PI * 2 * i) / count;
+          const dist = r * (0.3 + (i / count) * 0.7);
+          pts.push({ x: center.x + Math.cos(t * 1.5) * dist, y: center.y + Math.sin(t * 1.5) * dist });
+        }
+        break;
+      }
+      case "hex": {
+        for (let i = 0; i < count; i++) {
+          const a = (Math.PI * 2 * (i % 6)) / 6;
+          const dist = r * (0.4 + Math.random() * 0.6);
+          pts.push({ x: center.x + Math.cos(a) * dist, y: center.y + Math.sin(a) * dist });
+        }
+        break;
+      }
+      case "scatter": {
+        for (let i = 0; i < count; i++) {
+          const a = Math.random() * Math.PI * 2;
+          const dist = r * (0.2 + Math.random() * 0.8);
+          pts.push({ x: center.x + Math.cos(a) * dist, y: center.y + Math.sin(a) * dist });
+        }
+        break;
+      }
+      case "ring":
+      default: {
+        for (let i = 0; i < count; i++) {
+          const a = (Math.PI * 2 * i) / count;
+          pts.push({ x: center.x + Math.cos(a) * r, y: center.y + Math.sin(a) * r });
+        }
+        break;
+      }
+    }
+    return pts;
+  }
+
+  /** Core flash shaped by projectileShape — replaces generic circle flash */
+  private burstCoreFlash(sig: TechniqueVisual, pos: Pos): void {
+    switch (sig.projectileShape) {
+      case "shard": {
+        const diamond = this.scene.add.graphics();
+        diamond.setDepth(91);
+        diamond.setBlendMode(Phaser.BlendModes.ADD);
+        diamond.fillStyle(sig.accent, 0.85);
+        diamond.fillPoints([
+          new Phaser.Geom.Point(pos.x, pos.y - 5),
+          new Phaser.Geom.Point(pos.x + 3.5, pos.y),
+          new Phaser.Geom.Point(pos.x, pos.y + 5),
+          new Phaser.Geom.Point(pos.x - 3.5, pos.y),
+        ], true);
+        this.scene.tweens.add({
+          targets: diamond, scaleX: 3, scaleY: 3, alpha: 0,
+          duration: 200, ease: "Quad.easeOut",
+          onComplete: () => diamond.destroy(),
+        });
+        break;
+      }
+      case "needle": {
+        const line = this.scene.add.graphics();
+        line.setDepth(91);
+        line.setBlendMode(Phaser.BlendModes.ADD);
+        line.lineStyle(2.5, sig.accent, 0.95);
+        line.beginPath();
+        line.moveTo(pos.x, pos.y - 7);
+        line.lineTo(pos.x, pos.y + 7);
+        line.strokePath();
+        this.scene.tweens.add({
+          targets: line, scaleX: 1.5, scaleY: 2.5, alpha: 0,
+          duration: 180, ease: "Quad.easeOut",
+          onComplete: () => line.destroy(),
+        });
+        break;
+      }
+      case "cross": {
+        const cross = this.scene.add.graphics();
+        cross.setDepth(91);
+        cross.setBlendMode(Phaser.BlendModes.ADD);
+        cross.lineStyle(2, sig.accent, 0.9);
+        cross.beginPath();
+        cross.moveTo(pos.x - 5, pos.y);
+        cross.lineTo(pos.x + 5, pos.y);
+        cross.moveTo(pos.x, pos.y - 5);
+        cross.lineTo(pos.x, pos.y + 5);
+        cross.strokePath();
+        this.scene.tweens.add({
+          targets: cross, scaleX: 2.5, scaleY: 2.5, alpha: 0,
+          duration: 220, ease: "Quad.easeOut",
+          onComplete: () => cross.destroy(),
+        });
+        break;
+      }
+      case "leaf": {
+        const leaf = this.scene.add.graphics();
+        leaf.setDepth(91);
+        leaf.setBlendMode(Phaser.BlendModes.ADD);
+        leaf.fillStyle(sig.primary, 0.6);
+        leaf.fillEllipse(pos.x, pos.y, 10, 5);
+        this.scene.tweens.add({
+          targets: leaf, scaleX: 2.5, scaleY: 2, alpha: 0,
+          duration: 280, ease: "Sine.easeOut",
+          onComplete: () => leaf.destroy(),
+        });
+        break;
+      }
+      case "flare": {
+        const star = this.scene.add.graphics();
+        star.setDepth(91);
+        star.setBlendMode(Phaser.BlendModes.ADD);
+        star.fillStyle(sig.accent, 0.75);
+        star.fillCircle(pos.x, pos.y, 2.5);
+        star.lineStyle(1.5, sig.primary, 0.9);
+        for (let i = 0; i < 4; i++) {
+          const a = (Math.PI / 2) * i + Math.PI / 4;
+          star.beginPath();
+          star.moveTo(pos.x + Math.cos(a) * 2, pos.y + Math.sin(a) * 2);
+          star.lineTo(pos.x + Math.cos(a) * 7, pos.y + Math.sin(a) * 7);
+          star.strokePath();
+        }
+        this.scene.tweens.add({
+          targets: star, scaleX: 2.8, scaleY: 2.8, alpha: 0, angle: 45,
+          duration: 230, ease: "Quad.easeOut",
+          onComplete: () => star.destroy(),
+        });
+        break;
+      }
+      case "bolt": {
+        // Lightning zigzag flash
+        const zap = this.scene.add.graphics();
+        zap.setDepth(91);
+        zap.setBlendMode(Phaser.BlendModes.ADD);
+        zap.lineStyle(2.5, sig.accent, 0.95);
+        zap.beginPath();
+        zap.moveTo(pos.x - 4, pos.y - 7); zap.lineTo(pos.x + 2, pos.y - 2);
+        zap.lineTo(pos.x - 2, pos.y + 2); zap.lineTo(pos.x + 4, pos.y + 7);
+        zap.strokePath();
+        zap.lineStyle(5, sig.primary, 0.3);
+        zap.beginPath();
+        zap.moveTo(pos.x - 4, pos.y - 7); zap.lineTo(pos.x + 2, pos.y - 2);
+        zap.lineTo(pos.x - 2, pos.y + 2); zap.lineTo(pos.x + 4, pos.y + 7);
+        zap.strokePath();
+        this.scene.tweens.add({
+          targets: zap, scaleX: 2.5, scaleY: 2.5, alpha: 0,
+          duration: 180, ease: "Quad.easeOut",
+          onComplete: () => zap.destroy(),
+        });
+        break;
+      }
+      case "crescent": {
+        // Curved blade arc flash
+        const arc = this.scene.add.graphics();
+        arc.setDepth(91);
+        arc.setBlendMode(Phaser.BlendModes.ADD);
+        arc.lineStyle(2.5, sig.accent, 0.9);
+        arc.beginPath();
+        arc.arc(pos.x, pos.y, 6, Phaser.Math.DegToRad(-100), Phaser.Math.DegToRad(100), false);
+        arc.strokePath();
+        arc.lineStyle(5, sig.primary, 0.35);
+        arc.beginPath();
+        arc.arc(pos.x, pos.y, 6, Phaser.Math.DegToRad(-80), Phaser.Math.DegToRad(80), false);
+        arc.strokePath();
+        this.scene.tweens.add({
+          targets: arc, scaleX: 2.5, scaleY: 2.5, alpha: 0, angle: 30,
+          duration: 220, ease: "Quad.easeOut",
+          onComplete: () => arc.destroy(),
+        });
+        break;
+      }
+      case "spiral": {
+        // Spiraling vortex flash
+        const vortex = this.scene.add.graphics();
+        vortex.setDepth(91);
+        vortex.setBlendMode(Phaser.BlendModes.ADD);
+        vortex.lineStyle(1.5, sig.accent, 0.85);
+        vortex.beginPath();
+        for (let t = 0; t < Math.PI * 2.5; t += 0.25) {
+          const r = t * 1.8;
+          const px = pos.x + Math.cos(t) * r;
+          const py = pos.y + Math.sin(t) * r;
+          if (t === 0) vortex.moveTo(px, py); else vortex.lineTo(px, py);
+        }
+        vortex.strokePath();
+        this.scene.tweens.add({
+          targets: vortex, scaleX: 2, scaleY: 2, alpha: 0, angle: 90,
+          duration: 300, ease: "Quad.easeOut",
+          onComplete: () => vortex.destroy(),
+        });
+        break;
+      }
+      case "star": {
+        // 5-pointed star flash
+        const starG = this.scene.add.graphics();
+        starG.setDepth(91);
+        starG.setBlendMode(Phaser.BlendModes.ADD);
+        const outerR = 6, innerR = 2.5;
+        const starPts: Phaser.Geom.Point[] = [];
+        for (let i = 0; i < 10; i++) {
+          const a = (Math.PI * 2 * i) / 10 - Math.PI / 2;
+          const r = i % 2 === 0 ? outerR : innerR;
+          starPts.push(new Phaser.Geom.Point(pos.x + Math.cos(a) * r, pos.y + Math.sin(a) * r));
+        }
+        starG.fillStyle(sig.accent, 0.8);
+        starG.fillPoints(starPts, true);
+        starG.fillStyle(sig.primary, 0.5);
+        starG.fillCircle(pos.x, pos.y, innerR);
+        this.scene.tweens.add({
+          targets: starG, scaleX: 3, scaleY: 3, alpha: 0, angle: 36,
+          duration: 250, ease: "Quad.easeOut",
+          onComplete: () => starG.destroy(),
+        });
+        break;
+      }
+      case "orb":
+      default: {
+        const outer = this.scene.add.arc(pos.x, pos.y, 4, 0, 360, false, sig.primary, 0.5);
+        outer.setDepth(91);
+        outer.setBlendMode(Phaser.BlendModes.ADD);
+        const inner = this.scene.add.arc(pos.x, pos.y, 2, 0, 360, false, sig.accent, 0.9);
+        inner.setDepth(92);
+        inner.setBlendMode(Phaser.BlendModes.ADD);
+        this.scene.tweens.add({
+          targets: outer, scaleX: 4, scaleY: 4, alpha: 0,
+          duration: 280, ease: "Quad.easeOut",
+          onComplete: () => outer.destroy(),
+        });
+        this.scene.tweens.add({
+          targets: inner, scaleX: 2.5, scaleY: 2.5, alpha: 0,
+          duration: 200, ease: "Quad.easeOut",
+          onComplete: () => inner.destroy(),
+        });
+        break;
+      }
+    }
   }
 
   private resolvePos(
@@ -1789,6 +2432,54 @@ export class AbilityEffectsLayer {
         dot.lineTo(0, signature.projectileRadius + 2);
         dot.strokePath();
         break;
+      case "bolt": {
+        const r = signature.projectileRadius;
+        dot.lineStyle(4, signature.accent, 0.3);
+        dot.beginPath(); dot.moveTo(-1, -r - 3); dot.lineTo(2, -r); dot.lineTo(-2, 0); dot.lineTo(1, r); dot.lineTo(-1, r + 3); dot.strokePath();
+        dot.lineStyle(2, signature.primary, 0.95);
+        dot.beginPath(); dot.moveTo(-1, -r - 3); dot.lineTo(2, -r); dot.lineTo(-2, 0); dot.lineTo(1, r); dot.lineTo(-1, r + 3); dot.strokePath();
+        break;
+      }
+      case "crescent":
+        dot.lineStyle(2, signature.primary, 0.95);
+        dot.beginPath();
+        dot.arc(0, 0, signature.projectileRadius + 2, Phaser.Math.DegToRad(-120), Phaser.Math.DegToRad(120), false);
+        dot.strokePath();
+        dot.lineStyle(4, signature.accent, 0.3);
+        dot.beginPath();
+        dot.arc(0, 0, signature.projectileRadius + 2, Phaser.Math.DegToRad(-100), Phaser.Math.DegToRad(100), false);
+        dot.strokePath();
+        break;
+      case "spiral": {
+        const sr = signature.projectileRadius;
+        dot.lineStyle(1.5, signature.primary, 0.9);
+        dot.beginPath();
+        for (let t = 0; t < Math.PI * 3; t += 0.3) {
+          const rad = t * (sr / 4);
+          const sx = Math.cos(t) * rad;
+          const sy = Math.sin(t) * rad;
+          if (t === 0) dot.moveTo(sx, sy); else dot.lineTo(sx, sy);
+        }
+        dot.strokePath();
+        dot.fillStyle(signature.accent, 0.6);
+        dot.fillCircle(0, 0, sr * 0.5);
+        break;
+      }
+      case "star": {
+        const rs = signature.projectileRadius + 2;
+        const ri = rs * 0.4;
+        const pts: Phaser.Geom.Point[] = [];
+        for (let i = 0; i < 10; i++) {
+          const a = (Math.PI * 2 * i) / 10 - Math.PI / 2;
+          const rad = i % 2 === 0 ? rs : ri;
+          pts.push(new Phaser.Geom.Point(Math.cos(a) * rad, Math.sin(a) * rad));
+        }
+        dot.fillStyle(signature.accent, 0.5);
+        dot.fillPoints(pts, true);
+        dot.fillStyle(signature.primary, 0.95);
+        dot.fillCircle(0, 0, ri * 0.6);
+        break;
+      }
       case "orb":
       default:
         dot.fillStyle(signature.accent, 0.55);
@@ -1837,6 +2528,49 @@ export class AbilityEffectsLayer {
         outer.strokeCircle(center.x, center.y, signature.ringRadius);
         outer.strokeRect(center.x - signature.ringRadius + 1, center.y - signature.ringRadius + 1, signature.ringRadius * 2 - 2, signature.ringRadius * 2 - 2);
         break;
+      case "slash": {
+        const s = signature.ringRadius;
+        outer.beginPath();
+        outer.moveTo(center.x - s, center.y - s); outer.lineTo(center.x + s, center.y + s);
+        outer.moveTo(center.x + s, center.y - s); outer.lineTo(center.x - s, center.y + s);
+        outer.strokePath();
+        break;
+      }
+      case "spiral": {
+        for (let arm = 0; arm < 3; arm++) {
+          const base = (Math.PI * 2 * arm) / 3;
+          outer.beginPath();
+          for (let t = 0; t <= Math.PI * 1.5; t += 0.2) {
+            const r = (t / (Math.PI * 1.5)) * (signature.ringRadius + 3);
+            const px = center.x + Math.cos(base + t) * r;
+            const py = center.y + Math.sin(base + t) * r;
+            if (t === 0) outer.moveTo(px, py); else outer.lineTo(px, py);
+          }
+          outer.strokePath();
+        }
+        break;
+      }
+      case "hex": {
+        const hexPts: Phaser.Geom.Point[] = [];
+        for (let i = 0; i < 6; i++) {
+          const a = (Math.PI * 2 * i) / 6;
+          hexPts.push(new Phaser.Geom.Point(
+            center.x + Math.cos(a) * signature.ringRadius,
+            center.y + Math.sin(a) * signature.ringRadius,
+          ));
+        }
+        outer.strokePoints(hexPts, true);
+        break;
+      }
+      case "scatter": {
+        for (let i = 0; i < 8; i++) {
+          const a = (Math.PI * 2 * i) / 8 + (Math.random() - 0.5) * 0.4;
+          const r = signature.ringRadius * (0.3 + Math.random() * 0.7);
+          outer.fillStyle(signature.primary, 0.7);
+          outer.fillCircle(center.x + Math.cos(a) * r, center.y + Math.sin(a) * r, 1.5);
+        }
+        break;
+      }
       case "ring":
       default:
         outer.strokeCircle(center.x, center.y, signature.ringRadius);

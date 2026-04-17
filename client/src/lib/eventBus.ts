@@ -4,7 +4,11 @@ export interface GameEventMap {
   guildRegistrarClick: Entity;
   auctioneerClick: Entity;
   arenaMasterClick: Entity;
+  dungeonGateClick: Entity;
+  enchantingAltarClick: Entity;
+  alchemyLabClick: Entity;
   entityInspect: { entityId: string; zoneId: string };
+  clearEntityInspect: void;
   inspectSelf: { zoneId: string; walletAddress: string };
   switchZone: { zoneId: string };
   zoneChanged: { zoneId: string };
@@ -15,6 +19,8 @@ export interface GameEventMap {
   followPlayer: { zoneId: string; walletAddress: string };
   /** User clicked an NPC to send the agent there */
   agentGoToNpc: { entityId: string; zoneId: string; name: string; type: string; teachesProfession?: string; action?: string; questId?: string; questTitle?: string };
+  /** User clicked empty ground to move agent to a world position */
+  agentGoToPosition: { x: number; y: number; zoneId: string };
   /** User clicked an NPC that has no dedicated dialog — show info panel */
   npcInfoClick: Entity;
   /** User clicked a quest-giver NPC — open dialogue overlay */

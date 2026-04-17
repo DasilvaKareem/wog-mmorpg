@@ -6,7 +6,8 @@ const NONCE_ERROR_CODES = new Set(["-32004", "-32000", "-32603", "NONCE_EXPIRED"
 const MAX_RETRIES = 3;
 const DEFAULT_RECEIPT_TIMEOUT_MS = 45_000;
 const DEFAULT_SUBMISSION_TIMEOUT_MS = 20_000;
-const DEFAULT_QUEUE_ATTEMPT_TIMEOUT_MS = 30_000;
+const DEFAULT_QUEUE_ATTEMPT_TIMEOUT_MS =
+  Number.parseInt(process.env.QUEUE_ATTEMPT_TIMEOUT_MS ?? "60000", 10) || 60_000;
 const DISTRIBUTED_QUEUE_LOCK_TTL_MS = 45_000;
 const DISTRIBUTED_QUEUE_LOCK_HEARTBEAT_MS = 10_000;
 const DISTRIBUTED_QUEUE_LOCK_KEY_PREFIX = "blockchain:tx-lock";
@@ -72,7 +73,14 @@ export function isTransientRpcSendError(err: unknown): boolean {
   );
 }
 
+function isBalanceError(err: unknown): boolean {
+  const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
+  return msg.includes("balance is too low") || msg.includes("transfer amount exceeds balance");
+}
+
 function isNonceError(err: unknown): boolean {
+  // Balance errors share code -32004 with nonce errors on SKALE — don't retry those
+  if (isBalanceError(err)) return false;
   const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
   const code = String((err as any)?.code ?? (err as any)?.cause?.code ?? (err as any)?.data?.code ?? "");
   return (

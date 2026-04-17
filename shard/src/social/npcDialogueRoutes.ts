@@ -53,9 +53,15 @@ export function registerNpcDialogueRoutes(server: FastifyInstance): void {
       return { error: "NPC not found" };
     }
 
-    if (!isQuestNpc(npc) && npc.name !== "Scout Kaela") {
+    const DIALOGUE_NPC_TYPES = new Set([
+      "quest-giver", "lore-npc", "trainer", "profession-trainer",
+      "merchant", "crafting-master", "guild-registrar", "auctioneer",
+      "arena-master", "forge", "alchemy-lab", "enchanting-altar",
+      "campfire", "tanning-rack", "jewelers-bench",
+    ]);
+    if (!DIALOGUE_NPC_TYPES.has(npc.type) && npc.name !== "Scout Kaela") {
       reply.code(400);
-      return { error: "NPC dialogue is only available for quest givers right now" };
+      return { error: "This NPC has nothing to say" };
     }
 
     const response = await generateNpcDialogueResponse({

@@ -1,0 +1,318 @@
+// ── Edict Evaluator ─────────────────────────────────────────────────
+//
+// Runs in the zone tick (synchronous, 1s cadence). Evaluates a player's
+// edicts top-to-bottom. First full match wins.  Returns null if no edict
+// matches — caller falls through to existing pickTechnique() AI.
+
+import type { Edict, EdictCondition, EdictAction } from "./edicts.js";
+import { getTechniqueById, type TechniqueDefinition } from "./techniques.js";
+import type { Entity, ActiveEffect } from "../world/zoneRuntime.js";
+import { getPartyMembers } from "../social/partySystem.js";
+
+// ── Public result type ──────────────────────────────────────────────
+
+export interface EdictResult {
+  edict: Edict;
+  /** Direct order to set on entity (for flee/skip/basic-attack). */
+  order?: { action: string; targetId?: string; techniqueId?: string; x?: number; y?: number };
+  /** Override pickTechnique — cast this technique instead. */
+  techniqueOverride?: TechniqueDefinition;
+  /** Override pickAutoCombatTarget — attack this entity instead. */
+  targetOverride?: Entity;
+}
+
+// ── Zone state shape (minimal interface to avoid circular import) ───
+
+interface ZoneView {
+  entities: Map<string, Entity>;
+  tick: number;
+}
+
+// ── Main evaluator ──────────────────────────────────────────────────
+
+export function evaluateEdicts(
+  entity: Entity,
+  zone: ZoneView,
+  edicts: Edict[],
+  currentTarget: Entity | null,
+): EdictResult | null {
+  for (const edict of edicts) {
+    if (!edict.enabled) continue;
+    if (edict.conditions.length === 0) continue;
+
+    // AND: all conditions must pass
+    let allMatch = true;
+    for (const cond of edict.conditions) {
+      if (!evaluateCondition(entity, zone, currentTarget, cond)) {
+        allMatch = false;
+        break;
+      }
+    }
+    if (!allMatch) continue;
+
+    // Conditions matched — resolve action
+    const result = resolveAction(entity, zone, currentTarget, edict);
+    if (result) return result;
+    // If action can't execute (cooldown, no essence), skip to next edict
+  }
+  return null;
+}
+
+// ── Condition evaluation ────────────────────────────────────────────
+
+function evaluateCondition(
+  entity: Entity,
+  zone: ZoneView,
+  currentTarget: Entity | null,
+  cond: EdictCondition,
+): boolean {
+  // Resolve subject entity
+  const subject = resolveSubject(cond.subject, entity, zone, currentTarget);
+  if (!subject && cond.field !== "always") return false;
+
+  // Read field value
+  const actual = readField(subject, entity, zone, cond.field);
+  if (actual === undefined && cond.field !== "always") return false;
+
+  // Compare
+  return compare(actual, cond.operator, cond.value);
+}
+
+function resolveSubject(
+  subject: string,
+  entity: Entity,
+  zone: ZoneView,
+  currentTarget: Entity | null,
+): Entity | null {
+  switch (subject) {
+    case "self":
+      return entity;
+    case "target":
+      return currentTarget;
+    case "ally_lowest_hp": {
+      const partyIds = getPartyMembers(entity.id);
+      if (partyIds.length === 0) return null;
+      let lowest: Entity | null = null;
+      let lowestRatio = 1;
+      for (const pid of partyIds) {
+        if (pid === entity.id) continue;
+        const ally = zone.entities.get(pid);
+        if (!ally || ally.hp <= 0) continue;
+        const ratio = ally.hp / Math.max(1, ally.maxHp);
+        if (ratio < lowestRatio) {
+          lowestRatio = ratio;
+          lowest = ally;
+        }
+      }
+      return lowest;
+    }
+    default:
+      return null;
+  }
+}
+
+function readField(
+  subject: Entity | null,
+  self: Entity,
+  zone: ZoneView,
+  field: string,
+): number | string | boolean | undefined {
+  switch (field) {
+    case "hp_pct":
+      return subject ? Math.round((subject.hp / Math.max(1, subject.maxHp)) * 100) : undefined;
+    case "essence_pct":
+      return subject?.essence != null && subject?.maxEssence
+        ? Math.round((subject.essence / subject.maxEssence) * 100)
+        : undefined;
+    case "type":
+      return subject?.type;
+    case "active_effect":
+      // Returns the type string of the first active effect, or "none"
+      // Operator will be "has" or "not_has" with value = effect type
+      return hasEffectType(subject?.activeEffects, undefined) ? "present" : "none";
+    case "effect_from_self":
+      return hasEffectFromCaster(subject?.activeEffects, self.id) ? "present" : "none";
+    case "nearby_enemies": {
+      let count = 0;
+      const RANGE = 70;
+      for (const e of zone.entities.values()) {
+        if (e.id === self.id) continue;
+        if (e.hp <= 0) continue;
+        if (e.type !== "mob" && e.type !== "boss") continue;
+        const dx = e.x - self.x, dy = (e.y ?? 0) - (self.y ?? 0);
+        if (dx * dx + dy * dy <= RANGE * RANGE) count++;
+      }
+      return count;
+    }
+    case "always":
+      return true;
+    default:
+      return undefined;
+  }
+}
+
+function hasEffectType(effects: ActiveEffect[] | undefined, _unused: unknown): boolean {
+  return !!effects && effects.length > 0;
+}
+
+function hasEffectFromCaster(effects: ActiveEffect[] | undefined, casterId: string): boolean {
+  if (!effects) return false;
+  return effects.some(e => e.casterId === casterId);
+}
+
+// Special-case: for "active_effect" and "effect_from_self" fields,
+// the operator/value work differently — we check for specific effect types
+function compare(
+  actual: number | string | boolean | undefined,
+  operator: string,
+  value: number | string | boolean,
+): boolean {
+  // Special handling for effect-presence fields
+  if (typeof value === "string" && (operator === "has" || operator === "not_has")) {
+    // "has"/"not_has" with effect type value — delegate to special check
+    // actual is "present" or "none" (simplified), but we need the real check
+    // This is handled via the field reader returning "present"/"none"
+    if (operator === "has") return actual === "present";
+    if (operator === "not_has") return actual === "none";
+  }
+
+  // Numeric comparisons
+  if (typeof actual === "number" && typeof value === "number") {
+    switch (operator) {
+      case "lt": return actual < value;
+      case "gt": return actual > value;
+      case "gte": return actual >= value;
+      case "eq": return actual === value;
+      default: return false;
+    }
+  }
+
+  // String/type comparisons
+  if (operator === "is") return actual === value;
+  if (operator === "eq") return actual === value;
+
+  return false;
+}
+
+// ── Action resolution ───────────────────────────────────────────────
+
+function resolveAction(
+  entity: Entity,
+  zone: ZoneView,
+  currentTarget: Entity | null,
+  edict: Edict,
+): EdictResult | null {
+  const action = edict.action;
+
+  switch (action.type) {
+    case "use_technique":
+      return resolveTechniqueAction(entity, zone, edict, action);
+
+    case "attack":
+      if (!currentTarget) return null;
+      return { edict, order: { action: "attack", targetId: currentTarget.id } };
+
+    case "prefer_target":
+      return resolveTargetPreference(entity, zone, edict, action);
+
+    case "flee":
+      return resolveFlee(entity, currentTarget, edict);
+
+    case "skip":
+      return { edict, order: { action: "move", x: entity.x, y: entity.y } };
+
+    default:
+      return null;
+  }
+}
+
+function resolveTechniqueAction(
+  entity: Entity,
+  zone: ZoneView,
+  edict: Edict,
+  action: EdictAction,
+): EdictResult | null {
+  if (!action.techniqueId) return null;
+
+  const tech = getTechniqueById(action.techniqueId);
+  if (!tech) return null;
+
+  // Must have learned the technique
+  if (!entity.learnedTechniques?.includes(tech.id)) return null;
+
+  // Check cooldown
+  if (entity.cooldowns?.has(tech.id)) {
+    const expiresAtTick = entity.cooldowns.get(tech.id)!;
+    if (zone.tick < expiresAtTick) return null; // on cooldown — skip to next edict
+  }
+
+  // Check essence cost
+  if (tech.essenceCost > 0) {
+    const currentEssence = entity.essence ?? 0;
+    if (currentEssence < tech.essenceCost) return null; // not enough — skip to next edict
+  }
+
+  return { edict, techniqueOverride: tech };
+}
+
+function resolveTargetPreference(
+  entity: Entity,
+  zone: ZoneView,
+  edict: Edict,
+  action: EdictAction,
+): EdictResult | null {
+  const pref = action.targetPreference ?? "nearest";
+  let best: Entity | null = null;
+  let bestScore = -Infinity;
+  const RANGE = 100;
+
+  for (const e of zone.entities.values()) {
+    if (e.id === entity.id) continue;
+    if (e.hp <= 0) continue;
+    if (e.type !== "mob" && e.type !== "boss") continue;
+    const dx = e.x - entity.x, dy = (e.y ?? 0) - (entity.y ?? 0);
+    const distSq = dx * dx + dy * dy;
+    if (distSq > RANGE * RANGE) continue;
+
+    let score = 0;
+    switch (pref) {
+      case "nearest":
+        score = -distSq; // lower distance = higher score
+        break;
+      case "weakest":
+        score = -(e.hp / Math.max(1, e.maxHp)); // lower HP ratio = higher score
+        break;
+      case "strongest":
+        score = e.level ?? 0; // higher level = higher score
+        break;
+      case "boss":
+        score = e.type === "boss" ? 1000 : -distSq; // strongly prefer bosses
+        break;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = e;
+    }
+  }
+
+  if (!best) return null;
+  return { edict, targetOverride: best };
+}
+
+function resolveFlee(
+  entity: Entity,
+  currentTarget: Entity | null,
+  edict: Edict,
+): EdictResult | null {
+  // Move 80 units away from current threat
+  const threatX = currentTarget?.x ?? entity.x;
+  const threatY = currentTarget?.y ?? entity.y;
+  const dx = entity.x - threatX;
+  const dy = (entity.y ?? 0) - (threatY ?? 0);
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+  const fleeX = entity.x + (dx / dist) * 80;
+  const fleeY = (entity.y ?? 0) + (dy / dist) * 80;
+
+  return { edict, order: { action: "move", x: Math.round(fleeX), y: Math.round(fleeY) } as unknown as EdictResult["order"] };
+}

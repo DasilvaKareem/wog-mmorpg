@@ -9,11 +9,11 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { getAgentEndpoint, getAgentOwnerWallet } from "../erc8004/identity.js";
 import { getErc8004ChainName, getOfficialErc8004Addresses } from "../erc8004/official.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
 import { SKALE_BASE_CHAIN_ID } from "../blockchain/biteChain.js";
+import { getCharacterProjectionByAgentId } from "../character/characterProjectionStore.js";
 
 const BASE_URL = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
 const A2A_CHAIN_NAME = getErc8004ChainName(SKALE_BASE_CHAIN_ID);
@@ -184,7 +184,7 @@ export function registerA2ARoutes(server: FastifyInstance): void {
     }
   });
 
-  // ── Resolve on-chain A2A endpoint ─────────────────────────────────────────
+  // ── Resolve agent A2A endpoint from local authoritative state ────────────
   server.get("/a2a/resolve/:agentId", async (
     req: FastifyRequest<{ Params: { agentId: string } }>,
     reply: FastifyReply,
@@ -197,8 +197,9 @@ export function registerA2ARoutes(server: FastifyInstance): void {
       return reply.status(400).send({ error: "Invalid agentId — must be a number" });
     }
 
-    const endpoint = await getAgentEndpoint(id);
-    const wallet = await getAgentOwnerWallet(id);
+    const projection = await getCharacterProjectionByAgentId(agentId);
+    const wallet = projection?.walletAddress ?? null;
+    const endpoint = wallet ? `${BASE_URL}/a2a/${wallet}` : null;
 
     if (!endpoint && !wallet) {
       return reply.status(404).send({ error: "Agent identity not found" });

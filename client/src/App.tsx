@@ -51,6 +51,15 @@ const AgentChatPanel = React.lazy(() =>
 const DeferredWorldDialogs = React.lazy(() =>
   import("@/components/DeferredWorldDialogs").then((mod) => ({ default: mod.DeferredWorldDialogs }))
 );
+const DungeonGateDialog = React.lazy(() =>
+  import("@/components/DungeonGateDialog").then((mod) => ({ default: mod.DungeonGateDialog }))
+);
+const AlchemyLabDialog = React.lazy(() =>
+  import("@/components/AlchemyLabDialog").then((mod) => ({ default: mod.AlchemyLabDialog }))
+);
+const EnchantingAltarDialog = React.lazy(() =>
+  import("@/components/EnchantingAltarDialog").then((mod) => ({ default: mod.EnchantingAltarDialog }))
+);
 const HotkeyBar = React.lazy(() =>
   import("@/components/HotkeyBar").then((mod) => ({ default: mod.HotkeyBar }))
 );
@@ -74,6 +83,9 @@ const WorldMap = React.lazy(() =>
 );
 const LandingPage = React.lazy(() =>
   import("@/components/LandingPage").then((mod) => ({ default: mod.LandingPage }))
+);
+const MobileLoginPage = React.lazy(() =>
+  import("@/components/MobileLoginPage").then((mod) => ({ default: mod.MobileLoginPage }))
 );
 const LeaderboardPage = React.lazy(() =>
   import("@/components/LeaderboardPage").then((mod) => ({ default: mod.LeaderboardPage }))
@@ -107,6 +119,12 @@ const PricingPage = React.lazy(() =>
 );
 const AdminDashboardPage = React.lazy(() =>
   import("@/components/AdminDashboardPage").then((mod) => ({ default: mod.AdminDashboardPage }))
+);
+const PrivacyPolicyPage = React.lazy(() =>
+  import("@/components/PrivacyPolicyPage").then((mod) => ({ default: mod.PrivacyPolicyPage }))
+);
+const TermsOfUsePage = React.lazy(() =>
+  import("@/components/TermsOfUsePage").then((mod) => ({ default: mod.TermsOfUsePage }))
 );
 const FarcasterMiniApp = React.lazy(() =>
   import("@/pages/FarcasterMiniApp").then((mod) => ({ default: mod.FarcasterMiniApp }))
@@ -260,7 +278,7 @@ function GameWorld(): React.ReactElement {
   const [currentZone, setCurrentZone] = React.useState<string | null>("village-square");
   const [isCompactWorldUI, setIsCompactWorldUI] = React.useState(false);
   const [deferredDialogsReady, setDeferredDialogsReady] = React.useState(false);
-  const { address, characterProgress } = useWalletContext();
+  const { address, characterProgress, refreshCharacterProgress, refreshProfessions } = useWalletContext();
 
   // Toggleable panel visibility: null = use default (shown on desktop, hidden on mobile)
   const [chatVisible, setChatVisible] = React.useState<boolean | null>(null);
@@ -479,20 +497,25 @@ function GameWorld(): React.ReactElement {
     void (async () => {
       const trackedWallet = await WalletManager.getInstance().getTrackedWalletAddress();
       const walletToFocus = trackedWallet ?? address;
-      let attempts = 0;
-      const maxAttempts = 8;
+      const latestProgress = await refreshCharacterProgress(true);
+      const targetZoneId = latestProgress?.zoneId ?? zoneId;
 
-      const retry = window.setInterval(() => {
-        if (zoneId) {
-          gameBus.emit("switchZone", { zoneId });
-        }
-        gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
-        if (++attempts >= maxAttempts) {
-          window.clearInterval(retry);
-        }
-      }, 350);
+      if (targetZoneId) {
+        gameBus.emit("followPlayer", { zoneId: targetZoneId, walletAddress: walletToFocus });
+        return;
+      }
+
+      gameBus.emit("lockToPlayer", { walletAddress: walletToFocus });
     })();
-  }, [address]);
+  }, [address, refreshCharacterProgress]);
+
+  const toggleProfessions = React.useCallback(() => {
+    const nextVisible = !professionsVisible;
+    setProfessionsVisible(nextVisible);
+    if (nextVisible) {
+      void refreshProfessions();
+    }
+  }, [professionsVisible, refreshProfessions]);
 
   // Listen for global "open onboarding" event (from Navbar sign-in button)
   React.useEffect(() => {
@@ -528,7 +551,7 @@ function GameWorld(): React.ReactElement {
       } else if (key === "b") {
         gameBus.emit("inventoryOpen", undefined as never);
       } else if (key === "p") {
-        setProfessionsVisible((v) => !v);
+        toggleProfessions();
       } else if (key === "n") {
         setInboxOpen((c) => !c);
       } else if (event.code === "Space" && address) {
@@ -539,7 +562,7 @@ function GameWorld(): React.ReactElement {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI]);
+  }, [address, currentZone, characterProgress, focusOwnedCharacter, isCompactWorldUI, toggleProfessions]);
 
   React.useEffect(() => {
     const unsub1 = gameBus.on("zoneChanged", ({ zoneId }) => {
@@ -635,32 +658,37 @@ function GameWorld(): React.ReactElement {
       <React.Suspense fallback={null}>
         {showLeftDock && (
           <div className="pointer-events-none absolute left-2 top-14 bottom-16 z-30 md:left-4">
-            {professionsVisible && (
-              <div
-                className="absolute left-0 top-0 min-h-0"
-                style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
-              >
-                <ProfessionsPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
-                <div
-                  onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
-                  className="pointer-events-auto absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize professions panel"
-                />
-                <div
-                  onPointerDown={(event) => startTopHeightResize(
-                    event,
-                    leftTopHeight,
-                    setLeftTopHeightRaw,
-                    showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
-                  )}
-                  className="pointer-events-auto absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
-                  title="Resize professions panel"
-                />
-              </div>
-            )}
+            <div
+              aria-hidden={!professionsVisible}
+              className={`absolute left-0 top-0 min-h-0 overflow-hidden transition-opacity ${
+                professionsVisible ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+              }`}
+              style={{ width: `${leftTopWidth}px`, height: `${leftTopHeight}px` }}
+            >
+              <ProfessionsPanel className="h-full w-full max-w-none max-h-full overflow-auto" />
+              {professionsVisible && (
+                <>
+                  <div
+                    onPointerDown={(event) => startLeftWidthResize(event, leftTopWidth, setLeftTopWidthRaw)}
+                    className="absolute -right-1.5 top-1/2 h-24 w-3 -translate-y-1/2 cursor-col-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                    title="Resize professions panel"
+                  />
+                  <div
+                    onPointerDown={(event) => startTopHeightResize(
+                      event,
+                      leftTopHeight,
+                      setLeftTopHeightRaw,
+                      showRanks ? Math.max(MIN_DOCK_PANEL_HEIGHT, leftAvailableHeight - leftBottomHeight - DOCK_PANEL_GAP) : leftAvailableHeight,
+                    )}
+                    className="absolute inset-x-4 -bottom-1.5 h-3 cursor-row-resize rounded-full border border-[#24314d] bg-[#0a0f1ecc] transition-colors hover:border-[#ffcc00] hover:bg-[#1a2238]"
+                    title="Resize professions panel"
+                  />
+                </>
+              )}
+            </div>
             {showRanks && (
               <div
-                className="absolute bottom-0 left-0 min-h-0"
+                className="pointer-events-none absolute bottom-0 left-0 min-h-0"
                 style={{ width: `${leftBottomWidth}px`, height: `${leftBottomHeight}px` }}
               >
                 <PlayerPanel className="pointer-events-auto h-full w-full max-w-none max-h-full overflow-auto" />
@@ -687,7 +715,7 @@ function GameWorld(): React.ReactElement {
           <div className="pointer-events-none absolute right-2 top-4 bottom-16 z-30 md:right-4">
             {showWallet && (
               <div
-                className="absolute right-0 top-0 min-h-0"
+                className="pointer-events-none absolute right-0 top-0 min-h-0"
                 style={{ width: `${rightTopWidth}px`, height: `${rightTopHeight}px` }}
               >
                 {address ? (
@@ -719,7 +747,7 @@ function GameWorld(): React.ReactElement {
             )}
             {showChat && (address || !showWallet) && (
               <div
-                className="absolute bottom-0 right-0 min-h-0"
+                className="pointer-events-none absolute bottom-0 right-0 min-h-0"
                 style={{ width: `${rightBottomWidth}px`, height: `${rightBottomHeight}px` }}
               >
                 {address ? (
@@ -753,6 +781,9 @@ function GameWorld(): React.ReactElement {
             )}
           </div>
         )}
+        <DungeonGateDialog />
+        <AlchemyLabDialog />
+        <EnchantingAltarDialog />
         {deferredDialogsReady && <DeferredWorldDialogs />}
         {questLogOpen && (
           <QuestLogDialog open={questLogOpen} onClose={() => setQuestLogOpen(false)} walletAddress={address} />
@@ -799,7 +830,7 @@ function GameWorld(): React.ReactElement {
             onChat={() => setChatVisible((v) => !(v ?? !isCompactWorldUI))}
             onRanks={() => setRanksVisible((v) => !(v ?? !isCompactWorldUI))}
             onWallet={() => setWalletVisible((v) => !(v ?? !isCompactWorldUI))}
-            onProfessions={() => setProfessionsVisible((v) => !v)}
+            onProfessions={toggleProfessions}
             onSettings={() => setSettingsOpen((s) => !s)}
             inboxActive={inboxOpen}
             chatActive={showChat}
@@ -817,25 +848,35 @@ function GameWorld(): React.ReactElement {
 function AppShell(): React.ReactElement {
   const location = useLocation();
   const isWorldRoute = location.pathname === "/world";
+  const isMobileRoute = location.pathname === "/mobile";
   const [onboardingOpen, setOnboardingOpen] = React.useState(false);
   const [onboardingMode, setOnboardingMode] = React.useState<OnboardingStartMode>("create-character");
   const { address } = useWalletContext();
 
   // Listen for global "open onboarding" event on non-world routes
   React.useEffect(() => {
-    if (isWorldRoute) return; // GameWorld handles its own listener
+    if (isWorldRoute || isMobileRoute) return;
     const handler = (event: Event) => {
       setOnboardingMode(resolveOnboardingMode(event));
       setOnboardingOpen(true);
     };
     window.addEventListener(OPEN_ONBOARDING_EVENT, handler);
     return () => window.removeEventListener(OPEN_ONBOARDING_EVENT, handler);
-  }, [isWorldRoute]);
+  }, [isWorldRoute, isMobileRoute]);
+
+  // /mobile is a standalone native-app shell — render nothing else
+  if (isMobileRoute) {
+    return (
+      <React.Suspense fallback={<RouteFallback />}>
+        <MobileLoginPage />
+      </React.Suspense>
+    );
+  }
 
   return (
     <div className={`relative h-full w-full ${isWorldRoute ? "" : "flex flex-col"}`}>
       <Navbar />
-      <PushNotificationBanner walletAddress={address} />
+      {/* <PushNotificationBanner walletAddress={address} /> */}
       {isWorldRoute ? (
         <div className="h-full w-full pt-0">
           <GameWorld />
@@ -845,6 +886,7 @@ function AppShell(): React.ReactElement {
           <React.Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route path="/" element={<LandingPage />} />
+              <Route path="/mobile" element={<MobileLoginPage />} />
               <Route path="/marketplace" element={<MarketplacePage />} />
               <Route path="/market" element={<RealMoneyMarketPage />} />
               <Route path="/x402" element={<X402AgentPage />} />
@@ -856,6 +898,8 @@ function AppShell(): React.ReactElement {
               <Route path="/champions" element={<ChampionsPage />} />
               <Route path="/pricing" element={<PricingPage />} />
               <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route path="/privacy" element={<PrivacyPolicyPage />} />
+              <Route path="/terms" element={<TermsOfUsePage />} />
               <Route path="*" element={<LandingPage />} />
             </Routes>
           </React.Suspense>

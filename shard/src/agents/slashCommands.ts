@@ -16,8 +16,10 @@ import {
   type Entity,
 } from "../world/zoneRuntime.js";
 import { getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getWorldLayout } from "../world/worldLayout.js";
+import { getZoneEvents } from "../world/zoneEvents.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
-import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
+import { getPartyLeaderId, getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
+import { buildPartyCoordinationReport } from "../social/partyReport.js";
 import { getLearnedProfessions } from "../professions/professions.js";
 import { fetchLiquidationInventory } from "./agentUtils.js";
 import {
@@ -26,10 +28,17 @@ import {
   getAgentCustodialWallet,
   patchAgentConfig,
   type AgentFocus,
+  type GatherPreference,
   type AgentStrategy,
 } from "./agentConfigStore.js";
 import { agentManager } from "./agentManager.js";
 import { resolveRegionId } from "../world/worldLayout.js";
+import { ITEM_CATALOG, getItemByTokenId, getItemRarity, type EquipmentSlot } from "../items/itemCatalog.js";
+import { getItemBalance } from "../blockchain/blockchain.js";
+import { getItemInstance, getWalletInstances, isItemInstanceOwnedBy } from "../items/itemRng.js";
+import { recalculateEntityVitals } from "../world/zoneRuntime.js";
+import { logDiary, narrativeEquip, narrativeUnequip } from "../social/diary.js";
+import { saveCharacter } from "../character/characterStore.js";
 
 export interface SlashCommandResult {
   /** The formatted response text to display in chat */
@@ -61,6 +70,11 @@ const COMMANDS: CommandDef[] = [];
 
 function cmd(def: CommandDef) {
   COMMANDS.push(def);
+}
+
+function formatPct(numerator: number, denominator: number): string {
+  if (denominator <= 0) return "0%";
+  return `${Math.round((numerator / denominator) * 100)}%`;
 }
 
 // ── /help ──────────────────────────────────────────────────────────────────
@@ -341,7 +355,7 @@ cmd({
     const VALID_FOCUSES: Record<string, AgentFocus> = {
       combat: "combat", fight: "combat", grind: "combat",
       quest: "questing", questing: "questing",
-      gather: "gathering", gathering: "gathering", mine: "gathering", herb: "gathering",
+      gather: "gathering", gathering: "gathering", mine: "gathering", herb: "gathering", herbalism: "gathering",
       craft: "crafting", crafting: "crafting", forge: "crafting",
       brew: "alchemy", alchemy: "alchemy", potion: "alchemy",
       cook: "cooking", cooking: "cooking",
@@ -360,6 +374,15 @@ cmd({
     }
 
     const patch: Record<string, unknown> = { focus };
+    if (focus === "gathering") {
+      const gatherNodeType: GatherPreference =
+        focusInput === "mine" ? "ore" :
+        (focusInput === "herb" || focusInput === "herbalism") ? "herb" :
+        "both";
+      patch.gatherNodeType = gatherNodeType;
+    } else {
+      patch.gatherNodeType = undefined;
+    }
     if (focus === "traveling" && zoneInput) {
       const resolved = resolveRegionId(zoneInput);
       if (resolved) patch.targetZone = resolved;
@@ -406,14 +429,91 @@ cmd({
     const partyId = getPlayerPartyId(ctx.entityId);
     if (!partyId) return { response: "You are not in a party." };
 
+    const leaderId = getPartyLeaderId(ctx.entityId);
     const members = getPartyMembers(ctx.entityId);
     const lines = members.map((id) => {
       const member = getEntity(id);
       if (!member) return `  (unknown)`;
-      return `  ${member.name} — L${member.level ?? "?"} ${member.classId ?? "?"} (${Math.round((member.hp / Math.max(member.maxHp, 1)) * 100)}% HP)`;
+      const leaderTag = id === leaderId ? " [leader]" : "";
+      return `  ${member.name}${leaderTag} — L${member.level ?? "?"} ${member.classId ?? "?"} (${Math.round((member.hp / Math.max(member.maxHp, 1)) * 100)}% HP)`;
     });
 
     return { response: `Party (${members.length}):\n${lines.join("\n")}` };
+  },
+});
+
+cmd({
+  aliases: ["partydebug", "partymetrics", "coord"],
+  usage: "/partydebug",
+  description: "Show recent party coordination metrics and party events",
+  handler: (_args, ctx) => {
+    if (!ctx.entityId || !ctx.entity) return { response: "No character in world." };
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (!partyId) return { response: "You are not in a party." };
+
+    const runner = agentManager.getRunner(ctx.authWallet);
+    const partyTelemetry = runner?.getSnapshot().telemetry?.party ?? {};
+    const topMetrics = Object.entries(partyTelemetry)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, count]) => `  ${name}: ${count}`);
+
+    const recentPartyEvents = getZoneEvents(ctx.entity.region ?? "unknown", 80)
+      .filter((event) => event.type === "party")
+      .slice(-6)
+      .map((event) => `  ${event.message}`);
+
+    const leaderId = getPartyLeaderId(ctx.entityId);
+    const leader = leaderId ? getEntity(leaderId) : null;
+
+    return {
+      response: [
+        `Party Debug`,
+        `Party: ${partyId}`,
+        `Leader: ${leader?.name ?? leaderId ?? "unknown"}`,
+        `Metrics:`,
+        ...(topMetrics.length > 0 ? topMetrics : ["  (no party metrics yet)"]),
+        `Recent party events:`,
+        ...(recentPartyEvents.length > 0 ? recentPartyEvents : ["  (no recent party events)"]),
+      ].join("\n"),
+    };
+  },
+});
+
+cmd({
+  aliases: ["partyreport", "partyrep", "preport"],
+  usage: "/partyreport",
+  description: "Summarize party cohesion and leader-follow effectiveness",
+  handler: (_args, ctx) => {
+    if (!ctx.entityId || !ctx.entity) return { response: "No character in world." };
+    const partyId = getPlayerPartyId(ctx.entityId);
+    if (!partyId) return { response: "You are not in a party." };
+    const report = buildPartyCoordinationReport(partyId);
+    if (!report) return { response: "Party report unavailable." };
+
+    const recentLines = report.recentEvents.length > 0
+      ? report.recentEvents.slice(0, 8).map((event) => `  ${event.message}`)
+      : ["  (no recent party events)"];
+
+    const topMetricLines = report.metrics.top.map(({ kind, count }) => `  ${kind}: ${count}`);
+
+    return {
+      response: [
+        `Party Report`,
+        `Party: ${report.partyId}`,
+        `Leader: ${report.leader.name ?? report.leader.entityId ?? "unknown"}`,
+        `Members: ${report.counts.liveMembers}/${report.counts.totalMembers} live`,
+        `Cohesion: ${report.counts.followerCount > 0 ? `${report.counts.nearLeaderFollowers}/${report.counts.followerCount} followers near leader (${report.ratios.cohesionPct}%)` : "n/a (no followers)"}`,
+        `Cohesion failures: ${report.counts.cohesionFailures} (${report.counts.offZoneFollowers} off-zone, ${report.counts.spacingFailures} too far)`,
+        `Leader-call assist share: ${report.ratios.leaderCallAssistPct}% (${report.metrics.assistLeaderTarget}/${Math.max(1, report.metrics.assistTotal)})`,
+        `Leader-support share: ${report.ratios.leaderSupportPct}% (${report.metrics.leaderSupportTotal}/${Math.max(1, report.metrics.supportTotal)})`,
+        `Follow activity share: ${report.ratios.followActivityPct}% (${report.metrics.followLeader}/${Math.max(1, report.metrics.followLeader + report.metrics.assistTotal)})`,
+        `Party metrics:`,
+        ...(topMetricLines.length > 0 ? topMetricLines : ["  (no party metrics yet)"]),
+        `Recent party events:`,
+        ...recentLines,
+      ].join("\n"),
+    };
   },
 });
 
@@ -506,6 +606,226 @@ cmd({
     return {
       response: `${e.name} is at (${Math.round(e.x)}, ${Math.round(e.y)}) in ${e.region ?? "unknown"}`,
     };
+  },
+});
+
+// ── /equip ────────────────────────────────────────────────────────────────
+
+const EQUIPMENT_SLOTS: EquipmentSlot[] = [
+  "weapon", "shield", "chest", "legs", "boots", "helm",
+  "shoulders", "gloves", "belt", "cape", "ring", "amulet",
+];
+
+/** Fuzzy-match an item name against the catalog. Returns best matches. */
+function findItemsByName(query: string): typeof ITEM_CATALOG {
+  const q = query.toLowerCase();
+  // Exact match first
+  const exact = ITEM_CATALOG.filter((i) => i.name.toLowerCase() === q);
+  if (exact.length > 0) return exact;
+  // Substring match
+  const partial = ITEM_CATALOG.filter((i) => i.name.toLowerCase().includes(q));
+  if (partial.length > 0) return partial;
+  // Word-based: every query word must appear somewhere in the name
+  const words = q.split(/\s+/);
+  return ITEM_CATALOG.filter((i) => {
+    const name = i.name.toLowerCase();
+    return words.every((w) => name.includes(w));
+  });
+}
+
+cmd({
+  aliases: ["equip", "eq", "wear", "wield"],
+  usage: "/equip <item name>",
+  description: "Equip an item from your inventory by name",
+  handler: async (args, ctx) => {
+    if (!args) {
+      return { response: "Usage: /equip <item name>\nExamples: /equip steel longsword, /equip chainmail shirt, /equip oak shield" };
+    }
+    if (!ctx.entity) return { response: "No character in world." };
+    if (!ctx.custodialWallet) return { response: "No wallet found." };
+
+    const entity = ctx.entity;
+    const region = ctx.region;
+    if (!region) return { response: "Not in a zone." };
+
+    // Find item by name
+    const matches = findItemsByName(args);
+    const equippable = matches.filter(
+      (i) => (i.category === "weapon" || i.category === "armor" || i.category === "tool") && i.equipSlot
+    );
+
+    if (equippable.length === 0) {
+      if (matches.length > 0) {
+        return { response: `"${matches[0].name}" is not equippable (${matches[0].category}).` };
+      }
+      // Suggest close matches
+      const q = args.toLowerCase();
+      const allEquippable = ITEM_CATALOG.filter((i) => i.equipSlot);
+      const suggestions = allEquippable
+        .filter((i) => {
+          const name = i.name.toLowerCase();
+          return q.split(/\s+/).some((w) => name.includes(w));
+        })
+        .slice(0, 5)
+        .map((i) => `  ${i.name} (${i.equipSlot})`);
+      const suggestText = suggestions.length > 0
+        ? `\n\nDid you mean:\n${suggestions.join("\n")}`
+        : "\n\nUse /bag to see your inventory.";
+      return { response: `No equippable item matching "${args}".${suggestText}` };
+    }
+
+    if (equippable.length > 1) {
+      // Check if there's a single exact name match among equippable
+      const exactMatch = equippable.filter((i) => i.name.toLowerCase() === args.toLowerCase());
+      if (exactMatch.length === 1) {
+        equippable.length = 0;
+        equippable.push(exactMatch[0]);
+      } else {
+        const list = equippable.slice(0, 8).map((i) => `  ${i.name} (${i.equipSlot}, ${getItemRarity(i.copperPrice)})`);
+        return { response: `Multiple matches:\n${list.join("\n")}\n\nBe more specific.` };
+      }
+    }
+
+    const item = equippable[0];
+
+    // Check wallet owns the item
+    const balance = await getItemBalance(ctx.custodialWallet, item.tokenId);
+    if (balance < 1n) {
+      return { response: `You don't own ${item.name}. Use /bag to check your inventory.` };
+    }
+
+    // Check for crafted instances — prefer highest quality
+    const instances = getWalletInstances(ctx.custodialWallet)
+      .filter((inst) => inst.baseTokenId === Number(item.tokenId));
+    const bestInstance = instances.length > 0
+      ? instances.sort((a, b) => {
+          const tierOrder: Record<string, number> = { common: 0, uncommon: 1, rare: 2, epic: 3 };
+          return (tierOrder[b.quality.tier] ?? 0) - (tierOrder[a.quality.tier] ?? 0);
+        })[0]
+      : undefined;
+
+    // Equip it
+    entity.equipment ??= {};
+    const slot = item.equipSlot!;
+    const durability = bestInstance?.currentDurability ?? bestInstance?.rolledMaxDurability ?? item.maxDurability ?? 0;
+    const maxDurability = bestInstance?.currentMaxDurability ?? bestInstance?.rolledMaxDurability ?? item.maxDurability ?? 0;
+    const displayName = bestInstance?.displayName ?? item.name;
+
+    entity.equipment[slot] = {
+      tokenId: Number(item.tokenId),
+      name: displayName,
+      xrVisualId: item.xrVisualId ?? null,
+      durability,
+      maxDurability,
+      broken: false,
+      ...(bestInstance && {
+        instanceId: bestInstance.instanceId,
+        quality: bestInstance.quality.tier,
+        rolledStats: bestInstance.rolledStats,
+        enchantments: bestInstance.enchantments ? [...bestInstance.enchantments] : undefined,
+        bonusAffix: bestInstance.bonusAffix
+          ? {
+              name: bestInstance.bonusAffix.name,
+              statBonuses: bestInstance.bonusAffix.statBonuses,
+              specialEffect: bestInstance.bonusAffix.specialEffect,
+            }
+          : undefined,
+      }),
+    };
+    recalculateEntityVitals(entity);
+
+    // Diary + persistence
+    if (entity.walletAddress) {
+      const { headline, narrative } = narrativeEquip(entity.name, entity.raceId, entity.classId, region, displayName, slot);
+      logDiary(entity.walletAddress, entity.name, region, entity.x, entity.y, "equip", headline, narrative, {
+        itemName: displayName,
+        tokenId: item.tokenId.toString(),
+        slot,
+      });
+      saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment }).catch(() => {});
+    }
+
+    const rarity = getItemRarity(item.copperPrice);
+    const statsText = item.statBonuses
+      ? Object.entries(item.statBonuses)
+          .filter(([, v]) => v !== 0)
+          .map(([k, v]) => `${(v as number) > 0 ? "+" : ""}${v} ${k.toUpperCase()}`)
+          .join(", ")
+      : "";
+    const qualityText = bestInstance ? ` [${bestInstance.quality.tier}]` : "";
+
+    return {
+      response: `Equipped ${displayName}${qualityText} → ${slot}\n${rarity} ${item.category} | ${statsText || "no stat bonuses"} | ${durability}/${maxDurability} durability`,
+    };
+  },
+});
+
+// ── /unequip ──────────────────────────────────────────────────────────────
+
+cmd({
+  aliases: ["unequip", "uneq", "remove"],
+  usage: "/unequip <slot or item name>",
+  description: "Unequip an item by slot (weapon, chest, etc.) or item name",
+  handler: async (args, ctx) => {
+    if (!args) {
+      const equipped = ctx.entity?.equipment
+        ? Object.entries(ctx.entity.equipment)
+            .filter(([, v]) => v != null)
+            .map(([slot, item]: [string, any]) => `  ${slot}: ${item.name ?? `#${item.tokenId}`}`)
+        : [];
+      const gearList = equipped.length > 0 ? equipped.join("\n") : "  (nothing equipped)";
+      return { response: `Usage: /unequip <slot or item name>\nSlots: ${EQUIPMENT_SLOTS.join(", ")}\n\nCurrently equipped:\n${gearList}` };
+    }
+    if (!ctx.entity) return { response: "No character in world." };
+
+    const entity = ctx.entity;
+    const region = ctx.region;
+    if (!region) return { response: "Not in a zone." };
+
+    const input = args.toLowerCase().trim();
+
+    // Try as slot name first
+    let slot: EquipmentSlot | null = null;
+    if (EQUIPMENT_SLOTS.includes(input as EquipmentSlot)) {
+      slot = input as EquipmentSlot;
+    } else {
+      // Try matching by item name in equipped items
+      if (entity.equipment) {
+        for (const [s, item] of Object.entries(entity.equipment)) {
+          if (!item) continue;
+          if ((item as any).name?.toLowerCase().includes(input)) {
+            slot = s as EquipmentSlot;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!slot) {
+      return { response: `No equipped item matching "${args}".\nUse /status to see your gear, or specify a slot: ${EQUIPMENT_SLOTS.join(", ")}` };
+    }
+
+    const equipped = entity.equipment?.[slot];
+    if (!equipped) {
+      return { response: `Nothing equipped in ${slot} slot.` };
+    }
+
+    const itemName = (equipped as any).name ?? `item #${(equipped as any).tokenId}`;
+
+    // Unequip
+    delete entity.equipment![slot];
+    if (Object.keys(entity.equipment ?? {}).length === 0) {
+      entity.equipment = undefined;
+    }
+    recalculateEntityVitals(entity);
+
+    if (entity.walletAddress) {
+      const { headline, narrative } = narrativeUnequip(entity.name, entity.raceId, entity.classId, region, slot);
+      logDiary(entity.walletAddress, entity.name, region, entity.x, entity.y, "unequip", headline, narrative, { slot });
+      saveCharacter(entity.walletAddress, entity.name, { equipment: entity.equipment ?? {} }).catch(() => {});
+    }
+
+    return { response: `Unequipped ${itemName} from ${slot}.` };
   },
 });
 

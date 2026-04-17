@@ -47,52 +47,38 @@ function CharacterSection({
   const [showSwapMenu, setShowSwapMenu] = React.useState(false);
   const liveCharacterTokenId =
     characterProgress?.source === "live"
-      ? characterProgress.characterTokenId ??
-        characters.find((c) => {
-          const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-          const liveBaseName = characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim();
-          return baseName === liveBaseName || c.name === characterProgress.name;
-        })?.tokenId ??
-        null
+      ? characterProgress.characterTokenId ?? null
       : null;
-  const liveCharacterBaseName =
-    characterProgress?.source === "live"
-      ? characterProgress.name.replace(/\s+the\s+\w+$/i, "").trim()
-      : deployedCharacterName;
 
   const activeCharacter = React.useMemo(() => {
-    if (liveCharacterTokenId) {
-      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
-      if (liveCharacter) return liveCharacter;
-    }
-
     if (selectedCharacterTokenId) {
       const selected = characters.find((c) => c.tokenId === selectedCharacterTokenId);
       if (selected) return selected;
     }
 
-    if (liveCharacterBaseName) {
-      const deployed = characters.find((c) => {
-        const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-        return baseName === liveCharacterBaseName || c.name === liveCharacterBaseName;
-      });
-      if (deployed) return deployed;
+    if (liveCharacterTokenId) {
+      const liveCharacter = characters.find((c) => c.tokenId === liveCharacterTokenId);
+      if (liveCharacter) return liveCharacter;
     }
 
     return characters[0] ?? null;
-  }, [characters, liveCharacterBaseName, liveCharacterTokenId, selectedCharacterTokenId]);
+  }, [characters, liveCharacterTokenId, selectedCharacterTokenId]);
 
-  const selectionValue = liveCharacterTokenId ?? selectedCharacterTokenId ?? "";
+  const selectionValue = selectedCharacterTokenId ?? liveCharacterTokenId ?? "";
 
   const activeCharacterName = activeCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
-  const activeCharacterLevel = characterProgress?.level ?? activeCharacter?.properties.level ?? null;
+  const activeCharacterLevel =
+    selectedCharacterTokenId && activeCharacter
+      ? activeCharacter?.properties.level ?? null
+      : characterProgress?.level ?? activeCharacter?.properties.level ?? null;
   const activeCharacterRace = activeCharacter?.properties.race ?? null;
   const activeCharacterClass = activeCharacter?.properties.class ?? null;
 
   function focusCharacter() {
     if (!characterProgress) return;
     if (characterProgress.zoneId) {
-      gameBus.emit("switchZone", { zoneId: characterProgress.zoneId });
+      gameBus.emit("followPlayer", { zoneId: characterProgress.zoneId, walletAddress });
+      return;
     }
     gameBus.emit("lockToPlayer", { walletAddress });
   }
@@ -135,12 +121,13 @@ function CharacterSection({
 
       // Focus camera on the new character's zone + lock to them
       if (res.ok && data.zoneId) {
-        gameBus.emit("switchZone", { zoneId: data.zoneId });
+        gameBus.emit("followPlayer", { zoneId: data.zoneId, walletAddress });
+      } else if (res.ok) {
+        gameBus.emit("lockToPlayer", { walletAddress });
       }
       if (res.ok) {
         gameBus.emit("charactersChanged", { walletAddress });
       }
-      gameBus.emit("lockToPlayer", { walletAddress });
     } catch {
       // silent
     } finally {
@@ -225,8 +212,7 @@ function CharacterSection({
                 </option>
               )}
               {characters.map((c) => {
-                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"
@@ -292,8 +278,7 @@ function CharacterSection({
                 </option>
               )}
               {characters.map((c) => {
-                const baseName = c.name.replace(/\s+the\s+\w+$/i, "").trim();
-                const isDeployed = liveCharacterBaseName && (baseName === liveCharacterBaseName || c.name === liveCharacterBaseName);
+                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"
@@ -423,8 +408,9 @@ export function WalletPanel({ className }: { className?: string } = {}): React.R
   return (
     <Card
       className={cn(
-        "pointer-events-auto flex h-full min-h-0 w-full max-w-none flex-col overflow-hidden",
+        "pointer-events-auto flex min-h-0 w-full max-w-none flex-col overflow-hidden",
         className,
+        collapsed ? "h-auto" : "h-full",
       )}
       data-tutorial-id="wallet-panel"
     >

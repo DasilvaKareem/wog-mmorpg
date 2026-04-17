@@ -20,13 +20,16 @@ function chunkKey(zoneId: string, cx: number, cz: number): string {
   return `${zoneId}_${cx}_${cz}`;
 }
 
-/** Elevation tint values: lower elevations are darker, higher are brighter */
-const ELEVATION_TINTS: Record<number, number> = {
-  0: 0xbbbbbb,  // shadowed (lowest)
-  1: 0xdddddd,  // slightly dim
-  2: 0xffffff,  // full brightness
-  3: 0xffffff,  // full brightness
-};
+/** Max elevation value from the generator (0-30 range) */
+const MAX_ELEVATION = 30;
+
+/** Compute tint for an elevation value: lower = darker, higher = brighter */
+function elevationTint(elev: number): number {
+  const t = Math.min(1, elev / MAX_ELEVATION);
+  // Lerp from 0xbb (dim) to 0xff (full brightness)
+  const channel = Math.round(0xbb + t * (0xff - 0xbb));
+  return (channel << 16) | (channel << 8) | channel;
+}
 
 /** Extra tilemap layer for cliff edge rendering */
 interface ElevationLayer {
@@ -193,7 +196,7 @@ export class TilemapRenderer {
       for (let y = 0; y < CHUNK_SIZE; y++) {
         for (let x = 0; x < CHUNK_SIZE; x++) {
           const elev = elevation[y * CHUNK_SIZE + x];
-          const tint = ELEVATION_TINTS[elev] ?? 0xffffff;
+          const tint = elevationTint(elev);
           if (tint !== 0xffffff) {
             const tile = groundLayer.getTileAt(x, y);
             if (tile) tile.tint = tint;

@@ -4,9 +4,15 @@ dist/
 .env
 client/.env.production
 .DS_Store
+.env.production
 
 # Astro generated
 docs/.astro/
+
+shard/tmp-sync
+
+tmp-sync
+temp-sync
 
 # pnpm
 .pnpm-store/

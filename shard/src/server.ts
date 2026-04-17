@@ -1,10 +1,12 @@
 import "dotenv/config";
 import "./config/devLocalContracts.js";
+import { runMigrations } from "./db.js";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { registerZoneRuntime } from "./world/zoneRuntime.js";
 import { registerSpawnOrders } from "./world/spawnOrders.js";
 import { registerStateApi } from "./routes/stateApi.js";
+import { registerStatsRoutes } from "./routes/statsRoutes.js";
 import { registerCommands } from "./social/commands.js";
 import { registerWalletRoutes, startWalletRegistrationWorker } from "./blockchain/wallet.js";
 import { registerShopRoutes } from "./economy/shop.js";
@@ -18,7 +20,6 @@ import { registerGuildTick } from "./economy/guildTick.js";
 import { registerGuildVaultRoutes } from "./economy/guildVault.js";
 import { spawnNpcs, tickMobRespawner } from "./world/npcSpawner.js";
 import { initMerchantWallets, registerMerchantAgentTick, getMerchantCount } from "./world/merchantAgent.js";
-import { restoreMerchantStatesFromRedis } from "./world/merchantAgent.js";
 import { registerMiningRoutes } from "./professions/mining.js";
 import { spawnOreNodes } from "./resources/oreSpawner.js";
 import { registerProfessionRoutes } from "./professions/professions.js";
@@ -32,9 +33,10 @@ import { registerTechniqueRoutes } from "./combat/techniqueRoutes.js";
 import { registerEnchantingRoutes } from "./professions/enchanting.js";
 import { registerEventRoutes } from "./social/eventRoutes.js";
 import { registerTerrainRoutes } from "./world/terrainRoutes.js";
+import { registerNpcRoutes } from "./world/npcRoutes.js";
 import { registerSkinningRoutes } from "./professions/skinning.js";
 import { registerCookingRoutes } from "./professions/cooking.js";
-import { registerPartyRoutes, restorePartiesFromRedis } from "./social/partySystem.js";
+import { registerPartyRoutes } from "./social/partySystem.js";
 import { registerFriendsRoutes } from "./social/friendsSystem.js";
 import { registerAuthRoutes } from "./auth/auth.js";
 import { registerZoneTransitionRoutes } from "./world/zoneTransition.js";
@@ -42,18 +44,20 @@ import { registerLeaderboardRoutes } from "./social/leaderboard.js";
 import { registerLeatherworkingRoutes } from "./professions/leatherworking.js";
 import { registerUpgradingRoutes } from "./items/upgrading.js";
 import { registerJewelcraftingRoutes } from "./professions/jewelcrafting.js";
-import { rebuildAuctionCache, getAllAuctionsFromCache } from "./economy/auctionHouseChain.js";
+import { getAllAuctionsFromCache, hydrateAuctionCacheFromProjections } from "./economy/auctionHouseChain.js";
 import { registerPvPRoutes } from "./combat/pvpRoutes.js";
 import { registerPredictionRoutes } from "./economy/predictionRoutes.js";
 import { registerX402Routes } from "./economy/x402Routes.js";
 import { registerAgentChatRoutes } from "./agents/agentChatRoutes.js";
 import { registerAgentInboxRoutes } from "./agents/agentInboxRoutes.js";
 import { registerA2ARoutes } from "./agents/a2aRoutes.js";
+import { registerAgentDirectoryRoutes } from "./agents/agentDirectoryRoutes.js";
 import { agentManager } from "./agents/agentManager.js";
 import { registerItemRngRoutes } from "./items/itemRng.js";
 import { registerMarketplaceRoutes } from "./economy/marketplace.js";
 import { registerDirectBuyRoutes } from "./marketplace/directBuyRoutes.js";
 import { registerMarketplaceAdminRoutes } from "./marketplace/adminRoutes.js";
+import { registerChainAdminRoutes } from "./blockchain/adminRoutes.js";
 import { registerRentalRoutes } from "./marketplace/rentalRoutes.js";
 import { registerItemCatalogRoutes } from "./items/itemCatalogRoutes.js";
 import { registerReputationRoutes } from "./economy/reputationRoutes.js";
@@ -81,11 +85,13 @@ import { registerPlotRoutes } from "./farming/plotRoutes.js";
 import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
 import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
-import { restoreReservations } from "./blockchain/goldLedger.js";
-import { getTxStats, mintGold } from "./blockchain/blockchain.js";
+import { enqueueGoldMint, getTxStats } from "./blockchain/blockchain.js";
+import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
+import { getChainIntentStats, listChainIntents } from "./blockchain/chainIntentStore.js";
 import { getWorldLayout } from "./world/worldLayout.js";
-import { getAllEntities, getEntity, unregisterSpawnedWallet, restoreLivePlayersFromRedis } from "./world/zoneRuntime.js";
+import { getAllEntities, getEntity, removeLivePlayerEntityEventually, restoreLivePlayersFromPostgres, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
 import { saveCharacter } from "./character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
 import { biteProvider, probeBiteRpc, SKALE_BASE_CHAIN_ID, SKALE_BASE_RPC_URL } from "./blockchain/biteChain.js";
@@ -94,6 +100,10 @@ import { pvpBattleManager } from "./combat/pvpBattleManager.js";
 import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js";
 import { startReputationChainWorker } from "./economy/reputationChain.js";
 import { startChainOperationReplayWorker } from "./blockchain/chainOperationStore.js";
+import { ensureGameSchema, getGameSchemaHealth } from "./db/gameSchema.js";
+import { migrateRedisToPostgres } from "./character/migrateRedisToPostgres.js";
+import { initPostgres, isPostgresConfigured } from "./db/postgres.js";
+import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
 
 const server = Fastify({ logger: true });
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
@@ -102,6 +112,27 @@ const REQUIRE_REDIS_PERSISTENCE = !["0", "false", "no", "off"].includes(
 );
 const LOCAL_TEST_MODE = (process.env.LOCAL_TEST_MODE ?? "").trim().toLowerCase();
 const SKIP_MERCHANT_BOOTSTRAP = LOCAL_TEST_MODE === "core";
+const LAZY_RUNTIME_HYDRATION = !["0", "false", "no", "off"].includes(
+  (process.env.LAZY_RUNTIME_HYDRATION ?? "true").trim().toLowerCase()
+);
+const RUN_BACKGROUND_WORKERS = !["0", "false", "no", "off"].includes(
+  (process.env.RUN_BACKGROUND_WORKERS ?? "true").trim().toLowerCase()
+);
+const HOTPATH_CONCURRENCY_LIMITS_ENABLED = !["0", "false", "no", "off"].includes(
+  (process.env.HOTPATH_CONCURRENCY_LIMITS_ENABLED ?? "true").trim().toLowerCase()
+);
+const WORLD_LAYOUT_CACHE_MS = Math.max(
+  50,
+  Number.parseInt(process.env.WORLD_LAYOUT_CACHE_MS ?? "1000", 10) || 1000
+);
+const GUILD_CACHE_REFRESH_INTERVAL_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.GUILD_CACHE_REFRESH_INTERVAL_MS ?? "300000", 10) || 300_000
+);
+const MOB_RESPAWNER_INTERVAL_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.MOB_RESPAWNER_INTERVAL_MS ?? "5000", 10) || 5_000
+);
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -130,6 +161,16 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
   { key: "character-create", methods: ["POST"], exact: "/character/create", max: 10, windowMs: 60_000 },
   { key: "x402-deploy", methods: ["POST"], exact: "/x402/deploy", max: 6, windowMs: 60_000 },
   { key: "admin", methods: ["POST"], prefix: "/admin/", max: 5, windowMs: 60_000 },
+  // Protect high-volume read paths from polling storms.
+  { key: "world-layout", methods: ["GET"], exact: "/world/layout", max: 60, windowMs: 60_000 },
+  { key: "zones-list", methods: ["GET"], exact: "/zones", max: 120, windowMs: 60_000 },
+  { key: "zones-detail", methods: ["GET"], prefix: "/zones/", max: 300, windowMs: 60_000 },
+  { key: "players-active", methods: ["GET"], exact: "/players/active", max: 60, windowMs: 60_000 },
+  { key: "world-state", methods: ["GET"], exact: "/state", max: 12, windowMs: 60_000 },
+  { key: "wallet-read", methods: ["GET"], prefix: "/wallet/", max: 120, windowMs: 60_000 },
+  { key: "agent-status", methods: ["GET"], prefix: "/agent/status/", max: 120, windowMs: 60_000 },
+  { key: "inbox-read", methods: ["GET"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
+  { key: "admin-read", methods: ["GET"], prefix: "/admin/", max: 30, windowMs: 60_000 },
   // Agent console messages should not get blocked by unrelated gameplay POSTs from the same IP.
   { key: "agent-post", methods: ["POST"], prefix: "/agent/", max: 180, windowMs: 60_000 },
   { key: "inbox-post", methods: ["POST"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
@@ -140,6 +181,44 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
 ];
 
 const rateLimitHits = new Map<string, number[]>();
+const RATE_LIMIT_STALE_MS = 5 * 60_000;
+
+type ConcurrencyRule = {
+  key: string;
+  methods?: string[];
+  exact?: string;
+  prefix?: string;
+  maxInFlight: number;
+};
+
+const CONCURRENCY_RULES: ConcurrencyRule[] = [
+  { key: "world-layout", methods: ["GET"], exact: "/world/layout", maxInFlight: 12 },
+  { key: "zones-detail", methods: ["GET"], prefix: "/zones/", maxInFlight: 30 },
+  { key: "wallet-read", methods: ["GET"], prefix: "/wallet/", maxInFlight: 20 },
+  { key: "agent-status", methods: ["GET"], prefix: "/agent/status/", maxInFlight: 20 },
+  { key: "inbox-read", methods: ["GET"], prefix: "/inbox/", maxInFlight: 20 },
+  { key: "world-state", methods: ["GET"], exact: "/state", maxInFlight: 4 },
+];
+
+const inFlightByRule = new Map<string, number>();
+
+function pruneRateLimitHits(now = Date.now()): void {
+  const cutoff = now - RATE_LIMIT_STALE_MS;
+  for (const [bucketKey, hits] of rateLimitHits.entries()) {
+    const recent = hits.filter((ts) => ts >= cutoff);
+    if (recent.length === 0) {
+      rateLimitHits.delete(bucketKey);
+      continue;
+    }
+    if (recent.length !== hits.length) {
+      rateLimitHits.set(bucketKey, recent);
+    }
+  }
+}
+
+setInterval(() => {
+  pruneRateLimitHits();
+}, 60_000).unref();
 
 function getAllowedCorsOrigins(): Set<string> {
   const configured = process.env.CORS_ORIGINS
@@ -148,6 +227,18 @@ function getAllowedCorsOrigins(): Set<string> {
     .filter(Boolean);
 
   return new Set([...(configured ?? []), ...DEFAULT_CORS_ORIGINS]);
+}
+
+function isAllowedCorsOrigin(origin: string, allowed: Set<string>): boolean {
+  if (allowed.has(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return host === "worldofgeneva.com" || host.endsWith(".worldofgeneva.com");
+  } catch {
+    return false;
+  }
 }
 
 function getRateLimitRule(method: string, url: string): RateLimitRule | null {
@@ -160,6 +251,16 @@ function getRateLimitRule(method: string, url: string): RateLimitRule | null {
     return rule;
   }
 
+  return null;
+}
+
+function getConcurrencyRule(method: string, path: string): ConcurrencyRule | null {
+  for (const rule of CONCURRENCY_RULES) {
+    if (rule.methods && !rule.methods.includes(method)) continue;
+    if (rule.exact && rule.exact !== path) continue;
+    if (rule.prefix && !path.startsWith(rule.prefix)) continue;
+    return rule;
+  }
   return null;
 }
 
@@ -395,8 +496,8 @@ server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", a
   const { address, copper } = req.body;
   if (!address || !copper || copper <= 0) return reply.code(400).send({ error: "address and copper required" });
   try {
-    const tx = await mintGold(address, copper.toString());
-    return reply.send({ ok: true, tx, copper });
+    const operationId = await enqueueGoldMint(address, copper.toString());
+    return reply.send({ ok: true, operationId, copper });
   } catch (err: any) {
     return reply.code(500).send({ error: err.message });
   }
@@ -560,7 +661,16 @@ toggleAuto();
 });
 
 // World layout — zone positions for seamless world rendering
-server.get("/world/layout", async () => getWorldLayout());
+let worldLayoutCache: { data: ReturnType<typeof getWorldLayout>; expiresAt: number } | null = null;
+server.get("/world/layout", async () => {
+  const now = Date.now();
+  if (worldLayoutCache && worldLayoutCache.expiresAt > now) {
+    return worldLayoutCache.data;
+  }
+  const data = getWorldLayout();
+  worldLayoutCache = { data, expiresAt: now + WORLD_LAYOUT_CACHE_MS };
+  return data;
+});
 
 // Admin dashboard — aggregated server health + game state
 server.get("/admin/dashboard", async () => {
@@ -608,6 +718,11 @@ server.get("/admin/dashboard", async () => {
 
   const runners = agentManager.listRunners();
   const agentSnapshots = runners.filter(r => r.running).map(r => r.getSnapshot());
+  const chainIntentStats = await getChainIntentStats();
+  const waitingFunds = await listChainIntents({ statuses: ["waiting_funds"], limit: 200, offset: 0 });
+  const failedPermanent = await listChainIntents({ statuses: ["failed_permanent"], limit: 200, offset: 0 });
+  const staleSubmitted = (await listChainIntents({ statuses: ["submitted"], limit: 500, offset: 0 }))
+    .filter((intent) => (intent.lastSubmittedAt ?? intent.updatedAt) <= (Date.now() - 120_000));
 
   return {
     server: { uptime: process.uptime(), startedAt: Date.now() - process.uptime() * 1000, memoryMB: Math.round(mem.rss / 1048576) },
@@ -618,6 +733,13 @@ server.get("/admin/dashboard", async () => {
       rpcUrl: SKALE_BASE_RPC_URL,
       rpcError: rpcProbe.error,
       txStats: getTxStats(),
+      chainBatcher: getChainBatcherStats(),
+      chainIntents: {
+        byType: chainIntentStats,
+        waitingFunds: waitingFunds.length,
+        failedPermanent: failedPermanent.length,
+        staleSubmitted: staleSubmitted.length,
+      },
     },
     zones: { count: regionCounts.size, totalEntities, players: playerCount, mobs: mobCount, npcs: npcCount, perZone },
     agents: { active: agentSnapshots.length, list: agentSnapshots },
@@ -658,12 +780,15 @@ server.post<{
   }
 
   // Save full character state
+  const verifiedIdentityPatch = await buildVerifiedIdentityPatch(entity.walletAddress, {
+    characterTokenId: entity.characterTokenId?.toString(),
+    agentId: entity.agentId?.toString(),
+  });
   await saveCharacter(entity.walletAddress, entity.name, {
     name: entity.name,
     level: entity.level ?? 1,
     xp: entity.xp ?? 0,
-    ...(entity.characterTokenId != null && { characterTokenId: entity.characterTokenId.toString() }),
-    ...(entity.agentId != null && { agentId: entity.agentId.toString() }),
+    ...verifiedIdentityPatch,
     raceId: entity.raceId ?? "human",
     classId: entity.classId ?? "warrior",
     calling: entity.calling,
@@ -680,7 +805,9 @@ server.post<{
     completedQuests: entity.completedQuests ?? [],
     learnedTechniques: entity.learnedTechniques ?? [],
     professions: getLearnedProfessions(entity.walletAddress),
-    pendingQuestApprovals: entity.pendingQuestApprovals ?? [],
+    runEnergy: entity.runEnergy,
+    maxRunEnergy: entity.maxRunEnergy,
+    runModeEnabled: entity.runModeEnabled,
     equipment: entity.equipment ?? undefined,
   });
 
@@ -691,7 +818,10 @@ server.post<{
       (e as any).taggedAtTick = undefined;
     }
   }
-  if (entity.walletAddress) unregisterSpawnedWallet(entity.walletAddress);
+  if (entity.walletAddress) {
+    unregisterSpawnedWallet(entity.walletAddress);
+    removeLivePlayerEntityEventually(entity.walletAddress, "logout");
+  }
   getAllEntities().delete(entityId);
 
   server.log.info(`[logout] ${entity.name} saved and despawned from ${foundZoneId}`);
@@ -707,7 +837,7 @@ server.post<{
 const allowedCorsOrigins = getAllowedCorsOrigins();
 server.register(cors, {
   origin(origin, cb) {
-    if (!origin || allowedCorsOrigins.has(origin)) {
+    if (!origin || isAllowedCorsOrigin(origin, allowedCorsOrigins)) {
       cb(null, true);
       return;
     }
@@ -716,33 +846,28 @@ server.register(cors, {
 });
 
 // Register subsystems
-server.addHook("onRequest", async (request, reply) => {
-  const rule = getRateLimitRule(request.method, request.url);
-  if (!rule) return;
-
-  const path = getRequestPath(request.url);
-  const verdict = enforceRateLimit(request.ip, path, rule);
-  if (verdict.ok) return;
-
-  reply.header("Retry-After", verdict.retryAfterSeconds.toString());
-  reply.code(429).send({ error: "Rate limit exceeded" });
-});
 registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
 registerZoneRuntime(server);
+if (RUN_BACKGROUND_WORKERS) {
+  startChainBatcher();
+} else {
+  server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — chain batcher disabled on this node");
+}
 registerSpawnOrders(server);
 registerCommands(server);
 registerStateApi(server);
+registerStatsRoutes(server);
 registerWalletRoutes(server);
 registerShopRoutes(server);
 registerCharacterRoutes(server);
 registerTradeRoutes(server);
 registerEquipmentRoutes(server);
 registerAuctionHouseRoutes(server);
-registerAuctionHouseTick(server);
+if (RUN_BACKGROUND_WORKERS) registerAuctionHouseTick(server);
 registerGuildRoutes(server);
-registerGuildTick(server);
+if (RUN_BACKGROUND_WORKERS) registerGuildTick(server);
 registerGuildVaultRoutes(server);
 registerMiningRoutes(server);
 registerProfessionRoutes(server);
@@ -756,6 +881,7 @@ registerTechniqueRoutes(server);
 registerEnchantingRoutes(server);
 registerEventRoutes(server);
 registerTerrainRoutes(server);
+registerNpcRoutes(server);
 registerSkinningRoutes(server);
 registerCookingRoutes(server);
 registerPartyRoutes(server);
@@ -770,19 +896,21 @@ registerPredictionRoutes(server);
 registerAgentChatRoutes(server);
 registerAgentInboxRoutes(server);
 registerA2ARoutes(server);
+registerAgentDirectoryRoutes(server);
 registerGoldPurchaseRoutes(server);
 registerItemRngRoutes(server);
 registerMarketplaceRoutes(server);
 registerDirectBuyRoutes(server);
 registerRentalRoutes(server);
 registerMarketplaceAdminRoutes(server);
+registerChainAdminRoutes(server);
 registerItemCatalogRoutes(server);
 registerReputationRoutes(server);
 registerNameServiceRoutes(server);
 registerDungeonGateRoutes(server);
 registerEssenceTechniqueRoutes(server);
 registerForgedTechniqueRoutes(server);
-registerDungeonGateTick(server);
+if (RUN_BACKGROUND_WORKERS) registerDungeonGateTick(server);
 registerFarmingRoutes(server);
 registerPlotRoutes(server);
 registerBuildingRoutes(server);
@@ -791,9 +919,13 @@ registerDiaryRoutes(server);
 registerNotificationRoutes(server);
 registerWebPushRoutes(server);
 initDungeonLootTables();
-startGuildNameCacheRefresh();
+if (RUN_BACKGROUND_WORKERS) {
+  startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
+}
 spawnNpcs();
-if (SKIP_MERCHANT_BOOTSTRAP) {
+if (!RUN_BACKGROUND_WORKERS) {
+  server.log.info("[merchant] RUN_BACKGROUND_WORKERS=false — merchant tick disabled on this node");
+} else if (SKIP_MERCHANT_BOOTSTRAP) {
   server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
 } else {
   registerMerchantAgentTick(server);
@@ -810,21 +942,54 @@ spawnNectarNodes();
 spawnCropNodes();
 
 // Mob respawner - check every 5 seconds
-setInterval(() => {
-  tickMobRespawner();
-}, 5000);
+if (RUN_BACKGROUND_WORKERS) {
+  setInterval(() => {
+    tickMobRespawner();
+  }, MOB_RESPAWNER_INTERVAL_MS);
+}
 
 const start = async () => {
-  if (REQUIRE_REDIS_PERSISTENCE) {
+  server.log.info(
+    `[runtime] backgroundWorkers=${RUN_BACKGROUND_WORKERS} hotpathConcurrency=${HOTPATH_CONCURRENCY_LIMITS_ENABLED} worldLayoutCacheMs=${WORLD_LAYOUT_CACHE_MS}`
+  );
+  await initPostgres();
+  if (isPostgresConfigured()) {
+    await ensureGameSchema();
+    const health = await getGameSchemaHealth().catch(() => null);
+    server.log.info(
+      health
+        ? `[postgres] Ready (characters=${health.characterCount}, identities=${health.identityStateCount}, walletLinks=${health.walletLinkCount}, characterProjections=${health.characterProjectionCount}, outbox=${health.outboxCount}, chainOps=${health.chainOperationCount}, professions=${health.professionStateCount}, equipment=${health.equipmentStateCount}, parties=${health.partyCount}, listings=${health.listingCount}, plots=${health.plotStateCount}, itemMappings=${health.itemTokenMappingCount}, itemInstances=${health.craftedItemInstanceCount}, friendEdges=${health.friendEdgeCount}, friendRequests=${health.friendRequestCount}, auctions=${health.auctionProjectionCount}, guilds=${health.guildCount}, guildMembers=${health.guildMembershipCount}, guildProposals=${health.guildProposalCount}, pushSubs=${health.webPushSubscriptionCount}, telegramLinks=${health.telegramLinkCount}, marketplaceOps=${health.marketplaceOperationCount}, marketplacePayments=${health.marketplacePendingPaymentCount}, goldPayments=${health.goldPendingPaymentCount}, rentals=${health.rentalListingCount}, rentalGrants=${health.rentalGrantCount}, rentalEntities=${health.characterRentalEntityCount}, diaryEntries=${health.diaryEntryCount}, reputationScores=${health.reputationScoreCount}, reputationFeedback=${health.reputationFeedbackCount}, custodialWallets=${health.custodialWalletCount}, walletRuntime=${health.walletRuntimeStateCount}, walletRegistrations=${health.walletRegistrationStateCount}, bootstrapJobs=${health.characterBootstrapJobCount}, inbox=${health.agentInboxMessageCount}, inboxHistory=${health.agentInboxHistoryCount}, merchants=${health.merchantStateCount}, partyInvites=${health.partyInviteCount}, promoCodes=${health.promoCodeCount}, promoRedemptions=${health.promoCodeRedemptionCount}, goldReservations=${health.goldReservationCount})`
+        : "[postgres] Ready"
+    );
+    // Migrate Redis data into Postgres (safe to run multiple times — all upserts use ON CONFLICT)
+    if (getRedis()) {
+      try {
+        const result = await migrateRedisToPostgres();
+        server.log.info(`[migrate] Characters: ${result.characters.migrated} migrated, ${result.characters.errors} errors`);
+        server.log.info(`[migrate] Items: ${result.items.migrated} migrated, ${result.items.errors} errors`);
+      } catch (err: any) {
+        server.log.warn(`[migrate] Redis→Postgres migration failed (non-fatal): ${err.message?.slice(0, 100)}`);
+      }
+    }
+  } else {
+    server.log.warn("[postgres] DATABASE_URL not configured; authoritative persistent read models are disabled");
+  }
+
+  if (REQUIRE_REDIS_PERSISTENCE && !isPostgresConfigured()) {
     assertRedisAvailable("server boot");
     server.log.info("[redis] Redis persistence required and available");
-  } else if (!getRedis() && isMemoryFallbackAllowed()) {
+  } else if (REQUIRE_REDIS_PERSISTENCE && isPostgresConfigured() && !getRedis()) {
+    server.log.warn("[redis] Redis persistence requested but Postgres is authoritative; continuing without Redis");
+  } else if (!getRedis() && isMemoryFallbackAllowed() && !isPostgresConfigured()) {
     server.log.warn("[redis] Running with memory fallback enabled; persistence guarantees are reduced");
   }
 
-  // Rebuild auction cache from on-chain events (non-blocking — don't delay server start)
-  rebuildAuctionCache().catch((err: any) => {
-    server.log.warn(`[auction] Cache rebuild failed (non-fatal): ${err.message?.slice(0, 100)}`);
+  await hydrateAuctionCacheFromProjections().then((count) => {
+    if (count > 0) {
+      server.log.info(`[auction] Hydrated ${count} auction projection(s) from Postgres`);
+    }
+  }).catch((err: any) => {
+    server.log.warn(`[auction] Failed to hydrate Postgres auction projections: ${err.message?.slice(0, 100)}`);
   });
 
   // Start Telegram bot (non-blocking — no bot token = graceful no-op)
@@ -859,41 +1024,43 @@ const start = async () => {
     server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
   }
 
-  // Restore gold reservations from Redis (prevents double-spend after restart)
-  restoreReservations().catch((err: any) => {
-    server.log.warn(`[goldLedger] Reservation restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  if (RUN_BACKGROUND_WORKERS) {
+    startWalletRegistrationWorker(server);
+  }
 
-  // Restore plot ownership from Redis (land persists across restarts)
-  const { initializePlotsFromRedis } = await import("./farming/plotSystem.js");
-  await initializePlotsFromRedis().catch((err: any) => {
-    server.log.warn(`[plots] Plot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  const port = Number(process.env.PORT) || 3000;
+  const host = "0.0.0.0";
+  await server.listen({ port, host });
+  server.log.info(`Shard listening on ${host}:${port}`);
 
-  await restoreMerchantStatesFromRedis().catch((err: any) => {
-    server.log.warn(`[merchant] Merchant restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  if (LAZY_RUNTIME_HYDRATION) {
+    server.log.info("[runtime] Lazy hydration enabled; skipping eager restore of live sessions, parties, PvP, merchants, agents, plots, and gold reservations");
+  } else {
+    await pvpBattleManager.restoreFromRedis().catch((err: any) => {
+      server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+    await restoreLivePlayersFromPostgres().then((count) => {
+      if (count > 0) {
+        server.log.info(`[live-player] Restored ${count} active player session(s) from Postgres`);
+      }
+    }).catch((err: any) => {
+      server.log.warn(`[live-player] Postgres restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+  }
 
-  await pvpBattleManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[pvp] PvP restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
+  if (RUN_BACKGROUND_WORKERS) {
+    startAgentRuntimeReconciler(server.log);
 
-  await restoreLivePlayersFromRedis().catch((err: any) => {
-    server.log.warn(`[live-player] Live player restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await restorePartiesFromRedis().catch((err: any) => {
-    server.log.warn(`[party] Party restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-
-  await startCharacterBootstrapWorker(server.log).catch((err: any) => {
-    server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-  startWalletRegistrationWorker(server);
-  startNameServiceWorker(server.log);
-  startPlotOperationWorker(server.log);
-  startReputationChainWorker(server.log);
-  startChainOperationReplayWorker(server.log);
+    await startCharacterBootstrapWorker(server).catch((err: any) => {
+      server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+    startNameServiceWorker(server.log);
+    startPlotOperationWorker(server.log);
+    startReputationChainWorker(server.log);
+    startChainOperationReplayWorker(server.log);
+  } else {
+    server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — async workers not started on this node");
+  }
 
   await Promise.race([
     initWorldMapStore(),
@@ -907,26 +1074,17 @@ const start = async () => {
   server.log.info(`[chain] RPC target ${SKALE_BASE_RPC_URL} (expected chainId=${SKALE_BASE_CHAIN_ID})`);
   await assertConfiguredRpc();
   server.log.info(`[chain] Verified RPC chainId=${SKALE_BASE_CHAIN_ID}`);
-
-  const port = Number(process.env.PORT) || 3000;
-  const host = "0.0.0.0";
-
-  await server.listen({ port, host });
-  server.log.info(`Shard listening on ${host}:${port}`);
-
-  // Restore agents that were running before restart
-  agentManager.restoreFromRedis().catch((err: any) => {
-    server.log.warn(`[agent] Boot restore failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
 };
 
-// Graceful shutdown: stop all agent loops
+// Graceful shutdown: stop all agent loops, flush batched chain writes
 process.on("SIGTERM", async () => {
+  await stopChainBatcher();
   await agentManager.stopAll();
   await server.close();
   process.exit(0);
 });
 process.on("SIGINT", async () => {
+  await stopChainBatcher();
   await agentManager.stopAll();
   await server.close();
   process.exit(0);

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemMint } from "../blockchain/blockchain.js";
 import { FLOWER_CATALOG } from "../resources/flowerCatalog.js";
 import { NECTAR_CATALOG } from "../resources/nectarCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeGatherHerb } from "../social/diary.js";
-import { awardProfessionXp, xpForRarity } from "./professionXp.js";
+import { awardProfessionXp, xpForRarity, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
 
@@ -33,6 +33,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       maxCharges: props.maxCharges,
       respawnTicks: props.respawnTicks,
       requiredSickleTier: props.requiredSickleTier,
+      requiredSkillLevel: props.requiredSkillLevel,
       tokenId: props.tokenId.toString(),
     }));
   });
@@ -59,6 +60,9 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
           depleted: e.depletedAtTick != null,
           requiredSickleTier: e.flowerType
             ? FLOWER_CATALOG[e.flowerType].requiredSickleTier
+            : 1,
+          requiredSkillLevel: e.flowerType
+            ? FLOWER_CATALOG[e.flowerType].requiredSkillLevel
             : 1,
           region: e.region,
         }));
@@ -168,6 +172,45 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check herbalism skill level
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["herbalism"]?.level ?? 1;
+    if (currentSkillLevel < flowerProps.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Herbalism skill too low for ${flowerProps.label}`,
+        requiredSkillLevel: flowerProps.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Gather simpler herbs to raise your skill from ${currentSkillLevel} to ${flowerProps.requiredSkillLevel}`,
+      };
+    }
+
+    // Roll for gathering failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, flowerProps.requiredSkillLevel);
+    if (failed) {
+      weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
+      if (weaponEquipped.durability === 0) {
+        weaponEquipped.broken = true;
+        if (entity.equipment) delete entity.equipment.weapon;
+      }
+      lastGatherTime.set(entityId, Date.now());
+      const region = zoneId ?? entity.region ?? "unknown";
+      awardProfessionXp(entity, region, Math.floor(xpForRarity(flowerProps.rarity) / 2), "herbalism");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        flowerName: flowerProps.label,
+        message: "The petals crumbled as you cut. Node preserved.",
+        sickle: {
+          name: sickleItem.name,
+          durability: weaponEquipped.durability,
+          maxDurability: weaponEquipped.maxDurability,
+          broken: weaponEquipped.broken,
+        },
+      };
+    }
+
     // Deplete flower charge
     flowerNode.charges = (flowerNode.charges ?? 0) - 1;
     const chargesRemaining = flowerNode.charges;
@@ -184,7 +227,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
     // Mint flower NFT
     try {
-      const flowerTx = await mintItem(walletAddress, flowerProps.tokenId, 1n);
+      const flowerTx = await enqueueItemMint(walletAddress, flowerProps.tokenId, 1n);
 
       server.log.info(
         `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx}`
@@ -265,6 +308,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       maxCharges: props.maxCharges,
       respawnTicks: props.respawnTicks,
       requiredSickleTier: props.requiredSickleTier,
+      requiredSkillLevel: props.requiredSkillLevel,
       tokenId: props.tokenId.toString(),
     }));
   });
@@ -280,20 +324,22 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
       const nectarNodes = entities
         .filter((e) => e.type === "nectar-node")
-        .map((e) => ({
-          id: e.id,
-          name: e.name,
-          x: e.x,
-          y: e.y,
-          nectarType: e.nectarType,
-          charges: e.charges ?? 0,
-          maxCharges: e.maxCharges ?? 0,
-          depleted: e.depletedAtTick != null,
-          requiredSickleTier: e.nectarType && NECTAR_CATALOG[e.nectarType as keyof typeof NECTAR_CATALOG]
-            ? NECTAR_CATALOG[e.nectarType as keyof typeof NECTAR_CATALOG].requiredSickleTier
-            : 1,
-          region: e.region,
-        }));
+        .map((e) => {
+          const nProps = e.nectarType ? NECTAR_CATALOG[e.nectarType as keyof typeof NECTAR_CATALOG] : undefined;
+          return {
+            id: e.id,
+            name: e.name,
+            x: e.x,
+            y: e.y,
+            nectarType: e.nectarType,
+            charges: e.charges ?? 0,
+            maxCharges: e.maxCharges ?? 0,
+            depleted: e.depletedAtTick != null,
+            requiredSickleTier: nProps?.requiredSickleTier ?? 1,
+            requiredSkillLevel: nProps?.requiredSkillLevel ?? 1,
+            region: e.region,
+          };
+        });
 
       return { region: region ?? "all", nectarNodes };
     }
@@ -400,6 +446,45 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check herbalism skill level
+    const nectarSkills = getProfessionSkills(walletAddress);
+    const nectarSkillLevel = nectarSkills["herbalism"]?.level ?? 1;
+    if (nectarSkillLevel < nectarProps.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Herbalism skill too low for ${nectarProps.label}`,
+        requiredSkillLevel: nectarProps.requiredSkillLevel,
+        currentSkillLevel: nectarSkillLevel,
+        hint: `Gather simpler herbs to raise your skill from ${nectarSkillLevel} to ${nectarProps.requiredSkillLevel}`,
+      };
+    }
+
+    // Roll for gathering failure
+    const { failed: nectarFailed, failChance: nectarFailChance } = rollFailure(nectarSkillLevel, nectarProps.requiredSkillLevel);
+    if (nectarFailed) {
+      weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
+      if (weaponEquipped.durability === 0) {
+        weaponEquipped.broken = true;
+        if (entity.equipment) delete entity.equipment.weapon;
+      }
+      lastGatherTime.set(entityId, Date.now());
+      const region = zoneId ?? entity.region ?? "unknown";
+      awardProfessionXp(entity, region, Math.floor(xpForRarity(nectarProps.rarity) / 2), "herbalism");
+      return {
+        ok: false,
+        failed: true,
+        failChance: nectarFailChance,
+        nectarName: nectarProps.label,
+        message: "The nectar spilled before you could collect it. Node preserved.",
+        sickle: {
+          name: sickleItem.name,
+          durability: weaponEquipped.durability,
+          maxDurability: weaponEquipped.maxDurability,
+          broken: weaponEquipped.broken,
+        },
+      };
+    }
+
     // Deplete charge
     nectarNode.charges = (nectarNode.charges ?? 0) - 1;
     const chargesRemaining = nectarNode.charges;
@@ -416,7 +501,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
     // Mint nectar NFT
     try {
-      const nectarTx = await mintItem(walletAddress, nectarProps.tokenId, 1n);
+      const nectarTx = await enqueueItemMint(walletAddress, nectarProps.tokenId, 1n);
 
       server.log.info(
         `[herbalism] ${entity.name} gathered ${nectarProps.label} → ${nectarTx}`
@@ -426,6 +511,17 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       const xpAmount = xpForRarity(nectarProps.rarity);
       const region = zoneId ?? entity.region ?? "unknown";
       const profXpResult = awardProfessionXp(entity, region, xpAmount, "herbalism", undefined, nectarProps.label);
+
+      // Emit zone event for client speech bubbles
+      logZoneEvent({
+        zoneId: region,
+        type: "loot",
+        tick: getWorldTick(),
+        message: `${entity.name}: Gathered ${nectarProps.label}`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: { gatherType: "herbalism", itemName: nectarProps.label, nodeId: nectarNodeId },
+      });
 
       // Advance gather quest progress
       advanceGatherQuests(entity, nectarProps.label);

@@ -480,11 +480,16 @@ function getQuestGraphScene(
     }
   }
 
-  return {
-    arcId: questGiverArcId(name),
-    sceneId: "root",
-    sceneTitle: `${name} Contract Board`,
-  };
+  // Only attempt generated quest arcs for NPCs with known quests
+  if (availableQuestIds.length > 0 || activeQuestIds.length > 0) {
+    return {
+      arcId: questGiverArcId(name),
+      sceneId: "root",
+      sceneTitle: name,
+    };
+  }
+
+  return null;
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
@@ -782,7 +787,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
   const legacyNode = graphSession ? null : node;
   const graphNode = graphSession?.node ?? null;
   const activeNode = graphNode ?? legacyNode;
-  const currentText = activeNode?.text ?? "";
+  const currentText = (graphNode?.type === "freeform" ? graphNode.text : activeNode?.text) ?? "";
   const { displayed, done, skip } = useTypewriter(currentText, 20);
 
   const runQuestGraphStart = React.useCallback(async (
@@ -907,7 +912,15 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
 
   const submitAmbientPrompt = React.useCallback(async (prompt: string) => {
     const trimmed = prompt.trim();
-    if (!trimmed || !npc || !address || !playerEntityId || ambientLoading) return;
+    if (!trimmed || !npc || ambientLoading) return;
+    if (!address) {
+      setAmbientError("Connect your wallet to talk to NPCs.");
+      return;
+    }
+    if (!playerEntityId) {
+      setAmbientError("Deploy your champion first — no character found in the world.");
+      return;
+    }
 
     setAmbientLoading(true);
     setAmbientError(null);
@@ -1289,11 +1302,11 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
         {showGraphFreeformPanel && graphNode?.type === "freeform" && (
           <div className="px-4 pb-3">
             <div className="border p-3" style={{ borderColor: "#1e2842", background: BG_DARK }}>
-              <div className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>
+              <div className="text-[9px] font-bold uppercase tracking-wider" style={{ color: GOLD }}>
                 {graphNode.prompt}
               </div>
-              <div className="mt-1 text-[10px]" style={{ color: DIM }}>
-                Respond in your own words or tap a route below.
+              <div className="mt-0.5 text-[10px]" style={{ color: DIM }}>
+                Respond in your own words or choose an option below.
               </div>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row">
                 <textarea
@@ -1364,20 +1377,13 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
         {showAmbientPanel && (
           <div className="px-4 pb-3">
           <div className="border p-3" style={{ borderColor: "#1e2842", background: BG_DARK }}>
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <div>
-                <div className="text-[8px] font-bold uppercase tracking-wider" style={{ color: DIM }}>
-                  Ask {npc.name}
-                </div>
-                <div className="text-[10px]" style={{ color: DIM }}>
-                  Freeform flavor chat stays guided by quest state and NPC persona.
-                </div>
+            <div className="mb-2">
+              <div className="text-[9px] font-bold uppercase tracking-wider" style={{ color: GOLD }}>
+                Speak with {npc.name}
               </div>
-              {ambientReply && (
-                <div className="text-[8px] uppercase tracking-wider" style={{ color: ambientReply.provider === "llm" ? ACCENT : WARN }}>
-                  {ambientReply.provider === "llm" ? "LLM Reply" : "Fallback Reply"}
-                </div>
-              )}
+              <div className="mt-0.5 text-[10px]" style={{ color: DIM }}>
+                Ask about quests, the area, or anything on your mind.
+              </div>
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row">
@@ -1428,15 +1434,9 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
 
             {ambientReply && (
               <div className="mt-3 border px-3 py-2" style={{ borderColor: "#1e2842", background: "#0a0e18" }}>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2">
                   <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: GOLD }}>
                     {npc.name}
-                  </span>
-                  <span className="text-[8px] uppercase tracking-wider" style={{ color: DIM }}>
-                    {ambientReply.persona.role}
-                  </span>
-                  <span className="text-[8px] uppercase tracking-wider" style={{ color: DIM }}>
-                    {ambientReply.intent.replace(/_/g, " ")}
                   </span>
                 </div>
                 <p className="mt-2 text-[11px] leading-[1.6]" style={{ color: TEXT, whiteSpace: "pre-wrap" }}>
@@ -1480,7 +1480,7 @@ export function NpcDialogueOverlay(): React.ReactElement | null {
               : activeChoices?.length
               ? "Press 1-9 or click a choice"
               : showGraphFreeformPanel
-              ? "Use the prompt above"
+              ? "Type a response or pick an option"
               : "Space to continue"}
           </span>
 

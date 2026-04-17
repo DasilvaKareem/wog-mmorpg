@@ -6,23 +6,29 @@ export default defineConfig(({ mode }) => {
   const apiUrl =
     env.VITE_API_URL ||
     env.API_URL ||
-    (isProd ? "https://wog.urbantech.dev" : "http://localhost:3003");
+    "http://127.0.0.1:3000";
+
+  const proxyOpts = { target: apiUrl, changeOrigin: true, secure: true };
 
   return {
     base: isProd ? "/xr/" : "./",
     server: {
       port: 5174,
       proxy: {
-        "/zones": apiUrl,
-        "/players": apiUrl,
-        "/v1": apiUrl,
-        "/v2": apiUrl,
-        "/world": apiUrl,
-        "/character": apiUrl,
-        "/spawn": apiUrl,
-        "/command": apiUrl,
-        "/auth": apiUrl,
-        "/time": apiUrl,
+        "/zones": proxyOpts,
+        "/players": proxyOpts,
+        "/v1": proxyOpts,
+        "/v2": proxyOpts,
+        "/world": proxyOpts,
+        "/character": proxyOpts,
+        "/spawn": proxyOpts,
+        "/command": proxyOpts,
+        "/auth": proxyOpts,
+        "/agent": proxyOpts,
+        "/wallet": proxyOpts,
+        "/chat": proxyOpts,
+        "/inbox": proxyOpts,
+        "/time": proxyOpts,
       },
     },
   };

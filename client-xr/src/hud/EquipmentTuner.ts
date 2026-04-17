@@ -21,8 +21,16 @@ const SLOTS: Record<string, TunableSlot> = {
   helmPlate:       { label: "Helm (Plate)",   pos: { x: 0, y: 0.08, z: 0 },        rot: { x: 0, y: 0, z: 0 } },
   helmChain:       { label: "Helm (Chain)",   pos: { x: 0, y: 0.06, z: 0 },        rot: { x: 0, y: 0, z: 0 } },
   helmLeather:     { label: "Helm (Leather)", pos: { x: 0, y: 0.1, z: 0 },         rot: { x: 0, y: 0, z: 0 } },
+  chestPlate:      { label: "Chest (Plate)",  pos: { x: 0, y: 0, z: 0.06 },        rot: { x: 0, y: 0, z: 0 } },
+  chestChain:      { label: "Chest (Chain)",  pos: { x: 0, y: -0.02, z: 0.05 },    rot: { x: 0, y: 0, z: 0 } },
+  chestLeather:    { label: "Chest (Leather)",pos: { x: 0, y: -0.02, z: 0.05 },    rot: { x: 0, y: 0, z: 0 } },
   shoulderPlate:   { label: "Shoulder (Plate)",pos: { x: 0, y: 0.05, z: 0 },       rot: { x: 0, y: 0, z: 0 } },
   shoulderChain:   { label: "Shoulder (Chain)",pos: { x: 0, y: 0.03, z: 0 },       rot: { x: 0, y: 0, z: 0 } },
+  glovePlate:      { label: "Glove (Plate)",  pos: { x: 0, y: -0.12, z: 0.08 },    rot: { x: 0, y: 0, z: 0 } },
+  gloveLeather:    { label: "Glove (Leather)",pos: { x: 0, y: -0.12, z: 0.06 },    rot: { x: 0, y: 0, z: 0 } },
+  legPlate:        { label: "Leg (Plate)",    pos: { x: 0, y: -0.18, z: 0.10 },    rot: { x: 0, y: 0, z: 0 } },
+  legChain:        { label: "Leg (Chain)",    pos: { x: 0, y: -0.18, z: 0.08 },    rot: { x: 0, y: 0, z: 0 } },
+  legLeather:      { label: "Leg (Leather)",  pos: { x: 0, y: -0.18, z: 0.08 },    rot: { x: 0, y: 0, z: 0 } },
   beltPlate:       { label: "Belt (Plate)",   pos: { x: 0, y: 0.02, z: 0 },       rot: { x: Math.PI / 2, y: 0, z: 0 } },
   beltLeather:     { label: "Belt (Leather)", pos: { x: 0, y: 0.02, z: 0 },       rot: { x: Math.PI / 2, y: 0, z: 0 } },
   bootPlate:       { label: "Boot (Plate)",   pos: { x: 0.01, y: -0.29, z: 0.07 }, rot: { x: 0.008, y: 0, z: 0 } },
@@ -64,6 +72,11 @@ export class EquipmentTuner {
   /** Get current values for a slot */
   getSlot(name: string): TunableSlot | undefined {
     return SLOTS[name];
+  }
+
+  /** Whether the tuner panel is currently open */
+  isVisible(): boolean {
+    return this.visible;
   }
 
   private render() {

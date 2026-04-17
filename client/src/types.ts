@@ -40,6 +40,10 @@ export interface Entity {
   teachesClass?: string;
   activeQuests?: Array<{ questId: string; progress: number; startedAt: number }>;
   completedQuests?: string[];
+  gateRank?: "E" | "D" | "C" | "B" | "A" | "S";
+  isDangerGate?: boolean;
+  gateExpiresAt?: number;
+  gateOpened?: boolean;
 }
 
 export interface ActiveEffect {
@@ -147,6 +151,7 @@ export interface OwnedCharacter {
   tokenId: string;
   characterTokenId?: string | null;
   agentId?: string | null;
+  agentRegistrationTxHash?: string | null;
   chainRegistrationStatus?:
     | "unregistered"
     | "pending_mint"
@@ -155,6 +160,7 @@ export interface OwnedCharacter {
     | "registered"
     | "failed_retryable"
     | "failed_permanent";
+  chainRegistrationLastError?: string | null;
   bootstrapStatus?:
     | "queued"
     | "pending_mint"

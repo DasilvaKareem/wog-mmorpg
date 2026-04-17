@@ -4,6 +4,8 @@ import { LayerPanel } from "./panels/LayerPanel";
 import { ElevationPicker } from "./panels/ElevationPicker";
 import { ZoneProperties } from "./panels/ZoneProperties";
 import { FalPanel } from "./panels/FalPanel";
+import { PrefabPalette } from "./panels/PrefabPalette";
+import { NpcEditorPanel } from "./panels/NpcEditorPanel";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { useEditorStore } from "./store/editorStore";
 
@@ -16,6 +18,7 @@ export function App() {
       <div className="flex w-64 flex-col border-r border-zinc-800 bg-zinc-900">
         <Toolbar />
         <div className="min-h-0 flex-1 overflow-y-auto">
+          <PrefabPalette />
           <TilePalette />
         </div>
       </div>
@@ -33,6 +36,7 @@ export function App() {
       {/* Right sidebar — layers, elevation, zone props, FAL */}
       <div className="flex w-64 flex-col gap-0 overflow-y-auto border-l border-zinc-800 bg-zinc-900">
         <LayerPanel />
+        <NpcEditorPanel />
         <ElevationPicker />
         <ZoneProperties />
         <FalPanel />

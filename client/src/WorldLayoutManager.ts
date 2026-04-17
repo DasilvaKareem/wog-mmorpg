@@ -21,10 +21,36 @@ export class WorldLayoutManager {
   private layout: WorldLayoutData | null = null;
   private coordScale = 1;
 
+  private async fetchLayoutWithRetry(retryCount = 2): Promise<Response> {
+    const timeoutMs = 12_000;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(`${API_URL}/world/layout`, { signal: controller.signal });
+        clearTimeout(timeout);
+        if (response.status === 522 && attempt < retryCount) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+        return response;
+      } catch (err) {
+        clearTimeout(timeout);
+        lastError = err;
+        if (attempt < retryCount) {
+          await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+          continue;
+        }
+      }
+    }
+    throw lastError ?? new Error("Failed to fetch world layout");
+  }
+
   /** Fetch layout from server. Call once at startup. */
   async load(): Promise<boolean> {
     try {
-      const res = await fetch(`${API_URL}/world/layout`);
+      const res = await this.fetchLayoutWithRetry();
       if (!res.ok) return false;
       this.layout = (await res.json()) as WorldLayoutData;
       if (this.layout.tileSize > 0) {

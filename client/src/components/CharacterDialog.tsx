@@ -163,9 +163,10 @@ export function CharacterDialog({ open, onOpenChange, onRequestCreate }: Charact
         trackAgentTaskCompleted({ walletAddress: address, entityId: data.entityId, zoneId: data.zoneId });
         setDeployResult(`Deployed! Agent spawned in ${data.zoneId}`);
         if (data.zoneId) {
-          gameBus.emit("switchZone", { zoneId: data.zoneId });
+          gameBus.emit("followPlayer", { zoneId: data.zoneId, walletAddress: address });
+        } else {
+          gameBus.emit("lockToPlayer", { walletAddress: address });
         }
-        gameBus.emit("lockToPlayer", { walletAddress: address });
       } else {
         setDeployResult(data.error ?? "Deploy failed");
       }

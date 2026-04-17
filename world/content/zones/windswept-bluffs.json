@@ -4,5 +4,39 @@
   "biome": "grassland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "bluff-overlook",
+      "name": "Bluff Overlook",
+      "type": "landmark",
+      "position": { "x": 360, "z": 300 },
+      "radius": 17,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "shepherds-cottage",
+      "name": "Shepherd's Cottage",
+      "type": "structure",
+      "position": { "x": 240, "z": 180 },
+      "radius": 18,
+      "tags": ["rest"],
+      "structure": { "kind": "house", "capacity": 4, "services": ["rest"], "npcs": ["hermit"] }
+    },
+    {
+      "id": "ridgeline-provisions",
+      "name": "Ridgeline Provisions",
+      "type": "structure",
+      "position": { "x": 470, "z": 400 },
+      "radius": 21,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "bluff-track",
+      "name": "Bluff Track",
+      "nodes": ["shepherds-cottage", "bluff-overlook", "ridgeline-provisions"]
+    }
+  ]
 }

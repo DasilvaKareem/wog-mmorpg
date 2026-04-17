@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { getOfficialErc8004Addresses } from "../erc8004/official.js";
+import { getOfficialErc8004Addresses, SKALE_BASE_MAINNET_CHAIN_ID } from "../erc8004/official.js";
 
 type DeploymentManifest = {
   chainId?: number;
@@ -67,9 +67,9 @@ const MAINNET_PRESET: ChainPreset = {
   chainId: "1187947933",
   rpcUrl: "https://skale-base.skalenodes.com/v1/base",
   environment: {
-    GOLD_CONTRACT_ADDRESS: "0x421699e71bBeC7d05FCbc79C690afD5D8585f182",
-    ITEMS_CONTRACT_ADDRESS: "0xAe68cdA079fd699780506cc49381EE732837Ec35",
-    CHARACTER_CONTRACT_ADDRESS: "0x331dAdFFFFC8A126a739CA5CCAd847c29973B642",
+    GOLD_CONTRACT_ADDRESS: "0x1b6825b0607237506d7401A382c0c9d8632c4969",
+    ITEMS_CONTRACT_ADDRESS: "0x91EDD7aA82B303c183D7A74E333940725a70712e",
+    CHARACTER_CONTRACT_ADDRESS: "0x1351566E5fdDE4252F3542822e171686c461dB52",
     IDENTITY_REGISTRY_ADDRESS: "0x8004A169FB4a3325136EB29fA0ceB6D2e539a432",
     REPUTATION_REGISTRY_ADDRESS: "0x8004BAa17C55a88189AE136b182e5fdA19dE9b63",
     AUCTION_HOUSE_CONTRACT_ADDRESS: "0x8FBcA728a8B904587CE6220dfA05F2c0DE3060B6",
@@ -95,11 +95,17 @@ function shouldOverrideWithManifest(key: string, currentValue: string | undefine
   // In DEV mode, local chain addresses should come from the active Hardhat manifest
   // rather than any stale values persisted in shard/.env.
   if (
-    key.endsWith("_CONTRACT_ADDRESS") ||
-    key.endsWith("_REGISTRY_ADDRESS") ||
-    key === "SKALE_BASE_RPC_URL" ||
-    key === "SKALE_BASE_CHAIN_ID"
+    DEV_ENABLED &&
+    (
+      key.endsWith("_CONTRACT_ADDRESS") ||
+      key === "SKALE_BASE_RPC_URL" ||
+      key === "SKALE_BASE_CHAIN_ID"
+    )
   ) {
+    return true;
+  }
+
+  if (key === "IDENTITY_REGISTRY_ADDRESS" || key === "REPUTATION_REGISTRY_ADDRESS") {
     return true;
   }
 
@@ -201,5 +207,5 @@ if (DEV_ENABLED) {
     );
   }
 } else {
-  applyOfficialRegistryFallback(process.env.SKALE_BASE_CHAIN_ID);
+  applyOfficialRegistryFallback(process.env.SKALE_BASE_CHAIN_ID ?? String(SKALE_BASE_MAINNET_CHAIN_ID));
 }

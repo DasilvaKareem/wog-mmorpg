@@ -3,7 +3,7 @@
  */
 
 import { getGoldBalance, getItemBalance } from "../blockchain/blockchain.js";
-import { getAvailableGold } from "../blockchain/goldLedger.js";
+import { getAvailableGoldAsync } from "../blockchain/goldLedger.js";
 import { goldToCopper } from "../blockchain/currency.js";
 import { getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
 import { getItemRarity, getItemRecycleCopperValue, ITEM_CATALOG } from "../items/itemCatalog.js";
@@ -186,6 +186,7 @@ export interface AgentContext {
   isInteractionOnCooldown(key: string): boolean;
   setInteractionCooldown(key: string, ms: number): void;
   clearInteractionCooldown(key: string): void;
+  recordPartyCoordination(kind: string): void;
   logActivity(text: string): void;
   setEntityGotoMode(on: boolean): void;
   getWalletBalance(): Promise<{ copper: number; items: any[] }>;
@@ -195,9 +196,43 @@ export interface AgentContext {
   setScript(script: BotScript | null): void;
   readonly currentScript: BotScript | null;
 
+  /** Enqueue a multi-step chain of scripts (queued actions run to completion
+   *  without autonomous trigger interference). If `clearExisting` is true,
+   *  the existing queue is replaced. */
+  enqueueActions(scripts: BotScript[], clearExisting?: boolean): Promise<void>;
+
+  /** Latest known "home" zone — where the agent is grinding. Used by detour
+   *  chains to return here after completing a side-errand. */
+  readonly homeZone: string | null;
+
+  /** When true, combat target selection filters out mobs 7+ levels below the
+   *  agent. Mirrors AgentConfig.ignoreWeakMobs. */
+  readonly ignoreWeakMobs: boolean;
+
+  /** Check whether a quest is currently flagged as stuck (target mob unreachable
+   *  or combat repeatedly blocked). Stuck quests are excluded from questMobNames
+   *  so the agent grinds generic targets or moves on instead of spinning. */
+  isQuestStuck(questId: string): boolean;
+
+  /** Mark a quest as stuck. Auto-expires after ~5 minutes so the agent can retry. */
+  markQuestStuck(questId: string, reason: string): void;
+
+  /** ID of the target the agent is currently committed to, or null if no commitment.
+   *  Once committed, target selection sticks with this mob for a handful of ticks
+   *  so the randomized shortlist in pickCombatTarget doesn't flip targets every
+   *  tick and flood the server with redundant attack/technique commands. */
+  readonly committedTargetId: string | null;
+
+  /** Lock onto a target for the next `ttlTicks` ticks (default 8 ≈ 10s). */
+  commitTarget(targetId: string, ttlTicks?: number): void;
+
+  /** Release the current target commitment (e.g. when the target dies or leaves). */
+  clearCommittedTarget(): void;
+
   // Public actions (also called from chat routes)
   buyItem(tokenId: number): Promise<boolean>;
   equipItem(tokenId: number, instanceId?: string): Promise<boolean>;
+  equipItemWithReason(tokenId: number, instanceId?: string): Promise<{ ok: boolean; reason?: string }>;
   learnProfession(professionId: string): Promise<boolean>;
   recycleItem(tokenId: number, quantity?: number): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }>;
 
@@ -215,7 +250,7 @@ export async function fetchWalletBalance(
   try {
     const onChainGold = parseFloat(await getGoldBalance(custodialWallet));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(custodialWallet, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(custodialWallet, safeOnChainGold);
     const balanceResults = await Promise.all(
       ITEM_CATALOG.map((item) => getItemBalance(custodialWallet, item.tokenId)),
     );
@@ -252,7 +287,7 @@ export async function fetchLiquidationInventory(
   try {
     const onChainGold = parseFloat(await getGoldBalance(custodialWallet));
     const safeOnChainGold = Number.isFinite(onChainGold) ? onChainGold : 0;
-    const availableGold = getAvailableGold(custodialWallet, safeOnChainGold);
+    const availableGold = await getAvailableGoldAsync(custodialWallet, safeOnChainGold);
     const equippedCounts = await getEquippedItemCounts(custodialWallet);
     const balanceResults = await Promise.all(
       ITEM_CATALOG.map((item) => getItemBalance(custodialWallet, item.tokenId)),

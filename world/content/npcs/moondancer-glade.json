@@ -1,0 +1,333 @@
+{
+  "zoneId": "moondancer-glade",
+  "npcs": [
+    {
+      "type": "trainer",
+      "name": "Moonblade Warchief Gorak - Warrior Trainer",
+      "x": 60,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "warrior"
+    },
+    {
+      "type": "trainer",
+      "name": "Lunaris Templar Soren - Paladin Trainer",
+      "x": 200,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "paladin"
+    },
+    {
+      "type": "trainer",
+      "name": "Nightbloom Assassin Yara - Rogue Trainer",
+      "x": 340,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "rogue"
+    },
+    {
+      "type": "trainer",
+      "name": "Moonbow Sentinel Caelum - Ranger Trainer",
+      "x": 480,
+      "y": 300,
+      "hp": 999,
+      "teachesClass": "ranger"
+    },
+    {
+      "type": "trainer",
+      "name": "Starweaver Illythia - Mage Trainer",
+      "x": 60,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "mage"
+    },
+    {
+      "type": "trainer",
+      "name": "Moon Priestess Elyria - Cleric Trainer",
+      "x": 200,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "cleric"
+    },
+    {
+      "type": "trainer",
+      "name": "Eclipse Herald Morrigan - Warlock Trainer",
+      "x": 340,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "warlock"
+    },
+    {
+      "type": "trainer",
+      "name": "Lunar Sage Hiroshi - Monk Trainer",
+      "x": 480,
+      "y": 360,
+      "hp": 999,
+      "teachesClass": "monk"
+    },
+    {
+      "type": "quest-giver",
+      "name": "Elder Druid Moonwhisper",
+      "x": 170,
+      "y": 220,
+      "hp": 999
+    },
+    {
+      "type": "quest-giver",
+      "name": "Moonherb Gatherer Lirien",
+      "x": 230,
+      "y": 260,
+      "hp": 999
+    },
+    {
+      "type": "merchant",
+      "name": "Moonweaver Merchant Liora",
+      "x": 180,
+      "y": 100,
+      "hp": 999,
+      "shopItems": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115
+      ]
+    },
+    {
+      "type": "merchant",
+      "name": "Moonlit Blacksmith Elara",
+      "x": 220,
+      "y": 420,
+      "hp": 999,
+      "shopItems": [
+        3,
+        5,
+        9,
+        17,
+        18,
+        19,
+        20,
+        21,
+        28,
+        29,
+        30,
+        42,
+        43,
+        44,
+        77,
+        78,
+        79,
+        115,
+        224,
+        225,
+        226,
+        228,
+        229,
+        230,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249
+      ]
+    },
+    {
+      "type": "auctioneer",
+      "name": "Lunar Auctioneer Faelan",
+      "x": 260,
+      "y": 100,
+      "hp": 999
+    },
+    {
+      "type": "guild-registrar",
+      "name": "Grove Keeper Registrar",
+      "x": 340,
+      "y": 100,
+      "hp": 999
+    },
+    {
+      "type": "lore-npc",
+      "name": "Ritual Keeper Seluna",
+      "x": 340,
+      "y": 340,
+      "hp": 999
+    },
+    {
+      "type": "forge",
+      "name": "Moonlit Anvil",
+      "x": 100,
+      "y": 560,
+      "hp": 9999
+    },
+    {
+      "type": "alchemy-lab",
+      "name": "Druidic Brewing Stand",
+      "x": 200,
+      "y": 560,
+      "hp": 9999
+    },
+    {
+      "type": "enchanting-altar",
+      "name": "Moonlit Enchanting Altar",
+      "x": 300,
+      "y": 560,
+      "hp": 9999
+    },
+    {
+      "type": "arena-master",
+      "name": "Moonblade Duelist Sera",
+      "x": 420,
+      "y": 100,
+      "hp": 999
+    },
+    {
+      "type": "mob",
+      "name": "Moon Stalker",
+      "x": 80,
+      "y": 430,
+      "hp": 754,
+      "level": 30,
+      "xpReward": 650
+    },
+    {
+      "type": "mob",
+      "name": "Moon Stalker",
+      "x": 120,
+      "y": 520,
+      "hp": 754,
+      "level": 30,
+      "xpReward": 650
+    },
+    {
+      "type": "mob",
+      "name": "Moon Stalker",
+      "x": 160,
+      "y": 450,
+      "hp": 754,
+      "level": 30,
+      "xpReward": 650
+    },
+    {
+      "type": "mob",
+      "name": "Fae Guardian",
+      "x": 300,
+      "y": 500,
+      "hp": 763,
+      "level": 31,
+      "xpReward": 680
+    },
+    {
+      "type": "mob",
+      "name": "Fae Guardian",
+      "x": 350,
+      "y": 580,
+      "hp": 763,
+      "level": 31,
+      "xpReward": 680
+    },
+    {
+      "type": "mob",
+      "name": "Fae Guardian",
+      "x": 250,
+      "y": 580,
+      "hp": 763,
+      "level": 31,
+      "xpReward": 680
+    },
+    {
+      "type": "mob",
+      "name": "Twilight Dryad",
+      "x": 380,
+      "y": 430,
+      "hp": 754,
+      "level": 32,
+      "xpReward": 710
+    },
+    {
+      "type": "mob",
+      "name": "Twilight Dryad",
+      "x": 430,
+      "y": 500,
+      "hp": 754,
+      "level": 32,
+      "xpReward": 710
+    },
+    {
+      "type": "mob",
+      "name": "Twilight Dryad",
+      "x": 460,
+      "y": 430,
+      "hp": 754,
+      "level": 32,
+      "xpReward": 710
+    },
+    {
+      "type": "mob",
+      "name": "Shadow Druid",
+      "x": 520,
+      "y": 400,
+      "hp": 810,
+      "level": 33,
+      "xpReward": 740
+    },
+    {
+      "type": "mob",
+      "name": "Shadow Druid",
+      "x": 560,
+      "y": 480,
+      "hp": 810,
+      "level": 33,
+      "xpReward": 740
+    },
+    {
+      "type": "mob",
+      "name": "Lunar Wraith",
+      "x": 500,
+      "y": 280,
+      "hp": 838,
+      "level": 34,
+      "xpReward": 770
+    },
+    {
+      "type": "mob",
+      "name": "Lunar Wraith",
+      "x": 550,
+      "y": 200,
+      "hp": 838,
+      "level": 34,
+      "xpReward": 770
+    },
+    {
+      "type": "boss",
+      "name": "Moondancer Archdruid",
+      "x": 500,
+      "y": 250,
+      "hp": 3200,
+      "level": 35,
+      "xpReward": 1300
+    }
+  ]
+}

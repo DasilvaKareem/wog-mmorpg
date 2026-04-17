@@ -4,5 +4,44 @@
   "biome": "grassland",
   "width": 640,
   "height": 640,
-  "pois": []
+  "pois": [
+    {
+      "id": "tidebreak-monument",
+      "name": "Tidebreak Monument",
+      "type": "landmark",
+      "position": { "x": 290, "z": 350 },
+      "radius": 20,
+      "tags": ["safe-zone"]
+    },
+    {
+      "id": "saltspray-temple",
+      "name": "Saltspray Temple",
+      "type": "structure",
+      "position": { "x": 180, "z": 230 },
+      "radius": 22,
+      "tags": ["heal", "bless"],
+      "structure": { "kind": "temple", "capacity": 8, "services": ["heal", "bless"], "npcs": ["priestess"] }
+    },
+    {
+      "id": "driftwood-trading-post",
+      "name": "Driftwood Trading Post",
+      "type": "structure",
+      "position": { "x": 420, "z": 460 },
+      "radius": 20,
+      "tags": ["shop"],
+      "structure": { "kind": "shop", "capacity": 6, "services": ["buy", "sell"], "npcs": ["merchant"] }
+    }
+  ],
+  "roads": [
+    {
+      "id": "coastal-path",
+      "name": "Coastal Path",
+      "nodes": ["saltspray-temple", "tidebreak-monument", "driftwood-trading-post"]
+    },
+    {
+      "id": "tideline-shortcut",
+      "name": "Tideline Shortcut",
+      "nodes": ["saltspray-temple", "driftwood-trading-post"]
+    }
+  ]
 }

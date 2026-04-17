@@ -59,14 +59,23 @@ function getOrCreateSkill(wallet: string, profession: string): ProfessionSkillDa
   return map.get(profession)!;
 }
 
+export interface SkillXpResult {
+  profession: string;
+  oldLevel: number;
+  newLevel: number;
+  skillUp: boolean;
+}
+
 /** Award per-profession skill XP (called alongside character XP award) */
-function awardSkillXp(wallet: string, actionLabel: string, xpAmount: number): void {
+export function awardSkillXp(wallet: string, actionLabel: string, xpAmount: number): SkillXpResult | null {
   const profId = ACTION_TO_PROFESSION[actionLabel];
-  if (!profId) return;
+  if (!profId) return null;
   const skill = getOrCreateSkill(wallet, profId);
+  const oldLevel = skill.level;
   skill.xp += xpAmount;
   skill.actions += 1;
   skill.level = skillLevelFromXp(skill.xp);
+  return { profession: profId, oldLevel, newLevel: skill.level, skillUp: skill.level > oldLevel };
 }
 
 /** Get all profession skill data for a wallet */
@@ -157,9 +166,25 @@ export function awardProfessionXp(
 ): ProfessionXpResult {
   if (xpAmount <= 0) return { xpAwarded: 0, totalXp: entity.xp ?? 0, leveledUp: false };
 
-  // Track per-profession skill XP
+  // Track per-profession skill XP + emit skill-up event
   if (entity.walletAddress) {
-    awardSkillXp(entity.walletAddress, actionLabel, xpAmount);
+    const skillResult = awardSkillXp(entity.walletAddress, actionLabel, xpAmount);
+    if (skillResult?.skillUp) {
+      const zone = getAllZones().get(zoneId);
+      logZoneEvent({
+        zoneId,
+        type: "profession",
+        tick: zone?.tick ?? 0,
+        message: `${entity.name}'s ${skillResult.profession} skill reached ${skillResult.newLevel}!`,
+        entityId: entity.id,
+        entityName: entity.name,
+        data: {
+          profession: skillResult.profession,
+          oldLevel: skillResult.oldLevel,
+          newLevel: skillResult.newLevel,
+        },
+      });
+    }
   }
 
   // Ensure level and xp are proper numbers (safety fix)
@@ -270,4 +295,33 @@ export function xpForRarity(rarity: "common" | "uncommon" | "rare" | "epic"): nu
     case "rare": return PROFESSION_XP.GATHER_RARE;
     case "epic": return PROFESSION_XP.GATHER_EPIC;
   }
+}
+
+// ── Failure chance ────────────────────────────────────────────────────
+
+const MAX_FAIL_RATE = 0.40; // 40% max failure when skill barely meets requirement
+const SKILL_BUFFER = 25;    // failure drops to 0% this many levels above requirement
+
+/**
+ * Calculate the chance of failing a profession action (craft, gather, etc.)
+ * based on how far the player's skill exceeds the requirement.
+ *
+ * - At exactly the required level: 40% failure
+ * - 12 levels above: ~20% failure
+ * - 25+ levels above: 0% failure
+ *
+ * Returns a number 0..1 representing failure probability.
+ */
+export function calculateFailChance(currentSkill: number, requiredSkill: number): number {
+  if (currentSkill >= requiredSkill + SKILL_BUFFER) return 0;
+  return Math.max(0, MAX_FAIL_RATE * (1 - (currentSkill - requiredSkill) / SKILL_BUFFER));
+}
+
+/**
+ * Roll against a failure chance. Returns true if the action fails.
+ */
+export function rollFailure(currentSkill: number, requiredSkill: number): { failed: boolean; failChance: number } {
+  const failChance = calculateFailChance(currentSkill, requiredSkill);
+  if (failChance <= 0) return { failed: false, failChance: 0 };
+  return { failed: Math.random() < failChance, failChance: Math.round(failChance * 100) };
 }

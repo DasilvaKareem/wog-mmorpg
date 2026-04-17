@@ -1,12 +1,12 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { mintItem } from "../blockchain/blockchain.js";
+import { enqueueItemMint } from "../blockchain/blockchain.js";
 import { ORE_CATALOG } from "../resources/oreCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { logDiary, narrativeMine } from "../social/diary.js";
-import { awardProfessionXp, xpForRarity } from "./professionXp.js";
+import { awardProfessionXp, xpForRarity, getProfessionSkills, rollFailure } from "./professionXp.js";
 import { advanceGatherQuests } from "../social/questSystem.js";
 import { logZoneEvent } from "../world/zoneEvents.js";
 
@@ -32,6 +32,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
       maxCharges: props.maxCharges,
       respawnTicks: props.respawnTicks,
       requiredPickaxeTier: props.requiredPickaxeTier,
+      requiredSkillLevel: props.requiredSkillLevel,
       tokenId: props.tokenId.toString(),
     }));
   });
@@ -57,6 +58,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
           maxCharges: e.maxCharges ?? 0,
           depleted: e.depletedAtTick != null,
           requiredPickaxeTier: e.oreType ? ORE_CATALOG[e.oreType].requiredPickaxeTier : 1,
+          requiredSkillLevel: e.oreType ? ORE_CATALOG[e.oreType].requiredSkillLevel : 1,
           region: e.region,
         }));
 
@@ -165,6 +167,46 @@ export function registerMiningRoutes(server: FastifyInstance) {
       };
     }
 
+    // Check mining skill level
+    const skills = getProfessionSkills(walletAddress);
+    const currentSkillLevel = skills["mining"]?.level ?? 1;
+    if (currentSkillLevel < oreProps.requiredSkillLevel) {
+      reply.code(400);
+      return {
+        error: `Mining skill too low for ${oreProps.label}`,
+        requiredSkillLevel: oreProps.requiredSkillLevel,
+        currentSkillLevel,
+        hint: `Mine simpler ores to raise your skill from ${currentSkillLevel} to ${oreProps.requiredSkillLevel}`,
+      };
+    }
+
+    // Roll for gathering failure
+    const { failed, failChance } = rollFailure(currentSkillLevel, oreProps.requiredSkillLevel);
+    if (failed) {
+      // Consume tool durability but don't deplete node
+      weaponEquipped.durability = Math.max(0, weaponEquipped.durability - 1);
+      if (weaponEquipped.durability === 0) {
+        weaponEquipped.broken = true;
+        if (entity.equipment) delete entity.equipment.weapon;
+      }
+      lastGatherTime.set(entityId, Date.now());
+      const region = zoneId ?? entity.region ?? "unknown";
+      awardProfessionXp(entity, region, Math.floor(xpForRarity(oreProps.rarity) / 2), "mining");
+      return {
+        ok: false,
+        failed: true,
+        failChance,
+        oreName: oreProps.label,
+        message: "Your pickaxe struck poorly and the ore crumbled. Node preserved.",
+        pickaxe: {
+          name: pickaxeItem.name,
+          durability: weaponEquipped.durability,
+          maxDurability: weaponEquipped.maxDurability,
+          broken: weaponEquipped.broken,
+        },
+      };
+    }
+
     // Deplete ore charge
     oreNode.charges = (oreNode.charges ?? 0) - 1;
     const chargesRemaining = oreNode.charges;
@@ -181,7 +223,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
 
     // Mint ore NFT
     try {
-      const oreTx = await mintItem(walletAddress, oreProps.tokenId, 1n);
+      const oreTx = await enqueueItemMint(walletAddress, oreProps.tokenId, 1n);
 
       server.log.info(
         `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx}`

@@ -8,6 +8,7 @@ import { createCustodialWallet } from "../blockchain/custodialWalletRedis.js";
 import {
   getAgentCustodialWallet,
   setAgentCustodialWallet,
+  clearAgentCustodialWallet,
   getAgentEntityRef,
   setAgentEntityRef,
   clearAgentEntityRef,
@@ -17,6 +18,7 @@ import {
 } from "./agentConfigStore.js";
 import { authenticateWithWallet } from "../auth/authHelper.js";
 import { loadCharacter } from "../character/characterStore.js";
+import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { getAllEntities, isWalletSpawned } from "../world/zoneRuntime.js";
 import { extractRawCharacterName } from "./agentUtils.js";
 
@@ -46,6 +48,36 @@ function normalizeOnChainTokenId(value: unknown): string | undefined {
   return trimmed;
 }
 
+function normalizeCharacterLookupName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const raw = extractRawCharacterName(value) ?? value;
+  const trimmed = raw.trim().toLowerCase();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function selectRequestedCharacter(characters: any[] | undefined, requestedName: string): any | null {
+  if (!Array.isArray(characters) || characters.length === 0) return null;
+  const normalizedRequested = normalizeCharacterLookupName(requestedName);
+  if (!normalizedRequested) {
+    const sorted = [...characters].sort((left, right) => {
+      const leftLevel = Number(left?.properties?.level ?? 1);
+      const rightLevel = Number(right?.properties?.level ?? 1);
+      if (leftLevel !== rightLevel) return rightLevel - leftLevel;
+      const leftXp = Number(left?.properties?.xp ?? 0);
+      const rightXp = Number(right?.properties?.xp ?? 0);
+      if (leftXp !== rightXp) return rightXp - leftXp;
+      return String(left?.name ?? "").localeCompare(String(right?.name ?? ""));
+    });
+    return sorted[0] ?? null;
+  }
+
+  const exact = characters.find((character) => {
+    const candidate = normalizeCharacterLookupName(character?.name);
+    return candidate === normalizedRequested;
+  });
+  return exact ?? null;
+}
+
 export interface CharacterSetupResult {
   custodialWallet: string;
   entityId: string;
@@ -68,12 +100,31 @@ export async function setupAgentCharacter(
   calling?: "adventurer" | "farmer" | "merchant" | "craftsman"
 ): Promise<CharacterSetupResult> {
   const existing = await getAgentCustodialWallet(userWallet);
+  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
 
   // ── Step 1: Get or create custodial wallet ─────────────────────────────
   let custodialAddress: string;
   if (existing) {
-    custodialAddress = existing;
-    console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
+    try {
+      await exportCustodialWallet(existing);
+      custodialAddress = existing;
+      console.log(`[agentSetup] Reusing custodial wallet ${custodialAddress} for ${userWallet}`);
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "");
+      const staleCipher =
+        msg.includes("unable to authenticate data") ||
+        msg.includes("Unsupported state") ||
+        msg.includes("Custodial wallet not found");
+      if (!staleCipher) {
+        throw err;
+      }
+      console.warn(`[agentSetup] Stale custodial wallet mapping for ${userWallet}: ${existing} (${msg.slice(0, 120)})`);
+      await clearAgentCustodialWallet(userWallet);
+      const wallet = await createCustodialWallet();
+      custodialAddress = wallet.address.toLowerCase();
+      await setAgentCustodialWallet(userWallet, custodialAddress);
+      console.log(`[agentSetup] Replaced broken custodial wallet with ${custodialAddress} for ${userWallet}`);
+    }
   } else {
     const wallet = await createCustodialWallet();
     custodialAddress = wallet.address.toLowerCase();
@@ -124,13 +175,17 @@ export async function setupAgentCharacter(
           : typeof liveEntity.agentId === "number"
             ? Math.trunc(liveEntity.agentId).toString()
             : undefined;
+      const verifiedLiveIdentity = await buildVerifiedIdentityPatch(custodialAddress, {
+        characterTokenId: recoveredTokenId,
+        agentId: recoveredAgentId,
+      });
 
       await setAgentEntityRef(userWallet, {
         entityId: spawnedEntry.entityId,
         zoneId: spawnedEntry.zoneId,
         characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
-        ...(recoveredAgentId ? { agentId: recoveredAgentId } : {}),
-        ...(recoveredTokenId ? { characterTokenId: recoveredTokenId } : {}),
+        ...(verifiedLiveIdentity.characterTokenId ? { characterTokenId: verifiedLiveIdentity.characterTokenId } : {}),
+        ...(verifiedLiveIdentity.agentId ? { agentId: verifiedLiveIdentity.agentId } : {}),
       });
 
       console.log(`[agentSetup] Reattached to live shard entity ${spawnedEntry.entityId} for ${userWallet}`);
@@ -139,8 +194,8 @@ export async function setupAgentCharacter(
         entityId: spawnedEntry.entityId,
         zoneId: spawnedEntry.zoneId,
         characterName: extractRawCharacterName(liveEntity.name) ?? liveEntity.name,
-        agentId: recoveredAgentId,
-        characterTokenId: recoveredTokenId,
+        agentId: verifiedLiveIdentity.agentId ?? undefined,
+        characterTokenId: verifiedLiveIdentity.characterTokenId ?? undefined,
         alreadyExisted: true,
       };
     }
@@ -149,7 +204,6 @@ export async function setupAgentCharacter(
   // ── Step 3: Mint character NFT (only if no saved character exists) ────
   // CRITICAL: /character/create used to overwrite Redis with level 1.
   // Skip it entirely when a saved character already exists to preserve progress.
-  const { exportCustodialWallet } = await import("../blockchain/custodialWalletRedis.js");
   const rawPrivateKey = await exportCustodialWallet(custodialAddress);
   const token = await authenticateWithWallet(rawPrivateKey);
 
@@ -177,7 +231,7 @@ export async function setupAgentCharacter(
   let character: any;
   try {
     const charData = await apiCall("GET", `/character/${custodialAddress}`, undefined, token);
-    character = charData.characters?.[0];
+    character = selectRequestedCharacter(charData.characters, characterName);
   } catch {
     character = null;
   }
@@ -190,10 +244,14 @@ export async function setupAgentCharacter(
   const spawnXp = character?.properties?.xp ?? 0;
   const spawnRace = character?.properties?.race ?? raceId;
   const spawnClass = character?.properties?.class ?? classId;
-  const spawnTokenId = normalizeOnChainTokenId(character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId);
-  const spawnAgentId = typeof character?.agentId === "string" && character.agentId.trim().length > 0
-    ? character.agentId.trim()
-    : existingSave?.agentId;
+  const verifiedSpawnIdentity = await buildVerifiedIdentityPatch(custodialAddress, {
+    characterTokenId: character?.characterTokenId ?? character?.tokenId ?? existingSave?.characterTokenId,
+    agentId: character?.agentId ?? existingSave?.agentId,
+    agentRegistrationTxHash: character?.agentRegistrationTxHash ?? existingSave?.agentRegistrationTxHash,
+    chainRegistrationStatus: character?.chainRegistrationStatus ?? existingSave?.chainRegistrationStatus,
+  });
+  const spawnTokenId = verifiedSpawnIdentity.characterTokenId;
+  const spawnAgentId = verifiedSpawnIdentity.agentId;
 
   // ── Step 6: Spawn into last known zone (or village-square for new agents) ──
   const startZone = existingRef?.zoneId ?? "village-square";
@@ -207,6 +265,7 @@ export async function setupAgentCharacter(
     level: spawnLevel,
     xp: spawnXp,
     characterTokenId: spawnTokenId,
+    agentId: spawnAgentId,
     raceId: spawnRace,
     classId: spawnClass,
   }, token);
@@ -243,8 +302,8 @@ export async function setupAgentCharacter(
     entityId,
     zoneId: resolvedZoneId,
     characterName: spawnName,
-    agentId: spawnAgentId,
-    characterTokenId: spawnTokenId,
+    agentId: spawnAgentId ?? undefined,
+    characterTokenId: spawnTokenId ?? undefined,
     alreadyExisted: false,
   };
 }

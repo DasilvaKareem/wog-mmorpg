@@ -1,4 +1,4 @@
-import { getItemBalance } from "../blockchain/blockchain.js";
+import { getOnChainItemBalance } from "../blockchain/blockchain.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import {
   getEquippedItemCounts,
@@ -52,7 +52,7 @@ export async function canListItem(params: {
   }
 
   // 3. Owns enough?
-  const balance = await getItemBalance(wallet, BigInt(tokenId));
+  const balance = await getOnChainItemBalance(wallet, BigInt(tokenId));
   if (balance < BigInt(quantity)) {
     return {
       allowed: false,
@@ -138,7 +138,7 @@ export async function isRentable(params: {
     return { allowed: false, reason: "Item is restricted" };
   }
 
-  const balance = await getItemBalance(wallet, BigInt(tokenId));
+  const balance = await getOnChainItemBalance(wallet, BigInt(tokenId));
   if (balance < 1n) {
     return { allowed: false, reason: "You don't own this item" };
   }
