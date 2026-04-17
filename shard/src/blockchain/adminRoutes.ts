@@ -81,7 +81,7 @@ type CachedSummary = {
   value: GasSummary;
 };
 
-const SUMMARY_CACHE_MS = 30_000;
+const SUMMARY_CACHE_MS = 120_000;
 let lifetimeGasSummaryCache: CachedSummary | null = null;
 
 function formatEtherFromWei(value: bigint): string {
@@ -100,8 +100,12 @@ function safeBigInt(value?: string | null): bigint | null {
   }
 }
 
-async function enrichAttemptGas(attempt: ChainTxAttemptRecord): Promise<ChainTxAttemptRecord & { gas: AttemptGasDetails }> {
-  if (attempt.txHash) {
+async function enrichAttemptGas(
+  attempt: ChainTxAttemptRecord,
+  options?: { skipReceiptLookup?: boolean }
+): Promise<ChainTxAttemptRecord & { gas: AttemptGasDetails }> {
+  const skipReceiptLookup = options?.skipReceiptLookup ?? false;
+  if (!skipReceiptLookup && attempt.txHash) {
     try {
       const [receipt, tx] = await Promise.all([
         biteProvider.getTransactionReceipt(attempt.txHash),
@@ -259,13 +263,19 @@ async function listAllChainTxAttempts(limit = 500): Promise<ChainTxAttemptRecord
   return all;
 }
 
-async function getLifetimeGasSummary(serverWalletAddress?: string | null): Promise<GasSummary> {
+async function getLifetimeGasSummary(
+  serverWalletAddress?: string | null,
+  options?: { skipReceiptLookup?: boolean }
+): Promise<GasSummary> {
   const now = Date.now();
   if (lifetimeGasSummaryCache && lifetimeGasSummaryCache.expiresAt > now) {
     return lifetimeGasSummaryCache.value;
   }
   const attempts = await listAllChainTxAttempts();
-  const summary = summarizeGasUsage(await Promise.all(attempts.map((attempt) => enrichAttemptGas(attempt))), serverWalletAddress);
+  const summary = summarizeGasUsage(
+    await Promise.all(attempts.map((attempt) => enrichAttemptGas(attempt, options))),
+    serverWalletAddress
+  );
   lifetimeGasSummaryCache = {
     expiresAt: now + SUMMARY_CACHE_MS,
     value: summary,
@@ -348,6 +358,7 @@ export function registerChainAdminRoutes(server: FastifyInstance): void {
 <script>
 const $ = (id) => document.getElementById(id);
 let timer = null;
+let refreshInFlight = false;
 
 function esc(v) {
   if (v == null) return "";
@@ -489,10 +500,14 @@ async function fetchStatus() {
 }
 
 async function refresh() {
+  if (refreshInFlight) return;
+  refreshInFlight = true;
   try {
     await fetchStatus();
   } catch (err) {
     $('updated').textContent = 'Failed: ' + (err?.message || err);
+  } finally {
+    refreshInFlight = false;
   }
 }
 
@@ -554,20 +569,26 @@ syncAuto();
 
   server.get("/admin/chain/status", async (request, reply) => {
     if (!verifyAdmin(request, reply)) return;
-    const stats = await getChainIntentStats();
-    const waitingFunds = await listChainIntents({ statuses: ["waiting_funds"], limit: 200, offset: 0 });
-    const permanentFailures = await listChainIntents({ statuses: ["failed_permanent"], limit: 200, offset: 0 });
-    const submitted = await listChainIntents({ statuses: ["submitted"], limit: 500, offset: 0 });
+    const [stats, waitingFunds, permanentFailures, submitted, recentAttemptsRaw, serverWallet] = await Promise.all([
+      getChainIntentStats(),
+      listChainIntents({ statuses: ["waiting_funds"], limit: 200, offset: 0 }),
+      listChainIntents({ statuses: ["failed_permanent"], limit: 200, offset: 0 }),
+      listChainIntents({ statuses: ["submitted"], limit: 500, offset: 0 }),
+      listChainTxAttempts({ limit: 100, offset: 0 }),
+      getServerWalletSummary(),
+    ]);
     const staleSubmitted = submitted.filter((intent) => {
       const submittedAt = intent.lastSubmittedAt ?? intent.updatedAt;
       return submittedAt <= (Date.now() - STALE_SUBMITTED_MS);
     });
-    const recentAttemptsRaw = await listChainTxAttempts({ limit: 100, offset: 0 });
-    const recentAttempts = await Promise.all(recentAttemptsRaw.slice(0, 50).map((attempt) => enrichAttemptGas(attempt)));
-    const serverWallet = await getServerWalletSummary();
+    const [recentAttempts, enrichedForRecentGas, lifetimeGas] = await Promise.all([
+      Promise.all(recentAttemptsRaw.slice(0, 50).map((attempt) => enrichAttemptGas(attempt, { skipReceiptLookup: true }))),
+      Promise.all(recentAttemptsRaw.map((attempt) => enrichAttemptGas(attempt, { skipReceiptLookup: true }))),
+      getLifetimeGasSummary(serverWallet.address, { skipReceiptLookup: true }),
+    ]);
     const gas = {
-      recent: summarizeGasUsage(await Promise.all(recentAttemptsRaw.map((attempt) => enrichAttemptGas(attempt))), serverWallet.address),
-      lifetime: await getLifetimeGasSummary(serverWallet.address),
+      recent: summarizeGasUsage(enrichedForRecentGas, serverWallet.address),
+      lifetime: lifetimeGas,
     };
 
     return {

@@ -35,6 +35,10 @@ const nameServiceContract =
     ? new ethers.Contract(NAME_SERVICE_ADDRESS, NAME_SERVICE_ABI, biteSigner ?? biteWallet)
     : null;
 
+export function isNameServiceEnabled(): boolean {
+  return Boolean(nameServiceContract);
+}
+
 if (!nameServiceContract) {
   if (!NAME_SERVICE_ADDRESS) {
     console.warn(

@@ -386,13 +386,14 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     return () => { cancelled = true; };
   }, [walletAddress]);
 
-  // Poll agent status every 3s
+  // Poll agent status with lighter cadence to avoid API pressure.
   React.useEffect(() => {
     if (!token) return;
     let cancelled = false;
 
     async function pollStatus() {
       if (cancelled || !token) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const res = await fetch(`${API_URL}/agent/status/${walletAddress}`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -455,7 +456,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     }
 
     pollStatus();
-    const id = setInterval(pollStatus, 3000);
+    const id = setInterval(pollStatus, 10_000);
     return () => { cancelled = true; clearInterval(id); };
   }, [token, walletAddress]);
 
@@ -465,6 +466,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     let cancelled = false;
 
     async function pollInbox() {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       try {
         const res = await fetch(`${API_URL}/inbox/${walletAddress}/history?limit=50`);
         if (!res.ok || cancelled) return;
@@ -507,7 +509,7 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
     void pollInbox();
     const id = setInterval(() => {
       void pollInbox();
-    }, 3000);
+    }, 15_000);
 
     return () => {
       cancelled = true;

@@ -916,9 +916,12 @@ async function processCharacterMintPayload(payload: CharacterMintPayload): Promi
     const tokenUri = await resolveCharacterMetadataUri(payload.nft);
     const receipt = await queueBiteTransaction(`character-mint:${payload.toAddress.toLowerCase()}`, async () => {
       const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+      const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
       const tx = await waitForBiteSubmission(
         characterWriteContract.mintTo(payload.toAddress, tokenUri, {
-          ...managedFees,
+          gasPrice: undefined,
+          ...eip1559Fees,
+          type: undefined,
           nonce: await reserveServerNonce() ?? undefined,
         })
       );
@@ -1222,9 +1225,12 @@ async function processCharacterMetadataPayload(payload: CharacterMetadataPayload
 
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+        const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...managedFees,
+            gasPrice: undefined,
+            ...eip1559Fees,
+            type: undefined,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );
@@ -1943,9 +1949,12 @@ registerChainOperationProcessor("character-metadata-update", async (record: Chai
       const uri = await resolveCharacterMetadataUri(metadata);
       const tx = await queueBiteTransaction(`character-metadata:${payload.characterTokenId}`, async () => {
         const managedFees = await resolveManagedFeeOverrides(skaleProvider);
+        const { gasPrice: _gasPrice, ...eip1559Fees } = managedFees;
         return await waitForBiteSubmission(
           characterWriteContract.setTokenURI(BigInt(payload.characterTokenId), uri, {
-            ...managedFees,
+            gasPrice: undefined,
+            ...eip1559Fees,
+            type: undefined,
             nonce: await reserveServerNonce() ?? undefined,
           })
         );

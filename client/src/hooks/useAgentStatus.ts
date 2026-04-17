@@ -1,5 +1,5 @@
 /**
- * useAgentStatus — polls GET /agent/status/:wallet every 3s
+ * useAgentStatus — polls GET /agent/status/:wallet with adaptive cadence
  */
 
 import * as React from "react";
@@ -66,10 +66,12 @@ export function useAgentStatus(
 
       if (cancelled) return;
       const failureCount = failureCountRef.current;
+      const isHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+      const baseDelay = isHidden ? 30_000 : 10_000;
       const nextDelay =
         failureCount === 0
-          ? 3000
-          : Math.min(30000, 3000 * 2 ** Math.min(failureCount, 3));
+          ? baseDelay
+          : Math.min(60_000, baseDelay * 2 ** Math.min(failureCount, 3));
 
       timeoutId = window.setTimeout(() => {
         void poll();
