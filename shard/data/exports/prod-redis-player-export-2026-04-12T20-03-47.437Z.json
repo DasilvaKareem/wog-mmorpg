@@ -524,7 +524,7 @@
     },
     {
       "walletAddress": "0x0b915d001d81bd507160c6892c4fafe39dd3cb2d",
-      "characterName": "Hero",
+      "characterName": "Hero_cb2d",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -532,7 +532,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hero",
+      "name": "Hero_cb2d",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -758,7 +758,7 @@
     },
     {
       "walletAddress": "0x15210daf4a7e9f66658138440ee9d7fca481512f",
-      "characterName": "beeboo",
+      "characterName": "beeboo_512f",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -771,7 +771,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "beeboo",
+      "name": "beeboo_512f",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -842,7 +842,7 @@
     },
     {
       "walletAddress": "0x18a5053e845e59aee78bdff1ab96ea488be5dda8",
-      "characterName": "The Barbarian",
+      "characterName": "The Barbarian_dda8",
       "professions": [],
       "learnedTechniques": [],
       "y": 138.08599657290387,
@@ -852,7 +852,7 @@
       ],
       "x": 208.0688699107899,
       "level": 1,
-      "name": "The Barbarian",
+      "name": "The Barbarian_dda8",
       "kills": 1,
       "raceId": "human",
       "zone": "village-square",
@@ -1054,7 +1054,7 @@
     },
     {
       "walletAddress": "0x21d4066c457d012da6a79d108317940348cffa50",
-      "characterName": "HermesAgent",
+      "characterName": "HermesAgent_fa50",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -1062,7 +1062,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "HermesAgent",
+      "name": "HermesAgent_fa50",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -1335,8 +1335,8 @@
     },
     {
       "walletAddress": "0x2c252feaa887ecbcb21a8878684085909c6a94f6",
-      "characterName": "Lyra",
-      "name": "Lyra",
+      "characterName": "Lyra_94f6",
+      "name": "Lyra_94f6",
       "level": 1,
       "xp": 0,
       "raceId": "elf",
@@ -1385,8 +1385,8 @@
     },
     {
       "walletAddress": "0x311c509447baf5fa80d433f8dda49a0b221b8877",
-      "characterName": "Papa",
-      "name": "Papa",
+      "characterName": "Papa_8877",
+      "name": "Papa_8877",
       "level": 1,
       "xp": 40,
       "raceId": "human",
@@ -1464,8 +1464,8 @@
     },
     {
       "walletAddress": "0x360b05d71ccab7e836ee6949b47b7dcd2d195d32",
-      "characterName": "mayv",
-      "name": "mayv",
+      "characterName": "mayv_5d32",
+      "name": "mayv_5d32",
       "level": 1,
       "xp": 0,
       "raceId": "elf",
@@ -1596,7 +1596,7 @@
     },
     {
       "walletAddress": "0x3930aad5343f19eac44d9d6c932c2f32a41d10b4",
-      "characterName": "Hero",
+      "characterName": "Hero_10b4",
       "professions": [],
       "learnedTechniques": [],
       "y": 200,
@@ -1604,7 +1604,7 @@
       "completedQuests": [],
       "x": 400,
       "level": 4,
-      "name": "Hero",
+      "name": "Hero_10b4",
       "kills": 674,
       "raceId": "human",
       "zone": "village-square",
@@ -1612,8 +1612,8 @@
     },
     {
       "walletAddress": "0x3aac8084f1fcddda4514815e4d91f69f6003eb73",
-      "characterName": "Mar",
-      "name": "Mar",
+      "characterName": "Mar_eb73",
+      "name": "Mar_eb73",
       "level": 1,
       "xp": 57,
       "raceId": "elf",
@@ -1647,7 +1647,7 @@
     {
       "walletAddress": "0x3b57043398bb413f47a1eafb7c03318f8875c4a9",
       "characterName": "2233",
-      "name": 2233,
+      "name": "2233",
       "level": 5,
       "xp": 3107,
       "raceId": "elf",
@@ -1667,7 +1667,7 @@
     },
     {
       "walletAddress": "0x3cccff0bc221b3cb74f0407d3809856cb373a6b4",
-      "characterName": "Hermes4",
+      "characterName": "Hermes4_a6b4",
       "professions": [],
       "y": 72.34392690598536,
       "raceId": "human",
@@ -1675,7 +1675,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 538.8104760659735,
-      "name": "Hermes4",
+      "name": "Hermes4_a6b4",
       "level": 3,
       "kills": 323,
       "xp": 1322,
@@ -1683,8 +1683,8 @@
     },
     {
       "walletAddress": "0x3cef5af1145fe5f40b91d6ba2afe202c5c45f9e5",
-      "characterName": "Zara",
-      "name": "Zara",
+      "characterName": "Zara_f9e5",
+      "name": "Zara_f9e5",
       "level": 3,
       "xp": 325,
       "raceId": "human",
@@ -1699,8 +1699,8 @@
     },
     {
       "walletAddress": "0x3d7688514060170481330c6202c0c8190ae7e5d9",
-      "characterName": "Barbas",
-      "name": "Barbas",
+      "characterName": "Barbas_e5d9",
+      "name": "Barbas_e5d9",
       "level": 1,
       "xp": 0,
       "raceId": "beastkin",
@@ -1715,7 +1715,7 @@
     },
     {
       "walletAddress": "0x3dfc1851d89f6b8197151e2b070cb9bc4bfbe57e",
-      "characterName": "SamSam",
+      "characterName": "SamSam_e57e",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -1728,7 +1728,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "SamSam",
+      "name": "SamSam_e57e",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -1736,7 +1736,7 @@
     },
     {
       "walletAddress": "0x3e6b1c2fdcfd2041f7c7719efa1d6465067ed49d",
-      "characterName": "Jo",
+      "characterName": "Jo_d49d",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -1749,7 +1749,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Jo",
+      "name": "Jo_d49d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -1917,7 +1917,7 @@
     },
     {
       "walletAddress": "0x432e5db5c455f58386b8950230a52c327e5bb4d4",
-      "characterName": "JMoon",
+      "characterName": "JMoon_b4d4",
       "storyFlags": [],
       "professions": [],
       "learnedTechniques": [
@@ -1931,7 +1931,7 @@
       ],
       "x": 2244.48089019838,
       "level": 2,
-      "name": "JMoon",
+      "name": "JMoon_b4d4",
       "kills": 346,
       "raceId": "elf",
       "zone": "emberglow-estate",
@@ -2038,7 +2038,7 @@
     },
     {
       "walletAddress": "0x46b2b55088a118c88b69148c049e213fa0eea3ee",
-      "characterName": "Bellis",
+      "characterName": "Bellis_a3ee",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -2049,12 +2049,12 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 0,
-      "name": "Bellis",
+      "name": "Bellis_a3ee",
       "level": 1
     },
     {
       "walletAddress": "0x46b2b55088a118c88b69148c049e213fa0eea3ee",
-      "characterName": "Boellis",
+      "characterName": "Boellis_a3ee",
       "runModeEnabled": "true",
       "storyFlags": [],
       "professions": [],
@@ -2072,7 +2072,7 @@
       "completedQuests": [],
       "x": 159.50245047998783,
       "level": 2,
-      "name": "Boellis",
+      "name": "Boellis_a3ee",
       "kills": 8,
       "zone": "village-square",
       "xp": 602,
@@ -2213,7 +2213,7 @@
     },
     {
       "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-      "characterName": "Artioa",
+      "characterName": "Artioa_6e63",
       "professions": [],
       "learnedTechniques": [],
       "y": 150,
@@ -2221,7 +2221,7 @@
       "completedQuests": [],
       "x": 150,
       "level": 1,
-      "name": "Artioa",
+      "name": "Artioa_6e63",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -2332,7 +2332,7 @@
     },
     {
       "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-      "characterName": "sadsad",
+      "characterName": "sadsad_6e63",
       "professions": [],
       "y": 0,
       "raceId": "human",
@@ -2340,7 +2340,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 0,
-      "name": "sadsad",
+      "name": "sadsad_6e63",
       "level": 1,
       "kills": 0,
       "xp": 0,
@@ -2369,7 +2369,7 @@
     },
     {
       "walletAddress": "0x4be740afebd4d45b638f73a6a3755cd746fa3f1a",
-      "characterName": "Lyra",
+      "characterName": "Lyra_3f1a",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -2377,7 +2377,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Lyra",
+      "name": "Lyra_3f1a",
       "kills": 0,
       "raceId": "elf",
       "zone": "village-square",
@@ -2385,7 +2385,7 @@
     },
     {
       "walletAddress": "0x4d1fdcc9ba34be9e8b84b31caf1b5242a4235995",
-      "characterName": "saf",
+      "characterName": "saf_5995",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -2398,7 +2398,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "saf",
+      "name": "saf_5995",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -2406,8 +2406,8 @@
     },
     {
       "walletAddress": "0x4d7f5c5a97331b623e2d6973fa6d18a4a800acce",
-      "characterName": "Nemotron0",
-      "name": "Nemotron0",
+      "characterName": "Nemotron0_acce",
+      "name": "Nemotron0_acce",
       "level": 38,
       "xp": 150712,
       "raceId": "human",
@@ -2426,7 +2426,7 @@
     },
     {
       "walletAddress": "0x4db8d114ea957ee51a3a82b33e5c8af3af2036cc",
-      "characterName": "bartholomew",
+      "characterName": "bartholomew_36cc",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -2434,7 +2434,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "bartholomew",
+      "name": "bartholomew_36cc",
       "kills": 0,
       "raceId": "elf",
       "zone": "village-square",
@@ -2442,7 +2442,7 @@
     },
     {
       "walletAddress": "0x4ffa8ef39da3bdbaa260980bcd40660416a6c60e",
-      "characterName": "Hermes0",
+      "characterName": "Hermes0_c60e",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -2450,7 +2450,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hermes0",
+      "name": "Hermes0_c60e",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -2523,7 +2523,7 @@
     },
     {
       "walletAddress": "0x5325b4402064f57681788813730fe29e1ae2d07f",
-      "characterName": "Junoka",
+      "characterName": "Junoka_d07f",
       "storyFlags": [],
       "professions": [
         "herbalism",
@@ -2578,7 +2578,7 @@
         "goblin_menace"
       ],
       "x": 3015.655525343753,
-      "name": "Junoka",
+      "name": "Junoka_d07f",
       "level": 49,
       "kills": 22266,
       "xp": 242599,
@@ -2644,8 +2644,8 @@
     },
     {
       "walletAddress": "0x5445b459d06423323f2aa0a3a5472b17d787a2b0",
-      "characterName": "HermesAgent",
-      "name": "HermesAgent",
+      "characterName": "HermesAgent_a2b0",
+      "name": "HermesAgent_a2b0",
       "level": 3,
       "xp": 1376,
       "raceId": "human",
@@ -3032,7 +3032,7 @@
     },
     {
       "walletAddress": "0x63748c9243cab999338abbb0344520d078adce8b",
-      "characterName": "Hero",
+      "characterName": "Hero_ce8b",
       "professions": [],
       "y": 312.70702047453693,
       "raceId": "human",
@@ -3040,7 +3040,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 483.3232855009686,
-      "name": "Hero",
+      "name": "Hero_ce8b",
       "level": 2,
       "kills": 22,
       "xp": 407,
@@ -3078,7 +3078,7 @@
     },
     {
       "walletAddress": "0x66bfda1de54c4e00fabb683d0a8507c75e6da0cf",
-      "characterName": "PercyJackson",
+      "characterName": "PercyJackson_a0cf",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -3091,7 +3091,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "PercyJackson",
+      "name": "PercyJackson_a0cf",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -3184,7 +3184,7 @@
     },
     {
       "walletAddress": "0x66e50a611dd4463e9cdf1d3c450bde50c73755f0",
-      "characterName": "preyanshu",
+      "characterName": "preyanshu_55f0",
       "storyFlags": [],
       "professions": [
         "herbalism"
@@ -3205,7 +3205,7 @@
       "completedQuests": [],
       "x": 1057.9758495322383,
       "level": 5,
-      "name": "preyanshu",
+      "name": "preyanshu_55f0",
       "kills": 151,
       "zone": "willowfen-pastures",
       "xp": 2566,
@@ -3253,7 +3253,7 @@
     },
     {
       "walletAddress": "0x69c77562681d781785a00f6260b1c6c1d3393e87",
-      "characterName": "CryptoBeast",
+      "characterName": "CryptoBeast_3e87",
       "professions": [],
       "y": 604.9222342488598,
       "raceId": "beastkin",
@@ -3296,7 +3296,7 @@
         "traders_bargain"
       ],
       "x": -442.62855488215524,
-      "name": "CryptoBeast",
+      "name": "CryptoBeast_3e87",
       "level": 1,
       "kills": 5,
       "xp": 316,
@@ -3344,7 +3344,7 @@
     },
     {
       "walletAddress": "0x6be33521f2ac595b101b8de25dada8d517bad450",
-      "characterName": "Barbas",
+      "characterName": "Barbas_d450",
       "storyFlags": [],
       "professions": [
         "blacksmithing",
@@ -3413,7 +3413,7 @@
         "druids_perspective"
       ],
       "x": 767.8047916931098,
-      "name": "Barbas",
+      "name": "Barbas_d450",
       "level": 28,
       "kills": 12132,
       "xp": 78428,
@@ -3422,7 +3422,7 @@
     },
     {
       "walletAddress": "0x6be33521f2ac595b101b8de25dada8d517bad450",
-      "characterName": "barbas3",
+      "characterName": "barbas3_d450",
       "storyFlags": [],
       "professions": [
         "blacksmithing",
@@ -3489,7 +3489,7 @@
           "actions": 3
         }
       },
-      "name": "barbas3",
+      "name": "barbas3_d450",
       "level": 11,
       "kills": 116,
       "xp": 12776,
@@ -3622,7 +3622,7 @@
     },
     {
       "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
-      "characterName": "Artioa",
+      "characterName": "Artioa_8393",
       "runModeEnabled": "false",
       "professions": [],
       "storyFlags": [],
@@ -3687,7 +3687,7 @@
       "runEnergy": 100,
       "completedQuests": [],
       "x": 2070,
-      "name": "Artioa",
+      "name": "Artioa_8393",
       "level": 32,
       "kills": 10,
       "xp": 106495,
@@ -3696,7 +3696,7 @@
     },
     {
       "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
-      "characterName": "doepo",
+      "characterName": "doepo_8393",
       "professions": [
         "herbalism"
       ],
@@ -3722,7 +3722,7 @@
         "alpha_threat"
       ],
       "x": 1571.9004784098827,
-      "name": "doepo",
+      "name": "doepo_8393",
       "level": 25,
       "kills": 1660,
       "xp": 62803,
@@ -3730,8 +3730,8 @@
     },
     {
       "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
-      "characterName": "Irelia",
-      "name": "Irelia",
+      "characterName": "Irelia_8393",
+      "name": "Irelia_8393",
       "level": 6,
       "xp": 4003,
       "raceId": "human",
@@ -3746,7 +3746,7 @@
     },
     {
       "walletAddress": "0x75ab80e52390ea5b6dfabaadefdcf77e6f4b8393",
-      "characterName": "ShadowArcher",
+      "characterName": "ShadowArcher_8393",
       "runModeEnabled": "false",
       "storyFlags": [],
       "professions": [],
@@ -3764,7 +3764,7 @@
       "completedQuests": [],
       "x": 2710,
       "level": 2,
-      "name": "ShadowArcher",
+      "name": "ShadowArcher_8393",
       "kills": 0,
       "zone": "starfall-ranch",
       "xp": 420,
@@ -3772,7 +3772,7 @@
     },
     {
       "walletAddress": "0x77bdd2444af5ec7e9c06ee2b10956e078e9aff46",
-      "characterName": "HermesAgent",
+      "characterName": "HermesAgent_ff46",
       "professions": [],
       "y": 0,
       "raceId": "human",
@@ -3780,7 +3780,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 0,
-      "name": "HermesAgent",
+      "name": "HermesAgent_ff46",
       "level": 1,
       "kills": 0,
       "xp": 0,
@@ -3788,7 +3788,7 @@
     },
     {
       "walletAddress": "0x7a1545d3409fc3d4a25c61be47fa43b42f28bd91",
-      "characterName": "millis",
+      "characterName": "millis_bd91",
       "runModeEnabled": "true",
       "storyFlags": [],
       "professions": [],
@@ -3806,7 +3806,7 @@
       "completedQuests": [],
       "x": 739.9716136611721,
       "level": 1,
-      "name": "millis",
+      "name": "millis_bd91",
       "kills": 84,
       "zone": "auroral-plains",
       "xp": 169,
@@ -3830,7 +3830,7 @@
     },
     {
       "walletAddress": "0x7c4f0a26a5bb3417cbcf81a39afdac90f35fb71f",
-      "characterName": "ZiGGi",
+      "characterName": "ZiGGi_b71f",
       "storyFlags": [],
       "professions": [],
       "y": 420,
@@ -3846,14 +3846,14 @@
       "completedQuests": [],
       "x": 346,
       "level": 12,
-      "name": "ZiGGi",
+      "name": "ZiGGi_b71f",
       "kills": 1339,
       "zone": "village-square",
       "xp": 14404
     },
     {
       "walletAddress": "0x7fea651b1251dddc7204286c73653b08c4f25cb5",
-      "characterName": "saf",
+      "characterName": "saf_5cb5",
       "storyFlags": [],
       "professions": [],
       "y": 1595.66302115815,
@@ -3869,7 +3869,7 @@
       "completedQuests": [],
       "x": 2878.947766001121,
       "level": 2,
-      "name": "saf",
+      "name": "saf_5cb5",
       "kills": 10,
       "zone": "starfall-ranch",
       "xp": 427
@@ -3928,7 +3928,7 @@
     },
     {
       "walletAddress": "0x83cc4694a1df465513feb687507ac328b5b917ce",
-      "characterName": "sirlancelot",
+      "characterName": "sirlancelot_17ce",
       "professions": [],
       "y": 0,
       "skinColor": "dark",
@@ -3940,7 +3940,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "sirlancelot",
+      "name": "sirlancelot_17ce",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -4154,8 +4154,8 @@
     },
     {
       "walletAddress": "0x89d1274bb051629a1f69fc33f69a4b6843e5d93e",
-      "characterName": "Junoka",
-      "name": "Junoka",
+      "characterName": "Junoka_d93e",
+      "name": "Junoka_d93e",
       "level": 1,
       "xp": 0,
       "raceId": "human",
@@ -4190,7 +4190,7 @@
     },
     {
       "walletAddress": "0x89d1274bb051629a1f69fc33f69a4b6843e5d93e",
-      "characterName": "JunoKing",
+      "characterName": "JunoKing_d93e",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -4202,7 +4202,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "JunoKing",
+      "name": "JunoKing_d93e",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -4226,7 +4226,7 @@
     },
     {
       "walletAddress": "0x8a25da0ac6b4a6c75e6ae26035b3c2a43768b47b",
-      "characterName": "wowow",
+      "characterName": "wowow_b47b",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -4239,7 +4239,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "wowow",
+      "name": "wowow_b47b",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -4683,8 +4683,8 @@
     },
     {
       "walletAddress": "0x8e6d1557880796625900fcc7094cb5863cd6398b",
-      "characterName": "TheSpiralArchitect",
-      "name": "TheSpiralArchitect",
+      "characterName": "TheSpiralArchi_398b",
+      "name": "TheSpiralArchi_398b",
       "level": 1,
       "xp": 0,
       "raceId": "beastkin",
@@ -4704,7 +4704,7 @@
     },
     {
       "walletAddress": "0x8f228254c13756725b829d00aaa911c392128481",
-      "characterName": "dante",
+      "characterName": "dante_8481",
       "storyFlags": [],
       "professions": [
         "herbalism"
@@ -4733,7 +4733,7 @@
         }
       },
       "level": 20,
-      "name": "dante",
+      "name": "dante_8481",
       "kills": 11253,
       "zone": "goldenreach-grange",
       "xp": 42318
@@ -4758,7 +4758,7 @@
     },
     {
       "walletAddress": "0x919887677fa61232d364317dca9a547b38face04",
-      "characterName": "Hermes1",
+      "characterName": "Hermes1_ce04",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -4766,7 +4766,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hermes1",
+      "name": "Hermes1_ce04",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -4790,7 +4790,7 @@
     },
     {
       "walletAddress": "0x94656593ff037fd32e8c197236f52bb15cfde830",
-      "characterName": "Karna",
+      "characterName": "Karna_e830",
       "professions": [],
       "y": 419.99999999997897,
       "raceId": "beastkin",
@@ -4798,7 +4798,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 266.56243765273166,
-      "name": "Karna",
+      "name": "Karna_e830",
       "level": 1,
       "kills": 2,
       "xp": 45,
@@ -4806,7 +4806,7 @@
     },
     {
       "walletAddress": "0x9479163c4bd34ba0e483b11e1fb9d2dba8fca122",
-      "characterName": "Romy",
+      "characterName": "Romy_a122",
       "professions": [],
       "y": 0,
       "skinColor": "brown",
@@ -4819,7 +4819,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Romy",
+      "name": "Romy_a122",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -4911,7 +4911,7 @@
     },
     {
       "walletAddress": "0x951438b32fa86ad2a49562e28a92496cd83737cf",
-      "characterName": "neo7",
+      "characterName": "neo7_37cf",
       "professions": [],
       "y": 0,
       "skinColor": "dark",
@@ -4924,7 +4924,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "neo7",
+      "name": "neo7_37cf",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -4932,7 +4932,7 @@
     },
     {
       "walletAddress": "0x95ba0d8e427e72d343044da47980e938174cb644",
-      "characterName": "checking",
+      "characterName": "checking_b644",
       "runModeEnabled": "true",
       "storyFlags": [],
       "professions": [],
@@ -4950,7 +4950,7 @@
       "completedQuests": [],
       "x": 817.475942542691,
       "level": 16,
-      "name": "checking",
+      "name": "checking_b644",
       "kills": 638,
       "zone": "wild-meadow",
       "xp": 25617,
@@ -4979,7 +4979,7 @@
     },
     {
       "walletAddress": "0x95ba0d8e427e72d343044da47980e938174cb644",
-      "characterName": "Preyanshu",
+      "characterName": "Preyanshu_b644",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -4992,7 +4992,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Preyanshu",
+      "name": "Preyanshu_b644",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -5032,7 +5032,7 @@
     },
     {
       "walletAddress": "0x985902277bda8309ffbd57fdd3032e0ff249465a",
-      "characterName": "Hermes6",
+      "characterName": "Hermes6_465a",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -5043,7 +5043,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 0,
-      "name": "Hermes6",
+      "name": "Hermes6_465a",
       "level": 1
     },
     {
@@ -5137,7 +5137,7 @@
     },
     {
       "walletAddress": "0x9ec0c8a0e6a687e6818c7ee063c617fcd017dceb",
-      "characterName": "adri",
+      "characterName": "adri_dceb",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -5150,7 +5150,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "adri",
+      "name": "adri_dceb",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -5201,7 +5201,7 @@
     },
     {
       "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "characterName": "Durango",
+      "characterName": "Durango_afc2",
       "storyFlags": [],
       "professions": [
         "leatherworking",
@@ -5244,14 +5244,14 @@
         }
       },
       "level": 8,
-      "name": "Durango",
+      "name": "Durango_afc2",
       "kills": 84,
       "zone": "village-square",
       "xp": 6996
     },
     {
-      "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "characterName": "JackTheRipper",
+      "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
+      "characterName": "JackTheRipper_afc2",
       "professions": [
         "leatherworking",
         "herbalism",
@@ -5352,7 +5352,7 @@
           "actions": 1
         }
       },
-      "name": "JackTheRipper",
+      "name": "JackTheRipper_afc2",
       "level": 57,
       "kills": 15362,
       "xp": 324909,
@@ -5360,7 +5360,7 @@
     },
     {
       "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "characterName": "LancerOfRed",
+      "characterName": "LancerOfRed_afc2",
       "professions": [
         "leatherworking",
         "herbalism",
@@ -5494,7 +5494,7 @@
           "actions": 4
         }
       },
-      "name": "LancerOfRed",
+      "name": "LancerOfRed_afc2",
       "level": 58,
       "kills": 59625,
       "xp": 336689,
@@ -5502,8 +5502,8 @@
     },
     {
       "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "characterName": "sadsad",
-      "name": "sadsad",
+      "characterName": "sadsad_afc2",
+      "name": "sadsad_afc2",
       "level": 3,
       "xp": 1278,
       "raceId": "human",
@@ -5518,7 +5518,7 @@
     },
     {
       "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "characterName": "Supermage",
+      "characterName": "Supermage_afc2",
       "storyFlags": [],
       "professions": [
         "leatherworking",
@@ -5553,7 +5553,7 @@
         }
       },
       "level": 21,
-      "name": "Supermage",
+      "name": "Supermage_afc2",
       "kills": 0,
       "zone": "village-square",
       "xp": 44610,
@@ -5561,7 +5561,7 @@
     },
     {
       "walletAddress": "0xa1d3cc346f8d33a346d91414dd587700ade4df70",
-      "characterName": "Zion",
+      "characterName": "Zion_df70",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -5574,7 +5574,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Zion",
+      "name": "Zion_df70",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -5651,7 +5651,7 @@
     },
     {
       "walletAddress": "0xa64f715e95c7a37798cddce8134ce64ab61784b0",
-      "characterName": "laughingbull",
+      "characterName": "laughingbull_84b0",
       "equipment": {
         "weapon": {
           "tokenId": 41,
@@ -5675,7 +5675,7 @@
       ],
       "x": 165.00490095997563,
       "level": 10,
-      "name": "laughingbull",
+      "name": "laughingbull_84b0",
       "kills": 0,
       "raceId": "dwarf",
       "zone": "village-square",
@@ -5683,7 +5683,7 @@
     },
     {
       "walletAddress": "0xa819fb4adf67f0f249013d09f095bf00727d59c9",
-      "characterName": "Hero",
+      "characterName": "Hero_59c9",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -5691,7 +5691,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hero",
+      "name": "Hero_59c9",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -5736,7 +5736,7 @@
     },
     {
       "walletAddress": "0xa98be7bf8d0a56a67e773c314f8fb9b22b59247d",
-      "characterName": "2233",
+      "characterName": "2233_247d",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -5749,7 +5749,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": 2233,
+      "name": "2233_247d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -5757,8 +5757,8 @@
     },
     {
       "walletAddress": "0xaa533d514057e2e3684dbb49fc19d1fa2a3e7894",
-      "characterName": "Sean",
-      "name": "Sean",
+      "characterName": "Sean_7894",
+      "name": "Sean_7894",
       "level": 5,
       "xp": 3178,
       "raceId": "human",
@@ -5775,7 +5775,7 @@
     },
     {
       "walletAddress": "0xaa7b3871ae1489ed45220626f048100c936d613f",
-      "characterName": "Quile",
+      "characterName": "Quile_613f",
       "professions": [],
       "learnedTechniques": [
         "cleric_holy_light"
@@ -5798,7 +5798,7 @@
       ],
       "x": 135.04900774507263,
       "level": 3,
-      "name": "Quile",
+      "name": "Quile_613f",
       "kills": 495,
       "raceId": "elf",
       "zone": "village-square",
@@ -5806,7 +5806,7 @@
     },
     {
       "walletAddress": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
-      "characterName": "SonoLuminae",
+      "characterName": "SonoLuminae_48de",
       "storyFlags": [],
       "professions": [],
       "y": 434,
@@ -5851,15 +5851,15 @@
       ],
       "x": 360,
       "level": 12,
-      "name": "SonoLuminae",
+      "name": "SonoLuminae_48de",
       "kills": 2029,
       "zone": "village-square",
       "xp": 15118
     },
     {
       "walletAddress": "0xabf77902a49009c6e961a80d4a3bd2904af7383d",
-      "characterName": "HermesAgent0",
-      "name": "HermesAgent0",
+      "characterName": "HermesAgent0_383d",
+      "name": "HermesAgent0_383d",
       "level": 3,
       "xp": 697,
       "raceId": "human",
@@ -5975,8 +5975,8 @@
     },
     {
       "walletAddress": "0xad002e8021cc88c99017a230cc81d99738c4560a",
-      "characterName": "sadsad",
-      "name": "sadsad",
+      "characterName": "sadsad_560a",
+      "name": "sadsad_560a",
       "level": 1,
       "xp": 0,
       "raceId": "human",
@@ -5991,7 +5991,7 @@
     },
     {
       "walletAddress": "0xadb148e54da164863c7ca6654d8f0968cd227921",
-      "characterName": "saf",
+      "characterName": "saf_7921",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -6004,7 +6004,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "saf",
+      "name": "saf_7921",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -6012,7 +6012,7 @@
     },
     {
       "walletAddress": "0xaeaaf3abbea5267b2cc28e91183ddb2be58b493d",
-      "characterName": "Megaman",
+      "characterName": "Megaman_493d",
       "professions": [
         "alchemy",
         "blacksmithing"
@@ -6337,7 +6337,7 @@
           "actions": 1
         }
       },
-      "name": "Megaman",
+      "name": "Megaman_493d",
       "level": 50,
       "kills": 1049,
       "xp": 250009,
@@ -6382,8 +6382,8 @@
     },
     {
       "walletAddress": "0xb1d2b651b6414012eb1c5cc10a94b553e67153a2",
-      "characterName": "MonkMan",
-      "name": "MonkMan",
+      "characterName": "MonkMan_53a2",
+      "name": "MonkMan_53a2",
       "level": 1,
       "xp": 0,
       "raceId": "human",
@@ -6403,7 +6403,7 @@
     },
     {
       "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
-      "characterName": "Jeremy",
+      "characterName": "Jeremy_e673",
       "runModeEnabled": "false",
       "storyFlags": [],
       "professions": [],
@@ -6425,7 +6425,7 @@
       "runEnergy": 100,
       "completedQuests": [],
       "x": 147.49754952001217,
-      "name": "Jeremy",
+      "name": "Jeremy_e673",
       "level": 8,
       "kills": 109,
       "xp": 7842,
@@ -6434,8 +6434,8 @@
     },
     {
       "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
-      "characterName": "Karna",
-      "name": "Karna",
+      "characterName": "Karna_e673",
+      "name": "Karna_e673",
       "level": 1,
       "xp": 0,
       "raceId": "dwarf",
@@ -6450,7 +6450,7 @@
     },
     {
       "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
-      "characterName": "Naruto",
+      "characterName": "Naruto_e673",
       "runModeEnabled": "false",
       "storyFlags": [],
       "professions": [],
@@ -6468,7 +6468,7 @@
       "completedQuests": [],
       "x": 24.04880411954561,
       "level": 8,
-      "name": "Naruto",
+      "name": "Naruto_e673",
       "kills": 0,
       "zone": "village-square",
       "xp": 6793,
@@ -6476,7 +6476,7 @@
     },
     {
       "walletAddress": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
-      "characterName": "Sasuke",
+      "characterName": "Sasuke_e673",
       "runModeEnabled": "true",
       "storyFlags": [],
       "professions": [],
@@ -6496,7 +6496,7 @@
       "completedQuests": [],
       "x": 158,
       "level": 1,
-      "name": "Sasuke",
+      "name": "Sasuke_e673",
       "kills": 4,
       "zone": "village-square",
       "xp": 144,
@@ -6504,7 +6504,7 @@
     },
     {
       "walletAddress": "0xb5796f65989d3dc72feff12c21d66ec645fc2409",
-      "characterName": "Zidon",
+      "characterName": "Zidon_2409",
       "equipment": {},
       "professions": [],
       "learnedTechniques": [
@@ -6563,7 +6563,7 @@
       ],
       "x": 145.30887390555506,
       "level": 12,
-      "name": "Zidon",
+      "name": "Zidon_2409",
       "kills": 2861,
       "raceId": "human",
       "zone": "village-square",
@@ -6571,7 +6571,7 @@
     },
     {
       "walletAddress": "0xb727201723b6b9f9da1836958ec7047d11519036",
-      "characterName": "binobotv0",
+      "characterName": "binobotv0_9036",
       "professions": [],
       "y": 0,
       "skinColor": "dark",
@@ -6584,7 +6584,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "binobotv0",
+      "name": "binobotv0_9036",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -6608,7 +6608,7 @@
     },
     {
       "walletAddress": "0xb7c319488eab8bf3175fd1d69c36934a2bd22212",
-      "characterName": "Aria",
+      "characterName": "Aria_2212",
       "professions": [],
       "learnedTechniques": [],
       "y": 435.98541076847584,
@@ -6616,7 +6616,7 @@
       "completedQuests": [],
       "x": 314.6582668060922,
       "level": 3,
-      "name": "Aria",
+      "name": "Aria_2212",
       "kills": 637,
       "raceId": "elf",
       "zone": "village-square",
@@ -6677,7 +6677,7 @@
     },
     {
       "walletAddress": "0xbb4e5d5eb1713eedb7faace3dc2ae2af6366dfbd",
-      "characterName": "Hermes5",
+      "characterName": "Hermes5_dfbd",
       "professions": [],
       "learnedTechniques": [],
       "y": 102.08354221913982,
@@ -6685,7 +6685,7 @@
       "completedQuests": [],
       "x": 440.87676523025385,
       "level": 4,
-      "name": "Hermes5",
+      "name": "Hermes5_dfbd",
       "kills": 321,
       "raceId": "human",
       "zone": "village-square",
@@ -6693,7 +6693,7 @@
     },
     {
       "walletAddress": "0xbdc4078665b1903387ca4d34be9c06038f7851f4",
-      "characterName": "Tapwater",
+      "characterName": "Tapwater_51f4",
       "professions": [],
       "y": 0,
       "skinColor": "brown",
@@ -6706,7 +6706,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Tapwater",
+      "name": "Tapwater_51f4",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -6714,7 +6714,7 @@
     },
     {
       "walletAddress": "0xbddbcbf49f7f248b85ddbebef06fbaad207974c6",
-      "characterName": "Fiona",
+      "characterName": "Fiona_74c6",
       "storyFlags": [],
       "professions": [],
       "y": 272.79705942401466,
@@ -6732,15 +6732,15 @@
       ],
       "x": 2227.9950990400243,
       "level": 3,
-      "name": "Fiona",
+      "name": "Fiona_74c6",
       "kills": 7,
       "zone": "emerald-woods",
       "xp": 1133
     },
     {
       "walletAddress": "0xbe4d5e7f89eaa7325c59f465b0ede431ffad60fe",
-      "characterName": "betterthanshafaq",
-      "name": "betterthanshafaq",
+      "characterName": "betterthanshaf_60fe",
+      "name": "betterthanshaf_60fe",
       "level": 1,
       "xp": 0,
       "raceId": "beastkin",
@@ -6796,8 +6796,8 @@
     },
     {
       "walletAddress": "0xc4dcedd79f258238a500bf1241c9f16fc8e95b0d",
-      "characterName": "HermesAgent3",
-      "name": "HermesAgent3",
+      "characterName": "HermesAgent3_5b0d",
+      "name": "HermesAgent3_5b0d",
       "level": 1,
       "xp": 0,
       "raceId": "human",
@@ -6812,7 +6812,7 @@
     },
     {
       "walletAddress": "0xc5104301c7ec58e0bd98e41bec2250f5644de8bf",
-      "characterName": "HermesAgent2",
+      "characterName": "HermesAgent2_e8bf",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -6820,7 +6820,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "HermesAgent2",
+      "name": "HermesAgent2_e8bf",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -6844,8 +6844,8 @@
     },
     {
       "walletAddress": "0xc5f1dcb1f1a0fbd998d65efb1acf69140df52ec8",
-      "characterName": "Aria",
-      "name": "Aria",
+      "characterName": "Aria_2ec8",
+      "name": "Aria_2ec8",
       "level": 2,
       "xp": 561,
       "raceId": "elf",
@@ -6860,7 +6860,7 @@
     },
     {
       "walletAddress": "0xc6e080a9cb5de7333b6d51981fb0626faccde1ea",
-      "characterName": "henrythe9th",
+      "characterName": "henrythe9th_e1ea",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -6873,7 +6873,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "henrythe9th",
+      "name": "henrythe9th_e1ea",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -6928,7 +6928,7 @@
     },
     {
       "walletAddress": "0xc93ae72ef498c47d3dca395c256c0f590916221e",
-      "characterName": "Hermes",
+      "characterName": "Hermes_221e",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -6940,7 +6940,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hermes",
+      "name": "Hermes_221e",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -6964,7 +6964,7 @@
     },
     {
       "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
-      "characterName": "checking",
+      "characterName": "checking_ed7a",
       "runModeEnabled": "false",
       "storyFlags": [],
       "professions": [],
@@ -6986,7 +6986,7 @@
       "completedQuests": [],
       "x": 2220,
       "level": 2,
-      "name": "checking",
+      "name": "checking_ed7a",
       "kills": 0,
       "zone": "emerald-woods",
       "xp": 419,
@@ -6994,7 +6994,7 @@
     },
     {
       "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
-      "characterName": "newcharacter",
+      "characterName": "newcharacter_ed7a",
       "storyFlags": [],
       "professions": [
         "blacksmithing"
@@ -7010,14 +7010,14 @@
       "completedQuests": [],
       "x": 2247,
       "level": 2,
-      "name": "newcharacter",
+      "name": "newcharacter_ed7a",
       "kills": 14,
       "zone": "emberglow-estate",
       "xp": 409
     },
     {
       "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
-      "characterName": "Preyanshu",
+      "characterName": "Preyanshu_ed7a",
       "professions": [
         "blacksmithing"
       ],
@@ -7056,7 +7056,7 @@
           "actions": 100
         }
       },
-      "name": "Preyanshu",
+      "name": "Preyanshu_ed7a",
       "level": 29,
       "kills": 12760,
       "xp": 84121,
@@ -7064,8 +7064,8 @@
     },
     {
       "walletAddress": "0xcaaaff3ef703e48dc1f51037abbc3d025ffe9701",
-      "characterName": "hebrew hammer",
-      "name": "hebrew hammer",
+      "characterName": "hebrew hammer_9701",
+      "name": "hebrew hammer_9701",
       "level": 3,
       "xp": 1197,
       "raceId": "elf",
@@ -7080,8 +7080,8 @@
     },
     {
       "walletAddress": "0xcb31b3363bdc57428156f35bf593fa2647d97a04",
-      "characterName": "Natsuhi",
-      "name": "Natsuhi",
+      "characterName": "Natsuhi_7a04",
+      "name": "Natsuhi_7a04",
       "level": 1,
       "xp": 0,
       "raceId": "elf",
@@ -7101,7 +7101,7 @@
     },
     {
       "walletAddress": "0xcd5e457b5a236186867d54e1f514e5d62a0bfb2b",
-      "characterName": "Elara",
+      "characterName": "Elara_fb2b",
       "kills": 869,
       "raceId": "elf",
       "zone": "village-square",
@@ -7112,12 +7112,12 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 472.39819385588953,
-      "name": "Elara",
+      "name": "Elara_fb2b",
       "level": 3
     },
     {
       "walletAddress": "0xcd7c885d3d926d94499148dd6b7c44a2ede3537d",
-      "characterName": "Leary",
+      "characterName": "Leary_537d",
       "professions": [],
       "y": 0,
       "skinColor": "tan",
@@ -7130,7 +7130,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Leary",
+      "name": "Leary_537d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7138,7 +7138,7 @@
     },
     {
       "walletAddress": "0xcea6dd4b7779cd303aadf749228f03a267f9f5b9",
-      "characterName": "stav",
+      "characterName": "stav_f5b9",
       "professions": [
         "mining"
       ],
@@ -7177,7 +7177,7 @@
       ],
       "x": 1291.2549009599757,
       "level": 16,
-      "name": "stav",
+      "name": "stav_f5b9",
       "kills": 2943,
       "raceId": "human",
       "zone": "dark-forest",
@@ -7236,7 +7236,7 @@
     },
     {
       "walletAddress": "0xd09ebe2e33f747e0af7bad8e308a4b88af567ea6",
-      "characterName": "Hermes3",
+      "characterName": "Hermes3_7ea6",
       "professions": [],
       "y": 0,
       "raceId": "human",
@@ -7244,7 +7244,7 @@
       "learnedTechniques": [],
       "completedQuests": [],
       "x": 0,
-      "name": "Hermes3",
+      "name": "Hermes3_7ea6",
       "level": 1,
       "kills": 0,
       "xp": 0,
@@ -7252,8 +7252,8 @@
     },
     {
       "walletAddress": "0xd11e2929aa9a7baf75f2272757654a8f427f7f63",
-      "characterName": "carrot",
-      "name": "carrot",
+      "characterName": "carrot_7f63",
+      "name": "carrot_7f63",
       "level": 2,
       "xp": 413,
       "raceId": "elf",
@@ -7268,7 +7268,7 @@
     },
     {
       "walletAddress": "0xd16ee2c0abda8e0279ffc5b0e7898c840e97c3d6",
-      "characterName": "ElfMonk",
+      "characterName": "ElfMonk_c3d6",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -7276,7 +7276,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "ElfMonk",
+      "name": "ElfMonk_c3d6",
       "kills": 0,
       "raceId": "dwarf",
       "zone": "village-square",
@@ -7318,8 +7318,8 @@
     },
     {
       "walletAddress": "0xd5233a0ed940ae89bd3d62def998105be65699bd",
-      "characterName": "Kael",
-      "name": "Kael",
+      "characterName": "Kael_99bd",
+      "name": "Kael_99bd",
       "level": 1,
       "xp": 0,
       "raceId": "elf",
@@ -7352,7 +7352,7 @@
     },
     {
       "walletAddress": "0xd8b290fb5c42929b0689df857c1e2e0a23606dd3",
-      "characterName": "rewasa",
+      "characterName": "rewasa_6dd3",
       "equipment": {},
       "professions": [],
       "learnedTechniques": [
@@ -7376,7 +7376,7 @@
       ],
       "x": 690,
       "level": 16,
-      "name": "rewasa",
+      "name": "rewasa_6dd3",
       "kills": 1899,
       "raceId": "dwarf",
       "zone": "wild-meadow",
@@ -7404,7 +7404,7 @@
     },
     {
       "walletAddress": "0xda9d866935141a6e6e0ed9b1a34f2dc87dd6bb81",
-      "characterName": "Rizzo",
+      "characterName": "Rizzo_bb81",
       "professions": [],
       "y": 142.79705942401466,
       "raceId": "human",
@@ -7414,7 +7414,7 @@
       ],
       "completedQuests": [],
       "x": 137.99509904002437,
-      "name": "Rizzo",
+      "name": "Rizzo_bb81",
       "level": 1,
       "kills": 7,
       "xp": 111,
@@ -7438,7 +7438,7 @@
     },
     {
       "walletAddress": "0xde56b2378ea260064e65ce544f0fc2f1ba87abd7",
-      "characterName": "Small Master",
+      "characterName": "Small Master_abd7",
       "professions": [],
       "learnedTechniques": [
         "rogue_backstab"
@@ -7461,7 +7461,7 @@
       ],
       "x": 136.0537294510208,
       "level": 3,
-      "name": "Small Master",
+      "name": "Small Master_abd7",
       "kills": 795,
       "raceId": "dwarf",
       "zone": "village-square",
@@ -7469,7 +7469,7 @@
     },
     {
       "walletAddress": "0xdec2970a95d7030b835bf6f2ad82b9ecc0ed351b",
-      "characterName": "xac",
+      "characterName": "xac_351b",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -7482,7 +7482,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "xac",
+      "name": "xac_351b",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7490,7 +7490,7 @@
     },
     {
       "walletAddress": "0xdefce11794ed171613649653c54e82a5b0e25ad9",
-      "characterName": "ModalAgent",
+      "characterName": "ModalAgent_5ad9",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -7498,7 +7498,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "ModalAgent",
+      "name": "ModalAgent_5ad9",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -7526,7 +7526,7 @@
     },
     {
       "walletAddress": "0xe0a934e388cf15edfab62cb91895def6eb3aa463",
-      "characterName": "HermesAgent1",
+      "characterName": "HermesAgent1_a463",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -7534,7 +7534,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "HermesAgent1",
+      "name": "HermesAgent1_a463",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -7542,7 +7542,7 @@
     },
     {
       "walletAddress": "0xe1989cea01951dffaead6171d0982888852e92bf",
-      "characterName": "Brand DeAmbre",
+      "characterName": "Brand DeAmbre_92bf",
       "professions": [
         "herbalism",
         "mining"
@@ -7558,7 +7558,7 @@
         "welcome_adventurer"
       ],
       "x": 700.7536757199817,
-      "name": "Brand DeAmbre",
+      "name": "Brand DeAmbre_92bf",
       "level": 16,
       "kills": 3177,
       "xp": 25617,
@@ -7566,8 +7566,8 @@
     },
     {
       "walletAddress": "0xe384dc4e218bed50d90e66af737a82fa9ff81bfb",
-      "characterName": "gun",
-      "name": "gun",
+      "characterName": "gun_1bfb",
+      "name": "gun_1bfb",
       "level": 4,
       "xp": 2288,
       "raceId": "human",
@@ -7584,7 +7584,7 @@
     },
     {
       "walletAddress": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
-      "characterName": "bdfdffdb",
+      "characterName": "bdfdffdb_a3e3",
       "storyFlags": [],
       "professions": [
         "herbalism",
@@ -7613,14 +7613,14 @@
       "completedQuests": [],
       "x": 787.949300726134,
       "level": 2,
-      "name": "bdfdffdb",
+      "name": "bdfdffdb_a3e3",
       "kills": 11,
       "zone": "wild-meadow",
       "xp": 486
     },
     {
       "walletAddress": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
-      "characterName": "Jimbro",
+      "characterName": "Jimbro_a3e3",
       "equipment": {},
       "professions": [
         "herbalism",
@@ -7657,7 +7657,7 @@
       ],
       "x": 1342.4669071837245,
       "level": 10,
-      "name": "Jimbro",
+      "name": "Jimbro_a3e3",
       "kills": 730,
       "raceId": "beastkin",
       "zone": "dark-forest",
@@ -7665,7 +7665,7 @@
     },
     {
       "walletAddress": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
-      "characterName": "spellmaster",
+      "characterName": "spellmaster_a3e3",
       "storyFlags": [],
       "professions": [
         "herbalism",
@@ -7705,7 +7705,7 @@
           "actions": 5
         }
       },
-      "name": "spellmaster",
+      "name": "spellmaster_a3e3",
       "level": 5,
       "kills": 113,
       "xp": 3247,
@@ -7713,7 +7713,7 @@
     },
     {
       "walletAddress": "0xe7056565b36fbf724fab236ab12286e4fefe25da",
-      "characterName": "Granty",
+      "characterName": "Granty_25da",
       "professions": [],
       "y": 0,
       "skinColor": "tan",
@@ -7726,7 +7726,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Granty",
+      "name": "Granty_25da",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7734,7 +7734,7 @@
     },
     {
       "walletAddress": "0xe71b5ac258944041cd85e04460dd97ccaaff464a",
-      "characterName": "aa",
+      "characterName": "aa_464a",
       "professions": [],
       "y": 0,
       "skinColor": "light",
@@ -7747,7 +7747,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "aa",
+      "name": "aa_464a",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7771,7 +7771,7 @@
     },
     {
       "walletAddress": "0xe8c4a1c37900b6e654a66b045779b8dd9c4353c2",
-      "characterName": "XiaoQian",
+      "characterName": "XiaoQian_53c2",
       "professions": [],
       "learnedTechniques": [],
       "y": 150,
@@ -7779,7 +7779,7 @@
       "completedQuests": [],
       "x": 150,
       "level": 1,
-      "name": "XiaoQian",
+      "name": "XiaoQian_53c2",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -7787,7 +7787,7 @@
     },
     {
       "walletAddress": "0xebe71e7eeb6c8571f7eac4c66156fcd7a3297e95",
-      "characterName": "Hermes7",
+      "characterName": "Hermes7_7e95",
       "professions": [],
       "learnedTechniques": [],
       "y": 0,
@@ -7795,7 +7795,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Hermes7",
+      "name": "Hermes7_7e95",
       "kills": 0,
       "raceId": "human",
       "zone": "village-square",
@@ -7803,7 +7803,7 @@
     },
     {
       "walletAddress": "0xed03df224d5b20198b56d6c431456e40d86dabbf",
-      "characterName": "Rainey",
+      "characterName": "Rainey_abbf",
       "professions": [
         "herbalism",
         "mining"
@@ -7828,7 +7828,7 @@
         "mining_101"
       ],
       "x": 167.99509904002437,
-      "name": "Rainey",
+      "name": "Rainey_abbf",
       "level": 6,
       "kills": 25,
       "xp": 3775,
@@ -7836,8 +7836,8 @@
     },
     {
       "walletAddress": "0xee4c391db454a95c808a1e6b9c85d59456f4f339",
-      "characterName": "ccc",
-      "name": "ccc",
+      "characterName": "ccc_f339",
+      "name": "ccc_f339",
       "level": 1,
       "xp": 0,
       "raceId": "human",
@@ -7857,7 +7857,7 @@
     },
     {
       "walletAddress": "0xee5ad8e8aebdd1b5876c1b57d138d92d6741d1e4",
-      "characterName": "Nyx",
+      "characterName": "Nyx_d1e4",
       "professions": [],
       "learnedTechniques": [
         "warlock_shadow_bolt"
@@ -7867,7 +7867,7 @@
       "completedQuests": [],
       "x": 162.00486277561163,
       "level": 8,
-      "name": "Nyx",
+      "name": "Nyx_d1e4",
       "kills": 740,
       "raceId": "elf",
       "zone": "village-square",
@@ -7875,7 +7875,7 @@
     },
     {
       "walletAddress": "0xf22ceae1feff5ccb428c3c9e4458d838597a4c76",
-      "characterName": "Hero",
+      "characterName": "Hero_4c76",
       "professions": [],
       "learnedTechniques": [],
       "y": 196.85723323329688,
@@ -7883,7 +7883,7 @@
       "completedQuests": [],
       "x": 435.9918869855555,
       "level": 2,
-      "name": "Hero",
+      "name": "Hero_4c76",
       "kills": 35,
       "raceId": "human",
       "zone": "village-square",
@@ -7891,7 +7891,7 @@
     },
     {
       "walletAddress": "0xf793fd71e9ebf781e4074b335a65184d50158962",
-      "characterName": "Dean",
+      "characterName": "Dean_8962",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -7904,7 +7904,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Dean",
+      "name": "Dean_8962",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7928,7 +7928,7 @@
     },
     {
       "walletAddress": "0xf9cc4ca461829fe4b664499498b866aa7ba201dd",
-      "characterName": "Bow Ties Are Koo",
+      "characterName": "Bow Ties Are K_01dd",
       "professions": [],
       "learnedTechniques": [],
       "y": 157.20291766536693,
@@ -7950,7 +7950,7 @@
       ],
       "x": 137.99513722438837,
       "level": 4,
-      "name": "Bow Ties Are Koo",
+      "name": "Bow Ties Are K_01dd",
       "kills": 270,
       "raceId": "elf",
       "zone": "village-square",
@@ -7958,8 +7958,8 @@
     },
     {
       "walletAddress": "0xfb21b2ebf930191f22c5a609c529198367508a12",
-      "characterName": "roy",
-      "name": "roy",
+      "characterName": "roy_8a12",
+      "name": "roy_8a12",
       "level": 1,
       "xp": 0,
       "raceId": "beastkin",
@@ -7974,7 +7974,7 @@
     },
     {
       "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
-      "characterName": "checking",
+      "characterName": "checking_ad5d",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -7987,7 +7987,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "checking",
+      "name": "checking_ad5d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -7995,7 +7995,7 @@
     },
     {
       "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
-      "characterName": "erc",
+      "characterName": "erc_ad5d",
       "professions": [],
       "y": 0,
       "skinColor": "dark",
@@ -8008,7 +8008,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "erc",
+      "name": "erc_ad5d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -8016,7 +8016,7 @@
     },
     {
       "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
-      "characterName": "lessgo",
+      "characterName": "lessgo_ad5d",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -8029,7 +8029,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "lessgo",
+      "name": "lessgo_ad5d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -8058,7 +8058,7 @@
     },
     {
       "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
-      "characterName": "Preyanshu",
+      "characterName": "Preyanshu_ad5d",
       "professions": [],
       "y": 0,
       "skinColor": "brown",
@@ -8071,7 +8071,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "Preyanshu",
+      "name": "Preyanshu_ad5d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -8100,7 +8100,7 @@
     },
     {
       "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
-      "characterName": "testingmint",
+      "characterName": "testingmint_ad5d",
       "professions": [],
       "y": 0,
       "skinColor": "medium",
@@ -8113,7 +8113,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "testingmint",
+      "name": "testingmint_ad5d",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -8121,7 +8121,7 @@
     },
     {
       "walletAddress": "0xfd271f17918a9183bd7b066364d95c24203c351f",
-      "characterName": "avi",
+      "characterName": "avi_351f",
       "professions": [],
       "y": 0,
       "skinColor": "fair",
@@ -8134,7 +8134,7 @@
       "completedQuests": [],
       "x": 0,
       "level": 1,
-      "name": "avi",
+      "name": "avi_351f",
       "kills": 0,
       "zone": "village-square",
       "xp": 0,
@@ -8142,8 +8142,8 @@
     },
     {
       "walletAddress": "0xfd5a6e555e6de9d88948cfbdd84964f23bd197f9",
-      "characterName": "Thorin",
-      "name": "Thorin",
+      "characterName": "Thorin_97f9",
+      "name": "Thorin_97f9",
       "level": 4,
       "xp": 1467,
       "raceId": "dwarf",

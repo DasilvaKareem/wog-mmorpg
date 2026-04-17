@@ -381,13 +381,16 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
     }
 
     try {
+      // Deterministic deploy: if client explicitly selected a character (by name or token),
+      // never auto-create a new same-name character during deploy.
+      const deterministicSelection = Boolean(requestedCharacterTokenId || characterName);
       const result = await setupAgentCharacter(
         authWallet,
         characterName,
         raceId,
         classId,
         request.body.calling,
-        { preventCreateIfMissing: Boolean(requestedCharacterTokenId) }
+        { preventCreateIfMissing: deterministicSelection }
       );
 
       // Mint starter gold for brand-new custodial wallets (0 balance) so the agent
