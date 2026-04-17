@@ -9,7 +9,10 @@ import {
 } from "./guildChain.js";
 import { recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 
-const TICK_INTERVAL_MS = 30_000; // 30 seconds (was 10s — proposals have 24hr voting)
+const TICK_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.GUILD_TICK_INTERVAL_MS ?? "30000", 10) || 30_000
+); // 30 seconds default
 
 // Track known-active proposal IDs to avoid scanning all proposals each tick
 const activeProposals = new Set<number>();

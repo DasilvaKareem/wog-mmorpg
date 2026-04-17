@@ -503,6 +503,7 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 1000; // 1 tick per second
 const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
+const ZONE_RESPONSE_CACHE_MS = Math.max(50, Number.parseInt(process.env.ZONE_RESPONSE_CACHE_MS ?? "500", 10) || 500);
 const WALK_MOVE_SPEED = 30; // units per tick
 const RUN_MOVE_SPEED = 60; // units per tick
 const DEFAULT_RUN_ENERGY = 100;
@@ -523,6 +524,7 @@ interface PartyTargetLock {
 const partyTargetLocks = new Map<string, PartyTargetLock>();
 const LIVE_PLAYER_IDS_KEY = "world:live-players";
 const LIVE_PLAYER_KEY_PREFIX = "world:live-player:";
+const zoneResponseCache = new Map<string, { expiresAt: number; payload: unknown }>();
 
 interface PersistedLivePlayer {
   entity: Record<string, unknown>;
@@ -3585,9 +3587,16 @@ export function registerZoneRuntime(server: FastifyInstance) {
         reply.code(404);
         return { error: "Zone not found" };
       }
+      const cacheKey = `zone:${zoneId}`;
+      const now = Date.now();
+      const cached = zoneResponseCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return cached.payload;
+      }
+
       const zone = getOrCreateZone(zoneId);
       const recentEvents = getRecentZoneEvents(zone.zoneId, Date.now() - 8000, ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"]);
-      return {
+      const payload = {
         zoneId: zone.zoneId,
         tick: zone.tick,
         gameTime: getGameTime(zone.tick),
@@ -3600,6 +3609,12 @@ export function registerZoneRuntime(server: FastifyInstance) {
         visibleIntents: buildVisibleIntents(zone),
         recentEvents,
       };
+
+      zoneResponseCache.set(cacheKey, {
+        expiresAt: now + ZONE_RESPONSE_CACHE_MS,
+        payload,
+      });
+      return payload;
     }
   );
 

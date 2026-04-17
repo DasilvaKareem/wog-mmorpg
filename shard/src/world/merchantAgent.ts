@@ -39,10 +39,22 @@ export interface MerchantState {
 
 // ── Constants ────────────────────────────────────────────────────
 
-const MERCHANT_TICK_INTERVAL = 10_000;
-const INVENTORY_SYNC_INTERVAL = 180_000;
-const PRICE_UPDATE_INTERVAL = 30_000;
-const RESTOCK_INTERVAL = 120_000;
+const MERCHANT_TICK_INTERVAL = Math.max(
+  5_000,
+  Number.parseInt(process.env.MERCHANT_TICK_INTERVAL_MS ?? "10000", 10) || 10_000
+);
+const INVENTORY_SYNC_INTERVAL = Math.max(
+  30_000,
+  Number.parseInt(process.env.MERCHANT_INVENTORY_SYNC_INTERVAL_MS ?? "180000", 10) || 180_000
+);
+const PRICE_UPDATE_INTERVAL = Math.max(
+  10_000,
+  Number.parseInt(process.env.MERCHANT_PRICE_UPDATE_INTERVAL_MS ?? "30000", 10) || 30_000
+);
+const RESTOCK_INTERVAL = Math.max(
+  30_000,
+  Number.parseInt(process.env.MERCHANT_RESTOCK_INTERVAL_MS ?? "120000", 10) || 120_000
+);
 const ANNOUNCEMENT_COOLDOWN = 300_000;
 const INITIAL_GOLD_SEED = 500;
 const INITIAL_STOCK_PER_ITEM = 5;

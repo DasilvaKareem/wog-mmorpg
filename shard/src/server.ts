@@ -115,6 +115,24 @@ const SKIP_MERCHANT_BOOTSTRAP = LOCAL_TEST_MODE === "core";
 const LAZY_RUNTIME_HYDRATION = !["0", "false", "no", "off"].includes(
   (process.env.LAZY_RUNTIME_HYDRATION ?? "true").trim().toLowerCase()
 );
+const RUN_BACKGROUND_WORKERS = !["0", "false", "no", "off"].includes(
+  (process.env.RUN_BACKGROUND_WORKERS ?? "true").trim().toLowerCase()
+);
+const HOTPATH_CONCURRENCY_LIMITS_ENABLED = !["0", "false", "no", "off"].includes(
+  (process.env.HOTPATH_CONCURRENCY_LIMITS_ENABLED ?? "true").trim().toLowerCase()
+);
+const WORLD_LAYOUT_CACHE_MS = Math.max(
+  50,
+  Number.parseInt(process.env.WORLD_LAYOUT_CACHE_MS ?? "1000", 10) || 1000
+);
+const GUILD_CACHE_REFRESH_INTERVAL_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.GUILD_CACHE_REFRESH_INTERVAL_MS ?? "300000", 10) || 300_000
+);
+const MOB_RESPAWNER_INTERVAL_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.MOB_RESPAWNER_INTERVAL_MS ?? "5000", 10) || 5_000
+);
 const DEFAULT_CORS_ORIGINS = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -143,6 +161,16 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
   { key: "character-create", methods: ["POST"], exact: "/character/create", max: 10, windowMs: 60_000 },
   { key: "x402-deploy", methods: ["POST"], exact: "/x402/deploy", max: 6, windowMs: 60_000 },
   { key: "admin", methods: ["POST"], prefix: "/admin/", max: 5, windowMs: 60_000 },
+  // Protect high-volume read paths from polling storms.
+  { key: "world-layout", methods: ["GET"], exact: "/world/layout", max: 60, windowMs: 60_000 },
+  { key: "zones-list", methods: ["GET"], exact: "/zones", max: 120, windowMs: 60_000 },
+  { key: "zones-detail", methods: ["GET"], prefix: "/zones/", max: 300, windowMs: 60_000 },
+  { key: "players-active", methods: ["GET"], exact: "/players/active", max: 60, windowMs: 60_000 },
+  { key: "world-state", methods: ["GET"], exact: "/state", max: 12, windowMs: 60_000 },
+  { key: "wallet-read", methods: ["GET"], prefix: "/wallet/", max: 120, windowMs: 60_000 },
+  { key: "agent-status", methods: ["GET"], prefix: "/agent/status/", max: 120, windowMs: 60_000 },
+  { key: "inbox-read", methods: ["GET"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
+  { key: "admin-read", methods: ["GET"], prefix: "/admin/", max: 30, windowMs: 60_000 },
   // Agent console messages should not get blocked by unrelated gameplay POSTs from the same IP.
   { key: "agent-post", methods: ["POST"], prefix: "/agent/", max: 180, windowMs: 60_000 },
   { key: "inbox-post", methods: ["POST"], prefix: "/inbox/", max: 120, windowMs: 60_000 },
@@ -153,6 +181,44 @@ const RATE_LIMIT_RULES: RateLimitRule[] = [
 ];
 
 const rateLimitHits = new Map<string, number[]>();
+const RATE_LIMIT_STALE_MS = 5 * 60_000;
+
+type ConcurrencyRule = {
+  key: string;
+  methods?: string[];
+  exact?: string;
+  prefix?: string;
+  maxInFlight: number;
+};
+
+const CONCURRENCY_RULES: ConcurrencyRule[] = [
+  { key: "world-layout", methods: ["GET"], exact: "/world/layout", maxInFlight: 12 },
+  { key: "zones-detail", methods: ["GET"], prefix: "/zones/", maxInFlight: 30 },
+  { key: "wallet-read", methods: ["GET"], prefix: "/wallet/", maxInFlight: 20 },
+  { key: "agent-status", methods: ["GET"], prefix: "/agent/status/", maxInFlight: 20 },
+  { key: "inbox-read", methods: ["GET"], prefix: "/inbox/", maxInFlight: 20 },
+  { key: "world-state", methods: ["GET"], exact: "/state", maxInFlight: 4 },
+];
+
+const inFlightByRule = new Map<string, number>();
+
+function pruneRateLimitHits(now = Date.now()): void {
+  const cutoff = now - RATE_LIMIT_STALE_MS;
+  for (const [bucketKey, hits] of rateLimitHits.entries()) {
+    const recent = hits.filter((ts) => ts >= cutoff);
+    if (recent.length === 0) {
+      rateLimitHits.delete(bucketKey);
+      continue;
+    }
+    if (recent.length !== hits.length) {
+      rateLimitHits.set(bucketKey, recent);
+    }
+  }
+}
+
+setInterval(() => {
+  pruneRateLimitHits();
+}, 60_000).unref();
 
 function getAllowedCorsOrigins(): Set<string> {
   const configured = process.env.CORS_ORIGINS
@@ -185,6 +251,16 @@ function getRateLimitRule(method: string, url: string): RateLimitRule | null {
     return rule;
   }
 
+  return null;
+}
+
+function getConcurrencyRule(method: string, path: string): ConcurrencyRule | null {
+  for (const rule of CONCURRENCY_RULES) {
+    if (rule.methods && !rule.methods.includes(method)) continue;
+    if (rule.exact && rule.exact !== path) continue;
+    if (rule.prefix && !path.startsWith(rule.prefix)) continue;
+    return rule;
+  }
   return null;
 }
 
@@ -585,7 +661,16 @@ toggleAuto();
 });
 
 // World layout — zone positions for seamless world rendering
-server.get("/world/layout", async () => getWorldLayout());
+let worldLayoutCache: { data: ReturnType<typeof getWorldLayout>; expiresAt: number } | null = null;
+server.get("/world/layout", async () => {
+  const now = Date.now();
+  if (worldLayoutCache && worldLayoutCache.expiresAt > now) {
+    return worldLayoutCache.data;
+  }
+  const data = getWorldLayout();
+  worldLayoutCache = { data, expiresAt: now + WORLD_LAYOUT_CACHE_MS };
+  return data;
+});
 
 // Admin dashboard — aggregated server health + game state
 server.get("/admin/dashboard", async () => {
@@ -762,21 +847,53 @@ server.register(cors, {
 
 // Register subsystems
 server.addHook("onRequest", async (request, reply) => {
+  const path = getRequestPath(request.url);
+
+  if (HOTPATH_CONCURRENCY_LIMITS_ENABLED) {
+    const concurrencyRule = getConcurrencyRule(request.method, path);
+    if (concurrencyRule) {
+      const active = inFlightByRule.get(concurrencyRule.key) ?? 0;
+      if (active >= concurrencyRule.maxInFlight) {
+        reply.header("Retry-After", "1");
+        reply.code(429).send({ error: "Server busy, please retry shortly" });
+        return;
+      }
+      inFlightByRule.set(concurrencyRule.key, active + 1);
+      (request as any).__concurrencyRuleKey = concurrencyRule.key;
+    }
+  }
+
   const rule = getRateLimitRule(request.method, request.url);
   if (!rule) return;
-
-  const path = getRequestPath(request.url);
   const verdict = enforceRateLimit(request.ip, path, rule);
   if (verdict.ok) return;
 
+  server.log.warn(
+    { ip: request.ip, method: request.method, path, rule: rule.key, retryAfterSeconds: verdict.retryAfterSeconds },
+    "[rate-limit] Request rejected",
+  );
   reply.header("Retry-After", verdict.retryAfterSeconds.toString());
   reply.code(429).send({ error: "Rate limit exceeded" });
+});
+server.addHook("onResponse", async (request) => {
+  const ruleKey = (request as any).__concurrencyRuleKey as string | undefined;
+  if (!ruleKey) return;
+  const active = inFlightByRule.get(ruleKey) ?? 0;
+  if (active <= 1) {
+    inFlightByRule.delete(ruleKey);
+    return;
+  }
+  inFlightByRule.set(ruleKey, active - 1);
 });
 registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
 registerZoneRuntime(server);
-startChainBatcher();
+if (RUN_BACKGROUND_WORKERS) {
+  startChainBatcher();
+} else {
+  server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — chain batcher disabled on this node");
+}
 registerSpawnOrders(server);
 registerCommands(server);
 registerStateApi(server);
@@ -787,9 +904,9 @@ registerCharacterRoutes(server);
 registerTradeRoutes(server);
 registerEquipmentRoutes(server);
 registerAuctionHouseRoutes(server);
-registerAuctionHouseTick(server);
+if (RUN_BACKGROUND_WORKERS) registerAuctionHouseTick(server);
 registerGuildRoutes(server);
-registerGuildTick(server);
+if (RUN_BACKGROUND_WORKERS) registerGuildTick(server);
 registerGuildVaultRoutes(server);
 registerMiningRoutes(server);
 registerProfessionRoutes(server);
@@ -832,7 +949,7 @@ registerNameServiceRoutes(server);
 registerDungeonGateRoutes(server);
 registerEssenceTechniqueRoutes(server);
 registerForgedTechniqueRoutes(server);
-registerDungeonGateTick(server);
+if (RUN_BACKGROUND_WORKERS) registerDungeonGateTick(server);
 registerFarmingRoutes(server);
 registerPlotRoutes(server);
 registerBuildingRoutes(server);
@@ -841,9 +958,13 @@ registerDiaryRoutes(server);
 registerNotificationRoutes(server);
 registerWebPushRoutes(server);
 initDungeonLootTables();
-startGuildNameCacheRefresh();
+if (RUN_BACKGROUND_WORKERS) {
+  startGuildNameCacheRefresh(GUILD_CACHE_REFRESH_INTERVAL_MS);
+}
 spawnNpcs();
-if (SKIP_MERCHANT_BOOTSTRAP) {
+if (!RUN_BACKGROUND_WORKERS) {
+  server.log.info("[merchant] RUN_BACKGROUND_WORKERS=false — merchant tick disabled on this node");
+} else if (SKIP_MERCHANT_BOOTSTRAP) {
   server.log.info("[merchant] Skipping merchant bootstrap in LOCAL_TEST_MODE=core");
 } else {
   registerMerchantAgentTick(server);
@@ -860,11 +981,16 @@ spawnNectarNodes();
 spawnCropNodes();
 
 // Mob respawner - check every 5 seconds
-setInterval(() => {
-  tickMobRespawner();
-}, 5000);
+if (RUN_BACKGROUND_WORKERS) {
+  setInterval(() => {
+    tickMobRespawner();
+  }, MOB_RESPAWNER_INTERVAL_MS);
+}
 
 const start = async () => {
+  server.log.info(
+    `[runtime] backgroundWorkers=${RUN_BACKGROUND_WORKERS} hotpathConcurrency=${HOTPATH_CONCURRENCY_LIMITS_ENABLED} worldLayoutCacheMs=${WORLD_LAYOUT_CACHE_MS}`
+  );
   await initPostgres();
   if (isPostgresConfigured()) {
     await ensureGameSchema();
@@ -937,7 +1063,9 @@ const start = async () => {
     server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
   }
 
-  startWalletRegistrationWorker(server);
+  if (RUN_BACKGROUND_WORKERS) {
+    startWalletRegistrationWorker(server);
+  }
 
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";
@@ -959,15 +1087,19 @@ const start = async () => {
     });
   }
 
-  startAgentRuntimeReconciler(server.log);
+  if (RUN_BACKGROUND_WORKERS) {
+    startAgentRuntimeReconciler(server.log);
 
-  await startCharacterBootstrapWorker(server).catch((err: any) => {
-    server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
-  });
-  startNameServiceWorker(server.log);
-  startPlotOperationWorker(server.log);
-  startReputationChainWorker(server.log);
-  startChainOperationReplayWorker(server.log);
+    await startCharacterBootstrapWorker(server).catch((err: any) => {
+      server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
+    });
+    startNameServiceWorker(server.log);
+    startPlotOperationWorker(server.log);
+    startReputationChainWorker(server.log);
+    startChainOperationReplayWorker(server.log);
+  } else {
+    server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — async workers not started on this node");
+  }
 
   await Promise.race([
     initWorldMapStore(),
