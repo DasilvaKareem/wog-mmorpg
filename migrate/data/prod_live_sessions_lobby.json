@@ -1,0 +1,145 @@
+{
+  "exportedAt": "2026-04-17T10:15:18.970Z",
+  "zone": "village-square",
+  "count": 23,
+  "liveSessions": [
+    {
+      "wallet_address": "0x4be619301fd68724763dd016552eb18535c36e63",
+      "zone_id": "village-square",
+      "entity_id": "c57aa2f9-819f-4009-84ba-4bc5a6d5508f",
+      "updated_at": "2026-04-17T08:03:51.203Z"
+    },
+    {
+      "wallet_address": "0xfa1eccf25b8399e7409ca3b8b60cdb47d3fb560f",
+      "zone_id": "village-square",
+      "entity_id": "42ea3e8a-db9c-46af-a382-397fc5ca4396",
+      "updated_at": "2026-04-17T05:32:01.815Z"
+    },
+    {
+      "wallet_address": "0x3ff896c14e80d38dc39635b6490004a84ead703e",
+      "zone_id": "village-square",
+      "entity_id": "36348912-638a-45bf-a543-db911f94f4bd",
+      "updated_at": "2026-04-16T03:37:55.370Z"
+    },
+    {
+      "wallet_address": "0x4489db07fd759bb3268666fa965eace9a960cfbc",
+      "zone_id": "village-square",
+      "entity_id": "50bb63e7-20e8-491b-b81e-3edc8c07432c",
+      "updated_at": "2026-04-16T03:37:54.659Z"
+    },
+    {
+      "wallet_address": "0x570532a87bb068d24e5c72d4fb5ca90738583594",
+      "zone_id": "village-square",
+      "entity_id": "7c6c1ad4-1d4a-49d2-9209-32abbd9bcb9a",
+      "updated_at": "2026-04-16T03:37:54.434Z"
+    },
+    {
+      "wallet_address": "0x631073c8924ca922314bb912cb6285bcdef61d17",
+      "zone_id": "village-square",
+      "entity_id": "f98e4ca3-ffd5-427a-add7-d71c24deb857",
+      "updated_at": "2026-04-16T03:37:54.107Z"
+    },
+    {
+      "wallet_address": "0x66e50a611dd4463e9cdf1d3c450bde50c73755f0",
+      "zone_id": "village-square",
+      "entity_id": "35a7a6b4-e83f-48eb-9a87-ff301bd2fab4",
+      "updated_at": "2026-04-16T03:37:53.849Z"
+    },
+    {
+      "wallet_address": "0x46b2b55088a118c88b69148c049e213fa0eea3ee",
+      "zone_id": "village-square",
+      "entity_id": "49e4fb07-c3cc-49b1-916f-a144d04b1117",
+      "updated_at": "2026-04-16T03:37:53.179Z"
+    },
+    {
+      "wallet_address": "0x7c4f0a26a5bb3417cbcf81a39afdac90f35fb71f",
+      "zone_id": "village-square",
+      "entity_id": "e1dec859-1b23-47e1-b9ef-e200de9cbc54",
+      "updated_at": "2026-04-16T03:37:52.415Z"
+    },
+    {
+      "wallet_address": "0x89311735832bfccbd8272d9bfea4787497005fa4",
+      "zone_id": "village-square",
+      "entity_id": "8aa06477-19e1-4772-8505-dc26b6ef869b",
+      "updated_at": "2026-04-16T03:37:51.632Z"
+    },
+    {
+      "wallet_address": "0x94e70ef3090971c732284bbfb03935a57a8ae365",
+      "zone_id": "village-square",
+      "entity_id": "7e997787-a960-4d62-9da0-ab4cbd2c9471",
+      "updated_at": "2026-04-16T03:37:51.314Z"
+    },
+    {
+      "wallet_address": "0xa07d98d11dacaea338084e4a5b26e7ea93cfce95",
+      "zone_id": "village-square",
+      "entity_id": "3b15a880-7d1b-4985-b04a-350679f0be12",
+      "updated_at": "2026-04-16T03:37:50.886Z"
+    },
+    {
+      "wallet_address": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
+      "zone_id": "village-square",
+      "entity_id": "24990918-ec32-4dcc-b690-dd40676e14d6",
+      "updated_at": "2026-04-16T03:37:50.638Z"
+    },
+    {
+      "wallet_address": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
+      "zone_id": "village-square",
+      "entity_id": "cd738840-942b-4c2f-875e-b4465a717b68",
+      "updated_at": "2026-04-16T03:37:50.417Z"
+    },
+    {
+      "wallet_address": "0xb208c8ce1d6f2a00c7d50743dcfdfac4fd1ee673",
+      "zone_id": "village-square",
+      "entity_id": "f13384a4-9a3a-47a4-a505-5850019dbc70",
+      "updated_at": "2026-04-16T03:37:50.083Z"
+    },
+    {
+      "wallet_address": "0xe55fc955d7bb883820ece6125246f28f7c6ea3e3",
+      "zone_id": "village-square",
+      "entity_id": "8fd0f77b-de7e-47dc-bb6c-a42084b42786",
+      "updated_at": "2026-04-16T03:37:49.379Z"
+    },
+    {
+      "wallet_address": "0x149ef0c596ca55d33ac1b841cc80ebed45c3682d",
+      "zone_id": "village-square",
+      "entity_id": "f0d6aae3-3ad0-4643-a2e7-84a83790041d",
+      "updated_at": "2026-04-16T03:37:48.899Z"
+    },
+    {
+      "wallet_address": "0x1b75a1349ab32202a92abbee905fc425545810f1",
+      "zone_id": "village-square",
+      "entity_id": "79338572-5bd4-4199-910a-da2206c5d52d",
+      "updated_at": "2026-04-16T03:37:48.634Z"
+    },
+    {
+      "wallet_address": "0x21fe805ba5a60b63afcc654009a18b0820425856",
+      "zone_id": "village-square",
+      "entity_id": "0dfcf1e3-9af3-4a8c-a23f-cc6cba4ffb42",
+      "updated_at": "2026-04-16T03:37:48.394Z"
+    },
+    {
+      "wallet_address": "0x34fdcdbec5448fb5aaa90348f6d782dd6ad20dc9",
+      "zone_id": "village-square",
+      "entity_id": "5fdf04ea-1d37-4c1f-8f9b-a0b66e0b24e4",
+      "updated_at": "2026-04-16T03:37:48.149Z"
+    },
+    {
+      "wallet_address": "0x3f2ace32fb20fee3c11d535e82d486e5c78b0f89",
+      "zone_id": "village-square",
+      "entity_id": "cb4740d7-8775-48b5-8cb0-8c4502b4abea",
+      "updated_at": "2026-04-16T03:37:47.942Z"
+    },
+    {
+      "wallet_address": "0xd8a72444b04c96ac943e16e732c4461390bf9819",
+      "zone_id": "village-square",
+      "entity_id": "590685ef-f715-4c1e-85b1-9dde18c31f69",
+      "updated_at": "2026-04-16T03:37:47.585Z"
+    },
+    {
+      "wallet_address": "0xb688b0f224af0a75af034474ed8b11b3f7c1fccf",
+      "zone_id": "village-square",
+      "entity_id": "f117cfa6-11d8-4c79-af58-5c793d6ca633",
+      "updated_at": "2026-04-16T03:37:47.361Z"
+    }
+  ]
+}

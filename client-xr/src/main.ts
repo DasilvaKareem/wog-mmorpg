@@ -309,6 +309,7 @@ let ownWalletAddress: string | null = null;
 let ownEntityId: string | null = null;
 let desiredRunMode: boolean | null = null;
 let autoLockEnabled = false;
+let manualUnlockUntilMs = 0;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
 let lastQuestPollTime = 0;
@@ -481,7 +482,7 @@ function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
 
   // If entity is already loaded in scene, lock on immediately
   const pos = entities.getEntityPosition(me.id);
-  if (pos) {
+  if (pos && autoLockEnabled && Date.now() >= manualUnlockUntilMs) {
     lockOn(me.id);
     controls.setTarget(pos.x, pos.y, pos.z);
   }
@@ -820,7 +821,13 @@ async function pollNearbyZones() {
     effects.syncActiveEffects(merged);
 
     // Auto-lock to own character once it appears in scene (only if enabled)
-    if (autoLockEnabled && ownEntityId && !lockedEntityId && merged[ownEntityId]) {
+    if (
+      autoLockEnabled &&
+      ownEntityId &&
+      !lockedEntityId &&
+      merged[ownEntityId] &&
+      Date.now() >= manualUnlockUntilMs
+    ) {
       lockOn(ownEntityId);
     }
 
@@ -1147,8 +1154,15 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    autoLockEnabled = false;
+    manualUnlockUntilMs = Date.now() + 5_000;
     unlockCamera();
     inspector.hide();
+    hudLock.textContent = "FREE CAMERA";
+    hudLock.style.display = "block";
+    setTimeout(() => {
+      if (!lockedEntityId) hudLock.style.display = "none";
+    }, 1200);
     return;
   }
   if (e.key === "Enter" || e.key === "t" || e.key === "T") {

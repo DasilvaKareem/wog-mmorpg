@@ -19,6 +19,16 @@ const skaleChain = defineChain({
 
 const sharedInAppWallet = inAppWallet();
 
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] | object }) => Promise<unknown>;
+};
+
+declare global {
+  interface Window {
+    ethereum?: EthereumProvider;
+  }
+}
+
 function walletKey(walletAddress: string): string {
   return `wog:agent:jwt:${walletAddress.toLowerCase()}`;
 }
@@ -105,17 +115,53 @@ export async function getAuthToken(walletAddress: string): Promise<string | null
   const cached = getCachedToken(walletAddress);
   if (cached) return cached;
 
+  const signWithExternalWallet = async (message: string): Promise<string | null> => {
+    const provider = window.ethereum;
+    if (!provider) return null;
+
+    let accounts: string[] = [];
+    try {
+      accounts = (await provider.request({ method: "eth_accounts" })) as string[];
+    } catch {
+      return null;
+    }
+    const account = accounts.find((entry) => entry?.toLowerCase() === walletAddress.toLowerCase());
+    if (!account) return null;
+
+    try {
+      const signature = await provider.request({
+        method: "personal_sign",
+        params: [message, account],
+      });
+      return typeof signature === "string" ? signature : null;
+    } catch {
+      try {
+        const signature = await provider.request({
+          method: "eth_sign",
+          params: [account, message],
+        });
+        return typeof signature === "string" ? signature : null;
+      } catch {
+        return null;
+      }
+    }
+  };
+
   for (const base of CANDIDATE_BASES) {
     try {
       const challengeRes = await fetch(toUrl(base, `/auth/challenge?wallet=${walletAddress}`));
       if (!challengeRes.ok) continue;
       const { message, timestamp } = await challengeRes.json();
 
-      const account = await sharedInAppWallet.getAccount();
-      if (!account) return null;
-      if (account.address.toLowerCase() !== walletAddress.toLowerCase()) return null;
+      let signature: string | null = null;
+      const inAppAccount = sharedInAppWallet.getAccount?.() ?? null;
+      if (inAppAccount && inAppAccount.address.toLowerCase() === walletAddress.toLowerCase()) {
+        signature = await inAppAccount.signMessage({ message });
+      } else {
+        signature = await signWithExternalWallet(message);
+      }
+      if (!signature) continue;
 
-      const signature = await account.signMessage({ message });
       const verifyRes = await fetch(toUrl(base, "/auth/verify"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,6 +213,20 @@ class XRAuth {
     await rememberAddress(account.address);
     await getAuthToken(account.address);
     return account.address;
+  }
+
+  async connectWallet(): Promise<string> {
+    const provider = window.ethereum;
+    if (!provider) throw new Error("No injected wallet found. Install MetaMask or another browser wallet.");
+
+    const accounts = (await provider.request({ method: "eth_requestAccounts" })) as string[];
+    const address = accounts?.[0];
+    if (!address) throw new Error("No wallet account available.");
+
+    this.address = address;
+    await rememberAddress(address);
+    await getAuthToken(address);
+    return address;
   }
 
   async sendEmailCode(email: string): Promise<void> {

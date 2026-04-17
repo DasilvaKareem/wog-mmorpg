@@ -7,6 +7,7 @@ interface ManagedFeeOverrides {
   gasPrice: bigint;
   maxFeePerGas: bigint;
   maxPriorityFeePerGas?: bigint;
+  txType: 0 | 2;
 }
 
 interface CacheEntry {
@@ -15,6 +16,19 @@ interface CacheEntry {
 }
 
 const providerFeeCache = new WeakMap<ethers.JsonRpcProvider, CacheEntry>();
+const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
+const LEGACY_CHAIN_IDS = new Set([
+  324705682,  // SKALE testnet chain
+  1187947933, // SKALE Base mainnet chain
+]);
+
+function shouldForceLegacyGas(): boolean {
+  if (TRUE_VALUES.has((process.env.TX_FORCE_LEGACY_GAS ?? "").trim().toLowerCase())) {
+    return true;
+  }
+  const chainId = Number(process.env.SKALE_BASE_CHAIN_ID || 1187947933);
+  return Number.isFinite(chainId) && LEGACY_CHAIN_IDS.has(chainId);
+}
 
 function multiplyBps(value: bigint, bps: number): bigint {
   if (!Number.isFinite(bps) || bps <= 0) return value;
@@ -71,6 +85,7 @@ export async function resolveManagedFeeOverrides(
     gasPrice: chainGasPrice,
     maxFeePerGas: bufferedMaxFeePerGas,
     ...(maxPriorityFeePerGas ? { maxPriorityFeePerGas } : {}),
+    txType: shouldForceLegacyGas() ? 0 : 2,
   };
 
   providerFeeCache.set(provider, {
@@ -118,8 +133,34 @@ export function createManagedFeeProvider(rpcUrl: string): ethers.JsonRpcProvider
       ? (priority <= bufferedMaxFeePerGas ? priority : bufferedMaxFeePerGas)
       : null;
 
+    if (shouldForceLegacyGas()) {
+      // Legacy fee markets do not accept EIP-1559 fields.
+      return new ethers.FeeData(gasPrice, null, null);
+    }
+
     return new ethers.FeeData(gasPrice, bufferedMaxFeePerGas, maxPriorityFeePerGas);
   };
 
   return provider;
+}
+
+export function toManagedTxFeeFields(
+  managedFees: ManagedFeeOverrides
+): {
+  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+} {
+  if (managedFees.txType === 0) {
+    return {
+      gasPrice: managedFees.gasPrice,
+      maxFeePerGas: undefined,
+      maxPriorityFeePerGas: undefined,
+    };
+  }
+  return {
+    gasPrice: undefined,
+    maxFeePerGas: managedFees.maxFeePerGas,
+    maxPriorityFeePerGas: managedFees.maxPriorityFeePerGas,
+  };
 }

@@ -8,7 +8,7 @@ import { registerSpawnOrders } from "./world/spawnOrders.js";
 import { registerStateApi } from "./routes/stateApi.js";
 import { registerStatsRoutes } from "./routes/statsRoutes.js";
 import { registerCommands } from "./social/commands.js";
-import { registerWalletRoutes, startWalletRegistrationWorker } from "./blockchain/wallet.js";
+import { registerWalletRoutes } from "./blockchain/wallet.js";
 import { registerShopRoutes } from "./economy/shop.js";
 import { registerCharacterRoutes } from "./character/characterRoutes.js";
 import { registerTradeRoutes } from "./economy/trade.js";
@@ -62,7 +62,6 @@ import { registerRentalRoutes } from "./marketplace/rentalRoutes.js";
 import { registerItemCatalogRoutes } from "./items/itemCatalogRoutes.js";
 import { registerReputationRoutes } from "./economy/reputationRoutes.js";
 import { registerNameServiceRoutes } from "./blockchain/nameServiceRoutes.js";
-import { startNameServiceWorker } from "./blockchain/nameServiceChain.js";
 import { registerDungeonGateRoutes } from "./world/dungeonGate.js";
 import { registerEssenceTechniqueRoutes } from "./combat/essenceTechniqueRoutes.js";
 import { registerForgedTechniqueRoutes } from "./combat/forgedTechniqueRoutes.js";
@@ -83,26 +82,22 @@ import { initWorldMapStore } from "./world/worldMapStore.js";
 import { registerFarmingRoutes } from "./farming/farming.js";
 import { registerPlotRoutes } from "./farming/plotRoutes.js";
 import { registerBuildingRoutes } from "./farming/buildingRoutes.js";
-import { startPlotOperationWorker } from "./farming/plotSystem.js";
 import { spawnCropNodes } from "./farming/cropSpawner.js";
 import { enqueueGoldMint, getTxStats } from "./blockchain/blockchain.js";
-import { startChainBatcher, stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
+import { stopChainBatcher, getChainBatcherStats } from "./blockchain/chainBatcher.js";
 import { getChainIntentStats, listChainIntents } from "./blockchain/chainIntentStore.js";
 import { getWorldLayout } from "./world/worldLayout.js";
 import { getAllEntities, getEntity, removeLivePlayerEntityEventually, restoreLivePlayersFromPostgres, unregisterSpawnedWallet } from "./world/zoneRuntime.js";
-import { saveCharacter } from "./character/characterStore.js";
+import { deleteCharacter, loadCharacter, saveCharacter } from "./character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "./character/characterIdentityPersistence.js";
 import { authenticateRequest } from "./auth/auth.js";
 import { getLearnedProfessions } from "./professions/professions.js";
 import { biteProvider, probeBiteRpc, SKALE_BASE_CHAIN_ID, SKALE_BASE_RPC_URL } from "./blockchain/biteChain.js";
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "./redis.js";
 import { pvpBattleManager } from "./combat/pvpBattleManager.js";
-import { startCharacterBootstrapWorker } from "./character/characterBootstrap.js";
-import { startReputationChainWorker } from "./economy/reputationChain.js";
-import { startChainOperationReplayWorker } from "./blockchain/chainOperationStore.js";
 import { ensureGameSchema, getGameSchemaHealth } from "./db/gameSchema.js";
 import { migrateRedisToPostgres } from "./character/migrateRedisToPostgres.js";
-import { initPostgres, isPostgresConfigured } from "./db/postgres.js";
+import { initPostgres, isPostgresConfigured, postgresQuery } from "./db/postgres.js";
 import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
 
 const server = Fastify({ logger: true });
@@ -503,6 +498,114 @@ server.post<{ Body: { address: string; copper: number } }>("/admin/mint-gold", a
   }
 });
 
+// Admin: rename a live player and persist the rename across runtime + storage.
+server.post<{ Body: { walletAddress: string; newName: string } }>("/admin/rename-live-player", async (req, reply) => {
+  if (!ADMIN_SECRET) {
+    return reply.code(503).send({ error: "Admin route disabled: ADMIN_SECRET is not configured" });
+  }
+
+  const secret = req.headers["x-admin-secret"];
+  if (secret !== ADMIN_SECRET) {
+    return reply.code(401).send({ error: "Unauthorized" });
+  }
+
+  const walletAddress = (req.body.walletAddress ?? "").trim().toLowerCase();
+  const newName = (req.body.newName ?? "").trim();
+  if (!walletAddress || !newName) {
+    return reply.code(400).send({ error: "walletAddress and newName are required" });
+  }
+
+  let targetEntity = Array.from(getAllEntities().values()).find(
+    (entity) => entity.type === "player" && entity.walletAddress?.toLowerCase() === walletAddress
+  );
+  if (!targetEntity) {
+    return reply.code(404).send({ error: "Live player not found for walletAddress" });
+  }
+
+  const oldName = targetEntity.name;
+  if (oldName === newName) {
+    return reply.send({ ok: true, walletAddress, oldName, newName, unchanged: true });
+  }
+
+  targetEntity.name = newName;
+
+  try {
+    const saved = await loadCharacter(walletAddress, oldName);
+    if (saved) {
+      await saveCharacter(walletAddress, newName, { ...saved, name: newName });
+      await deleteCharacter(walletAddress, oldName).catch(() => {});
+    } else {
+      await saveCharacter(walletAddress, newName, {
+        name: newName,
+        level: targetEntity.level ?? 1,
+        xp: targetEntity.xp ?? 0,
+        x: targetEntity.x,
+        y: targetEntity.y,
+        zone: targetEntity.region ?? "village-square",
+      } as any);
+    }
+  } catch (err: any) {
+    req.log.warn(`[admin/rename-live-player] save sync warning for ${walletAddress}: ${err.message?.slice(0, 140)}`);
+  }
+
+  // Best-effort Redis key cleanup so stale names do not respawn later.
+  const redis = getRedis();
+  if (redis) {
+    try {
+      const oldKey = `character:${walletAddress}:${oldName}`;
+      const newKey = `character:${walletAddress}:${newName}`;
+      const oldHash = await redis.hgetall(oldKey);
+      const newHash = await redis.hgetall(newKey);
+      const sourceHash = Object.keys(oldHash).length > 0 ? oldHash : newHash;
+      if (Object.keys(sourceHash).length > 0) {
+        await redis.hset(newKey, { ...sourceHash, name: newName });
+      }
+      await redis.del(oldKey);
+    } catch (err: any) {
+      req.log.warn(`[admin/rename-live-player] redis sync warning for ${walletAddress}: ${err.message?.slice(0, 140)}`);
+    }
+  }
+
+  // Best-effort projection/runtime sync for all owner mappings on this custodial wallet.
+  if (isPostgresConfigured()) {
+    try {
+      await postgresQuery(
+        `
+          update game.wallet_links
+          set character_name = $2,
+              updated_at = now()
+          where custodial_wallet = $1
+        `,
+        [walletAddress, newName]
+      );
+      await postgresQuery(
+        `
+          update game.live_sessions
+          set session_state = jsonb_set(session_state, '{entity,name}', to_jsonb($2::text), true),
+              updated_at = now()
+          where wallet_address = $1
+        `,
+        [walletAddress, newName]
+      );
+      await postgresQuery(
+        `
+          update game.wallet_runtime_state wr
+          set payload_json = jsonb_set(wr.payload_json, '{characterName}', to_jsonb($2::text), true),
+              updated_at = now()
+          from game.wallet_links wl
+          where wl.custodial_wallet = $1
+            and wr.state_key = ('agent:entity:' || wl.owner_wallet)
+        `,
+        [walletAddress, newName]
+      );
+    } catch (err: any) {
+      req.log.warn(`[admin/rename-live-player] postgres sync warning for ${walletAddress}: ${err.message?.slice(0, 140)}`);
+    }
+  }
+
+  return reply.send({ ok: true, walletAddress, oldName, newName, entityId: targetEntity.id });
+});
+
 // Transaction stats — live blockchain activity dashboard
 server.get("/stats/transactions", async () => getTxStats());
 
@@ -850,11 +953,6 @@ registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
 registerZoneRuntime(server);
-if (RUN_BACKGROUND_WORKERS) {
-  startChainBatcher();
-} else {
-  server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — chain batcher disabled on this node");
-}
 registerSpawnOrders(server);
 registerCommands(server);
 registerStateApi(server);
@@ -1018,10 +1116,6 @@ const start = async () => {
     server.log.info("[inbox] Diary inbox hook registered — game events now go to inbox");
   }
 
-  if (RUN_BACKGROUND_WORKERS) {
-    startWalletRegistrationWorker(server);
-  }
-
   const port = Number(process.env.PORT) || 3000;
   const host = "0.0.0.0";
   await server.listen({ port, host });
@@ -1045,15 +1139,9 @@ const start = async () => {
   if (RUN_BACKGROUND_WORKERS) {
     startAgentRuntimeReconciler(server.log);
 
-    await startCharacterBootstrapWorker(server).catch((err: any) => {
-      server.log.warn(`[character-bootstrap] Worker start failed (non-fatal): ${err.message?.slice(0, 100)}`);
-    });
-    startNameServiceWorker(server.log);
-    startPlotOperationWorker(server.log);
-    startReputationChainWorker(server.log);
-    startChainOperationReplayWorker(server.log);
+    server.log.info("[workers] Chain workers are isolated to blockchain-worker process");
   } else {
-    server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — async workers not started on this node");
+    server.log.warn("[workers] RUN_BACKGROUND_WORKERS=false — async runtime workers not started on this node");
   }
 
   await Promise.race([

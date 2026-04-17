@@ -53,10 +53,19 @@ function CharacterSection({
       }),
     [characters],
   );
+  const collapseCharacterName = React.useCallback(
+    (value: string | null | undefined): string =>
+      (value ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase(),
+    []
+  );
   const liveCharacterTokenId =
     characterProgress?.source === "live"
       ? characterProgress.characterTokenId ?? null
       : null;
+  const liveCharacterNameKey =
+    characterProgress?.source === "live"
+      ? collapseCharacterName(characterProgress.name)
+      : "";
 
   const activeCharacter = React.useMemo(() => {
     if (selectedCharacterTokenId) {
@@ -71,16 +80,46 @@ function CharacterSection({
 
     return characters[0] ?? null;
   }, [characters, liveCharacterTokenId, selectedCharacterTokenId]);
+  const activeLiveCharacter = React.useMemo(() => {
+    if (characterProgress?.source !== "live") return null;
+    if (liveCharacterTokenId) {
+      const byToken = characters.find(
+        (c) =>
+          c.tokenId === liveCharacterTokenId ||
+          (c.characterTokenId != null && c.characterTokenId === liveCharacterTokenId)
+      );
+      if (byToken) return byToken;
+    }
+    if (liveCharacterNameKey) {
+      const byName = characters.find((c) => collapseCharacterName(c.name) === liveCharacterNameKey);
+      if (byName) return byName;
+    }
+    return null;
+  }, [characterProgress?.source, characters, liveCharacterNameKey, liveCharacterTokenId, collapseCharacterName]);
 
   const selectionValue = selectedCharacterTokenId ?? liveCharacterTokenId ?? "";
 
-  const activeCharacterName = activeCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
+  const displayCharacter = characterProgress?.source === "live" ? activeLiveCharacter : activeCharacter;
+  const activeCharacterName =
+    characterProgress?.source === "live"
+      ? characterProgress.name ?? displayCharacter?.name ?? deployedCharacterName ?? "No character"
+      : displayCharacter?.name ?? characterProgress?.name ?? deployedCharacterName ?? "No character";
   const activeCharacterLevel =
-    selectedCharacterTokenId && activeCharacter
-      ? activeCharacter?.properties.level ?? null
-      : characterProgress?.level ?? activeCharacter?.properties.level ?? null;
-  const activeCharacterRace = activeCharacter?.properties.race ?? null;
-  const activeCharacterClass = activeCharacter?.properties.class ?? null;
+    characterProgress?.source === "live"
+      ? characterProgress.level ?? displayCharacter?.properties.level ?? null
+      : selectedCharacterTokenId && displayCharacter
+        ? displayCharacter.properties.level ?? null
+        : characterProgress?.level ?? displayCharacter?.properties.level ?? null;
+  const activeCharacterRace = displayCharacter?.properties.race ?? null;
+  const activeCharacterClass = displayCharacter?.properties.class ?? null;
+  const isSameAsLiveCharacter = (character: import("@/types").OwnedCharacter): boolean => {
+    if (characterProgress?.source !== "live") return false;
+    if (liveCharacterTokenId) {
+      const token = (character.characterTokenId ?? character.tokenId ?? "").trim();
+      if (token && token === String(liveCharacterTokenId).trim()) return true;
+    }
+    return collapseCharacterName(character.name) === liveCharacterNameKey;
+  };
 
   function focusCharacter() {
     if (!characterProgress) return;
@@ -100,7 +139,7 @@ function CharacterSection({
       console.warn("[switch] Ignoring non-minted/projection character selection:", char.name, char.tokenId);
       return;
     }
-    if (liveCharacterTokenId && characterTokenId === String(liveCharacterTokenId).trim()) {
+    if (isSameAsLiveCharacter(char)) {
       // Already deployed/live for this wallet — do not stop+redeploy.
       gameBus.emit("lockToPlayer", { walletAddress });
       return;
@@ -231,7 +270,7 @@ function CharacterSection({
                 </option>
               )}
               {deployableCharacters.map((c) => {
-                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
+                const isDeployed = isSameAsLiveCharacter(c);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"
@@ -297,7 +336,7 @@ function CharacterSection({
                 </option>
               )}
               {deployableCharacters.map((c) => {
-                const isDeployed = Boolean(liveCharacterTokenId && c.tokenId === liveCharacterTokenId);
+                const isDeployed = isSameAsLiveCharacter(c);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
                     ? "Minting"

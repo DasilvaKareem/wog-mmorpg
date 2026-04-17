@@ -30,10 +30,10 @@ jobs:
             APP_DIR="/opt/wog-mmorpg"
             SHARD_DIR="$APP_DIR/shard"
 
-            echo "[deploy] Updating repo to origin/main..."
+            echo "[deploy] Updating repo to origin/master..."
             cd "$APP_DIR"
             git fetch origin
-            git reset --hard origin/main
+            git reset --hard origin/master
             git clean -fd
 
             echo "[deploy] Installing shard dependencies..."
@@ -43,24 +43,27 @@ jobs:
             echo "[deploy] Building shard..."
             npm run build
 
-            echo "[deploy] Forcing workers OFF in runtime env..."
+            echo "[deploy] Configuring runtime worker split..."
             cd "$APP_DIR"
-            if grep -q '^RUN_BACKGROUND_WORKERS=' .env; then
-              sed -i 's/^RUN_BACKGROUND_WORKERS=.*/RUN_BACKGROUND_WORKERS=false/' .env
+            if grep -q '^RUN_BLOCKCHAIN_WORKERS=' .env; then
+              sed -i 's/^RUN_BLOCKCHAIN_WORKERS=.*/RUN_BLOCKCHAIN_WORKERS=false/' .env
             else
-              printf '\nRUN_BACKGROUND_WORKERS=false\n' >> .env
+              printf '\nRUN_BLOCKCHAIN_WORKERS=false\n' >> .env
             fi
 
-            echo "[deploy] Restarting PM2 app..."
+            echo "[deploy] Restarting PM2 apps..."
             pm2 delete wog-mmorpg >/dev/null 2>&1 || true
             pm2 delete wog-shard >/dev/null 2>&1 || true
-            RUN_BACKGROUND_WORKERS=false pm2 start "$SHARD_DIR/dist/server.js" --name wog-mmorpg --cwd "$SHARD_DIR"
+            pm2 delete wog-blockchain-worker >/dev/null 2>&1 || true
+            RUN_BLOCKCHAIN_WORKERS=false pm2 start "$SHARD_DIR/dist/server.js" --name wog-mmorpg --cwd "$SHARD_DIR"
+            RUN_BLOCKCHAIN_WORKERS=true pm2 start "$SHARD_DIR/dist/blockchainWorker.js" --name wog-blockchain-worker --cwd "$SHARD_DIR"
 
             echo "[deploy] Health check..."
             for i in $(seq 1 30); do
-              if curl -fsS http://127.0.0.1:3000/health >/dev/null; then
-                echo "[deploy] shard healthy"
-                pm2 env wog-mmorpg | grep RUN_BACKGROUND_WORKERS || true
+              if curl -fsS http://127.0.0.1:3000/health >/dev/null && curl -fsS http://127.0.0.1:3002/health >/dev/null; then
+                echo "[deploy] shard + blockchain-worker healthy"
+                pm2 env wog-mmorpg | grep RUN_BLOCKCHAIN_WORKERS || true
+                pm2 env wog-blockchain-worker | grep RUN_BLOCKCHAIN_WORKERS || true
                 pm2 status
                 exit 0
               fi
@@ -69,4 +72,5 @@ jobs:
 
             echo "[deploy] shard health check failed"
             pm2 logs wog-mmorpg --lines 120 --nostream || true
+            pm2 logs wog-blockchain-worker --lines 120 --nostream || true
             exit 1

@@ -68,10 +68,12 @@ gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
 echo "[5/5] Restarting PM2..."
 gcloud compute ssh $INSTANCE --zone=$ZONE --command="\
   cd $REMOTE_DIR && \
-  (pm2 restart wog-shard 2>/dev/null || pm2 restart wog-mmorpg 2>/dev/null || pm2 start $REMOTE_DIR/dist/server.js --name wog-shard --cwd $REMOTE_DIR) && \
+  (RUN_BLOCKCHAIN_WORKERS=false pm2 restart wog-shard --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=false pm2 restart wog-mmorpg --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=false pm2 start $REMOTE_DIR/dist/server.js --name wog-shard --cwd $REMOTE_DIR) && \
+  (RUN_BLOCKCHAIN_WORKERS=true pm2 restart wog-blockchain-worker --update-env 2>/dev/null || RUN_BLOCKCHAIN_WORKERS=true pm2 start $REMOTE_DIR/dist/blockchainWorker.js --name wog-blockchain-worker --cwd $REMOTE_DIR) && \
   (pm2 restart wog-mcp 2>/dev/null || pm2 start $REMOTE_DIR/mcp/dist/index.js --name wog-mcp --cwd $REMOTE_DIR/mcp) && \
   sleep 10 && \
   curl -sf http://localhost:3000/health && echo ' <- shard OK' && \
+  curl -sf http://localhost:3002/health && echo ' <- blockchain worker OK' && \
   curl -sf http://localhost:3001/health && echo ' <- MCP OK' && \
   echo 'Both servers healthy!' && \
   echo '--- Port 3000 sanity check ---' && \

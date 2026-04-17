@@ -99,6 +99,17 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_character_projections_agent
           on game.character_projections (agent_id);
 
+        create table if not exists game.character_name_claims (
+          normalized_name text primary key,
+          character_name text not null,
+          wallet_address text not null,
+          class_id text not null,
+          updated_at timestamptz not null default now()
+        );
+
+        create index if not exists idx_character_name_claims_wallet
+          on game.character_name_claims (wallet_address);
+
         -- Repair ghost rows from early bootstrap paths that wrote empty class_id.
         -- For each (wallet, normalized_name) with an empty-class_id row:
         --   1. If snapshot_json stored a classId, backfill it.

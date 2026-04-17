@@ -34,7 +34,13 @@ function randomPlayerAppearance(name: string) {
 }
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
-import { listCharacterProjectionsForWallets, type CharacterProjectionRecord } from "./characterProjectionStore.js";
+import {
+  getCharacterProjectionByNormalizedNameGlobal,
+  listCharacterProjectionsForWallets,
+  normalizeStoredCharacterName,
+  type CharacterProjectionRecord,
+} from "./characterProjectionStore.js";
+import { claimCharacterName, releaseCharacterNameClaim } from "../db/characterNameClaimStore.js";
 
 type CharacterListEntry = {
   tokenId: string;
@@ -207,7 +213,25 @@ function dedupeCharacterEntries(characters: CharacterListEntry[]): CharacterList
     }
   }
 
-  return Array.from(byName.values());
+  const dedupedByName = Array.from(byName.values());
+
+  // Final pass: collapse aliases that point to the same on-chain token.
+  // Historical migrations/renames can leave multiple display names for one token.
+  const byToken = new Map<string, CharacterListEntry>();
+  const withoutToken: CharacterListEntry[] = [];
+  for (const character of dedupedByName) {
+    const token = typeof character.characterTokenId === "string" ? character.characterTokenId.trim() : "";
+    if (!/^\d+$/.test(token)) {
+      withoutToken.push(character);
+      continue;
+    }
+    const existing = byToken.get(token);
+    if (!existing || compareCharacterEntries(existing, character) < 0) {
+      byToken.set(token, character);
+    }
+  }
+
+  return [...byToken.values(), ...withoutToken];
 }
 
 function buildCharacterEntryFromProjection(
@@ -323,7 +347,25 @@ async function resolveSavedCharacter(
   ownerWallet: string,
   custodialWallet: string | null,
   characterName: string,
+  classId?: string,
 ): Promise<{ saved: Awaited<ReturnType<typeof loadCharacter>>; savedWallet: string | null }> {
+  if (classId) {
+    const wantedKey = normalizeCharacterKey(characterName, classId);
+    const ownerSavedAll = await loadAllCharactersForWallet(ownerWallet).catch(() => []);
+    const ownerExact = ownerSavedAll.find((candidate) => normalizeCharacterKey(candidate.name, candidate.classId) === wantedKey) ?? null;
+    if (ownerExact) {
+      return { saved: ownerExact, savedWallet: ownerWallet };
+    }
+
+    if (custodialWallet) {
+      const custodialSavedAll = await loadAllCharactersForWallet(custodialWallet).catch(() => []);
+      const custodialExact = custodialSavedAll.find((candidate) => normalizeCharacterKey(candidate.name, candidate.classId) === wantedKey) ?? null;
+      if (custodialExact) {
+        return { saved: custodialExact, savedWallet: custodialWallet };
+      }
+    }
+  }
+
   const ownerSaved = await loadCharacter(ownerWallet, characterName);
   if (ownerSaved) {
     return { saved: ownerSaved, savedWallet: ownerWallet };
@@ -418,7 +460,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     try {
       const custodialWallet = await getAgentCustodialWallet(walletAddress);
       let targetWallet = walletAddress;
-      let { saved, savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, rawName);
+      let { saved, savedWallet } = await resolveSavedCharacter(walletAddress, custodialWallet, rawName, classId);
+      const sanitizedCharacterTokenId = typeof characterTokenId === "string" && /^\d+$/.test(characterTokenId.trim())
+        ? characterTokenId.trim()
+        : undefined;
 
       if (!saved) {
         if (!raceId || !classId) {
@@ -431,8 +476,8 @@ export function registerCharacterRoutes(server: FastifyInstance) {
           name: rawName,
           level: 1,
           xp: 0,
-          ...(characterTokenId ? { characterTokenId } : {}),
-          chainRegistrationStatus: characterTokenId ? "mint_confirmed" : "unregistered",
+          ...(sanitizedCharacterTokenId ? { characterTokenId: sanitizedCharacterTokenId } : {}),
+          chainRegistrationStatus: sanitizedCharacterTokenId ? "mint_confirmed" : "unregistered",
           raceId,
           classId,
           gender: appearance.gender,
@@ -460,6 +505,10 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       }
 
       if (saved.agentId) {
+        await saveCharacter(targetWallet, rawName, {
+          chainRegistrationStatus: "registered",
+          chainRegistrationLastError: "",
+        }).catch(() => {});
         return reply.send({
           ok: true,
           alreadyRegistered: true,
@@ -566,8 +615,19 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       // TODO: verify paymentProof.transactionHash on-chain
     }
 
+    const normalizedRequestedName = normalizeStoredCharacterName(name);
+    const existingGlobal = await getCharacterProjectionByNormalizedNameGlobal(normalizedRequestedName).catch(() => null);
+    if (
+      existingGlobal
+      && existingGlobal.walletAddress.toLowerCase() !== walletAddress.toLowerCase()
+    ) {
+      reply.code(409);
+      return { error: "Character name already taken" };
+    }
+
     const character = computeCharacter(name, race, className);
     const existingSave = await loadCharacter(walletAddress, character.name);
+    let shouldReleaseClaimOnError = false;
 
     const callingLabel = calling ? calling.charAt(0).toUpperCase() + calling.slice(1) : null;
     const metadata = {
@@ -584,6 +644,18 @@ export function registerCharacterRoutes(server: FastifyInstance) {
     };
 
     try {
+      const claimStatus = await claimCharacterName({
+        normalizedName: normalizedRequestedName,
+        characterName: character.name,
+        walletAddress,
+        classId: character.class.id,
+      });
+      if (claimStatus === "taken") {
+        reply.code(409);
+        return { error: "Character name already taken" };
+      }
+      shouldReleaseClaimOnError = claimStatus === "claimed";
+
       // Queue wallet onboarding, but don't block character creation on treasury setup.
       void registerWalletWithWelcomeBonus(server, walletAddress).catch((err) => {
         server.log.warn(
@@ -637,13 +709,25 @@ export function registerCharacterRoutes(server: FastifyInstance) {
       );
 
       if (!existingSave || needsCharacterMint || needsIdentityRegistration) {
-        const job = await enqueueCharacterBootstrap(walletAddress, character.name, "character:create", ["wog:a2a-enabled"]);
-        bootstrapStatus = job.status;
-        chainRegistrationStatus = resolveBootstrapChainRegistrationStatus(
-          job.status,
-          existingSave?.chainRegistrationStatus ?? "unregistered",
-        );
-        void processCharacterBootstrapJob(walletAddress, character.name, server.log);
+        const existingJob = await loadCharacterBootstrapJob(walletAddress, character.name).catch(() => null);
+        const hasActiveJob = existingJob != null
+          && !["completed", "failed_retryable", "failed_permanent"].includes(existingJob.status);
+
+        if (hasActiveJob) {
+          bootstrapStatus = existingJob.status;
+          chainRegistrationStatus = resolveBootstrapChainRegistrationStatus(
+            existingJob.status,
+            existingSave?.chainRegistrationStatus ?? "unregistered",
+          );
+        } else {
+          const job = await enqueueCharacterBootstrap(walletAddress, character.name, "character:create", ["wog:a2a-enabled"]);
+          bootstrapStatus = job.status;
+          chainRegistrationStatus = resolveBootstrapChainRegistrationStatus(
+            job.status,
+            existingSave?.chainRegistrationStatus ?? "unregistered",
+          );
+          void processCharacterBootstrapJob(walletAddress, character.name, server.log);
+        }
       } else {
         server.log.info(`[character] Existing character "${character.name}" on ${walletAddress} already has NFT + ERC-8004 identity`);
       }
@@ -679,6 +763,13 @@ export function registerCharacterRoutes(server: FastifyInstance) {
         },
       };
     } catch (err) {
+      if (shouldReleaseClaimOnError && !existingSave) {
+        await releaseCharacterNameClaim({
+          normalizedName: normalizedRequestedName,
+          walletAddress,
+          classId: character.class.id,
+        }).catch(() => {});
+      }
       server.log.error(err, `Character creation failed for ${walletAddress}`);
       reply.code(500);
       return { error: "Character creation failed" };
