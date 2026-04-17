@@ -284,11 +284,7 @@ export async function saveCharacter(
     await syncCharacterProjection(walletAddress, characterName, merged).catch((err) => {
       console.warn(`[characterProjection] Failed to sync ${walletAddress}:${characterName}: ${String(err?.message ?? err).slice(0, 140)}`);
     });
-
-    const redis = getRedis();
-    if (!redis) {
-      return;
-    }
+    return;
   }
 
   // Flatten to string values for Redis HSET
@@ -346,6 +342,7 @@ export async function loadCharacter(
     if (snapshot && Object.keys(snapshot).length > 0) {
       return snapshot as unknown as CharacterSaveData;
     }
+    return null;
   }
   let raw: Record<string, string> = {};
   const k = key(walletAddress, characterName);
@@ -418,9 +415,7 @@ export async function loadAllCharactersForWallet(
 ): Promise<CharacterSaveData[]> {
   if (isPostgresConfigured()) {
     const snapshots = await listCharacterSnapshotsForWallet(walletAddress);
-    if (snapshots.length > 0) {
-      return snapshots as unknown as CharacterSaveData[];
-    }
+    return snapshots as unknown as CharacterSaveData[];
   }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
   const seen = new Set<string>();
@@ -471,6 +466,7 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
       const professions = Array.isArray(snapshot.professions) ? snapshot.professions.map(String) : [];
       if (professions.length > 0) return professions;
     }
+    return [];
   }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
 
