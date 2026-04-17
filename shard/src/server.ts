@@ -846,45 +846,6 @@ server.register(cors, {
 });
 
 // Register subsystems
-server.addHook("onRequest", async (request, reply) => {
-  const path = getRequestPath(request.url);
-
-  if (HOTPATH_CONCURRENCY_LIMITS_ENABLED) {
-    const concurrencyRule = getConcurrencyRule(request.method, path);
-    if (concurrencyRule) {
-      const active = inFlightByRule.get(concurrencyRule.key) ?? 0;
-      if (active >= concurrencyRule.maxInFlight) {
-        reply.header("Retry-After", "1");
-        reply.code(429).send({ error: "Server busy, please retry shortly" });
-        return;
-      }
-      inFlightByRule.set(concurrencyRule.key, active + 1);
-      (request as any).__concurrencyRuleKey = concurrencyRule.key;
-    }
-  }
-
-  const rule = getRateLimitRule(request.method, request.url);
-  if (!rule) return;
-  const verdict = enforceRateLimit(request.ip, path, rule);
-  if (verdict.ok) return;
-
-  server.log.warn(
-    { ip: request.ip, method: request.method, path, rule: rule.key, retryAfterSeconds: verdict.retryAfterSeconds },
-    "[rate-limit] Request rejected",
-  );
-  reply.header("Retry-After", verdict.retryAfterSeconds.toString());
-  reply.code(429).send({ error: "Rate limit exceeded" });
-});
-server.addHook("onResponse", async (request) => {
-  const ruleKey = (request as any).__concurrencyRuleKey as string | undefined;
-  if (!ruleKey) return;
-  const active = inFlightByRule.get(ruleKey) ?? 0;
-  if (active <= 1) {
-    inFlightByRule.delete(ruleKey);
-    return;
-  }
-  inFlightByRule.set(ruleKey, active - 1);
-});
 registerAuthRoutes(server);
 registerFarcasterAuthRoutes(server);
 registerX402Routes(server);
