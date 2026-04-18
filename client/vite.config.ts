@@ -1,4 +1,5 @@
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -77,7 +78,28 @@ function createApiProxy() {
   };
 }
 
+function resolveClientBuildMeta() {
+  const safeExec = (cmd: string): string | null => {
+    try {
+      return execSync(cmd, { stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+    } catch {
+      return null;
+    }
+  };
+
+  const commit = safeExec("git rev-parse --short HEAD") ?? "unknown";
+  const branch = safeExec("git rev-parse --abbrev-ref HEAD") ?? "unknown";
+  const builtAt = new Date().toISOString();
+  const label = process.env.VITE_BUILD_LABEL?.trim() || null;
+  return { commit, branch, builtAt, label };
+}
+
+const CLIENT_BUILD_META = resolveClientBuildMeta();
+
 export default defineConfig({
+  define: {
+    __WOG_CLIENT_BUILD__: JSON.stringify(CLIENT_BUILD_META),
+  },
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
