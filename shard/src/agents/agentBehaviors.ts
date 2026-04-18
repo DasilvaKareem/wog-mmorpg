@@ -3,7 +3,7 @@
  * Each function runs one tick of the behavior and is called from AgentRunner.executeCurrentScript().
  */
 
-import { getAgentConfig, patchAgentConfig, type AgentStrategy } from "./agentConfigStore.js";
+import { getAgentConfig, patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
 import { getEntity as getWorldEntity, getOrCreateZone, pickPartyFocusTarget } from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPartyMembers, getPlayerPartyId } from "../social/partySystem.js";
@@ -1839,9 +1839,47 @@ export async function doGotoNpc(
     ctx.setEntityGotoMode(true);
 
     const config = await getAgentConfig(ctx.userWallet);
+    const scriptGoto = ctx.currentScript?.type === "goto" ? ctx.currentScript : null;
+    const resolveFocusAfterGoto = (): AgentFocus => {
+      if (config?.resumeFocusAfterGoto && config.resumeFocusAfterGoto !== "goto") {
+        return config.resumeFocusAfterGoto;
+      }
+      return "questing";
+    };
+    const clearGotoStateAndResume = async (
+      reason: string,
+      options?: { keepFocusIfNotGoto?: boolean; completed?: boolean; targetName?: string; targetId?: string },
+    ): Promise<ActionResult> => {
+      const shouldSwitchFocus =
+        !options?.keepFocusIfNotGoto || !config || config.focus === "goto";
+      const focusPatch = shouldSwitchFocus ? { focus: resolveFocusAfterGoto() } : {};
+      await patchAgentConfig(ctx.userWallet, {
+        gotoTarget: undefined,
+        gotoPosition: undefined,
+        resumeFocusAfterGoto: undefined,
+        ...focusPatch,
+      });
+      ctx.setEntityGotoMode(false);
+      ctx.setScript(null);
+      return options?.completed
+        ? actionCompleted(reason)
+        : actionBlocked(reason, {
+            failureKey: `goto:missing:${options?.targetId ?? "unknown"}`,
+            targetId: options?.targetId,
+            targetName: options?.targetName,
+            category: "strategic",
+          });
+    };
 
     // ── Position-based goto (click-to-move) ─────────────────────────────
-    const pos = config?.gotoPosition;
+    const pos = config?.gotoPosition
+      ?? (
+        scriptGoto?.gotoX != null
+          && scriptGoto?.gotoY != null
+          && scriptGoto?.gotoZoneId
+          ? { x: scriptGoto.gotoX, y: scriptGoto.gotoY, zoneId: scriptGoto.gotoZoneId }
+          : undefined
+      );
     if (pos) {
       // Wrong zone — travel there first
       if (pos.zoneId !== ctx.currentRegion) {
@@ -1871,10 +1909,7 @@ export async function doGotoNpc(
       if (dist <= 35) {
         // Arrived — clear position, idle
         void ctx.logActivity(`Arrived at waypoint (${Math.round(pos.x)}, ${Math.round(pos.y)})`);
-        ctx.setEntityGotoMode(false);
-        await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
-        ctx.setScript(null);
-        return actionCompleted("Arrived at waypoint");
+        return clearGotoStateAndResume("Arrived at waypoint", { completed: true, keepFocusIfNotGoto: true });
       }
 
       // Still walking — issue/reissue move command
@@ -1886,19 +1921,27 @@ export async function doGotoNpc(
 
       // moveToEntity returned false = close enough
       void ctx.logActivity(`Arrived at waypoint`);
-      ctx.setEntityGotoMode(false);
-      await patchAgentConfig(ctx.userWallet, { gotoPosition: undefined });
-      ctx.setScript(null);
-      return actionCompleted("Arrived at waypoint");
+      return clearGotoStateAndResume("Arrived at waypoint", { completed: true, keepFocusIfNotGoto: true });
     }
 
     // ── Entity-based goto (NPC click) ───────────────────────────────────
-    const target = config?.gotoTarget;
+    const target = config?.gotoTarget
+      ?? (
+        scriptGoto?.targetEntityId && scriptGoto?.gotoZoneId
+          ? {
+              entityId: scriptGoto.targetEntityId,
+              zoneId: scriptGoto.gotoZoneId,
+              name: scriptGoto.targetName,
+              action: scriptGoto.gotoAction,
+              profession: scriptGoto.gotoProfession,
+              techniqueId: scriptGoto.gotoTechniqueId,
+              techniqueName: scriptGoto.gotoTechniqueName,
+              questId: scriptGoto.gotoQuestId,
+            }
+          : undefined
+      );
     if (!target) {
-      ctx.setEntityGotoMode(false);
-      await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
-      ctx.setScript(null);
-      return actionCompleted("Goto target cleared");
+      return clearGotoStateAndResume("Goto target cleared", { completed: true, keepFocusIfNotGoto: true });
     }
 
     const { entityId: targetEntityId, zoneId: targetZoneId, name: targetName } = target;
@@ -1938,14 +1981,9 @@ export async function doGotoNpc(
 
     if (!targetEntity) {
       void ctx.logActivity(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`);
-      ctx.setEntityGotoMode(false);
-      await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
-      ctx.setScript(null);
-      return actionBlocked(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`, {
-        failureKey: `goto:missing:${targetEntityId}`,
+      return clearGotoStateAndResume(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`, {
         targetId: targetEntityId,
         targetName,
-        category: "strategic",
       });
     }
 
@@ -2063,12 +2101,10 @@ export async function doGotoNpc(
     }
 
     console.log(`[agent:${ctx.walletTag}] Arrived at goto target: ${targetName ?? targetEntityId}`);
-    ctx.setEntityGotoMode(false);
-    // Clear the goto target but preserve the previous focus instead of blindly resetting to questing.
-    // The runner will pick the next script based on whatever focus the user had set.
-    await patchAgentConfig(ctx.userWallet, { gotoTarget: undefined });
-    ctx.setScript(null);
-    return actionCompleted(`Arrived at ${targetName ?? targetEntityId}`);
+    return clearGotoStateAndResume(`Arrived at ${targetName ?? targetEntityId}`, {
+      completed: true,
+      keepFocusIfNotGoto: true,
+    });
   } catch (err: any) {
     ctx.setEntityGotoMode(false);
     const reason = formatAgentError(err);

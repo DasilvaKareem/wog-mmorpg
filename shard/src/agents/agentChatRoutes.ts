@@ -1909,6 +1909,13 @@ Strategy options: aggressive, balanced, defensive`;
                       actionsTaken.push(result.ok ? `[${result.reason}]` : `[no ${techClassId} trainer nearby]`);
                     } else {
                       // Navigate to trainer and learn on arrival
+                      const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+                      const resumeFocusAfterGoto =
+                        existingConfig.focus === "goto"
+                          ? (existingConfig.resumeFocusAfterGoto && existingConfig.resumeFocusAfterGoto !== "goto"
+                              ? existingConfig.resumeFocusAfterGoto
+                              : "questing")
+                          : existingConfig.focus;
                       await patchAgentConfig(authWallet, {
                         focus: "goto" as AgentFocus,
                         gotoTarget: {
@@ -1919,8 +1926,16 @@ Strategy options: aggressive, balanced, defensive`;
                           techniqueId: nextToLearn.id,
                           techniqueName: nextToLearn.name,
                         },
+                        resumeFocusAfterGoto,
                       });
-                      runner.setGotoTarget(trainerId, techEntity?.region ?? "village-square", trainerName ?? undefined, "learn-technique");
+                      runner.setGotoTarget(
+                        trainerId,
+                        techEntity?.region ?? "village-square",
+                        trainerName ?? undefined,
+                        "learn-technique",
+                        undefined,
+                        { techniqueId: nextToLearn.id, techniqueName: nextToLearn.name },
+                      );
                       configUpdated = true;
                       actionsTaken.push(`[heading to ${trainerName} to learn ${nextToLearn.name}]`);
                       server.log.info(`[agent/chat] learn_technique: goto trainer ${trainerId} to learn ${nextToLearn.id}`);
@@ -2264,10 +2279,19 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.code(400).send({ error: "entityId and zoneId are required" });
     }
 
+    const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+    const resumeFocusAfterGoto =
+      existingConfig.focus === "goto"
+        ? (existingConfig.resumeFocusAfterGoto && existingConfig.resumeFocusAfterGoto !== "goto"
+            ? existingConfig.resumeFocusAfterGoto
+            : "questing")
+        : existingConfig.focus;
+
     await patchAgentConfig(authWallet, {
       focus: "goto",
       gotoTarget: { entityId, zoneId, name, action, profession, questId },
       gotoPosition: undefined,
+      resumeFocusAfterGoto,
     });
 
     const logText = action === "learn-profession" && profession
@@ -2288,7 +2312,7 @@ Strategy options: aggressive, balanced, defensive`;
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      runner.setGotoTarget(entityId, zoneId, name, action, profession);
+      runner.setGotoTarget(entityId, zoneId, name, action, profession, { questId });
     }
 
     return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
@@ -2315,10 +2339,19 @@ Strategy options: aggressive, balanced, defensive`;
     const cx = Math.max(offset.x, Math.min(offset.x + size.width, x));
     const cy = Math.max(offset.z, Math.min(offset.z + size.height, y));
 
+    const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
+    const resumeFocusAfterGoto =
+      existingConfig.focus === "goto"
+        ? (existingConfig.resumeFocusAfterGoto && existingConfig.resumeFocusAfterGoto !== "goto"
+            ? existingConfig.resumeFocusAfterGoto
+            : "questing")
+        : existingConfig.focus;
+
     await patchAgentConfig(authWallet, {
       focus: "goto",
       gotoPosition: { x: cx, y: cy, zoneId },
       gotoTarget: undefined,
+      resumeFocusAfterGoto,
     });
 
     await appendChatMessage(authWallet, {

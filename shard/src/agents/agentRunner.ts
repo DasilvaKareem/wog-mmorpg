@@ -368,16 +368,40 @@ export class AgentRunner {
     }
   }
 
-  public setGotoTarget(entityId: string, zoneId: string, name?: string, action?: string, profession?: string): void {
+  public setGotoTarget(
+    entityId: string,
+    zoneId: string,
+    name?: string,
+    action?: string,
+    profession?: string,
+    extras?: { techniqueId?: string; techniqueName?: string; questId?: string },
+  ): void {
     const reason = action === "learn-profession" && profession
       ? `User: learn ${profession} from ${name ?? entityId}`
       : `User directed agent to ${name ?? entityId}`;
-    this.currentScript = { type: "goto", targetEntityId: entityId, targetName: name, reason };
+    this.currentScript = {
+      type: "goto",
+      targetEntityId: entityId,
+      targetName: name,
+      gotoZoneId: zoneId,
+      gotoAction: action,
+      gotoProfession: profession,
+      gotoTechniqueId: extras?.techniqueId,
+      gotoTechniqueName: extras?.techniqueName,
+      gotoQuestId: extras?.questId,
+      reason,
+    };
     this.ticksSinceLastDecision = 0;
   }
 
   public setGotoPosition(x: number, y: number, zoneId: string): void {
-    this.currentScript = { type: "goto", reason: `User: move to (${Math.round(x)}, ${Math.round(y)})` };
+    this.currentScript = {
+      type: "goto",
+      gotoX: x,
+      gotoY: y,
+      gotoZoneId: zoneId,
+      reason: `User: move to (${Math.round(x)}, ${Math.round(y)})`,
+    };
     this.ticksSinceLastDecision = 0;
   }
 
@@ -1618,6 +1642,9 @@ export class AgentRunner {
       strategy: AgentStrategy;
       gatherNodeType?: GatherPreference;
       targetZone?: string;
+      gotoTarget?: { entityId: string; zoneId: string };
+      gotoPosition?: { x: number; y: number; zoneId: string };
+      resumeFocusAfterGoto?: AgentFocus;
       objectives?: AgentObjective[];
       standingOrders?: string;
       autoProgress?: boolean;
@@ -1692,6 +1719,22 @@ export class AgentRunner {
       } catch { /* non-fatal */ }
 
       if (trigger.type === "no_script") {
+        if (config.focus === "goto" && !config.gotoTarget && !config.gotoPosition) {
+          const fallbackFocus =
+            config.resumeFocusAfterGoto && config.resumeFocusAfterGoto !== "goto"
+              ? config.resumeFocusAfterGoto
+              : "questing";
+          await patchAgentConfig(this.userWallet, {
+            focus: fallbackFocus,
+            resumeFocusAfterGoto: undefined,
+            gotoTarget: undefined,
+            gotoPosition: undefined,
+          });
+          this.currentScript = focusToScript(fallbackFocus, strategy, config.targetZone, config.gatherNodeType);
+          this.ticksOnCurrentScript = 0;
+          void this.logActivity(`[goto] Target missing; resuming ${fallbackFocus}`);
+          return;
+        }
         // Always respect the user's configured focus — never override with hardcoded behavior
         this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
         this.ticksOnCurrentScript = 0;

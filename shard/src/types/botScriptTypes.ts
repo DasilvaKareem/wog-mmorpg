@@ -40,6 +40,17 @@ export interface BotScript {
   targetEntityId?: string;
   /** goto: human-readable NPC name for activity log */
   targetName?: string;
+  /** goto: target zone for NPC/position */
+  gotoZoneId?: string;
+  /** goto: optional click-to-move world coordinates */
+  gotoX?: number;
+  gotoY?: number;
+  /** goto: optional on-arrival action details */
+  gotoAction?: string;
+  gotoProfession?: string;
+  gotoTechniqueId?: string;
+  gotoTechniqueName?: string;
+  gotoQuestId?: string;
   /** dungeon: gate entity ID to open */
   gateEntityId?: string;
   /** dungeon: gate rank */
