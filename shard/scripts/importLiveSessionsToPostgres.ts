@@ -15,7 +15,8 @@ type LiveSessionExport = {
   }>;
 };
 
-function normalizeWallet(value: string): string {
+function normalizeWallet(value: unknown): string {
+  if (typeof value !== "string") return "";
   return value.trim().toLowerCase();
 }
 
@@ -38,8 +39,10 @@ async function main() {
 
   let imported = 0;
   for (const session of sessions) {
+    const walletAddress = normalizeWallet(session.walletAddress);
+    if (!walletAddress) continue;
     await upsertLiveSession({
-      walletAddress: normalizeWallet(session.walletAddress),
+      walletAddress,
       entityId: session.entityId ?? null,
       zoneId: session.zoneId ?? "village-square",
       sessionState: session.sessionState ?? {},
