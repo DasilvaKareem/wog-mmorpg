@@ -49,6 +49,11 @@ function pickPrimaryCharacterProgress(
 ): WalletCharacterProgress | null {
   if (characters.length === 0) return null;
 
+  const parseNumericTokenId = (character: OwnedCharacter): number | null => {
+    const rawToken = String(character.characterTokenId ?? character.tokenId ?? "").trim();
+    return /^\d+$/.test(rawToken) ? Number(rawToken) : null;
+  };
+
   const [primary] = [...characters].sort((left, right) => {
     if (right.properties.level !== left.properties.level) {
       return right.properties.level - left.properties.level;
@@ -56,7 +61,14 @@ function pickPrimaryCharacterProgress(
     if (right.properties.xp !== left.properties.xp) {
       return right.properties.xp - left.properties.xp;
     }
-    return Number(left.tokenId) - Number(right.tokenId);
+    const leftToken = parseNumericTokenId(left);
+    const rightToken = parseNumericTokenId(right);
+    if (leftToken != null && rightToken != null && leftToken !== rightToken) {
+      return leftToken - rightToken;
+    }
+    if (leftToken != null && rightToken == null) return -1;
+    if (leftToken == null && rightToken != null) return 1;
+    return left.name.localeCompare(right.name);
   });
 
   const maxHp = Math.max(1, primary.properties.stats.hp ?? 1);

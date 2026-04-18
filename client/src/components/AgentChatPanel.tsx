@@ -286,7 +286,7 @@ interface AgentChatPanelProps {
 }
 
 export function AgentChatPanel({ walletAddress, currentZone, className = "" }: AgentChatPanelProps): React.ReactElement {
-  const { characters, selectedCharacterTokenId } = useWalletContext();
+  const { characters, selectedCharacterTokenId, characterProgress } = useWalletContext();
   const [messages, setMessages] = React.useState<ConsoleMessage[]>([]);
   const [input, setInput] = React.useState("");
   const [sending, setSending] = React.useState(false);
@@ -311,10 +311,36 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
   const inboxReadMarker = React.useRef<InboxReadMarker | null>(null);
   const seededServerHistory = React.useRef(false);
   const lastProgressTickRef = React.useRef(0);
+  const collapseCharacterName = React.useCallback(
+    (value: string | null | undefined): string =>
+      (value ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase(),
+    []
+  );
+  const parseNumericTokenId = React.useCallback((tokenId: string | null | undefined): number | null => {
+    const raw = String(tokenId ?? "").trim();
+    return /^\d+$/.test(raw) ? Number(raw) : null;
+  }, []);
   const primaryCharacter = React.useMemo(() => {
     if (selectedCharacterTokenId) {
       const selected = characters.find((character) => character.tokenId === selectedCharacterTokenId);
       if (selected) return selected;
+    }
+
+    const progressTokenId = characterProgress?.characterTokenId?.trim();
+    if (progressTokenId) {
+      const byProgressToken = characters.find((character) => {
+        const token = String(character.characterTokenId ?? character.tokenId ?? "").trim();
+        return token === progressTokenId;
+      });
+      if (byProgressToken) return byProgressToken;
+    }
+
+    const progressNameKey = collapseCharacterName(characterProgress?.name);
+    if (progressNameKey) {
+      const byProgressName = characters.find(
+        (character) => collapseCharacterName(character.name) === progressNameKey
+      );
+      if (byProgressName) return byProgressName;
     }
 
     const liveByToken = status?.characterTokenId
@@ -331,17 +357,33 @@ export function AgentChatPanel({ walletAddress, currentZone, className = "" }: A
       : null;
     if (liveByName) return liveByName;
 
-    const sorted = [...characters].sort((left, right) => {
+      const sorted = [...characters].sort((left, right) => {
       const leftLevel = Number(left.properties?.level ?? 1);
       const rightLevel = Number(right.properties?.level ?? 1);
       if (leftLevel !== rightLevel) return rightLevel - leftLevel;
       const leftXp = Number(left.properties?.xp ?? 0);
       const rightXp = Number(right.properties?.xp ?? 0);
       if (leftXp !== rightXp) return rightXp - leftXp;
+      const leftToken = parseNumericTokenId(left.characterTokenId ?? left.tokenId);
+      const rightToken = parseNumericTokenId(right.characterTokenId ?? right.tokenId);
+      if (leftToken != null && rightToken != null && leftToken !== rightToken) {
+        return leftToken - rightToken;
+      }
+      if (leftToken != null && rightToken == null) return -1;
+      if (leftToken == null && rightToken != null) return 1;
       return left.name.localeCompare(right.name);
     });
     return sorted[0] ?? null;
-  }, [characters, selectedCharacterTokenId, status?.characterTokenId, status?.entity?.name]);
+  }, [
+    characters,
+    selectedCharacterTokenId,
+    characterProgress?.characterTokenId,
+    characterProgress?.name,
+    status?.characterTokenId,
+    status?.entity?.name,
+    collapseCharacterName,
+    parseNumericTokenId,
+  ]);
 
   // Auto-scroll on new messages
   React.useEffect(() => {
