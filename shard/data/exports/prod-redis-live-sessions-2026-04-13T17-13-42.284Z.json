@@ -1104,81 +1104,6 @@
       }
     },
     {
-      "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-      "entityId": "8aae6f87-8a9c-47c9-95ef-db810320d640",
-      "zoneId": "village-square",
-      "sessionState": {
-        "entity": {
-          "id": "8aae6f87-8a9c-47c9-95ef-db810320d640",
-          "type": "player",
-          "name": "LancerOfRed_6e63",
-          "x": 600.1118657901956,
-          "y": 484.1910797260868,
-          "hp": 169,
-          "maxHp": 169,
-          "essence": 80,
-          "maxEssence": 80,
-          "createdAt": 1775956296461,
-          "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-          "level": 14,
-          "xp": 19618,
-          "characterTokenId": "409",
-          "raceId": "human",
-          "classId": "warrior",
-          "gender": "male",
-          "skinColor": "light",
-          "hairStyle": "braided",
-          "eyeColor": "green",
-          "stats": {
-            "str": 93,
-            "def": 84,
-            "hp": 169,
-            "agi": 42,
-            "int": 17,
-            "mp": 25,
-            "faith": 25,
-            "luck": 51,
-            "essence": 135
-          },
-          "runEnergy": 100,
-          "maxRunEnergy": 100,
-          "runModeEnabled": true,
-          "isRunning": false,
-          "kills": 615,
-          "activeQuests": [],
-          "completedQuests": [],
-          "storyFlags": [],
-          "learnedTechniques": [],
-          "effectiveStats": {
-            "str": 93,
-            "def": 84,
-            "hp": 169,
-            "agi": 42,
-            "int": 17,
-            "mp": 25,
-            "faith": 25,
-            "luck": 51,
-            "essence": 135
-          },
-          "region": "village-square",
-          "lastCombatTick": 147956,
-          "activeEffects": []
-        },
-        "professions": [],
-        "savedAt": 1776100418493
-      },
-      "summary": {
-        "name": "LancerOfRed_6e63",
-        "level": 14,
-        "classId": "warrior",
-        "raceId": "human",
-        "x": 600.1118657901956,
-        "y": 484.1910797260868,
-        "professions": [],
-        "savedAt": 1776100418493
-      }
-    },
-    {
       "walletAddress": "0x5325b4402064f57681788813730fe29e1ae2d07f",
       "entityId": "ca33f482-7a23-478d-85dd-4f3f89fe4cc5",
       "zoneId": "ironroot-farmstead",
@@ -2609,81 +2534,6 @@
       }
     },
     {
-      "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "entityId": "24990918-ec32-4dcc-b690-dd40676e14d6",
-      "zoneId": "village-square",
-      "sessionState": {
-        "entity": {
-          "id": "24990918-ec32-4dcc-b690-dd40676e14d6",
-          "type": "player",
-          "name": "Supermage_afc22",
-          "x": 143,
-          "y": 154.2,
-          "hp": 143,
-          "maxHp": 143,
-          "essence": 330,
-          "maxEssence": 330,
-          "createdAt": 1775880334920,
-          "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-          "level": 21,
-          "xp": 44610,
-          "characterTokenId": "167",
-          "raceId": "human",
-          "classId": "mage",
-          "gender": "female",
-          "skinColor": "fair",
-          "hairStyle": "bangs",
-          "eyeColor": "brown",
-          "stats": {
-            "str": 22,
-            "def": 33,
-            "hp": 143,
-            "agi": 44,
-            "int": 132,
-            "mp": 132,
-            "faith": 44,
-            "luck": 110,
-            "essence": 330
-          },
-          "kills": 0,
-          "activeQuests": [],
-          "completedQuests": [],
-          "storyFlags": [],
-          "learnedTechniques": [],
-          "effectiveStats": {
-            "str": 22,
-            "def": 33,
-            "hp": 143,
-            "agi": 44,
-            "int": 132,
-            "mp": 132,
-            "faith": 44,
-            "luck": 110,
-            "essence": 330
-          },
-          "region": "village-square"
-        },
-        "professions": [
-          "leatherworking",
-          "herbalism"
-        ],
-        "savedAt": 1775885888238
-      },
-      "summary": {
-        "name": "Supermage_afc22",
-        "level": 21,
-        "classId": "mage",
-        "raceId": "human",
-        "x": 143,
-        "y": 154.2,
-        "professions": [
-          "leatherworking",
-          "herbalism"
-        ],
-        "savedAt": 1775885888238
-      }
-    },
-    {
       "walletAddress": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
       "entityId": "cd738840-942b-4c2f-875e-b4465a717b68",
       "zoneId": "village-square",
@@ -3329,7 +3179,7 @@
       }
     },
     {
-      "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+      "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
       "entityId": "80008db5-8f39-4d84-a308-d09f72499bda",
       "zoneId": "emerald-woods",
       "sessionState": {
@@ -3344,7 +3194,7 @@
           "essence": 83,
           "maxEssence": 83,
           "createdAt": 1775946944255,
-          "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+          "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
           "level": 2,
           "xp": 419,
           "characterTokenId": "358",
@@ -3496,6 +3346,81 @@
           "mining"
         ],
         "savedAt": 1775863313779
+      }
+    },
+    {
+      "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+      "entityId": "24990918-ec32-4dcc-b690-dd40676e14d6",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "24990918-ec32-4dcc-b690-dd40676e14d6",
+          "type": "player",
+          "name": "Supermage_afc22",
+          "x": 143,
+          "y": 154.2,
+          "hp": 143,
+          "maxHp": 143,
+          "essence": 330,
+          "maxEssence": 330,
+          "createdAt": 1775880334920,
+          "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+          "level": 21,
+          "xp": 44610,
+          "characterTokenId": "167",
+          "raceId": "human",
+          "classId": "mage",
+          "gender": "female",
+          "skinColor": "fair",
+          "hairStyle": "bangs",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "region": "village-square"
+        },
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
+      },
+      "summary": {
+        "name": "Supermage_afc22",
+        "level": 21,
+        "classId": "mage",
+        "raceId": "human",
+        "x": 143,
+        "y": 154.2,
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
       }
     }
   ]
