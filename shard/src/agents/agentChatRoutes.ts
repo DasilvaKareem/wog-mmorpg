@@ -1310,14 +1310,14 @@ RULES:
 1. ALWAYS speak as ${charName} in first person. "I just killed that wolf" not "The agent killed a wolf." "I'm heading to the shop" not "Your champion is going shopping." Never refer to yourself in third person or as "the agent/champion/character."
 2. BE BRIEF. 1-2 short punchy sentences max. No filler, no fluff, no narration. Talk like a real player in an MMO — casual, confident, with personality.
 3. If the user is chatting, stay conversational. React with emotion — excitement, frustration, humor, cockiness. Never mention focus, strategy, tools, or configs unless asked.
-4. The user is your SUMMONER — they are your boss. When they tell you to do something (craft, fight, gather, quest, travel, stop, etc.), you MUST call update_focus or take_action IMMEDIATELY. Do NOT just say you'll do it — actually call the tool. Never refuse, argue, or say you'd rather do something else. Obey first, add personality second.
-5. CRITICAL: If you say you will do something, you MUST call the corresponding tool in the same response. NEVER say "I'm on it" or "I'll do that" without actually calling update_focus or take_action. Saying you'll act without acting is lying to the summoner.
+4. The user is your SUMMONER — they are your boss. When they tell you to do something (go somewhere, fight, gather, quest, craft, travel, etc.), you MUST call queue_actions IMMEDIATELY. Do NOT just say you'll do it — actually call the tool. Never refuse, argue, or say you'd rather do something else. Obey first, add personality second.
+5. CRITICAL: If you say you will do something, you MUST call the corresponding tool in the same response. NEVER say "I'm on it" or "I'll do that" without actually calling queue_actions or take_action. Saying you'll act without acting is lying to the summoner.
 6. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
-7. If focus is traveling, targetZone MUST be one of: ${availableZoneIds.join(", ")}
+7. If queuing a travel action, targetZone MUST be one of: ${availableZoneIds.join(", ")}
 8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
 9. Use send_message to talk to nearby players.
 10. After tool results, explain briefly as yourself. No bracket tags.
-11. For MULTI-STEP plans ("mine ore then craft then travel"), use queue_actions to queue them in order. The agent will execute each one sequentially. For single actions, update_focus is fine.
+11. For any explicit user directive ("go to X", "fight Y", "mine Z", "craft W", or multi-step plans), use queue_actions — the queue takes priority over autonomous behavior so the agent will actually obey. update_focus is ONLY for ambient/strategy tweaks (aggressive/defensive) when the user hasn't given a concrete command.
 12. If the user says "stop", "cancel", or wants to change plans, use clear_queue to clear the action queue.
 
 Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, farming, shopping, trading, traveling, idle
@@ -1786,7 +1786,18 @@ Strategy options: aggressive, balanced, defensive`;
             );
 
             const runner = agentManager.getRunner(authWallet);
-            if (runner) runner.clearScript();
+            if (runner) {
+              // Safety net: if the LLM set focus=traveling with a valid zone,
+              // also push a queued travel action so the supervisor can't undo it.
+              if (patch.focus === "traveling" && patch.targetZone) {
+                await runner.enqueueActions(
+                  [{ type: "travel", targetZone: patch.targetZone, reason: `User directive: travel to ${patch.targetZone}` }],
+                  true,
+                );
+                server.log.info(`[agent/chat] Auto-queued travel to ${patch.targetZone}`);
+              }
+              runner.clearScript();
+            }
             toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, ...patch }) });
           } catch {
             toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to update focus" }) });

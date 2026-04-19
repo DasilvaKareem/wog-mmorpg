@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
@@ -12,6 +13,15 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: isProd ? "/xr/" : "./",
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(process.cwd(), "index.html"),
+          controller: resolve(process.cwd(), "controller.html"),
+          display: resolve(process.cwd(), "display.html"),
+        },
+      },
+    },
     server: {
       port: 5174,
       proxy: {

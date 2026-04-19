@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>World of Geneva — XR</title>
+  <title>World of Geneva — Controller</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -89,7 +89,6 @@
     }
     #vr-button:hover { background: #3b7; }
 
-    /* Mobile landscape: scale HUD to 50%. Phones land in this bucket (height ~400-500px); tablets and desktops stay full-size. */
     @media (orientation: landscape) and (max-height: 500px) {
       #hud,
       #controls-help,
@@ -110,27 +109,22 @@
       #vr-button {
         transform: scale(0.5) !important;
       }
-      /* Top-left anchored */
       #hud,
       #player-panel,
       #vitals-panel { transform-origin: top left !important; }
-      /* Bottom-left anchored */
       #controls-help,
       #chat-log,
       #agent-chat { transform-origin: bottom left !important; }
-      /* Top-right anchored */
       #intent-mode-badge,
       #intent-tooltip,
       #minimap,
       #animation-lab-panel,
       #equip-tuner,
       #quest-panel { transform-origin: top right !important; }
-      /* Bottom-right anchored */
       #bag-panel,
       #skills-panel,
       #run-panel,
       #vr-button { transform-origin: bottom right !important; }
-      /* Bottom-center (preserves existing translateX(-50%)) */
       #lock-indicator {
         transform: translateX(-50%) scale(0.5) !important;
         transform-origin: bottom center !important;

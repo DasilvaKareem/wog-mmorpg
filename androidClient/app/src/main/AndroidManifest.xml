@@ -35,7 +35,15 @@
             </intent-filter>
         </activity>
 
-        <!-- WebView game screen -->
+        <!-- Native login screen (email OTP via thirdweb) -->
+        <activity
+            android:name=".LoginActivity"
+            android:exported="false"
+            android:theme="@style/Theme.WoG"
+            android:windowSoftInputMode="adjustResize"
+            android:screenOrientation="portrait" />
+
+        <!-- Full-screen WebView game screen -->
         <activity
             android:name=".GameActivity"
             android:exported="false"

@@ -28,6 +28,7 @@ export class ActionBar {
       html += `<button class="ab-btn" data-id="${btn.id}" title="${btn.label} (${btn.key})">`;
       html += `<span class="ab-icon">${btn.icon}</span>`;
       html += `<span class="ab-key">${btn.key}</span>`;
+      html += `<span class="ab-badge" data-id="${btn.id}" hidden></span>`;
       html += `</button>`;
     }
     this.container.innerHTML = html;
@@ -38,6 +39,28 @@ export class ActionBar {
       const btn = this.buttons.find((b) => b.id === id);
       if (btn) el.addEventListener("click", btn.onClick);
     });
+  }
+
+  /** Show a red count badge on a button; pass 0 to hide. */
+  setBadge(id: string, count: number) {
+    const badge = this.container.querySelector<HTMLElement>(`.ab-badge[data-id="${id}"]`);
+    if (!badge) return;
+    if (count <= 0) {
+      badge.hidden = true;
+      badge.textContent = "";
+    } else {
+      badge.hidden = false;
+      badge.textContent = count > 99 ? "99+" : String(count);
+    }
+  }
+
+  /** Play a brief pulse ring on a button to draw attention. */
+  pulse(id: string) {
+    const btn = this.container.querySelector<HTMLElement>(`.ab-btn[data-id="${id}"]`);
+    if (!btn) return;
+    btn.classList.remove("ab-pulse");
+    void btn.offsetWidth;
+    btn.classList.add("ab-pulse");
   }
 
   private injectStyles() {
@@ -89,6 +112,30 @@ export class ActionBar {
         font: bold 8px monospace;
         color: rgba(68, 255, 136, 0.5);
         line-height: 1;
+      }
+
+      .ab-badge {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        background: #e33;
+        color: #fff;
+        border-radius: 8px;
+        font: bold 10px/16px monospace;
+        text-align: center;
+        pointer-events: none;
+        box-shadow: 0 0 0 2px rgba(10, 16, 28, 0.95);
+      }
+
+      .ab-btn.ab-pulse {
+        animation: ab-pulse 0.65s ease-out;
+      }
+      @keyframes ab-pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(255, 80, 80, 0.75); }
+        100% { box-shadow: 0 0 0 16px rgba(255, 80, 80, 0); }
       }
     `;
     document.head.appendChild(style);

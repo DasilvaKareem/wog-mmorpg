@@ -358,6 +358,11 @@ export class AgentChat {
     return !this.root.classList.contains("chat-hidden");
   }
 
+  /** Whether the chat is expanded (user is actively reading/typing) */
+  isExpanded(): boolean {
+    return this.expanded;
+  }
+
   /** Show the chat panel (does not auto-expand input) */
   show() {
     this.root.classList.remove("chat-hidden");

@@ -10,6 +10,7 @@ export class DesktopControls {
   private distance = 15;
   private target = new THREE.Vector3(0, 0, 0);
   private landingMode = false;
+  private inputEnabled = true;
   private autoOrbitSpeed = 0;
 
   private isDragging = false;
@@ -76,6 +77,18 @@ export class DesktopControls {
     this.isDragging = false;
     this.dragButton = null;
     this.keys.clear();
+  }
+
+  setInputEnabled(enabled: boolean) {
+    this.inputEnabled = enabled;
+    if (!enabled) {
+      this.isDragging = false;
+      this.dragButton = null;
+      this.activeTouchId = null;
+      this.pinchStartDist = 0;
+      this.touchMoved = false;
+      this.keys.clear();
+    }
   }
 
   /** When true, WASD is disabled (camera follows a locked entity) */
@@ -174,6 +187,7 @@ export class DesktopControls {
   // ── Event handlers ──
 
   private onMouseDown = (e: MouseEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
     if (e.button === 2) {
       this.isDragging = true;
@@ -183,6 +197,7 @@ export class DesktopControls {
   };
 
   private onMouseMove = (e: MouseEvent) => {
+    if (!this.inputEnabled) return;
     if (!this.isDragging) return;
     const dx = e.clientX - this.lastMouse.x;
     const dy = e.clientY - this.lastMouse.y;
@@ -197,6 +212,7 @@ export class DesktopControls {
   };
 
   private onMouseUp = (e: MouseEvent) => {
+    if (!this.inputEnabled) return;
     if (e.button === this.dragButton) {
       this.isDragging = false;
       this.dragButton = null;
@@ -204,6 +220,7 @@ export class DesktopControls {
   };
 
   private onWheel = (e: WheelEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
     e.preventDefault();
     this.distance = Math.max(5, Math.min(50, this.distance + e.deltaY * 0.02));
@@ -211,11 +228,13 @@ export class DesktopControls {
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
     this.keys.add(e.key.toLowerCase());
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
     this.keys.delete(e.key.toLowerCase());
   };
@@ -223,6 +242,7 @@ export class DesktopControls {
   // ── Touch handlers (mobile orbit + pinch-zoom; tap passes through as click) ──
 
   private onTouchStart = (e: TouchEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
     if (e.touches.length === 1) {
       const t = e.touches[0];
@@ -244,6 +264,7 @@ export class DesktopControls {
   };
 
   private onTouchMove = (e: TouchEvent) => {
+    if (!this.inputEnabled) return;
     if (this.landingMode) return;
 
     if (e.touches.length === 2 && this.pinchStartDist > 0) {
@@ -281,10 +302,12 @@ export class DesktopControls {
   };
 
   private onGesture = (e: Event) => {
+    if (!this.inputEnabled) return;
     e.preventDefault();
   };
 
   private onTouchEnd = (e: TouchEvent) => {
+    if (!this.inputEnabled) return;
     if (this.touchMoved) {
       // Suppress the synthesized click after a drag-orbit.
       e.preventDefault();

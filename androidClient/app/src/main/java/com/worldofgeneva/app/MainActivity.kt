@@ -127,7 +127,7 @@ fun LandingScreen() {
             // Enter button
             Button(
                 onClick = {
-                    context.startActivity(Intent(context, GameActivity::class.java))
+                    context.startActivity(Intent(context, LoginActivity::class.java))
                 },
                 modifier = Modifier
                     .fillMaxWidth()

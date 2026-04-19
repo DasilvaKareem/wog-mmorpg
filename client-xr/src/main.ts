@@ -1,6 +1,7 @@
 // Global error display so we can see what breaks on prod
 window.onerror = (msg, src, line, col, err) => {
   const el = document.createElement("pre");
+  el.dataset.debugOverlay = "true";
   el.style.cssText = "position:fixed;top:0;left:0;right:0;background:#200;color:#f88;padding:12px;font:12px monospace;z-index:9999;white-space:pre-wrap";
   el.textContent = `${msg}\n${src}:${line}:${col}\n${err?.stack ?? ""}`;
   document.body.appendChild(el);
@@ -35,7 +36,7 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter } from "./api.js";
+import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters } from "./api.js";
 import { getAuthToken, getCachedToken } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -43,7 +44,14 @@ import { GauntletCursor } from "./hud/GauntletCursor.js";
 import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 
 let gauntletCursor: GauntletCursor | null = null;
-const isAnimationLab = new URLSearchParams(window.location.search).get("animlab") === "1";
+const urlParams = new URLSearchParams(window.location.search);
+const isAnimationLab = urlParams.get("animlab") === "1";
+const pageMode = document.body.dataset.appMode;
+const isDisplayMode = pageMode === "display" || /\/display\.html$/i.test(window.location.pathname) || urlParams.get("mode") === "display";
+const followWalletAddress = urlParams.get("wallet")?.trim().toLowerCase() || urlParams.get("followWallet")?.trim().toLowerCase() || "";
+const followEntityId = urlParams.get("entityId")?.trim() || urlParams.get("followEntityId")?.trim() || "";
+const displayFollowTarget = followWalletAddress || followEntityId;
+document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
 // Equipment tuner — hidden by default, press P to toggle
@@ -129,6 +137,7 @@ const runPanel = new RunPanel({
 });
 
 const controls = new DesktopControls(camera, renderer.domElement);
+controls.setInputEnabled(!isDisplayMode);
 controls.collisionCheck = (x, z) => world.isWalkable(x, z);
 const inspector = new EntityInspector({
   canActOnPlayer: (entity) => {
@@ -190,6 +199,7 @@ const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const agentChat = new AgentChat();
 const charSelect = !isAnimationLab
+  && !isDisplayMode
   ? new CharacterSelect({
     charAssets: world.getCharacterAssets(),
     onCharacterReady: (detail: CharacterReadyDetail) => {
@@ -223,6 +233,7 @@ const charSelect = !isAnimationLab
   : null;
 
 const landing = !isAnimationLab
+  && !isDisplayMode
   ? new LandingPage({
     onEnterWorld: ({ walletAddress }) => {
       if (walletAddress) {
@@ -276,6 +287,7 @@ const hudFps = document.getElementById("hud-fps")!;
 const hudLock = document.getElementById("lock-indicator")!;
 
 function setGameplayHudVisible(visible: boolean) {
+  if (isDisplayMode) visible = false;
   gauntletCursor?.setEnabled(visible);
   const ids = [
     "hud",
@@ -308,7 +320,7 @@ let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownEntityId: string | null = null;
 let desiredRunMode: boolean | null = null;
-let autoLockEnabled = false;
+let autoLockEnabled = isDisplayMode;
 let manualUnlockUntilMs = 0;
 let isPollingNearbyZones = false;
 let isPollingActivePlayers = false;
@@ -488,6 +500,33 @@ function tryLockOwnCharacter(activePlayers: ActivePlayer[]) {
   }
 }
 
+function tryFollowDisplayTarget(activePlayers: ActivePlayer[]) {
+  if (!isDisplayMode) return;
+  let target: ActivePlayer | undefined;
+  if (followEntityId) {
+    target = activePlayers.find((player) => player.id === followEntityId);
+  } else if (followWalletAddress) {
+    target = activePlayers.find((player) => player.walletAddress?.toLowerCase() === followWalletAddress);
+  }
+  if (!target) return;
+
+  ownEntityId = target.id;
+
+  const zoneCenter = world.getZoneCenter(target.zoneId);
+  if (zoneCenter) {
+    controls.setTarget(zoneCenter.x, 0, zoneCenter.z);
+  }
+
+  const pos = entities.getEntityPosition(target.id);
+  if (pos) {
+    controls.setTarget(pos.x, pos.y, pos.z);
+  }
+
+  if (Date.now() >= manualUnlockUntilMs && lockedEntityId !== target.id) {
+    lockOn(target.id);
+  }
+}
+
 /**
  * Full sequence: call /agent/status to get entityId + zoneId,
  * move camera to their zone, poll that zone, then lock on.
@@ -501,44 +540,34 @@ async function findOwnCharacter() {
     return;
   }
 
-  // 1. Get entity ID + zone from agent status endpoint
   try {
-    const res = await fetch(`${API_BASE}/agent/status/${ownWalletAddress}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      console.log("[autolock] agent/status failed:", res.status);
-      return;
-    }
-    const status = await res.json();
-    if (!status.entityId || !status.zoneId) {
-      console.log("[autolock] No character deployed. entityId:", status.entityId, "zoneId:", status.zoneId);
+    const data = await fetchCharacters(ownWalletAddress, token);
+    const liveEntity = data?.liveEntity;
+    if (!liveEntity?.id || !liveEntity.zoneId) {
+      console.log("[autolock] No live entity for wallet", ownWalletAddress);
       return;
     }
 
-    console.log("[autolock] Found entity:", status.entityId, "zone:", status.zoneId, "name:", status.entity?.name);
-    ownEntityId = status.entityId;
-    agentChat.setEntityId(status.entityId);
-    hudLock.textContent = `FINDING: ${status.entity?.name ?? "character"}`;
+    console.log("[autolock] Found entity:", liveEntity.id, "zone:", liveEntity.zoneId, "name:", liveEntity.name);
+    ownEntityId = liveEntity.id;
+    agentChat.setEntityId(liveEntity.id);
+    hudLock.textContent = `FINDING: ${liveEntity.name ?? "character"}`;
     hudLock.style.display = "block";
 
-    // 2. Move camera to their zone
-    const zoneCenter = world.getZoneCenter(status.zoneId);
+    const zoneCenter = world.getZoneCenter(liveEntity.zoneId);
     if (zoneCenter) {
       controls.setTarget(zoneCenter.x, 0, zoneCenter.z);
       world.updateLoading(zoneCenter.x, zoneCenter.z);
     }
 
-    // 3. Poll that zone to load the entity
     await pollNearbyZones();
 
-    // 4. Move camera to entity but only lock if autoLockEnabled
-    const pos = entities.getEntityPosition(status.entityId);
+    const pos = entities.getEntityPosition(liveEntity.id);
     if (pos) {
       controls.setTarget(pos.x, pos.y, pos.z);
       if (autoLockEnabled) {
-        lockOn(status.entityId);
-        console.log("[autolock] Locked to", status.entity?.name);
+        lockOn(liveEntity.id);
+        console.log("[autolock] Locked to", liveEntity.name);
       } else {
         console.log("[autolock] Found character, camera moved (spacebar to lock)");
       }
@@ -715,8 +744,15 @@ actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", o
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => {
   questPanel.toggle();
 }});
+let unreadChat = 0;
+const clearChatUnread = () => {
+  if (unreadChat === 0) return;
+  unreadChat = 0;
+  actionBar.setBadge("chat", 0);
+};
 actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => {
   agentChat.toggle();
+  if (agentChat.isExpanded()) clearChatUnread();
 }});
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
   playerPanel.toggle();
@@ -737,6 +773,9 @@ const npcDialog = new NpcDialog({
 
 if (landing) {
   controls.setLandingMode(true);
+  setGameplayHudVisible(false);
+} else if (isDisplayMode) {
+  controls.setLandingMode(false);
   setGameplayHudVisible(false);
 }
 
@@ -813,6 +852,13 @@ async function pollNearbyZones() {
       effects.processEvents(newEvents);
       entities.processEvents(newEvents);
       intentLines.processEvents(newEvents);
+      if (agentChat.isExpanded()) {
+        clearChatUnread();
+      } else {
+        unreadChat += newEvents.length;
+        actionBar.setBadge("chat", unreadChat);
+        actionBar.pulse("chat");
+      }
     }
 
     effects.syncActiveEffects(merged);
@@ -862,6 +908,7 @@ async function pollActivePlayers() {
     if (!data) return;
     playerPanel.update(data.players);
     landing?.setOnlineCount(data.count);
+    tryFollowDisplayTarget(data.players);
     tryLockOwnCharacter(data.players);
   } finally {
     isPollingActivePlayers = false;
@@ -964,6 +1011,7 @@ gauntletCursor = new GauntletCursor(
 gauntletCursor.setEnabled(false);
 
 renderer.domElement.addEventListener("click", (e) => {
+  if (isDisplayMode) return;
   if (landing?.isActive()) return;
   if (isAnimationLab) return;
   ndcMouse.set(
@@ -1143,6 +1191,7 @@ if (navigator.xr) {
 
 // Keyboard shortcuts
 window.addEventListener("keydown", (e) => {
+  if (isDisplayMode) return;
   if (landing?.isActive()) return;
   // Don't intercept keys while typing in agent chat or NPC dialog
   if (agentChat.isFocused()) return;
@@ -1165,6 +1214,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Enter" || e.key === "t" || e.key === "T") {
     e.preventDefault();
     agentChat.expand();
+    clearChatUnread();
     return;
   }
   if (e.key === "r" || e.key === "R") {
@@ -1297,6 +1347,9 @@ async function init() {
   }
 
   console.log("WoG XR Client starting (unified world)...");
+  if (isDisplayMode) {
+    console.log("[display] Watch-only mode enabled", displayFollowTarget || "(no follow target)");
+  }
 
   // Load world layout + pick initial zone in parallel
   const [layout, initialZone] = await Promise.all([
