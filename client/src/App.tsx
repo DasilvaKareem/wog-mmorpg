@@ -141,6 +141,27 @@ function RouteFallback(): React.ReactElement {
   );
 }
 
+function ClientBuildInfoPage(): React.ReactElement {
+  const payload = {
+    app: "wog-2d-client",
+    ...__WOG_CLIENT_BUILD__,
+  };
+
+  return (
+    <div className="min-h-screen bg-[#060d12] text-[#cfd8ff] p-6">
+      <div className="mx-auto max-w-4xl">
+        <h1 className="text-[18px] font-semibold tracking-wide mb-4">Client Build Info</h1>
+        <p className="text-[12px] text-[#8fa2d9] mb-4">
+          Use this endpoint-like page to verify the live deployed client build.
+        </p>
+        <pre className="rounded border border-[#253250] bg-[#0b1422] p-4 text-[12px] overflow-auto whitespace-pre-wrap">
+{JSON.stringify(payload, null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
 function WorldConnectPrompt({
   title,
   shortcut,
@@ -898,6 +919,7 @@ function AppShell(): React.ReactElement {
               <Route path="/champions" element={<ChampionsPage />} />
               <Route path="/pricing" element={<PricingPage />} />
               <Route path="/admin" element={<AdminDashboardPage />} />
+              <Route path="/__build" element={<ClientBuildInfoPage />} />
               <Route path="/privacy" element={<PrivacyPolicyPage />} />
               <Route path="/terms" element={<TermsOfUsePage />} />
               <Route path="*" element={<LandingPage />} />

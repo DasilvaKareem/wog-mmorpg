@@ -45,14 +45,7 @@ function CharacterSection({
 }): React.ReactElement {
   const [switching, setSwitching] = React.useState(false);
   const [showSwapMenu, setShowSwapMenu] = React.useState(false);
-  const deployableCharacters = React.useMemo(
-    () =>
-      characters.filter((character) => {
-        const token = (character.characterTokenId ?? character.tokenId ?? "").trim();
-        return /^\d+$/.test(token);
-      }),
-    [characters],
-  );
+  const selectableCharacters = React.useMemo(() => characters, [characters]);
   const collapseCharacterName = React.useCallback(
     (value: string | null | undefined): string =>
       (value ?? "").replace(/\s+the\s+\w+$/i, "").trim().toLowerCase(),
@@ -123,6 +116,11 @@ function CharacterSection({
 
   function focusCharacter() {
     if (!characterProgress) return;
+    // Prefer deterministic entity-id focus when we have live entity context.
+    if (characterProgress.source === "live" && characterProgress.id) {
+      gameBus.emit("focusEntity", { entityId: characterProgress.id });
+      return;
+    }
     if (characterProgress.zoneId) {
       gameBus.emit("followPlayer", { zoneId: characterProgress.zoneId, walletAddress });
       return;
@@ -134,11 +132,10 @@ function CharacterSection({
     if (switching) return;
     const char = characters.find((c) => c.tokenId === tokenId);
     if (!char) return;
-    const characterTokenId = (char.characterTokenId ?? char.tokenId ?? "").trim();
-    if (!/^\d+$/.test(characterTokenId)) {
-      console.warn("[switch] Ignoring non-minted/projection character selection:", char.name, char.tokenId);
-      return;
-    }
+    const characterTokenIdRaw = (char.characterTokenId ?? char.tokenId ?? "").trim();
+    // Projection characters have non-numeric IDs. Keep them deployable:
+    // backend will resolve by name and queue bootstrap txs if needed.
+    const characterTokenId = /^\d+$/.test(characterTokenIdRaw) ? characterTokenIdRaw : undefined;
     if (isSameAsLiveCharacter(char)) {
       // Already deployed/live for this wallet — do not stop+redeploy.
       gameBus.emit("lockToPlayer", { walletAddress });
@@ -250,7 +247,7 @@ function CharacterSection({
               </button>
             )}
           </div>
-          {showSwapMenu && deployableCharacters.length > 0 && (
+          {showSwapMenu && selectableCharacters.length > 0 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
               value={selectionValue}
@@ -269,7 +266,7 @@ function CharacterSection({
                   {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
                 </option>
               )}
-              {deployableCharacters.map((c) => {
+              {selectableCharacters.map((c) => {
                 const isDeployed = isSameAsLiveCharacter(c);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"
@@ -316,7 +313,7 @@ function CharacterSection({
               </button>
             )}
           </div>
-          {showSwapMenu && deployableCharacters.length > 0 && (
+          {showSwapMenu && selectableCharacters.length > 0 && (
             <select
               className="w-full border-2 border-[#29334d] bg-[#0a0f1e] px-1 py-0.5 text-[8px] text-[#f1f5ff] outline-none focus:border-[#54f28b]"
               value={selectionValue}
@@ -335,7 +332,7 @@ function CharacterSection({
                   {deployedCharacterName ? `${deployedCharacterName} (active)` : "None"}
                 </option>
               )}
-              {deployableCharacters.map((c) => {
+              {selectableCharacters.map((c) => {
                 const isDeployed = isSameAsLiveCharacter(c);
                 const pendingStatus =
                   c.bootstrapStatus === "queued" || c.bootstrapStatus === "pending_mint"

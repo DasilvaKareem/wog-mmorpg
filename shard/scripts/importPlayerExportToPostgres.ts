@@ -86,7 +86,8 @@ type ExportPayload = {
   parties: ExportedParty[];
 };
 
-function normalizeWallet(value: string): string {
+function normalizeWallet(value: unknown): string {
+  if (typeof value !== "string") return "";
   return value.trim().toLowerCase();
 }
 
@@ -195,18 +196,19 @@ async function main() {
   let importedCharacters = 0;
   let skippedCharacters = 0;
   for (const character of payload.characters ?? []) {
-    if (!hasRenderableCharacterFields(character)) {
+    const characterWallet = normalizeWallet(character.walletAddress);
+    if (!characterWallet || !hasRenderableCharacterFields(character)) {
       skippedCharacters += 1;
       if (skippedCharacters <= 10) {
         console.warn(
-          `[import] skipping incomplete character ${normalizeWallet(character.walletAddress)}:${character.characterName}`
+          `[import] skipping incomplete character ${characterWallet || "<invalid-wallet>"}:${character.characterName}`
         );
       }
       continue;
     }
     const snapshot = buildCharacterSnapshot(character);
     await upsertCharacterProjection({
-      walletAddress: normalizeWallet(character.walletAddress),
+      walletAddress: characterWallet,
       character: {
         name: snapshot.name,
         classId: snapshot.classId,
@@ -225,12 +227,12 @@ async function main() {
       source: "prod-redis-import",
     });
     await replaceProfessionStateForWallet({
-      walletAddress: normalizeWallet(character.walletAddress),
+      walletAddress: characterWallet,
       professions: snapshot.professions ?? [],
       skills: snapshot.professionSkills ?? {},
     });
     await replaceEquipmentState({
-      walletAddress: normalizeWallet(character.walletAddress),
+      walletAddress: characterWallet,
       characterName: snapshot.name,
       equipment: snapshot.equipment,
     });
@@ -260,7 +262,9 @@ async function main() {
   let importedRegisteredWallets = 0;
   if (includeRegisteredWallets) {
     for (const wallet of payload.registeredWallets ?? []) {
-      await putWalletRuntimeState(`wallet:registered:${normalizeWallet(wallet)}`, "1");
+      const normalizedWallet = normalizeWallet(wallet);
+      if (!normalizedWallet) continue;
+      await putWalletRuntimeState(`wallet:registered:${normalizedWallet}`, "1");
       importedRegisteredWallets += 1;
     }
     console.log(`[import] registered wallets ${importedRegisteredWallets}/${payload.registeredWallets.length}`);
@@ -272,12 +276,16 @@ async function main() {
 
   let importedFriends = 0;
   for (const record of payload.friends ?? []) {
+    const walletAddress = normalizeWallet(record.walletAddress);
+    if (!walletAddress) continue;
     await replaceFriends(
-      normalizeWallet(record.walletAddress),
-      (record.friends ?? []).map((entry) => ({
-        wallet: normalizeWallet(entry.wallet),
-        addedAt: Number(entry.addedAt ?? 0) || 0,
-      }))
+      walletAddress,
+      (record.friends ?? [])
+        .map((entry) => ({
+          wallet: normalizeWallet(entry.wallet),
+          addedAt: Number(entry.addedAt ?? 0) || 0,
+        }))
+        .filter((entry) => entry.wallet.length > 0)
     );
     importedFriends += 1;
   }
@@ -285,10 +293,13 @@ async function main() {
 
   let importedParties = 0;
   for (const party of payload.parties ?? []) {
+    const leaderWallet = normalizeWallet(party.leaderWallet);
+    if (!leaderWallet) continue;
+    const memberWallets = (party.memberWallets ?? []).map(normalizeWallet).filter((wallet) => wallet.length > 0);
     await savePersistedParty({
       id: party.id,
-      leaderWallet: normalizeWallet(party.leaderWallet),
-      memberWallets: (party.memberWallets ?? []).map(normalizeWallet),
+      leaderWallet,
+      memberWallets,
       zoneId: party.zoneId ?? "village-square",
       createdAt: Number(party.createdAt ?? 0) || Date.now(),
       shareXp: Boolean(party.shareXp),

@@ -88,6 +88,8 @@ export interface AgentConfig {
   gotoTarget?: { entityId: string; zoneId: string; name?: string; action?: string; profession?: string; techniqueId?: string; techniqueName?: string; questId?: string };
   /** Set when user clicks empty ground to move agent to a position. Cleared on arrival. */
   gotoPosition?: { x: number; y: number; zoneId: string };
+  /** Focus to restore after one-shot goto finishes or is cleared. */
+  resumeFocusAfterGoto?: AgentFocus;
   lastUpdated: number;
   /** Pricing tier — defaults to "free" for backward compat */
   tier?: AgentTier;

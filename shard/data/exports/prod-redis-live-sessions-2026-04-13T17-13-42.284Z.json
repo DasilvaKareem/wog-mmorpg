@@ -17,7 +17,7 @@
         "entity": {
           "id": "255152ee-ef95-49b0-9817-6bfe39cd2e9b",
           "type": "player",
-          "name": "bartholomew",
+          "name": "bartholomew_f033",
           "x": 1600,
           "y": -320,
           "hp": 108,
@@ -106,7 +106,7 @@
         "savedAt": 1775863311869
       },
       "summary": {
-        "name": "bartholomew",
+        "name": "bartholomew_f033",
         "level": 13,
         "classId": "warlock",
         "raceId": "elf",
@@ -126,7 +126,7 @@
         "entity": {
           "id": "f0d6aae3-3ad0-4643-a2e7-84a83790041d",
           "type": "player",
-          "name": "Boellis",
+          "name": "Boellis_682d",
           "x": 306,
           "y": 260,
           "hp": 122,
@@ -213,7 +213,7 @@
         "savedAt": 1776100418615
       },
       "summary": {
-        "name": "Boellis",
+        "name": "Boellis_682d",
         "level": 6,
         "classId": "paladin",
         "raceId": "beastkin",
@@ -235,7 +235,7 @@
         "entity": {
           "id": "79338572-5bd4-4199-910a-da2206c5d52d",
           "type": "player",
-          "name": "TheSpiralArchitect",
+          "name": "TheSpiralArchi_10f1",
           "x": 315.97458993343247,
           "y": 289.58094917087266,
           "hp": 285,
@@ -322,7 +322,7 @@
         "savedAt": 1775863311686
       },
       "summary": {
-        "name": "TheSpiralArchitect",
+        "name": "TheSpiralArchi_10f1",
         "level": 35,
         "classId": "monk",
         "raceId": "beastkin",
@@ -343,7 +343,7 @@
         "entity": {
           "id": "0dfcf1e3-9af3-4a8c-a23f-cc6cba4ffb42",
           "type": "player",
-          "name": "millis",
+          "name": "millis_5856",
           "x": 291.26330032585463,
           "y": 495.5201424529332,
           "hp": 153,
@@ -444,7 +444,7 @@
         "savedAt": 1776100417869
       },
       "summary": {
-        "name": "millis",
+        "name": "millis_5856",
         "level": 19,
         "classId": "rogue",
         "raceId": "beastkin",
@@ -466,7 +466,7 @@
         "entity": {
           "id": "5fdf04ea-1d37-4c1f-8f9b-a0b66e0b24e4",
           "type": "player",
-          "name": "neo7",
+          "name": "neo7_0dc9",
           "x": 140.26194498817736,
           "y": 158.58648389901654,
           "hp": 113,
@@ -521,7 +521,7 @@
         "savedAt": 1775863314487
       },
       "summary": {
-        "name": "neo7",
+        "name": "neo7_0dc9",
         "level": 11,
         "classId": "rogue",
         "raceId": "human",
@@ -539,7 +539,7 @@
         "entity": {
           "id": "cb4740d7-8775-48b5-8cb0-8c4502b4abea",
           "type": "player",
-          "name": "saf",
+          "name": "saf_0f89",
           "x": 307.99509904002434,
           "y": 267.20294057598534,
           "hp": 144,
@@ -602,7 +602,7 @@
         "savedAt": 1775863312608
       },
       "summary": {
-        "name": "saf",
+        "name": "saf_0f89",
         "level": 10,
         "classId": "warrior",
         "raceId": "human",
@@ -783,7 +783,7 @@
         "entity": {
           "id": "420a0062-61e2-4f55-8702-075c14e7e357",
           "type": "player",
-          "name": "Preyanshu",
+          "name": "Preyanshu_9021",
           "x": 7,
           "y": -4.2,
           "hp": 100,
@@ -830,7 +830,7 @@
         "savedAt": 1775863313591
       },
       "summary": {
-        "name": "Preyanshu",
+        "name": "Preyanshu_9021",
         "level": 1,
         "classId": "warrior",
         "raceId": "human",
@@ -848,7 +848,7 @@
         "entity": {
           "id": "baf4d124-a801-430a-bab5-a25265f571e1",
           "type": "player",
-          "name": "PercyJackson",
+          "name": "PercyJackson_c0b7",
           "x": 769.1867048317738,
           "y": -128.89228022527493,
           "hp": 225,
@@ -936,7 +936,7 @@
         "savedAt": 1775863313648
       },
       "summary": {
-        "name": "PercyJackson",
+        "name": "PercyJackson_c0b7",
         "level": 28,
         "classId": "ranger",
         "raceId": "human",
@@ -960,7 +960,7 @@
         "entity": {
           "id": "50bb63e7-20e8-491b-b81e-3edc8c07432c",
           "type": "player",
-          "name": "Artioa",
+          "name": "Artioa_cfbc",
           "x": 471,
           "y": 627,
           "hp": 169,
@@ -1017,7 +1017,7 @@
         "savedAt": 1776100418286
       },
       "summary": {
-        "name": "Artioa",
+        "name": "Artioa_cfbc",
         "level": 14,
         "classId": "warrior",
         "raceId": "human",
@@ -1035,7 +1035,7 @@
         "entity": {
           "id": "49e4fb07-c3cc-49b1-916f-a144d04b1117",
           "type": "player",
-          "name": "Boellis",
+          "name": "Boellis_a3ee2",
           "x": 161.03138593997278,
           "y": 138.35145976173362,
           "hp": 104,
@@ -1093,7 +1093,7 @@
         "savedAt": 1776100418393
       },
       "summary": {
-        "name": "Boellis",
+        "name": "Boellis_a3ee2",
         "level": 2,
         "classId": "paladin",
         "raceId": "beastkin",
@@ -1104,81 +1104,6 @@
       }
     },
     {
-      "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-      "entityId": "8aae6f87-8a9c-47c9-95ef-db810320d640",
-      "zoneId": "village-square",
-      "sessionState": {
-        "entity": {
-          "id": "8aae6f87-8a9c-47c9-95ef-db810320d640",
-          "type": "player",
-          "name": "LancerOfRed",
-          "x": 600.1118657901956,
-          "y": 484.1910797260868,
-          "hp": 169,
-          "maxHp": 169,
-          "essence": 80,
-          "maxEssence": 80,
-          "createdAt": 1775956296461,
-          "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
-          "level": 14,
-          "xp": 19618,
-          "characterTokenId": "409",
-          "raceId": "human",
-          "classId": "warrior",
-          "gender": "male",
-          "skinColor": "light",
-          "hairStyle": "braided",
-          "eyeColor": "green",
-          "stats": {
-            "str": 93,
-            "def": 84,
-            "hp": 169,
-            "agi": 42,
-            "int": 17,
-            "mp": 25,
-            "faith": 25,
-            "luck": 51,
-            "essence": 135
-          },
-          "runEnergy": 100,
-          "maxRunEnergy": 100,
-          "runModeEnabled": true,
-          "isRunning": false,
-          "kills": 615,
-          "activeQuests": [],
-          "completedQuests": [],
-          "storyFlags": [],
-          "learnedTechniques": [],
-          "effectiveStats": {
-            "str": 93,
-            "def": 84,
-            "hp": 169,
-            "agi": 42,
-            "int": 17,
-            "mp": 25,
-            "faith": 25,
-            "luck": 51,
-            "essence": 135
-          },
-          "region": "village-square",
-          "lastCombatTick": 147956,
-          "activeEffects": []
-        },
-        "professions": [],
-        "savedAt": 1776100418493
-      },
-      "summary": {
-        "name": "LancerOfRed",
-        "level": 14,
-        "classId": "warrior",
-        "raceId": "human",
-        "x": 600.1118657901956,
-        "y": 484.1910797260868,
-        "professions": [],
-        "savedAt": 1776100418493
-      }
-    },
-    {
       "walletAddress": "0x5325b4402064f57681788813730fe29e1ae2d07f",
       "entityId": "ca33f482-7a23-478d-85dd-4f3f89fe4cc5",
       "zoneId": "ironroot-farmstead",
@@ -1186,7 +1111,7 @@
         "entity": {
           "id": "ca33f482-7a23-478d-85dd-4f3f89fe4cc5",
           "type": "player",
-          "name": "Junoka",
+          "name": "Junoka_d07f2",
           "x": 3015.655525343753,
           "y": -974.9642603036199,
           "hp": 418,
@@ -1304,7 +1229,7 @@
         "savedAt": 1775863311628
       },
       "summary": {
-        "name": "Junoka",
+        "name": "Junoka_d07f2",
         "level": 49,
         "classId": "monk",
         "raceId": "human",
@@ -1326,7 +1251,7 @@
         "entity": {
           "id": "7c6c1ad4-1d4a-49d2-9209-32abbd9bcb9a",
           "type": "player",
-          "name": "Aria",
+          "name": "Aria_3594",
           "x": 157,
           "y": 145.8,
           "hp": 76,
@@ -1371,7 +1296,7 @@
         "savedAt": 1775885888031
       },
       "summary": {
-        "name": "Aria",
+        "name": "Aria_3594",
         "level": 1,
         "classId": "ranger",
         "raceId": "elf",
@@ -1389,7 +1314,7 @@
         "entity": {
           "id": "165342d3-e0e6-4629-8778-9b20d5d63213",
           "type": "player",
-          "name": "Leary",
+          "name": "Leary_fc84",
           "x": 660.7917878361087,
           "y": 40.83287102388854,
           "hp": 164,
@@ -1444,7 +1369,7 @@
         "savedAt": 1775863312666
       },
       "summary": {
-        "name": "Leary",
+        "name": "Leary_fc84",
         "level": 16,
         "classId": "cleric",
         "raceId": "beastkin",
@@ -1462,7 +1387,7 @@
         "entity": {
           "id": "f98e4ca3-ffd5-427a-add7-d71c24deb857",
           "type": "player",
-          "name": "Jeremy",
+          "name": "Jeremy_1d17",
           "x": 320,
           "y": 274,
           "hp": 201,
@@ -1538,7 +1463,7 @@
         "savedAt": 1776100408133
       },
       "summary": {
-        "name": "Jeremy",
+        "name": "Jeremy_1d17",
         "level": 20,
         "classId": "warrior",
         "raceId": "elf",
@@ -1558,7 +1483,7 @@
         "entity": {
           "id": "35a7a6b4-e83f-48eb-9a87-ff301bd2fab4",
           "type": "player",
-          "name": "erc",
+          "name": "erc_55f0",
           "x": 167.99509904002437,
           "y": 252.79705942401463,
           "hp": 104,
@@ -1625,7 +1550,7 @@
         "savedAt": 1775863313709
       },
       "summary": {
-        "name": "erc",
+        "name": "erc_55f0",
         "level": 2,
         "classId": "paladin",
         "raceId": "human",
@@ -1645,7 +1570,7 @@
         "entity": {
           "id": "30e9f26f-ab39-4f28-9349-f6ab42450b81",
           "type": "player",
-          "name": "Barbas",
+          "name": "Barbas_d4502",
           "x": 767.8047916931098,
           "y": 368.2328600699959,
           "hp": 267,
@@ -1767,7 +1692,7 @@
         "savedAt": 1775863314576
       },
       "summary": {
-        "name": "Barbas",
+        "name": "Barbas_d4502",
         "level": 28,
         "classId": "warrior",
         "raceId": "elf",
@@ -1789,7 +1714,7 @@
         "entity": {
           "id": "ced61d17-c933-4796-aed7-c82eea9e04d4",
           "type": "player",
-          "name": "ShadowArcher",
+          "name": "ShadowArcher_83932",
           "x": 2710,
           "y": 1430,
           "hp": 92,
@@ -1845,7 +1770,7 @@
         "savedAt": 1775946316298
       },
       "summary": {
-        "name": "ShadowArcher",
+        "name": "ShadowArcher_83932",
         "level": 2,
         "classId": "ranger",
         "raceId": "dwarf",
@@ -1863,7 +1788,7 @@
         "entity": {
           "id": "adf27358-3ed5-4aca-b69d-2fc176656db8",
           "type": "player",
-          "name": "millis",
+          "name": "millis_bd912",
           "x": 739.9716136611721,
           "y": -140.01287501683825,
           "hp": 41,
@@ -1925,7 +1850,7 @@
         "savedAt": 1775945715219
       },
       "summary": {
-        "name": "millis",
+        "name": "millis_bd912",
         "level": 1,
         "classId": "rogue",
         "raceId": "beastkin",
@@ -1943,7 +1868,7 @@
         "entity": {
           "id": "e1dec859-1b23-47e1-b9ef-e200de9cbc54",
           "type": "player",
-          "name": "ZiGGi",
+          "name": "ZiGGi_b71f2",
           "x": 346,
           "y": 420,
           "hp": 117,
@@ -2002,7 +1927,7 @@
         "savedAt": 1775863313895
       },
       "summary": {
-        "name": "ZiGGi",
+        "name": "ZiGGi_b71f2",
         "level": 12,
         "classId": "rogue",
         "raceId": "beastkin",
@@ -2020,7 +1945,7 @@
         "entity": {
           "id": "bad1152a-eca7-4ff3-8251-2cdf5e2e7a34",
           "type": "player",
-          "name": "saf",
+          "name": "saf_5cb52",
           "x": 2878.947766001121,
           "y": 1595.66302115815,
           "hp": 73,
@@ -2075,7 +2000,7 @@
         "savedAt": 1775863312536
       },
       "summary": {
-        "name": "saf",
+        "name": "saf_5cb52",
         "level": 2,
         "classId": "warlock",
         "raceId": "human",
@@ -2093,7 +2018,7 @@
         "entity": {
           "id": "593aaf68-a901-4d99-b239-08b02aad475a",
           "type": "player",
-          "name": "binobotv0",
+          "name": "binobotv0_2499",
           "x": 659.3102524838947,
           "y": 54.75425935264872,
           "hp": 164,
@@ -2148,7 +2073,7 @@
         "savedAt": 1775863312119
       },
       "summary": {
-        "name": "binobotv0",
+        "name": "binobotv0_2499",
         "level": 16,
         "classId": "cleric",
         "raceId": "human",
@@ -2166,7 +2091,7 @@
         "entity": {
           "id": "8aa06477-19e1-4772-8505-dc26b6ef869b",
           "type": "player",
-          "name": "TestHero",
+          "name": "TestHero_5fa4",
           "x": 150.76284009162768,
           "y": 149.32736936109592,
           "hp": 100,
@@ -2211,7 +2136,7 @@
         "savedAt": 1775863314632
       },
       "summary": {
-        "name": "TestHero",
+        "name": "TestHero_5fa4",
         "level": 1,
         "classId": "warrior",
         "raceId": "human",
@@ -2229,7 +2154,7 @@
         "entity": {
           "id": "ec34440c-2eb4-4607-afe9-71bc8cc7d18f",
           "type": "player",
-          "name": "dante",
+          "name": "dante_84812",
           "x": 1160.9250381965976,
           "y": -853.6721839185144,
           "hp": 212,
@@ -2296,7 +2221,7 @@
         "savedAt": 1775863312942
       },
       "summary": {
-        "name": "dante",
+        "name": "dante_84812",
         "level": 20,
         "classId": "warrior",
         "raceId": "human",
@@ -2316,7 +2241,7 @@
         "entity": {
           "id": "7e997787-a960-4d62-9da0-ab4cbd2c9471",
           "type": "player",
-          "name": "Dean",
+          "name": "Dean_e365",
           "x": 37.995099040024364,
           "y": 312.79705942401466,
           "hp": 104,
@@ -2438,7 +2363,7 @@
         "savedAt": 1775863313534
       },
       "summary": {
-        "name": "Dean",
+        "name": "Dean_e365",
         "level": 2,
         "classId": "warrior",
         "raceId": "human",
@@ -2456,7 +2381,7 @@
         "entity": {
           "id": "1f9f81d7-fede-434e-a1a3-c9dfc6d035de",
           "type": "player",
-          "name": "checking",
+          "name": "checking_b6442",
           "x": 817.475942542691,
           "y": 158.68145932316975,
           "hp": 183,
@@ -2514,7 +2439,7 @@
         "savedAt": 1775945714921
       },
       "summary": {
-        "name": "checking",
+        "name": "checking_b6442",
         "level": 16,
         "classId": "warrior",
         "raceId": "human",
@@ -2532,7 +2457,7 @@
         "entity": {
           "id": "3b15a880-7d1b-4985-b04a-350679f0be12",
           "type": "player",
-          "name": "Aurelia Dawnstrider",
+          "name": "Aurelia Dawnst_ce95",
           "x": 167.99509904002437,
           "y": 332.79705942401466,
           "hp": 89,
@@ -2595,7 +2520,7 @@
         "savedAt": 1775863313463
       },
       "summary": {
-        "name": "Aurelia Dawnstrider",
+        "name": "Aurelia Dawnst_ce95",
         "level": 5,
         "classId": "ranger",
         "raceId": "elf",
@@ -2609,81 +2534,6 @@
       }
     },
     {
-      "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-      "entityId": "24990918-ec32-4dcc-b690-dd40676e14d6",
-      "zoneId": "village-square",
-      "sessionState": {
-        "entity": {
-          "id": "24990918-ec32-4dcc-b690-dd40676e14d6",
-          "type": "player",
-          "name": "Supermage",
-          "x": 143,
-          "y": 154.2,
-          "hp": 143,
-          "maxHp": 143,
-          "essence": 330,
-          "maxEssence": 330,
-          "createdAt": 1775880334920,
-          "walletAddress": "0xa180f0f2b9ba900d694fc7bcb1dc1b91545bafc2",
-          "level": 21,
-          "xp": 44610,
-          "characterTokenId": "167",
-          "raceId": "human",
-          "classId": "mage",
-          "gender": "female",
-          "skinColor": "fair",
-          "hairStyle": "bangs",
-          "eyeColor": "brown",
-          "stats": {
-            "str": 22,
-            "def": 33,
-            "hp": 143,
-            "agi": 44,
-            "int": 132,
-            "mp": 132,
-            "faith": 44,
-            "luck": 110,
-            "essence": 330
-          },
-          "kills": 0,
-          "activeQuests": [],
-          "completedQuests": [],
-          "storyFlags": [],
-          "learnedTechniques": [],
-          "effectiveStats": {
-            "str": 22,
-            "def": 33,
-            "hp": 143,
-            "agi": 44,
-            "int": 132,
-            "mp": 132,
-            "faith": 44,
-            "luck": 110,
-            "essence": 330
-          },
-          "region": "village-square"
-        },
-        "professions": [
-          "leatherworking",
-          "herbalism"
-        ],
-        "savedAt": 1775885888238
-      },
-      "summary": {
-        "name": "Supermage",
-        "level": 21,
-        "classId": "mage",
-        "raceId": "human",
-        "x": 143,
-        "y": 154.2,
-        "professions": [
-          "leatherworking",
-          "herbalism"
-        ],
-        "savedAt": 1775885888238
-      }
-    },
-    {
       "walletAddress": "0xaada2fbc953a71aa8b318326f3b6a91c7b0148de",
       "entityId": "cd738840-942b-4c2f-875e-b4465a717b68",
       "zoneId": "village-square",
@@ -2691,7 +2541,7 @@
         "entity": {
           "id": "cd738840-942b-4c2f-875e-b4465a717b68",
           "type": "player",
-          "name": "SonoLuminae",
+          "name": "SonoLuminae_48de2",
           "x": 360,
           "y": 434,
           "hp": 104,
@@ -2779,7 +2629,7 @@
         "savedAt": 1775863313836
       },
       "summary": {
-        "name": "SonoLuminae",
+        "name": "SonoLuminae_48de2",
         "level": 12,
         "classId": "warlock",
         "raceId": "elf",
@@ -2797,7 +2647,7 @@
         "entity": {
           "id": "b19669ab-da22-48fe-987c-520bca387eeb",
           "type": "player",
-          "name": "Megaman",
+          "name": "Megaman_493d2",
           "x": 2847.995099040025,
           "y": -282.79705942401404,
           "hp": 335,
@@ -3156,7 +3006,7 @@
         "savedAt": 1775863311802
       },
       "summary": {
-        "name": "Megaman",
+        "name": "Megaman_493d2",
         "level": 50,
         "classId": "mage",
         "raceId": "elf",
@@ -3177,7 +3027,7 @@
         "entity": {
           "id": "f13384a4-9a3a-47a4-a505-5850019dbc70",
           "type": "player",
-          "name": "Jeremy",
+          "name": "Jeremy_e6732",
           "x": 137.77495874253947,
           "y": 156.82241931391204,
           "hp": 126,
@@ -3239,7 +3089,7 @@
         "savedAt": 1776100418186
       },
       "summary": {
-        "name": "Jeremy",
+        "name": "Jeremy_e6732",
         "level": 8,
         "classId": "warrior",
         "raceId": "elf",
@@ -3257,7 +3107,7 @@
         "entity": {
           "id": "2ba53e32-b2de-4fd8-b8f1-43933d6ef610",
           "type": "player",
-          "name": "Fiona",
+          "name": "Fiona_74c62",
           "x": 2227.9950990400243,
           "y": 272.79705942401466,
           "hp": 108,
@@ -3318,7 +3168,7 @@
         "savedAt": 1775863312729
       },
       "summary": {
-        "name": "Fiona",
+        "name": "Fiona_74c62",
         "level": 3,
         "classId": "warrior",
         "raceId": "beastkin",
@@ -3329,14 +3179,14 @@
       }
     },
     {
-      "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+      "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
       "entityId": "80008db5-8f39-4d84-a308-d09f72499bda",
       "zoneId": "emerald-woods",
       "sessionState": {
         "entity": {
           "id": "80008db5-8f39-4d84-a308-d09f72499bda",
           "type": "player",
-          "name": "checking",
+          "name": "checking_ed7a2",
           "x": 2220,
           "y": 300,
           "hp": 104,
@@ -3344,7 +3194,7 @@
           "essence": 83,
           "maxEssence": 83,
           "createdAt": 1775946944255,
-          "walletAddress": "0xca5bfdcf41f8f0840e9200f9b324be7e0bb3ed7a",
+          "walletAddress": "0xfc4744e42fbbfe00050f46db9623304c3947ad5d",
           "level": 2,
           "xp": 419,
           "characterTokenId": "358",
@@ -3393,7 +3243,7 @@
         "savedAt": 1776100407989
       },
       "summary": {
-        "name": "checking",
+        "name": "checking_ed7a2",
         "level": 2,
         "classId": "warrior",
         "raceId": "human",
@@ -3411,7 +3261,7 @@
         "entity": {
           "id": "8fd0f77b-de7e-47dc-bb6c-a42084b42786",
           "type": "player",
-          "name": "spellmaster",
+          "name": "spellmaster_a3e32",
           "x": 67.9950990400244,
           "y": 587.2029405759854,
           "hp": 73,
@@ -3484,7 +3334,7 @@
         "savedAt": 1775863313779
       },
       "summary": {
-        "name": "spellmaster",
+        "name": "spellmaster_a3e32",
         "level": 5,
         "classId": "mage",
         "raceId": "elf",
@@ -3496,6 +3346,81 @@
           "mining"
         ],
         "savedAt": 1775863313779
+      }
+    },
+    {
+      "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+      "entityId": "24990918-ec32-4dcc-b690-dd40676e14d6",
+      "zoneId": "village-square",
+      "sessionState": {
+        "entity": {
+          "id": "24990918-ec32-4dcc-b690-dd40676e14d6",
+          "type": "player",
+          "name": "Supermage_afc22",
+          "x": 143,
+          "y": 154.2,
+          "hp": 143,
+          "maxHp": 143,
+          "essence": 330,
+          "maxEssence": 330,
+          "createdAt": 1775880334920,
+          "walletAddress": "0x4be619301fd68724763dd016552eb18535c36e63",
+          "level": 21,
+          "xp": 44610,
+          "characterTokenId": "167",
+          "raceId": "human",
+          "classId": "mage",
+          "gender": "female",
+          "skinColor": "fair",
+          "hairStyle": "bangs",
+          "eyeColor": "brown",
+          "stats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "kills": 0,
+          "activeQuests": [],
+          "completedQuests": [],
+          "storyFlags": [],
+          "learnedTechniques": [],
+          "effectiveStats": {
+            "str": 22,
+            "def": 33,
+            "hp": 143,
+            "agi": 44,
+            "int": 132,
+            "mp": 132,
+            "faith": 44,
+            "luck": 110,
+            "essence": 330
+          },
+          "region": "village-square"
+        },
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
+      },
+      "summary": {
+        "name": "Supermage_afc22",
+        "level": 21,
+        "classId": "mage",
+        "raceId": "human",
+        "x": 143,
+        "y": 154.2,
+        "professions": [
+          "leatherworking",
+          "herbalism"
+        ],
+        "savedAt": 1775885888238
       }
     }
   ]
