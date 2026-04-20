@@ -173,11 +173,11 @@ export async function postCommand(
 
 // ── Character select APIs ──────────────────────────────────────────
 
-export async function fetchCharacters(walletAddress: string, token: string): Promise<CharacterListResponse | null> {
+export async function fetchCharacters(walletAddress: string, token: string | null = null): Promise<CharacterListResponse | null> {
   for (const base of CANDIDATE_BASES) {
     try {
       const res = await fetchWithRetry(toUrl(base, `/character/${walletAddress}`), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) continue;
       return (await res.json()) as CharacterListResponse;
@@ -200,12 +200,18 @@ export async function createCharacter(
   token: string,
   body: { walletAddress: string; characterName: string; classId: string; raceId: string },
 ): Promise<{ ok: boolean; character?: { name: string }; error?: string }> {
+  const payload = {
+    walletAddress: body.walletAddress,
+    name: body.characterName,
+    race: body.raceId,
+    className: body.classId,
+  };
   for (const base of CANDIDATE_BASES) {
     try {
       const res = await fetchWithRetry(toUrl(base, "/character/create"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       return { ok: res.ok, character: data.character, error: data.error };
@@ -313,6 +319,20 @@ export async function buyShopItem(
 
 export async function fetchInventory(walletAddress: string): Promise<InventoryResponse | null> {
   return fetchJsonWithFallback<InventoryResponse>(`/inventory/${walletAddress}`);
+}
+
+export async function equipItem(
+  token: string,
+  body: { zoneId: string; entityId: string; tokenId: number; instanceId?: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/equipment/equip", token, body);
+}
+
+export async function unequipItem(
+  token: string,
+  body: { zoneId: string; entityId: string; slot: string },
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/equipment/unequip", token, body);
 }
 
 export async function fetchProfessionStatus(walletAddress: string): Promise<ProfessionStatusResponse | null> {

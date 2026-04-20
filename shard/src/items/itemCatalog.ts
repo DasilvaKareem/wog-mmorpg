@@ -39,6 +39,8 @@ export interface ItemDefinition {
   xrVisualId?: string | null;
   statBonuses?: ItemStatBonuses;
   maxDurability?: number;
+  /** Weapons only. Multiplier on class base swing time. <1 = faster. Default 1.0. */
+  swingMultiplier?: number;
 }
 
 /** Derive rarity from copper price. */
@@ -81,6 +83,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 8 },
     maxDurability: 60,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 3n,
@@ -91,6 +94,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 14 },
     maxDurability: 80,
+    swingMultiplier: 1.1,
   },
   {
     tokenId: 4n,
@@ -101,6 +105,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 4, agi: 6 },
     maxDurability: 70,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 5n,
@@ -111,6 +116,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 18, agi: -1 },
     maxDurability: 95,
+    swingMultiplier: 1.15,
   },
   {
     tokenId: 6n,
@@ -121,6 +127,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 12, faith: 3 },
     maxDurability: 65,
+    swingMultiplier: 1.4,
   },
   // --- Armor ---
   {
@@ -330,6 +337,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 40,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 28n,
@@ -339,6 +347,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 60,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 29n,
@@ -348,6 +357,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 80,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 30n,
@@ -357,6 +367,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 100,
+    swingMultiplier: 1.3,
   },
   // --- Flowers (Materials) ---
   {
@@ -438,6 +449,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 35,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 42n,
@@ -447,6 +459,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 55,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 43n,
@@ -456,6 +469,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 75,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 44n,
@@ -465,6 +479,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 95,
+    swingMultiplier: 1.0,
   },
   // --- Potions (Alchemy Products) ---
   {
@@ -697,6 +712,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 50,
+    swingMultiplier: 0.9,
   },
   {
     tokenId: 77n,
@@ -706,6 +722,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 70,
+    swingMultiplier: 0.9,
   },
   {
     tokenId: 78n,
@@ -715,6 +732,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 90,
+    swingMultiplier: 0.9,
   },
   {
     tokenId: 79n,
@@ -724,6 +742,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     category: "tool",
     equipSlot: "weapon",
     maxDurability: 120,
+    swingMultiplier: 0.9,
   },
 
   // --- Mana Potion (moved from tokenId 1) ---
@@ -977,6 +996,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 10 },
     maxDurability: 75,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 106n,
@@ -987,6 +1007,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 18 },
     maxDurability: 100,
+    swingMultiplier: 1.1,
   },
   {
     tokenId: 107n,
@@ -997,6 +1018,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 5, agi: 8 },
     maxDurability: 88,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 108n,
@@ -1007,6 +1029,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 23, agi: -1 },
     maxDurability: 119,
+    swingMultiplier: 1.15,
   },
   {
     tokenId: 109n,
@@ -1017,6 +1040,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 15, faith: 4 },
     maxDurability: 81,
+    swingMultiplier: 1.4,
   },
 
   // --- Upgraded Weapons — Masterwork (+50% stats) ---
@@ -1029,6 +1053,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 12 },
     maxDurability: 90,
+    swingMultiplier: 1.0,
   },
   {
     tokenId: 111n,
@@ -1039,6 +1064,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 21 },
     maxDurability: 120,
+    swingMultiplier: 1.1,
   },
   {
     tokenId: 112n,
@@ -1049,6 +1075,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 6, agi: 9 },
     maxDurability: 105,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 113n,
@@ -1059,6 +1086,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 27, agi: -1 },
     maxDurability: 143,
+    swingMultiplier: 1.15,
   },
   {
     tokenId: 114n,
@@ -1069,6 +1097,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 18, faith: 5 },
     maxDurability: 98,
+    swingMultiplier: 1.4,
   },
 
   // --- Disenchanting Scroll (Consumable) ---
@@ -1542,6 +1571,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 28, agi: 5 },
     maxDurability: 150,
+    swingMultiplier: 1.55,
   },
   {
     tokenId: 181n,
@@ -1552,6 +1582,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 24, faith: 10 },
     maxDurability: 140,
+    swingMultiplier: 1.45,
   },
   {
     tokenId: 182n,
@@ -1562,6 +1593,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 20, str: 10 },
     maxDurability: 130,
+    swingMultiplier: 1.35,
   },
   {
     tokenId: 183n,
@@ -1572,6 +1604,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 32, def: -3 },
     maxDurability: 160,
+    swingMultiplier: 1.2,
   },
   {
     tokenId: 184n,
@@ -1582,6 +1615,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 26, str: 6 },
     maxDurability: 120,
+    swingMultiplier: 0.75,
   },
 
   // --- Elite Craftable Armor (only obtainable through crafting) ---
@@ -1865,6 +1899,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 1 },
     maxDurability: 50,
+    swingMultiplier: 1.5,
   },
   {
     tokenId: 221n,
@@ -1875,6 +1910,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 2 },
     maxDurability: 100,
+    swingMultiplier: 1.5,
   },
   {
     tokenId: 222n,
@@ -1885,6 +1921,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 3 },
     maxDurability: 150,
+    swingMultiplier: 1.5,
   },
   {
     tokenId: 223n,
@@ -1895,6 +1932,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 4, luck: 5 },
     maxDurability: 200,
+    swingMultiplier: 1.5,
   },
   // --- Shields ---
   {
@@ -1986,6 +2024,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 7, str: 3 },
     maxDurability: 50,
+    swingMultiplier: 0.8,
   },
   {
     tokenId: 232n,
@@ -1996,6 +2035,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 6, hp: 5 },
     maxDurability: 75,
+    swingMultiplier: 1.1,
   },
   {
     tokenId: 233n,
@@ -2006,6 +2046,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 5, str: 5 },
     maxDurability: 55,
+    swingMultiplier: 0.95,
   },
   {
     tokenId: 234n,
@@ -2016,6 +2057,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 9 },
     maxDurability: 45,
+    swingMultiplier: 1.2,
   },
   // Tier 2 — Bar-forged (comparable to Steel Longsword / Battle Axe)
   {
@@ -2027,6 +2069,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 10, agi: 6 },
     maxDurability: 85,
+    swingMultiplier: 0.95,
   },
   {
     tokenId: 236n,
@@ -2037,6 +2080,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 17, agi: -2 },
     maxDurability: 100,
+    swingMultiplier: 1.4,
   },
   {
     tokenId: 237n,
@@ -2047,6 +2091,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 10, str: 5 },
     maxDurability: 80,
+    swingMultiplier: 1.3,
   },
   {
     tokenId: 238n,
@@ -2057,6 +2102,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { int: 14, faith: 4 },
     maxDurability: 70,
+    swingMultiplier: 1.3,
   },
   // Tier 3 — Alloy-forged (between Reinforced and Masterwork)
   {
@@ -2068,6 +2114,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 22, agi: -2 },
     maxDurability: 110,
+    swingMultiplier: 1.55,
   },
   {
     tokenId: 240n,
@@ -2078,6 +2125,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 8, agi: 14 },
     maxDurability: 90,
+    swingMultiplier: 0.85,
   },
   {
     tokenId: 241n,
@@ -2088,6 +2136,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { agi: 12, str: 8 },
     maxDurability: 100,
+    swingMultiplier: 1.5,
   },
   {
     tokenId: 242n,
@@ -2098,6 +2147,7 @@ export const ITEM_CATALOG: ItemDefinition[] = [
     equipSlot: "weapon",
     statBonuses: { str: 16, faith: 8 },
     maxDurability: 105,
+    swingMultiplier: 1.45,
   },
   // --- Warrior Modular Set (XR donor-backed) ---
   {

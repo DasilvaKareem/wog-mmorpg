@@ -53,6 +53,7 @@ export interface MapState {
   showGround: boolean;
   showOverlay: boolean;
   showElevation: boolean;
+  viewMode: "2d" | "3d";
 
   // Viewport
   zoom: number;
@@ -91,6 +92,7 @@ export interface MapState {
   setSelectedElevation: (elev: number) => void;
   toggleGrid: () => void;
   toggleLayerVisibility: (layer: "ground" | "overlay" | "elevation") => void;
+  setViewMode: (mode: "2d" | "3d") => void;
   setZoom: (zoom: number) => void;
   setPan: (x: number, y: number) => void;
   setZoneId: (id: string) => void;
@@ -180,6 +182,7 @@ export const useEditorStore = create<MapState>((set, get) => ({
   showGround: true,
   showOverlay: true,
   showElevation: true,
+  viewMode: "2d",
 
   zoom: 1,
   panX: 0,
@@ -208,6 +211,7 @@ export const useEditorStore = create<MapState>((set, get) => ({
   setSelectedTile: (tile) => set({ selectedTile: tile }),
   setSelectedElevation: (elev) => set({ selectedElevation: elev }),
   toggleGrid: () => set((s) => ({ showGrid: !s.showGrid })),
+  setViewMode: (mode) => set({ viewMode: mode }),
   toggleLayerVisibility: (layer) =>
     set((s) => {
       if (layer === "ground") return { showGround: !s.showGround };

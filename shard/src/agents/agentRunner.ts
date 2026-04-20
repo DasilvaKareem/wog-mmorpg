@@ -76,6 +76,13 @@ import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.j
 import * as behaviors from "./agentBehaviors.js";
 import { emitAgentChat, getAgentOrigin, maybeReactToChat, pickLine } from "./agentDialogue.js";
 import { sendAgentPush } from "./agentPushService.js";
+import {
+  buildUtilityDecisionContext,
+  chooseNextScript,
+  formatUtilityDecision,
+  formatUtilityQueueAbstain,
+  type UtilityDecision,
+} from "./agentUtility.js";
 
 const TICK_MS = 1200;
 /** Safety-net: call supervisor if no trigger has fired in about 30s. */
@@ -117,6 +124,15 @@ interface AgentTelemetrySnapshot {
   loop: TimingMetric;
   walletBalance: TimingMetric;
   supervisor: TimingMetric & { errors: number };
+  utility: {
+    evaluated: number;
+    driven: number;
+    shadow: number;
+    escalated: number;
+    abstainedQueue: number;
+    byTrigger: Record<string, number>;
+    lastWinner: string | null;
+  };
   actionResults: Record<string, number>;
   commands: {
     total: number;
@@ -304,6 +320,15 @@ export class AgentRunner {
     loop: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     walletBalance: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0 },
     supervisor: { count: 0, avgMs: 0, maxMs: 0, lastMs: 0, errors: 0 },
+    utility: {
+      evaluated: 0,
+      driven: 0,
+      shadow: 0,
+      escalated: 0,
+      abstainedQueue: 0,
+      byTrigger: {} as Record<string, number>,
+      lastWinner: null as string | null,
+    },
     actionResults: { idle: 0, progressed: 0, blocked: 0, completed: 0 },
     commands: { total: 0, move: 0, attack: 0, technique: 0, travel: 0, failed: 0, lastAt: null as number | null },
     failures: {
@@ -942,6 +967,15 @@ export class AgentRunner {
         lastMs: round(this.telemetry.supervisor.lastMs),
         errors: this.telemetry.supervisor.errors,
       },
+      utility: {
+        evaluated: this.telemetry.utility.evaluated,
+        driven: this.telemetry.utility.driven,
+        shadow: this.telemetry.utility.shadow,
+        escalated: this.telemetry.utility.escalated,
+        abstainedQueue: this.telemetry.utility.abstainedQueue,
+        byTrigger: { ...this.telemetry.utility.byTrigger },
+        lastWinner: this.telemetry.utility.lastWinner,
+      },
       actionResults: { ...this.telemetry.actionResults },
       commands: { ...this.telemetry.commands },
       failures: {
@@ -960,6 +994,29 @@ export class AgentRunner {
 
   private recordPartyCoordination(kind: string): void {
     this.telemetry.party[kind] = (this.telemetry.party[kind] ?? 0) + 1;
+  }
+
+  private recordUtilityDecision(
+    triggerType: string,
+    decision: UtilityDecision,
+    driven: boolean,
+  ): void {
+    this.telemetry.utility.evaluated += 1;
+    this.telemetry.utility.byTrigger[triggerType] = (this.telemetry.utility.byTrigger[triggerType] ?? 0) + 1;
+    this.telemetry.utility.lastWinner = decision.winner.type;
+    if (driven) {
+      this.telemetry.utility.driven += 1;
+    } else {
+      this.telemetry.utility.shadow += 1;
+    }
+    if (decision.shouldEscalateToSupervisor) {
+      this.telemetry.utility.escalated += 1;
+    }
+  }
+
+  private recordUtilityQueueAbstain(triggerType: string): void {
+    this.telemetry.utility.abstainedQueue += 1;
+    this.telemetry.utility.byTrigger[triggerType] = (this.telemetry.utility.byTrigger[triggerType] ?? 0) + 1;
   }
 
   private async getZoneState(): Promise<{ entities: Record<string, any>; me: any; recentEvents: ZoneEvent[] } | null> {
@@ -1668,6 +1725,10 @@ export class AgentRunner {
 
     // ── Action queue: dequeue next if idle ──
     if (!this.currentScript && this.actionQueue.length > 0) {
+      this.recordUtilityQueueAbstain("queue_dequeue");
+      console.log(
+        `[agent:${this.walletTag}] Utility abstain :: ${formatUtilityQueueAbstain(this.actionQueue.length, this.currentScript)}`
+      );
       this.dequeueNext();
       return; // let the new script execute on the next tick
     }
@@ -1686,6 +1747,10 @@ export class AgentRunner {
     // Only "blocked" triggers (repeated failures) can interrupt a queued action.
     if (trigger && this.actionQueue.length > 0) {
       if (trigger.type === "zone_arrived" || trigger.type === "periodic" || trigger.type === "no_script") {
+        this.recordUtilityQueueAbstain(trigger.type);
+        console.log(
+          `[agent:${this.walletTag}] Utility abstain [${trigger.type}] :: ${formatUtilityQueueAbstain(this.actionQueue.length, this.currentScript)}`
+        );
         console.log(`[agent:${this.walletTag}] Suppressed ${trigger.type} trigger — queue active (${this.actionQueue.length} items)`);
         trigger = null;
       }
@@ -1735,7 +1800,41 @@ export class AgentRunner {
           void this.logActivity(`[goto] Target missing; resuming ${fallbackFocus}`);
           return;
         }
-        // Always respect the user's configured focus — never override with hardcoded behavior
+        if (this.currentCaps.supervisorEnabled) {
+          const { copper: walletGoldCopper } = await this.getWalletBalance();
+          const liquidation = await this.getLiquidationInventory();
+          const utilityDecision = chooseNextScript(buildUtilityDecisionContext({
+            trigger,
+            entity,
+            entities,
+            currentRegion: this.currentRegion,
+            currentScript: this.currentScript,
+            currentScriptProgressing: false,
+            queueActive: this.actionQueue.length > 0,
+            queuedActionCount: this.actionQueue.length,
+            userFocus: config.focus,
+            strategy,
+            copper: walletGoldCopper,
+            inventoryItems: liquidation.items,
+            recentFailures: this.getRecentFailures(),
+            allowedZones: this.currentCaps.allowedZones,
+            ignoreWeakMobs: this.ignoreWeakMobsFlag,
+          }));
+          const utilityCanDrive = !utilityDecision.shouldEscalateToSupervisor;
+          this.recordUtilityDecision(trigger.type, utilityDecision, utilityCanDrive);
+          console.log(
+            `[agent:${this.walletTag}] Utility ${utilityCanDrive ? "drive" : "shadow"} [${trigger.type}] ` +
+            `winner=${utilityDecision.winner.type} score=${utilityDecision.winner.score.toFixed(2)} ` +
+            `escalate=${utilityDecision.shouldEscalateToSupervisor} :: ` +
+            `${formatUtilityDecision(utilityDecision)}`,
+          );
+          if (utilityCanDrive) {
+            this.currentScript = utilityDecision.winner.script;
+            this.ticksOnCurrentScript = 0;
+            void this.logActivity(`[utility] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+            return;
+          }
+        }
         this.currentScript = focusToScript(config.focus, strategy, config.targetZone, config.gatherNodeType);
         this.ticksOnCurrentScript = 0;
         void this.logActivity(`[AI] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
@@ -1804,6 +1903,43 @@ export class AgentRunner {
         const supervisorStartedAt = performance.now();
         try {
           const { copper: walletGoldCopper } = await this.getWalletBalance();
+          const liquidation = await this.getLiquidationInventory();
+          const utilityContext = buildUtilityDecisionContext({
+            trigger,
+            entity,
+            entities,
+            currentRegion: this.currentRegion,
+            currentScript: this.currentScript,
+            currentScriptProgressing: this.lastActionResult?.status === "progressed" || this.lastActionResult?.status === "completed",
+            queueActive: this.actionQueue.length > 0,
+            queuedActionCount: this.actionQueue.length,
+            userFocus: config.focus,
+            strategy,
+            copper: walletGoldCopper,
+            inventoryItems: liquidation.items,
+            recentFailures: this.getRecentFailures(),
+            allowedZones: this.currentCaps.allowedZones,
+            ignoreWeakMobs: this.ignoreWeakMobsFlag,
+          });
+          const utilityDecision = chooseNextScript(utilityContext);
+          const utilityEligibleTrigger =
+            trigger.type === "periodic" ||
+            trigger.type === "zone_arrived" ||
+            trigger.type === "script_done";
+          const utilityCanDrive = utilityEligibleTrigger && !utilityDecision.shouldEscalateToSupervisor;
+          this.recordUtilityDecision(trigger.type, utilityDecision, utilityCanDrive);
+          console.log(
+            `[agent:${this.walletTag}] Utility ${utilityCanDrive ? "drive" : "shadow"} [${trigger.type}] ` +
+            `winner=${utilityDecision.winner.type} score=${utilityDecision.winner.score.toFixed(2)} ` +
+            `escalate=${utilityDecision.shouldEscalateToSupervisor} :: ` +
+            `${formatUtilityDecision(utilityDecision)}`,
+          );
+          if (utilityCanDrive) {
+            this.currentScript = utilityDecision.winner.script;
+            this.ticksOnCurrentScript = 0;
+            void this.logActivity(`[utility] ${this.currentScript.type}: ${this.currentScript.reason ?? ""}`);
+            return;
+          }
           const newScript = await runSupervisor(trigger, {
             entity, entities,
             entityId: this.entityId!,

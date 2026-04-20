@@ -745,9 +745,11 @@ export class CharacterSelect {
 
       .cs-panel {
         position: relative;
+        box-sizing: border-box;
         width: min(520px, calc(100vw - 32px));
         max-height: calc(100vh - 48px);
         overflow-y: auto;
+        overflow-x: hidden;
         padding: 24px 24px 18px;
         border-radius: 30px;
         background: linear-gradient(180deg, rgba(42, 31, 21, 0.94) 0%, rgba(16, 13, 11, 0.97) 100%);
@@ -755,6 +757,8 @@ export class CharacterSelect {
         box-shadow: 0 28px 90px rgba(0, 0, 0, 0.58),
           inset 0 1px 0 rgba(255, 244, 215, 0.08);
       }
+
+      .cs-panel * { box-sizing: border-box; max-width: 100%; }
 
       .cs-panel.is-busy button { pointer-events: none; opacity: 0.78; }
 
@@ -1007,7 +1011,7 @@ export class CharacterSelect {
 
       .cs-picker {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 8px;
         margin-bottom: 14px;
       }
@@ -1035,9 +1039,8 @@ export class CharacterSelect {
         margin-top: 3px;
         font: 400 10px/1.4 "Courier New", monospace;
         color: #8f8067;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        white-space: normal;
+        overflow-wrap: anywhere;
       }
 
       .cs-pick-btn:hover { border-color: rgba(239, 201, 127, 0.3); }
@@ -1061,7 +1064,7 @@ export class CharacterSelect {
 
       .cs-stats-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
         gap: 6px;
       }
 
@@ -1092,18 +1095,26 @@ export class CharacterSelect {
         text-transform: uppercase;
       }
 
-      @media (max-width: 640px) {
+      @media (max-width: 768px) {
         .cs-panel {
-          width: calc(100vw - 20px);
-          padding: 20px 16px 14px;
+          width: calc(100vw - 16px);
+          padding: 20px 14px 14px;
           border-radius: 24px;
         }
         .cs-header {
           padding-top: 38px;
         }
         .cs-preview-viewport { height: 260px; }
-        .cs-picker { grid-template-columns: 1fr; }
-        .cs-stats-grid { grid-template-columns: repeat(3, 1fr); }
+        .cs-picker { gap: 6px; }
+        .cs-pick-btn { padding: 10px 12px; }
+        .cs-stats-grid { gap: 4px; }
+        .cs-stat { padding: 5px 6px; font-size: 9px; }
+        .cs-header-back { padding: 8px 12px; font-size: 10px; }
+      }
+
+      @media (max-width: 380px) {
+        .cs-panel { padding: 16px 10px 12px; }
+        .cs-preview-viewport { height: 220px; }
       }
     `;
     document.head.appendChild(style);

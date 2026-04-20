@@ -37,6 +37,35 @@ function expiryKey(walletAddress: string): string {
   return `wog:agent:jwt:expiry:${walletAddress.toLowerCase()}`;
 }
 
+export function getSavedWalletAddress(): string | null {
+  try {
+    const direct = localStorage.getItem(ADDRESS_KEY);
+    if (direct) return direct;
+
+    // Fallback: infer from any JWT saved by either the XR or main client.
+    // Keys look like `wog:agent:jwt:<address>` and their expiry is at
+    // `wog:agent:jwt:expiry:<address>` — pick the one with the latest expiry.
+    const jwtPrefix = "wog:agent:jwt:";
+    const expiryPrefix = "wog:agent:jwt:expiry:";
+    let bestAddress: string | null = null;
+    let bestExpiry = 0;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(jwtPrefix) || key.startsWith(expiryPrefix)) continue;
+      const address = key.slice(jwtPrefix.length);
+      if (!address || !/^0x[0-9a-f]{40}$/i.test(address)) continue;
+      const expiry = Number(localStorage.getItem(expiryPrefix + address) ?? "0");
+      if (expiry > bestExpiry) {
+        bestExpiry = expiry;
+        bestAddress = address;
+      }
+    }
+    return bestAddress;
+  } catch {
+    return null;
+  }
+}
+
 export function getCachedToken(walletAddress: string): string | null {
   try {
     const expiry = Number(localStorage.getItem(expiryKey(walletAddress)) ?? "0");

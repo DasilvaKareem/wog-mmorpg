@@ -590,6 +590,9 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
 
   // ── GET /inventory/:walletAddress ─────────────────────────────────────────
   // Returns authoritative game inventory balances + equipped status for a wallet.
+  // Resolves owner→custodial wallet so callers asking for the owner wallet still
+  // see items stored under the linked custodial wallet (where the live entity
+  // actually owns them).
   server.get<{ Params: { walletAddress: string } }>(
     "/inventory/:walletAddress",
     async (request, reply) => {
@@ -599,10 +602,17 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
         return { error: "Invalid wallet address" };
       }
 
-      // Find live entity equipment across zones
+      const ownerWallet = walletAddress.toLowerCase();
+      const custodialWallet = (await getAgentCustodialWallet(walletAddress))?.toLowerCase() ?? null;
+      const wallets = custodialWallet && custodialWallet !== ownerWallet
+        ? [ownerWallet, custodialWallet]
+        : [ownerWallet];
+      const walletSet = new Set(wallets);
+
+      // Find live entity equipment across zones (across owner + custodial)
       const equippedByTokenId: Record<number, { slot: string; durability: number; maxDurability: number }> = {};
       for (const entity of getAllEntities().values()) {
-        if (entity.type === "player" && entity.walletAddress?.toLowerCase() === walletAddress.toLowerCase()) {
+        if (entity.type === "player" && entity.walletAddress && walletSet.has(entity.walletAddress.toLowerCase())) {
           for (const [slot, e] of Object.entries(entity.equipment ?? {})) {
             equippedByTokenId[(e as any).tokenId] = {
               slot,
@@ -610,22 +620,28 @@ export function registerEquipmentRoutes(server: FastifyInstance) {
               maxDurability: (e as any).maxDurability ?? 0,
             };
           }
-          break;
         }
       }
 
-      const equippedCounts = await getEquippedItemCounts(walletAddress);
-
-      // Build a map of tokenId → crafted instances for this wallet
-      const walletInstances = getWalletInstances(walletAddress);
-      const instancesByToken = new Map<number, typeof walletInstances>();
-      for (const inst of walletInstances) {
-        const arr = instancesByToken.get(inst.baseTokenId) ?? [];
-        arr.push(inst);
-        instancesByToken.set(inst.baseTokenId, arr);
+      const equippedCounts = new Map<number, number>();
+      const instancesByToken = new Map<number, ReturnType<typeof getWalletInstances>>();
+      const dbBalances = new Map<number, number>();
+      for (const w of wallets) {
+        const counts = await getEquippedItemCounts(w);
+        for (const [tokenId, count] of counts) {
+          equippedCounts.set(tokenId, (equippedCounts.get(tokenId) ?? 0) + count);
+        }
+        for (const inst of getWalletInstances(w)) {
+          const arr = instancesByToken.get(inst.baseTokenId) ?? [];
+          arr.push(inst);
+          instancesByToken.set(inst.baseTokenId, arr);
+        }
+        const bals = await listWalletItemBalances(w);
+        for (const [tokenId, qty] of bals) {
+          dbBalances.set(tokenId, (dbBalances.get(tokenId) ?? 0) + qty);
+        }
       }
 
-      const dbBalances = await listWalletItemBalances(walletAddress);
       const balances = ITEM_CATALOG.map((item) => ({
         tokenId: Number(item.tokenId),
         qty: dbBalances.get(Number(item.tokenId)) ?? 0,

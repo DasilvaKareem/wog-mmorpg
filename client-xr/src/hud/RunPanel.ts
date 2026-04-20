@@ -135,7 +135,7 @@ export class RunPanel {
         color: #ffb17a;
       }
       #run-panel .run-toggle:disabled {
-        cursor: default;
+        cursor: inherit;
       }
       #run-panel .run-energy-bar {
         height: 8px;

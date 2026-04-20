@@ -135,8 +135,8 @@ export class VitalsPanel {
     s.textContent = `
       #vitals-panel {
         position: fixed;
-        top: 44px;
-        left: 284px;
+        top: 12px;
+        left: 12px;
         width: 220px;
         display: flex;
         flex-direction: column;
@@ -223,19 +223,9 @@ export class VitalsPanel {
         color: rgba(92, 168, 255, 0.7);
         margin-top: 2px;
       }
-      @media (max-width: 1180px) {
+      @media (max-width: 480px) {
         #vitals-panel {
-          left: auto;
-          right: 12px;
-          top: 184px;
-        }
-      }
-      @media (max-width: 760px) {
-        #vitals-panel {
-          left: 12px;
-          right: auto;
-          top: auto;
-          bottom: 164px;
+          width: 180px;
         }
       }
     `;

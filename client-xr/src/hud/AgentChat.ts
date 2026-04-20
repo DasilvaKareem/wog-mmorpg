@@ -942,6 +942,15 @@ export class AgentChat {
         background: rgba(239, 201, 127, 0.2);
         border-radius: 2px;
       }
+
+      @media (max-width: 640px) {
+        #agent-chat {
+          left: 8px;
+          right: 8px;
+          width: auto;
+          max-width: calc(100vw - 16px);
+        }
+      }
     `;
     document.head.appendChild(style);
   }

@@ -69,8 +69,7 @@ export class GauntletCursor {
     // Set default gauntlet immediately
     this.applyMode("default");
 
-    this.canvas.addEventListener("mousemove", this.onMouseMove);
-    this.canvas.addEventListener("mouseleave", this.onMouseLeave);
+    window.addEventListener("mousemove", this.onMouseMove);
   }
 
   setEnabled(enabled: boolean) {
@@ -79,8 +78,7 @@ export class GauntletCursor {
   }
 
   dispose() {
-    this.canvas.removeEventListener("mousemove", this.onMouseMove);
-    this.canvas.removeEventListener("mouseleave", this.onMouseLeave);
+    window.removeEventListener("mousemove", this.onMouseMove);
     document.body.style.cursor = "";
     this.canvas.style.cursor = "";
   }
@@ -108,13 +106,9 @@ export class GauntletCursor {
     }
   };
 
-  private onMouseLeave = () => {
-    if (this.currentMode !== "default") this.applyMode("default");
-  };
-
   private applyMode(mode: CursorMode) {
     this.currentMode = mode;
     const css = this.cssStrings.get(mode) ?? "auto";
-    this.canvas.style.cursor = css;
+    document.body.style.cursor = css;
   }
 }

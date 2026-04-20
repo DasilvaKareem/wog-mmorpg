@@ -239,6 +239,10 @@ export interface Entity {
   followLeaderId?: string;
   /** In-flight technique windup state for pre-resolution telegraphing. */
   castingIntent?: CastingIntent;
+  /** Swing timer: tick when this entity is next allowed to land a basic attack. */
+  nextAttackTick?: number;
+  /** Optional per-entity override for base swing time (ms). Used for mobs/bosses without classId. */
+  baseSwingMs?: number;
   /** Most recently committed technique for AI variety. */
   lastTechniqueId?: string;
   lastTechniqueTick?: number;
@@ -706,6 +710,32 @@ const RANGED_CLASSES = new Set(["mage", "warlock", "ranger", "cleric"]);
 /** Return the animStyle for a basic auto-attack: "projectile" for ranged, "melee" for melee. */
 function getBasicAttackAnimStyle(entity: Entity): "melee" | "projectile" {
   return RANGED_CLASSES.has(entity.classId ?? "") ? "projectile" : "melee";
+}
+
+const MOB_BASE_SWING_MS = 2500;
+const BOSS_BASE_SWING_MS = 3500;
+const DEFAULT_PLAYER_SWING_MS = 2000;
+
+/**
+ * Ticks between consecutive basic attacks for an entity.
+ * swingMs = classBase × weaponMult × (100 / (100 + agi)), then / TICK_MS.
+ */
+function getEntitySwingTicks(entity: Entity): number {
+  let baseMs: number;
+  if (entity.classId) {
+    baseMs = getClassById(entity.classId)?.baseSwingMs ?? DEFAULT_PLAYER_SWING_MS;
+  } else if (entity.type === "boss") {
+    baseMs = entity.baseSwingMs ?? BOSS_BASE_SWING_MS;
+  } else {
+    baseMs = entity.baseSwingMs ?? MOB_BASE_SWING_MS;
+  }
+  const weaponTokenId = entity.equipment?.weapon?.tokenId;
+  const weaponMult = weaponTokenId != null
+    ? (getItemByTokenId(BigInt(weaponTokenId))?.swingMultiplier ?? 1)
+    : 1;
+  const agi = entity.effectiveStats?.agi ?? entity.stats?.agi ?? 0;
+  const ms = baseMs * weaponMult * (100 / (100 + agi));
+  return Math.max(1, Math.ceil(ms / TICK_MS));
 }
 
 function getVisibleIntentCategory(order: Order, technique?: TechniqueDefinition): VisibleIntentCategory {
@@ -1413,6 +1443,15 @@ function trySetMobTag(mob: Entity, attackerId: string, attackerType: string, tic
     mob.taggedAtTick = tick;
   } else if (mob.taggedBy === attackerId) {
     mob.taggedAtTick = tick;
+  }
+
+  // Interrupt roaming so aggro can engage next tick — don't override an
+  // existing attack order or a leash-home, and skip if already casting.
+  if (mob.leashing) return;
+  if (mob.castingIntent) return;
+  const currentOrder = mob.order;
+  if (!currentOrder || currentOrder.action === "move") {
+    mob.order = { action: "attack", targetId: attackerId };
   }
 }
 
@@ -2515,6 +2554,10 @@ async function worldTick() {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
           }
+          if ((entity.nextAttackTick ?? 0) > zone.tick) {
+            continue;
+          }
+          entity.nextAttackTick = zone.tick + getEntitySwingTicks(entity);
           const rawDmg = computeDamage(entity, target, zone.zoneId);
           const hit = resolveHit(entity, target, rawDmg);
 
@@ -2556,107 +2599,6 @@ async function worldTick() {
               targetName: target.name,
               data: { damage: hit.finalDamage, critical: hit.critical, blocked: hit.blocked, targetHp: target.hp, animStyle: atkAnim, casterX: entity.x, casterZ: entity.y, targetX: target.x, targetZ: target.y },
             });
-
-            // Basic retaliation: combatants trade hits while in range.
-            if (target.hp > 0 && canRetaliate(target)) {
-              const retRaw = computeDamage(target, entity, zone.zoneId);
-              const retHit = resolveHit(target, entity, retRaw);
-
-              entity.lastCombatTick = zone.tick;
-              target.lastCombatTick = zone.tick;
-
-              const retAnim = getBasicAttackAnimStyle(target);
-
-              if (retHit.dodged) {
-                logZoneEvent({
-                  zoneId: zone.zoneId,
-                  type: "combat",
-                  tick: zone.tick,
-                  message: `${entity.name} dodges ${target.name}'s retaliation!`,
-                  entityId: target.id,
-                  entityName: target.name,
-                  targetId: entity.id,
-                  targetName: entity.name,
-                  data: { damage: 0, dodged: true, targetHp: entity.hp, animStyle: retAnim, casterX: target.x, casterZ: target.y, targetX: entity.x, targetZ: entity.y },
-                });
-              } else {
-                applyDurabilityLoss(target, ["weapon", ...ARMOR_SLOTS]);
-                applyDurabilityLoss(entity, ["weapon", ...ARMOR_SLOTS]);
-
-                const retTag = retHit.critical ? "CRITICAL! " : "";
-                const retBlockTag = retHit.blocked ? " (blocked)" : "";
-                logZoneEvent({
-                  zoneId: zone.zoneId,
-                  type: "combat",
-                  tick: zone.tick,
-                  message: `${retTag}${target.name} retaliates for ${retHit.finalDamage} damage!${retBlockTag}`,
-                  entityId: target.id,
-                  entityName: target.name,
-                  targetId: entity.id,
-                  targetName: entity.name,
-                  data: { damage: retHit.finalDamage, critical: retHit.critical, blocked: retHit.blocked, targetHp: entity.hp, animStyle: retAnim, casterX: target.x, casterZ: target.y, targetX: entity.x, targetZ: entity.y },
-                });
-
-                if (entity.hp <= 0) {
-                  logZoneEvent({
-                    zoneId: zone.zoneId,
-                    type: "death",
-                    tick: zone.tick,
-                    message: `${entity.name} has been slain by ${target.name}!`,
-                    entityId: entity.id,
-                    entityName: entity.name,
-                    targetId: target.id,
-                    targetName: target.name,
-                  });
-
-                  if (entity.type === "player") {
-                    handlePlayerDeath(entity, zone.zoneId);
-                    continue;
-                  } else {
-                    const retaliator = (entity.taggedBy && zone.entities.get(entity.taggedBy)?.type === "player")
-                      ? zone.entities.get(entity.taggedBy)!
-                      : (target.type === "player" ? target : undefined);
-                    if (retaliator && retaliator.type === "player") {
-                      retaliator.kills = (retaliator.kills ?? 0) + 1;
-                      logZoneEvent({
-                        zoneId: zone.zoneId,
-                        type: "kill",
-                        tick: zone.tick,
-                        message: `${retaliator.name} has slain ${entity.name}!`,
-                        entityId: retaliator.id,
-                        entityName: retaliator.name,
-                        targetId: entity.id,
-                        targetName: entity.name,
-                        data: { xpReward: entity.xpReward ?? 0 },
-                      });
-                      if (retaliator.walletAddress) {
-                        const { headline, narrative } = narrativeKill(retaliator.name, retaliator.raceId, retaliator.classId, zone.zoneId, entity.name, entity.xpReward ?? 0);
-                        logDiary(retaliator.walletAddress, retaliator.name, zone.zoneId, retaliator.x, retaliator.y, "kill", headline, narrative, {
-                          targetName: entity.name,
-                          targetType: entity.type,
-                          xpReward: entity.xpReward ?? 0,
-                        });
-                      }
-                      if (retaliator.activeQuests) {
-                        for (const activeQuest of retaliator.activeQuests) {
-                          const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
-                          if (questDef && doesKillCountForQuest(questDef, entity.type, entity.name)) {
-                            activeQuest.progress++;
-                          }
-                        }
-                      }
-                    }
-
-                    await handleMobDeath(entity, retaliator ?? target, zone);
-
-                    if (retaliator) {
-                      awardPartyXp(zone, retaliator, entity.xpReward ?? 0, entity.level);
-                    }
-                    continue;
-                  }
-                }
-              }
-            }
           }
 
           if (target.hp <= 0) {

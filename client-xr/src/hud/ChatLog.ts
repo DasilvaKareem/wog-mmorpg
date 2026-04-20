@@ -18,7 +18,7 @@ export class ChatLog {
       position: fixed;
       bottom: 12px;
       left: 12px;
-      width: 400px;
+      width: min(400px, calc(100vw - 24px));
       max-height: 200px;
       overflow: hidden;
       color: #ccc;

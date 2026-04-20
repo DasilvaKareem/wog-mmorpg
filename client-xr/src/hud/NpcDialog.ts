@@ -1291,7 +1291,15 @@ export class NpcDialog {
         cursor: pointer;
       }
       .nd-btn:hover { background: rgba(255,204,0,0.2); }
-      .nd-btn:disabled { opacity: 0.5; cursor: default; }
+      .nd-btn:disabled { opacity: 0.5; cursor: inherit; }
+
+      @media (max-width: 640px) {
+        .nd-container {
+          width: calc(100vw - 16px);
+          max-width: 100%;
+          max-height: calc(100vh - 16px);
+        }
+      }
     `;
     document.head.appendChild(style);
   }

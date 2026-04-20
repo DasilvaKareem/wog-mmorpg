@@ -36,8 +36,8 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters } from "./api.js";
-import { getAuthToken, getCachedToken } from "./auth.js";
+import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem } from "./api.js";
+import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
@@ -48,9 +48,48 @@ const urlParams = new URLSearchParams(window.location.search);
 const isAnimationLab = urlParams.get("animlab") === "1";
 const pageMode = document.body.dataset.appMode;
 const isDisplayMode = pageMode === "display" || /\/display\.html$/i.test(window.location.pathname) || urlParams.get("mode") === "display";
-const followWalletAddress = urlParams.get("wallet")?.trim().toLowerCase() || urlParams.get("followWallet")?.trim().toLowerCase() || "";
+const queryWallet = urlParams.get("wallet")?.trim().toLowerCase() || urlParams.get("followWallet")?.trim().toLowerCase() || "";
 const followEntityId = urlParams.get("entityId")?.trim() || urlParams.get("followEntityId")?.trim() || "";
+let followWalletAddress = queryWallet
+  || (isDisplayMode && !followEntityId ? (getSavedWalletAddress()?.trim().toLowerCase() ?? "") : "");
 const displayFollowTarget = followWalletAddress || followEntityId;
+
+// In display mode with no URL-provided target, keep watching localStorage in
+// case the user logs in on another tab after display.html was opened.
+if (isDisplayMode && !queryWallet && !followEntityId) {
+  const dumpWogKeys = () => {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith("wog")) keys.push(k);
+    }
+    return keys;
+  };
+  console.log("[display] Initial localStorage wog-keys:", dumpWogKeys());
+  let pollCount = 0;
+  const resolveWallet = (): boolean => {
+    const next = getSavedWalletAddress()?.trim().toLowerCase() ?? "";
+    if (next && next !== followWalletAddress) {
+      followWalletAddress = next;
+      console.log("[display] Follow wallet resolved:", next);
+      return true;
+    }
+    return false;
+  };
+  window.addEventListener("storage", (e) => {
+    if (!e.key || e.key.startsWith("wog:")) resolveWallet();
+  });
+  if (!followWalletAddress) {
+    const timer = window.setInterval(() => {
+      pollCount++;
+      if (resolveWallet()) {
+        window.clearInterval(timer);
+      } else if (pollCount % 5 === 0) {
+        console.log(`[display] Still waiting for wallet (poll #${pollCount}). wog-keys:`, dumpWogKeys());
+      }
+    }, 2000);
+  }
+}
 document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
@@ -534,8 +573,9 @@ function tryFollowDisplayTarget(activePlayers: ActivePlayer[]) {
 async function findOwnCharacter() {
   if (!ownWalletAddress) return;
 
-  const token = await getAuthToken(ownWalletAddress);
-  if (!token) {
+  // Display mode is watch-only — /character/:wallet has no auth, skip signing.
+  const token = isDisplayMode ? null : await getAuthToken(ownWalletAddress);
+  if (!isDisplayMode && !token) {
     console.log("[autolock] No auth token");
     return;
   }
@@ -723,7 +763,26 @@ const questPanel = new QuestPanel({
   },
 });
 
-const bagPanel = new BagPanel();
+const bagPanel = new BagPanel({
+  onEquipItem: async (item) => {
+    if (!ownWalletAddress || !ownEntityId) return;
+    const ent = entities.getEntity(ownEntityId);
+    if (!ent?.zoneId) return;
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return;
+    const isEquipped = item.equipped && item.equippedSlot;
+    const result = isEquipped
+      ? await unequipItem(token, { zoneId: ent.zoneId, entityId: ownEntityId, slot: item.equippedSlot! })
+      : await equipItem(token, { zoneId: ent.zoneId, entityId: ownEntityId, tokenId: item.tokenId });
+    if (!result.ok) {
+      console.warn("[bag] equip/unequip failed:", result.error);
+      return;
+    }
+    lastInventoryPollTime = 0;
+    void pollInventory();
+  },
+});
+bagPanel.setPlayer(null, true);
 const skillsPanel = new SkillsPanel();
 const vitalsPanel = new VitalsPanel();
 let lastInventoryPollTime = 0;
@@ -1382,6 +1441,20 @@ async function init() {
   // Poll loop
   setInterval(pollNearbyZones, ZONE_POLL_INTERVAL);
   setInterval(pollActivePlayers, ACTIVE_PLAYERS_POLL_INTERVAL);
+
+  // Display mode: resolve the followed wallet → liveEntity → camera + lock.
+  // Retries every 3s until a live entity is found (character may not be
+  // spawned yet, or the follow wallet may arrive late via localStorage).
+  if (isDisplayMode && !followEntityId) {
+    const tryResolve = async () => {
+      if (!followWalletAddress) return;
+      if (ownEntityId) return;
+      ownWalletAddress = followWalletAddress;
+      await findOwnCharacter();
+    };
+    void tryResolve();
+    setInterval(() => { void tryResolve(); }, 3000);
+  }
 
   // Render loop
   renderer.setAnimationLoop(animate);

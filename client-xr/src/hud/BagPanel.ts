@@ -105,6 +105,26 @@ export class BagPanel {
       if (related && cell.contains(related)) return;
       this.tooltipEl.style.display = "none";
     });
+
+    // Click to equip / unequip / use
+    this.gridEl.addEventListener("click", (e) => {
+      if (!this.isOwn) return;
+      const cell = (e.target as HTMLElement).closest(".bag-cell[data-idx]") as HTMLElement;
+      if (!cell) return;
+      const idx = Number(cell.dataset.idx);
+      const item = this.items[idx];
+      if (!item) return;
+
+      const isEquippable = Boolean(item.equipSlot)
+        && (item.category === "armor" || item.category === "weapon" || item.category === "tool");
+      if (isEquippable) {
+        this.callbacks.onEquipItem?.(item);
+        return;
+      }
+      if (item.category === "consumable" || item.category === "potion" || item.category === "food") {
+        this.callbacks.onUseItem?.(item);
+      }
+    });
   }
 
   setPlayer(_walletAddress: string | null, isOwn: boolean) {
@@ -255,7 +275,7 @@ export class BagPanel {
         align-items: center;
         justify-content: center;
         position: relative;
-        cursor: default;
+        cursor: inherit;
         transition: background 0.12s;
       }
 

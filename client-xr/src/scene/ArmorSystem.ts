@@ -28,7 +28,21 @@ interface ArmorPieceDef {
   defaultColor?: number;
   /** Optional donor bone names used to constrain broad materials to the right body region */
   allowedBones?: string[];
+  /** Render as double-sided — opt-in for cloth (tabards, sashes, capes). Armor stays single-sided. */
+  doubleSided?: boolean;
 }
+
+/** Per-slot polygonOffset + renderOrder so outer layers consistently sit on top of inner. */
+const SLOT_DEPTH: Record<string, { offset: number; renderOrder: number }> = {
+  chest:     { offset: -2, renderOrder: 1 },
+  legs:      { offset: -2, renderOrder: 1 },
+  boots:     { offset: -4, renderOrder: 2 },
+  gloves:    { offset: -4, renderOrder: 2 },
+  belt:      { offset: -4, renderOrder: 2 },
+  shoulders: { offset: -6, renderOrder: 3 },
+  helm:      { offset: -4, renderOrder: 3 },
+  weapon:    { offset: -2, renderOrder: 4 },
+};
 
 type ArmorEquipmentItem = {
   name?: string;
@@ -37,40 +51,17 @@ type ArmorEquipmentItem = {
 };
 
 const TARGET_SKELETON_INDEX_BY_NAME: Record<string, number> = {
-  bone: 0,
-  root: 0,
+  bone: 0, root: 0,
   footl: 1,
-  body: 2,
-  body1: 2,
-  hips: 3,
-  abdomen: 4,
-  torso: 5,
-  neck: 6,
-  head: 7,
-  shoulderl: 8,
-  upperarml: 9,
-  lowerarml: 10,
-  fistl: 11,
-  fist1l: 11,
-  fist2l: 11,
-  thumb1l: 11,
-  thumb2l: 11,
-  shoulderr: 12,
-  upperarmr: 13,
-  lowerarmr: 14,
-  fistr: 15,
-  fist1r: 15,
-  fist2r: 15,
-  weaponr: 15,
-  thumb1r: 15,
-  thumb2r: 15,
-  upperlegl: 16,
-  lowerlegl: 17,
-  upperlegr: 18,
-  lowerlegr: 19,
-  poletargetl: 20,
-  footr: 21,
-  poletargetr: 22,
+  body: 2, body1: 2,
+  hips: 3, abdomen: 4, torso: 5, neck: 6, head: 7,
+  shoulderl: 8, upperarml: 9, lowerarml: 10,
+  fistl: 11, fist1l: 11, fist2l: 11, thumb1l: 11, thumb2l: 11,
+  shoulderr: 12, upperarmr: 13, lowerarmr: 14,
+  fistr: 15, fist1r: 15, fist2r: 15, weaponr: 15, thumb1r: 15, thumb2r: 15,
+  upperlegl: 16, lowerlegl: 17,
+  upperlegr: 18, lowerlegr: 19,
+  poletargetl: 20, footr: 21, poletargetr: 22,
 };
 
 function normalizeMaterialName(name: string): string {
@@ -122,39 +113,35 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   worker_vest:        { donor: "Worker_Male",          materials: ["Vest"],         defaultColor: 0x77553a },
   cowboy_jacket:      { donor: "Cowboy_Male",           materials: ["Jacket"],       defaultColor: 0x814824 },
   zombie_rags:        { donor: "Zombie_Male",          materials: ["Clothes"],      defaultColor: 0x53457b },
-  // Blender modular donor target: split Warrior into skinned torso/armor regions.
-  warrior_chest:      { donor: "Warrior_Modular",      materials: ["Armor", "Chest", "Torso", "Clothes"], defaultColor: 0x7d7b82, allowedBones: ["Body", "Hips", "Abdomen", "Torso", "Neck"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // SHOULDERS / OVERLAY
   // ═══════════════════════════════════════════════════════════════════
-  knight_pauldrons:   { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x9098a8, allowedBones: ["Shoulder.L", "UpperArm.L", "Shoulder.R", "UpperArm.R"] },
-  gold_pauldrons:     { donor: "Knight_Golden_Male",   materials: ["Armor_Dark"],   defaultColor: 0x292929 },
-  soldier_gear:       { donor: "Soldier_Male",         materials: ["Black"],        defaultColor: 0x2b2b2b },
-  blue_soldier_gear:  { donor: "BlueSoldier_Male",     materials: ["Black"],        defaultColor: 0x2b2b2b },
-  ninja_wraps:        { donor: "Ninja_Male",           materials: ["Details"],      defaultColor: 0x451e43 },
-  sand_ninja_wraps:   { donor: "Ninja_Sand",           materials: ["Details"],      defaultColor: 0x451239 },
-  pirate_gold:        { donor: "Pirate_Male",          materials: ["Gold"],         defaultColor: 0x9c7536 },
-  chef_apron:         { donor: "Chef_Hat",             materials: ["DarkClothes"],  defaultColor: 0x9a9a9a },
-  suit_details:       { donor: "Suit_Male",            materials: ["Details"],      defaultColor: 0x484848 },
-  oldclassy_detail:   { donor: "OldClassy_Male",       materials: ["Detail"],       defaultColor: 0x8d5c39 },
-  warrior_shoulders:  { donor: "Warrior_Modular",      materials: ["Shoulder", "Shoulders", "Pauldron"], defaultColor: 0x6e727c, allowedBones: ["Shoulder.L", "UpperArm.L", "Shoulder.R", "UpperArm.R"] },
+  knight_pauldrons:   { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x9098a8, allowedBones: ["Shoulder.L", "Shoulder.R"] },
+  gold_pauldrons:     { donor: "Knight_Golden_Male",   materials: ["Armor_Dark"],   defaultColor: 0x292929, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  soldier_gear:       { donor: "Soldier_Male",         materials: ["Black"],        defaultColor: 0x2b2b2b, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  blue_soldier_gear:  { donor: "BlueSoldier_Male",     materials: ["Black"],        defaultColor: 0x2b2b2b, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  ninja_wraps:        { donor: "Ninja_Male",           materials: ["Details"],      defaultColor: 0x451e43, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  sand_ninja_wraps:   { donor: "Ninja_Sand",           materials: ["Details"],      defaultColor: 0x451239, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  pirate_gold:        { donor: "Pirate_Male",          materials: ["Gold"],         defaultColor: 0x9c7536, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  chef_apron:         { donor: "Chef_Hat",             materials: ["DarkClothes"],  defaultColor: 0x9a9a9a, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  suit_details:       { donor: "Suit_Male",            materials: ["Details"],      defaultColor: 0x484848, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
+  oldclassy_detail:   { donor: "OldClassy_Male",       materials: ["Detail"],       defaultColor: 0x8d5c39, allowedBones: ["Shoulder.L", "Shoulder.R", "UpperArm.L", "UpperArm.R"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // LEGS / PANTS
   // ═══════════════════════════════════════════════════════════════════
-  viking_pants:       { donor: "Viking_Male",          materials: ["Pants"],        defaultColor: 0x30241e },
-  soldier_pants:      { donor: "Soldier_Male",         materials: ["DarkGreen"],    defaultColor: 0x353c22 },
-  blue_soldier_pants: { donor: "BlueSoldier_Male",     materials: ["Grey"],         defaultColor: 0x3c3c3c },
-  ninja_legs:         { donor: "Ninja_Male",           materials: ["Grey"],         defaultColor: 0x4c4c4c },
-  cowboy_pants:       { donor: "Cowboy_Male",           materials: ["Pants"],        defaultColor: 0x3f251b },
-  oldclassy_pants:    { donor: "OldClassy_Male",       materials: ["Pants"],        defaultColor: 0x7d7c5e },
-  pirate_boots:       { donor: "Pirate_Male",          materials: ["Black"],        defaultColor: 0x252525 },
-  worker_pants:       { donor: "Worker_Male",          materials: ["Pants"],        defaultColor: 0x3f586f },
-  zombie_pants:       { donor: "Zombie_Male",          materials: ["Pants"],        defaultColor: 0x9a9171 },
-  knight_detail:      { donor: "Knight_Male",          materials: ["Detail"],       defaultColor: 0x54321f },
-  doctor_scrubs:      { donor: "Doctor_Male_Old",      materials: ["Brown"],        defaultColor: 0x1f3436 },
-  warrior_legs:       { donor: "Warrior_Modular",      materials: ["Legs", "Pants", "Greaves"], defaultColor: 0x665a4a, allowedBones: ["UpperLeg.L", "LowerLeg.L", "Foot.L", "UpperLeg.R", "LowerLeg.R", "Foot.R"] },
+  viking_pants:       { donor: "Viking_Male",          materials: ["Pants"],        defaultColor: 0x30241e, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  soldier_pants:      { donor: "Soldier_Male",         materials: ["Black"],        defaultColor: 0x353c22, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  blue_soldier_pants: { donor: "BlueSoldier_Male",     materials: ["Black"],        defaultColor: 0x3c3c3c, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  ninja_legs:         { donor: "Ninja_Male",           materials: ["Grey"],         defaultColor: 0x4c4c4c, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  cowboy_pants:       { donor: "Cowboy_Male",           materials: ["Pants"],        defaultColor: 0x3f251b, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  oldclassy_pants:    { donor: "OldClassy_Male",       materials: ["Pants"],        defaultColor: 0x7d7c5e, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  pirate_boots:       { donor: "Pirate_Male",          materials: ["Black"],        defaultColor: 0x252525, allowedBones: ["LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  worker_pants:       { donor: "Worker_Male",          materials: ["Pants"],        defaultColor: 0x3f586f, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  zombie_pants:       { donor: "Zombie_Male",          materials: ["Pants"],        defaultColor: 0x9a9171, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  knight_detail:      { donor: "Knight_Male",          materials: ["Detail"],       defaultColor: 0x54321f, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
+  doctor_scrubs:      { donor: "Doctor_Male_Old",      materials: ["Brown"],        defaultColor: 0x1f3436, allowedBones: ["UpperLeg.L", "UpperLeg.R", "LowerLeg.L", "LowerLeg.R", "Foot.L", "Foot.R"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // HELM / HAT
@@ -169,26 +156,36 @@ const ARMOR_CATALOG: Record<string, ArmorPieceDef> = {
   chef_hat:           { donor: "Chef_Hat",             materials: ["Hat"],          defaultColor: 0xf4f3e8 },
   worker_hat:         { donor: "Worker_Male",          materials: ["Hat"],          defaultColor: 0xa19741 },
   oldclassy_hat:      { donor: "OldClassy_Male",       materials: ["Hat"],          defaultColor: 0x1b1a16 },
-  warrior_helm:       { donor: "Warrior_Modular",      materials: ["Helm", "Helmet", "Headgear"], defaultColor: 0x8d8f95, allowedBones: ["Neck", "Head"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // BELT / ACCESSORY
   // ═══════════════════════════════════════════════════════════════════
-  knight_tabard:      { donor: "Knight_Male",          materials: ["Red"],          defaultColor: 0x642420 },
-  gold_tabard:        { donor: "Knight_Golden_Male",   materials: ["Red"],          defaultColor: 0x5a212e },
-  elf_belt:           { donor: "Elf",                  materials: ["Belt", "Gold"], defaultColor: 0x906e38 },
-  wizard_belt:        { donor: "Wizard",               materials: ["Belt", "Gold"], defaultColor: 0x906e38 },
-  pirate_sash:        { donor: "Pirate_Male",          materials: ["Brown", "Red"], defaultColor: 0x583e2c },
-  pirate_undershirt:  { donor: "Pirate_Male",          materials: ["Beige"],        defaultColor: 0xb7b09b },
-  kimono_sash:        { donor: "Kimono_Male",          materials: ["Band"],         defaultColor: 0x83382b },
-  chef_band:          { donor: "Chef_Hat",             materials: ["Band"],         defaultColor: 0x83382b },
-  cowboy_scarf:       { donor: "Cowboy_Male",           materials: ["Scarf"],        defaultColor: 0x811e19 },
-  viking_accents:     { donor: "Viking_Male",          materials: ["Light"],        defaultColor: 0xc0a98f },
-  suit_belt:          { donor: "Suit_Male",            materials: ["Belt"],         defaultColor: 0x191b29 },
-  suit_shirt:         { donor: "Suit_Male",            materials: ["Shirt"],        defaultColor: 0xcccccc },
-  oldclassy_belt:     { donor: "OldClassy_Male",       materials: ["Belt"],         defaultColor: 0x523724 },
-  doctor_stethoscope: { donor: "Doctor_Male_Old",      materials: ["Black"],        defaultColor: 0x46806e },
-  warrior_belt:       { donor: "Warrior_Modular",      materials: ["Belt", "Waist", "Tabard"], defaultColor: 0x8b5c36, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  knight_tabard:      { donor: "Knight_Male",          materials: ["Red"],          defaultColor: 0x642420, allowedBones: ["Body", "Hips", "Abdomen", "Torso"], doubleSided: true },
+  gold_tabard:        { donor: "Knight_Golden_Male",   materials: ["Red"],          defaultColor: 0x5a212e, allowedBones: ["Body", "Hips", "Abdomen", "Torso"], doubleSided: true },
+  elf_belt:           { donor: "Elf",                  materials: ["Belt", "Gold"], defaultColor: 0x906e38, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  wizard_belt:        { donor: "Wizard",               materials: ["Belt", "Gold"], defaultColor: 0x906e38, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  pirate_sash:        { donor: "Pirate_Male",          materials: ["Brown", "Red"], defaultColor: 0x583e2c, allowedBones: ["Body", "Hips", "Abdomen", "Torso"], doubleSided: true },
+  pirate_undershirt:  { donor: "Pirate_Male",          materials: ["Beige"],        defaultColor: 0xb7b09b, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  kimono_sash:        { donor: "Kimono_Male",          materials: ["Band"],         defaultColor: 0x83382b, allowedBones: ["Body", "Hips", "Abdomen", "Torso"], doubleSided: true },
+  chef_band:          { donor: "Chef_Hat",             materials: ["Band"],         defaultColor: 0x83382b, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  cowboy_scarf:       { donor: "Cowboy_Male",           materials: ["Scarf"],        defaultColor: 0x811e19, allowedBones: ["Neck", "Torso"], doubleSided: true },
+  viking_accents:     { donor: "Viking_Male",          materials: ["Light"],        defaultColor: 0xc0a98f, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  suit_belt:          { donor: "Suit_Male",            materials: ["Belt"],         defaultColor: 0x191b29, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  suit_shirt:         { donor: "Suit_Male",            materials: ["Shirt"],        defaultColor: 0xcccccc, allowedBones: ["Body", "Hips", "Abdomen", "Torso", "Neck"] },
+  oldclassy_belt:     { donor: "OldClassy_Male",       materials: ["Belt"],         defaultColor: 0x523724, allowedBones: ["Body", "Hips", "Abdomen", "Torso"] },
+  doctor_stethoscope: { donor: "Doctor_Male_Old",      materials: ["Black"],        defaultColor: 0x46806e, allowedBones: ["Body", "Torso", "Neck"] },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // BOOTS
+  // ═══════════════════════════════════════════════════════════════════
+  boots_plate:        { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x707885, allowedBones: ["Foot.L", "Foot.R"] },
+  boots_leather:      { donor: "Pirate_Male",          materials: ["Black"],        defaultColor: 0x2a1e14, allowedBones: ["Foot.L", "Foot.R"] },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // GLOVES / GAUNTLETS
+  // ═══════════════════════════════════════════════════════════════════
+  gloves_plate:       { donor: "Knight_Male",          materials: ["Armor"],        defaultColor: 0x8891a0, allowedBones: ["Fist.L", "Fist.R", "LowerArm.L", "LowerArm.R"] },
+  gloves_leather:     { donor: "Pirate_Male",          materials: ["Black"],        defaultColor: 0x3a2c1e, allowedBones: ["Fist.L", "Fist.R", "LowerArm.L", "LowerArm.R"] },
 
   // ═══════════════════════════════════════════════════════════════════
   // HAIR (equippable styles)
@@ -225,7 +222,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/worker.*shirt|work.*shirt/i,                            "worker_shirt"],
   [/vest/i,                                                 "worker_vest"],
   [/viking.*chest|fur.*chest|barbarian/i,                   "viking_chest"],
-  [/warrior.*chest|mercenary.*(?:armor|cuirass)|gladiator.*armor|cuirass/i, "warrior_chest"],
+  [/warrior.*chest|mercenary.*(?:armor|cuirass)|gladiator.*armor|cuirass/i, "knight_plate"],
   [/dress.*shirt|fine.*shirt|classy.*shirt/i,               "oldclassy_shirt"],
   [/zombie|undead.*rag|tattered/i,                          "zombie_rags"],
   [/robe|cloak/i,                                           "wizard_robe"],
@@ -242,7 +239,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/pirate.*epaulette|gold.*buckle/i,                       "pirate_gold"],
   [/apron/i,                                                "chef_apron"],
   [/military.*gear|tactical/i,                              "soldier_gear"],
-  [/warrior.*shoulder|mercenary.*pauldron|gladiator.*shoulder/i, "warrior_shoulders"],
+  [/warrior.*shoulder|mercenary.*pauldron|gladiator.*shoulder/i, "knight_pauldrons"],
   [/shoulder/i,                                             "soldier_gear"],
 
   // ── Legs ──
@@ -252,12 +249,22 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*pant|chaps|leather.*pant/i,                     "cowboy_pants"],
   [/pirate.*boot|buccaneer.*boot/i,                         "pirate_boots"],
   [/worker.*pant|work.*pant/i,                              "worker_pants"],
-  [/warrior.*leg|mercenary.*greave|gladiator.*leg/i,        "warrior_legs"],
+  [/warrior.*leg|mercenary.*greave|gladiator.*leg/i,        "viking_pants"],
   [/fine.*pant|dress.*pant|classy.*pant|trouser/i,          "oldclassy_pants"],
   [/scrub|medic.*pant/i,                                    "doctor_scrubs"],
-  [/plate.*greave|iron.*greave|steel.*greave/i,             "knight_detail"],
-  [/greave|leg.*guard/i,                                    "soldier_pants"],
+  [/plate.*greave|iron.*greave|steel.*greave/i,             "viking_pants"],
+  [/greave|leg.*guard/i,                                    "viking_pants"],
   [/pant|legging/i,                                         "viking_pants"],
+
+  // ── Boots ──
+  [/plate.*boot|iron.*boot|steel.*boot|sabaton/i,           "boots_plate"],
+  [/leather.*boot|hide.*boot/i,                             "boots_leather"],
+  [/boot/i,                                                 "boots_leather"],
+
+  // ── Gloves / Gauntlets ──
+  [/plate.*gauntlet|iron.*gauntlet|steel.*gauntlet|knight.*gauntlet/i, "gloves_plate"],
+  [/leather.*glove|hide.*glove/i,                           "gloves_leather"],
+  [/gauntlet|glove|grip|bracer/i,                           "gloves_plate"],
 
   // ── Helm / Hat ──
   [/viking.*helm|horned.*helm/i,                            "viking_helm"],
@@ -268,7 +275,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*hat|ranch.*hat/i,                               "cowboy_hat"],
   [/chef.*hat|cook.*hat|toque/i,                            "chef_hat"],
   [/hard.*hat|worker.*hat|construction/i,                   "worker_hat"],
-  [/warrior.*helm|mercenary.*helm|gladiator.*helm/i,        "warrior_helm"],
+  [/warrior.*helm|mercenary.*helm|gladiator.*helm/i,        "soldier_helm"],
   [/top.*hat|classy.*hat|formal.*hat/i,                     "oldclassy_hat"],
   [/helm|helmet/i,                                          "soldier_helm"],
   [/hat|cap|hood/i,                                         "worker_hat"],
@@ -285,7 +292,7 @@ const ITEM_NAME_TO_PIECE: [RegExp, string][] = [
   [/cowboy.*scarf|bandana|neckerchief/i,                    "cowboy_scarf"],
   [/bone.*accent|viking.*accent/i,                          "viking_accents"],
   [/stethoscope/i,                                          "doctor_stethoscope"],
-  [/warrior.*belt|mercenary.*belt|gladiator.*belt/i,        "warrior_belt"],
+  [/warrior.*belt|mercenary.*belt|gladiator.*belt/i,        "knight_tabard"],
   [/undershirt|cream.*shirt/i,                              "pirate_undershirt"],
   [/dress.*shirt.*under|suit.*shirt/i,                      "suit_shirt"],
   [/guard.*belt|plate.*belt|iron.*belt/i,                   "oldclassy_belt"],
@@ -379,6 +386,7 @@ export class ArmorSystem {
    */
   createPiece(
     pieceId: string,
+    slot: string,
     targetSkeleton: THREE.Skeleton,
     rootBone: THREE.Bone,
     tintColor?: number,
@@ -389,18 +397,22 @@ export class ArmorSystem {
       return null;
     }
 
+    const def = ARMOR_CATALOG[pieceId];
+    const depth = SLOT_DEPTH[slot] ?? { offset: -2, renderOrder: 1 };
+
     const color = tintColor ?? piece.defaultColor;
     const material = new THREE.MeshToonMaterial({
       color,
       gradientMap: getGradientMap(),
-      side: THREE.DoubleSide,
+      side: def?.doubleSided ? THREE.DoubleSide : THREE.FrontSide,
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
+      polygonOffsetFactor: depth.offset,
+      polygonOffsetUnits: depth.offset,
     });
 
     const mesh = new THREE.SkinnedMesh(piece.geometry, material);
-    mesh.name = `armor_${pieceId}`;
+    mesh.name = `armor_${slot}_${pieceId}`;
+    mesh.renderOrder = depth.renderOrder;
     mesh.castShadow = true;
     mesh.frustumCulled = false;
     mesh.bind(targetSkeleton, new THREE.Matrix4());
@@ -421,13 +433,12 @@ export class ArmorSystem {
     const armorGroup = new THREE.Group();
     armorGroup.name = "equipment";
 
-    for (const [_slot, item] of Object.entries(equipment)) {
+    for (const [slot, item] of Object.entries(equipment)) {
       const pieceId = resolveCanonicalArmorPieceId(item);
       if (!pieceId) continue;
 
-      // Quality-based color tinting
       const qualityTint = this.qualityTint(item.quality);
-      const mesh = this.createPiece(pieceId, targetSkeleton, rootBone, qualityTint);
+      const mesh = this.createPiece(pieceId, slot, targetSkeleton, rootBone, qualityTint);
       if (mesh) {
         armorGroup.add(mesh);
       }
@@ -475,15 +486,17 @@ export class ArmorSystem {
   ): void {
     const skinIndex = geometry.getAttribute("skinIndex");
     if (!(skinIndex instanceof THREE.BufferAttribute)) return;
-
     const donorBones = donorSkeleton.bones;
     const remap = new Map<number, number>();
     for (let i = 0; i < donorBones.length; i++) {
-      const normalized = normalizeBoneName(donorBones[i]?.name ?? "");
+      const raw = donorBones[i]?.name ?? "";
+      const normalized = normalizeBoneName(raw);
       const mapped = TARGET_SKELETON_INDEX_BY_NAME[normalized];
+      if (mapped === undefined) {
+        console.warn(`[Armor] unmapped donor bone "${raw}" (normalized "${normalized}"), collapsing to root`);
+      }
       remap.set(i, mapped ?? 0);
     }
-
     for (let i = 0; i < skinIndex.count; i++) {
       for (let c = 0; c < skinIndex.itemSize; c++) {
         const sourceIndex = skinIndex.getComponent(i, c) as number;
@@ -527,6 +540,7 @@ export class ArmorSystem {
       newIndices[i] = oldToNew.get(allIndices[i])!;
     }
     newGeo.setIndex(new THREE.BufferAttribute(newIndices, 1));
+    newGeo.computeVertexNormals();
     return newGeo;
   }
 
@@ -553,21 +567,25 @@ export class ArmorSystem {
       return sourceGeo.clone();
     }
 
+    // Keep a triangle only when every vertex has a majority (>0.5) of its
+    // skin weight on allowed bones. This rejects non-region geometry that
+    // happens to share a weak influence with the region (e.g., chest plate
+    // triangles that have 0.1 weight on Shoulder) while still keeping
+    // boundary triangles that are largely but not exclusively in-region.
+    const MAJORITY_THRESHOLD = 0.5;
     const keptTriangleIndices: number[] = [];
     for (let i = 0; i < srcIndex.count; i += 3) {
       let keepTriangle = true;
       for (let t = 0; t < 3; t++) {
         const vertexIndex = srcIndex.getX(i + t);
-        let dominantBone = -1;
-        let dominantWeight = -1;
+        let allowedWeightSum = 0;
         for (let c = 0; c < skinIndex.itemSize; c++) {
-          const weight = skinWeight.getComponent(vertexIndex, c) as number;
-          if (weight > dominantWeight) {
-            dominantWeight = weight;
-            dominantBone = skinIndex.getComponent(vertexIndex, c) as number;
+          const bone = skinIndex.getComponent(vertexIndex, c) as number;
+          if (allowedBoneIndices.has(bone)) {
+            allowedWeightSum += skinWeight.getComponent(vertexIndex, c) as number;
           }
         }
-        if (!allowedBoneIndices.has(dominantBone)) {
+        if (allowedWeightSum < MAJORITY_THRESHOLD) {
           keepTriangle = false;
           break;
         }

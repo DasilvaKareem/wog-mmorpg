@@ -108,6 +108,86 @@ export function renderMap(opts: RenderOpts) {
     }
   }
 
+  // Tree glyphs — the Overworld.png tree sprites are tiny pixel-art and
+  // disappear at normal zoom. Draw a procedural canopy + trunk on top so
+  // trees are actually visible in the editor. A "tree" is anchored by a
+  // trunk tile (40 or 45) in either layer; canopy quadrant tiles are
+  // ignored here since the procedural canopy covers their footprint.
+  if (state.showOverlay || state.showGround) {
+    const TRUNK_LIGHT = 40;
+    const TRUNK_DARK = 45;
+    const CANOPY_LIGHT = new Set([41, 42, 43, 44]);
+    const CANOPY_DARK = new Set([46, 47, 48, 49]);
+    const drawTree = (tx: number, ty: number, dark: boolean) => {
+      const cx = tx * tileSize + tileSize / 2;
+      const cy = ty * tileSize + tileSize / 2;
+      const r = tileSize * 0.9;
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + tileSize * 0.35, r * 0.7, r * 0.25, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = dark ? "#5a3a1a" : "#7a4a1e";
+      ctx.fillRect(cx - tileSize * 0.15, cy - tileSize * 0.1, tileSize * 0.3, tileSize * 0.5);
+      const grad = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.3, r * 0.1, cx, cy - tileSize * 0.1, r);
+      if (dark) {
+        grad.addColorStop(0, "#3a6b2a");
+        grad.addColorStop(1, "#1a3a16");
+      } else {
+        grad.addColorStop(0, "#7dc24a");
+        grad.addColorStop(1, "#2f6a28");
+      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy - tileSize * 0.1, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.lineWidth = 1 / state.zoom;
+      ctx.stroke();
+    };
+    const anchoredTrunks = new Set<number>();
+    const scan = (arr: Int32Array | number[]) => {
+      for (let y = startY; y < endY; y++) {
+        for (let x = startX; x < endX; x++) {
+          const t = arr[y * state.width + x];
+          if (t === TRUNK_LIGHT || t === TRUNK_DARK) {
+            const key = y * state.width + x;
+            if (anchoredTrunks.has(key)) continue;
+            anchoredTrunks.add(key);
+            drawTree(x, y, t === TRUNK_DARK);
+          }
+        }
+      }
+    };
+    scan(state.ground as any);
+    scan(state.overlay as any);
+    // Orphan canopies (canopy tile without a nearby trunk) — draw a small
+    // shrub so the author still sees something there.
+    for (let y = startY; y < endY; y++) {
+      for (let x = startX; x < endX; x++) {
+        const t = state.overlay[y * state.width + x];
+        const isCanopy = CANOPY_LIGHT.has(t) || CANOPY_DARK.has(t);
+        if (!isCanopy) continue;
+        let anchored = false;
+        for (let dy = -1; dy <= 1 && !anchored; dy++) {
+          for (let dx = -1; dx <= 1 && !anchored; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= state.width || ny >= state.height) continue;
+            const key = ny * state.width + nx;
+            if (anchoredTrunks.has(key)) anchored = true;
+          }
+        }
+        if (anchored) continue;
+        const cx = x * tileSize + tileSize / 2;
+        const cy = y * tileSize + tileSize / 2;
+        ctx.fillStyle = CANOPY_DARK.has(t) ? "#2a4a1a" : "#4a7a28";
+        ctx.beginPath();
+        ctx.arc(cx, cy, tileSize * 0.35, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   // Elevation overlay
   if (state.showElevation) {
     for (let y = startY; y < endY; y++) {

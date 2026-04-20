@@ -198,10 +198,10 @@ export class PlayerPanel {
     style.textContent = `
       #player-panel {
         position: fixed;
-        top: 44px;
+        top: 200px;
         left: 12px;
         width: 260px;
-        max-height: min(420px, calc(100vh - 200px));
+        max-height: min(420px, calc(100vh - 360px));
         background: rgba(10, 16, 28, 0.92);
         border: 1px solid rgba(68, 255, 136, 0.25);
         border-radius: 8px;

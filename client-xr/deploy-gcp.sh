@@ -22,6 +22,8 @@ fi
 echo "==> Setting cache headers..."
 # HTML — no cache (always fetch latest)
 gcloud storage objects update "$BUCKET/$PREFIX/index.html" --cache-control="no-cache, no-store"
+gcloud storage objects update "$BUCKET/$PREFIX/display.html" --cache-control="no-cache, no-store" 2>/dev/null || true
+gcloud storage objects update "$BUCKET/$PREFIX/controller.html" --cache-control="no-cache, no-store" 2>/dev/null || true
 
 # Unversioned public models can change in-place, so keep them revalidating.
 gsutil -m setmeta -r -h "Cache-Control:no-cache, no-store" "$BUCKET/$PREFIX/models/" 2>/dev/null || true
