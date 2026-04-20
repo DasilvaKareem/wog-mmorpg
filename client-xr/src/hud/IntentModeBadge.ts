@@ -1,11 +1,12 @@
 export type IntentVisibilityMode = "minimal" | "tactical" | "spectator";
 
-export class IntentModeBadge {
+export class ZoneNameBadge {
   private el: HTMLDivElement;
+  private currentZoneId: string | null = null;
 
   constructor() {
     this.el = document.createElement("div");
-    this.el.id = "intent-mode-badge";
+    this.el.id = "zone-name-badge";
     this.el.style.cssText = `
       position: fixed;
       top: 12px;
@@ -23,10 +24,12 @@ export class IntentModeBadge {
       backdrop-filter: blur(5px);
     `;
     document.body.appendChild(this.el);
-    this.setMode("minimal");
+    this.setZoneId(null);
   }
 
-  setMode(mode: IntentVisibilityMode) {
-    this.el.textContent = `Intent ${mode} · V`;
+  setZoneId(zoneId: string | null) {
+    if (zoneId === this.currentZoneId) return;
+    this.currentZoneId = zoneId;
+    this.el.textContent = zoneId ? zoneId.replace(/-/g, " ") : "—";
   }
 }

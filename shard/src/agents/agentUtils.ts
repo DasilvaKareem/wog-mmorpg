@@ -217,6 +217,13 @@ export interface AgentContext {
   /** Mark a quest as stuck. Auto-expires after ~5 minutes so the agent can retry. */
   markQuestStuck(questId: string, reason: string): void;
 
+  /** Whether a gather node is blacklisted for this agent (skill too low).
+   *  Per-agent so a low-skill agent's blacklist doesn't block a high-skill agent. */
+  isGatherNodeBlacklisted(nodeId: string): boolean;
+
+  /** Blacklist a gather node for this agent. Auto-expires after ~5 minutes. */
+  markGatherNodeBlacklisted(nodeId: string): void;
+
   /** ID of the target the agent is currently committed to, or null if no commitment.
    *  Once committed, target selection sticks with this mob for a handful of ticks
    *  so the randomized shortlist in pickCombatTarget doesn't flip targets every

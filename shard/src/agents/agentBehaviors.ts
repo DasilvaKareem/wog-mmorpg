@@ -517,14 +517,6 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: R
 type GatherPreference = "ore" | "herb" | "both";
 type GatheringToolKind = "pickaxe" | "sickle";
 
-/**
- * Nodes blacklisted due to "skill too low" — prevents agents from
- * hammering the same node hundreds of times. Entries expire after 5 minutes
- * so the agent retries once its skill may have improved.
- */
-const gatherSkillBlacklist = new Set<string>();
-setInterval(() => gatherSkillBlacklist.clear(), 5 * 60_000);
-
 function matchesTool(name: string | undefined, toolKind: GatheringToolKind): boolean {
   const lower = name?.toLowerCase() ?? "";
   return toolKind === "pickaxe" ? lower.includes("pickaxe") : lower.includes("sickle");
@@ -551,10 +543,11 @@ function findGatherNode(
   entities: Record<string, any>,
   me: any,
   preference: GatherPreference,
+  isBlacklisted: (nodeId: string) => boolean,
 ): [string, any] | null {
   const matches = Object.entries(entities)
     .filter(([id, e]) => {
-      if (gatherSkillBlacklist.has(id)) return false;
+      if (isBlacklisted(id)) return false;
       const alive = !e.depletedAtTick && (e.charges ?? 0) > 0;
       if (preference === "ore") return e.type === "ore-node" && alive;
       if (preference === "herb") return e.type === "flower-node" && alive;
@@ -853,7 +846,7 @@ export async function doGathering(
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
-    const node = findGatherNode(entities, me, preference);
+    const node = findGatherNode(entities, me, preference, (id) => ctx.isGatherNodeBlacklisted(id));
     if (!node) {
       return fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
     }
@@ -905,7 +898,7 @@ export async function doGathering(
       } catch (err: any) {
         const reason = formatAgentError(err);
         if (/skill too low/i.test(reason)) {
-          gatherSkillBlacklist.add(nodeId);
+          ctx.markGatherNodeBlacklisted(nodeId);
           void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
           return actionBlocked(reason, {
             failureKey: `mining:skill:${ctx.currentRegion}`,
@@ -947,7 +940,7 @@ export async function doGathering(
         const reason = formatAgentError(err);
         // Skill too low — blacklist this node and try a lower-tier one
         if (/skill too low/i.test(reason)) {
-          gatherSkillBlacklist.add(nodeId);
+          ctx.markGatherNodeBlacklisted(nodeId);
           void ctx.logActivity(`Skill too low for ${nodeEntity.name ?? "node"} — looking for easier nodes`);
           return actionBlocked(reason, {
             failureKey: `herbalism:skill:${ctx.currentRegion}`,
@@ -2289,9 +2282,11 @@ export async function doQuesting(
             ctx.setScript(null);
             return actionProgressed(`Traveling to ${nextZone} for new quests`);
           }
-          // No quest zone available — fall through to combat grinding
-          void ctx.logActivity("All quests exhausted — grinding mobs for XP");
-          return fallbackToCombat(ctx, "All quests exhausted", strategy);
+          // No quest zone available for this level — go idle so we don't
+          // loop into combat fallback → level-mismatch → zone rescue.
+          void ctx.logActivity(`No quests available for Lv${myLevel} — idling`);
+          ctx.setScript({ type: "idle", reason: `No quests available for Lv${myLevel}` });
+          return actionIdle(`No quests available for Lv${myLevel}`);
         }
       } catch (err: any) {
         console.debug(`[agent:${ctx.walletTag}] quest accept: ${err.message?.slice(0, 60)}`);
@@ -2374,9 +2369,10 @@ export async function doQuesting(
     } else {
       const activeCount = activeQuests.filter((aq: any) => !aq.complete).length;
       const detail = `active=${activeCount} total=${activeQuests.length}`;
-      console.debug(`[agent:${ctx.walletTag}] Quest fallback to combat: no kill/gather objectives (${detail})`);
-      void ctx.logActivity(`No quest objectives — grinding mobs (${detail})`);
-      return fallbackToCombat(ctx, `No quest objectives (${detail})`, strategy);
+      console.debug(`[agent:${ctx.walletTag}] No kill/gather objectives — idling (${detail})`);
+      void ctx.logActivity(`No quest objectives — idling (${detail})`);
+      ctx.setScript({ type: "idle", reason: `No quest objectives (${detail})` });
+      return actionIdle(`No quest objectives (${detail})`);
     }
   } catch (err: any) {
     const reason = formatAgentError(err);

@@ -391,7 +391,7 @@ cmd({
 
     await patchAgentConfig(ctx.authWallet, patch);
     const runner = agentManager.getRunner(ctx.authWallet);
-    if (runner) runner.clearScript();
+    if (runner) await runner.clearScript();
 
     const zoneMsg = patch.targetZone ? ` → ${patch.targetZone}` : "";
     return { response: `Focus set to: ${focus}${zoneMsg}`, configChanged: true };
@@ -413,7 +413,7 @@ cmd({
     }
     await patchAgentConfig(ctx.authWallet, { strategy: input as AgentStrategy });
     const runner = agentManager.getRunner(ctx.authWallet);
-    if (runner) runner.clearScript();
+    if (runner) await runner.clearScript();
     return { response: `Strategy set to: ${input}`, configChanged: true };
   },
 });
@@ -589,7 +589,7 @@ cmd({
 
     await patchAgentConfig(ctx.authWallet, { focus: "traveling", targetZone: resolved });
     const runner = agentManager.getRunner(ctx.authWallet);
-    if (runner) runner.clearScript();
+    if (runner) await runner.clearScript();
     return { response: `Traveling to ${resolved}...`, configChanged: true };
   },
 });

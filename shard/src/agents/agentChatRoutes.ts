@@ -1115,7 +1115,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
 
     // Clear the runner's current script so it picks up the new focus immediately
     const runner = agentManager.getRunner(authWallet);
-    if (runner) runner.clearScript();
+    if (runner) await runner.clearScript();
 
     server.log.info(`[recommend/apply] ${authWallet.slice(0, 8)} applied: ${title ?? focus} (${strategy ?? "balanced"})`);
 
@@ -1193,7 +1193,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
     const captured = await captureDirectives(authWallet, message);
     if (captured.length > 0) {
       const runner = agentManager.getRunner(authWallet);
-      if (runner) runner.clearScript();
+      if (runner) await runner.clearScript();
     }
 
     const config = await getAgentConfig(authWallet);
@@ -1799,7 +1799,7 @@ Strategy options: aggressive, balanced, defensive`;
                 );
                 server.log.info(`[agent/chat] Auto-queued travel to ${patch.targetZone}`);
               }
-              runner.clearScript();
+              await runner.clearScript();
             }
             toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, ...patch }) });
           } catch {
@@ -1939,7 +1939,7 @@ Strategy options: aggressive, balanced, defensive`;
                         },
                         resumeFocusAfterGoto,
                       });
-                      runner.setGotoTarget(
+                      await runner.setGotoTarget(
                         trainerId,
                         techEntity?.region ?? "village-square",
                         trainerName ?? undefined,
@@ -2079,7 +2079,7 @@ Strategy options: aggressive, balanced, defensive`;
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
                 await runner.enqueueActions(scripts, input.clearExisting !== false);
-                runner.clearScript(); // start executing immediately
+                await runner.clearScript(); // start executing immediately
               }
               const summary = scripts.map((s) => s.type).join(" → ");
               actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
@@ -2096,7 +2096,7 @@ Strategy options: aggressive, balanced, defensive`;
             const runner = agentManager.getRunner(authWallet);
             if (runner) {
               await runner.clearQueue();
-              runner.clearScript();
+              await runner.clearScript();
             }
             actionsTaken.push("[cleared action queue]");
             server.log.info("[agent/chat] clear_queue");
@@ -2218,7 +2218,7 @@ Strategy options: aggressive, balanced, defensive`;
               configUpdated = true;
               actionsTaken.push(`[switched to ${input.focus}${input.strategy ? `, ${input.strategy}` : ""}]`);
               const runner = agentManager.getRunner(authWallet);
-              if (runner) runner.clearScript();
+              if (runner) await runner.clearScript();
               server.log.info(`[agent/chat] Retry succeeded: focus=${input.focus}`);
             } catch { /* ignore parse errors */ }
           }
@@ -2323,7 +2323,7 @@ Strategy options: aggressive, balanced, defensive`;
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      runner.setGotoTarget(entityId, zoneId, name, action, profession, { questId });
+      await runner.setGotoTarget(entityId, zoneId, name, action, profession, { questId });
     }
 
     return reply.send({ ok: true, gotoTarget: { entityId, zoneId, name, action, profession, questId } });
@@ -2373,7 +2373,7 @@ Strategy options: aggressive, balanced, defensive`;
 
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      runner.setGotoPosition(cx, cy, zoneId);
+      await runner.setGotoPosition(cx, cy, zoneId);
     }
 
     return reply.send({ ok: true, gotoPosition: { x: cx, y: cy, zoneId } });
@@ -2441,7 +2441,7 @@ Strategy options: aggressive, balanced, defensive`;
     // Force the runner to pick up the change immediately
     const runner = agentManager.getRunner(authWallet);
     if (runner) {
-      runner.clearScript();
+      await runner.clearScript();
     }
 
     return reply.send({ ok: true, updated: patch });
@@ -2503,7 +2503,7 @@ Strategy options: aggressive, balanced, defensive`;
     });
 
     const runner = agentManager.getRunner(authWallet);
-    if (runner) runner.clearScript();
+    if (runner) await runner.clearScript();
 
     return reply.send({ ok: true, updated: patch });
   });

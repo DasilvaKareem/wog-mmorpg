@@ -7,6 +7,7 @@
  * Survival logic (HP, repair, self-adaptation) lives in agentSurvival.ts.
  */
 
+import { AsyncLocalStorage } from "async_hooks";
 import {
   getAgentConfig,
   getAgentCustodialWallet,
@@ -230,6 +231,35 @@ export class AgentRunner {
   private ignoreWeakMobsFlag = true;
   /** Quests flagged as stuck — key=questId, value=epoch ms when it unsticks (5 min TTL). */
   private stuckQuests = new Map<string, number>();
+  /** Gather nodes blacklisted due to "skill too low" — key=nodeId, value=epoch ms when retry allowed (5 min TTL). */
+  private gatherNodeBlacklist = new Map<string, number>();
+
+  /** Per-entity tick gate. Serializes the loop's tick body and any externally-
+   *  invoked mutating methods (clearScript, enqueueActions, repairGear, etc.)
+   *  so chat-driven directives can't race with an in-flight tick. */
+  private tickGate: Promise<void> = Promise.resolve();
+  /** Per-async-chain marker. When set, withGate detects re-entry from already-
+   *  gated code (loop tick → behavior → ctx.method → runner.method) and runs
+   *  inline instead of trying to acquire the gate again, which would deadlock. */
+  private gateContext = new AsyncLocalStorage<true>();
+
+  /**
+   * Serialize `fn` against the loop tick and any other externally-invoked
+   * mutating method. Re-entrant: if called from inside a gated context, runs
+   * inline. Use this around the loop's tick body and around any public method
+   * that mutates runner state.
+   */
+  private withGate<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.gateContext.getStore()) return fn();
+    const previous = this.tickGate;
+    let release!: () => void;
+    this.tickGate = new Promise<void>((resolve) => { release = resolve; });
+    return previous.then(() =>
+      this.gateContext.run(true, async () => {
+        try { return await fn(); } finally { release(); }
+      }),
+    );
+  }
 
   /** Monotonic tick counter — used by commitTarget to measure commitment TTL in ticks. */
   private tickCounter = 0;
@@ -278,6 +308,20 @@ export class AgentRunner {
       console.log(`[agent:${this.walletTag}] Quest ${questId} flagged stuck for 5 min: ${reason}`);
       void this.logActivity(`Quest "${questId}" is stuck — skipping for 5 min (${reason})`);
     }
+  }
+
+  private isGatherNodeBlacklisted(nodeId: string): boolean {
+    const until = this.gatherNodeBlacklist.get(nodeId);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this.gatherNodeBlacklist.delete(nodeId);
+      return false;
+    }
+    return true;
+  }
+
+  private markGatherNodeBlacklisted(nodeId: string): void {
+    this.gatherNodeBlacklist.set(nodeId, Date.now() + 5 * 60_000);
   }
   private combatFallbackCount = 0;
   public currentActivity = "Idle";
@@ -385,12 +429,18 @@ export class AgentRunner {
 
   // ── Public API (called from chat routes / manager) ─────────────────────────
 
-  public clearScript(): void {
-    this.currentScript = null;
-    // If queue has items, the next tick will dequeue. Otherwise force re-evaluation.
-    if (this.actionQueue.length === 0) {
-      this.ticksSinceLastDecision = MAX_STALE_TICKS;
-    }
+  public clearScript(): Promise<void> {
+    return this.withGate(async () => {
+      this.currentScript = null;
+      // If queue has items (e.g. user-directive enqueue), pop one immediately so
+      // the next tick can't race ahead and overwrite currentScript before the
+      // queue gets a turn. Otherwise force re-evaluation on next tick.
+      if (this.actionQueue.length > 0) {
+        this.dequeueNext();
+      } else {
+        this.ticksSinceLastDecision = MAX_STALE_TICKS;
+      }
+    });
   }
 
   public setGotoTarget(
@@ -400,34 +450,38 @@ export class AgentRunner {
     action?: string,
     profession?: string,
     extras?: { techniqueId?: string; techniqueName?: string; questId?: string },
-  ): void {
-    const reason = action === "learn-profession" && profession
-      ? `User: learn ${profession} from ${name ?? entityId}`
-      : `User directed agent to ${name ?? entityId}`;
-    this.currentScript = {
-      type: "goto",
-      targetEntityId: entityId,
-      targetName: name,
-      gotoZoneId: zoneId,
-      gotoAction: action,
-      gotoProfession: profession,
-      gotoTechniqueId: extras?.techniqueId,
-      gotoTechniqueName: extras?.techniqueName,
-      gotoQuestId: extras?.questId,
-      reason,
-    };
-    this.ticksSinceLastDecision = 0;
+  ): Promise<void> {
+    return this.withGate(async () => {
+      const reason = action === "learn-profession" && profession
+        ? `User: learn ${profession} from ${name ?? entityId}`
+        : `User directed agent to ${name ?? entityId}`;
+      this.currentScript = {
+        type: "goto",
+        targetEntityId: entityId,
+        targetName: name,
+        gotoZoneId: zoneId,
+        gotoAction: action,
+        gotoProfession: profession,
+        gotoTechniqueId: extras?.techniqueId,
+        gotoTechniqueName: extras?.techniqueName,
+        gotoQuestId: extras?.questId,
+        reason,
+      };
+      this.ticksSinceLastDecision = 0;
+    });
   }
 
-  public setGotoPosition(x: number, y: number, zoneId: string): void {
-    this.currentScript = {
-      type: "goto",
-      gotoX: x,
-      gotoY: y,
-      gotoZoneId: zoneId,
-      reason: `User: move to (${Math.round(x)}, ${Math.round(y)})`,
-    };
-    this.ticksSinceLastDecision = 0;
+  public setGotoPosition(x: number, y: number, zoneId: string): Promise<void> {
+    return this.withGate(async () => {
+      this.currentScript = {
+        type: "goto",
+        gotoX: x,
+        gotoY: y,
+        gotoZoneId: zoneId,
+        reason: `User: move to (${Math.round(x)}, ${Math.round(y)})`,
+      };
+      this.ticksSinceLastDecision = 0;
+    });
   }
 
   // ── Action Queue ────────────────────────────────────────────────────────────
@@ -435,23 +489,27 @@ export class AgentRunner {
   private actionQueue: BotScript[] = [];
 
   /** Push one or more scripts to the back of the queue */
-  public async enqueueActions(scripts: BotScript[], clearExisting = false): Promise<void> {
-    if (clearExisting) this.actionQueue = [];
-    this.actionQueue.push(...scripts);
-    if (this.actionQueue.length > 10) this.actionQueue = this.actionQueue.slice(0, 10);
-    await setActionQueue(this.userWallet, this.actionQueue);
-    // Start executing immediately if idle
-    if (!this.currentScript && this.actionQueue.length > 0) {
-      this.dequeueNext();
-    }
-    console.log(`[agent:${this.walletTag}] Queue now has ${this.actionQueue.length} items`);
+  public enqueueActions(scripts: BotScript[], clearExisting = false): Promise<void> {
+    return this.withGate(async () => {
+      if (clearExisting) this.actionQueue = [];
+      this.actionQueue.push(...scripts);
+      if (this.actionQueue.length > 10) this.actionQueue = this.actionQueue.slice(0, 10);
+      await setActionQueue(this.userWallet, this.actionQueue);
+      // Start executing immediately if idle
+      if (!this.currentScript && this.actionQueue.length > 0) {
+        this.dequeueNext();
+      }
+      console.log(`[agent:${this.walletTag}] Queue now has ${this.actionQueue.length} items`);
+    });
   }
 
   /** Clear all queued actions */
-  public async clearQueue(): Promise<void> {
-    this.actionQueue = [];
-    await clearActionQueue(this.userWallet);
-    console.log(`[agent:${this.walletTag}] Queue cleared`);
+  public clearQueue(): Promise<void> {
+    return this.withGate(async () => {
+      this.actionQueue = [];
+      await clearActionQueue(this.userWallet);
+      console.log(`[agent:${this.walletTag}] Queue cleared`);
+    });
   }
 
   /** View current queue */
@@ -500,6 +558,9 @@ export class AgentRunner {
   // ── Public actions (called from chat tool handlers) ────────────────────────
 
   async learnProfession(professionId: string): Promise<boolean> {
+    return this.withGate(() => this._learnProfessionInner(professionId));
+  }
+  private async _learnProfessionInner(professionId: string): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     try {
       const profRes = await this.api("GET", `/professions/${this.custodialWallet}`);
@@ -633,6 +694,9 @@ export class AgentRunner {
   }
 
   async buyItem(tokenId: number): Promise<boolean> {
+    return this.withGate(() => this._buyItemInner(tokenId));
+  }
+  private async _buyItemInner(tokenId: number): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     try {
       await this.api("POST", "/shop/buy", { buyerAddress: this.custodialWallet, tokenId, quantity: 1 });
@@ -657,6 +721,9 @@ export class AgentRunner {
    * Returns both success and the final error reason for smarter caller logic.
    */
   async equipItemWithReason(tokenId: number, instanceId?: string): Promise<{ ok: boolean; reason?: string }> {
+    return this.withGate(() => this._equipItemWithReasonInner(tokenId, instanceId));
+  }
+  private async _equipItemWithReasonInner(tokenId: number, instanceId?: string): Promise<{ ok: boolean; reason?: string }> {
     if (!this.api || !this.entityId || !this.custodialWallet) return { ok: false, reason: "agent context not ready" };
 
     const maxAttempts = 3;
@@ -689,6 +756,9 @@ export class AgentRunner {
   }
 
   async repairGear(): Promise<boolean> {
+    return this.withGate(() => this._repairGearInner());
+  }
+  private async _repairGearInner(): Promise<boolean> {
     if (!this.api || !this.entityId || !this.custodialWallet) return false;
     const cooldownKey = `repair:${this.currentRegion}`;
     let smithId: string | undefined;
@@ -774,6 +844,12 @@ export class AgentRunner {
   }
 
   async recycleItem(
+    tokenId: number,
+    quantity = 1,
+  ): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }> {
+    return this.withGate(() => this._recycleItemInner(tokenId, quantity));
+  }
+  private async _recycleItemInner(
     tokenId: number,
     quantity = 1,
   ): Promise<{ ok: boolean; error?: string; itemName?: string; totalPayoutCopper?: number }> {
@@ -1613,6 +1689,8 @@ export class AgentRunner {
       get ignoreWeakMobs() { return self.ignoreWeakMobsFlag; },
       isQuestStuck: (id) => self.isQuestStuck(id),
       markQuestStuck: (id, reason) => self.markQuestStuck(id, reason),
+      isGatherNodeBlacklisted: (id) => self.isGatherNodeBlacklisted(id),
+      markGatherNodeBlacklisted: (id) => self.markGatherNodeBlacklisted(id),
       get committedTargetId() { return self.getCommittedTargetId(); },
       commitTarget: (id, ttlTicks) => self.commitTarget(id, ttlTicks),
       clearCommittedTarget: () => self.clearCommittedTarget(),
@@ -2646,7 +2724,7 @@ export class AgentRunner {
           }
         }
 
-        await this.decideAndAct(entity, zs.entities, config, strategy);
+        await this.withGate(() => this.decideAndAct(entity, zs.entities, config, strategy));
       } catch (err: any) {
         console.warn(`[agent:${this.walletTag}] Loop error: ${err.message?.slice(0, 80)}`);
         this.logError("loop", `Loop error: ${err.message?.slice(0, 200) ?? "unknown"}`, { stack: err.stack?.slice(0, 300) ?? "" });

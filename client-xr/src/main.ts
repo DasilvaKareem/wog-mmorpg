@@ -19,7 +19,7 @@ import { XRSessionManager } from "./xr/XRSessionManager.js";
 // XRControllers imported dynamically to avoid crashing non-XR browsers
 type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
-import { IntentModeBadge } from "./hud/IntentModeBadge.js";
+import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { AgentChat } from "./hud/AgentChat.js";
@@ -233,7 +233,7 @@ const inspector = new EntityInspector({
     return `Duel challenge sent to ${entity.name}`;
   },
 });
-const intentModeBadge = new IntentModeBadge();
+const zoneNameBadge = new ZoneNameBadge();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const agentChat = new AgentChat();
@@ -947,6 +947,7 @@ async function pollNearbyZones() {
 
     // Minimap — pass camera in server coords
     minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+    zoneNameBadge.setZoneId(ownEntityId ? merged[ownEntityId]?.zoneId ?? null : null);
 
     // Quest poll piggybacks on zone poll but self-throttles to 5s
     void pollQuests();
@@ -1282,8 +1283,7 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "v" || e.key === "V") {
-    const mode = intentLines.cycleVisibilityMode();
-    intentModeBadge.setMode(mode);
+    intentLines.cycleVisibilityMode();
   }
   if (e.key === "q" || e.key === "Q") {
     questPanel.toggle();
