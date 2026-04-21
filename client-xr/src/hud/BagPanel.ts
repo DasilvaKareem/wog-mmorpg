@@ -54,12 +54,14 @@ interface BagPanelCallbacks {
 export class BagPanel {
   private container: HTMLDivElement;
   private headerEl: HTMLDivElement;
+  private goldEl: HTMLDivElement;
   private gridEl: HTMLDivElement;
   private tooltipEl: HTMLDivElement;
   private callbacks: BagPanelCallbacks;
 
   private items: InventoryItem[] = [];
   private isOwn = false;
+  private copper: number | null = null;
 
   constructor(callbacks: BagPanelCallbacks = {}) {
     this.callbacks = callbacks;
@@ -73,6 +75,12 @@ export class BagPanel {
     this.headerEl.className = "bag-header";
     this.headerEl.innerHTML = `<span class="bag-title">Bag</span><span class="bag-count"></span>`;
     this.container.appendChild(this.headerEl);
+
+    // Gold strip
+    this.goldEl = document.createElement("div");
+    this.goldEl.className = "bag-gold";
+    this.goldEl.innerHTML = `<span class="bag-gold-loading">—</span>`;
+    this.container.appendChild(this.goldEl);
 
     // Grid
     this.gridEl = document.createElement("div");
@@ -134,6 +142,29 @@ export class BagPanel {
   updateInventory(items: InventoryItem[]) {
     this.items = items;
     this.render();
+  }
+
+  /** Set current wallet balance (in copper). Pass null to show placeholder. */
+  updateGold(copper: number | null) {
+    this.copper = copper;
+    this.renderGold();
+  }
+
+  private renderGold() {
+    if (this.copper == null) {
+      this.goldEl.innerHTML = `<span class="bag-gold-loading">—</span>`;
+      return;
+    }
+    const total = Math.max(0, Math.floor(this.copper));
+    const g = Math.floor(total / 10_000);
+    const s = Math.floor((total % 10_000) / 100);
+    const c = total % 100;
+
+    const parts: string[] = [];
+    if (g > 0) parts.push(`<span class="coin gold"><b>${g}</b>g</span>`);
+    if (s > 0 || g > 0) parts.push(`<span class="coin silver"><b>${s}</b>s</span>`);
+    parts.push(`<span class="coin copper"><b>${c}</b>c</span>`);
+    this.goldEl.innerHTML = parts.join("");
   }
 
   toggle() {
@@ -256,6 +287,33 @@ export class BagPanel {
       }
       .bag-title { color: #4f8; font-weight: bold; font-size: 13px; }
       .bag-count { color: #667; font-size: 11px; }
+
+      .bag-gold {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 12px;
+        border-bottom: 1px solid rgba(68, 255, 136, 0.1);
+        background: rgba(0, 0, 0, 0.25);
+        font: 11px monospace;
+      }
+      .bag-gold .coin {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 2px;
+      }
+      .bag-gold .coin b {
+        font-weight: bold;
+        font-size: 12px;
+      }
+      .bag-gold .gold   { color: #ffd15c; }
+      .bag-gold .gold b { color: #ffd15c; }
+      .bag-gold .silver { color: #d0d8e0; }
+      .bag-gold .silver b { color: #eef2f8; }
+      .bag-gold .copper { color: #cc8a5a; }
+      .bag-gold .copper b { color: #e6a070; }
+      .bag-gold-loading { color: #556; font-size: 10px; }
 
       .bag-grid {
         display: grid;

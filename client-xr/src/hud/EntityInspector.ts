@@ -5,7 +5,16 @@ interface EntityInspectorOptions {
   onAddFriend?: (entity: Entity) => Promise<string>;
   onTrade?: (entity: Entity) => Promise<string>;
   onDuel?: (entity: Entity) => Promise<string>;
+  canCommandAgent?: () => boolean;
+  onAgentGather?: (entity: Entity) => Promise<string>;
 }
+
+const GATHER_TYPES: Record<string, { verb: string; noun: string }> = {
+  "ore-node":    { verb: "Mine",    noun: "ore vein" },
+  "flower-node": { verb: "Gather",  noun: "flower"   },
+  "nectar-node": { verb: "Gather",  noun: "nectar"   },
+  "crop-node":   { verb: "Harvest", noun: "crop"     },
+};
 
 /**
  * HTML overlay panel showing inspected entity details.
@@ -17,7 +26,7 @@ export class EntityInspector {
   private _locked = false;
   private readonly options: EntityInspectorOptions;
   private actionFeedback = "";
-  private activeAction: "friend" | "trade" | "duel" | null = null;
+  private activeAction: "friend" | "trade" | "duel" | "gather" | null = null;
   private lastAnchor: { x: number; y: number } | null = null;
 
   constructor(options: EntityInspectorOptions = {}) {
@@ -200,6 +209,24 @@ export class EntityInspector {
       }
     }
 
+    const gather = GATHER_TYPES[e.type];
+    if (gather && this.options.onAgentGather && this.options.canCommandAgent?.()) {
+      const busy = this.activeAction === "gather";
+      html += `
+        <div style="margin-top:10px;">
+          <button
+            type="button"
+            data-action="gather"
+            ${busy ? "disabled" : ""}
+            style="width:100%; padding:7px 10px; border-radius:6px; border:1px solid rgba(120,220,160,0.35); background:rgba(80,180,120,0.18); color:#b7f2cc; font:bold 11px monospace; cursor:${busy ? "wait" : "pointer"}; letter-spacing:0.04em;"
+          >${busy ? "..." : `${esc(gather.verb)} with your agent`}</button>
+        </div>
+      `;
+      if (this.actionFeedback) {
+        html += `<div style="margin-top:8px; font-size:11px; color:#b7f2cc;">${esc(this.actionFeedback)}</div>`;
+      }
+    }
+
     // Position
     html += `<div style="margin-top:6px; font-size:10px; color:#666;">
       pos: ${Math.round(e.x)}, ${Math.round(e.y)}
@@ -225,15 +252,16 @@ export class EntityInspector {
     if (!btn || !this.currentEntity) return;
     e.preventDefault();
     e.stopPropagation();
-    const action = btn.dataset.action as "friend" | "trade" | "duel";
+    const action = btn.dataset.action as "friend" | "trade" | "duel" | "gather";
     void this.handleAction(action, this.currentEntity);
   };
 
-  private async handleAction(action: "friend" | "trade" | "duel", entity: Entity) {
+  private async handleAction(action: "friend" | "trade" | "duel" | "gather", entity: Entity) {
     const handlers = {
       friend: this.options.onAddFriend,
       trade: this.options.onTrade,
       duel: this.options.onDuel,
+      gather: this.options.onAgentGather,
     } as const;
     const handler = handlers[action];
     if (!handler) return;

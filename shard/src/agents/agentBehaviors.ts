@@ -544,7 +544,15 @@ function findGatherNode(
   me: any,
   preference: GatherPreference,
   isBlacklisted: (nodeId: string) => boolean,
+  preferredItemName?: string | null,
 ): [string, any] | null {
+  const matchesPreferredName = (name: string | undefined): boolean => {
+    if (!preferredItemName) return false;
+    const a = (name ?? "").toLowerCase();
+    const b = preferredItemName.toLowerCase();
+    return a.includes(b) || b.includes(a);
+  };
+
   const matches = Object.entries(entities)
     .filter(([id, e]) => {
       if (isBlacklisted(id)) return false;
@@ -554,6 +562,12 @@ function findGatherNode(
       return (e.type === "ore-node" || e.type === "flower-node") && alive;
     })
     .sort(([, a], [, b]) => {
+      // Prefer nodes whose name matches an active quest target (e.g., Meadow
+      // Lily) so gather quests actually progress instead of grinding random
+      // dandelions forever.
+      const aMatch = matchesPreferredName(a.name) ? 0 : 1;
+      const bMatch = matchesPreferredName(b.name) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
       const tierDiff = requiredNodeTier(a) - requiredNodeTier(b);
       if (tierDiff !== 0) return tierDiff;
       return Math.hypot(a.x - me.x, a.y - me.y) - Math.hypot(b.x - me.x, b.y - me.y);
@@ -846,7 +860,32 @@ export async function doGathering(
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
-    const node = findGatherNode(entities, me, preference, (id) => ctx.isGatherNodeBlacklisted(id));
+    // Prefer nodes that advance an active gather quest so quest progress
+    // actually ticks (e.g., Herbalism 103 wants Meadow Lily — don't harvest
+    // dandelions forever when a lily patch is nearby).
+    let preferredItemName: string | null = null;
+    try {
+      const activeRes = await ctx.api("GET", `/quests/active/${ctx.entityId}`);
+      const activeQuests: any[] = activeRes?.activeQuests ?? [];
+      for (const aq of activeQuests) {
+        if (aq?.complete) continue;
+        const obj = aq?.quest?.objective;
+        if (obj?.type === "gather" && obj.targetItemName) {
+          preferredItemName = String(obj.targetItemName);
+          break;
+        }
+      }
+    } catch {
+      // Quest lookup is best-effort; fall through with no preference.
+    }
+
+    const node = findGatherNode(
+      entities,
+      me,
+      preference,
+      (id) => ctx.isGatherNodeBlacklisted(id),
+      preferredItemName,
+    );
     if (!node) {
       return fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
     }
@@ -1100,9 +1139,11 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     }
 
     const [labId, labEntity] = lab;
-    const moving = await ctx.moveToEntity(me, labEntity);
-    if (moving) return actionProgressed(`Moving to ${labEntity.name ?? "alchemy lab"}`);
 
+    // Fetch recipes and inventory BEFORE walking to the lab. If no recipe is
+    // brewable with current materials, commit to gathering — otherwise the
+    // agent thrashes between "walk to lab → brew fails → walk to herb node →
+    // walk back to lab" forever without ever gathering a full herb.
     const recipesRes = await ctx.api("GET", "/alchemy/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
     if (recipes.length === 0) {
@@ -1110,8 +1151,33 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
       return doGathering(ctx, strategy, "herb");
     }
 
+    const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
+    const invItems: Array<{ tokenId: number; quantity: number }> = invRes?.items ?? [];
+    const haveQty = new Map<number, number>();
+    for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
+
+    const canBrew = (recipe: any): boolean => {
+      const mats: Array<{ tokenId: string | number; quantity: number }> = recipe.materials ?? [];
+      if (mats.length === 0) return true;
+      for (const m of mats) {
+        const need = Number(m.quantity ?? 0);
+        const have = haveQty.get(Number(m.tokenId)) ?? 0;
+        if (have < need) return false;
+      }
+      return true;
+    };
+
+    const brewable = recipes.filter(canBrew);
+    if (brewable.length === 0) {
+      void ctx.logActivity("Missing ingredients for all potions — gathering herbs");
+      return doGathering(ctx, strategy, "herb");
+    }
+
+    const moving = await ctx.moveToEntity(me, labEntity);
+    if (moving) return actionProgressed(`Moving to ${labEntity.name ?? "alchemy lab"}`);
+
     let lastError: string | null = null;
-    for (const recipe of recipes) {
+    for (const recipe of brewable) {
       try {
         await ctx.api("POST", "/alchemy/brew", {
           walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
@@ -1139,16 +1205,120 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
       }
     }
 
-    void ctx.logActivity("Missing ingredients for all potions — gathering herbs");
-    const gatherResult = await doGathering(ctx, strategy, "herb");
-    return lastError ? actionBlocked(lastError, {
-      failureKey: `alchemy:brew:${ctx.currentRegion}`,
-      endpoint: "/alchemy/brew",
-    }) : gatherResult;
+    // Inventory said we were brewable but every recipe still errored (race,
+    // cooldown, skill level, etc.) — fall back to gathering without thrashing.
+    void ctx.logActivity("Brew attempts failed — gathering herbs");
+    return doGathering(ctx, strategy, "herb");
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] alchemy tick: ${reason.slice(0, 60)}`);
     return actionBlocked(reason, { failureKey: `alchemy:error:${ctx.currentRegion}` });
+  }
+}
+
+// ── Craft-quest executor ────────────────────────────────────────────────────
+//
+// Drives craft objectives like "Smelt 2 Tin Bars" by (1) looking up which
+// recipe produces the target item, (2) gathering any missing materials, and
+// (3) walking to the right station (forge / tanning-rack / etc.) to craft.
+// Without this, craft quests fell through to `doGathering` and the agent
+// would mine ore forever but never actually smelt a bar.
+
+const PROFESSION_TO_STATION: Record<string, string> = {
+  blacksmithing:  "forge",
+  leatherworking: "tanning-rack",
+  enchanting:     "enchanting-altar",
+  jewelcrafting:  "jewelers-bench",
+  cooking:        "campfire",
+  alchemy:        "alchemy-lab",
+};
+
+async function doCraftQuest(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  targetItemName: string,
+): Promise<ActionResult> {
+  try {
+    const targetLC = targetItemName.toLowerCase();
+
+    const recipesRes = await ctx.api("GET", "/crafting/recipes");
+    const recipes: any[] = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+    const recipe = recipes.find((r) => {
+      const name = String(r.output?.name ?? "").toLowerCase();
+      if (!name) return false;
+      return name === targetLC || name.includes(targetLC) || targetLC.includes(name);
+    });
+    if (!recipe) {
+      void ctx.logActivity(`No recipe produces "${targetItemName}" — gathering instead`);
+      return doGathering(ctx, strategy);
+    }
+
+    const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
+    const invItems: Array<{ tokenId: number; quantity: number }> = invRes?.items ?? [];
+    const haveQty = new Map<number, number>();
+    for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
+
+    const mats: Array<{ tokenId: number; quantity: number; name: string }> =
+      (recipe.materials ?? []).map((m: any) => ({
+        tokenId: Number(m.tokenId),
+        quantity: Number(m.quantity ?? 0),
+        name: String(m.name ?? ""),
+      }));
+    const missing = mats.find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity);
+    if (missing) {
+      void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName} — gathering`);
+      // Ore is more common for smelt recipes; fall back to "both" for others.
+      const pref: GatherPreference = /ore|bar|ingot/i.test(missing.name) ? "ore" : "both";
+      return doGathering(ctx, strategy, pref);
+    }
+
+    const zs = await ctx.getZoneState();
+    if (!zs) return actionIdle("Zone state unavailable");
+    const { entities, me } = zs;
+
+    const profession = String(recipe.requiredProfession ?? "blacksmithing");
+    const stationType = PROFESSION_TO_STATION[profession] ?? "forge";
+    const station = ctx.findNearestEntity(entities, me, (e: any) => e.type === stationType);
+    if (!station) {
+      void ctx.logActivity(`No ${stationType} in ${ctx.currentRegion} — gathering instead`);
+      return doGathering(ctx, strategy);
+    }
+
+    const [stationId, stationEntity] = station;
+    const moving = await ctx.moveToEntity(me, stationEntity);
+    if (moving) return actionProgressed(`Moving to ${stationEntity.name ?? stationType}`);
+
+    try {
+      await ctx.api("POST", "/crafting/forge", {
+        walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+        entityId: ctx.entityId, forgeId: stationId, recipeId: recipe.recipeId,
+      });
+      const label = recipe.output?.name ?? recipe.recipeId;
+      void ctx.logActivity(`Crafted ${label}`);
+      logZoneEvent({
+        zoneId: ctx.currentRegion, type: "profession", tick: 0,
+        message: `${me.name} crafted ${label}`,
+        entityId: ctx.entityId, entityName: me.name,
+        data: { profession, target: label },
+      });
+      emitAgentChat({
+        entityId: ctx.entityId, entityName: me.name ?? "Agent",
+        zoneId: ctx.currentRegion, event: "crafting",
+        origin: me.origin, classId: me.classId,
+        detail: label,
+      });
+      return actionCompleted(`Crafted ${label}`);
+    } catch (err: any) {
+      const reason = formatAgentError(err);
+      console.debug(`[agent:${ctx.walletTag}] craft ${recipe.recipeId}: ${reason.slice(0, 60)}`);
+      return actionBlocked(reason, {
+        failureKey: `craft:${recipe.recipeId}:${ctx.currentRegion}`,
+        endpoint: "/crafting/forge",
+      });
+    }
+  } catch (err: any) {
+    const reason = formatAgentError(err);
+    return actionBlocked(reason, { failureKey: `craft:error:${ctx.currentRegion}` });
   }
 }
 
@@ -2371,6 +2541,16 @@ export async function doQuesting(
       }
       return combatResult;
     } else if (hasGatherQuest) {
+      // Craft quests need to actually visit the forge/station after gathering;
+      // plain doGathering would mine ore forever without ever smelting.
+      const craftQuest = activeQuests.find(
+        (aq: any) => !aq.complete && aq.quest?.objective?.type === "craft" && aq.quest?.objective?.targetItemName,
+      );
+      if (craftQuest) {
+        const target = String(craftQuest.quest.objective.targetItemName);
+        void ctx.logActivity(`Crafting ${target} for quest`);
+        return doCraftQuest(ctx, strategy, target);
+      }
       void ctx.logActivity("Gathering resources for quest");
       return doGathering(ctx, strategy);
     } else {

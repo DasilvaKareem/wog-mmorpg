@@ -354,7 +354,11 @@ export class EffectsManager {
 
   processEvents(events: ZoneEvent[]) {
     for (const ev of events) {
-      if (ev.type !== "ability") continue;
+      // `ability` = technique/spell cast. `combat` = basic auto-attack.
+      // Both need VFX — melee swings for warriors, projectile bolts for casters/rangers.
+      // Dodged attacks skip the VFX (no projectile to impact).
+      if (ev.type !== "ability" && ev.type !== "combat") continue;
+      if (ev.type === "combat" && ev.data?.dodged === true) continue;
       if (this.seenEventIds.has(ev.id)) continue;
       this.seenEventIds.add(ev.id);
 

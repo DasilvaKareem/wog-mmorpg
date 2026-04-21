@@ -2292,6 +2292,21 @@ Strategy options: aggressive, balanced, defensive`;
       return reply.code(400).send({ error: "entityId and zoneId are required" });
     }
 
+    // Validate that the target entity actually exists in the requested zone.
+    // Without this, the agent sets up a goto, walks into the zone, finds
+    // nothing, fails; the UI re-posts with the same stale ID and the failure
+    // chain repeats — surfacing "[BLOCKED] goto failed 3x" in the activity log.
+    const targetEntity = getWorldEntity(entityId);
+    if (!targetEntity) {
+      return reply.code(404).send({ error: `Entity ${entityId} not found`, hint: "The NPC may have respawned with a new id — reopen the tab and click again." });
+    }
+    if (targetEntity.region !== zoneId) {
+      return reply.code(404).send({
+        error: `Entity ${entityId} is not in ${zoneId}`,
+        hint: `Actually located in ${targetEntity.region ?? "unknown zone"}.`,
+      });
+    }
+
     const existingConfig = (await getAgentConfig(authWallet)) ?? defaultConfig();
     const resumeFocusAfterGoto =
       existingConfig.focus === "goto"

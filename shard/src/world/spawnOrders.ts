@@ -30,6 +30,21 @@ import {
   loadCharacterBootstrapJob,
   processCharacterBootstrapJob,
 } from "../character/characterBootstrap.js";
+import { getLearnedTechniques } from "../combat/techniques.js";
+
+/**
+ * Return the default set of base-rank techniques a class should know at the
+ * given level. Agents otherwise need to find a trainer + pay copper before
+ * they can use *any* technique, which makes early combat feel like nothing
+ * but basic auto-attacks. Granting base ranks at spawn keeps combat lively
+ * for fresh characters and casters especially.
+ */
+function defaultTechniquesForClass(classId: string, level: number): string[] {
+  const eligible = getLearnedTechniques(classId, Math.max(1, level));
+  return eligible
+    .map((t) => t.id)
+    .filter((id) => !/_r[234]$/.test(id)); // base ranks only — higher ranks still require training
+}
 
 interface SpawnOrderBody {
   zoneId: string;
@@ -292,7 +307,13 @@ export function registerSpawnOrders(server: FastifyInstance) {
       activeQuests: saved?.activeQuests ?? [],
       completedQuests: resolvedCompletedQuests,
       storyFlags: saved?.storyFlags ?? [],
-      learnedTechniques: saved?.learnedTechniques ?? [],
+      learnedTechniques: (() => {
+        const savedTechs = saved?.learnedTechniques ?? [];
+        if (savedTechs.length > 0) return savedTechs;
+        if (type !== "player" || !resolvedClassId) return [];
+        // Fresh / empty roster → seed with base-rank techniques for this level
+        return defaultTechniquesForClass(resolvedClassId, resolvedLevel ?? 1);
+      })(),
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),
     };
 
@@ -359,7 +380,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
         activeQuests: [],
         completedQuests: [],
         storyFlags: [],
-        learnedTechniques: [],
+        learnedTechniques: entity.learnedTechniques ?? [],
         professions: [],
         runEnergy: resolvedRunEnergy,
         maxRunEnergy: resolvedMaxRunEnergy,

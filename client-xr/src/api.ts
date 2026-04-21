@@ -324,6 +324,27 @@ export async function deployAgent(
   return { ok: false, error: "All API bases unreachable" };
 }
 
+export async function sendAgentChat(
+  token: string,
+  message: string,
+): Promise<{ ok: boolean; response?: string; error?: string }> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, "/agent/chat"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return { ok: false, error: data.error ?? `HTTP ${res.status}` };
+      return { ok: true, response: data.response };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return { ok: false, error: "All API bases unreachable" };
+}
+
 // ── Quest endpoints ───────────────────────────────────────────────
 
 export async function fetchQuestLog(walletAddress: string): Promise<QuestLogResponse | null> {
@@ -379,6 +400,18 @@ export async function buyShopItem(
 
 export async function fetchInventory(walletAddress: string): Promise<InventoryResponse | null> {
   return fetchJsonWithFallback<InventoryResponse>(`/inventory/${walletAddress}`);
+}
+
+export interface WalletBalanceResponse {
+  address: string;
+  copper: number;
+  gold: string;
+  onChainGold?: string;
+  spentGold?: string;
+}
+
+export async function fetchWalletBalance(walletAddress: string): Promise<WalletBalanceResponse | null> {
+  return fetchJsonWithFallback<WalletBalanceResponse>(`/wallet/${walletAddress}/balance`);
 }
 
 export async function equipItem(

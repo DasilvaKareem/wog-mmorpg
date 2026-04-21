@@ -175,13 +175,15 @@ export class AgentChat {
     const isAi = tab === "ai";
     this.log.hidden = isAi;
     this.aiPanel.hidden = !isAi;
-    this.input.style.display = isAi ? "none" : "";
     if (isAi) {
+      this.input.placeholder = "Command your agent...";
       this.startAiPolling();
       void this.refreshAiStatus();
     } else {
+      this.input.placeholder = "Send a command to your agent...";
       this.stopAiPolling();
     }
+    if (this.expanded) this.input.focus();
   }
 
   private renderTabs() {
@@ -335,7 +337,7 @@ export class AgentChat {
     this.show();
     this.expanded = true;
     this.root.classList.add("expanded");
-    if (this.activeTab === "chat") this.input.focus();
+    this.input.focus();
     this.scrollToBottom();
     if (this.activeTab === "ai") {
       this.startAiPolling();

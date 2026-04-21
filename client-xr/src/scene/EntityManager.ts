@@ -993,192 +993,61 @@ function makeFloatingNumber(text: string, kind: FloatingKind): THREE.Sprite {
 
 import { CharacterRig } from "./CharacterRig.js";
 import { AvatarAssets } from "./AvatarAssets.js";
-import { AnimationLibrary } from "./AnimationLibrary.js";
+import {
+  type Action,
+  resolveAction,
+  buildGlbActionMap,
+  getClipFromMap,
+  getProceduralClip,
+  auditGlbActionMap,
+  animLogFor,
+  animLogOnce,
+  animWarn,
+  isAnimDebugFor,
+} from "./AnimationResolver.js";
 
 type HumanoidRigLike = CharacterRig;
 
-// ── Animation types ─────────────────────────────────────────────────
+// ── Animation resolution ────────────────────────────────────────────
+// All animation mapping (technique → clip, class → basic attack, GLB clip
+// name candidates, fallback chains) lives in AnimationResolver.ts.
+// This file only deals in Actions — pure intent values.
 
-type AnimName = "walk" | "run" | "idle" | "attack" | "magicbolt" | "bowshot"
-  | "heroicstrike" | "cleave" | "shieldwall" | "battlerage" | "intimidatingshout" | "rallyingcry" | "rendingstrike"
-  | "spellcast" | "darkcast" | "holycast"
-  | "palmstrike" | "flyingkick" | "whirlwindkick"
-  | "damage" | "heal" | "death" | "gather" | "craft"
-  | "mine" | "forage" | "skin" | "brew" | "cook" | "enchant" | "carve"
-  | "roll" | "jump" | "shoot" | "pickup" | "sit" | "standup" | "levelup" | "defeat";
-
-/** Map gatherType → profession-specific gather animation */
-const GATHER_ANIM: Record<string, AnimName> = {
+/** Map profession gatherType → Action */
+const GATHER_ACTION: Record<string, Action> = {
   mining: "mine",
   herbalism: "forage",
   skinning: "skin",
 };
 
-/** Map craftType → profession-specific craft animation */
-const CRAFT_ANIM: Record<string, AnimName> = {
+/** Map professional craftType → Action */
+const CRAFT_ACTION: Record<string, Action> = {
   alchemy: "brew",
   cooking: "cook",
-  crafting: "craft",     // existing hammer/forge clip
+  crafting: "craft",
   enchanting: "enchant",
   leatherworking: "carve",
   jewelcrafting: "carve",
 };
 
-/** Map technique IDs to specific animation clips (ranked versions share base clip) */
-const TECHNIQUE_ANIM: Record<string, AnimName> = {
-  warrior_heroic_strike: "heroicstrike",
-  warrior_heroic_strike_r2: "heroicstrike",
-  warrior_heroic_strike_r3: "heroicstrike",
-  warrior_cleave: "cleave",
-  warrior_cleave_r2: "cleave",
-  warrior_shield_wall: "shieldwall",
-  warrior_battle_rage: "battlerage",
-  warrior_battle_rage_r2: "battlerage",
-  warrior_intimidating_shout: "intimidatingshout",
-  warrior_rallying_cry: "rallyingcry",
-  warrior_rending_strike: "rendingstrike",
-  // Paladin
-  paladin_holy_smite: "attack", paladin_holy_smite_r2: "attack", paladin_holy_smite_r3: "attack",
-  paladin_consecration: "holycast", paladin_consecration_r2: "holycast",
-  paladin_judgment: "holycast",
-  paladin_lay_on_hands: "holycast", paladin_lay_on_hands_r2: "holycast",
-  paladin_divine_shield: "shieldwall",
-  paladin_blessing_of_might: "holycast",
-  paladin_aura_of_resolve: "holycast",
-  // Rogue
-  rogue_backstab: "attack", rogue_backstab_r2: "attack", rogue_backstab_r3: "attack",
-  rogue_poison_blade: "attack", rogue_poison_blade_r2: "attack",
-  rogue_shadow_strike: "attack", rogue_shadow_strike_r2: "attack",
-  rogue_smoke_bomb: "attack",
-  rogue_blade_flurry: "cleave",
-  rogue_stealth: "idle",
-  rogue_evasion: "idle",
-  // Ranger
-  ranger_aimed_shot: "bowshot", ranger_aimed_shot_r2: "bowshot", ranger_aimed_shot_r3: "bowshot",
-  ranger_hunters_mark: "bowshot", ranger_hunters_mark_r2: "bowshot",
-  ranger_quick_shot: "bowshot",
-  ranger_multi_shot: "bowshot", ranger_multi_shot_r2: "bowshot",
-  ranger_entangling_roots: "spellcast",
-  ranger_volley: "spellcast",
-  ranger_natures_blessing: "holycast",
-  // Mage
-  mage_fireball: "spellcast", mage_fireball_r2: "spellcast", mage_fireball_r3: "spellcast",
-  mage_arcane_missiles: "spellcast", mage_arcane_missiles_r2: "spellcast",
-  mage_slow: "spellcast",
-  mage_flamestrike: "spellcast", mage_flamestrike_r2: "spellcast",
-  mage_frost_nova: "spellcast",
-  mage_frost_armor: "spellcast",
-  mage_mana_shield: "spellcast",
-  // Cleric
-  cleric_holy_light: "holycast", cleric_holy_light_r2: "holycast", cleric_holy_light_r3: "holycast",
-  cleric_smite: "holycast",
-  cleric_renew: "holycast", cleric_renew_r2: "holycast",
-  cleric_holy_nova: "holycast",
-  cleric_divine_protection: "holycast", cleric_divine_protection_r2: "holycast",
-  cleric_prayer_of_fortitude: "holycast",
-  cleric_spirit_of_redemption: "holycast",
-  // Warlock
-  warlock_shadow_bolt: "darkcast", warlock_shadow_bolt_r2: "darkcast", warlock_shadow_bolt_r3: "darkcast",
-  warlock_curse_of_weakness: "darkcast",
-  warlock_drain_life: "darkcast", warlock_drain_life_r2: "darkcast",
-  warlock_corruption: "darkcast", warlock_corruption_r2: "darkcast",
-  warlock_howl_of_terror: "darkcast",
-  warlock_soul_shield: "darkcast",
-  warlock_siphon_soul: "darkcast", warlock_siphon_soul_r2: "darkcast",
-  // Monk
-  monk_palm_strike: "palmstrike", monk_palm_strike_r2: "palmstrike",
-  monk_disable: "palmstrike",
-  monk_chi_burst: "spellcast", monk_chi_burst_r2: "spellcast", monk_chi_burst_r3: "spellcast",
-  monk_flying_kick: "flyingkick",
-  monk_whirlwind_kick: "whirlwindkick",
-  monk_meditation: "holycast", monk_meditation_r2: "holycast",
-  monk_inner_focus: "holycast",
-};
-
-/** Pick the right attack animation clip based on class (fallback when no technique ID) */
-function attackAnimForClass(classId: string | undefined): AnimName {
-  switch (classId) {
-    case "mage": return "magicbolt";
-    case "warlock": return "magicbolt";
-    case "cleric": return "magicbolt";
-    case "ranger": return "bowshot";
-    case "monk": return "palmstrike";
+/** Actions that count as a combat hold (block locomotion transitions). */
+function isCombatAction(action: Action | null): boolean {
+  if (!action) return false;
+  switch (action) {
+    case "idle": case "walk": case "run":
+    case "damage": case "heal": case "death": case "defeat":
+    case "levelup": case "roll": case "jump": case "sit": case "standup":
+    case "pickup": case "gather": case "mine": case "forage": case "skin":
+    case "craft": case "brew": case "cook": case "enchant": case "carve":
+      return false;
     default:
-      return "attack";
+      return true;
   }
 }
 
-function attackAnimForEntity(entity: Pick<Entity, "classId" | "equipment">): AnimName {
-  const weaponName = entity.equipment?.weapon?.name;
-  if (weaponName) {
-    switch (inferWeaponType(weaponName)) {
-      case "bow":
-        return "bowshot";
-      case "staff":
-        switch (entity.classId) {
-          case "cleric": return "holycast";
-          case "warlock": return "darkcast";
-          case "mage": return "spellcast";
-          default: return "spellcast";
-        }
-      case "sword":
-      case "axe":
-      case "dagger":
-      case "mace":
-        return "attack";
-      default:
-        break;
-    }
-  }
-  return attackAnimForClass(entity.classId);
-}
-
-function isCastLikeAnim(anim: AnimName): boolean {
-  return anim === "magicbolt"
-    || anim === "bowshot"
-    || anim === "spellcast"
-    || anim === "darkcast"
-    || anim === "holycast";
-}
-
-function resolveCombatAnim(
-  entity: Pick<Entity, "classId" | "equipment">,
-  techniqueId?: string,
-  animStyle?: string,
-): AnimName {
-  const mapped = techniqueId ? TECHNIQUE_ANIM[techniqueId] : undefined;
-  const fallback = attackAnimForEntity(entity);
-  if (!mapped) return fallback;
-
-  if (animStyle === "melee" && isCastLikeAnim(mapped)) {
-    return fallback;
-  }
-
-  return mapped;
-}
-
-function getLocomotionAnim(entity: Pick<Entity, "isRunning">, movingSmooth: number): AnimName {
+function locomotionAction(entity: Pick<Entity, "isRunning">, movingSmooth: number): Action {
   if (movingSmooth <= 0.1) return "idle";
   return entity.isRunning ? "run" : "walk";
-}
-
-const PROFESSION_ANIMS: Set<AnimName> = new Set([
-  "gather", "craft", "mine", "forage", "skin", "brew", "cook", "enchant", "carve", "pickup",
-]);
-
-/** Animations that are non-combat one-shots (shouldn't be treated as combat holds) */
-const NON_COMBAT_ONESHOTS: Set<AnimName> = new Set([
-  "levelup", "defeat", "jump", "roll", "sit", "standup", ...PROFESSION_ANIMS,
-]);
-
-function isCombatAnimation(name: AnimName | null): boolean {
-  return name != null && name !== "walk" && name !== "run" && name !== "idle"
-    && name !== "damage" && name !== "heal" && name !== "death"
-    && !NON_COMBAT_ONESHOTS.has(name);
-}
-
-function getIntentAnimForEntity(entity: Entity, intent: Pick<VisibleIntent, "techniqueId">): AnimName {
-  return resolveCombatAnim(entity, intent.techniqueId);
 }
 
 interface FloatingText {
@@ -1222,9 +1091,11 @@ interface EntityObject {
   // Rig + animation
   rig: HumanoidRigLike | null;
   mixer: THREE.AnimationMixer | null;
-  actions: Map<string, THREE.AnimationAction>;
-  clipOverrides: Map<string, THREE.AnimationClip>;
-  currentAnim: AnimName | null;
+  /** Cached AnimationActions, keyed by the Action that produced them. */
+  animActions: Map<Action, THREE.AnimationAction>;
+  /** Pre-resolved Action → Clip map for GLB characters. Empty for procedural rigs. */
+  actionMap: Map<Action, THREE.AnimationClip>;
+  currentAction: Action | null;
   /** Bones needed for old-style references (armor attach, etc.) */
   leftLeg: THREE.Mesh | null;
   rightLeg: THREE.Mesh | null;
@@ -1238,7 +1109,7 @@ interface EntityObject {
   /** When the current one-shot animation started (performance.now ms), 0 if looping */
   oneShotStart: number;
   /** Queued melee animation waiting for entity to be in visual range */
-  pendingMelee: { anim: AnimName; targetId: string; holdOverride?: number; queuedAt: number } | null;
+  pendingMelee: { action: Action; targetId: string; holdOverride?: number; queuedAt: number } | null;
   lifeState: EntityLifeState;
   lifeToken: number;
   /** Timestamp when death animation started — prevents premature respawn */
@@ -1544,8 +1415,8 @@ export class EntityManager {
         }
 
         // Smooth yaw rotation (shortest path) — skip during combat/cast/death anims
-        const curAnim = obj.currentAnim;
-        const freeYaw = curAnim === null || curAnim === "walk" || curAnim === "run" || curAnim === "idle" || curAnim === "gather" || curAnim === "craft";
+        const curAction = obj.currentAction;
+        const freeYaw = curAction === null || curAction === "walk" || curAction === "run" || curAction === "idle" || curAction === "gather" || curAction === "craft";
         if (freeYaw) {
           let yawDiff = obj.targetYaw - g.rotation.y;
           while (yawDiff > Math.PI) yawDiff -= Math.PI * 2;
@@ -1562,8 +1433,8 @@ export class EntityManager {
 
       // ── Animation blending via mixer ──
       if (obj.mixer && (obj.rig || obj.hasGlbModel)) {
-        const curAnim = obj.currentAnim;
-        const isOneShot = curAnim && curAnim !== "walk" && curAnim !== "run" && curAnim !== "idle";
+        const curAction = obj.currentAction;
+        const isOneShot = curAction !== null && curAction !== "walk" && curAction !== "run" && curAction !== "idle";
 
         // Safety valve: force return to locomotion if one-shot stuck > 3s
         if (isAlive && isOneShot && obj.oneShotStart > 0) {
@@ -1571,20 +1442,20 @@ export class EntityManager {
           if (elapsed > 3000) {
             obj.oneShotStart = 0;
             obj.combatAnimHold = 0;
-            this.playAnimation(obj, getLocomotionAnim(obj.entity, obj.movingSmooth), true);
+            this.playAction(obj, locomotionAction(obj.entity, obj.movingSmooth), true);
           }
         }
 
         // Return from combat anim once hold timer expires
-        if (isAlive && isCombatAnimation(curAnim) && obj.combatAnimHold <= 0) {
-          this.playAnimation(obj, getLocomotionAnim(obj.entity, obj.movingSmooth), true);
+        if (isAlive && isCombatAction(curAction) && obj.combatAnimHold <= 0) {
+          this.playAction(obj, locomotionAction(obj.entity, obj.movingSmooth), true);
         }
 
         // Normal locomotion blend (only when not in a one-shot)
         if (isAlive && !isOneShot) {
-          const wantAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
-          if (curAnim !== wantAnim) {
-            this.playAnimation(obj, wantAnim, true);
+          const wantAction = locomotionAction(obj.entity, obj.movingSmooth);
+          if (curAction !== wantAction) {
+            this.playAction(obj, wantAction, true);
           }
         }
 
@@ -1751,85 +1622,149 @@ export class EntityManager {
   }
 
   private stopAnimations(obj: EntityObject) {
-    for (const action of obj.actions.values()) {
+    for (const action of obj.animActions.values()) {
       action.stop();
     }
     obj.mixer?.stopAllAction();
     obj.oneShotStart = 0;
   }
 
-  private getClipForEntity(obj: EntityObject, name: AnimName): THREE.AnimationClip | null {
-    const override = obj.clipOverrides.get(name);
-    if (override) return override;
-    // GLB characters only use their own clips via clipOverrides — never fall back
-    // to AnimationLibrary (incompatible bone names)
-    if (obj.hasGlbModel) return null;
-    return AnimationLibrary.get(name);
+  // ── Debug heartbeat (throttled event-flow check) ─────────────────
+  private debugEventCounts: Record<string, number> = {};
+  private debugEventLastFlush = 0;
+  private debugCountEvents(events: import("../types.js").ZoneEvent[]) {
+    // Only when debug scope is active — otherwise this is pure noise.
+    if (!isAnimDebugFor("__flow__") && !isAnimDebugFor(this.ownEntityIdDebugName())) {
+      // Still collect counts silently so when scope activates mid-session we're warm.
+      return;
+    }
+    for (const ev of events) {
+      this.debugEventCounts[ev.type] = (this.debugEventCounts[ev.type] ?? 0) + 1;
+    }
+    const now = performance.now();
+    if (now - this.debugEventLastFlush < 3000) return;
+    this.debugEventLastFlush = now;
+    const summary = Object.entries(this.debugEventCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => `${t}=${n}`)
+      .join(", ");
+    if (summary) animLogOnce(`events (last 3s): ${summary}`);
+    this.debugEventCounts = {};
+  }
+
+  private ownEntityIdDebugName(): string | null {
+    if (!this.ownEntityId) return null;
+    const obj = this.entities.get(this.ownEntityId);
+    return obj?.entity.name ?? null;
+  }
+
+  /**
+   * Resolve the clip to use for an Action, applying GLB or procedural fallback.
+   * Single source of truth — called by playAction.
+   */
+  private getClipForAction(obj: EntityObject, action: Action): THREE.AnimationClip | null {
+    if (obj.hasGlbModel) return getClipFromMap(obj.actionMap, action, obj.entity.name);
+    return getProceduralClip(action);
   }
 
   // ── Animation playback helpers ──────────────────────────────────────
 
-  private playAnimation(obj: EntityObject, name: AnimName, loop: boolean, onFinish?: () => void) {
-    if (!obj.mixer) return;
+  /**
+   * Play an Action on an entity. `loop=true` for locomotion; `loop=false` for
+   * one-shots (combat, reactions, gathers). On finish, one-shots transition
+   * back to the locomotion action automatically.
+   */
+  private playAction(obj: EntityObject, action: Action, loop: boolean, onFinish?: () => void) {
+    if (!obj.mixer) {
+      if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no mixer, can't play ${action}`);
+      return;
+    }
 
-    // Get or create the action
-    let action = obj.actions.get(name);
-    if (!action) {
-      const clip = this.getClipForEntity(obj, name);
+    let anim = obj.animActions.get(action);
+    if (!anim) {
+      const clip = this.getClipForAction(obj, action);
       if (!clip) {
+        if (isAnimDebugFor(obj.entity.name)) {
+          animWarn(`${obj.entity.name} (${obj.entity.classId ?? "?"}): no clip for ${action} hasGlb=${obj.hasGlbModel}`);
+        }
         if (!loop) {
           onFinish?.();
-          const nextAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
-          if (name !== nextAnim) {
-            this.playAnimation(obj, nextAnim, true);
-          }
+          const nextAction = locomotionAction(obj.entity, obj.movingSmooth);
+          if (action !== nextAction) this.playAction(obj, nextAction, true);
         }
         return;
       }
-      action = obj.mixer.clipAction(clip);
-      obj.actions.set(name, action);
+      anim = obj.mixer.clipAction(clip);
+      obj.animActions.set(action, anim);
+
+      // Silent binding failures are the #1 reason animations play but do nothing.
+      // Only warn on the debug-scoped entity, and only for combat/one-shot actions.
+      if (isAnimDebugFor(obj.entity.name) && !loop) {
+        const bound = (anim as unknown as { _propertyBindings?: unknown[] })._propertyBindings?.length ?? 0;
+        animLogFor(obj.entity.name, `cache ${action}: clip=${clip.name} tracks=${clip.tracks.length} bound=${bound}`);
+        if (bound === 0 && clip.tracks.length > 0) {
+          animWarn(`${obj.entity.name}: clip "${clip.name}" has ${clip.tracks.length} tracks but 0 bound to rig — bone names mismatch`);
+        }
+      }
     }
 
-    action.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
-    action.clampWhenFinished = !loop;
+    anim.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
+    anim.clampWhenFinished = !loop;
 
-    // Crossfade from current
-    const current = obj.currentAnim ? obj.actions.get(obj.currentAnim) : null;
-    if (current && current !== action) {
-      action.reset();
-      action.play();
-      current.crossFadeTo(action, 0.15, true);
+    const current = obj.currentAction ? obj.animActions.get(obj.currentAction) : null;
+    if (current && current !== anim) {
+      // For one-shots (combat, reactions), abandon the crossfade entirely —
+      // Three.js warp=true scales the new action's timescale to match the
+      // old action's duration, which kills short clips. Stop the old action
+      // hard and play the new one at full weight.
+      // For locomotion (loop=true), a short unwarped crossfade is fine.
+      if (loop) {
+        anim.reset();
+        anim.setEffectiveWeight(1);
+        anim.setEffectiveTimeScale(1);
+        anim.play();
+        current.crossFadeTo(anim, 0.15, false);
+      } else {
+        current.stop();
+        anim.reset();
+        anim.setEffectiveWeight(1);
+        anim.setEffectiveTimeScale(1);
+        anim.play();
+      }
     } else {
-      action.reset();
-      action.play();
+      anim.reset();
+      anim.setEffectiveWeight(1);
+      anim.setEffectiveTimeScale(1);
+      anim.play();
     }
 
-    obj.currentAnim = name;
+    // Only log combat transitions (skip locomotion), only for debug scope.
+    if (!loop && isAnimDebugFor(obj.entity.name)) {
+      animLogFor(obj.entity.name, `play ${obj.currentAction ?? "∅"} → ${action}`);
+    }
+    obj.currentAction = action;
 
     if (loop) {
       obj.oneShotStart = 0;
-    } else {
-      obj.oneShotStart = performance.now();
-      // One-shot: return to idle/walk when done
-      const mixer = obj.mixer;
-      const startToken = obj.oneShotStart; // capture to detect superseded animations
-      const handler = (e: { action: THREE.AnimationAction }) => {
-        if (e.action !== action) return;
-        mixer.removeEventListener("finished", handler);
-        // Only transition if this one-shot hasn't been superseded
-        if (obj.oneShotStart === startToken) {
-          obj.oneShotStart = 0;
-          onFinish?.();
-          const nextAnim = getLocomotionAnim(obj.entity, obj.movingSmooth);
-          this.playAnimation(obj, nextAnim, true);
-        }
-      };
-      mixer.addEventListener("finished", handler);
+      return;
     }
+    obj.oneShotStart = performance.now();
+    const mixer = obj.mixer;
+    const startToken = obj.oneShotStart;
+    const handler = (e: { action: THREE.AnimationAction }) => {
+      if (e.action !== anim) return;
+      mixer.removeEventListener("finished", handler);
+      if (obj.oneShotStart === startToken) {
+        obj.oneShotStart = 0;
+        onFinish?.();
+        this.playAction(obj, locomotionAction(obj.entity, obj.movingSmooth), true);
+      }
+    };
+    mixer.addEventListener("finished", handler);
   }
 
-  private playOneShot(obj: EntityObject, name: AnimName, onFinish?: () => void) {
-    this.playAnimation(obj, name, false, onFinish);
+  private playOneShot(obj: EntityObject, action: Action, onFinish?: () => void) {
+    this.playAction(obj, action, false, onFinish);
   }
 
   private shouldReplaceCombatIntent(current: VisibleIntent, next: VisibleIntent): boolean {
@@ -2258,7 +2193,7 @@ export class EntityManager {
     });
 
     this.stopAnimations(obj);
-    obj.currentAnim = null;
+    obj.currentAction = null;
 
     obj.prevTargetX = pos.x;
     obj.prevTargetZ = pos.z;
@@ -2267,7 +2202,7 @@ export class EntityManager {
     this.snapToPosition(obj, pos.x, pos.z);
 
     if (obj.mixer && (obj.rig || obj.hasGlbModel)) {
-      this.playAnimation(obj, "idle", true);
+      this.playAction(obj, "idle", true);
     }
 
     this.updateHpBar(obj, ent);
@@ -2279,21 +2214,21 @@ export class EntityManager {
    * Types handled: combat, ability, technique-start, loot, chat, death, levelup.
    */
   processEvents(events: import("../types.js").ZoneEvent[]) {
+    // Rate-limited event-flow heartbeat — fires at most once every 3s, and
+    // ONLY when animdebug is active. Tells us whether combat events are
+    // even reaching the client.
+    if (events.length > 0) this.debugCountEvents(events);
     for (const ev of events) {
       // ── Profession: gather/craft ──
       if (ev.type === "loot" && ev.entityId && ev.data?.gatherType) {
         const obj = this.entities.get(ev.entityId);
-        const anim = GATHER_ANIM[ev.data.gatherType as string] ?? "gather";
-        if (obj && obj.currentAnim !== anim) {
-          this.playOneShot(obj, anim);
-        }
+        const action = GATHER_ACTION[ev.data.gatherType as string] ?? "gather";
+        if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
       }
       if (ev.type === "loot" && ev.entityId && ev.data?.craftType) {
         const obj = this.entities.get(ev.entityId);
-        const anim = CRAFT_ANIM[ev.data.craftType as string] ?? "craft";
-        if (obj && obj.currentAnim !== anim) {
-          this.playOneShot(obj, anim);
-        }
+        const action = CRAFT_ACTION[ev.data.craftType as string] ?? "craft";
+        if (obj && obj.currentAction !== action) this.playOneShot(obj, action);
       }
 
       // ── Chat: speech bubble ──
@@ -2316,13 +2251,15 @@ export class EntityManager {
         const obj = this.entities.get(ev.entityId);
         if (obj && obj.lifeState === "alive" && (obj.rig || obj.hasGlbModel)) {
           const animStyle = ev.data?.animStyle as string | undefined;
-          const anim = resolveCombatAnim(obj.entity, undefined, animStyle);
+          const action = resolveAction(obj.entity, "basic-attack", undefined, animStyle);
           const isMelee = animStyle !== "projectile";
+          animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"} → ${action}`);
           this.faceTarget(obj, ev.targetId);
-          this.playCombatAnim(obj, anim, undefined, ev.targetId, isMelee);
+          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee);
+        } else if (obj && isAnimDebugFor(obj.entity.name)) {
+          animWarn(`${obj.entity.name}: combat event skipped (life=${obj.lifeState} rig=${!!obj.rig} glb=${obj.hasGlbModel})`);
         }
 
-        // Dodge / block callouts on the target (no HP delta fires for these)
         if (ev.targetId && ev.data?.dodged === true) {
           const target = this.entities.get(ev.targetId);
           if (target && target.lifeState === "alive") this.triggerDodge(target);
@@ -2339,9 +2276,9 @@ export class EntityManager {
         const techniqueId = ev.data?.techniqueId as string | undefined;
         const animStyle = ev.data?.animStyle as string | undefined;
         const isMelee = animStyle === "melee";
-        const anim = resolveCombatAnim(obj.entity, techniqueId, animStyle);
+        const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
-        this.playCombatAnim(obj, anim, undefined, ev.targetId, isMelee);
+        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee);
       }
 
       // ── Technique windup: casting started ──
@@ -2351,11 +2288,10 @@ export class EntityManager {
         const techniqueId = ev.data?.techniqueId as string | undefined;
         const animStyle = ev.data?.animStyle as string | undefined;
         const isMelee = animStyle === "melee";
-        const anim = resolveCombatAnim(obj.entity, techniqueId, animStyle);
+        const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
-        // Windup holds longer — technique will resolve in a future event
         const windupTicks = ev.data?.windupTicks as number | undefined;
-        this.playCombatAnim(obj, anim, (windupTicks ?? 2) * 1.0, ev.targetId, isMelee);
+        this.playCombatAction(obj, action, (windupTicks ?? 2) * 1.0, ev.targetId, isMelee);
       }
 
       // ── Death ──
@@ -2390,21 +2326,24 @@ export class EntityManager {
   }
 
   /**
-   * Play a combat animation with a hold timer based on clip duration.
-   * For melee attacks, queues the animation if the entity is visually out of range.
-   * For GLB models, triggers the lunge timer instead.
+   * Play a combat Action with a hold timer based on clip duration.
+   * Melee attacks queue until the entity is visually in range of the target.
    */
-  private playCombatAnim(obj: EntityObject, anim: AnimName, holdOverride?: number, targetId?: string, isMelee = true) {
-    if (!(obj.rig || obj.hasGlbModel)) return;
+  private playCombatAction(obj: EntityObject, action: Action, holdOverride?: number, targetId?: string, isMelee = true) {
+    if (!(obj.rig || obj.hasGlbModel)) {
+      if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no rig (skipped ${action})`);
+      return;
+    }
 
-    // Melee range gate: if visually out of range, queue until entity arrives
     if (isMelee && targetId) {
       const targetObj = this.entities.get(targetId);
       if (targetObj) {
         const dx = targetObj.group.position.x - obj.group.position.x;
         const dz = targetObj.group.position.z - obj.group.position.z;
-        if (Math.sqrt(dx * dx + dz * dz) > MELEE_ANIM_RANGE) {
-          obj.pendingMelee = { anim, targetId, holdOverride, queuedAt: performance.now() };
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > MELEE_ANIM_RANGE) {
+          animLogFor(obj.entity.name, `QUEUED ${action} (dist=${dist.toFixed(1)} > ${MELEE_ANIM_RANGE})`);
+          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now() };
           return;
         }
       }
@@ -2412,34 +2351,23 @@ export class EntityManager {
 
     obj.pendingMelee = null;
 
-    // Get clip duration for hold timer (fallback 0.6s)
-    const clip = this.getClipForEntity(obj, anim);
+    const clip = this.getClipForAction(obj, action);
     const clipDuration = clip?.duration ?? 0.6;
     obj.combatAnimHold = holdOverride ?? clipDuration;
 
-    if (obj.hasGlbModel) {
-      // GLB characters should play their real authored combat clip, not just
-      // the positional lunge fallback used during early bring-up.
-      this.playOneShot(obj, anim);
-      if (isMelee) {
-        obj.glbAttackTimer = 0.35;
-      }
-      return;
-    }
-
-    this.playOneShot(obj, anim);
+    this.playOneShot(obj, action);
+    if (obj.hasGlbModel && isMelee) obj.glbAttackTimer = 0.35;
   }
 
   /** Flush pending melee animations once entity is visually in range */
   private flushPendingMelee(obj: EntityObject) {
     if (!obj.pendingMelee) return;
-    const { anim, targetId, holdOverride, queuedAt } = obj.pendingMelee;
+    const { action, targetId, holdOverride, queuedAt } = obj.pendingMelee;
 
-    // Timeout: play anyway after 1s (server is authoritative)
     const elapsed = performance.now() - queuedAt;
     if (elapsed > 1000) {
       obj.pendingMelee = null;
-      this.playCombatAnim(obj, anim, holdOverride, targetId, false);
+      this.playCombatAction(obj, action, holdOverride, targetId, false);
       return;
     }
 
@@ -2453,7 +2381,7 @@ export class EntityManager {
     const dz = targetObj.group.position.z - obj.group.position.z;
     if (Math.sqrt(dx * dx + dz * dz) <= MELEE_ANIM_RANGE) {
       obj.pendingMelee = null;
-      this.playCombatAnim(obj, anim, holdOverride, targetId, false);
+      this.playCombatAction(obj, action, holdOverride, targetId, false);
     }
   }
 
@@ -2477,7 +2405,7 @@ export class EntityManager {
     let rightArm: THREE.Group | null = null;
     let rig: HumanoidRigLike | null = null;
     let mixer: THREE.AnimationMixer | null = null;
-    let clipOverrides = new Map<string, THREE.AnimationClip>();
+    let actionMap = new Map<Action, THREE.AnimationClip>();
     let hasGlbCharacter = false;
 
     switch (info.style) {
@@ -2486,52 +2414,27 @@ export class EntityManager {
         if (glbChar) {
           mixer = glbChar.mixer;
           hasGlbCharacter = true;
-          // Map GLB animation names → our internal clip overrides
-          const glbAnimMap: Record<string, string> = {
-            Idle: "idle", Walk: "walk", Run: "run",
-            SwordSlash: "attack", Punch: "attack",
-            Sword_Attack: "attack", Sword_Attack2: "attack",
-            Dagger_Attack: "attack", Dagger_Attack2: "attack",
-            Attack: "attack", Attack2: "attack",
-            Shoot_OneHanded: "shoot", Bow_Shoot: "shoot", Bow_Draw: "shoot",
-            Staff_Attack: "shoot", Spell1: "spellcast", Spell2: "darkcast",
-            Death: "death", Defeat: "defeat", RecieveHit: "damage", RecieveHit_2: "damage",
-            Jump: "jump", Roll: "roll",
-            PickUp: "pickup", SitDown: "sit", StandUp: "standup",
-            Walk_Carry: "gather", Run_Carry: "craft",
-            Victory: "levelup",
-          };
-          for (const [glbName, ourName] of Object.entries(glbAnimMap)) {
-            const clip = glbChar.clips.get(glbName);
-            if (clip) clipOverrides.set(ourName, clip);
+          actionMap = buildGlbActionMap(glbChar.clips);
+          if (isAnimDebugFor(ent.name)) {
+            animLogOnce(
+              `${ent.name} GLB loaded: ${glbChar.clips.size} clips `
+              + `[${Array.from(glbChar.clips.keys()).join(", ")}]`,
+            );
+            animLogOnce(
+              `${ent.name} action map: ${Array.from(actionMap).map(([a, c]) => `${a}=${c.name}`).join(" | ") || "EMPTY"}`,
+            );
           }
-
-          // Map technique-specific anims to best GLB equivalents
-          const firstClip = (...names: string[]) => names.map((name) => glbChar.clips.get(name)).find(Boolean);
-          const swordClip = firstClip("SwordSlash", "Sword_Attack", "Sword_Attack2", "Dagger_Attack", "Dagger_Attack2", "Attack", "Attack2");
-          const punchClip = firstClip("Punch", "Attack", "Attack2");
-          const shootClip = firstClip("Shoot_OneHanded", "Bow_Shoot", "Bow_Draw", "Staff_Attack", "Spell1");
-          const spellClip = firstClip("Spell1", "Spell2", "Staff_Attack", "Shoot_OneHanded", "Bow_Shoot");
-          const rollClip = glbChar.clips.get("Roll");
-          const pickupClip = glbChar.clips.get("PickUp");
-          for (const a of ["heroicstrike", "cleave", "rendingstrike", "shieldwall", "battlerage", "intimidatingshout", "rallyingcry"] as AnimName[]) {
-            if (swordClip && !clipOverrides.has(a)) clipOverrides.set(a, swordClip);
-          }
-          for (const a of ["palmstrike", "flyingkick", "whirlwindkick"] as AnimName[]) {
-            if (punchClip && !clipOverrides.has(a)) clipOverrides.set(a, punchClip);
-          }
-          for (const a of ["magicbolt", "bowshot", "spellcast", "darkcast", "holycast"] as AnimName[]) {
-            if ((spellClip ?? shootClip) && !clipOverrides.has(a)) clipOverrides.set(a, spellClip ?? shootClip!);
-          }
-          if (rollClip && !clipOverrides.has("roll")) clipOverrides.set("roll", rollClip);
-          if ((spellClip ?? shootClip) && !clipOverrides.has("heal")) clipOverrides.set("heal", spellClip ?? shootClip!);
-          for (const a of ["mine", "forage", "skin", "brew", "cook", "enchant", "carve"] as AnimName[]) {
-            if (pickupClip && !clipOverrides.has(a)) clipOverrides.set(a, pickupClip);
-          }
+          auditGlbActionMap(
+            actionMap,
+            Array.from(glbChar.clips.keys()),
+            ent.name,
+            ent.classId ?? undefined,
+          );
           group.traverse((c) => {
             if (!bodyMesh && c instanceof THREE.SkinnedMesh) bodyMesh = c as unknown as THREE.Mesh;
           });
         } else {
+          animWarn(`${ent.name} fell back to procedural rig — GLB unavailable`);
           const result = ent.type === "player"
             ? this.buildPlayer(group, ent)
             : this.buildNpc(group, ent, info.color);
@@ -2542,7 +2445,6 @@ export class EntityManager {
           leftArm = result.leftArm;
           rightArm = result.rightArm;
           rig = result.rig;
-          clipOverrides = result.clipOverrides;
         }
         break;
       }
@@ -2555,7 +2457,6 @@ export class EntityManager {
         leftArm = result.leftArm;
         rightArm = result.rightArm;
         rig = result.rig;
-        clipOverrides = result.clipOverrides;
         break;
       }
       case "resource":
@@ -2611,7 +2512,7 @@ export class EntityManager {
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
       prevHp: ent.hp, prevXp: ent.xp ?? 0, bodyMesh, headMesh,
       isMoving: false, movingSmooth: 0,
-      rig, mixer, actions: new Map(), clipOverrides, currentAnim: null,
+      rig, mixer, animActions: new Map(), actionMap, currentAction: null,
       leftLeg, rightLeg, leftArm, rightArm,
       hasGlbModel: hasGlbCharacter || !!(group as any)._hasGlbModel,
       glbAttackTimer: 0,
@@ -3541,16 +3442,13 @@ export class EntityManager {
     });
   }
 
-  private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
-    return {
-      rig: new CharacterRig({ scale, isFemale }),
-      clipOverrides: new Map(),
-    };
+  private createHumanoidRig(scale = 1, isFemale = false): { rig: HumanoidRigLike } {
+    return { rig: new CharacterRig({ scale, isFemale }) };
   }
 
   // ── Player ────────────────────────────────────────────────────────
 
-  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+  private buildPlayer(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike } {
     const avatar = this.avatarAssets.resolvePlayer(ent);
     const cls = avatar.classBody;
     const { bodyScale, armScale, headScale, raceScale } = avatar.morphology;
@@ -3559,7 +3457,7 @@ export class EntityManager {
     const isBeastkin = race === "beastkin";
 
     // ── Build skeleton (now gender-aware — wider hips, narrower shoulders for female) ──
-    const { rig, clipOverrides } = this.createHumanoidRig(raceScale, isFemale);
+    const { rig } = this.createHumanoidRig(raceScale, isFemale);
     group.add(rig.rootBone);
 
     // ── Attach visual meshes to bones ──
@@ -3798,12 +3696,12 @@ export class EntityManager {
     // Procedural armor pieces — pass rig so pieces attach to bones
     addArmorPieces(group, ent, cls, leftArm, rightArm, leftLeg, rightLeg, rig, body);
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── Mob ───────────────────────────────────────────────────────────
 
-  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+  private buildMob(group: THREE.Group, ent: Entity): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike } {
     const isBoss = ent.type === "boss";
     const color = isBoss ? 0xaa33ff : 0xcc4444;
     const s = isBoss ? 1.4 : 1.0;
@@ -3829,7 +3727,7 @@ export class EntityManager {
           const dummyGroup = new THREE.Group();
           const rig = new CharacterRig({ scale: s });
           (group as any)._hasGlbModel = true;
-          return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig, clipOverrides: new Map() };
+          return { body: dummyMesh, head: dummyMesh, leftLeg: dummyMesh, rightLeg: dummyMesh, leftArm: dummyGroup, rightArm: dummyGroup, rig };
         }
       }
     }
@@ -3951,18 +3849,18 @@ export class EntityManager {
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides: new Map() };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── NPC ───────────────────────────────────────────────────────────
 
-  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike; clipOverrides: Map<string, THREE.AnimationClip> } {
+  private buildNpc(group: THREE.Group, ent: Entity, color: number): { body: THREE.Mesh; head: THREE.Mesh; leftLeg: THREE.Mesh; rightLeg: THREE.Mesh; leftArm: THREE.Group; rightArm: THREE.Group; rig: HumanoidRigLike } {
     const avatar = this.avatarAssets.resolveNpc(ent, color);
     const { skinHex, eyeHex, hairHex } = avatar.colors;
     const { hairStyle } = avatar.features;
     const mat = new THREE.MeshToonMaterial({ gradientMap: getGradientMap(), color });
 
-    const { rig, clipOverrides } = this.createHumanoidRig(1);
+    const { rig } = this.createHumanoidRig(1);
     group.add(rig.rootBone);
 
     // Legs → thigh on hip bones, shin on knee bones
@@ -4058,7 +3956,7 @@ export class EntityManager {
     const leftArm = rig.lShoulder as unknown as THREE.Group;
     const rightArm = rig.rShoulder as unknown as THREE.Group;
 
-    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig, clipOverrides };
+    return { body, head, leftLeg, rightLeg, leftArm, rightArm, rig };
   }
 
   // ── Resource node ─────────────────────────────────────────────────

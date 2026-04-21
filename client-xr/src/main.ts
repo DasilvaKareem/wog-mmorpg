@@ -20,6 +20,7 @@ import { XRSessionManager } from "./xr/XRSessionManager.js";
 type XRControllersType = import("./xr/XRControllers.js").XRControllers;
 import { EntityInspector } from "./hud/EntityInspector.js";
 import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
+import { ZoneBanner } from "./hud/ZoneBanner.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
 import { AgentChat } from "./hud/AgentChat.js";
@@ -32,11 +33,12 @@ import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
+import { InboxPanel } from "./hud/InboxPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem } from "./api.js";
+import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance } from "./api.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -116,6 +118,7 @@ const COORD_SCALE = 1 / 10; // server coords → 3D units
 /** Poll zones whose center is within this distance (3D units) of the camera */
 const POLL_RADIUS = 90;
 const EVENT_DEDUPE_RETENTION_MS = 10_000;
+const GATHER_NODE_TYPES = new Set(["ore-node", "flower-node", "nectar-node", "crop-node"]);
 
 // ── Renderer ────────────────────────────────────────────────────────
 
@@ -232,8 +235,22 @@ const inspector = new EntityInspector({
     if (!result.ok) throw new Error(result.error ?? "Failed to send duel request");
     return `Duel challenge sent to ${entity.name}`;
   },
+  canCommandAgent: () => !!ownWalletAddress && !!ownEntityId,
+  onAgentGather: async (entity) => {
+    if (!ownWalletAddress || !ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const verb = entity.type === "ore-node" ? "Mine"
+      : entity.type === "crop-node" ? "Harvest"
+      : "Gather";
+    const message = `${verb} the ${entity.name} at ${Math.round(entity.x)}, ${Math.round(entity.y)}${entity.zoneId ? ` in ${entity.zoneId.replace(/-/g, " ")}` : ""}.`;
+    const result = await sendAgentChat(token, message);
+    if (!result.ok) throw new Error(result.error ?? "Failed to message agent");
+    return `Told your agent: "${verb} ${entity.name}"`;
+  },
 });
 const zoneNameBadge = new ZoneNameBadge();
+const zoneBanner = new ZoneBanner();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
 const agentChat = new AgentChat();
@@ -246,8 +263,12 @@ const charSelect = !isAnimationLab
       ownWalletAddress = detail.walletAddress.toLowerCase();
       ownCustodialWallet = detail.custodialWallet?.toLowerCase() ?? null;
       ownEntityId = detail.entityId || null;
+      void import("./scene/AnimationResolver.js").then(m => m.setAnimDebugSelfName(detail.characterName));
       desiredRunMode = null;
       runPanel.reset();
+      inboxPanel.setCustodialWallet(ownCustodialWallet);
+      lastInboxPollTime = 0;
+      void pollInbox();
       agentChat.setWallet(ownWalletAddress);
       agentChat.setEntityId(detail.entityId || null);
       questPanel.setPlayer(ownWalletAddress, true);
@@ -789,11 +810,18 @@ const skillsPanel = new SkillsPanel();
 const vitalsPanel = new VitalsPanel();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
+let lastInboxPollTime = 0;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
+const INBOX_POLL_INTERVAL = 15_000;
 
 // ── Bottom-right action bar ────────────────────────────────────────
 const actionBar = new ActionBar();
+const inboxPanel = new InboxPanel({
+  onUnreadChange: (count: number) => {
+    actionBar.setBadge("inbox", count);
+  },
+});
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => {
   bagPanel.toggle();
   if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
@@ -817,6 +845,10 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 }});
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
   playerPanel.toggle();
+}});
+actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => {
+  inboxPanel.toggle();
+  if (inboxPanel.isVisible()) { lastInboxPollTime = 0; void pollInbox(); }
 }});
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
   if (ownEntityId) {
@@ -949,13 +981,17 @@ async function pollNearbyZones() {
 
     // Minimap — pass camera in server coords
     minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
-    zoneNameBadge.setZoneId(ownEntityId ? merged[ownEntityId]?.zoneId ?? null : null);
+    const ownZoneId = ownEntityId ? merged[ownEntityId]?.zoneId ?? null : null;
+    zoneNameBadge.setZoneId(ownZoneId);
+    zoneBanner.setZoneId(ownZoneId);
 
     // Quest poll piggybacks on zone poll but self-throttles to 5s
     void pollQuests();
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
     if (skillsPanel.isVisible()) void pollProfessions();
+    // Inbox always polls in background so the unread badge stays fresh.
+    void pollInbox();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -1041,9 +1077,15 @@ async function pollInventory() {
   if (now - lastInventoryPollTime < INVENTORY_POLL_INTERVAL) return;
   lastInventoryPollTime = now;
 
-  const inv = await fetchInventory(addr);
+  const [inv, balance] = await Promise.all([
+    fetchInventory(addr),
+    fetchWalletBalance(addr),
+  ]);
   if (inv) {
     bagPanel.updateInventory(inv.items);
+  }
+  if (balance) {
+    bagPanel.updateGold(balance.copper);
   }
 }
 
@@ -1059,6 +1101,16 @@ async function pollProfessions() {
   if (data) {
     skillsPanel.updateProfessions(data);
   }
+}
+
+async function pollInbox() {
+  // Inbox is keyed under the custodial wallet — that's where the agent's
+  // system events, quest notifications, and a2a messages are written.
+  if (!ownCustodialWallet) return;
+  const now = Date.now();
+  if (now - lastInboxPollTime < INBOX_POLL_INTERVAL) return;
+  lastInboxPollTime = now;
+  await inboxPanel.refresh();
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -1119,6 +1171,9 @@ renderer.domElement.addEventListener("click", (e) => {
       // Non-hostile NPC — open dialog without locking camera
       if (NpcDialog.isNpcType(entity.type) && ownEntityId) {
         npcDialog.open(entity);
+      } else if (GATHER_NODE_TYPES.has(entity.type)) {
+        // Resource node — let the inspector's "gather" button drive the agent.
+        // Do NOT auto-lock the camera; the user just wants to interact with it.
       } else {
         // Other non-hostile entity — lock camera to it
         lockOn(entity.id);
@@ -1309,6 +1364,10 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "u" || e.key === "U") {
     playerPanel.toggle();
+  }
+  if (e.key === "i" || e.key === "I") {
+    inboxPanel.toggle();
+    if (inboxPanel.isVisible()) { lastInboxPollTime = 0; void pollInbox(); }
   }
   if (e.key === " ") {
     e.preventDefault();

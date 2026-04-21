@@ -1,0 +1,276 @@
+import { CANDIDATE_BASES, toUrl } from "../api.js";
+
+interface InboxMessage {
+  id: string;
+  from: string;
+  fromName: string;
+  to: string;
+  type: "direct" | "trade-request" | "party-invite" | "broadcast" | "system";
+  body: string;
+  data?: Record<string, unknown>;
+  ts: number;
+}
+
+const TYPE_ICONS: Record<string, string> = {
+  system: "\u2728",
+  direct: "\u{1F4E8}",
+  "trade-request": "\u{1F4B0}",
+  "party-invite": "\u{1F465}",
+  broadcast: "\u{1F4E2}",
+};
+
+const TYPE_COLORS: Record<string, string> = {
+  system: "#ffc24f",
+  direct: "#8cc8ff",
+  "trade-request": "#f0c05a",
+  "party-invite": "#b48cff",
+  broadcast: "#ff88aa",
+};
+
+const LAST_SEEN_KEY = "wog:xr:inbox:lastSeen";
+const MESSAGE_LIMIT = 60;
+
+export class InboxPanel {
+  private container: HTMLDivElement;
+  private listEl: HTMLDivElement;
+  private footerEl: HTMLDivElement;
+  private custodialWallet: string | null = null;
+  private messages: InboxMessage[] = [];
+  private lastSeenTs = 0;
+  private onUnreadChange: (count: number) => void;
+
+  constructor(callbacks: { onUnreadChange?: (count: number) => void } = {}) {
+    this.onUnreadChange = callbacks.onUnreadChange ?? (() => {});
+
+    this.container = document.createElement("div");
+    this.container.id = "inbox-panel";
+    this.container.style.display = "none";
+
+    const header = document.createElement("div");
+    header.className = "ibx-header";
+    header.innerHTML = `<span class="ibx-title">Inbox</span><span class="ibx-sub">Agent Notifications</span>`;
+    this.container.appendChild(header);
+
+    this.listEl = document.createElement("div");
+    this.listEl.className = "ibx-list";
+    this.container.appendChild(this.listEl);
+
+    this.footerEl = document.createElement("div");
+    this.footerEl.className = "ibx-footer";
+    this.container.appendChild(this.footerEl);
+
+    document.body.appendChild(this.container);
+    this.injectStyles();
+
+    try {
+      this.lastSeenTs = Number(localStorage.getItem(LAST_SEEN_KEY) ?? "0") || 0;
+    } catch {
+      this.lastSeenTs = 0;
+    }
+  }
+
+  setCustodialWallet(wallet: string | null) {
+    this.custodialWallet = wallet ? wallet.toLowerCase() : null;
+    this.messages = [];
+    this.render();
+  }
+
+  getUnreadCount(): number {
+    let count = 0;
+    for (const m of this.messages) {
+      if (m.ts > this.lastSeenTs) count++;
+    }
+    return count;
+  }
+
+  async refresh(): Promise<void> {
+    if (!this.custodialWallet) return;
+    const path = `/inbox/${this.custodialWallet}/history?limit=${MESSAGE_LIMIT}`;
+    for (const base of CANDIDATE_BASES) {
+      try {
+        const res = await fetch(toUrl(base, path));
+        if (!res.ok) continue;
+        const data = await res.json();
+        const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
+        msgs.sort((a, b) => b.ts - a.ts);
+        this.messages = msgs;
+        this.render();
+        this.onUnreadChange(this.getUnreadCount());
+        return;
+      } catch {
+        // try next base
+      }
+    }
+  }
+
+  toggle() {
+    if (this.container.style.display === "none") {
+      this.show();
+    } else {
+      this.hide();
+    }
+  }
+
+  show() {
+    this.container.style.display = "flex";
+    void this.refresh();
+    this.markAllSeen();
+  }
+
+  hide() {
+    this.container.style.display = "none";
+  }
+
+  isVisible(): boolean {
+    return this.container.style.display !== "none";
+  }
+
+  private markAllSeen() {
+    if (this.messages.length === 0) return;
+    const newest = this.messages[0].ts;
+    if (newest > this.lastSeenTs) {
+      this.lastSeenTs = newest;
+      try { localStorage.setItem(LAST_SEEN_KEY, String(newest)); } catch { /* ignore */ }
+      this.onUnreadChange(0);
+      this.render();
+    }
+  }
+
+  private render() {
+    if (!this.custodialWallet) {
+      this.listEl.innerHTML = `<div class="ibx-empty">Deploy an agent to see messages.</div>`;
+      this.footerEl.textContent = "";
+      return;
+    }
+    if (this.messages.length === 0) {
+      this.listEl.innerHTML = `<div class="ibx-empty">No messages yet. Your agent will log events here.</div>`;
+      this.footerEl.textContent = "";
+      return;
+    }
+
+    let html = "";
+    for (const m of this.messages) {
+      const unread = m.ts > this.lastSeenTs;
+      const icon = TYPE_ICONS[m.type] ?? "\u2709";
+      const color = TYPE_COLORS[m.type] ?? "#9ab";
+      const sender = m.fromName || m.from.slice(0, 8) || "system";
+      const time = formatTime(m.ts);
+      html += `<div class="ibx-row${unread ? " ibx-unread" : ""}">`;
+      html += `<div class="ibx-icon" style="color:${color}">${icon}</div>`;
+      html += `<div class="ibx-content">`;
+      html += `<div class="ibx-meta"><span class="ibx-from" style="color:${color}">${esc(sender)}</span><span class="ibx-time">${esc(time)}</span></div>`;
+      html += `<div class="ibx-body">${esc(m.body)}</div>`;
+      html += `</div>`;
+      html += `</div>`;
+    }
+
+    this.listEl.innerHTML = html;
+    const total = this.messages.length;
+    const unread = this.getUnreadCount();
+    this.footerEl.textContent = unread > 0
+      ? `${unread} unread of ${total}`
+      : `${total} message${total === 1 ? "" : "s"}`;
+  }
+
+  private injectStyles() {
+    const style = document.createElement("style");
+    style.textContent = `
+      #inbox-panel {
+        position: fixed;
+        bottom: 64px;
+        right: 12px;
+        width: 300px;
+        max-height: calc(100vh - 200px);
+        background: rgba(10, 16, 28, 0.94);
+        border: 1px solid rgba(255, 194, 79, 0.25);
+        border-radius: 8px;
+        z-index: 16;
+        display: flex;
+        flex-direction: column;
+        font: 12px monospace;
+        color: #ccc;
+        backdrop-filter: blur(6px);
+        pointer-events: auto;
+      }
+
+      .ibx-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(255, 194, 79, 0.18);
+      }
+      .ibx-title { color: #ffc24f; font-weight: bold; font-size: 13px; letter-spacing: 0.5px; }
+      .ibx-sub { color: #667; font-size: 10px; }
+
+      .ibx-list {
+        overflow-y: auto;
+        flex: 1;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 194, 79, 0.2) transparent;
+      }
+
+      .ibx-row {
+        display: flex;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(255, 194, 79, 0.07);
+        align-items: flex-start;
+      }
+      .ibx-row:last-child { border-bottom: none; }
+      .ibx-row.ibx-unread {
+        background: rgba(255, 194, 79, 0.06);
+        border-left: 2px solid rgba(255, 194, 79, 0.55);
+      }
+
+      .ibx-icon { font-size: 16px; line-height: 1.2; flex-shrink: 0; width: 18px; text-align: center; }
+      .ibx-content { flex: 1; min-width: 0; }
+      .ibx-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+        margin-bottom: 2px;
+      }
+      .ibx-from { font-weight: bold; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ibx-time { font-size: 10px; color: #556; flex-shrink: 0; }
+      .ibx-body {
+        font-size: 11px;
+        color: #bcd;
+        line-height: 1.35;
+        word-wrap: break-word;
+        white-space: pre-wrap;
+      }
+
+      .ibx-empty {
+        padding: 24px 16px;
+        color: #556;
+        text-align: center;
+        font-size: 11px;
+      }
+
+      .ibx-footer {
+        padding: 6px 12px;
+        font-size: 10px;
+        color: #556;
+        border-top: 1px solid rgba(255, 194, 79, 0.1);
+        text-align: center;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
+function esc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function formatTime(ts: number): string {
+  if (!ts) return "";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
