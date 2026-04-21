@@ -264,6 +264,66 @@ export async function spawnCharacter(
   return { ok: false, error: "All API bases unreachable" };
 }
 
+export async function deployAgent(
+  token: string,
+  body: {
+    walletAddress: string;
+    characterName: string;
+    characterTokenId?: string;
+    raceId?: string;
+    classId?: string;
+  },
+): Promise<{
+  ok: boolean;
+  entityId?: string;
+  zoneId?: string;
+  custodialWallet?: string;
+  error?: string;
+}> {
+  // Stop any existing agent first (mirrors client web app's deploy flow).
+  for (const base of CANDIDATE_BASES) {
+    try {
+      await fetchWithRetry(toUrl(base, "/agent/stop"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ walletAddress: body.walletAddress }),
+      });
+      break;
+    } catch {
+      // Try next base; if all fail we'll still attempt deploy.
+    }
+  }
+
+  const payload = {
+    walletAddress: body.walletAddress,
+    characterName: body.characterName.replace(/\s+the\s+\w+$/i, ""),
+    characterTokenId: body.characterTokenId,
+    raceId: body.raceId,
+    classId: body.classId,
+  };
+
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, "/agent/deploy"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      return {
+        ok: res.ok,
+        entityId: data.entityId,
+        zoneId: data.zoneId,
+        custodialWallet: data.custodialWallet,
+        error: data.error,
+      };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return { ok: false, error: "All API bases unreachable" };
+}
+
 // ── Quest endpoints ───────────────────────────────────────────────
 
 export async function fetchQuestLog(walletAddress: string): Promise<QuestLogResponse | null> {

@@ -46,6 +46,9 @@ export interface Entity {
   cropType?: string;
   charges?: number;
   maxCharges?: number;
+  // Trainer NPCs
+  teachesClass?: string;
+  teachesProfession?: string;
 }
 
 export interface GameTime {

@@ -1,4 +1,5 @@
 import { TILE } from "./tileTypes";
+import { OVERWORLD_COLS, packOwRaw } from "./overworldMapping";
 
 /**
  * Multi-tile stamp prefabs for houses, villages, and decor clusters.
@@ -44,6 +45,38 @@ function fromGrid(grid: string[], legend: Record<string, C>): { cells: C[]; widt
   return { cells, width, height };
 }
 
+/**
+ * Build a prefab directly from a rectangular region of Overworld.png.
+ * Every cell in the region becomes an overlay tile pointing at its raw
+ * atlas index — no per-tile legend required. Use this for pre-assembled
+ * multi-tile art (houses, arches, fountains) where the atlas already
+ * contains the composed building.
+ *
+ * `solidMask` is an optional 2D grid of "S" (solid, writes to ground so
+ * the tile blocks movement) and "." (overlay only). Omit to treat every
+ * cell as overlay.
+ */
+function fromAtlasRegion(opts: {
+  row0: number;
+  col0: number;
+  rows: number;
+  cols: number;
+  solidMask?: string[];
+}): { cells: C[]; width: number; height: number } {
+  const { row0, col0, rows, cols, solidMask } = opts;
+  const cells: C[] = [];
+  for (let dy = 0; dy < rows; dy++) {
+    for (let dx = 0; dx < cols; dx++) {
+      const owIdx = (row0 + dy) * OVERWORLD_COLS + (col0 + dx);
+      const solid = solidMask?.[dy]?.[dx] === "S";
+      cells.push(solid
+        ? { ground: packOwRaw(owIdx) }
+        : { overlay: packOwRaw(owIdx) });
+    }
+  }
+  return { cells, width: cols, height: rows };
+}
+
 // ── House prefabs ───────────────────────────────────────────────────
 
 const SMALL_HOUSE_WOOD: Prefab = (() => {
@@ -68,25 +101,23 @@ const SMALL_HOUSE_WOOD: Prefab = (() => {
   return { id: "small-house-wood", name: "Small House", category: "house", width, height, cells };
 })();
 
+// Large wooden manor: 5×5 pre-assembled house at Overworld.png (row 0-4, col 6-10).
+// Walls (rows 1-3) stamp to ground so they block movement; the roof peak row
+// and the shadow row below stamp to overlay so grass remains underneath.
 const LARGE_HOUSE_WOOD: Prefab = (() => {
-  const { cells, width, height } = fromGrid(
-    [
-      "RRRRRRR",
-      "VIIIIIV",
-      "VIIIIIV",
-      "VIIIIIV",
-      "WWWDWWW",
+  const { cells, width, height } = fromAtlasRegion({
+    row0: 0,
+    col0: 6,
+    rows: 5,
+    cols: 5,
+    solidMask: [
+      ".....",  // roof peak — overlay (transparent edges)
+      ".SSS.",  // upper wall — solid
+      ".SSS.",  // lower wall — solid
+      ".SSS.",  // archway + windows — solid
+      ".....",  // ground shadow — overlay
     ],
-    {
-      R: { ground: TILE.GRASS_PLAIN, overlay: TILE.ROOF_RED },
-      V: { ground: TILE.WALL_WOOD_V },
-      W: { ground: TILE.WALL_WOOD_H },
-      I: { ground: TILE.INTERIOR_FLOOR },
-      D: { ground: TILE.DOOR },
-    },
-  );
-  cells[0] = { ground: TILE.GRASS_PLAIN, overlay: TILE.ROOF_RED_TOP };
-  cells[width - 1] = { ground: TILE.GRASS_PLAIN, overlay: TILE.ROOF_RED_TOP };
+  });
   return { id: "large-house-wood", name: "Large House", category: "house", width, height, cells };
 })();
 

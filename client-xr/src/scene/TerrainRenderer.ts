@@ -142,10 +142,39 @@ export class TerrainRenderer {
 
   getElevationAt(x: number, z: number): number {
     if (!this.elevationData.length) return 0;
-    const ix = Math.max(0, Math.min(this.gridWidth - 1, Math.floor(x)));
-    const iz = Math.max(0, Math.min(this.gridHeight - 1, Math.floor(z)));
-    const elev = this.elevationData[iz * this.gridWidth + ix] ?? 0;
-    return elev * ELEV_SCALE;
+    // Match the render-time corner sampler so entity Y lines up with the slope
+    // rendered on screen. Each corner = MAX over its up-to-4 surrounding
+    // cells; Y at (x, z) is then the bilinear interpolation of those 4 corners
+    // across the enclosing cell quad. Gives flat plateau tops and smooth 1-
+    // tile ramps connecting plateau to lower ground, instead of floating gaps.
+    const W = this.gridWidth;
+    const H = this.gridHeight;
+    const cx = Math.max(0, Math.min(W - 0.0001, x));
+    const cz = Math.max(0, Math.min(H - 0.0001, z));
+    const ix0 = Math.floor(cx);
+    const iz0 = Math.floor(cz);
+    const fx = cx - ix0;
+    const fz = cz - iz0;
+    const cornerMax = (gx: number, gz: number): number => {
+      let m = 0;
+      for (let dz = -1; dz <= 0; dz++) {
+        for (let dx = -1; dx <= 0; dx++) {
+          const ix = gx + dx;
+          const iz = gz + dz;
+          if (ix < 0 || ix >= W || iz < 0 || iz >= H) continue;
+          const e = this.elevationData[iz * W + ix] ?? 0;
+          if (e > m) m = e;
+        }
+      }
+      return m;
+    };
+    const e00 = cornerMax(ix0,     iz0);
+    const e10 = cornerMax(ix0 + 1, iz0);
+    const e01 = cornerMax(ix0,     iz0 + 1);
+    const e11 = cornerMax(ix0 + 1, iz0 + 1);
+    const e0 = e00 * (1 - fx) + e10 * fx;
+    const e1 = e01 * (1 - fx) + e11 * fx;
+    return (e0 * (1 - fz) + e1 * fz) * ELEV_SCALE;
   }
 
   build(data: TerrainData) {
@@ -157,6 +186,23 @@ export class TerrainRenderer {
     this.gridHeight = H;
 
     const textures = TerrainRenderer.getTextures();
+
+    // Corner height sampler — returns world-Y at grid corner (cx, cz) using
+    // the maximum of the up-to-4 cells touching the corner. Matches the
+    // runtime `getElevationAt` sampler so entities and ground align.
+    const cornerElevation = (cx: number, cz: number): number => {
+      let maxE = 0;
+      for (let dz = -1; dz <= 0; dz++) {
+        for (let dx = -1; dx <= 0; dx++) {
+          const ix = cx + dx;
+          const iz = cz + dz;
+          if (ix < 0 || ix >= W || iz < 0 || iz >= H) continue;
+          const e = data.elevation[iz * W + ix] ?? 0;
+          if (e > maxE) maxE = e;
+        }
+      }
+      return maxE * ELEV_SCALE;
+    };
 
     // ── Group tiles by terrain type ──
     // For each type, collect tile positions, then build one merged mesh per type.
@@ -192,11 +238,16 @@ export class TerrainRenderer {
 
         // 4 vertices per tile quad
         const vi = t * 4;
-        // v0: top-left, v1: top-right, v2: bottom-left, v3: bottom-right
-        const elev00 = (data.elevation[iz * W + ix] ?? 0) * ELEV_SCALE;
-        const elev10 = (data.elevation[iz * W + Math.min(ix + 1, W - 1)] ?? 0) * ELEV_SCALE;
-        const elev01 = (data.elevation[Math.min(iz + 1, H - 1) * W + ix] ?? 0) * ELEV_SCALE;
-        const elev11 = (data.elevation[Math.min(iz + 1, H - 1) * W + Math.min(ix + 1, W - 1)] ?? 0) * ELEV_SCALE;
+        // Corner heights are MAX over the (up to 4) cells touching each corner.
+        // This treats each cell's `elevation` as its plateau height: a block of
+        // same-height cells keeps flat corners at that height, and the cells
+        // just outside the block get one raised corner — producing a
+        // 1-tile-wide ramp that connects plateau to lower terrain instead of
+        // a floating cliff.
+        const elev00 = cornerElevation(ix,     iz);
+        const elev10 = cornerElevation(ix + 1, iz);
+        const elev01 = cornerElevation(ix,     iz + 1);
+        const elev11 = cornerElevation(ix + 1, iz + 1);
 
         // Positions (XZ plane, Y = elevation)
         positions.push(x0, elev00, z0);                           // v0

@@ -19,7 +19,8 @@ export type AgentPushType =
   | "technique_learned"
   | "session_ended"
   | "agent_message"
-  | "champion_question";
+  | "champion_question"
+  | "agent_stuck";
 
 export interface AgentPushEvent {
   type: AgentPushType;
@@ -119,6 +120,12 @@ function buildPayload(event: AgentPushEvent): PushPayload {
         title: `${agentName} needs your decision`,
         body: detail ?? "Your champion has a question for you!",
         tag: `wog-agent-question`,
+      };
+    case "agent_stuck":
+      return {
+        title: `${agentName} is stuck`,
+        body: detail ?? "Agent is stuck and needs direction.",
+        tag: `wog-agent-stuck`,
       };
   }
 }

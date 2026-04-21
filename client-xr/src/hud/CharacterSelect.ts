@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, spawnCharacter } from "../api.js";
+import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, spawnCharacter, deployAgent } from "../api.js";
 import { getAuthToken } from "../auth.js";
 import type { CharacterAssets, CharacterInstance } from "../scene/CharacterAssets.js";
 import { AvatarAssets } from "../scene/AvatarAssets.js";
@@ -11,6 +11,7 @@ export interface CharacterReadyDetail {
   entityId: string;
   zoneId: string;
   characterName: string;
+  custodialWallet?: string | null;
 }
 
 interface CharacterSelectOptions {
@@ -444,7 +445,7 @@ export class CharacterSelect {
 
     bar.querySelector("[data-action='play-char']")!.addEventListener("click", () => {
       if (isLive) {
-        this.reconnect();
+        void this.reconnect(char);
       } else {
         void this.spawnExisting(char);
       }
@@ -628,42 +629,57 @@ export class CharacterSelect {
   }
 
   private async spawnExisting(char: CharacterListEntry) {
-    await this.runBusy(`Spawning ${char.name}...`, async () => {
+    await this.runBusy(`Deploying ${char.name}...`, async () => {
       const token = await getAuthToken(this.walletAddress);
       if (!token) throw new Error("Auth token expired. Go back and sign in again.");
 
-      const spawn = await spawnCharacter(token, {
-        zoneId: STARTING_ZONE,
-        type: "player",
-        name: char.name,
+      const deploy = await deployAgent(token, {
         walletAddress: this.walletAddress,
-        classId: char.properties.class,
-        raceId: char.properties.race,
+        characterName: char.name,
         characterTokenId: char.characterTokenId ?? undefined,
+        raceId: char.properties.race,
+        classId: char.properties.class,
       });
 
-      if (!spawn.ok) {
-        const reconnected = this.handleExistingLiveSpawn(char.name, spawn);
-        if (reconnected) return;
-        throw new Error(spawn.error || "Spawn failed.");
+      if (!deploy.ok || !deploy.entityId) {
+        throw new Error(deploy.error || "Deploy failed.");
       }
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
-        entityId: spawn.spawned!.id,
-        zoneId: spawn.zone || STARTING_ZONE,
+        entityId: deploy.entityId,
+        zoneId: deploy.zoneId || STARTING_ZONE,
         characterName: char.name,
+        custodialWallet: deploy.custodialWallet ?? null,
       });
     });
   }
 
-  private reconnect() {
+  private async reconnect(char: CharacterListEntry) {
     if (!this.liveEntity) return;
-    this.options.onCharacterReady({
-      walletAddress: this.walletAddress,
-      entityId: this.liveEntity.id,
-      zoneId: this.liveEntity.zoneId,
-      characterName: this.liveEntity.name,
+    await this.runBusy(`Reconnecting ${char.name}...`, async () => {
+      const token = await getAuthToken(this.walletAddress);
+      if (!token) throw new Error("Auth token expired. Go back and sign in again.");
+
+      const deploy = await deployAgent(token, {
+        walletAddress: this.walletAddress,
+        characterName: char.name,
+        characterTokenId: char.characterTokenId ?? this.liveEntity?.characterTokenId ?? undefined,
+        raceId: char.properties.race,
+        classId: char.properties.class,
+      });
+
+      if (!deploy.ok || !deploy.entityId) {
+        throw new Error(deploy.error || "Reconnect failed.");
+      }
+
+      this.options.onCharacterReady({
+        walletAddress: this.walletAddress,
+        entityId: deploy.entityId,
+        zoneId: deploy.zoneId || this.liveEntity!.zoneId,
+        characterName: char.name,
+        custodialWallet: deploy.custodialWallet ?? null,
+      });
     });
   }
 

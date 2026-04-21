@@ -18,6 +18,7 @@ import { getAgentCustodialWallet } from "../agents/agentConfigStore.js";
 import { loadCharacter, saveCharacter } from "../character/characterStore.js";
 import { buildVerifiedIdentityPatch } from "../character/characterIdentityPersistence.js";
 import { isPostgresConfigured, postgresQuery } from "../db/postgres.js";
+import { listCompletedQuests as listCompletedQuestsInDb } from "../db/questCompletionStore.js";
 import { restoreProfessions } from "../professions/professions.js";
 import { restoreProfessionSkills } from "../professions/professionXp.js";
 import { reputationManager } from "../economy/reputationManager.js";
@@ -184,6 +185,27 @@ export function registerSpawnOrders(server: FastifyInstance) {
       saved = await loadCharacter(walletAddress, name);
     }
 
+    // Source of truth for completed quests is game.character_completed_quests.
+    // We still merge with the snapshot list so pre-migration characters whose
+    // completions only live in snapshot_json don't regress on first spawn after
+    // this change ships.
+    let resolvedCompletedQuests: string[] = saved?.completedQuests ?? [];
+    if (type === "player" && walletAddress && isPostgresConfigured()) {
+      try {
+        const dbCompleted = await listCompletedQuestsInDb({
+          walletAddress,
+          characterName: saved?.name ?? name,
+        });
+        if (dbCompleted.length > 0 || resolvedCompletedQuests.length > 0) {
+          resolvedCompletedQuests = Array.from(new Set([...resolvedCompletedQuests, ...dbCompleted]));
+        }
+      } catch (err) {
+        server.log.warn(
+          `[persistence] Failed to load completed quests from DB for ${walletAddress}:${name}: ${String((err as Error)?.message ?? err).slice(0, 140)}`
+        );
+      }
+    }
+
     const spawnZoneId = saved?.zone ?? zoneId;
     const zone = getOrCreateZone(spawnZoneId);
     const offset = getZoneOffset(spawnZoneId) ?? { x: 0, z: 0 };
@@ -268,7 +290,7 @@ export function registerSpawnOrders(server: FastifyInstance) {
       }),
       kills: saved?.kills ?? 0,
       activeQuests: saved?.activeQuests ?? [],
-      completedQuests: saved?.completedQuests ?? [],
+      completedQuests: resolvedCompletedQuests,
       storyFlags: saved?.storyFlags ?? [],
       learnedTechniques: saved?.learnedTechniques ?? [],
       ...(saved?.equipment != null && { equipment: saved.equipment as any }),

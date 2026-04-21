@@ -23,15 +23,18 @@ export const OW_TILES = {
   GRASS_FLOWERS_YELLOW:ow(9, 1),
   GRASS_FLOWERS_BLUE:  ow(10, 0),
 
-  // Dirt / Path (GROUND)
-  DIRT_PLAIN:          ow(3, 12),
-  DIRT_H:              ow(3, 13),
-  DIRT_V:              ow(3, 14),
-  DIRT_CROSS:          ow(3, 12),
-  DIRT_CORNER_NE:      ow(3, 12),
-  DIRT_CORNER_NW:      ow(3, 12),
-  DIRT_CORNER_SE:      ow(3, 12),
-  DIRT_CORNER_SW:      ow(3, 12),
+  // Dirt / Path (GROUND) — 3×3 autotile block at (row 13-14, col 12-14).
+  // Center tile (14,13) is pure dirt; surrounding tiles are grass-dirt
+  // transition edges so paths blend into grass terrain automatically.
+  DIRT_PLAIN:          ow(14, 13),  // center — pure dirt
+  DIRT_H:              ow(14, 13),  // tileable along horizontal
+  DIRT_V:              ow(14, 13),  // tileable along vertical
+  DIRT_CROSS:          ow(14, 13),  // 4-way intersection
+  DIRT_CORNER_NE:      ow(13, 14),  // top-right transition
+  DIRT_CORNER_NW:      ow(13, 12),  // top-left transition
+  DIRT_CORNER_SE:      ow(14, 14),  // right edge transition
+  DIRT_CORNER_SW:      ow(14, 12),  // left edge transition
+  DIRT_EDGE_N:         ow(13, 13),  // top edge (dirt south of grass)
 
   // Stone (GROUND)
   STONE_FLOOR:         ow(11, 14),
@@ -184,10 +187,29 @@ export const OLD_TO_OVERWORLD: (number | -1)[] = [
 ];
 
 /**
- * Translate an old procedural tile index (0-63) to an Overworld spritesheet
- * frame index. Returns -1 for empty/transparent tiles.
+ * Offset used to pack a raw Overworld atlas index into the old-tile grid.
+ * Values >= OW_RAW_OFFSET are interpreted as (value - OW_RAW_OFFSET) raw
+ * Overworld.png frame indices, bypassing the OLD_TO_OVERWORLD legacy map.
+ *
+ * This lets prefabs reference pre-assembled atlas art (full houses, etc.)
+ * without needing a named TILE entry for every unique 16x16 tile.
+ */
+export const OW_RAW_OFFSET = 10000;
+
+/** Encode a raw Overworld atlas index for storage in the ground/overlay grids. */
+export function packOwRaw(owIdx: number): number {
+  return OW_RAW_OFFSET + owIdx;
+}
+
+/**
+ * Translate a stored tile value to an Overworld spritesheet frame index.
+ * Returns -1 for empty/transparent tiles.
+ *
+ * Accepts either an old procedural tile enum (0-63) or a packed raw atlas
+ * index (>= OW_RAW_OFFSET).
  */
 export function mapOldTileToOverworld(oldTile: number): number {
+  if (oldTile >= OW_RAW_OFFSET) return oldTile - OW_RAW_OFFSET;
   if (oldTile < 0 || oldTile >= OLD_TO_OVERWORLD.length) return -1;
   return OLD_TO_OVERWORLD[oldTile];
 }

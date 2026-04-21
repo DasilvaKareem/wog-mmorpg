@@ -1793,7 +1793,7 @@ Strategy options: aggressive, balanced, defensive`;
               // Safety net: if the LLM set focus=traveling with a valid zone,
               // also push a queued travel action so the supervisor can't undo it.
               if (patch.focus === "traveling" && patch.targetZone) {
-                await runner.enqueueActions(
+                await runner.enqueueUserActions(
                   [{ type: "travel", targetZone: patch.targetZone, reason: `User directive: travel to ${patch.targetZone}` }],
                   true,
                 );
@@ -2078,8 +2078,10 @@ Strategy options: aggressive, balanced, defensive`;
               }));
               const runner = agentManager.getRunner(authWallet);
               if (runner) {
-                await runner.enqueueActions(scripts, input.clearExisting !== false);
+                await runner.enqueueUserActions(scripts, input.clearExisting !== false);
                 await runner.clearScript(); // start executing immediately
+              } else {
+                server.log.warn(`[agent/chat] queue_actions called but no runner for ${authWallet.slice(0,8)} — directive lost`);
               }
               const summary = scripts.map((s) => s.type).join(" → ");
               actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);

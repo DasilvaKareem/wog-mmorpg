@@ -96,6 +96,7 @@ import { biteProvider, probeBiteRpc, SKALE_BASE_CHAIN_ID, SKALE_BASE_RPC_URL } f
 import { assertRedisAvailable, getRedis, isMemoryFallbackAllowed } from "./redis.js";
 import { pvpBattleManager } from "./combat/pvpBattleManager.js";
 import { ensureGameSchema, getGameSchemaHealth } from "./db/gameSchema.js";
+import { backfillFromCharacterProjections as backfillCompletedQuests } from "./db/questCompletionStore.js";
 import { migrateRedisToPostgres } from "./character/migrateRedisToPostgres.js";
 import { initPostgres, isPostgresConfigured, postgresQuery } from "./db/postgres.js";
 import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
@@ -1071,6 +1072,18 @@ const start = async () => {
       } catch (err: any) {
         server.log.warn(`[migrate] Redis→Postgres migration failed (non-fatal): ${err.message?.slice(0, 100)}`);
       }
+    }
+
+    // Backfill completed-quest rows from snapshot_json into the authoritative
+    // game.character_completed_quests table. Runs after migrateRedisToPostgres
+    // so any Redis-only characters get their projections populated first.
+    try {
+      const questBackfill = await backfillCompletedQuests();
+      server.log.info(
+        `[migrate] Completed quests: scanned ${questBackfill.scanned} character projection(s), inserted ${questBackfill.inserted} row(s)`
+      );
+    } catch (err: any) {
+      server.log.warn(`[migrate] Completed-quest backfill failed (non-fatal): ${err.message?.slice(0, 100)}`);
     }
   } else {
     server.log.warn("[postgres] DATABASE_URL not configured; authoritative persistent read models are disabled");

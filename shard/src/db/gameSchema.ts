@@ -759,6 +759,17 @@ export async function ensureGameSchema(): Promise<void> {
 
         alter table game.wallet_names
           add column if not exists chain_registered_at timestamptz;
+
+        create table if not exists game.character_completed_quests (
+          wallet_address text not null,
+          normalized_name text not null,
+          quest_id text not null,
+          completed_at timestamptz not null default now(),
+          primary key (wallet_address, normalized_name, quest_id)
+        );
+
+        create index if not exists idx_character_completed_quests_character
+          on game.character_completed_quests (wallet_address, normalized_name);
       `);
       await client.query("commit");
     } catch (err) {

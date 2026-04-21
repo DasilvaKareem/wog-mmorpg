@@ -16,7 +16,7 @@ const CHAR_BASE = new URL(
   "models/characters/",
   new URL(import.meta.env.BASE_URL, window.location.href),
 ).href;
-const CHARACTER_MODEL_VERSION = "2026-04-15d";
+const CHARACTER_MODEL_VERSION = "2026-04-20a";
 
 function appendCharacterVersion(url: string): string {
   if (!url || url.startsWith("data:") || url.startsWith("blob:")) return url;
@@ -41,62 +41,76 @@ function createCharacterLoader(): GLTFLoader {
 
 /* ── WoG class → Quaternius model mapping ─────────────────────────── */
 
-/** Generic fallback bodies used when a class-specific asset is unavailable. */
-const CLASS_TO_MODEL: Record<string, string> = {
-  warrior:  "Casual_Male",
-  mage:     "Casual2_Male",
-  ranger:   "Casual3_Male",
-  cleric:   "Casual_Male",
-  rogue:    "Casual3_Male",
-  paladin:  "Casual_Male",
-  warlock:  "Casual2_Male",
-  monk:     "Casual3_Male",
+/** Class → authored Quaternius RPG model. Paladin shares Warrior, warlock shares Wizard. */
+const CLASS_MODELS: Record<string, string> = {
+  warrior: "Warrior",
+  paladin: "Warrior",
+  cleric: "Cleric",
+  ranger: "Ranger",
+  rogue: "Rogue",
+  monk: "Monk",
+  mage: "Wizard",
+  warlock: "Wizard",
 };
 
-/** Female generic fallback bodies. */
-const CLASS_TO_MODEL_FEMALE: Record<string, string> = {
-  warrior:  "Casual_Female",
-  mage:     "Casual2_Female",
-  ranger:   "Casual3_Female",
-  cleric:   "Casual_Female",
-  rogue:    "Casual3_Female",
-  paladin:  "Casual_Female",
-  warlock:  "Casual2_Female",
-  monk:     "Casual3_Female",
-};
-
-/**
- * Hand-authored default class bodies from the stripped Quaternius RPG pack.
- * These point at our tintable re-exports: the outfit stays authored and baked,
- * while skin and hair are split into separate tintable layers.
- */
-const UNIQUE_CLASS_MODELS: Record<string, string> = {
-  warrior: "Warrior_Tintable",
-  paladin: "Warrior_Tintable",
-  cleric: "Cleric_Tintable",
-  ranger: "Ranger_Tintable",
-  rogue: "Rogue_Tintable",
-  monk: "Monk_Tintable",
-  mage: "Wizard_Tintable",
-  warlock: "Wizard_Tintable",
-};
-
-/**
- * Use the authored class looks in live rendering. Generic casual bodies remain
- * as a fallback when a class-specific asset is missing.
- */
-const ENABLE_UNIQUE_CLASS_MODELS = false;
-
-/** NPC type → model */
+/** NPC type → base Quaternius model (never a player class). */
 const NPC_MODEL: Record<string, string> = {
-  merchant:       "OldClassy_Male",
-  "quest-giver":  "Cowboy_Male",
-  "guild-registrar": "Suit_Male",
-  "crafting-master": "Worker_Male",
+  merchant:             "OldClassy_Male",
+  "quest-giver":        "Cowboy_Male",
+  "guild-registrar":    "Suit_Male",
+  "crafting-master":    "Worker_Male",
   "profession-trainer": "Chef_Male",
-  "arena-master":  "Viking_Male",
-  "lore-npc":     "Wizard",
-  "auctioneer":   "Pirate_Male",
+  "arena-master":       "Viking_Male",
+  "lore-npc":           "Witch",
+  "auctioneer":         "Pirate_Male",
+  trainer:              "Knight_Male",
+};
+
+/**
+ * Class trainer (type=trainer, teachesClass=X) → themed base model.
+ * Each class trainer reads as a distinct archetype — paladin is a gold knight,
+ * rogue is a ninja, mage is a witch, monk is a kimono martial artist, etc.
+ * Warrior and warlock share models with their class but get a dark atlas tint
+ * (see `TRAINER_TINT`) so they don't look identical to the player class model.
+ */
+const TRAINER_BY_CLASS: Record<string, string> = {
+  warrior:  "Knight_Male",
+  paladin:  "Knight_Golden_Male",
+  cleric:   "OldClassy_Male",
+  mage:     "Witch",
+  warlock:  "Zombie_Male",
+  ranger:   "Cowboy_Hair",
+  rogue:    "Ninja_Male_Hair",
+  monk:     "Kimono_Male",
+};
+
+/** Profession trainer → themed base model (defaults to Chef_Male). */
+const TRAINER_BY_PROFESSION: Record<string, string> = {
+  mining:         "Worker_Male",
+  blacksmithing:  "Viking_Male",
+  herbalism:      "Chef_Female",
+  alchemy:        "Witch",
+  skinning:       "Cowboy_Male",
+  cooking:        "Chef_Male",
+  leatherworking: "Worker_Female",
+  jewelcrafting:  "OldClassy_Female",
+  enchanting:     "Kimono_Female",
+};
+
+/** Default base model for any unrecognized NPC type. */
+const DEFAULT_NPC_MODEL = "BlueSoldier_Male";
+
+/**
+ * Atlas-color multipliers applied to baked-texture trainer materials so
+ * trainers that share a body with a player class read as distinct. Keyed by
+ * `teachesClass`. Classes with a unique themed model (paladin, mage, rogue,
+ * monk) need no tint.
+ */
+const TRAINER_TINT: Record<string, number> = {
+  warrior: 0x333333, // black-knight warrior trainer
+  warlock: 0x663399, // dark-purple zombie warlock trainer
+  ranger:  0x6a8a4a, // forest-green ranger trainer
+  cleric:  0xffeebb, // warm holy cream cleric trainer
 };
 
 /** Skeleton bone names in the Quaternius models (dots stripped by SkeletonUtils.clone) */
@@ -192,15 +206,14 @@ export class CharacterAssets {
   private loader = createCharacterLoader();
   private baseReady = false;
 
-  /** Preload BaseCharacter + all class models so first spawn is instant */
+  /** Preload all class + NPC + trainer variants so first spawn is instant */
   async preload(): Promise<void> {
-    const models = new Set<string>(["BaseCharacter"]);
-    if (ENABLE_UNIQUE_CLASS_MODELS) {
-      for (const m of Object.values(UNIQUE_CLASS_MODELS)) models.add(m);
-    }
-    for (const m of Object.values(CLASS_TO_MODEL)) models.add(m);
-    for (const m of Object.values(CLASS_TO_MODEL_FEMALE)) models.add(m);
+    const models = new Set<string>();
+    models.add(DEFAULT_NPC_MODEL);
+    for (const m of Object.values(CLASS_MODELS)) models.add(m);
     for (const m of Object.values(NPC_MODEL)) models.add(m);
+    for (const m of Object.values(TRAINER_BY_CLASS)) models.add(m);
+    for (const m of Object.values(TRAINER_BY_PROFESSION)) models.add(m);
 
     console.log(`[CharAssets] Preloading ${models.size} character models`);
     const promises = [...models].map((name) =>
@@ -226,25 +239,31 @@ export class CharacterAssets {
     wogClass?: string;
     isFemale?: boolean;
     npcType?: string;
+    teachesClass?: string;
+    teachesProfession?: string;
     skinColor?: number;
     hairColor?: number;
     eyeColor?: number;
     outfitColor?: number;
     scale?: number;
   }): CharacterInstance | null {
-    // Resolve which model to use
+    // Resolve which model to use. NPCs never fall through to class models
+    // so a "warrior trainer" doesn't end up sharing the Warrior player mesh.
+    // Class/profession trainers pick a themed base model per discipline.
+    const trainerClass = opts.teachesClass?.toLowerCase();
+    const trainerProf = opts.teachesProfession?.toLowerCase();
     let modelName = opts.modelName;
     if (!modelName) {
-      if (opts.npcType && NPC_MODEL[opts.npcType]) {
-        modelName = NPC_MODEL[opts.npcType];
+      if (opts.npcType === "trainer" && trainerClass && TRAINER_BY_CLASS[trainerClass]) {
+        modelName = TRAINER_BY_CLASS[trainerClass];
+      } else if (opts.npcType === "profession-trainer" && trainerProf && TRAINER_BY_PROFESSION[trainerProf]) {
+        modelName = TRAINER_BY_PROFESSION[trainerProf];
+      } else if (opts.npcType) {
+        modelName = NPC_MODEL[opts.npcType] ?? DEFAULT_NPC_MODEL;
       } else if (opts.wogClass) {
-        const cls = opts.wogClass.toLowerCase();
-        modelName = (ENABLE_UNIQUE_CLASS_MODELS ? UNIQUE_CLASS_MODELS[cls] : undefined)
-          ?? ((opts.isFemale && CLASS_TO_MODEL_FEMALE[cls])
-            ? CLASS_TO_MODEL_FEMALE[cls]
-            : (CLASS_TO_MODEL[cls] ?? (opts.isFemale ? "Casual_Female" : "Casual_Male")));
+        modelName = CLASS_MODELS[opts.wogClass.toLowerCase()] ?? "Warrior";
       } else {
-        modelName = opts.isFemale ? "Casual_Female" : "Casual_Male";
+        modelName = "Warrior";
       }
     }
 
@@ -302,6 +321,9 @@ export class CharacterAssets {
 
     // Remap materials with custom colors and toon shading for every skinned mesh.
     const cls = opts.wogClass?.toLowerCase() ?? "";
+    const npcTint = (opts.npcType === "trainer" && trainerClass)
+      ? TRAINER_TINT[trainerClass]
+      : undefined;
     const remapMaterial = (mat: THREE.Material) => {
       const std = mat as THREE.MeshStandardMaterial;
       const name = std.name ?? "";
@@ -326,9 +348,22 @@ export class CharacterAssets {
       } else if (bakedAtlas && map) {
         // Baked atlas materials already encode skin/hair/clothes in the texture.
         // Keep the texture unmodified so unique authored looks survive the toon conversion.
-        color = new THREE.Color(0xffffff);
+        // Exception: warlock shares the Wizard mesh with mage — tint dark-purple.
+        // Exception: NPCs with an atlas tint (e.g., trainer → black knight) also
+        // multiply the atlas so they read as distinct from the matching class.
+        if (npcTint != null) {
+          color = new THREE.Color(npcTint);
+        } else if (cls === "warlock") {
+          color = new THREE.Color(0x8844cc);
+        } else {
+          color = new THREE.Color(0xffffff);
+        }
       }
 
+      // Self-light characters slightly so the toon shader doesn't clamp them
+      // to pure black in night scenes. For mapped (atlas) materials we route
+      // the emissive through the map itself so the baked colors glow, rather
+      // than a flat grey emissive that washes out the texture.
       const toon = new THREE.MeshToonMaterial({
         color,
         gradientMap: gradMap,
@@ -337,7 +372,9 @@ export class CharacterAssets {
         opacity: std.opacity,
         alphaTest: std.alphaTest,
         depthWrite: std.depthWrite,
-        ...(map ? { map } : {}),
+        emissive: map ? new THREE.Color(0xffffff) : color.clone().multiplyScalar(0.25),
+        emissiveIntensity: map ? 0.25 : 1.0,
+        ...(map ? { map, emissiveMap: map } : {}),
       });
       toon.name = name;
       return toon;
@@ -469,4 +506,4 @@ export class CharacterAssets {
   }
 }
 
-export { CLASS_TO_MODEL, CLASS_TO_MODEL_FEMALE, NPC_MODEL, BONE_NAMES };
+export { CLASS_MODELS, NPC_MODEL, BONE_NAMES };

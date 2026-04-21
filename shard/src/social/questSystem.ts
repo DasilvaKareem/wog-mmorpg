@@ -4,6 +4,11 @@ import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEnt
 import { enqueueGoldMint, enqueueItemMint } from "../blockchain/blockchain.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
+import { isPostgresConfigured } from "../db/postgres.js";
+import {
+  hasCompletedQuest as hasCompletedQuestInDb,
+  markQuestCompleted as markQuestCompletedInDb,
+} from "../db/questCompletionStore.js";
 import { getAllZoneEvents, logZoneEvent } from "../world/zoneEvents.js";
 import { getNpcIdByName } from "../world/npcSpawner.js";
 import { logDiary, narrativeQuestComplete } from "./diary.js";
@@ -3775,10 +3780,32 @@ export function registerQuestRoutes(server: FastifyInstance) {
       return { error: "Quest already active" };
     }
 
-    // Check if already completed
+    // Check if already completed — in-memory first, then Postgres as authoritative
+    // fallback. This closes the window where entity.completedQuests failed to
+    // restore on spawn (key mismatch, shard restart between save and load, etc.)
+    // but the quest was genuinely completed in a prior session.
     if (player.completedQuests.includes(questId)) {
       reply.code(400);
       return { error: "Quest already completed" };
+    }
+    if (isPostgresConfigured() && player.walletAddress && player.name) {
+      try {
+        const completedInDb = await hasCompletedQuestInDb({
+          walletAddress: player.walletAddress,
+          characterName: player.name,
+          questId,
+        });
+        if (completedInDb) {
+          // Hydrate in-memory so subsequent checks don't hit the DB.
+          if (!player.completedQuests.includes(questId)) {
+            player.completedQuests.push(questId);
+          }
+          reply.code(400);
+          return { error: "Quest already completed" };
+        }
+      } catch (err) {
+        console.error(`[persistence] hasCompletedQuest check failed for ${player.name}/${questId}:`, err);
+      }
     }
 
     // Check prerequisites
@@ -3968,6 +3995,23 @@ export function registerQuestRoutes(server: FastifyInstance) {
       };
     }
 
+    // Record completion in Postgres BEFORE mutating state or awarding rewards.
+    // If this fails we bail out so the player can't collect rewards for a quest
+    // we couldn't record — otherwise they could re-turn-in after a restart.
+    if (isPostgresConfigured() && player.walletAddress && player.name) {
+      try {
+        await markQuestCompletedInDb({
+          walletAddress: player.walletAddress,
+          characterName: player.name,
+          questId,
+        });
+      } catch (err) {
+        console.error(`[persistence] markQuestCompleted failed for ${player.name}/${questId}:`, err);
+        reply.code(503);
+        return { error: "Failed to record quest completion; try again" };
+      }
+    }
+
     // Remove from active quests
     player.activeQuests.splice(activeIndex, 1);
 
@@ -4100,6 +4144,22 @@ export function registerQuestRoutes(server: FastifyInstance) {
 
     // Complete: set progress = count
     aq.progress = quest.objective.count;
+
+    // Record completion in Postgres BEFORE mutating state or awarding rewards.
+    // See /quests/complete handler above for rationale.
+    if (isPostgresConfigured() && player.walletAddress && player.name) {
+      try {
+        await markQuestCompletedInDb({
+          walletAddress: player.walletAddress,
+          characterName: player.name,
+          questId: quest.id,
+        });
+      } catch (err) {
+        console.error(`[persistence] markQuestCompleted failed for ${player.name}/${quest.id}:`, err);
+        reply.code(503);
+        return { error: "Failed to record quest completion; try again" };
+      }
+    }
 
     // Move to completed
     player.activeQuests.splice(aqIndex, 1);

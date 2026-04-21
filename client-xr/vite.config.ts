@@ -5,6 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const isProd = mode === "production";
   const apiUrl =
+    env.DEV_PROXY_URL ||
     env.VITE_API_URL ||
     env.API_URL ||
     "http://127.0.0.1:3000";

@@ -233,6 +233,17 @@ export class AgentRunner {
   private stuckQuests = new Map<string, number>();
   /** Gather nodes blacklisted due to "skill too low" — key=nodeId, value=epoch ms when retry allowed (5 min TTL). */
   private gatherNodeBlacklist = new Map<string, number>();
+  /** Recent death timestamps per zone — used to detect death loops (mob too strong,
+   *  agent keeps respawning and walking back to die again). */
+  private recentDeathsByZone = new Map<string, number[]>();
+  /** When set, circuit-breaker / auto-progress enqueues are suppressed until
+   *  this epoch ms — the user just gave an explicit directive and we don't want
+   *  autonomous logic to wipe their queue. */
+  private userQueueLockUntil = 0;
+  /** Zone → epoch ms of the most recent circuit-breaker rescue attempt.
+   *  If a rescue fires for the same zone twice within 30s, the rescue itself
+   *  isn't working — escalate to the user instead of flailing again. */
+  private lastRescueByZone = new Map<string, number>();
 
   /** Per-entity tick gate. Serializes the loop's tick body and any externally-
    *  invoked mutating methods (clearScript, enqueueActions, repairGear, etc.)
@@ -501,6 +512,17 @@ export class AgentRunner {
       }
       console.log(`[agent:${this.walletTag}] Queue now has ${this.actionQueue.length} items`);
     });
+  }
+
+  /** Like enqueueActions but flags the queue as user-driven for 60s — circuit
+   *  breaker and auto-progress will not wipe these scripts during that window. */
+  public enqueueUserActions(scripts: BotScript[], clearExisting = true): Promise<void> {
+    this.userQueueLockUntil = Date.now() + 60_000;
+    return this.enqueueActions(scripts, clearExisting);
+  }
+
+  private isUserQueueLocked(): boolean {
+    return Date.now() < this.userQueueLockUntil;
   }
 
   /** Clear all queued actions */
@@ -774,6 +796,22 @@ export class AgentRunner {
     try {
       const zs = await this.getZoneState();
       if (!zs) return false;
+
+      // Pre-check wallet gold before calling /equipment/repair so an
+      // out-of-gold agent doesn't hit the API once per tick. The catch-block
+      // 60s cooldown only kicks in AFTER an API throw — but moveToEntity above
+      // can return early ("moving=true") before we ever reach the API call,
+      // skipping the throw entirely and never setting the cooldown.
+      const { copper } = await this.getWalletBalance();
+      if (copper < 1) {
+        this.setInteractionCooldown(cooldownKey, 60_000);
+        this.lastActionResult = actionBlocked("Insufficient gold", {
+          failureKey: cooldownKey,
+          endpoint: "/equipment/repair",
+          category: "strategic",
+        });
+        return false;
+      }
       const { entities, me } = zs;
 
       const hasDamaged = Object.values(me.equipment ?? {}).some(
@@ -836,7 +874,14 @@ export class AgentRunner {
         category: failure.category,
       });
       this.maybeScheduleBlockedTrigger(failure);
-      console.warn(`[agent:${this.walletTag}] repairGear failed: ${reason}`);
+      // "Insufficient gold" repeats every cooldown expiry (60s) and would spam
+      // stderr — demote to debug. Other reasons (real errors) still warn.
+      const isExpected = /insufficient gold|no damaged equipped items|must reference a blacksmith/i.test(reason);
+      if (isExpected) {
+        console.debug(`[agent:${this.walletTag}] repairGear blocked: ${reason}`);
+      } else {
+        console.warn(`[agent:${this.walletTag}] repairGear failed: ${reason}`);
+      }
       this.logError("action", `repairGear: ${reason}`, { endpoint: "/equipment/repair", targetId: smithId ?? "" });
       void this.logActivity(`Repair delayed: ${reason}`);
       return false;
@@ -1233,6 +1278,36 @@ export class AgentRunner {
     currentType: string,
     failure: FailureMemoryEntry,
   ): Promise<boolean> {
+    // User just gave a directive (queue is locked) — do NOT clobber it with a
+    // rescue chain. The user's queued travel/quest takes priority.
+    if (this.isUserQueueLocked()) {
+      console.log(`[agent:${this.walletTag}] Circuit breaker suppressed — user directive active`);
+      return false;
+    }
+
+    // One-shot escalation: if we already attempted a rescue for this zone in
+    // the last 30s and we're stuck again, the rescue isn't working. Stop
+    // flailing — go idle and ping the user to choose a direction.
+    const zone = this.currentRegion;
+    const lastRescue = this.lastRescueByZone.get(zone);
+    if (lastRescue && Date.now() - lastRescue < 30_000) {
+      const entity = this.entityId ? getWorldEntity(this.entityId) : null;
+      const level = entity?.level ?? 1;
+      const msg = `Stuck in ${zone} — Lv${level} agent, ${currentType} keeps blocking on "${failure.reason}". Tell me where to go next.`;
+      console.warn(`[agent:${this.walletTag}] Rescue escalation: ${msg}`);
+      void this.logActivity(`[STUCK] ${msg}`);
+      void sendAgentPush(this.userWallet, {
+        type: "agent_stuck",
+        agentName: entity?.name ?? "Agent",
+        detail: `Stuck in ${zone}: ${failure.reason}`,
+      });
+      void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
+      this.currentScript = { type: "idle", reason: `Escalation: stuck in ${zone}` };
+      this.ticksOnCurrentScript = 0;
+      this.lastRescueByZone.delete(zone);
+      return true;
+    }
+
     const entity = this.entityId ? getWorldEntity(this.entityId) : null;
     const level = entity?.level ?? 1;
     const allowed = this.currentCaps.allowedZones;
@@ -1256,6 +1331,7 @@ export class AgentRunner {
           toZone: rescueZone,
           reason: failure.reason,
         });
+        this.lastRescueByZone.set(zone, Date.now());
         await this.enqueueActions(chain, true);
         return true;
       }
@@ -1271,6 +1347,7 @@ export class AgentRunner {
         toFocus: fallback,
         reason: failure.reason,
       });
+      this.lastRescueByZone.set(zone, Date.now());
       void patchAgentConfig(this.userWallet, { focus: fallback });
       return true;
     }
@@ -1475,6 +1552,28 @@ export class AgentRunner {
     if (latest.type === "death") {
       const entity = this.entityId ? getWorldEntity(this.entityId) : null;
       void sendAgentPush(this.userWallet, { type: "death", agentName: entity?.name ?? "Agent", detail: this.currentRegion });
+
+      // Death-loop guard: if the agent has died 3+ times in this zone within
+      // the last 5 minutes, the mob is too strong — force idle and clear
+      // travel/quest focus so the agent stops walking back to its grave.
+      const zone = this.currentRegion;
+      const now = Date.now();
+      const window = 5 * 60_000;
+      const deaths = (this.recentDeathsByZone.get(zone) ?? []).filter((t) => now - t < window);
+      deaths.push(now);
+      this.recentDeathsByZone.set(zone, deaths);
+      if (deaths.length >= 3) {
+        console.warn(`[agent:${this.walletTag}] Death loop in ${zone} (${deaths.length} deaths in 5min) — going idle`);
+        void this.logActivity(`Died ${deaths.length}x in ${zone} — pausing. Tell me where to go next.`);
+        void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
+        this.currentScript = { type: "idle", reason: `Death loop in ${zone}` };
+        this.ticksOnCurrentScript = 0;
+        // Drop the threshold for the next deadly cycle — once unstuck the user
+        // will choose where to go.
+        this.recentDeathsByZone.delete(zone);
+        return null;
+      }
+
       return { type: "stuck", detail: `Recent death: ${latest.message}` };
     }
     if (latest.type === "quest-progress") {
@@ -1763,7 +1862,24 @@ export class AgentRunner {
       case "jewelcraft":   return behaviors.doJewelcrafting(ctx, strategy);
       case "farm":         return behaviors.doFarming(ctx, strategy);
       case "dungeon": return behaviors.doDungeon(ctx, strategy, { gateEntityId: script.gateEntityId, gateRank: script.gateRank });
-      case "idle":    return actionIdle("Idle");
+      case "idle": {
+        // Auto-defend: if a mob is actively attacking us, fight back.
+        // Only applies in idle mode — other scripts are explicit user/agent
+        // intent and shouldn't get hijacked by a passing aggressive mob.
+        const attacker = Object.values(entities).find(
+          (e: any) =>
+            (e.type === "mob" || e.type === "boss")
+            && e.hp > 0
+            && e.order?.action === "attack"
+            && e.order?.targetId === this.entityId,
+        ) as any;
+        if (attacker) {
+          this.commitTarget(attacker.id);
+          this.issueCommand({ action: "attack", targetId: attacker.id });
+          return actionProgressed(`Defending against ${attacker.name ?? "attacker"}`);
+        }
+        return actionIdle("Idle");
+      }
     }
   }
 
@@ -1924,7 +2040,7 @@ export class AgentRunner {
         // qualify for. Queued chains suppress autonomous triggers so the agent
         // actually completes the zone advance without getting yanked back.
         // Previous code had a `+2` upper bound that blocked most level-ups.
-        if (autoProgressEnabled && !activeObj) {
+        if (autoProgressEnabled && !activeObj && !this.isUserQueueLocked()) {
           const allowed = this.currentCaps.allowedZones;
           const chain = buildProgressChain(lvl, this.currentRegion, allowed);
           if (chain) {

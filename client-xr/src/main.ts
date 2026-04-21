@@ -244,6 +244,7 @@ const charSelect = !isAnimationLab
     onCharacterReady: (detail: CharacterReadyDetail) => {
       charSelect!.hide();
       ownWalletAddress = detail.walletAddress.toLowerCase();
+      ownCustodialWallet = detail.custodialWallet?.toLowerCase() ?? null;
       ownEntityId = detail.entityId || null;
       desiredRunMode = null;
       runPanel.reset();
@@ -357,6 +358,7 @@ function setGameplayHudVisible(visible: boolean) {
 
 let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
+let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
 let desiredRunMode: boolean | null = null;
 let autoLockEnabled = isDisplayMode;
@@ -1031,7 +1033,9 @@ async function refreshAvailableQuestsNow() {
 }
 
 async function pollInventory() {
-  const addr = ownWalletAddress;
+  // Agents store items under their custodial wallet; fall back to owner wallet
+  // when no agent has been deployed yet (shard then resolves custodial server-side).
+  const addr = ownCustodialWallet ?? ownWalletAddress;
   if (!addr) return;
   const now = Date.now();
   if (now - lastInventoryPollTime < INVENTORY_POLL_INTERVAL) return;
@@ -1044,7 +1048,8 @@ async function pollInventory() {
 }
 
 async function pollProfessions() {
-  const addr = ownWalletAddress;
+  // Same as inventory: agents learn professions under the custodial wallet.
+  const addr = ownCustodialWallet ?? ownWalletAddress;
   if (!addr) return;
   const now = Date.now();
   if (now - lastProfessionPollTime < PROFESSION_POLL_INTERVAL) return;

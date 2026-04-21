@@ -2491,9 +2491,11 @@ export class EntityManager {
             Idle: "idle", Walk: "walk", Run: "run",
             SwordSlash: "attack", Punch: "attack",
             Sword_Attack: "attack", Sword_Attack2: "attack",
-            Shoot_OneHanded: "shoot",
+            Dagger_Attack: "attack", Dagger_Attack2: "attack",
+            Attack: "attack", Attack2: "attack",
+            Shoot_OneHanded: "shoot", Bow_Shoot: "shoot", Bow_Draw: "shoot",
             Staff_Attack: "shoot", Spell1: "spellcast", Spell2: "darkcast",
-            Death: "death", Defeat: "defeat", RecieveHit: "damage",
+            Death: "death", Defeat: "defeat", RecieveHit: "damage", RecieveHit_2: "damage",
             Jump: "jump", Roll: "roll",
             PickUp: "pickup", SitDown: "sit", StandUp: "standup",
             Walk_Carry: "gather", Run_Carry: "craft",
@@ -2506,10 +2508,10 @@ export class EntityManager {
 
           // Map technique-specific anims to best GLB equivalents
           const firstClip = (...names: string[]) => names.map((name) => glbChar.clips.get(name)).find(Boolean);
-          const swordClip = firstClip("SwordSlash", "Sword_Attack", "Sword_Attack2");
-          const punchClip = firstClip("Punch");
-          const shootClip = firstClip("Shoot_OneHanded", "Staff_Attack", "Spell1");
-          const spellClip = firstClip("Spell1", "Spell2", "Shoot_OneHanded", "Staff_Attack");
+          const swordClip = firstClip("SwordSlash", "Sword_Attack", "Sword_Attack2", "Dagger_Attack", "Dagger_Attack2", "Attack", "Attack2");
+          const punchClip = firstClip("Punch", "Attack", "Attack2");
+          const shootClip = firstClip("Shoot_OneHanded", "Bow_Shoot", "Bow_Draw", "Staff_Attack", "Spell1");
+          const spellClip = firstClip("Spell1", "Spell2", "Staff_Attack", "Shoot_OneHanded", "Bow_Shoot");
           const rollClip = glbChar.clips.get("Roll");
           const pickupClip = glbChar.clips.get("PickUp");
           for (const a of ["heroicstrike", "cleave", "rendingstrike", "shieldwall", "battlerage", "intimidatingshout", "rallyingcry"] as AnimName[]) {
@@ -2977,6 +2979,8 @@ export class EntityManager {
     const char = this.charAssets.buildCharacter({
       wogClass: ent.classId ?? undefined,
       npcType: ent.type !== "player" ? ent.type : undefined,
+      teachesClass: ent.teachesClass,
+      teachesProfession: ent.teachesProfession,
       isFemale,
       skinColor: skinHex,
       hairColor: hairHex,

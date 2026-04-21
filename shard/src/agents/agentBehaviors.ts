@@ -1776,13 +1776,19 @@ export async function doTrading(ctx: AgentContext, strategy: AgentStrategy): Pro
 export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Promise<ActionResult> {
   try {
     const config = await getAgentConfig(ctx.userWallet);
-    const rawTargetZone = config?.targetZone;
+    // Prefer the script's own targetZone (set by queue_actions / circuit breaker
+    // chain) over config.targetZone — chat-driven `queue_actions` doesn't patch
+    // config, and reading from config alone made doTravel fall straight into
+    // the "arrived" branch and switch back to questing on the first tick.
+    const scriptTargetZone = ctx.currentScript?.targetZone;
+    const rawTargetZone = scriptTargetZone ?? config?.targetZone;
     const targetZone = resolveRegionId(rawTargetZone);
 
     if (rawTargetZone && !targetZone) {
       console.log(`[agent:${ctx.walletTag}] Invalid travel target zone: ${rawTargetZone}`);
       void ctx.logActivity(`Unknown destination "${rawTargetZone}" — clearing travel target`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      ctx.setScript(null);
       return actionCompleted(`Cleared invalid destination ${rawTargetZone}`);
     }
 
@@ -1790,6 +1796,7 @@ export async function doTravel(ctx: AgentContext, _strategy: AgentStrategy): Pro
       console.log(`[agent:${ctx.walletTag}] Arrived at ${ctx.currentRegion}, switching to questing`);
       void ctx.logActivity(`Arrived at ${ctx.currentRegion}, resuming questing`);
       await patchAgentConfig(ctx.userWallet, { focus: "questing", targetZone: undefined });
+      ctx.setScript(null);
       return actionCompleted(`Arrived at ${ctx.currentRegion}`);
     }
 
