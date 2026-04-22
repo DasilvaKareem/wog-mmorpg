@@ -37,7 +37,7 @@ export function getDefaultGambits(classId: string | undefined): Edict[] {
       conditions: [
         { subject: "leader_target", field: "hp_pct", operator: "gt", value: 0 },
       ],
-      action: { type: "prefer_target", targetPreference: "leader_target" },
+      action: { type: "best_technique", targetPreference: "leader_target" },
     },
     {
       id: id("assist-party-tag"),
@@ -46,7 +46,7 @@ export function getDefaultGambits(classId: string | undefined): Edict[] {
       conditions: [
         { subject: "self", field: "nearby_enemies", operator: "gte", value: 1 },
       ],
-      action: { type: "prefer_target", targetPreference: "party_tagged" },
+      action: { type: "best_technique", targetPreference: "party_tagged" },
     },
   ];
 
@@ -65,12 +65,12 @@ export function getDefaultGambits(classId: string | undefined): Edict[] {
 
   edicts.push({
     id: id("default-attack"),
-    name: "Attack nearest valid foe",
+    name: "Use best technique on nearest foe",
     enabled: true,
     conditions: [
       { subject: "self", field: "always", operator: "is", value: true },
     ],
-    action: { type: "prefer_target", targetPreference: "nearest" },
+    action: { type: "best_technique", targetPreference: "nearest" },
   });
 
   return edicts;

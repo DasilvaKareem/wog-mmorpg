@@ -9,6 +9,8 @@ interface InboxMessage {
   body: string;
   data?: Record<string, unknown>;
   ts: number;
+  /** Server-tracked read timestamp (ms). Null/undefined = unread. */
+  readAt?: number | null;
 }
 
 const TYPE_ICONS: Record<string, string> = {
@@ -27,7 +29,6 @@ const TYPE_COLORS: Record<string, string> = {
   broadcast: "#ff88aa",
 };
 
-const LAST_SEEN_KEY = "wog:xr:inbox:lastSeen";
 const MESSAGE_LIMIT = 60;
 
 export class InboxPanel {
@@ -36,8 +37,9 @@ export class InboxPanel {
   private footerEl: HTMLDivElement;
   private custodialWallet: string | null = null;
   private messages: InboxMessage[] = [];
-  private lastSeenTs = 0;
+  private serverUnread = 0;
   private onUnreadChange: (count: number) => void;
+  private apiBase: string | null = null;
 
   constructor(callbacks: { onUnreadChange?: (count: number) => void } = {}) {
     this.onUnreadChange = callbacks.onUnreadChange ?? (() => {});
@@ -61,26 +63,17 @@ export class InboxPanel {
 
     document.body.appendChild(this.container);
     this.injectStyles();
-
-    try {
-      this.lastSeenTs = Number(localStorage.getItem(LAST_SEEN_KEY) ?? "0") || 0;
-    } catch {
-      this.lastSeenTs = 0;
-    }
   }
 
   setCustodialWallet(wallet: string | null) {
     this.custodialWallet = wallet ? wallet.toLowerCase() : null;
     this.messages = [];
+    this.serverUnread = 0;
     this.render();
   }
 
   getUnreadCount(): number {
-    let count = 0;
-    for (const m of this.messages) {
-      if (m.ts > this.lastSeenTs) count++;
-    }
-    return count;
+    return this.serverUnread;
   }
 
   async refresh(): Promise<void> {
@@ -94,8 +87,10 @@ export class InboxPanel {
         const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
         msgs.sort((a, b) => b.ts - a.ts);
         this.messages = msgs;
+        this.serverUnread = Number(data.unread ?? msgs.filter((m) => !m.readAt).length);
+        this.apiBase = base;
         this.render();
-        this.onUnreadChange(this.getUnreadCount());
+        this.onUnreadChange(this.serverUnread);
         return;
       } catch {
         // try next base
@@ -113,8 +108,10 @@ export class InboxPanel {
 
   show() {
     this.container.style.display = "flex";
-    void this.refresh();
-    this.markAllSeen();
+    void (async () => {
+      await this.refresh();
+      await this.markAllSeen();
+    })();
   }
 
   hide() {
@@ -125,14 +122,36 @@ export class InboxPanel {
     return this.container.style.display !== "none";
   }
 
-  private markAllSeen() {
-    if (this.messages.length === 0) return;
-    const newest = this.messages[0].ts;
-    if (newest > this.lastSeenTs) {
-      this.lastSeenTs = newest;
-      try { localStorage.setItem(LAST_SEEN_KEY, String(newest)); } catch { /* ignore */ }
-      this.onUnreadChange(0);
-      this.render();
+  /**
+   * Mark every currently-unread message as read on the server. The server
+   * persists read_at per message so this state survives reloads and new
+   * browsers, unlike the old localStorage lastSeenTs approach.
+   */
+  private async markAllSeen(): Promise<void> {
+    if (!this.custodialWallet || this.messages.length === 0) return;
+    const unreadIds = this.messages.filter((m) => !m.readAt).map((m) => m.id);
+    if (unreadIds.length === 0) return;
+    const bases = this.apiBase != null ? [this.apiBase, ...CANDIDATE_BASES.filter((b) => b !== this.apiBase)] : CANDIDATE_BASES;
+    const path = `/inbox/${this.custodialWallet}/read`;
+    const nowMs = Date.now();
+    for (const base of bases) {
+      try {
+        const res = await fetch(toUrl(base, path), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messageIds: unreadIds }),
+        });
+        if (!res.ok) continue;
+        for (const m of this.messages) {
+          if (unreadIds.includes(m.id)) m.readAt = nowMs;
+        }
+        this.serverUnread = 0;
+        this.onUnreadChange(0);
+        this.render();
+        return;
+      } catch {
+        // try next base
+      }
     }
   }
 
@@ -150,7 +169,7 @@ export class InboxPanel {
 
     let html = "";
     for (const m of this.messages) {
-      const unread = m.ts > this.lastSeenTs;
+      const unread = !m.readAt;
       const icon = TYPE_ICONS[m.type] ?? "\u2709";
       const color = TYPE_COLORS[m.type] ?? "#9ab";
       const sender = m.fromName || m.from.slice(0, 8) || "system";

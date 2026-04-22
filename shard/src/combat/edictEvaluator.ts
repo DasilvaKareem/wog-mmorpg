@@ -1,13 +1,24 @@
 // ── Edict Evaluator ─────────────────────────────────────────────────
 //
 // Runs in the zone tick (synchronous, 1s cadence). Evaluates a player's
-// edicts top-to-bottom. First full match wins.  Returns null if no edict
-// matches — caller falls through to existing pickTechnique() AI.
+// edicts top-to-bottom. First full match wins. Edicts are the sole
+// scheduler for player auto-combat — there is no pickTechnique fallback
+// at the tick level. A `best_technique` action lets an edict delegate
+// technique selection to the heuristic picker via a callback.
 
 import type { Edict, EdictCondition, EdictAction } from "./edicts.js";
 import { getTechniqueById, type TechniqueDefinition } from "./techniques.js";
-import type { Entity, ActiveEffect } from "../world/zoneRuntime.js";
+import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
 import { getPartyMembers, getPartyLeaderId } from "../social/partySystem.js";
+
+// Injected by the tick to avoid circular import on zoneRuntime.pickTechnique.
+// Accepts the full ZoneState because pickTechnique reads fields (zoneId) beyond
+// what the evaluator itself touches.
+export type BestTechniquePicker = (
+  entity: Entity,
+  target: Entity,
+  zone: ZoneState,
+) => TechniqueDefinition | null;
 
 // ── Public result type ──────────────────────────────────────────────
 
@@ -21,20 +32,14 @@ export interface EdictResult {
   targetOverride?: Entity;
 }
 
-// ── Zone state shape (minimal interface to avoid circular import) ───
-
-interface ZoneView {
-  entities: Map<string, Entity>;
-  tick: number;
-}
-
 // ── Main evaluator ──────────────────────────────────────────────────
 
 export function evaluateEdicts(
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   edicts: Edict[],
   currentTarget: Entity | null,
+  pickBest?: BestTechniquePicker,
 ): EdictResult | null {
   for (const edict of edicts) {
     if (!edict.enabled) continue;
@@ -51,7 +56,7 @@ export function evaluateEdicts(
     if (!allMatch) continue;
 
     // Conditions matched — resolve action
-    const result = resolveAction(entity, zone, currentTarget, edict);
+    const result = resolveAction(entity, zone, currentTarget, edict, pickBest);
     if (result) return result;
     // If action can't execute (cooldown, no essence), skip to next edict
   }
@@ -62,7 +67,7 @@ export function evaluateEdicts(
 
 function evaluateCondition(
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   currentTarget: Entity | null,
   cond: EdictCondition,
 ): boolean {
@@ -81,7 +86,7 @@ function evaluateCondition(
 function resolveSubject(
   subject: string,
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   currentTarget: Entity | null,
 ): Entity | null {
   switch (subject) {
@@ -115,7 +120,7 @@ function resolveSubject(
   }
 }
 
-function resolvePartyLeader(entity: Entity, zone: ZoneView): Entity | null {
+function resolvePartyLeader(entity: Entity, zone: ZoneState): Entity | null {
   const leaderId = getPartyLeaderId(entity.id);
   if (!leaderId || leaderId === entity.id) return null;
   const leader = zone.entities.get(leaderId);
@@ -123,7 +128,7 @@ function resolvePartyLeader(entity: Entity, zone: ZoneView): Entity | null {
   return leader;
 }
 
-function resolveLeaderTarget(entity: Entity, zone: ZoneView): Entity | null {
+function resolveLeaderTarget(entity: Entity, zone: ZoneState): Entity | null {
   const leader = resolvePartyLeader(entity, zone);
   if (!leader) return null;
   const order = leader.order;
@@ -139,7 +144,7 @@ function resolveLeaderTarget(entity: Entity, zone: ZoneView): Entity | null {
 function readField(
   subject: Entity | null,
   self: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   field: string,
 ): number | string | boolean | undefined {
   switch (field) {
@@ -223,15 +228,19 @@ function compare(
 
 function resolveAction(
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   currentTarget: Entity | null,
   edict: Edict,
+  pickBest?: BestTechniquePicker,
 ): EdictResult | null {
   const action = edict.action;
 
   switch (action.type) {
     case "use_technique":
       return resolveTechniqueAction(entity, zone, edict, action);
+
+    case "best_technique":
+      return resolveBestTechniqueAction(entity, zone, currentTarget, edict, action, pickBest);
 
     case "attack":
       if (!currentTarget) return null;
@@ -251,9 +260,33 @@ function resolveAction(
   }
 }
 
+function resolveBestTechniqueAction(
+  entity: Entity,
+  zone: ZoneState,
+  currentTarget: Entity | null,
+  edict: Edict,
+  action: EdictAction,
+  pickBest?: BestTechniquePicker,
+): EdictResult | null {
+  // Target resolution: explicit preference > currentTarget.
+  let target: Entity | null = currentTarget;
+  if (action.targetPreference) {
+    const pref = resolveTargetPreference(entity, zone, edict, action);
+    if (pref?.targetOverride) target = pref.targetOverride;
+  }
+  if (!target) return null;
+
+  const tech = pickBest ? pickBest(entity, target, zone) : null;
+  if (tech) {
+    return { edict, techniqueOverride: tech, targetOverride: target };
+  }
+  // No usable technique — fall back to basic attack on the chosen target.
+  return { edict, targetOverride: target, order: { action: "attack", targetId: target.id } };
+}
+
 function resolveTechniqueAction(
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   edict: Edict,
   action: EdictAction,
 ): EdictResult | null {
@@ -282,7 +315,7 @@ function resolveTechniqueAction(
 
 function resolveTargetPreference(
   entity: Entity,
-  zone: ZoneView,
+  zone: ZoneState,
   edict: Edict,
   action: EdictAction,
 ): EdictResult | null {
@@ -336,7 +369,7 @@ function resolveTargetPreference(
   return { edict, targetOverride: best };
 }
 
-function resolvePartyTaggedTarget(entity: Entity, zone: ZoneView): Entity | null {
+function resolvePartyTaggedTarget(entity: Entity, zone: ZoneState): Entity | null {
   const partyIds = new Set(getPartyMembers(entity.id));
   if (partyIds.size <= 1) return null;
 

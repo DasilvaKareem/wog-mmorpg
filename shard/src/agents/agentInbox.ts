@@ -46,6 +46,12 @@ export interface InboxMessage {
   data?: Record<string, unknown>;
   /** Unix timestamp ms */
   ts: number;
+  /**
+   * When the recipient marked this message read (unix ms). Null/undefined for
+   * unread. Only populated when reading from the persistent history table —
+   * live queue messages are read-once-then-acked so this field doesn't apply.
+   */
+  readAt?: number | null;
 }
 
 export interface SendMessageParams {
@@ -399,7 +405,7 @@ export async function getMessageHistory(
   wallet: string,
   limit = 100,
   offset = 0,
-): Promise<{ messages: InboxMessage[]; total: number }> {
+): Promise<{ messages: InboxMessage[]; total: number; unread: number }> {
   if (isPostgresConfigured()) {
     const history = await listInboxHistory(wallet, limit, offset);
     if (history.total > 0) return history;
@@ -415,7 +421,8 @@ export async function getMessageHistory(
       const end = offset + limit - 1;
       const raw: string[] = await redis.lrange(key, start, end);
       const messages = raw.map((s: string) => JSON.parse(s) as InboxMessage);
-      return { messages, total };
+      // Redis-only fallback has no read-state column; treat all as unread.
+      return { messages, total, unread: total };
     } catch (err: any) {
       if (!isMemoryFallbackAllowed()) throw err;
       console.warn(`[inbox] History read failed: ${err.message}`);
@@ -427,8 +434,11 @@ export async function getMessageHistory(
   }
 
   const list = memHistory.get(wallet.toLowerCase()) ?? [];
-  return { messages: list.slice(offset, offset + limit), total: list.length };
+  return { messages: list.slice(offset, offset + limit), total: list.length, unread: list.length };
 }
+
+/** Re-export store helpers so routes can mark history messages read. */
+export { markHistoryRead, markAllHistoryRead } from "../db/agentInboxStore.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

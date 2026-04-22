@@ -50,4 +50,7 @@ export const shard = {
 
   post: <T>(path: string, body: unknown, token?: string) =>
     request<T>("POST", path, { body, token }),
+
+  put: <T>(path: string, body: unknown, token?: string) =>
+    request<T>("PUT", path, { body, token }),
 };

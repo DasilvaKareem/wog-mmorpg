@@ -18,6 +18,8 @@ import {
   countNewMessages,
   broadcastToZone,
   getMessageHistory,
+  markHistoryRead,
+  markAllHistoryRead,
   type InboxMessageType,
 } from "./agentInbox.js";
 import { getAgentEntityRef } from "./agentConfigStore.js";
@@ -185,8 +187,39 @@ export function registerAgentInboxRoutes(server: FastifyInstance): void {
     const limit = Math.min(Math.max(Number(request.query.limit) || 100, 1), 500);
     const offset = Math.max(Number(request.query.offset) || 0, 0);
 
-    const { messages, total } = await getMessageHistory(wallet, limit, offset);
-    return { ok: true, messages, total, limit, offset };
+    const { messages, total, unread } = await getMessageHistory(wallet, limit, offset);
+    return { ok: true, messages, total, unread, limit, offset };
+  });
+
+  // ── Mark history messages read ─────────────────────────────────────────────
+  // Unauthenticated (matches /history) so the spectator XR client can mark
+  // messages read. Wallet scoping is the only access control: you can only
+  // write to the wallet in the path.
+
+  server.post<{
+    Params: { wallet: string };
+    Body: { messageIds?: string[]; all?: boolean };
+  }>("/inbox/:wallet/read", async (request, reply) => {
+    const { wallet } = request.params;
+    if (!/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+      reply.code(400);
+      return { error: "Invalid wallet address" };
+    }
+    const { messageIds, all } = request.body ?? {};
+    if (all === true) {
+      const marked = await markAllHistoryRead(wallet);
+      return { ok: true, marked };
+    }
+    if (!Array.isArray(messageIds) || messageIds.length === 0) {
+      reply.code(400);
+      return { error: "Body must include messageIds: string[] or all: true" };
+    }
+    if (messageIds.length > 500) {
+      reply.code(400);
+      return { error: "Cannot mark more than 500 messages at once" };
+    }
+    const marked = await markHistoryRead(wallet, messageIds);
+    return { ok: true, marked };
   });
 
 }

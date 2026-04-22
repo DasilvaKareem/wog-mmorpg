@@ -73,15 +73,23 @@ export async function countNewInboxMessages(wallet: string, sinceTs: number): Pr
   return Number(rows[0]?.count ?? "0");
 }
 
-export async function listInboxHistory(wallet: string, limit: number, offset: number): Promise<{ messages: InboxMessage[]; total: number }> {
-  if (!isPostgresConfigured()) return { messages: [], total: 0 };
-  const [{ rows: countRows }, { rows }] = await Promise.all([
+export async function listInboxHistory(
+  wallet: string,
+  limit: number,
+  offset: number,
+): Promise<{ messages: InboxMessage[]; total: number; unread: number }> {
+  if (!isPostgresConfigured()) return { messages: [], total: 0, unread: 0 };
+  const [{ rows: countRows }, { rows: unreadRows }, { rows }] = await Promise.all([
     postgresQuery<{ count: string }>(
       `select count(*)::text as count from game.agent_inbox_history where wallet_address = $1`,
       [wallet.toLowerCase()]
     ),
-    postgresQuery<{ payload_json: InboxMessage }>(
-      `select payload_json
+    postgresQuery<{ count: string }>(
+      `select count(*)::text as count from game.agent_inbox_history where wallet_address = $1 and read_at is null`,
+      [wallet.toLowerCase()]
+    ),
+    postgresQuery<{ payload_json: InboxMessage; read_at: Date | null }>(
+      `select payload_json, read_at
          from game.agent_inbox_history
         where wallet_address = $1
         order by ts_ms asc
@@ -90,7 +98,45 @@ export async function listInboxHistory(wallet: string, limit: number, offset: nu
     ),
   ]);
   return {
-    messages: rows.map((row) => row.payload_json),
+    messages: rows.map((row) => ({
+      ...row.payload_json,
+      readAt: row.read_at ? row.read_at.valueOf() : null,
+    }) as InboxMessage),
     total: Number(countRows[0]?.count ?? "0"),
+    unread: Number(unreadRows[0]?.count ?? "0"),
   };
+}
+
+/**
+ * Mark a set of history message IDs as read for the given wallet. Idempotent —
+ * re-marking a message leaves its original read_at untouched. Returns the number
+ * of rows newly flipped from unread → read.
+ */
+export async function markHistoryRead(wallet: string, ids: string[]): Promise<number> {
+  if (!isPostgresConfigured() || ids.length === 0) return 0;
+  const { rowCount } = await postgresQuery(
+    `update game.agent_inbox_history
+        set read_at = now()
+      where wallet_address = $1
+        and message_id = any($2::text[])
+        and read_at is null`,
+    [wallet.toLowerCase(), ids]
+  );
+  return rowCount ?? 0;
+}
+
+/**
+ * Mark all unread history for a wallet as read. Returns the number of rows
+ * flipped. Used by "Mark all read" in the client.
+ */
+export async function markAllHistoryRead(wallet: string): Promise<number> {
+  if (!isPostgresConfigured()) return 0;
+  const { rowCount } = await postgresQuery(
+    `update game.agent_inbox_history
+        set read_at = now()
+      where wallet_address = $1
+        and read_at is null`,
+    [wallet.toLowerCase()]
+  );
+  return rowCount ?? 0;
 }

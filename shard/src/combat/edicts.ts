@@ -1,7 +1,9 @@
 // ── Edicts: FF12-style Gambit rules for AI champion automation ──────
 //
 // Evaluated top-to-bottom each combat tick. First match wins.
-// If no edict matches, existing pickTechnique() AI takes over.
+// Edicts are the sole auto-combat scheduler — there is no tick-level
+// pickTechnique fallback. Players without configured edicts fall back
+// to getDefaultGambits(classId) at evaluation time.
 
 // ── Condition model ─────────────────────────────────────────────────
 
@@ -32,6 +34,7 @@ export interface EdictCondition {
 
 export type EdictActionType =
   | "use_technique"     // cast a specific learned technique
+  | "best_technique"    // auto-pick best learned technique (replaces legacy pickTechnique fallback)
   | "attack"            // basic auto-attack
   | "prefer_target"     // override target selection
   | "flee"              // disengage, move away
@@ -42,7 +45,7 @@ export type EdictTargetPreference = "nearest" | "weakest" | "strongest" | "boss"
 export interface EdictAction {
   type: EdictActionType;
   techniqueId?: string;                         // for use_technique
-  targetPreference?: EdictTargetPreference;     // for prefer_target
+  targetPreference?: EdictTargetPreference;     // for prefer_target / best_technique
 }
 
 // ── Complete Edict rule ─────────────────────────────────────────────
@@ -76,7 +79,7 @@ const VALID_SUBJECTS: Set<string> = new Set<EdictSubject>([
 ]);
 
 const VALID_ACTION_TYPES: Set<string> = new Set<EdictActionType>([
-  "use_technique", "attack", "prefer_target", "flee", "skip",
+  "use_technique", "best_technique", "attack", "prefer_target", "flee", "skip",
 ]);
 
 export function validateEdicts(edicts: unknown): { valid: boolean; error?: string } {

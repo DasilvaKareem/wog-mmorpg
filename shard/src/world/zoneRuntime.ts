@@ -17,6 +17,7 @@ import { saveCharacter } from "../character/characterStore.js";
 import { getTechniquesByClass, getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
 import { getEdictCache } from "../combat/edictCache.js";
 import { evaluateEdicts } from "../combat/edictEvaluator.js";
+import { getDefaultGambits } from "../combat/defaultGambits.js";
 import { randomInt, randomUUID } from "crypto";
 import { getPlayerPartyId, getPartyMembers, areInSameParty, getPartyLeaderId } from "../social/partySystem.js";
 import { getCachedGuildName } from "../economy/guildChain.js";
@@ -1578,7 +1579,7 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
 /**
  * Handle mob death: auto-loot drops, create corpse for skinning
  */
-async function handleMobDeath(
+export async function handleMobDeath(
   mob: Entity,
   killer: Entity | undefined,
   zone: ZoneState
@@ -2524,6 +2525,10 @@ async function worldTick() {
     for (const entity of zone.entities.values()) {
       if (!entity.order) continue;
       if (entity.castingIntent) continue;
+      if (entity.hp <= 0) {
+        entity.order = undefined;
+        continue;
+      }
 
       if (entity.order.action === "move") {
         const arrived = moveToward(entity, entity.order.x, entity.order.y, zone.entities);
@@ -3257,39 +3262,29 @@ async function worldTick() {
       const nearestMob = pickAutoCombatTarget(entity, zone, autoCombatRange);
 
       // ── Edict evaluation (gambit system) ──────────────────────────
-      // If the player has edicts configured, evaluate them first.
-      // First match wins; if no match, fall through to default AI.
-      const edicts = entity.walletAddress ? getEdictCache(entity.walletAddress) : undefined;
-      if (edicts && edicts.length > 0) {
-        const edictResult = evaluateEdicts(entity, zone, edicts, nearestMob ?? null);
-        if (edictResult) {
-          if (edictResult.order) {
-            entity.order = edictResult.order as unknown as typeof entity.order;
-            continue;
-          }
-          const eTarget = edictResult.targetOverride ?? nearestMob;
-          if (!eTarget) continue;
-          if (edictResult.techniqueOverride) {
-            const techTarget = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
-            entity.order = { action: "technique", targetId: techTarget, techniqueId: edictResult.techniqueOverride.id };
-          } else {
-            entity.order = { action: "attack", targetId: eTarget.id };
-          }
-          continue;
-        }
-        // No edict matched — fall through to default AI below
+      // Edicts are the sole auto-combat scheduler. Every player evaluates
+      // against their configured edicts; if none are configured, we use
+      // getDefaultGambits(classId) so behavior is never silently no-op.
+      // First matching edict wins.
+      const cachedEdicts = entity.walletAddress ? getEdictCache(entity.walletAddress) : undefined;
+      const edicts = (cachedEdicts && cachedEdicts.length > 0)
+        ? cachedEdicts
+        : getDefaultGambits(entity.classId);
+      const edictResult = evaluateEdicts(entity, zone, edicts, nearestMob ?? null, pickTechnique);
+      if (!edictResult) continue;
+
+      if (edictResult.order && !edictResult.techniqueOverride) {
+        entity.order = edictResult.order as unknown as typeof entity.order;
+        continue;
       }
 
-      if (!nearestMob) continue;
-
-      // Pick the best technique from what the player has learned at trainers
-      const chosenTech = pickTechnique(entity, nearestMob, zone);
-      if (chosenTech) {
-        const techTarget = pickTechniqueTargetIdForAutoCombat(entity, nearestMob, chosenTech, zone);
-        entity.order = { action: "technique", targetId: techTarget, techniqueId: chosenTech.id };
+      const eTarget = edictResult.targetOverride ?? nearestMob;
+      if (!eTarget) continue;
+      if (edictResult.techniqueOverride) {
+        const techTarget = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
+        entity.order = { action: "technique", targetId: techTarget, techniqueId: edictResult.techniqueOverride.id };
       } else {
-        // Fall back to basic attack
-        entity.order = { action: "attack", targetId: nearestMob.id };
+        entity.order = { action: "attack", targetId: eTarget.id };
       }
     }
 

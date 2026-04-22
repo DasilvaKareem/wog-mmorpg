@@ -674,6 +674,13 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_agent_inbox_history_wallet_ts
           on game.agent_inbox_history (wallet_address, ts_ms desc);
 
+        alter table game.agent_inbox_history
+          add column if not exists read_at timestamptz;
+
+        create index if not exists idx_agent_inbox_history_wallet_unread
+          on game.agent_inbox_history (wallet_address, ts_ms desc)
+          where read_at is null;
+
         create table if not exists game.merchant_states (
           merchant_id text primary key,
           zone_id text not null,

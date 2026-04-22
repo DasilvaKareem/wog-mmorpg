@@ -3,6 +3,7 @@ import { registerAgentTools } from "./tools/agent.js";
 import { registerAuthTools } from "./tools/auth.js";
 import { registerCharacterTools } from "./tools/character.js";
 import { registerCombatTools } from "./tools/combat.js";
+import { registerGambitTools } from "./tools/gambits.js";
 import { registerNavigationTools } from "./tools/navigation.js";
 import { registerWorldTools } from "./tools/world.js";
 import { registerShopTools } from "./tools/shop.js";
@@ -22,6 +23,7 @@ export function createMcpServer(): McpServer {
   registerAuthTools(server);
   registerCharacterTools(server);
   registerCombatTools(server);
+  registerGambitTools(server);
   registerNavigationTools(server);
   registerWorldTools(server);
   registerShopTools(server);

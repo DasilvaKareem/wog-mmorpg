@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getTechniquesByClass, getLearnedTechniques, getTechniqueById, getRequiredPreviousRank, getPreviousRankId } from "./techniques.js";
 import type { TechniqueDefinition } from "./techniques.js";
-import { getOrCreateZone, getEntity, recalculateEntityVitals, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { getOrCreateZone, getEntity, recalculateEntityVitals, unregisterSpawnedWallet, handleMobDeath } from "../world/zoneRuntime.js";
 import { clampToZoneBounds } from "../world/worldLayout.js";
 import type { Entity, ActiveEffect, ZoneState } from "../world/zoneRuntime.js";
 import { getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
@@ -363,7 +363,7 @@ export function registerTechniqueRoutes(server: FastifyInstance): void {
     }
 
     // Apply technique effects (single-target / self / area)
-    const result = applyTechniqueEffects(caster, target, technique, zone);
+    const result = await applyTechniqueEffects(caster, target, technique, zone);
 
     // Log ability event for VFX pipeline
     logZoneEvent({
@@ -422,12 +422,12 @@ function addActiveEffect(entity: Entity, effect: ActiveEffect): void {
   entity.activeEffects.push(effect);
 }
 
-function applyTechniqueEffects(
+async function applyTechniqueEffects(
   caster: Entity,
   target: Entity,
   technique: TechniqueDefinition,
   zone: ZoneState
-): any {
+): Promise<any> {
   const { effects, type } = technique;
   const result: any = {};
 
@@ -439,18 +439,19 @@ function applyTechniqueEffects(
     if (effects.maxTargets && effects.maxTargets > 1) {
       // Multi-target attack
       const targets = findNearbyEnemies(target, zone, effects.maxTargets, effects.areaRadius);
-      result.targets = targets.map((t: Entity) => {
+      const rows: any[] = [];
+      for (const t of targets) {
         const actualDamage = Math.min(damage, t.hp);
         t.hp = Math.max(0, t.hp - damage);
-        if (t.hp === 0) {
-          if (t.type === "mob" || t.type === "boss") {
-            zone.entities.delete(t.id);
-          }
-          // Players are NOT deleted — zoneRuntime tick handles player death properly
-          // (respawn at graveyard, XP penalty, etc.)
+        const killed = t.hp === 0;
+        if (killed && (t.type === "mob" || t.type === "boss")) {
+          await handleMobDeath(t, caster, zone);
         }
-        return { id: t.id, name: t.name, damage: actualDamage, killed: t.hp === 0 };
-      });
+        // Players are NOT deleted — zoneRuntime tick handles player death properly
+        // (respawn at graveyard, XP penalty, etc.)
+        rows.push({ id: t.id, name: t.name, damage: actualDamage, killed });
+      }
+      result.targets = rows;
     } else {
       // Single target attack
       const actualDamage = Math.min(damage, target.hp);
@@ -458,8 +459,8 @@ function applyTechniqueEffects(
       result.damage = actualDamage;
       result.targetHp = target.hp;
 
-      if (target.hp === 0 && target.type === "mob") {
-        zone.entities.delete(target.id);
+      if (target.hp === 0 && (target.type === "mob" || target.type === "boss")) {
+        await handleMobDeath(target, caster, zone);
         result.targetKilled = true;
       }
     }

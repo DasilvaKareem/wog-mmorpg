@@ -753,6 +753,11 @@ const defaultSoleGeo = new THREE.BoxGeometry(0.13, 0.05, 0.16);      // flat sol
 const hpBarBgGeo = new THREE.PlaneGeometry(0.6, 0.06);
 const hpBarFgGeo = new THREE.PlaneGeometry(0.58, 0.04);
 
+// Combat-target ground ring — red disc at entity feet when actively attacking.
+// WoW-style "this thing is in combat" clarity indicator.
+const combatRingGeo = new THREE.RingGeometry(0.55, 0.72, 40);
+combatRingGeo.rotateX(-Math.PI / 2);
+
 function makeLabel(text: string, color = "#ffffff"): THREE.Sprite {
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d")!;
@@ -1116,6 +1121,10 @@ interface EntityObject {
   dyingSince: number;
   /** Floating quest indicator sprite above NPC */
   questIndicator: THREE.Sprite | null;
+  /** Red ground ring shown while the entity is actively attacking (WoW-style combat indicator) */
+  combatRing: THREE.Mesh | null;
+  /** Current opacity of combatRing — lerps 0↔1 so it fades in/out cleanly */
+  combatRingAlpha: number;
 }
 
 export class EntityManager {
@@ -1499,6 +1508,9 @@ export class EntityManager {
       if (obj.questIndicator) {
         obj.questIndicator.position.y = 2.5 + Math.sin(performance.now() * 0.003) * 0.08;
       }
+
+      // Combat-target ring — red pulse at feet while mob/boss is actively attacking
+      this.updateCombatRing(obj, dt);
     }
 
     // ── Entity push-apart (prevent visual overlap) ──
@@ -1627,6 +1639,56 @@ export class EntityManager {
     }
     obj.mixer?.stopAllAction();
     obj.oneShotStart = 0;
+  }
+
+  /**
+   * Show/hide/pulse a red ring at the entity's feet whenever it's actively
+   * attacking someone. Only applies to hostile types (mob, boss). Fades in/out
+   * smoothly over ~250ms so it doesn't flicker between tick boundaries.
+   */
+  private updateCombatRing(obj: EntityObject, dt: number) {
+    const t = obj.entity.type;
+    const eligible = (t === "mob" || t === "boss") && obj.lifeState === "alive";
+    const attacking = eligible
+      && !!obj.entity.order
+      && (obj.entity.order.action === "attack" || obj.entity.order.action === "technique");
+
+    const target = attacking ? 1 : 0;
+    if (obj.combatRingAlpha === target && !obj.combatRing) return;
+
+    // Lazy create only when first needed.
+    if (target === 1 && !obj.combatRing) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xff2a2a,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const ring = new THREE.Mesh(combatRingGeo, mat);
+      ring.layers.set(NO_OUTLINE_LAYER);
+      ring.position.y = 0.05;
+      ring.renderOrder = 1;
+      obj.group.add(ring);
+      obj.combatRing = ring;
+    }
+
+    if (!obj.combatRing) return;
+
+    // Smooth alpha lerp + gentle breathing pulse while visible.
+    const FADE_RATE = 6; // ~1/FADE_RATE seconds full fade
+    obj.combatRingAlpha += (target - obj.combatRingAlpha) * Math.min(FADE_RATE * dt, 1);
+    if (obj.combatRingAlpha < 0.01 && target === 0) {
+      obj.combatRing.visible = false;
+      return;
+    }
+    obj.combatRing.visible = true;
+    const pulse = 0.75 + Math.sin(performance.now() * 0.006) * 0.25;
+    const mat = obj.combatRing.material as THREE.MeshBasicMaterial;
+    mat.opacity = obj.combatRingAlpha * pulse * 0.85;
+    const scale = 1 + Math.sin(performance.now() * 0.004) * 0.04;
+    obj.combatRing.scale.setScalar(scale);
   }
 
   // ── Debug heartbeat (throttled event-flow check) ─────────────────
@@ -2523,6 +2585,8 @@ export class EntityManager {
       lifeToken: 0,
       dyingSince: 0,
       questIndicator: null,
+      combatRing: null,
+      combatRingAlpha: 0,
     };
 
     if (ent.hp <= 0) {
