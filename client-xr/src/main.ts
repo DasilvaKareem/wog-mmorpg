@@ -23,6 +23,7 @@ import { ZoneNameBadge } from "./hud/IntentModeBadge.js";
 import { ZoneBanner } from "./hud/ZoneBanner.js";
 import { IntentTooltip } from "./hud/IntentTooltip.js";
 import { Minimap } from "./hud/Minimap.js";
+import { WorldMap } from "./hud/WorldMap.js";
 import { AgentChat } from "./hud/AgentChat.js";
 import { LandingPage } from "./hud/LandingPage.js";
 import { CharacterSelect } from "./hud/CharacterSelect.js";
@@ -44,6 +45,7 @@ import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
 import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
+import { createSfxManager, playSoundEffect } from "./sfx.js";
 
 let gauntletCursor: GauntletCursor | null = null;
 const urlParams = new URLSearchParams(window.location.search);
@@ -94,6 +96,147 @@ if (isDisplayMode && !queryWallet && !followEntityId) {
 }
 document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
+const ZONE_BGM_URLS: Record<string, string> = {
+  "emerald-woods": "/audio/Emerald Woods.mp3",
+  "moondancer-glade": "/audio/007 moondancer glade.mp3",
+  "felsrock-citadel": "/audio/008 Felsrock Citadel.mp3",
+  "lake-lumina": "/audio/009 Lake Lumina.mp3",
+  "wild-meadow": "/audio/Wild Meadow Map Bgm.mp3",
+};
+const BGM_DEFAULT_URL = ZONE_BGM_URLS["emerald-woods"];
+
+class BgmManager {
+  private audio: HTMLAudioElement | null = null;
+  private currentUrl: string | null = null;
+  private pendingUrl: string | null = null;
+  private pendingTimer: number | null = null;
+  private silenceTimer: number | null = null;
+  private readonly volume = 0.35;
+  private readonly swapDelayMs = 500;
+  // Minecraft-style ambient silence between tracks: track plays once, then
+  // a randomized quiet gap, then the zone's track plays again.
+  private readonly silenceMinMs = 60_000;   // 1 min
+  private readonly silenceMaxMs = 180_000;  // 3 min
+
+  constructor() {
+    if (typeof window === "undefined") return;
+    this.audio = new Audio();
+    this.audio.loop = false;
+    this.audio.preload = "auto";
+    this.audio.volume = this.volume;
+    this.audio.addEventListener("error", () => {
+      console.warn("[bgm] audio error for", this.currentUrl, this.audio?.error?.code, this.audio?.error?.message);
+    });
+    this.audio.addEventListener("playing", () => {
+      console.log("[bgm] playing", this.currentUrl);
+    });
+    this.audio.addEventListener("ended", () => {
+      this.scheduleReplay();
+    });
+    this.syncMutedFromStorage();
+    window.addEventListener("wog:music-toggle", this.syncMutedFromStorage);
+    for (const evt of ["click", "touchstart", "keydown"] as const) {
+      document.addEventListener(evt, this.resumeOnInteraction, { passive: true });
+    }
+  }
+
+  dispose() {
+    if (this.pendingTimer !== null) {
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = null;
+      this.pendingUrl = null;
+    }
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    if (typeof window !== "undefined") {
+      window.removeEventListener("wog:music-toggle", this.syncMutedFromStorage);
+    }
+    for (const evt of ["click", "touchstart", "keydown"] as const) {
+      document.removeEventListener(evt, this.resumeOnInteraction);
+    }
+    if (!this.audio) return;
+    this.audio.pause();
+    this.audio.src = "";
+    this.audio = null;
+  }
+
+  setZone(zoneId: string | null) {
+    const nextUrl = (zoneId && ZONE_BGM_URLS[zoneId]) || BGM_DEFAULT_URL;
+    if (this.currentUrl === nextUrl) {
+      if (this.pendingTimer !== null) {
+        clearTimeout(this.pendingTimer);
+        this.pendingTimer = null;
+        this.pendingUrl = null;
+      }
+      return;
+    }
+    if (this.pendingUrl === nextUrl) return;
+    if (this.pendingTimer !== null) clearTimeout(this.pendingTimer);
+    this.pendingUrl = nextUrl;
+    console.log("[bgm] setZone pending", zoneId, "→", nextUrl);
+    this.pendingTimer = window.setTimeout(() => {
+      this.pendingTimer = null;
+      this.pendingUrl = null;
+      if (!this.audio || this.currentUrl === nextUrl) return;
+      console.log("[bgm] setZone swap →", nextUrl);
+      this.currentUrl = nextUrl;
+      this.swapTrack(nextUrl);
+      playSoundEffect("move_zone_transition");
+    }, this.swapDelayMs);
+  }
+
+  private syncMutedFromStorage = () => {
+    if (!this.audio || typeof window === "undefined") return;
+    try {
+      this.audio.muted = window.localStorage.getItem("wog-music-muted") === "1";
+    } catch {
+      this.audio.muted = false;
+    }
+    // Don't force-play if we're intentionally in a silence gap.
+    if (!this.audio.muted && this.audio.paused && this.currentUrl && this.silenceTimer === null) {
+      this.audio.play().catch(() => {});
+    }
+  };
+
+  private resumeOnInteraction = () => {
+    if (!this.audio || !this.currentUrl || this.audio.muted) return;
+    if (!this.audio.paused) return;
+    // Respect active silence gap — don't break the quiet stretch.
+    if (this.silenceTimer !== null) return;
+    this.audio.play().catch(() => {});
+  };
+
+  private scheduleReplay() {
+    if (this.silenceTimer !== null) clearTimeout(this.silenceTimer);
+    const delay = this.silenceMinMs + Math.random() * (this.silenceMaxMs - this.silenceMinMs);
+    console.log("[bgm] silence gap", Math.round(delay / 1000) + "s →", this.currentUrl);
+    this.silenceTimer = window.setTimeout(() => {
+      this.silenceTimer = null;
+      if (!this.audio || !this.currentUrl) return;
+      if (this.audio.muted) return;
+      try { this.audio.currentTime = 0; } catch {}
+      console.log("[bgm] replay after silence →", this.currentUrl);
+      this.audio.play().catch(() => {});
+    }, delay);
+  }
+
+  private swapTrack(url: string) {
+    if (!this.audio) return;
+    if (this.silenceTimer !== null) {
+      clearTimeout(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+    this.syncMutedFromStorage();
+    this.audio.pause();
+    try { this.audio.currentTime = 0; } catch {}
+    this.audio.src = url;
+    this.audio.load();
+    if (this.audio.muted) return;
+    this.audio.play().catch(() => {});
+  }
+}
 
 // Equipment tuner — hidden by default, press P to toggle
 const equipTuner = getEquipmentTuner();
@@ -177,6 +320,33 @@ const runPanel = new RunPanel({
     void toggleRunMode();
   },
 });
+const bgm = new BgmManager();
+createSfxManager();
+
+// Mute toggle: #sound-toggle button + M key. Persists to localStorage and
+// dispatches "wog:music-toggle" so BgmManager (and any other listeners) sync.
+const soundToggleBtn = document.getElementById("sound-toggle") as HTMLButtonElement | null;
+function isMusicMuted(): boolean {
+  try { return localStorage.getItem("wog-music-muted") === "1"; } catch { return false; }
+}
+function renderSoundToggle() {
+  if (!soundToggleBtn) return;
+  const muted = isMusicMuted();
+  soundToggleBtn.textContent = muted ? "🔇" : "♪";
+  soundToggleBtn.classList.toggle("muted", muted);
+}
+function toggleMusic() {
+  const next = !isMusicMuted();
+  try { localStorage.setItem("wog-music-muted", next ? "1" : "0"); } catch {}
+  window.dispatchEvent(new CustomEvent("wog:music-toggle", { detail: { muted: next } }));
+  renderSoundToggle();
+}
+renderSoundToggle();
+soundToggleBtn?.addEventListener("click", (e) => {
+  e.stopPropagation();
+  playSoundEffect("ui_button_click");
+  toggleMusic();
+});
 
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.setInputEnabled(!isDisplayMode);
@@ -253,6 +423,7 @@ const zoneNameBadge = new ZoneNameBadge();
 const zoneBanner = new ZoneBanner();
 const intentTooltip = new IntentTooltip();
 const minimap = new Minimap();
+const worldMap = new WorldMap();
 const agentChat = new AgentChat();
 const charSelect = !isAnimationLab
   && !isDisplayMode
@@ -360,6 +531,7 @@ function setGameplayHudVisible(visible: boolean) {
     "agent-chat",
     "run-panel",
     "minimap",
+    "world-map",
     "intent-tooltip",
     "intent-mode-badge",
     "quest-panel",
@@ -922,6 +1094,8 @@ async function pollNearbyZones() {
     }
 
     const visibleIntents = Array.from(mergedIntents.values());
+    const musicZoneId = ownEntityId ? (merged[ownEntityId]?.zoneId ?? null) : (nearbyIds[0] ?? null);
+    bgm.setZone(musicZoneId);
     // Filter events before sync so we can feed combat metadata (crit/block/dodge)
     // into this tick's HP-delta damage numbers via preSync().
     const newEvents = filterNewZoneEvents(allEvents);
@@ -980,7 +1154,15 @@ async function pollNearbyZones() {
     vitalsPanel.update(ownEntityId ? merged[ownEntityId] : null, merged);
 
     // Minimap — pass camera in server coords
-    minimap.update(merged, target.x / COORD_SCALE, target.z / COORD_SCALE);
+    const cameraSX = target.x / COORD_SCALE;
+    const cameraSZ = target.z / COORD_SCALE;
+    minimap.update(merged, cameraSX, cameraSZ);
+    worldMap.update(
+      merged,
+      ownEntityId ? merged[ownEntityId] ?? null : null,
+      cameraSX,
+      cameraSZ,
+    );
     const ownZoneId = ownEntityId ? merged[ownEntityId]?.zoneId ?? null : null;
     zoneNameBadge.setZoneId(ownZoneId);
     zoneBanner.setZoneId(ownZoneId);
@@ -1256,6 +1438,7 @@ window.addEventListener("pagehide", () => {
 
 window.addEventListener("beforeunload", () => {
   queueLogoutOnExit("beforeunload");
+  bgm.dispose();
 });
 
 // ── VR button ───────────────────────────────────────────────────────
@@ -1320,6 +1503,10 @@ window.addEventListener("keydown", (e) => {
     return;
   }
   if (e.key === "Escape") {
+    if (worldMap.isOpen()) {
+      worldMap.close();
+      return;
+    }
     autoLockEnabled = false;
     manualUnlockUntilMs = Date.now() + 5_000;
     unlockCamera();
@@ -1368,6 +1555,11 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "i" || e.key === "I") {
     inboxPanel.toggle();
     if (inboxPanel.isVisible()) { lastInboxPollTime = 0; void pollInbox(); }
+  }
+  if (e.key === "m" || e.key === "M") {
+    e.preventDefault();
+    if (xrSession.isPresenting) return;
+    worldMap.toggle();
   }
   if (e.key === " ") {
     e.preventDefault();
@@ -1463,6 +1655,7 @@ async function init() {
     document.getElementById("agent-chat")?.style.setProperty("display", "none");
     document.getElementById("run-panel")?.style.setProperty("display", "none");
     document.getElementById("minimap")?.style.setProperty("display", "none");
+    document.getElementById("world-map")?.style.setProperty("display", "none");
     document.getElementById("intent-tooltip")?.style.setProperty("display", "none");
     document.getElementById("intent-mode-badge")?.style.setProperty("display", "none");
     renderer.setAnimationLoop(animate);
@@ -1485,6 +1678,7 @@ async function init() {
   }
 
   world.setLayout(layout);
+  worldMap.setLayout(layout);
   landing?.setFeaturedZone(initialZone);
 
   // Center camera at the initial zone
