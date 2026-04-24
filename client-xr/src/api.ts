@@ -1,5 +1,7 @@
 import type {
   ActivePlayersResponse,
+  FriendRequestsResponse,
+  FriendsResponse,
   ZoneResponse,
   TerrainData,
   WorldLayout,
@@ -111,6 +113,14 @@ export async function fetchWorldLayout(): Promise<WorldLayout | null> {
 
 export async function fetchActivePlayers(): Promise<ActivePlayersResponse | null> {
   return fetchJsonWithFallback<ActivePlayersResponse>("/players/active");
+}
+
+export async function fetchFriends(walletAddress: string): Promise<FriendsResponse | null> {
+  return fetchJsonWithFallback<FriendsResponse>(`/friends/${walletAddress}`);
+}
+
+export async function fetchFriendRequests(walletAddress: string): Promise<FriendRequestsResponse | null> {
+  return fetchJsonWithFallback<FriendRequestsResponse>(`/friends/requests/${walletAddress}`);
 }
 
 async function postJsonWithFallback<T>(
@@ -438,6 +448,30 @@ export async function sendFriendRequest(
   toWallet: string,
 ): Promise<{ ok: boolean; error?: string }> {
   return postJsonWithFallback("/friends/request", token, { fromWallet, toWallet });
+}
+
+export async function acceptFriendRequest(
+  token: string,
+  wallet: string,
+  requestId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/friends/accept", token, { wallet, requestId });
+}
+
+export async function declineFriendRequest(
+  token: string,
+  wallet: string,
+  requestId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/friends/decline", token, { wallet, requestId });
+}
+
+export async function removeFriend(
+  token: string,
+  wallet: string,
+  targetWallet: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/friends/remove", token, { wallet, targetWallet });
 }
 
 export async function sendInboxMessage(

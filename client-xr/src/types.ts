@@ -168,6 +168,37 @@ export interface ActivePlayersResponse {
   players: ActivePlayer[];
 }
 
+export interface FriendInfo {
+  wallet: string;
+  addedAt: number;
+  online: boolean;
+  name: string | null;
+  wogName: string | null;
+  level: number | null;
+  classId: string | null;
+  raceId: string | null;
+  zoneId: string | null;
+  reputation: number;
+  reputationRank: string;
+}
+
+export interface FriendRequestInfo {
+  id: string;
+  fromWallet: string;
+  fromName: string;
+  toWallet: string;
+  createdAt: number;
+}
+
+export interface FriendsResponse {
+  friends: FriendInfo[];
+  count: number;
+}
+
+export interface FriendRequestsResponse {
+  requests: FriendRequestInfo[];
+}
+
 /** Anything that can answer elevation queries in world 3D coords */
 export interface ElevationProvider {
   getElevationAt(x: number, z: number): number;

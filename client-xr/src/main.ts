@@ -35,6 +35,7 @@ import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
+import { FriendsPanel } from "./hud/FriendsPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
@@ -44,7 +45,7 @@ import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
 import { GauntletCursor } from "./hud/GauntletCursor.js";
-import type { ActivePlayer, Entity, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
+import type { ActivePlayer, Entity, FriendInfo, QuestLogResponse, VisibleIntent, ZoneResponse } from "./types.js";
 import { createSfxManager, playSoundEffect } from "./sfx.js";
 
 let gauntletCursor: GauntletCursor | null = null;
@@ -362,7 +363,8 @@ const inspector = new EntityInspector({
     if (!ownWalletAddress || !entity.walletAddress) throw new Error("Friend request unavailable");
     const token = await getAuthToken(ownWalletAddress);
     if (!token) throw new Error("You need to sign in first");
-    const result = await sendFriendRequest(token, ownWalletAddress, entity.walletAddress);
+    const fromWallet = ownCustodialWallet ?? ownWalletAddress;
+    const result = await sendFriendRequest(token, fromWallet, entity.walletAddress);
     if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
     return `Friend request sent to ${entity.name}`;
   },
@@ -438,8 +440,11 @@ const charSelect = !isAnimationLab
       desiredRunMode = null;
       runPanel.reset();
       inboxPanel.setCustodialWallet(ownCustodialWallet);
+      friendsPanel.setIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
       lastInboxPollTime = 0;
+      lastFriendsPollTime = 0;
       void pollInbox();
+      void pollFriends();
       agentChat.setWallet(ownWalletAddress);
       agentChat.setEntityId(detail.entityId || null);
       questPanel.setPlayer(ownWalletAddress, true);
@@ -553,6 +558,7 @@ let lockedEntityId: string | null = null;
 let ownWalletAddress: string | null = null;
 let ownCustodialWallet: string | null = null;
 let ownEntityId: string | null = null;
+let latestActivePlayers: ActivePlayer[] = [];
 let desiredRunMode: boolean | null = null;
 let autoLockEnabled = isDisplayMode;
 let manualUnlockUntilMs = 0;
@@ -835,6 +841,28 @@ const playerPanel = new PlayerPanel({
   },
 });
 
+function locateFriend(friend: FriendInfo) {
+  const online = latestActivePlayers.find((player) =>
+    player.walletAddress?.toLowerCase() === friend.wallet.toLowerCase()
+  );
+  if (online?.id) {
+    const pos = entities.getEntityPosition(online.id);
+    if (pos) {
+      lockOn(online.id);
+      controls.setTarget(pos.x, pos.y, pos.z);
+      return;
+    }
+  }
+
+  if (friend.zoneId) {
+    const center = world.getZoneCenter(friend.zoneId);
+    if (center) {
+      unlockCamera();
+      controls.setTarget(center.x, 0, center.z);
+    }
+  }
+}
+
 const questPanel = new QuestPanel({
   onAcceptQuest: async (questId, npcEntityId, npcName) => {
     if (!ownWalletAddress || !ownEntityId) return;
@@ -983,15 +1011,26 @@ const vitalsPanel = new VitalsPanel();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
 let lastInboxPollTime = 0;
+let lastFriendsPollTime = 0;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
 const INBOX_POLL_INTERVAL = 15_000;
+const FRIENDS_POLL_INTERVAL = 15_000;
 
 // ── Bottom-right action bar ────────────────────────────────────────
 const actionBar = new ActionBar();
 const inboxPanel = new InboxPanel({
   onUnreadChange: (count: number) => {
     actionBar.setBadge("inbox", count);
+  },
+});
+const friendsPanel = new FriendsPanel({
+  getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
+  onRequestCountChange: (count: number) => {
+    actionBar.setBadge("friends", count);
+  },
+  onLocateFriend: (friend: FriendInfo) => {
+    locateFriend(friend);
   },
 });
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => {
@@ -1017,6 +1056,10 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 }});
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
   playerPanel.toggle();
+}});
+actionBar.addButton({ id: "friends", icon: "\u2605", label: "Friends", key: "F", onClick: () => {
+  friendsPanel.toggle();
+  if (friendsPanel.isVisible()) { lastFriendsPollTime = 0; void pollFriends(); }
 }});
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => {
   inboxPanel.toggle();
@@ -1174,6 +1217,8 @@ async function pollNearbyZones() {
     if (skillsPanel.isVisible()) void pollProfessions();
     // Inbox always polls in background so the unread badge stays fresh.
     void pollInbox();
+    // Friends poll in background for request badges and online status.
+    void pollFriends();
   } finally {
     isPollingNearbyZones = false;
   }
@@ -1186,6 +1231,7 @@ async function pollActivePlayers() {
   try {
     const data = await fetchActivePlayers();
     if (!data) return;
+    latestActivePlayers = data.players;
     playerPanel.update(data.players);
     landing?.setOnlineCount(data.count);
     tryFollowDisplayTarget(data.players);
@@ -1293,6 +1339,16 @@ async function pollInbox() {
   if (now - lastInboxPollTime < INBOX_POLL_INTERVAL) return;
   lastInboxPollTime = now;
   await inboxPanel.refresh();
+}
+
+async function pollFriends() {
+  if (!ownWalletAddress) return;
+  const socialWallet = ownCustodialWallet ?? ownWalletAddress;
+  friendsPanel.setIdentity(ownWalletAddress, socialWallet);
+  const now = Date.now();
+  if (now - lastFriendsPollTime < FRIENDS_POLL_INTERVAL) return;
+  lastFriendsPollTime = now;
+  await friendsPanel.refresh();
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -1551,6 +1607,10 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "u" || e.key === "U") {
     playerPanel.toggle();
+  }
+  if (e.key === "f" || e.key === "F") {
+    friendsPanel.toggle();
+    if (friendsPanel.isVisible()) { lastFriendsPollTime = 0; void pollFriends(); }
   }
   if (e.key === "i" || e.key === "I") {
     inboxPanel.toggle();
