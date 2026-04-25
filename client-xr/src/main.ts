@@ -35,7 +35,6 @@ import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
-import { FriendsPanel } from "./hud/FriendsPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
@@ -440,7 +439,7 @@ const charSelect = !isAnimationLab
       desiredRunMode = null;
       runPanel.reset();
       inboxPanel.setCustodialWallet(ownCustodialWallet);
-      friendsPanel.setIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
+      playerPanel.setFriendIdentity(ownWalletAddress, ownCustodialWallet ?? ownWalletAddress);
       lastInboxPollTime = 0;
       lastFriendsPollTime = 0;
       void pollInbox();
@@ -839,6 +838,13 @@ const playerPanel = new PlayerPanel({
       controls.setTarget(center.x, 0, center.z);
     }
   },
+  getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
+  onFriendRequestCountChange: (count: number) => {
+    actionBar.setBadge("players", count);
+  },
+  onFriendLocate: (friend: FriendInfo) => {
+    locateFriend(friend);
+  },
 });
 
 function locateFriend(friend: FriendInfo) {
@@ -1024,15 +1030,6 @@ const inboxPanel = new InboxPanel({
     actionBar.setBadge("inbox", count);
   },
 });
-const friendsPanel = new FriendsPanel({
-  getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
-  onRequestCountChange: (count: number) => {
-    actionBar.setBadge("friends", count);
-  },
-  onLocateFriend: (friend: FriendInfo) => {
-    locateFriend(friend);
-  },
-});
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => {
   bagPanel.toggle();
   if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
@@ -1056,10 +1053,6 @@ actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", on
 }});
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
   playerPanel.toggle();
-}});
-actionBar.addButton({ id: "friends", icon: "\u2605", label: "Friends", key: "F", onClick: () => {
-  friendsPanel.toggle();
-  if (friendsPanel.isVisible()) { lastFriendsPollTime = 0; void pollFriends(); }
 }});
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => {
   inboxPanel.toggle();
@@ -1344,11 +1337,11 @@ async function pollInbox() {
 async function pollFriends() {
   if (!ownWalletAddress) return;
   const socialWallet = ownCustodialWallet ?? ownWalletAddress;
-  friendsPanel.setIdentity(ownWalletAddress, socialWallet);
+  playerPanel.setFriendIdentity(ownWalletAddress, socialWallet);
   const now = Date.now();
   if (now - lastFriendsPollTime < FRIENDS_POLL_INTERVAL) return;
   lastFriendsPollTime = now;
-  await friendsPanel.refresh();
+  await playerPanel.refreshFriends();
 }
 
 // ── Raycaster for entity picking ────────────────────────────────────
@@ -1609,8 +1602,9 @@ window.addEventListener("keydown", (e) => {
     playerPanel.toggle();
   }
   if (e.key === "f" || e.key === "F") {
-    friendsPanel.toggle();
-    if (friendsPanel.isVisible()) { lastFriendsPollTime = 0; void pollFriends(); }
+    lastFriendsPollTime = 0;
+    playerPanel.showFriends();
+    void pollFriends();
   }
   if (e.key === "i" || e.key === "I") {
     inboxPanel.toggle();
