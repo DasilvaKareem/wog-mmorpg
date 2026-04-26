@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { enqueueItemMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { FLOWER_CATALOG } from "../resources/flowerCatalog.js";
 import { NECTAR_CATALOG } from "../resources/nectarCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -227,7 +227,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
     // Mint flower NFT
     try {
-      const flowerTx = await enqueueItemMint(walletAddress, flowerProps.tokenId, 1n);
+      await queueItemMint(walletAddress, flowerProps.tokenId, 1n);
+      const flowerTx = "queued-batch-item-mint";
 
       server.log.info(
         `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx}`
@@ -501,7 +502,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
 
     // Mint nectar NFT
     try {
-      const nectarTx = await enqueueItemMint(walletAddress, nectarProps.tokenId, 1n);
+      await queueItemMint(walletAddress, nectarProps.tokenId, 1n);
+      const nectarTx = "queued-batch-item-mint";
 
       server.log.info(
         `[herbalism] ${entity.name} gathered ${nectarProps.label} → ${nectarTx}`

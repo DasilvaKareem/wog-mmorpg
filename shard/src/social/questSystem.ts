@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest, walletsMatch } from "../auth/auth.js";
 import { type Entity, recalculateEntityVitals, getEntity, getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
-import { enqueueGoldMint, enqueueItemMint } from "../blockchain/blockchain.js";
+import { enqueueGoldMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -3612,7 +3613,7 @@ export async function awardQuestRewards(
     // Award item rewards
     if (quest.rewards.items) {
       for (const item of quest.rewards.items) {
-        await enqueueItemMint(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
+        await queueItemMint(player.walletAddress, BigInt(item.tokenId), BigInt(item.quantity)).catch(
           (err) =>
             console.error(
               `[quest] Failed to mint item ${item.tokenId} x${item.quantity} for ${player.name}:`,

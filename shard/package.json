@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:blockchain-worker": "tsx watch src/blockchainWorker.ts",
+    "guard:item-mint-paths": "node scripts/guardItemMintPaths.mjs",
     "build": "tsc",
     "start": "pnpm run build && node dist/server.js",
     "start:blockchain-worker": "pnpm run build && node dist/blockchainWorker.js",

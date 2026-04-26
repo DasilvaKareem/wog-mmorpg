@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
-import { getGoldBalance, enqueueGoldMint, enqueueItemMint, getItemBalance, enqueueItemBurn, enqueueGoldTransferFrom } from "../blockchain/blockchain.js";
+import { getGoldBalance, enqueueGoldMint, getItemBalance, enqueueItemBurn, enqueueGoldTransferFrom } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { formatGold, getAvailableGoldAsync, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { ITEM_CATALOG, getItemByTokenId, getItemRecycleCopperValue, getItemsByTokenIds } from "../items/itemCatalog.js";
 import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "../items/inventoryState.js";
@@ -176,7 +177,8 @@ export function registerShopRoutes(server: FastifyInstance) {
       }
 
       // Mint the item to the buyer
-      const itemTx = await enqueueItemMint(buyerAddress, item.tokenId, BigInt(quantity));
+      await queueItemMint(buyerAddress, item.tokenId, BigInt(quantity));
+      const itemTx = "queued-batch-item-mint";
       server.log.info(
         `Minted ${quantity}x ${item.name} to ${buyerAddress}: ${itemTx}`
       );

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getOrCreateZone } from "../world/zoneRuntime.js";
 import { enqueueItemBurn, enqueueItemMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { hasLearnedProfession } from "./professions.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
@@ -242,11 +243,8 @@ export function registerCookingRoutes(server: FastifyInstance) {
 
     // Mint cooked food
     try {
-      const cookTx = await enqueueItemMint(
-        walletAddress,
-        recipe.outputTokenId,
-        BigInt(recipe.outputQuantity)
-      );
+      await queueItemMint(walletAddress, recipe.outputTokenId, BigInt(recipe.outputQuantity));
+      const cookTx = "queued-batch-item-mint";
 
       // Award profession XP based on recipe tier
       const cookXp = recipeId === "cooked_meat"

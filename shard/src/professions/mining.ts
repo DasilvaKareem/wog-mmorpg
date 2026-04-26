@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { enqueueItemMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { ORE_CATALOG } from "../resources/oreCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
@@ -223,7 +223,8 @@ export function registerMiningRoutes(server: FastifyInstance) {
 
     // Mint ore NFT
     try {
-      const oreTx = await enqueueItemMint(walletAddress, oreProps.tokenId, 1n);
+      await queueItemMint(walletAddress, oreProps.tokenId, 1n);
+      const oreTx = "queued-batch-item-mint";
 
       server.log.info(
         `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx}`

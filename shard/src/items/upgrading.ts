@@ -3,6 +3,7 @@ import { authenticateRequest } from "../auth/auth.js";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "../professions/professions.js";
 import { enqueueItemBurn, enqueueItemMint, getItemBalance } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getItemByTokenId } from "./itemCatalog.js";
 import { consumeOwnedItemInstances, rollCraftedItem } from "./itemRng.js";
 import { getEquippedInstanceIds, getEquippedItemCounts, getRecyclableQuantity } from "./inventoryState.js";
@@ -271,7 +272,8 @@ export function registerUpgradingRoutes(server: FastifyInstance) {
 
     // Mint upgraded weapon
     try {
-      const upgradeTx = await enqueueItemMint(walletAddress, recipe.outputTokenId, 1n);
+      await queueItemMint(walletAddress, recipe.outputTokenId, 1n);
+      const upgradeTx = "queued-batch-item-mint";
 
       const inputItem = getItemByTokenId(recipe.inputWeaponTokenId);
       const outputItem = getItemByTokenId(recipe.outputTokenId);

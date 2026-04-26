@@ -15,7 +15,8 @@ import {
   type Entity,
 } from "./zoneRuntime.js";
 import { getPlayerPartyId, getPartyMembers } from "../social/partySystem.js";
-import { getItemBalance, enqueueItemBurn, enqueueItemMint } from "../blockchain/blockchain.js";
+import { getItemBalance, enqueueItemBurn } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
 import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfigStore.js";
@@ -419,7 +420,8 @@ export function registerDungeonGateRoutes(server: FastifyInstance): void {
 
     // Mint key
     try {
-      const tx = await enqueueItemMint(walletAddress, BigInt(keyTokenId), 1n);
+      await queueItemMint(walletAddress, BigInt(keyTokenId), 1n);
+      const tx = "queued-batch-item-mint";
       const keyItem = getItemByTokenId(BigInt(keyTokenId));
       const reagentItem = getItemByTokenId(BigInt(reagentTokenId));
 

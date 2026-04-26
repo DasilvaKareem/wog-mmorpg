@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getEntity } from "../world/zoneRuntime.js";
 import { hasLearnedProfession } from "./professions.js";
 import { enqueueItemMint, enqueueItemBurn, getItemBalance, getGoldBalance } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getAvailableGoldAsync, formatGold, recordGoldSpendAsync } from "../blockchain/goldLedger.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -856,11 +857,8 @@ export function registerCraftingRoutes(server: FastifyInstance) {
 
     // Mint crafted item
     try {
-      const craftTx = await enqueueItemMint(
-        walletAddress,
-        recipe.outputTokenId,
-        BigInt(recipe.outputQuantity)
-      );
+      await queueItemMint(walletAddress, recipe.outputTokenId, BigInt(recipe.outputQuantity));
+      const craftTx = "queued-batch-item-mint";
 
       const outputItem = getItemByTokenId(recipe.outputTokenId);
 
