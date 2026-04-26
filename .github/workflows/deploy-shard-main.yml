@@ -40,6 +40,9 @@ jobs:
             cd "$SHARD_DIR"
             npm ci --no-audit --no-fund
 
+            echo "[deploy] Running item-mint path guard..."
+            npm run guard:item-mint-paths
+
             echo "[deploy] Building shard..."
             npm run build
 

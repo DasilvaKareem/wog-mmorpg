@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { enqueueItemMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { getLootTable, rollDrops } from "../items/lootTables.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { hasLearnedProfession } from "./professions.js";
@@ -209,13 +209,13 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     }
 
     // Mint skinning materials
-    const mintPromises: Promise<string>[] = [];
+    const mintPromises: Promise<void>[] = [];
     const mintedItems: Array<{ name: string; quantity: number; tokenId: string }> = [];
 
     for (const drop of drops) {
       const item = getItemByTokenId(drop.tokenId);
       if (item) {
-        mintPromises.push(enqueueItemMint(walletAddress, drop.tokenId, BigInt(drop.quantity)));
+        mintPromises.push(queueItemMint(walletAddress, drop.tokenId, BigInt(drop.quantity)));
         mintedItems.push({
           name: item.name,
           quantity: drop.quantity,
@@ -225,7 +225,8 @@ export function registerSkinningRoutes(server: FastifyInstance) {
     }
 
     try {
-      const txHashes = await Promise.all(mintPromises);
+      await Promise.all(mintPromises);
+      const txHashes = mintedItems.map(() => "queued-batch-item-mint");
 
       // Award profession XP
       const region = zoneId ?? entity.region ?? "unknown";

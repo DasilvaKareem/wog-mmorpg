@@ -6,8 +6,8 @@
  * orders of magnitude (e.g. 20 loot drops in 30s → 1-3 txs instead of 20).
  *
  * Flush schedule:
- *   - Item mints:    every 30 seconds
- *   - Gold transfers: every 5 minutes
+ *   - Item mints:    every 3 minutes (configurable)
+ *   - Gold transfers: every 5 minutes (configurable)
  *   - On player disconnect: immediate flush for that wallet
  *   - On server shutdown:   flush all pending
  *
@@ -38,8 +38,14 @@ import { addWalletGold, addWalletItem } from "../db/walletBalanceStore.js";
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
-const ITEM_FLUSH_INTERVAL_MS = 30_000;   // 30 seconds
-const GOLD_FLUSH_INTERVAL_MS = 300_000;  // 5 minutes
+const ITEM_FLUSH_INTERVAL_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.CHAIN_BATCHER_ITEM_FLUSH_MS ?? "180000", 10) || 180_000
+); // default 3 minutes
+const GOLD_FLUSH_INTERVAL_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.CHAIN_BATCHER_GOLD_FLUSH_MS ?? "300000", 10) || 300_000
+); // default 5 minutes
 
 const SFUEL_CHECK_INTERVAL_MS = 60_000;  // check balance every 60s
 // Pause threshold: low enough that a faucet top-up (0.001 sFUEL) can reopen it.

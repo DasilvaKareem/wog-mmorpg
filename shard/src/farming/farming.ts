@@ -5,7 +5,7 @@
 
 import type { FastifyInstance } from "fastify";
 import { getEntity, getAllEntities, getEntitiesInRegion, getWorldTick } from "../world/zoneRuntime.js";
-import { enqueueItemMint } from "../blockchain/blockchain.js";
+import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { CROP_CATALOG, HARVESTABLE_PHASES, isBonusPhase, type CropType } from "./cropCatalog.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { authenticateRequest } from "../auth/auth.js";
@@ -163,11 +163,7 @@ export function registerFarmingRoutes(server: FastifyInstance) {
 
       // Mint the crop item
       try {
-        const mintTx = await enqueueItemMint(walletAddress, cropProps.tokenId, BigInt(quantity));
-        
-        server.log.info(
-          `[farming] ${player.name} harvested ${quantity}x ${cropProps.label} with tier ${hoeTier} hoe → ${mintTx} (charges left: ${chargesRemaining})`
-        );
+        await queueItemMint(walletAddress, cropProps.tokenId, BigInt(quantity));
       } catch (err: any) {
         server.log.error(err, `[farming] Harvest mint failed for ${walletAddress} on node ${cropNodeId}`);
         return reply.code(500).send({ 
