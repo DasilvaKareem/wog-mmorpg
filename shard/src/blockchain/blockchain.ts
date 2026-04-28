@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "crypto";
 import "../config/devLocalContracts.js";
 import { getContract, prepareTransaction, sendTransaction } from "thirdweb";
 import { privateKeyToAccount } from "thirdweb/wallets";
