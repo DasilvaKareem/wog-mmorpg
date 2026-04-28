@@ -507,8 +507,16 @@ export function getSpawnedWallets(): Map<string, SpawnedEntry> {
 let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 250; // 4 ticks per second — tighter combat + smoother motion
+// Perf instrumentation — warn when tick body or setInterval drift exceeds budget.
+const SLOW_TICK_WARN_MS = 50;
+const TICK_DRIFT_WARN_MS = 300;
+const SLOW_ZONE_DETAIL_WARN_MS = 30;
+let lastTickStartAt = 0;
 const PLAYER_PERSIST_INTERVAL_MS = Math.max(1000, Number(process.env.PLAYER_PERSIST_INTERVAL_MS) || 5000);
-const ZONE_RESPONSE_CACHE_MS = Math.max(50, Number.parseInt(process.env.ZONE_RESPONSE_CACHE_MS ?? "500", 10) || 500);
+// Client polls at 250ms (ZONE_POLL_INTERVAL); cache must expire before the next
+// poll or every other response is stale. 100ms still coalesces bursty duplicate
+// hits from multiple clients on the same populated zone.
+const ZONE_RESPONSE_CACHE_MS = Math.max(50, Number.parseInt(process.env.ZONE_RESPONSE_CACHE_MS ?? "100", 10) || 100);
 const WALK_MOVE_SPEED = 7.5; // units per tick (was 30/tick @ 1s; same real speed at 250ms)
 const RUN_MOVE_SPEED = 15; // units per tick (was 60/tick @ 1s)
 const DEFAULT_RUN_ENERGY = 100;
@@ -1577,13 +1585,16 @@ function handlePlayerDeath(player: Entity, zoneId: string): void {
 }
 
 /**
- * Handle mob death: auto-loot drops, create corpse for skinning
+ * Handle mob death: auto-loot drops, create corpse for skinning.
+ * Sync — the chain-side writes (queueItemMint/queueGoldTransfer) are fire-and-forget
+ * so the 250ms tick isn't stalled by Postgres round-trips under Postgres-configured prod.
+ * Durability is preserved by the batcher's aggregated-intent table.
  */
-export async function handleMobDeath(
+export function handleMobDeath(
   mob: Entity,
   killer: Entity | undefined,
   zone: ZoneState
-): Promise<void> {
+): void {
   const lootTable = getLootTable(mob.name);
   const copperReward = rollMobCopperReward(mob);
 
@@ -1598,8 +1609,10 @@ export async function handleMobDeath(
   if (killer?.walletAddress && lootTable) {
     // Roll auto-drops — queued in memory, flushed to chain every 30s
     const autoDrops = rollDrops(lootTable.autoDrops);
+    const killerWallet = killer.walletAddress;
     for (const drop of autoDrops) {
-      await queueItemMint(killer.walletAddress, drop.tokenId, BigInt(drop.quantity));
+      void queueItemMint(killerWallet, drop.tokenId, BigInt(drop.quantity))
+        .catch((err) => console.error(`[mob-death] queueItemMint failed for ${killerWallet}:`, err));
     }
 
     if (autoDrops.length > 0) {
@@ -1629,8 +1642,9 @@ export async function handleMobDeath(
     }
   } else if (copperReward > 0 && killer.walletAddress) {
     const goldReward = copperToGold(copperReward);
-    // Queue gold for async chain publication — flushed by the durable batcher
-    await queueGoldTransfer(killer.walletAddress, goldReward);
+    const killerWallet = killer.walletAddress;
+    void queueGoldTransfer(killerWallet, goldReward)
+      .catch((err) => console.error(`[mob-death] queueGoldTransfer failed for ${killerWallet}:`, err));
     const rewardLabel = formatCopperString(copperReward);
     console.log(
       `[loot] ${killer.name} received ${rewardLabel} from ${mob.name} (batched)`
@@ -2093,6 +2107,7 @@ export function pickAutoCombatTarget(
   partyMemberIds: string[] = getPartyMembers(entity.id),
   partyIdOverride?: string,
   partyLeaderIdOverride?: string,
+  grid?: SpatialGrid,
 ): Entity | null {
   const partyFocusTarget = pickPartyFocusTarget(
     entity,
@@ -2107,15 +2122,20 @@ export function pickAutoCombatTarget(
   const shouldRespectPartyAnchor = partyMemberIds.length > 1;
   let nearestMob: Entity | null = null;
   let nearestDist = autoCombatRange;
-  for (const other of zone.entities.values()) {
-    if (!isAliveAutoCombatTarget(other)) continue;
-    if (shouldRespectPartyAnchor && !isTargetWithinPartyAnchorRange(entity, other, zone, partyLeaderIdOverride)) continue;
-    if (isTrivialAutoCombatTarget(entity, other)) continue;
+  const consider = (other: Entity) => {
+    if (!isAliveAutoCombatTarget(other)) return;
+    if (shouldRespectPartyAnchor && !isTargetWithinPartyAnchorRange(entity, other, zone, partyLeaderIdOverride)) return;
+    if (isTrivialAutoCombatTarget(entity, other)) return;
     const dist = getDistanceBetween(entity, other);
     if (dist < nearestDist) {
       nearestDist = dist;
       nearestMob = other;
     }
+  };
+  if (grid) {
+    forEachInRadius(grid, entity.x, entity.y, autoCombatRange, consider);
+  } else {
+    for (const other of zone.entities.values()) consider(other);
   }
 
   return nearestMob;
@@ -2287,6 +2307,58 @@ const ENTITY_COLLISION_RADIUS = 14; // units — entities can't overlap within t
 /** Entity types that can be displaced by collisions. NPCs/stations are immovable. */
 const MOVABLE_TYPES = new Set(["player", "mob", "boss"]);
 
+/**
+ * Per-zone spatial grid for broadphase O(1)-amortized neighbor queries.
+ * Built once per zone per tick; reused by separation, mob aggro, and
+ * player auto-combat target selection. Replaces O(n²) scans.
+ * Cell size 64 fits the largest common query (boss aggro = 100) in a 3×3 lookup.
+ */
+const SPATIAL_GRID_CELL = 64;
+type SpatialGrid = Map<number, Entity[]>;
+
+function spatialCellKey(cx: number, cz: number): number {
+  // Offset to keep keys non-negative for pathological coords; stride wide
+  // enough that cz can't collide with an adjacent cx row.
+  return (cx + 2048) * 8192 + (cz + 2048);
+}
+
+function buildSpatialGrid(zone: ZoneState): SpatialGrid {
+  const grid: SpatialGrid = new Map();
+  for (const entity of zone.entities.values()) {
+    if ((entity.hp ?? 0) <= 0) continue;
+    const cx = Math.floor(entity.x / SPATIAL_GRID_CELL);
+    const cz = Math.floor(entity.y / SPATIAL_GRID_CELL);
+    const key = spatialCellKey(cx, cz);
+    let cell = grid.get(key);
+    if (!cell) {
+      cell = [];
+      grid.set(key, cell);
+    }
+    cell.push(entity);
+  }
+  return grid;
+}
+
+function forEachInRadius(
+  grid: SpatialGrid,
+  x: number,
+  y: number,
+  radius: number,
+  fn: (other: Entity) => void,
+): void {
+  const minCx = Math.floor((x - radius) / SPATIAL_GRID_CELL);
+  const maxCx = Math.floor((x + radius) / SPATIAL_GRID_CELL);
+  const minCz = Math.floor((y - radius) / SPATIAL_GRID_CELL);
+  const maxCz = Math.floor((y + radius) / SPATIAL_GRID_CELL);
+  for (let cx = minCx; cx <= maxCx; cx++) {
+    for (let cz = minCz; cz <= maxCz; cz++) {
+      const cell = grid.get(spatialCellKey(cx, cz));
+      if (!cell) continue;
+      for (const e of cell) fn(e);
+    }
+  }
+}
+
 function moveToward(
   entity: Entity, tx: number, ty: number,
   zoneEntities?: Map<string, Entity>,
@@ -2332,6 +2404,16 @@ function moveToward(
 }
 
 async function worldTick() {
+  const tickStart = performance.now();
+  if (lastTickStartAt > 0) {
+    const drift = tickStart - lastTickStartAt;
+    if (drift > TICK_DRIFT_WARN_MS) {
+      console.warn(
+        `[tick] drift ${drift.toFixed(0)}ms since last start (budget ${TICK_MS}ms) — ticks stacking under load`,
+      );
+    }
+  }
+  lastTickStartAt = tickStart;
   world.tick++;
 
   // Broadcast day/night phase transitions to all zones
@@ -2460,7 +2542,7 @@ async function worldTick() {
                   }
                 }
               }
-              await handleMobDeath(entity, dotKiller, zone);
+              handleMobDeath(entity, dotKiller, zone);
               // Grant XP for DoT kill
               if (dotKiller) {
                 awardPartyXp(zone, dotKiller, entity.xpReward ?? 0, entity.level);
@@ -2645,7 +2727,7 @@ async function worldTick() {
               handlePlayerDeath(target, zone.zoneId);
             } else {
               // Mobs/bosses: auto-loot to tagger + create corpse
-              await handleMobDeath(target, xpRecipient, zone);
+              handleMobDeath(target, xpRecipient, zone);
 
               // Track quest progress for kills (reward recipient only)
               if (xpRecipient.type === "player" && xpRecipient.activeQuests) {
@@ -2947,7 +3029,7 @@ async function worldTick() {
                   handlePlayerDeath(entity, zone.zoneId);
                   continue;
                 } else {
-                  await handleMobDeath(entity, target, zone);
+                  handleMobDeath(entity, target, zone);
                   continue;
                 }
               }
@@ -2990,7 +3072,7 @@ async function worldTick() {
             if (target.type === "player") {
               handlePlayerDeath(target, zone.zoneId);
             } else {
-              await handleMobDeath(target, techXpRecipient, zone);
+              handleMobDeath(target, techXpRecipient, zone);
               if (techXpRecipient.type === "player" && techXpRecipient.activeQuests) {
                 for (const activeQuest of techXpRecipient.activeQuests) {
                   const questDef = QUEST_CATALOG.find((q) => q.id === activeQuest.questId);
@@ -3024,7 +3106,10 @@ async function worldTick() {
     }
 
     // ── Entity separation pass: push overlapping entities apart ─────
-    // Runs every tick so even stationary entities don't stack.
+    // Build spatial grid once — reused for aggro + auto-combat below.
+    // Single pass with grid neighbor lookup replaces 3× O(n²) scan;
+    // any residual overlap converges within a few ticks at 4Hz.
+    const spatialGrid = buildSpatialGrid(zone);
     const livingEntities: Entity[] = [];
     for (const e of zone.entities.values()) {
       if ((e.hp ?? 0) <= 0) continue;
@@ -3032,51 +3117,45 @@ async function worldTick() {
           e.type === "nectar-node" || e.type === "crop-node" || e.type === "corpse") continue;
       livingEntities.push(e);
     }
-    // Run 3 passes for better convergence when many entities cluster
-    for (let pass = 0; pass < 3; pass++) {
-      for (let i = 0; i < livingEntities.length; i++) {
-        const a = livingEntities[i];
-        for (let j = i + 1; j < livingEntities.length; j++) {
-          const b = livingEntities[j];
-          const dx = a.x - b.x;
-          const dy = a.y - b.y;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const aMovable = MOVABLE_TYPES.has(a.type);
-          const bMovable = MOVABLE_TYPES.has(b.type);
-          if (!aMovable && !bMovable) continue; // both immovable, skip
-
-          if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
-            const overlap = ENTITY_COLLISION_RADIUS - dist;
-            const nx = (dx / dist) * overlap;
-            const ny = (dy / dist) * overlap;
-            if (aMovable && bMovable) {
-              // Both movable — split push equally
-              a.x += nx * 0.5;
-              a.y += ny * 0.5;
-              b.x -= nx * 0.5;
-              b.y -= ny * 0.5;
-            } else if (aMovable) {
-              // Only a moves — full push to a
-              a.x += nx;
-              a.y += ny;
-            } else {
-              // Only b moves — full push to b
-              b.x -= nx;
-              b.y -= ny;
-            }
-          } else if (dist <= 0.01) {
-            // Exactly overlapping — nudge movable entity away
-            if (aMovable) {
-              a.x += ENTITY_COLLISION_RADIUS * 0.5;
-              a.y += (i % 2 === 0 ? 1 : -1) * ENTITY_COLLISION_RADIUS * 0.3;
-            }
-            if (bMovable) {
-              b.x -= ENTITY_COLLISION_RADIUS * 0.5;
-              b.y += (i % 2 === 0 ? -1 : 1) * ENTITY_COLLISION_RADIUS * 0.3;
-            }
+    for (const a of livingEntities) {
+      const aMovable = MOVABLE_TYPES.has(a.type);
+      forEachInRadius(spatialGrid, a.x, a.y, ENTITY_COLLISION_RADIUS, (b) => {
+        // De-dup pairs: only process when a.id < b.id (skip self via equality).
+        if (a.id >= b.id) return;
+        const bMovable = MOVABLE_TYPES.has(b.type);
+        if (!aMovable && !bMovable) return;
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < ENTITY_COLLISION_RADIUS && dist > 0.01) {
+          const overlap = ENTITY_COLLISION_RADIUS - dist;
+          const nx = (dx / dist) * overlap;
+          const ny = (dy / dist) * overlap;
+          if (aMovable && bMovable) {
+            a.x += nx * 0.5;
+            a.y += ny * 0.5;
+            b.x -= nx * 0.5;
+            b.y -= ny * 0.5;
+          } else if (aMovable) {
+            a.x += nx;
+            a.y += ny;
+          } else {
+            b.x -= nx;
+            b.y -= ny;
+          }
+        } else if (dist <= 0.01) {
+          // Exactly overlapping — nudge movable entity with a small random jitter.
+          const jitter = Math.random() > 0.5 ? 1 : -1;
+          if (aMovable) {
+            a.x += ENTITY_COLLISION_RADIUS * 0.5;
+            a.y += jitter * ENTITY_COLLISION_RADIUS * 0.3;
+          }
+          if (bMovable) {
+            b.x -= ENTITY_COLLISION_RADIUS * 0.5;
+            b.y -= jitter * ENTITY_COLLISION_RADIUS * 0.3;
           }
         }
-      }
+      });
     }
 
     // ── Mob leash / de-aggro: mobs too far from spawn walk home ────
@@ -3174,12 +3253,12 @@ async function worldTick() {
         }
       }
 
-      // Otherwise find nearest player in aggro range
+      // Otherwise find nearest player in aggro range (grid-scoped).
       if (!target) {
         let nearestDist = aggroRange;
-        for (const other of zone.entities.values()) {
-          if (other.type !== "player") continue;
-          if (other.hp <= 0) continue;
+        forEachInRadius(spatialGrid, entity.x, entity.y, aggroRange, (other) => {
+          if (other.type !== "player") return;
+          if (other.hp <= 0) return;
           const dx = other.x - entity.x;
           const dy = other.y - entity.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
@@ -3187,7 +3266,7 @@ async function worldTick() {
             nearestDist = dist;
             target = other;
           }
-        }
+        });
       }
 
       if (!target) continue;
@@ -3259,7 +3338,7 @@ async function worldTick() {
       // Ranged classes scan further — auto-engage at their attack range + buffer
       const classRange = getEntityAttackRange(entity);
       const autoCombatRange = Math.max(BASE_AUTO_COMBAT_RANGE, classRange + 20);
-      const nearestMob = pickAutoCombatTarget(entity, zone, autoCombatRange);
+      const nearestMob = pickAutoCombatTarget(entity, zone, autoCombatRange, undefined, undefined, undefined, spatialGrid);
 
       // ── Edict evaluation (gambit system) ──────────────────────────
       // Edicts are the sole auto-combat scheduler. Every player evaluates
@@ -3400,6 +3479,13 @@ async function worldTick() {
 
   // Tick arena matches (win conditions, hazards, timers)
   arenaManager.tickArenaMatches();
+
+  const tickDuration = performance.now() - tickStart;
+  if (tickDuration > SLOW_TICK_WARN_MS) {
+    console.warn(
+      `[tick] slow tick ${tickDuration.toFixed(0)}ms tick=${world.tick} entities=${world.entities.size}`,
+    );
+  }
 }
 
 /**
@@ -3487,7 +3573,7 @@ export function registerZoneRuntime(server: FastifyInstance) {
     return result;
   });
 
-  const ZONE_EVENT_TYPES = ["ability", "combat", "death", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"] as const;
+  const ZONE_EVENT_TYPES = ["ability", "combat", "technique-start", "death", "kill", "levelup", "technique", "chat", "quest", "quest-progress", "shop", "trade", "loot", "system"] as const;
 
   function buildZoneDetail(zoneId: string) {
     const zone = getOrCreateZone(zoneId);
@@ -3575,7 +3661,14 @@ export function registerZoneRuntime(server: FastifyInstance) {
       if (cached && cached.expiresAt > now) {
         return cached.payload;
       }
+      const buildStart = performance.now();
       const payload = buildZoneDetail(zoneId);
+      const buildDuration = performance.now() - buildStart;
+      if (buildDuration > SLOW_ZONE_DETAIL_WARN_MS) {
+        console.warn(
+          `[zone-detail] slow build ${buildDuration.toFixed(0)}ms zone=${zoneId}`,
+        );
+      }
       zoneResponseCache.set(cacheKey, {
         expiresAt: now + ZONE_RESPONSE_CACHE_MS,
         payload,

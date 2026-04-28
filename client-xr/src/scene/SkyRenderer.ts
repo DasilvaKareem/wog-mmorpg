@@ -13,11 +13,11 @@ export class SkyRenderer {
     dawn:  new THREE.Color(0xffaa66),
     day:   new THREE.Color(0x87ceeb),
     dusk:  new THREE.Color(0xff6644),
-    night: new THREE.Color(0x0a0a20),
+    night: new THREE.Color(0x3a3a5a),
   };
 
-  private ambientLevels = { dawn: 1.2, day: 1.5, dusk: 1.0, night: 0.7 };
-  private sunLevels = { dawn: 1.2, day: 1.8, dusk: 1.0, night: 0.5 };
+  private ambientLevels = { dawn: 1.2, day: 1.5, dusk: 1.1, night: 1.1 };
+  private sunLevels = { dawn: 1.2, day: 1.8, dusk: 1.0, night: 0.9 };
 
   private cubeTexture: THREE.CubeTexture | null = null;
 

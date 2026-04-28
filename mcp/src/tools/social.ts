@@ -246,7 +246,7 @@ export function registerSocialTools(server: McpServer): void {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/party/create",
-        { walletAddress, entityId, zoneId },
+        { walletAddress, leaderId: entityId, zoneId },
         token
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -268,7 +268,7 @@ export function registerSocialTools(server: McpServer): void {
       const { walletAddress, token } = requireSession(sessionId);
       const data = await shard.post<unknown>(
         "/party/invite",
-        { walletAddress, partyId, targetEntityId, zoneId },
+        { walletAddress, partyId, invitedPlayerId: targetEntityId, zoneId },
         token
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };

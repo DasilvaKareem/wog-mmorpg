@@ -20,14 +20,18 @@ import { getDefaultGambits } from "../combat/defaultGambits.js";
 
 async function primeEdictCacheForWallet(userWallet: string): Promise<void> {
   try {
+    const custodialWallet = await getAgentCustodialWallet(userWallet);
     const cfg = await getAgentConfig(userWallet);
     if (cfg?.edicts && cfg.edicts.length > 0) {
       setEdictCache(userWallet, cfg.edicts);
+      if (custodialWallet) setEdictCache(custodialWallet, cfg.edicts);
       return;
     }
     const ref = await getAgentEntityRef(userWallet);
     const classId = ref ? (getWorldEntity(ref.entityId)?.classId ?? "") : "";
-    setEdictCache(userWallet, getDefaultGambits(classId));
+    const defaults = getDefaultGambits(classId);
+    setEdictCache(userWallet, defaults);
+    if (custodialWallet) setEdictCache(custodialWallet, defaults);
   } catch {
     // Non-fatal — zone tick will just use fallback AI.
   }

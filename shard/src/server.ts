@@ -1124,9 +1124,6 @@ const start = async () => {
       if (action === "level_up") {
         const level = (entry.details.newLevel as number) ?? "?";
         body = `${name} reached level ${level}!`;
-      } else if (action === "death") {
-        const zone = entry.zoneId.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
-        body = `${name} was slain in ${zone}.`;
       } else if (action === "quest_complete") {
         const quest = (entry.details.questName as string) ?? "a quest";
         body = `${name} completed "${quest}"!`;

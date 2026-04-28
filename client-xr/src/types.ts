@@ -70,7 +70,22 @@ export interface ActiveEffect {
 
 export interface ZoneEvent {
   id: string;
-  type: string;
+  type:
+    | "ability"
+    | "combat"
+    | "technique-start"
+    | "death"
+    | "kill"
+    | "levelup"
+    | "technique"
+    | "chat"
+    | "quest"
+    | "quest-progress"
+    | "shop"
+    | "trade"
+    | "loot"
+    | "system"
+    | string;
   tick: number;
   message: string;
   entityId?: string;

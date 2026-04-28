@@ -233,11 +233,32 @@ const TOWN_ASSET_DEFS: Record<string, { file: string; scale: number; yOffset: nu
   town_windmill: { file: "windmill.glb", scale: 3.0, yOffset: 0 },
 };
 
-/** Map from overlay tile index → asset name (town assets used when loaded, env fallback) */
+/**
+ * Per-zone tree palettes — picks which GLB to use for [light, dark] canopy tiles
+ * so each biome has a distinct silhouette instead of the same trees everywhere.
+ * `town` keys = Kenney town pieces (used when town pack is loaded), `env` keys = original GLBs.
+ */
+const ZONE_TREE_PALETTE: Record<string, { townLight: string[]; townDark: string[]; envLight: string[]; envDark: string[] }> = {
+  "village-square":   { townLight: ["town_tree", "town_tree_high_round"], townDark: ["town_tree_high"],                       envLight: ["oak_tree"],            envDark: ["oak_tree", "pine_tree"] },
+  "wild-meadow":      { townLight: ["town_tree", "town_tree_high_round"], townDark: ["town_tree_high"],                       envLight: ["oak_tree"],            envDark: ["pine_tree"] },
+  "dark-forest":      { townLight: ["town_tree_high_crooked"],            townDark: ["town_tree_crooked", "town_tree_high"],   envLight: ["pine_tree", "dead_tree"], envDark: ["pine_tree", "dead_tree"] },
+  "emerald-woods":    { townLight: ["town_tree_high_round", "town_tree"], townDark: ["town_tree_high", "town_tree_high_crooked"], envLight: ["oak_tree"],         envDark: ["pine_tree"] },
+  "auroral-plains":   { townLight: ["town_tree_high_round"],              townDark: ["town_tree_high_round"],                  envLight: ["oak_tree"],            envDark: ["oak_tree"] },
+  "viridian-range":   { townLight: ["town_tree_high"],                    townDark: ["town_tree_high_crooked", "town_tree_crooked"], envLight: ["pine_tree"],     envDark: ["pine_tree", "dead_tree"] },
+  "moondancer-glade": { townLight: ["town_tree_high_round", "town_tree"], townDark: ["town_tree_high"],                       envLight: ["oak_tree"],            envDark: ["pine_tree"] },
+  "felsrock-citadel": { townLight: ["town_tree_crooked"],                 townDark: ["town_tree_crooked", "town_tree_high_crooked"], envLight: ["dead_tree"],     envDark: ["dead_tree", "pine_tree"] },
+  "lake-lumina":      { townLight: ["town_tree_high_round", "town_tree"], townDark: ["town_tree_high"],                       envLight: ["oak_tree"],            envDark: ["oak_tree"] },
+  "azurshard-chasm":  { townLight: ["town_tree_crooked"],                 townDark: ["town_tree_high_crooked", "town_tree_crooked"], envLight: ["dead_tree"],     envDark: ["dead_tree", "pine_tree"] },
+};
+const DEFAULT_TREE_PALETTE = ZONE_TREE_PALETTE["wild-meadow"];
+
+/** Tile indices that represent trees — light vs dark canopy. */
+const LIGHT_TREE_TILES = new Set([40, 41, 42, 43, 44]);
+const DARK_TREE_TILES = new Set([45, 46, 47, 48, 49]);
+
+/** Map from overlay tile index → asset name (town assets used when loaded, env fallback).
+ *  Tree tiles (40-49) are NOT listed here — they go through the zone palette path. */
 const TILE_TO_ASSET: Record<number, string> = {
-  // Trees: 40-44 = light canopy (oak/round), 45-49 = dark canopy (pine/crooked)
-  40: "town_tree", 41: "town_tree_high_round", 42: "town_tree", 43: "town_tree_high_round", 44: "town_tree",
-  45: "town_tree_high", 46: "town_tree_high_crooked", 47: "town_tree_high", 48: "town_tree_crooked", 49: "town_tree_high",
   // Rocks: 50 = small, 51 = large
   50: "town_rock_small", 51: "town_rock_large",
   // Bushes → hedges
@@ -257,10 +278,9 @@ const TILE_TO_ASSET: Record<number, string> = {
   66: "town_banner_green", 67: "town_banner_red",
 };
 
-/** Fallback: original env assets for tiles, used when town assets aren't loaded */
+/** Fallback: original env assets for tiles, used when town assets aren't loaded.
+ *  Tree tiles (40-49) go through the zone palette path, not this map. */
 const TILE_TO_ASSET_FALLBACK: Record<number, string> = {
-  40: "oak_tree", 41: "oak_tree", 42: "oak_tree", 43: "oak_tree", 44: "oak_tree",
-  45: "pine_tree", 46: "pine_tree", 47: "pine_tree", 48: "pine_tree", 49: "pine_tree",
   50: "rock_cluster", 51: "boulder",
   52: "bush", 53: "bush",
   58: "wooden_fence", 59: "wooden_fence",
@@ -280,7 +300,21 @@ const MOB_NAME_TO_ASSET: [string, string][] = [
   ["necromancer", "necromancer_boss"],
 ];
 
-export { TILE_TO_ASSET, MOB_NAME_TO_ASSET, TOWN_ASSET_DEFS };
+export {
+  TILE_TO_ASSET,
+  MOB_NAME_TO_ASSET,
+  TOWN_ASSET_DEFS,
+  LIGHT_TREE_TILES,
+  DARK_TREE_TILES,
+};
+
+/** Stable 0..1 hash from integer coords + a salt — used for thinning/jitter. */
+function hash01(x: number, y: number, salt: number): number {
+  let h = (x | 0) * 374761393 + (y | 0) * 668265263 + (salt | 0) * 2147483647;
+  h = (h ^ (h >>> 13)) * 1274126177;
+  h = h ^ (h >>> 16);
+  return ((h >>> 0) % 100000) / 100000;
+}
 
 export class EnvironmentAssets {
   private cache = new Map<string, THREE.Object3D>();
@@ -381,6 +415,64 @@ export class EnvironmentAssets {
     if (townAsset && this.cache.has(townAsset)) return townAsset;
     // Fall back to original env assets if town not loaded
     return TILE_TO_ASSET_FALLBACK[tileIdx];
+  }
+
+  /**
+   * Pick a tree asset for a given tile using the zone-specific palette.
+   * Returns null when the tile should be skipped (thinning) so adjacent trees
+   * don't collide — tree GLBs are 3-7 world units wide but tiles are only 1 unit.
+   * Rule of thumb: ~30% of tree tiles actually spawn a tree.
+   */
+  getTreeAssetForZone(
+    zoneId: string | undefined,
+    tileIdx: number,
+    ix: number,
+    iz: number,
+    isTreeTile?: (gx: number, gz: number) => boolean,
+  ): { asset: string; jitterX: number; jitterZ: number; scaleMul: number } | null {
+    // Poisson-style thinning: only spawn a tree if THIS tile's hash is the
+    // strict minimum across its 5x5 neighborhood of tree-tiles. Guarantees
+    // ≥2 empty tiles between trees regardless of how dense the tree-tile
+    // overlay block is, so 3-unit-wide canopies stop overlapping.
+    const RADIUS = 2;
+    const myH = hash01(ix, iz, 1);
+    for (let dz = -RADIUS; dz <= RADIUS; dz++) {
+      for (let dx = -RADIUS; dx <= RADIUS; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        if (isTreeTile && !isTreeTile(ix + dx, iz + dz)) continue;
+        const nH = hash01(ix + dx, iz + dz, 1);
+        // tie-break by coords so equal hashes resolve deterministically
+        if (nH < myH || (nH === myH && (dz < 0 || (dz === 0 && dx < 0)))) {
+          return null;
+        }
+      }
+    }
+
+    const palette = (zoneId && ZONE_TREE_PALETTE[zoneId]) || DEFAULT_TREE_PALETTE;
+    const isDark = DARK_TREE_TILES.has(tileIdx);
+    const townPool = isDark ? palette.townDark : palette.townLight;
+    const envPool = isDark ? palette.envDark : palette.envLight;
+
+    const pickFrom = (pool: string[]) => pool[Math.floor(hash01(ix, iz, 2) * pool.length)];
+    const jitterX = (hash01(ix, iz, 3) - 0.5) * 0.8;
+    const jitterZ = (hash01(ix, iz, 4) - 0.5) * 0.8;
+    // Wide size variety: most trees mid-sized, with rare saplings + giants.
+    // Bias the curve so the distribution is interesting rather than uniform.
+    const r = hash01(ix, iz, 5);
+    let scaleMul: number;
+    if (r < 0.15)      scaleMul = 0.40 + hash01(ix, iz, 6) * 0.20; // 15% saplings (0.40–0.60)
+    else if (r < 0.85) scaleMul = 0.65 + hash01(ix, iz, 6) * 0.45; // 70% normal   (0.65–1.10)
+    else               scaleMul = 1.10 + hash01(ix, iz, 6) * 0.40; // 15% giants   (1.10–1.50)
+
+    const townName = pickFrom(townPool);
+    if (townName && this.cache.has(townName)) {
+      return { asset: townName, jitterX, jitterZ, scaleMul };
+    }
+    const envName = pickFrom(envPool);
+    if (envName && this.cache.has(envName)) {
+      return { asset: envName, jitterX, jitterZ, scaleMul };
+    }
+    return null;
   }
 
   /* ───── Town assets (Kenney Fantasy Town Kit) ───── */

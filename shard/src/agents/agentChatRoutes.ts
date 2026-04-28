@@ -1151,11 +1151,14 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
       return reply.code(400).send({ error: validation.error });
     }
 
-    await patchAgentConfig(authWallet, { edicts });
+    const savedEdicts = edicts as Edict[];
+    await patchAgentConfig(authWallet, { edicts: savedEdicts });
     // Update in-memory cache so zone tick picks it up immediately
-    setEdictCache(authWallet, edicts as Edict[]);
+    setEdictCache(authWallet, savedEdicts);
+    const custodialWallet = await getAgentCustodialWallet(authWallet);
+    if (custodialWallet) setEdictCache(custodialWallet, savedEdicts);
 
-    server.log.info(`[edicts] ${authWallet.slice(0, 8)} saved ${(edicts as Edict[]).length} edicts`);
+    server.log.info(`[edicts] ${authWallet.slice(0, 8)} saved ${savedEdicts.length} edicts`);
     return reply.send({ ok: true, edicts });
   });
 

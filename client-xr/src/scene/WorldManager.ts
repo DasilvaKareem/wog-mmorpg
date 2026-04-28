@@ -234,7 +234,7 @@ export class WorldManager implements ElevationProvider {
     console.log(`[World] Building zone ${id} (envAssets ready: ${this.envAssets.isReady()}, cached: ${this.envAssets.getCacheSize()})`);
 
     const terrain = new TerrainRenderer(this.envAssets);
-    terrain.build(data);
+    terrain.build(data, id);
     terrain.group.position.set(zone.worldOffset.x, 0, zone.worldOffset.y);
     this.group.add(terrain.group);
     zone.terrain = terrain;
@@ -335,13 +335,13 @@ export class WorldManager implements ElevationProvider {
 
   /** Rebuild all loaded zones so they use GLB models instead of primitives */
   private rebuildZonesWithAssets() {
-    for (const zone of this.zones.values()) {
+    for (const [id, zone] of this.zones) {
       if (!zone.terrain || !zone.terrainData) continue;
       const pos = zone.terrain.group.position.clone();
       this.group.remove(zone.terrain.group);
       zone.terrain.dispose();
       const terrain = new TerrainRenderer(this.envAssets);
-      terrain.build(zone.terrainData);
+      terrain.build(zone.terrainData, id);
       terrain.group.position.copy(pos);
       this.group.add(terrain.group);
       zone.terrain = terrain;

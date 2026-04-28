@@ -1050,8 +1050,21 @@ function isCombatAction(action: Action | null): boolean {
   }
 }
 
-function locomotionAction(entity: Pick<Entity, "isRunning">, movingSmooth: number): Action {
-  if (movingSmooth <= 0.1) return "idle";
+// Hysteresis: walk starts at 0.1, but once walking we keep walking until the
+// smoothed signal fully decays to 0.02. Without this, AI agents that stop-and-go
+// between pathfinding waypoints strobe walk↔idle and the walk cycle never plays
+// a full loop.
+const LOCOMOTION_START_THRESHOLD = 0.1;
+const LOCOMOTION_STOP_THRESHOLD = 0.02;
+
+function locomotionAction(
+  entity: Pick<Entity, "isRunning">,
+  movingSmooth: number,
+  curAction?: Action | null,
+): Action {
+  const inLocomotion = curAction === "walk" || curAction === "run";
+  const threshold = inLocomotion ? LOCOMOTION_STOP_THRESHOLD : LOCOMOTION_START_THRESHOLD;
+  if (movingSmooth <= threshold) return "idle";
   return entity.isRunning ? "run" : "walk";
 }
 
@@ -1460,9 +1473,11 @@ export class EntityManager {
           this.playAction(obj, locomotionAction(obj.entity, obj.movingSmooth), true);
         }
 
-        // Normal locomotion blend (only when not in a one-shot)
+        // Normal locomotion blend (only when not in a one-shot).
+        // Pass curAction so locomotionAction applies hysteresis — once walking,
+        // small dips in movingSmooth don't strobe back to idle.
         if (isAlive && !isOneShot) {
-          const wantAction = locomotionAction(obj.entity, obj.movingSmooth);
+          const wantAction = locomotionAction(obj.entity, obj.movingSmooth, curAction);
           if (curAction !== wantAction) {
             this.playAction(obj, wantAction, true);
           }
@@ -1482,14 +1497,14 @@ export class EntityManager {
         }
       }
 
-      // ── GLB mob attack animation (lunge only, no scale change) ──
+      // ── GLB attack animation (lunge only, no scale change) ──
       if (isAlive && obj.hasGlbModel && obj.glbAttackTimer > 0) {
         obj.glbAttackTimer -= dt;
         const t = Math.max(0, obj.glbAttackTimer);
         const total = 0.4;
         const progress = 1 - t / total;
         const lunge = progress < 0.4 ? progress / 0.4 : 1 - (progress - 0.4) / 0.6;
-        const glbChild = g.getObjectByName("glb_mob");
+        const glbChild = this.getGlbVisualRoot(obj);
         if (glbChild) {
           glbChild.position.z = lunge * 0.5;
         }
@@ -1829,6 +1844,12 @@ export class EntityManager {
     this.playAction(obj, action, false, onFinish);
   }
 
+  private getGlbVisualRoot(obj: EntityObject): THREE.Object3D | null {
+    return obj.group.getObjectByName("glb_mob")
+      ?? obj.group.children.find((child) => child.name.startsWith("char_"))
+      ?? null;
+  }
+
   private shouldReplaceCombatIntent(current: VisibleIntent, next: VisibleIntent): boolean {
     const currentRank = this.rankCombatIntent(current);
     const nextRank = this.rankCombatIntent(next);
@@ -1939,9 +1960,10 @@ export class EntityManager {
     const critical = !!opts?.critical;
     const blocked = !!opts?.blocked;
 
-    // GLB mob damage: flash red on all meshes
+    // GLB damage: flash red on all meshes. Player GLBs are named char_*;
+    // environment mob GLBs are named glb_mob.
     if (obj.hasGlbModel) {
-      const glbRoot = obj.group.getObjectByName("glb_mob");
+      const glbRoot = this.getGlbVisualRoot(obj);
       if (glbRoot) {
         glbRoot.traverse((c) => {
           if (c instanceof THREE.Mesh && c.material) {
@@ -2045,7 +2067,7 @@ export class EntityManager {
     }
     // Also flash any GLB meshes
     if (obj.hasGlbModel) {
-      const glbRoot = obj.group.getObjectByName("glb_mob");
+      const glbRoot = this.getGlbVisualRoot(obj);
       if (glbRoot) {
         glbRoot.traverse((c) => {
           if (c instanceof THREE.Mesh && c.material) {

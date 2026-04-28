@@ -33,7 +33,10 @@ import { QuestPanel } from "./hud/QuestPanel.js";
 import { NpcDialog } from "./hud/NpcDialog.js";
 import { RunPanel } from "./hud/RunPanel.js";
 import { BagPanel } from "./hud/BagPanel.js";
+import { SettingsPanel } from "./hud/SettingsPanel.js";
 import { SkillsPanel } from "./hud/SkillsPanel.js";
+import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
+import type { Edict } from "./hud/EdictEditor.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
@@ -96,14 +99,36 @@ if (isDisplayMode && !queryWallet && !followEntityId) {
 }
 document.body.dataset.appMode = isDisplayMode ? "display" : "controller";
 const API_BASE = import.meta.env.VITE_API_URL || "";
+// Resolve audio URLs against the Vite base (prod serves under /xr/, dev at /).
+// Hardcoded "/audio/..." would 404 on prod because the bucket path is /xr/audio.
+const AUDIO_BASE = new URL("audio/", new URL(import.meta.env.BASE_URL, window.location.href)).href;
+function audioUrl(file: string): string {
+  return AUDIO_BASE + encodeURIComponent(file);
+}
 const ZONE_BGM_URLS: Record<string, string> = {
-  "emerald-woods": "/audio/Emerald Woods.mp3",
-  "moondancer-glade": "/audio/007 moondancer glade.mp3",
-  "felsrock-citadel": "/audio/008 Felsrock Citadel.mp3",
-  "lake-lumina": "/audio/009 Lake Lumina.mp3",
-  "wild-meadow": "/audio/Wild Meadow Map Bgm.mp3",
+  "emerald-woods":    audioUrl("Emerald Woods.mp3"),
+  "moondancer-glade": audioUrl("007 moondancer glade.mp3"),
+  "felsrock-citadel": audioUrl("008 Felsrock Citadel.mp3"),
+  "lake-lumina":      audioUrl("009 Lake Lumina.mp3"),
+  "wild-meadow":      audioUrl("Wild Meadow Map Bgm.mp3"),
 };
 const BGM_DEFAULT_URL = ZONE_BGM_URLS["emerald-woods"];
+
+const BGM_VOLUME_KEY = "wog-music-volume";
+const BGM_DEFAULT_VOLUME = 0.35;
+
+function readBgmVolume(): number {
+  if (typeof window === "undefined") return BGM_DEFAULT_VOLUME;
+  try {
+    const raw = window.localStorage.getItem(BGM_VOLUME_KEY);
+    if (raw === null) return BGM_DEFAULT_VOLUME;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return BGM_DEFAULT_VOLUME;
+    return Math.min(1, Math.max(0, n));
+  } catch {
+    return BGM_DEFAULT_VOLUME;
+  }
+}
 
 class BgmManager {
   private audio: HTMLAudioElement | null = null;
@@ -111,7 +136,7 @@ class BgmManager {
   private pendingUrl: string | null = null;
   private pendingTimer: number | null = null;
   private silenceTimer: number | null = null;
-  private readonly volume = 0.35;
+  private volume = readBgmVolume();
   private readonly swapDelayMs = 500;
   // Minecraft-style ambient silence between tracks: track plays once, then
   // a randomized quiet gap, then the zone's track plays again.
@@ -135,6 +160,7 @@ class BgmManager {
     });
     this.syncMutedFromStorage();
     window.addEventListener("wog:music-toggle", this.syncMutedFromStorage);
+    window.addEventListener("wog:music-volume", this.syncVolumeFromStorage);
     for (const evt of ["click", "touchstart", "keydown"] as const) {
       document.addEventListener(evt, this.resumeOnInteraction, { passive: true });
     }
@@ -152,6 +178,7 @@ class BgmManager {
     }
     if (typeof window !== "undefined") {
       window.removeEventListener("wog:music-toggle", this.syncMutedFromStorage);
+      window.removeEventListener("wog:music-volume", this.syncVolumeFromStorage);
     }
     for (const evt of ["click", "touchstart", "keydown"] as const) {
       document.removeEventListener(evt, this.resumeOnInteraction);
@@ -198,6 +225,12 @@ class BgmManager {
     if (!this.audio.muted && this.audio.paused && this.currentUrl && this.silenceTimer === null) {
       this.audio.play().catch(() => {});
     }
+  };
+
+  private syncVolumeFromStorage = () => {
+    if (!this.audio) return;
+    this.volume = readBgmVolume();
+    this.audio.volume = this.volume;
   };
 
   private resumeOnInteraction = () => {
@@ -323,30 +356,10 @@ const runPanel = new RunPanel({
 const bgm = new BgmManager();
 createSfxManager();
 
-// Mute toggle: #sound-toggle button + M key. Persists to localStorage and
-// dispatches "wog:music-toggle" so BgmManager (and any other listeners) sync.
-const soundToggleBtn = document.getElementById("sound-toggle") as HTMLButtonElement | null;
-function isMusicMuted(): boolean {
-  try { return localStorage.getItem("wog-music-muted") === "1"; } catch { return false; }
-}
-function renderSoundToggle() {
-  if (!soundToggleBtn) return;
-  const muted = isMusicMuted();
-  soundToggleBtn.textContent = muted ? "🔇" : "♪";
-  soundToggleBtn.classList.toggle("muted", muted);
-}
-function toggleMusic() {
-  const next = !isMusicMuted();
-  try { localStorage.setItem("wog-music-muted", next ? "1" : "0"); } catch {}
-  window.dispatchEvent(new CustomEvent("wog:music-toggle", { detail: { muted: next } }));
-  renderSoundToggle();
-}
-renderSoundToggle();
-soundToggleBtn?.addEventListener("click", (e) => {
-  e.stopPropagation();
-  playSoundEffect("ui_button_click");
-  toggleMusic();
-});
+// Settings UI: #settings-toggle gear → SettingsPanel with an Audio tab
+// (music + SFX mute + volume). Persists to localStorage and dispatches
+// "wog:music-toggle" / "wog:music-volume" so BgmManager syncs.
+const settingsPanel = new SettingsPanel();
 
 const controls = new DesktopControls(camera, renderer.domElement);
 controls.setInputEnabled(!isDisplayMode);
@@ -1012,14 +1025,25 @@ const bagPanel = new BagPanel({
   },
 });
 bagPanel.setPlayer(null, true);
-const skillsPanel = new SkillsPanel();
+const skillsPanel = new SkillsPanel({
+  saveEdicts: (edicts) => saveEdictsToShard(edicts),
+  onTabChange: (tab) => {
+    if (tab === "professions") { lastProfessionPollTime = 0; void pollProfessions(); }
+    else if (tab === "skills") { lastLearnedTechPollTime = 0; void pollLearnedTechniques(); }
+    else if (tab === "edicts") { lastLearnedTechPollTime = 0; lastEdictsPollTime = 0; void pollLearnedTechniques(); void pollEdicts(); }
+  },
+});
 const vitalsPanel = new VitalsPanel();
 let lastInventoryPollTime = 0;
 let lastProfessionPollTime = 0;
+let lastLearnedTechPollTime = 0;
+let lastEdictsPollTime = 0;
 let lastInboxPollTime = 0;
 let lastFriendsPollTime = 0;
 const INVENTORY_POLL_INTERVAL = 10_000;
 const PROFESSION_POLL_INTERVAL = 15_000;
+const LEARNED_TECH_POLL_INTERVAL = 20_000;
+const EDICTS_POLL_INTERVAL = 30_000;
 const INBOX_POLL_INTERVAL = 15_000;
 const FRIENDS_POLL_INTERVAL = 15_000;
 
@@ -1036,7 +1060,7 @@ actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onCl
 }});
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => {
   skillsPanel.toggle();
-  if (skillsPanel.isVisible()) { lastProfessionPollTime = 0; void pollProfessions(); }
+  if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
 }});
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => {
   questPanel.toggle();
@@ -1063,6 +1087,9 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
     const ent = entities.getEntity(ownEntityId);
     if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
   }
+}});
+actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => {
+  settingsPanel.toggle();
 }});
 
 const npcDialog = new NpcDialog({
@@ -1207,7 +1234,7 @@ async function pollNearbyZones() {
     void pollQuests();
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
-    if (skillsPanel.isVisible()) void pollProfessions();
+    if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
     // Inbox always polls in background so the unread badge stays fresh.
     void pollInbox();
     // Friends poll in background for request badges and online status.
@@ -1321,6 +1348,97 @@ async function pollProfessions() {
   const data = await fetchProfessionStatus(addr);
   if (data) {
     skillsPanel.updateProfessions(data);
+  }
+}
+
+async function pollLearnedTechniques() {
+  if (!ownEntityId) return;
+  const now = Date.now();
+  if (now - lastLearnedTechPollTime < LEARNED_TECH_POLL_INTERVAL) return;
+  lastLearnedTechPollTime = now;
+  try {
+    const res = await fetch(`${API_BASE}/techniques/learned/${ownEntityId}`);
+    if (!res.ok) return;
+    const data = await res.json() as { techniques?: LearnedTechnique[] };
+    skillsPanel.updateTechniques(data.techniques ?? []);
+  } catch { /* non-fatal */ }
+}
+
+async function pollEdicts() {
+  const wallet = ownWalletAddress;
+  if (!wallet) return;
+  const now = Date.now();
+  if (now - lastEdictsPollTime < EDICTS_POLL_INTERVAL) return;
+  lastEdictsPollTime = now;
+  try {
+    const token = await getAuthToken(wallet);
+    if (!token) {
+      console.warn("[edicts] load skipped: no auth token");
+      return;
+    }
+    const res = await fetch(`${API_BASE}/agent/edicts/${wallet}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn("[edicts] load failed:", res.status, text);
+      return;
+    }
+    const data = await res.json() as { edicts?: Edict[] };
+    console.log("[edicts] loaded", data.edicts?.length ?? 0, "rules for", wallet);
+    skillsPanel.updateEdicts(data.edicts ?? []);
+  } catch (err) {
+    console.warn("[edicts] load error:", err);
+  }
+}
+
+async function saveEdictsToShard(edicts: Edict[]): Promise<{ ok: boolean; error?: string }> {
+  const wallet = ownWalletAddress;
+  if (!wallet) return { ok: false, error: "No owner wallet selected" };
+  try {
+    const token = await getAuthToken(wallet);
+    if (!token) {
+      console.warn("[edicts] save skipped: no auth token");
+      return { ok: false, error: "No auth token" };
+    }
+    console.log("[edicts] saving", edicts.length, "rules for", wallet, edicts);
+    const res = await fetch(`${API_BASE}/agent/edicts`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ edicts }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn("[edicts] save failed:", res.status, text);
+      return { ok: false, error: text || `HTTP ${res.status}` };
+    }
+    console.log("[edicts] save ok");
+    // Refresh cached copy from the server so any server-side normalization is reflected.
+    lastEdictsPollTime = 0;
+    void pollEdicts();
+    return { ok: true };
+  } catch (err) {
+    console.warn("[edicts] save error:", err);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+function kickSkillsPollForActiveTab() {
+  const tab = skillsPanel.getActiveTab();
+  if (tab === "professions") {
+    lastProfessionPollTime = 0;
+    void pollProfessions();
+  } else if (tab === "skills") {
+    lastLearnedTechPollTime = 0;
+    void pollLearnedTechniques();
+  } else {
+    lastLearnedTechPollTime = 0;
+    lastEdictsPollTime = 0;
+    void pollLearnedTechniques();
+    void pollEdicts();
   }
 }
 
@@ -1590,7 +1708,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "p" || e.key === "P") {
     skillsPanel.toggle();
-    if (skillsPanel.isVisible()) { lastProfessionPollTime = 0; void pollProfessions(); }
+    if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
   }
   if (e.key === "e" || e.key === "E") {
     if (ownEntityId) {

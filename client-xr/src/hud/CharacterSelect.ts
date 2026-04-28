@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, spawnCharacter, deployAgent } from "../api.js";
+import { fetchCharacters, fetchClasses, fetchRaces, createCharacter, deployAgent } from "../api.js";
 import { getAuthToken } from "../auth.js";
 import type { CharacterAssets, CharacterInstance } from "../scene/CharacterAssets.js";
 import { AvatarAssets } from "../scene/AvatarAssets.js";
@@ -23,6 +23,11 @@ interface CharacterSelectOptions {
 type View = "list" | "create";
 
 const STARTING_ZONE = "village-square";
+const CREATE_MINT_WAIT_TIMEOUT_MS = 120_000;
+const CREATE_MINT_POLL_MS = 2_500;
+const MINT_READY_BOOTSTRAP_STATUSES = new Set(["mint_confirmed", "identity_pending", "completed"]);
+const MINT_READY_CHAIN_STATUSES = new Set(["mint_confirmed", "identity_pending", "registered"]);
+const MINT_FAILED_STATUSES = new Set(["failed_retryable", "failed_permanent"]);
 
 const STAT_LABELS: Record<string, string> = {
   str: "STR", def: "DEF", hp: "HP", agi: "AGI",
@@ -602,28 +607,33 @@ export class CharacterSelect {
 
       if (!result.ok) throw new Error(result.error || "Character creation failed.");
 
-      this.setStatus("Character created! Spawning...");
+      const initialStatus = result.bootstrap?.status ?? result.bootstrap?.chainRegistrationStatus;
+      this.setStatus(initialStatus
+        ? `Mint queued. Waiting for ${initialStatus.replace(/_/g, " ")}...`
+        : "Mint queued. Waiting for confirmation...");
 
-      const spawn = await spawnCharacter(token, {
-        zoneId: STARTING_ZONE,
-        type: "player",
-        name,
+      const minted = await this.waitForMintedCharacter(token, name, this.selectedClass);
+      const characterTokenId = this.getDeployableCharacterTokenId(minted);
+
+      this.setStatus("Character minted. Deploying agent...");
+      const deploy = await deployAgent(token, {
         walletAddress: this.walletAddress,
-        classId: this.selectedClass,
-        raceId: this.selectedRace,
+        characterName: minted.name || name,
+        characterTokenId,
+        raceId: minted.properties.race ?? this.selectedRace,
+        classId: minted.properties.class ?? this.selectedClass,
       });
 
-      if (!spawn.ok) {
-        const reconnected = this.handleExistingLiveSpawn(name, spawn);
-        if (reconnected) return;
-        throw new Error(spawn.error || "Spawn failed.");
+      if (!deploy.ok || !deploy.entityId) {
+        throw new Error(deploy.error || "Deploy failed.");
       }
 
       this.options.onCharacterReady({
         walletAddress: this.walletAddress,
-        entityId: spawn.spawned!.id,
-        zoneId: spawn.zone || STARTING_ZONE,
-        characterName: name,
+        entityId: deploy.entityId,
+        zoneId: deploy.zoneId || STARTING_ZONE,
+        characterName: minted.name || name,
+        custodialWallet: deploy.custodialWallet ?? null,
       });
     });
   }
@@ -683,25 +693,80 @@ export class CharacterSelect {
     });
   }
 
-  private handleExistingLiveSpawn(
-    characterName: string,
-    spawn: { ok: boolean; entityId?: string; zoneId?: string; error?: string },
-  ): boolean {
-    if (spawn.error !== "Wallet already has a live character on this shard" || !spawn.entityId || !spawn.zoneId) {
-      return false;
+  // ── Helpers ────────────────────────────────────────────────────────
+
+  private async waitForMintedCharacter(token: string, characterName: string, classId: string): Promise<CharacterListEntry> {
+    const deadline = Date.now() + CREATE_MINT_WAIT_TIMEOUT_MS;
+    let lastFound: CharacterListEntry | null = null;
+
+    while (Date.now() < deadline) {
+      const data = await fetchCharacters(this.walletAddress, token);
+      if (data) {
+        this.liveEntity = data.liveEntity ?? null;
+        this.deployedCharacterName = data.deployedCharacterName ?? null;
+        this.characters = data.characters ?? [];
+        lastFound = this.findCreatedCharacter(this.characters, characterName, classId);
+
+        if (lastFound) {
+          const failedStatus = this.getMintFailureStatus(lastFound);
+          if (failedStatus) {
+            throw new Error(`Character mint failed (${failedStatus.replace(/_/g, " ")}). Try again from character select.`);
+          }
+          if (this.isCharacterMintReady(lastFound)) {
+            return lastFound;
+          }
+        }
+      }
+
+      this.setStatus(`Minting character NFT... ${this.describeMintStatus(lastFound)}`);
+      await this.sleep(CREATE_MINT_POLL_MS);
     }
 
-    this.setStatus(`${characterName} is already live. Reconnecting...`);
-    this.options.onCharacterReady({
-      walletAddress: this.walletAddress,
-      entityId: spawn.entityId,
-      zoneId: spawn.zoneId,
-      characterName,
-    });
-    return true;
+    throw new Error("Timed out waiting for the character mint. Try selecting the character again in a moment.");
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────
+  private findCreatedCharacter(characters: CharacterListEntry[], characterName: string, classId: string): CharacterListEntry | null {
+    const wantedName = this.normalizeCharacterName(characterName);
+    const exact = characters.find((char) =>
+      this.normalizeCharacterName(char.name) === wantedName
+      && (char.properties.class ?? classId) === classId
+    );
+    return exact ?? characters.find((char) => this.normalizeCharacterName(char.name) === wantedName) ?? null;
+  }
+
+  private isCharacterMintReady(char: CharacterListEntry): boolean {
+    if (this.getDeployableCharacterTokenId(char)) return true;
+    if (char.bootstrapStatus && MINT_READY_BOOTSTRAP_STATUSES.has(char.bootstrapStatus)) return true;
+    if (char.chainRegistrationStatus && MINT_READY_CHAIN_STATUSES.has(char.chainRegistrationStatus)) return true;
+    return false;
+  }
+
+  private getDeployableCharacterTokenId(char: CharacterListEntry): string | undefined {
+    if (char.characterTokenId) return char.characterTokenId;
+    if (char.tokenId && !char.tokenId.startsWith("saved-") && !char.tokenId.startsWith("projection-")) {
+      return char.tokenId;
+    }
+    return undefined;
+  }
+
+  private getMintFailureStatus(char: CharacterListEntry): string | null {
+    if (char.bootstrapStatus && MINT_FAILED_STATUSES.has(char.bootstrapStatus)) return char.bootstrapStatus;
+    if (char.chainRegistrationStatus && MINT_FAILED_STATUSES.has(char.chainRegistrationStatus)) return char.chainRegistrationStatus;
+    return null;
+  }
+
+  private describeMintStatus(char: CharacterListEntry | null): string {
+    const status = char?.bootstrapStatus ?? char?.chainRegistrationStatus ?? "queued";
+    return `(${status.replace(/_/g, " ")})`;
+  }
+
+  private normalizeCharacterName(name: string): string {
+    return name.replace(/\s+the\s+\w+$/i, "").trim().toLowerCase();
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
   private async runBusy(label: string, fn: () => Promise<void>) {
     if (this.busy) return;

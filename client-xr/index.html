@@ -90,27 +90,6 @@
     }
     #vr-button:hover { background: #3b7; }
 
-    #sound-toggle {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      width: 36px;
-      height: 36px;
-      padding: 0;
-      background: rgba(20, 30, 25, 0.7);
-      color: #ddd;
-      border: 1px solid #444;
-      border-radius: 6px;
-      font: 16px monospace;
-      cursor: pointer;
-      z-index: 10;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    #sound-toggle:hover { background: rgba(40, 60, 50, 0.85); border-color: #666; }
-    #sound-toggle.muted { color: #777; }
-
     /* Mobile landscape: scale HUD to 50%. Phones land in this bucket (height ~400-500px); tablets and desktops stay full-size. */
     @media (orientation: landscape) and (max-height: 500px) {
       #hud,
@@ -130,7 +109,7 @@
       #run-panel,
       #chat-log,
       #agent-chat,
-      #sound-toggle,
+      #settings-panel,
       #vr-button {
         transform: scale(0.5) !important;
       }
@@ -148,7 +127,7 @@
       #minimap,
       #animation-lab-panel,
       #equip-tuner,
-      #sound-toggle,
+      #settings-panel,
       #quest-panel { transform-origin: top right !important; }
       /* Bottom-right anchored */
       #bag-panel,
@@ -176,7 +155,6 @@
     Right-drag / 1-finger drag: orbit | Scroll / pinch: zoom | Tap/click: move | Esc: unlock | R: run | T: chat | Q: quests
   </div>
 
-  <button id="sound-toggle" title="Mute/unmute music" aria-label="Toggle music">♪</button>
   <button id="vr-button">Enter VR</button>
   <script type="module" src="/src/main.ts"></script>
 </body>

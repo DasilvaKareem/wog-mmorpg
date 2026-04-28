@@ -59,9 +59,16 @@ const SOUND_EFFECTS: Record<SoundEffectId, SoundEffectConfig> = {
 export const ALL_SOUND_EFFECT_IDS = Object.keys(SOUND_EFFECTS) as SoundEffectId[];
 
 function getAudioBaseUrl(): string {
-  const base = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_ASSET_BASE_URL;
-  const trimmed = base ? base.replace(/\/$/, "") : "";
-  return trimmed ? `${trimmed}/audio` : "/audio";
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+  const cdn = env?.VITE_ASSET_BASE_URL;
+  if (cdn) return `${cdn.replace(/\/$/, "")}/audio`;
+  // Resolve against the Vite base (prod serves under /xr/, dev at /). Hardcoded
+  // "/audio" would 404 on prod since the bucket path is /xr/audio.
+  if (typeof window !== "undefined") {
+    const appBase = env?.BASE_URL ?? "/";
+    return new URL("audio", new URL(appBase, window.location.href)).href.replace(/\/$/, "");
+  }
+  return "/audio";
 }
 
 export function getSoundEffectConfig(id: SoundEffectId): SoundEffectConfig {
@@ -86,6 +93,27 @@ export function isSoundEffectsEnabled(): boolean {
 export function setSoundEffectsEnabled(enabled: boolean): void {
   try { window.localStorage.setItem(SOUND_ENABLED_KEY, enabled ? "1" : "0"); } catch {}
   window.dispatchEvent(new CustomEvent(SOUND_TOGGLE_EVENT, { detail: { enabled } }));
+}
+
+const SFX_VOLUME_KEY = "wog-sfx-volume";
+
+/** Master volume multiplier on top of per-effect volumes (0..1). */
+export function getSoundEffectMasterVolume(): number {
+  if (typeof window === "undefined") return 1;
+  try {
+    const raw = window.localStorage.getItem(SFX_VOLUME_KEY);
+    if (raw === null) return 1;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return 1;
+    return Math.min(1, Math.max(0, n));
+  } catch {
+    return 1;
+  }
+}
+
+export function setSoundEffectMasterVolume(volume: number): void {
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(volume) ? volume : 1));
+  try { window.localStorage.setItem(SFX_VOLUME_KEY, String(clamped)); } catch {}
 }
 
 /**
@@ -185,7 +213,7 @@ class SfxManager {
       audio.pause();
       audio.currentTime = 0;
     } catch {}
-    audio.volume = getSoundEffectConfig(id).volume;
+    audio.volume = getSoundEffectConfig(id).volume * getSoundEffectMasterVolume();
     audio.play().catch(() => {});
   }
 }

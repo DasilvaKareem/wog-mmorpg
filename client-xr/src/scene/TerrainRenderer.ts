@@ -177,7 +177,7 @@ export class TerrainRenderer {
     return (e0 * (1 - fz) + e1 * fz) * ELEV_SCALE;
   }
 
-  build(data: TerrainData) {
+  build(data: TerrainData, zoneId?: string) {
     this.dispose();
     const W = data.width;
     const H = data.height;
@@ -323,6 +323,14 @@ export class TerrainRenderer {
       buildingHandled = handledTiles;
     }
 
+    // Closure used by tree placement to query whether a neighbor cell is
+    // also a tree-tile — keeps Poisson thinning scoped to the forest mask.
+    const isTreeTileAt = (gx: number, gz: number): boolean => {
+      if (gx < 0 || gx >= W || gz < 0 || gz >= H) return false;
+      const v = data.overlay[gz * W + gx] ?? -1;
+      return TREE_TILES.has(v);
+    };
+
     for (let iz = 0; iz < H; iz++) {
       for (let ix = 0; ix < W; ix++) {
         const ti = iz * W + ix;
@@ -361,6 +369,27 @@ export class TerrainRenderer {
 
         // Try GLB model first
         if (useGlb) {
+          // Trees get zone-specific palette + thinning + jitter so a dense
+          // tree-tile block doesn't render as a wall of overlapping canopies.
+          if (TREE_TILES.has(ov)) {
+            const pick = this.envAssets!.getTreeAssetForZone(zoneId, ov, ix, iz, isTreeTileAt);
+            if (pick) {
+              const obj = this.envAssets!.place(
+                pick.asset,
+                wx + pick.jitterX,
+                elev,
+                wz + pick.jitterZ,
+                pick.scaleMul,
+              );
+              if (obj) {
+                this.group.add(obj);
+                continue;
+              }
+            } else {
+              continue; // thinned out — leave an empty tile
+            }
+          }
+
           const assetName = this.envAssets!.getAssetForTile(ov);
           if (assetName) {
             const obj = this.envAssets!.place(assetName, wx, elev, wz);
@@ -384,16 +413,53 @@ export class TerrainRenderer {
           m.castShadow = true;
           this.group.add(m);
         } else if (TREE_TILES.has(ov)) {
-          const isDark = ov >= 45;
-          const trunk = new THREE.Mesh(this.trunkGeo, this.trunkMat);
-          trunk.position.set(wx, 1.25 + elev, wz);
-          trunk.castShadow = true;
-          this.group.add(trunk);
-          const canopy = new THREE.Mesh(this.canopyGeo, isDark ? this.canopyDarkMat : this.canopyLightMat);
-          canopy.position.set(wx, 2.8 + elev, wz);
-          canopy.castShadow = true;
-          this.group.add(canopy);
-          this.canopyMeshes.push({ mesh: canopy, baseX: wx, baseZ: wz });
+          // Match the GLB thinning: only place if this tile is the local-min
+          // hash in its 5x5 tree-tile neighborhood (Poisson-style spacing).
+          const hashAt = (gx: number, gz: number) => {
+            let v = (gx * 374761393 + gz * 668265263 + 2147483647) >>> 0;
+            v = ((v ^ (v >>> 13)) * 1274126177) >>> 0;
+            return (v ^ (v >>> 16)) >>> 0;
+          };
+          const myH = hashAt(ix, iz);
+          let isLocalMin = true;
+          for (let dz = -2; dz <= 2 && isLocalMin; dz++) {
+            for (let dx = -2; dx <= 2 && isLocalMin; dx++) {
+              if (dx === 0 && dz === 0) continue;
+              const nix = ix + dx, niz = iz + dz;
+              if (nix < 0 || nix >= W || niz < 0 || niz >= H) continue;
+              const nov = data.overlay[niz * W + nix] ?? -1;
+              if (!TREE_TILES.has(nov)) continue;
+              const nH = hashAt(nix, niz);
+              if (nH < myH || (nH === myH && (dz < 0 || (dz === 0 && dx < 0)))) {
+                isLocalMin = false;
+              }
+            }
+          }
+          const h = myH;
+          if (!isLocalMin) {
+            // skip — too close to another chosen tree
+          } else {
+            const isDark = ov >= 45;
+            const jx = (((h >>> 7) % 100) / 100 - 0.5) * 0.8;
+            const jz = (((h >>> 13) % 100) / 100 - 0.5) * 0.8;
+            const r = ((h >>> 19) % 1000) / 1000;
+            const r2 = ((h >>> 5) % 1000) / 1000;
+            let s: number;
+            if (r < 0.15)      s = 0.55 + r2 * 0.25; // saplings
+            else if (r < 0.85) s = 0.85 + r2 * 0.50; // normal
+            else               s = 1.40 + r2 * 0.50; // giants
+            const trunk = new THREE.Mesh(this.trunkGeo, this.trunkMat);
+            trunk.position.set(wx + jx, 1.25 * s + elev, wz + jz);
+            trunk.scale.set(s, s, s);
+            trunk.castShadow = true;
+            this.group.add(trunk);
+            const canopy = new THREE.Mesh(this.canopyGeo, isDark ? this.canopyDarkMat : this.canopyLightMat);
+            canopy.position.set(wx + jx, 2.8 * s + elev, wz + jz);
+            canopy.scale.set(s, s, s);
+            canopy.castShadow = true;
+            this.group.add(canopy);
+            this.canopyMeshes.push({ mesh: canopy, baseX: wx + jx, baseZ: wz + jz });
+          }
         } else if (ROCK_TILES.has(ov)) {
           const s = ov === 51 ? 1.5 : 1;
           const m = new THREE.Mesh(this.rockGeo, this.rockMat);

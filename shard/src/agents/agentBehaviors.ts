@@ -39,6 +39,39 @@ const AUCTION_LISTING_FEE_COPPER = 50;
 const AUCTION_RELIST_COOLDOWN_MS = 10 * 60_000;
 const MIN_AUCTION_VALUE_COPPER = 150;
 
+function normalizeMobName(name: unknown): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s]/g, " ") // Treat dashes and special chars as spaces
+    .replace(/\s+/g, " ");
+}
+
+function mobNameMatchesQuestTarget(mobName: unknown, questTargetName: unknown): boolean {
+  const mob = normalizeMobName(mobName);
+  const target = normalizeMobName(questTargetName);
+
+  if (!mob || !target) return false;
+  if (mob === target) return true;
+
+  const mobWords = mob.split(" ");
+  const targetWords = target.split(" ");
+
+  // Every word in the quest target must exist as a distinct word in the mob name.
+  // "Giant Rat" matches quest target "Rat"
+  // "Rat" does NOT match quest target "Giant Rat"
+  return targetWords.every((word) => mobWords.includes(word));
+}
+
+function matchesAnyQuestMob(mobName: unknown, questMobNames: Set<string>): boolean {
+  for (const questName of questMobNames) {
+    if (mobNameMatchesQuestTarget(mobName, questName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 interface AuctionListingPlan {
   tokenId: number;
   itemName: string;
@@ -429,7 +462,7 @@ function pickCombatTarget(
   const scored = candidates
     .map((entry) => {
       const [, target] = entry;
-      const questPriority = !!questMobNames?.has(String(target?.name ?? "").toLowerCase());
+      const questPriority = !!questMobNames && matchesAnyQuestMob(target?.name, questMobNames);
       if (!isCombatTargetAllowed(me, target, strategy, questPriority, ignoreWeakMobs)) return null;
       return {
         target,
@@ -2189,6 +2222,7 @@ export async function doGotoNpc(
     } else if (arrivalAction === "learn-technique" && (target as any).techniqueId) {
       try {
         await ctx.api("POST", "/techniques/learn", {
+          walletAddress: ctx.custodialWallet,
           zoneId: ctx.currentRegion, playerEntityId: ctx.entityId,
           techniqueId: (target as any).techniqueId, trainerEntityId: targetEntityId,
         });
@@ -2495,30 +2529,27 @@ export async function doQuesting(
 
       // Prefer quest-specific mobs over random combat
       const questMobNames = new Set(
-        liveKillQuests.map((aq: any) => (aq.quest?.objective?.targetMobName ?? "").toLowerCase()).filter(Boolean),
+        liveKillQuests.map((aq: any) => String(aq.quest?.objective?.targetMobName ?? "")).filter(Boolean),
       );
 
       // Pre-flight: are any of the quest target mobs actually in this zone?
-      // If not, flag the quests stuck and fall through to gather/grind — no
-      // point firing doQuestCombat just to block on "no valid targets".
+      // If not, fall through to gather/grind — no point firing doQuestCombat
+      // just to block on "no valid targets".
       const zsCheck = await ctx.getZoneState();
       const entitiesCheck = zsCheck?.entities ?? {};
       const questMobPresent = Object.values(entitiesCheck).some((e: any) =>
         (e.type === "mob" || e.type === "boss")
         && e.hp > 0
-        && questMobNames.has(String(e.name ?? "").toLowerCase()),
+        && matchesAnyQuestMob(e.name, questMobNames),
       );
+
       if (!questMobPresent) {
-        for (const aq of liveKillQuests) {
-          const id = aq.questId ?? aq.quest?.id;
-          if (id) ctx.markQuestStuck(id, `target mob not in ${ctx.currentRegion}`);
-        }
         if (hasGatherQuest) {
           void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — gathering instead`);
           return doGathering(ctx, strategy);
         }
-        // Jump straight to the fallback path so the circuit breaker can rescue
-        // us to a zone that actually has the target.
+        // Missing from current zone means "wrong zone" or "cleared", not "stuck".
+        // Reroute via the fallback path so the circuit breaker can find the right zone.
         return questBlockedFallback(ctx, strategy, "quest target not in zone", findNextZoneForLevel, me);
       }
 
@@ -2526,18 +2557,19 @@ export async function doQuesting(
 
       // If combat is blocked, do something productive instead of spinning
       if (combatResult.status === "blocked") {
-        // Flag the active quests as stuck so subsequent ticks don't hammer them
-        for (const aq of liveKillQuests) {
-          const id = aq.questId ?? aq.quest?.id;
-          if (id) ctx.markQuestStuck(id, combatResult.reason ?? "quest-combat blocked");
+        const reason = combatResult.reason ?? "quest-combat blocked";
+        // Only mark as stuck if the target is truly too dangerous for our current strategy.
+        if (reason.toLowerCase().includes("dangerous")) {
+          for (const aq of liveKillQuests) {
+            const id = aq.questId ?? aq.quest?.id;
+            if (id) ctx.markQuestStuck(id, reason);
+          }
         }
-        // Try gather/craft quests first
         if (hasGatherQuest) {
           void ctx.logActivity("Quest combat blocked — gathering for quest instead");
           return doGathering(ctx, strategy);
         }
-        // Otherwise do any productive non-combat activity
-        return questBlockedFallback(ctx, strategy, combatResult.reason ?? "no safe targets", findNextZoneForLevel, me);
+        return questBlockedFallback(ctx, strategy, reason, findNextZoneForLevel, me);
       }
       return combatResult;
     } else if (hasGatherQuest) {
@@ -2603,7 +2635,7 @@ async function doQuestCombat(
     // before honoring their own commit.
     if (partyId && partyLeaderId && partyLeaderId !== me.id) {
       const leaderTarget = pickPartyCombatTarget(me, ctx.currentRegion);
-      const leaderTargetIsQuest = leaderTarget ? questMobNames.has((leaderTarget.name ?? "").toLowerCase()) : false;
+      const leaderTargetIsQuest = leaderTarget ? matchesAnyQuestMob(leaderTarget.name, questMobNames) : false;
       if (leaderTarget && isCombatTargetAllowed(me, leaderTarget, strategy, leaderTargetIsQuest, weakMobFloor)) {
         if (ctx.committedTargetId !== leaderTarget.id) ctx.commitTarget(leaderTarget.id);
         return engagePartyCombatTarget(ctx, me, entities, leaderTarget, partyLeaderId);
@@ -2620,7 +2652,7 @@ async function doQuestCombat(
         && committedMob.hp > 0
         && (committedMob.type === "mob" || committedMob.type === "boss")
       ) {
-        const committedIsQuest = questMobNames.has(String(committedMob.name ?? "").toLowerCase());
+        const committedIsQuest = matchesAnyQuestMob(committedMob.name, questMobNames);
         if (isCombatTargetAllowed(me, committedMob, strategy, committedIsQuest, weakMobFloor)) {
           return engageCombatTarget(ctx, me, committedMob, entities);
         }
@@ -2629,7 +2661,7 @@ async function doQuestCombat(
     }
 
     const partyTarget = pickPartyCombatTarget(me, ctx.currentRegion);
-    const partyTargetIsQuestMob = partyTarget ? questMobNames.has((partyTarget.name ?? "").toLowerCase()) : false;
+    const partyTargetIsQuestMob = partyTarget ? matchesAnyQuestMob(partyTarget.name, questMobNames) : false;
     if (partyTarget && isCombatTargetAllowed(me, partyTarget, strategy, partyTargetIsQuestMob, weakMobFloor)) {
       ctx.commitTarget(partyTarget.id);
       return engagePartyCombatTarget(ctx, me, entities, partyTarget, partyLeaderId);
@@ -2644,7 +2676,7 @@ async function doQuestCombat(
       });
     }
     ctx.commitTarget(mob.id);
-    const isQuestTarget = questMobNames.has((mob.name ?? "").toLowerCase());
+    const isQuestTarget = matchesAnyQuestMob(mob.name, questMobNames);
     const result = engageCombatTarget(ctx, me, mob, entities);
     if (result.status === "progressed") {
       void ctx.logActivity(isQuestTarget

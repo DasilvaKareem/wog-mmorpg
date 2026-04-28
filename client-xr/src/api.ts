@@ -209,7 +209,21 @@ export async function fetchRaces(): Promise<RaceDef[]> {
 export async function createCharacter(
   token: string,
   body: { walletAddress: string; characterName: string; classId: string; raceId: string },
-): Promise<{ ok: boolean; character?: { name: string }; error?: string }> {
+): Promise<{
+  ok: boolean;
+  character?: {
+    name: string;
+    race?: string;
+    class?: string;
+    level?: number;
+    xp?: number;
+  };
+  bootstrap?: {
+    status?: string;
+    chainRegistrationStatus?: string | null;
+  };
+  error?: string;
+}> {
   const payload = {
     walletAddress: body.walletAddress,
     name: body.characterName,
@@ -224,7 +238,12 @@ export async function createCharacter(
         body: JSON.stringify(payload),
       });
       const data = await res.json();
-      return { ok: res.ok, character: data.character, error: data.error };
+      return {
+        ok: res.ok,
+        character: data.character,
+        bootstrap: data.bootstrap,
+        error: data.error,
+      };
     } catch {
       // Try next candidate base.
     }

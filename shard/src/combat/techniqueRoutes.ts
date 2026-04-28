@@ -445,7 +445,7 @@ async function applyTechniqueEffects(
         t.hp = Math.max(0, t.hp - damage);
         const killed = t.hp === 0;
         if (killed && (t.type === "mob" || t.type === "boss")) {
-          await handleMobDeath(t, caster, zone);
+          handleMobDeath(t, caster, zone);
         }
         // Players are NOT deleted — zoneRuntime tick handles player death properly
         // (respawn at graveyard, XP penalty, etc.)
@@ -460,7 +460,7 @@ async function applyTechniqueEffects(
       result.targetHp = target.hp;
 
       if (target.hp === 0 && (target.type === "mob" || target.type === "boss")) {
-        await handleMobDeath(target, caster, zone);
+        handleMobDeath(target, caster, zone);
         result.targetKilled = true;
       }
     }

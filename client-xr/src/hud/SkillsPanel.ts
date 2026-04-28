@@ -1,89 +1,203 @@
 import type { ProfessionStatusResponse, ProfessionSkillSummary } from "../types.js";
+import { LearnedTechniquesList, type LearnedTechnique } from "./LearnedTechniquesList.js";
+import { EdictEditor, type Edict } from "./EdictEditor.js";
 
 const PROFESSIONS: { id: string; name: string; icon: string }[] = [
-  { id: "mining",          name: "Mining",          icon: "\u26CF"          }, // pick
-  { id: "herbalism",       name: "Herbalism",       icon: "\u{1F33F}"      }, // herb
-  { id: "skinning",        name: "Skinning",        icon: "\u{1F9F6}"      }, // yarn/hide
-  { id: "blacksmithing",   name: "Blacksmithing",   icon: "\u2692"          }, // hammer+pick
-  { id: "alchemy",         name: "Alchemy",         icon: "\u{1F9EA}"      }, // test tube
-  { id: "cooking",         name: "Cooking",         icon: "\u{1F372}"      }, // pot of food
-  { id: "leatherworking",  name: "Leatherworking",  icon: "\u{1F4DC}"      }, // scroll
-  { id: "jewelcrafting",   name: "Jewelcrafting",   icon: "\u{1F48E}"      }, // gem
+  { id: "mining",          name: "Mining",          icon: "\u26CF"    },
+  { id: "herbalism",       name: "Herbalism",       icon: "\u{1F33F}" },
+  { id: "skinning",        name: "Skinning",        icon: "\u{1F9F6}" },
+  { id: "blacksmithing",   name: "Blacksmithing",   icon: "\u2692"    },
+  { id: "alchemy",         name: "Alchemy",         icon: "\u{1F9EA}" },
+  { id: "cooking",         name: "Cooking",         icon: "\u{1F372}" },
+  { id: "leatherworking",  name: "Leatherworking",  icon: "\u{1F4DC}" },
+  { id: "jewelcrafting",   name: "Jewelcrafting",   icon: "\u{1F48E}" },
 ];
 
 function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+export type SkillsTab = "professions" | "skills" | "edicts";
+
+export interface SkillsPanelCallbacks {
+  /** Save the full edict list. */
+  saveEdicts: (edicts: Edict[]) => Promise<{ ok: boolean; error?: string }>;
+  /** Fired when the user switches tabs — host may kick polling. */
+  onTabChange?: (tab: SkillsTab) => void;
+}
+
+/**
+ * Two-tab panel:
+ *  - Professions: skill levels for the 9 gathering/crafting professions
+ *  - Skills:      learned techniques + edict (gambit) editor
+ */
 export class SkillsPanel {
   private container: HTMLDivElement;
-  private gridEl: HTMLDivElement;
-  private tooltipEl: HTMLDivElement;
+  private tabBar: HTMLDivElement;
+  private bodyEl: HTMLDivElement;
 
-  private learnedIds: Set<string> = new Set();
+  // Professions tab
+  private profGrid: HTMLDivElement;
+  private profTooltip: HTMLDivElement;
+  private learnedIds = new Set<string>();
   private skills: Record<string, ProfessionSkillSummary> = {};
 
-  constructor() {
+  // Skills tab
+  private skillsScroll: HTMLDivElement;
+  private techniquesList: LearnedTechniquesList;
+
+  // Edicts tab
+  private edictsScroll: HTMLDivElement;
+  private edictEditor: EdictEditor;
+
+  private activeTab: SkillsTab = "professions";
+  private callbacks: SkillsPanelCallbacks;
+
+  constructor(callbacks: SkillsPanelCallbacks) {
+    this.callbacks = callbacks;
+
     this.container = document.createElement("div");
     this.container.id = "skills-panel";
     this.container.style.display = "none";
 
-    // Header
-    const header = document.createElement("div");
-    header.className = "sk-header";
-    header.innerHTML = `<span class="sk-title">Skills</span>`;
-    this.container.appendChild(header);
+    // ── Tab bar ────────────────────────────────────────────────
+    this.tabBar = document.createElement("div");
+    this.tabBar.className = "sk-tabs";
+    this.tabBar.innerHTML = `
+      <button class="sk-tab active" data-tab="professions">Professions</button>
+      <button class="sk-tab" data-tab="skills">Skills</button>
+      <button class="sk-tab" data-tab="edicts">Edicts</button>
+    `;
+    this.tabBar.addEventListener("click", (e) => {
+      const btn = (e.target as HTMLElement).closest(".sk-tab") as HTMLButtonElement | null;
+      if (!btn) return;
+      const tab = btn.dataset.tab as SkillsTab;
+      if (tab === this.activeTab) return;
+      this.activeTab = tab;
+      this.tabBar.querySelectorAll(".sk-tab").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      this.applyActiveTab();
+      this.callbacks.onTabChange?.(tab);
+    });
+    this.container.appendChild(this.tabBar);
 
-    // Grid
-    this.gridEl = document.createElement("div");
-    this.gridEl.className = "sk-grid";
-    this.container.appendChild(this.gridEl);
+    // ── Body (holds whichever tab is active) ──────────────────
+    this.bodyEl = document.createElement("div");
+    this.bodyEl.className = "sk-body";
+    this.container.appendChild(this.bodyEl);
 
-    // Tooltip
-    this.tooltipEl = document.createElement("div");
-    this.tooltipEl.className = "sk-tooltip";
-    this.tooltipEl.style.display = "none";
-    document.body.appendChild(this.tooltipEl);
-
-    document.body.appendChild(this.container);
-    this.injectStyles();
-    this.render();
-
-    // Hover
-    this.gridEl.addEventListener("mouseover", (e) => {
+    // ── Professions view ──────────────────────────────────────
+    this.profGrid = document.createElement("div");
+    this.profGrid.className = "sk-grid";
+    this.profGrid.addEventListener("mouseover", (e) => {
       const cell = (e.target as HTMLElement).closest(".sk-cell") as HTMLElement;
       if (!cell?.dataset.prof) return;
-      this.showTooltip(cell.dataset.prof, cell);
+      this.showProfTooltip(cell.dataset.prof, cell);
     });
-    this.gridEl.addEventListener("mouseout", (e) => {
+    this.profGrid.addEventListener("mouseout", (e) => {
       const cell = (e.target as HTMLElement).closest(".sk-cell") as HTMLElement;
       if (!cell) return;
       const related = (e as MouseEvent).relatedTarget as HTMLElement | null;
       if (related && cell.contains(related)) return;
-      this.tooltipEl.style.display = "none";
+      this.profTooltip.style.display = "none";
     });
+
+    // ── Skills view ───────────────────────────────────────────
+    this.skillsScroll = document.createElement("div");
+    this.skillsScroll.className = "sk-skills-scroll";
+
+    this.techniquesList = new LearnedTechniquesList();
+    const techHeader = document.createElement("div");
+    techHeader.className = "sk-section-head";
+    techHeader.innerHTML = `<span class="sk-section-title">Learned Techniques</span>`;
+    this.skillsScroll.appendChild(techHeader);
+    this.skillsScroll.appendChild(this.techniquesList.container);
+
+    // ── Edicts view ───────────────────────────────────────────
+    this.edictsScroll = document.createElement("div");
+    this.edictsScroll.className = "sk-skills-scroll";
+
+    const edictHeader = document.createElement("div");
+    edictHeader.className = "sk-section-head";
+    edictHeader.innerHTML = `<span class="sk-section-title">Edicts (Gambits)</span><span class="sk-section-hint">First match wins, evaluated top-to-bottom</span>`;
+    this.edictsScroll.appendChild(edictHeader);
+
+    this.edictEditor = new EdictEditor({
+      onSave: (edicts) => this.callbacks.saveEdicts(edicts),
+    });
+    this.edictsScroll.appendChild(this.edictEditor.container);
+
+    // ── Tooltip (professions) ─────────────────────────────────
+    this.profTooltip = document.createElement("div");
+    this.profTooltip.className = "sk-tooltip";
+    this.profTooltip.style.display = "none";
+    document.body.appendChild(this.profTooltip);
+
+    document.body.appendChild(this.container);
+
+    this.injectStyles();
+    LearnedTechniquesList.injectStyles();
+    EdictEditor.injectStyles();
+
+    this.applyActiveTab();
+    this.renderProfessions();
   }
+
+  // ── Public API ────────────────────────────────────────────────
 
   updateProfessions(data: ProfessionStatusResponse) {
     this.learnedIds = new Set(data.professions);
     this.skills = data.skills ?? {};
-    this.render();
+    this.renderProfessions();
+  }
+
+  updateTechniques(techniques: LearnedTechnique[]) {
+    this.techniquesList.update(techniques);
+    this.edictEditor.setTechniques(techniques);
+  }
+
+  updateEdicts(edicts: Edict[]) {
+    this.edictEditor.setEdicts(edicts);
+  }
+
+  getActiveTab(): SkillsTab {
+    return this.activeTab;
   }
 
   toggle() {
     if (this.container.style.display === "none") {
       this.container.style.display = "flex";
     } else {
-      this.container.style.display = "none";
-      this.tooltipEl.style.display = "none";
+      this.hide();
     }
   }
 
   show() { this.container.style.display = "flex"; }
-  hide() { this.container.style.display = "none"; this.tooltipEl.style.display = "none"; }
-  isVisible(): boolean { return this.container.style.display !== "none"; }
 
-  private render() {
+  hide() {
+    this.container.style.display = "none";
+    this.profTooltip.style.display = "none";
+  }
+
+  isVisible(): boolean {
+    return this.container.style.display !== "none";
+  }
+
+  // ── Internals ─────────────────────────────────────────────────
+
+  private applyActiveTab() {
+    this.bodyEl.innerHTML = "";
+    if (this.activeTab === "professions") {
+      this.bodyEl.appendChild(this.profGrid);
+      this.profTooltip.style.display = "none";
+    } else if (this.activeTab === "skills") {
+      this.bodyEl.appendChild(this.skillsScroll);
+    } else {
+      this.bodyEl.appendChild(this.edictsScroll);
+    }
+  }
+
+  private renderProfessions() {
     let html = "";
     for (const prof of PROFESSIONS) {
       const learned = this.learnedIds.has(prof.id);
@@ -105,10 +219,10 @@ export class SkillsPanel {
       html += `</div>`;
       html += `</div>`;
     }
-    this.gridEl.innerHTML = html;
+    this.profGrid.innerHTML = html;
   }
 
-  private showTooltip(profId: string, cell: HTMLElement) {
+  private showProfTooltip(profId: string, cell: HTMLElement) {
     const prof = PROFESSIONS.find((p) => p.id === profId);
     if (!prof) return;
     const learned = this.learnedIds.has(profId);
@@ -128,29 +242,32 @@ export class SkillsPanel {
       html += `<div class="sk-tt-hint">Visit a profession trainer to learn</div>`;
     }
 
-    this.tooltipEl.innerHTML = html;
-    this.tooltipEl.style.display = "block";
+    this.profTooltip.innerHTML = html;
+    this.profTooltip.style.display = "block";
 
     const cellRect = cell.getBoundingClientRect();
-    const ttRect = this.tooltipEl.getBoundingClientRect();
+    const ttRect = this.profTooltip.getBoundingClientRect();
     let left = cellRect.left - ttRect.width - 8;
     let top = cellRect.top;
     if (left < 4) { left = cellRect.left; top = cellRect.bottom + 4; }
     top = Math.min(top, window.innerHeight - ttRect.height - 4);
     top = Math.max(4, top);
 
-    this.tooltipEl.style.left = `${left}px`;
-    this.tooltipEl.style.top = `${top}px`;
+    this.profTooltip.style.left = `${left}px`;
+    this.profTooltip.style.top = `${top}px`;
   }
 
   private injectStyles() {
+    if (document.getElementById("sk-panel-styles")) return;
     const style = document.createElement("style");
+    style.id = "sk-panel-styles";
     style.textContent = `
       #skills-panel {
         position: fixed;
         bottom: 64px;
         right: 12px;
-        width: 240px;
+        width: 280px;
+        max-height: calc(100vh - 120px);
         background: rgba(10, 16, 28, 0.94);
         border: 1px solid rgba(68, 255, 136, 0.2);
         border-radius: 8px;
@@ -163,13 +280,32 @@ export class SkillsPanel {
         pointer-events: auto;
       }
 
-      .sk-header {
+      .sk-tabs {
         display: flex;
-        align-items: center;
-        padding: 8px 12px;
         border-bottom: 1px solid rgba(68, 255, 136, 0.15);
+        flex-shrink: 0;
       }
-      .sk-title { color: #4f8; font-weight: bold; font-size: 13px; }
+      .sk-tab {
+        flex: 1;
+        padding: 8px 0;
+        background: none;
+        border: none;
+        color: #667;
+        font: bold 12px monospace;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
+        border-bottom: 2px solid transparent;
+      }
+      .sk-tab:hover { color: #aab; }
+      .sk-tab.active { color: #4f8; border-bottom-color: #4f8; }
+
+      .sk-body {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
       .sk-grid {
         display: flex;
@@ -177,7 +313,6 @@ export class SkillsPanel {
         gap: 2px;
         padding: 6px;
         overflow-y: auto;
-        max-height: calc(100vh - 200px);
         scrollbar-width: thin;
         scrollbar-color: rgba(68, 255, 136, 0.2) transparent;
       }
@@ -192,7 +327,6 @@ export class SkillsPanel {
         transition: background 0.12s;
       }
       .sk-cell:hover { background: rgba(50, 65, 85, 0.6); }
-
       .sk-learned { background: rgba(30, 40, 55, 0.7); }
       .sk-locked { background: rgba(20, 25, 35, 0.5); opacity: 0.5; }
 
@@ -216,7 +350,27 @@ export class SkillsPanel {
         transition: width 0.3s;
       }
 
-      /* Tooltip */
+      /* Skills tab */
+      .sk-skills-scroll {
+        flex: 1;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(68, 255, 136, 0.2) transparent;
+      }
+      .sk-section-head {
+        display: flex; flex-direction: column;
+        padding: 8px 10px 4px;
+        border-bottom: 1px solid rgba(68, 255, 136, 0.1);
+      }
+      .sk-section-title {
+        color: #4f8; font: bold 11px monospace;
+        text-transform: uppercase; letter-spacing: 0.5px;
+      }
+      .sk-section-hint {
+        color: #667; font: 10px monospace; font-style: italic; margin-top: 1px;
+      }
+
+      /* Tooltip (profession) */
       .sk-tooltip {
         position: fixed;
         z-index: 100;

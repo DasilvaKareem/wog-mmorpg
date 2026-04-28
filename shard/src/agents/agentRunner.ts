@@ -66,6 +66,8 @@ import {
   fetchWalletBalance,
   formatAgentError,
   issueAgentCommand,
+  getTrainerZone,
+  getClassTrainerZone,
   type ActionResult,
   type ApiCaller,
   type AgentContext,
@@ -596,24 +598,31 @@ export class AgentRunner {
         (e) => e.type === "profession-trainer" && e.teachesProfession === professionId,
       );
       if (!trainer) {
-        if (this.currentRegion !== "village-square") {
-          // Don't yank high-level agents back to village-square for a profession
+        const targetHub = getTrainerZone(professionId);
+        if (this.currentRegion !== targetHub) {
+          // Don't yank high-level agents back to hubs for a profession
           // they might not actually need. Skip gracefully; caller falls back.
           const myLevel = zs.me.level ?? 1;
           if (myLevel >= 10) {
-            console.log(`[agent:${this.walletTag}] No ${professionId} trainer here and Lv${myLevel} — skipping profession detour`);
+            console.log(`[agent:${this.walletTag}] No ${professionId} trainer here and Lv${myLevel} — skipping hub detour`);
             void this.logActivity(`Skipping ${professionId} — no trainer nearby, continuing grinding`);
             return false;
           }
 
           // Low-level agents: enqueue a round-trip so they come back to homeZone
-          // instead of stranding in village-square.
+          // instead of stranding in the hub.
           const config = await getAgentConfig(this.userWallet);
           const homeZone = config?.homeZone ?? this.currentRegion;
           const chain = buildProfessionLearnChain(professionId, homeZone);
+          // Chain builder defaults to PROFESSION_HUB_ZONE, override it here
+          if (chain[0].type === "travel") {
+            chain[0].targetZone = targetHub;
+            chain[0].reason = `Detour: learn ${professionId} in ${targetHub}`;
+          }
+
           await this.enqueueActions(chain, true);
-          void this.logActivity(`Detour: learn ${professionId} → return to ${homeZone}`);
-          console.log(`[agent:${this.walletTag}] Enqueued profession-learn chain for ${professionId}, home=${homeZone}`);
+          void this.logActivity(`Detour: learn ${professionId} in ${targetHub} → return to ${homeZone}`);
+          console.log(`[agent:${this.walletTag}] Enqueued profession-learn chain for ${professionId}, hub=${targetHub}, home=${homeZone}`);
           return false;
         }
         console.log(`[agent:${this.walletTag}] No ${professionId} trainer in ${this.currentRegion}`);
@@ -687,6 +696,7 @@ export class AgentRunner {
 
       try {
         await this.api("POST", "/techniques/learn", {
+          walletAddress: this.custodialWallet,
           zoneId: this.currentRegion, playerEntityId: this.entityId,
           techniqueId: nextToLearn.id, trainerEntityId: trainer[0],
         });

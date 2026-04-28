@@ -68,12 +68,17 @@ function humanizeScript(s: { type: string; targetZone?: string | null; targetNam
 }
 
 const EVENT_COLORS: Record<string, string> = {
+  ability: "#b48efa",
   combat: "#ff8866",
+  "technique-start": "#8fb8ff",
   death: "#cc4444",
+  kill: "#ff5c7a",
   loot: "#ffcc44",
   chat: "#ccddee",
   quest: "#66bbff",
+  "quest-progress": "#66bbff",
   levelup: "#44ff88",
+  technique: "#b48efa",
   spawn: "#888",
   despawn: "#666",
   trade: "#ffaa44",

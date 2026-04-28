@@ -313,13 +313,16 @@ export async function setupAgentCharacter(
     config.edicts = getDefaultGambits(spawnClass);
     await setAgentConfig(userWallet, config);
     setEdictCache(userWallet, config.edicts);
+    setEdictCache(custodialAddress, config.edicts);
   } else if (!existingConfig.edicts || existingConfig.edicts.length === 0) {
     // Backfill defaults for agents that predate the gambit system.
     existingConfig.edicts = getDefaultGambits(spawnClass);
     await setAgentConfig(userWallet, existingConfig);
     setEdictCache(userWallet, existingConfig.edicts);
+    setEdictCache(custodialAddress, existingConfig.edicts);
   } else {
     setEdictCache(userWallet, existingConfig.edicts);
+    setEdictCache(custodialAddress, existingConfig.edicts);
   }
 
   console.log(`[agentSetup] Agent ready: entity=${entityId} zone=${resolvedZoneId}`);

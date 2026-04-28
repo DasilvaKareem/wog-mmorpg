@@ -247,6 +247,40 @@ export interface AgentContext {
   askSummoner(text: string, choices?: string[], context?: Record<string, unknown>): Promise<boolean>;
 }
 
+/** Registry of zones where specific profession trainers are located. */
+const PROFESSION_TRAINER_ZONES: Record<string, string> = {
+  mining: "village-square",
+  herbalism: "village-square",
+  skinning: "village-square",
+  blacksmithing: "village-square",
+  alchemy: "village-square",
+  cooking: "village-square",
+  leatherworking: "village-square",
+  jewelcrafting: "village-square",
+};
+
+/** Registry of zones where class trainers are located. */
+const CLASS_TRAINER_ZONES: Record<string, string> = {
+  warrior: "village-square",
+  paladin: "village-square",
+  rogue: "village-square",
+  ranger: "village-square",
+  mage: "village-square",
+  cleric: "village-square",
+  warlock: "village-square",
+  monk: "village-square",
+};
+
+/** Find the primary zone for a profession trainer. Falls back to village-square. */
+export function getTrainerZone(professionId: string): string {
+  return PROFESSION_TRAINER_ZONES[professionId.toLowerCase()] ?? "village-square";
+}
+
+/** Find the primary zone for a class trainer. Falls back to village-square. */
+export function getClassTrainerZone(classId: string): string {
+  return CLASS_TRAINER_ZONES[classId.toLowerCase()] ?? "village-square";
+}
+
 /**
  * Read wallet balance directly from the blockchain helpers.
  * Avoids bouncing through the local Fastify route from inside the shard.
