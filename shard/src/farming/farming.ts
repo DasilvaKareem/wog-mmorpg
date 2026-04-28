@@ -149,8 +149,12 @@ export function registerFarmingRoutes(server: FastifyInstance) {
       }
 
       // Harvest: reduce charges
-      const charges = (node.charges ?? 0) - 1;
-      node.charges = charges;
+      const originalCharges = node.charges ?? 0;
+      node.charges = originalCharges - 1;
+      const chargesRemaining = node.charges;
+      if (chargesRemaining <= 0) {
+        node.depletedAtTick = getWorldTick();
+      }
 
       // ── Bonus yield: double during peak phase ──
       const bonus = isBonusPhase(cropProps.preferredPhase, gt.phase);
@@ -159,14 +163,17 @@ export function registerFarmingRoutes(server: FastifyInstance) {
 
       // Mint the crop item
       try {
-        await enqueueItemMint(walletAddress, cropProps.tokenId, BigInt(quantity));
+        const mintTx = await enqueueItemMint(walletAddress, cropProps.tokenId, BigInt(quantity));
+        
+        server.log.info(
+          `[farming] ${player.name} harvested ${quantity}x ${cropProps.label} with tier ${hoeTier} hoe → ${mintTx} (charges left: ${chargesRemaining})`
+        );
       } catch (err: any) {
-        return reply.code(500).send({ error: `Mint failed: ${err.message}` });
-      }
-
-      // Mark depleted if no charges left
-      if (charges <= 0) {
-        node.depletedAtTick = getWorldTick();
+        server.log.error(err, `[farming] Harvest mint failed for ${walletAddress} on node ${cropNodeId}`);
+        return reply.code(500).send({ 
+          error: "Harvest transaction failed. Node charge consumed to prevent exploit.",
+          detail: err.message 
+        });
       }
 
       const itemDef = getItemByTokenId(cropProps.tokenId);
@@ -193,8 +200,8 @@ export function registerFarmingRoutes(server: FastifyInstance) {
         tokenId: cropProps.tokenId.toString(),
         quantity,
         bonusYield: bonus,
-        remainingCharges: Math.max(0, charges),
-        depleted: charges <= 0,
+        remainingCharges: Math.max(0, chargesRemaining),
+        depleted: chargesRemaining <= 0,
         gameTime: gt,
       };
     }

@@ -699,7 +699,7 @@ export async function enqueueItemMint(
   // Always invalidate the item cache so a stale balance=0 doesn't block
   // an immediate /equipment/equip right after the purchase.
   itemCache.invalidate(toAddress.toLowerCase());
-  const record = await createChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+  const record = await createChainOperation("item-mint", `${toAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}:${randomUUID()}`, {
     toAddress,
     tokenId: tokenId.toString(),
     quantity: quantity.toString(),
@@ -796,7 +796,7 @@ export async function burnItem(
     await subtractWalletItem(fromAddress, tokenId, quantity);
     itemCache.invalidate(fromAddress.toLowerCase());
   }
-  return executeRegisteredChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+  return executeRegisteredChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}:${randomUUID()}`, {
     fromAddress,
     tokenId: tokenId.toString(),
     quantity: quantity.toString(),
@@ -812,7 +812,7 @@ export async function enqueueItemBurn(
     await subtractWalletItem(fromAddress, tokenId, quantity);
     itemCache.invalidate(fromAddress.toLowerCase());
   }
-  const record = await createChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}`, {
+  const record = await createChainOperation("item-burn", `${fromAddress.toLowerCase()}:${tokenId.toString()}:${quantity.toString()}:${randomUUID()}`, {
     fromAddress,
     tokenId: tokenId.toString(),
     quantity: quantity.toString(),

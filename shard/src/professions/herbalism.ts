@@ -212,7 +212,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     }
 
     // Deplete flower charge
-    flowerNode.charges = (flowerNode.charges ?? 0) - 1;
+    const originalCharges = flowerNode.charges ?? 0;
+    flowerNode.charges = originalCharges - 1;
     const chargesRemaining = flowerNode.charges;
     if (flowerNode.charges <= 0) {
       flowerNode.depletedAtTick = getWorldTick();
@@ -230,7 +231,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       const flowerTx = await enqueueItemMint(walletAddress, flowerProps.tokenId, 1n);
 
       server.log.info(
-        `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx}`
+        `[herbalism] ${entity.name} gathered ${flowerProps.label} with ${sickleItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${flowerTx} (charges left: ${chargesRemaining})`
       );
 
       // Award profession XP
@@ -269,7 +270,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         flowerType: flowerNode.flowerType,
         flowerName: flowerProps.label,
         quantity: 1,
-        chargesRemaining,
+        chargesRemaining: Math.max(0, chargesRemaining),
         tokenId: flowerProps.tokenId.toString(),
         flowerTx,
         professionXp: profXpResult,
@@ -281,19 +282,15 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         },
       };
     } catch (err) {
-      server.log.error(err, `[herbalism] Failed for ${walletAddress}`);
+      server.log.error(err, `[herbalism] Failed for ${walletAddress} on node ${flowerNodeId}`);
 
-      // Refund charge and durability on mint failure
-      flowerNode.charges = (flowerNode.charges ?? 0) + 1;
-      if (flowerNode.charges > 0) flowerNode.depletedAtTick = undefined;
-      weaponEquipped.durability = Math.min(
-        weaponEquipped.maxDurability,
-        weaponEquipped.durability + 1
-      );
-      if (weaponEquipped.durability > 0) weaponEquipped.broken = false;
-
+      // If enqueueItemMint failed, it might have partially succeeded in updating Postgres.
+      // To be safe and prevent infinite farming exploits, we DO NOT refund the node charge
+      // or durability if an error occurs during the minting process, as the item might
+      // have already been added to the database. The node remains depleted (or with reduced charges).
+      
       reply.code(500);
-      return { error: "Gathering transaction failed" };
+      return { error: "Gathering transaction failed. Node charge consumed to prevent exploit." };
     }
   });
 
@@ -486,7 +483,8 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
     }
 
     // Deplete charge
-    nectarNode.charges = (nectarNode.charges ?? 0) - 1;
+    const originalNectarCharges = nectarNode.charges ?? 0;
+    nectarNode.charges = originalNectarCharges - 1;
     const chargesRemaining = nectarNode.charges;
     if (nectarNode.charges <= 0) {
       nectarNode.depletedAtTick = getWorldTick();
@@ -504,7 +502,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
       const nectarTx = await enqueueItemMint(walletAddress, nectarProps.tokenId, 1n);
 
       server.log.info(
-        `[herbalism] ${entity.name} gathered ${nectarProps.label} → ${nectarTx}`
+        `[herbalism] ${entity.name} gathered ${nectarProps.label} → ${nectarTx} (charges left: ${chargesRemaining})`
       );
 
       // Award profession XP (same as flower rarity)
@@ -543,7 +541,7 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         nectarType: nectarNode.nectarType,
         nectarName: nectarProps.label,
         quantity: 1,
-        chargesRemaining,
+        chargesRemaining: Math.max(0, chargesRemaining),
         tokenId: nectarProps.tokenId.toString(),
         nectarTx,
         professionXp: profXpResult,
@@ -555,16 +553,15 @@ export function registerHerbalismRoutes(server: FastifyInstance) {
         },
       };
     } catch (err) {
-      server.log.error(err, `[herbalism] Nectar gather failed for ${walletAddress}`);
+      server.log.error(err, `[herbalism] Nectar gather failed for ${walletAddress} on node ${nectarNodeId}`);
 
-      // Refund on failure
-      nectarNode.charges = (nectarNode.charges ?? 0) + 1;
-      if (nectarNode.charges > 0) nectarNode.depletedAtTick = undefined;
-      weaponEquipped.durability = Math.min(weaponEquipped.maxDurability, weaponEquipped.durability + 1);
-      if (weaponEquipped.durability > 0) weaponEquipped.broken = false;
-
+      // If enqueueItemMint failed, it might have partially succeeded in updating Postgres.
+      // To be safe and prevent infinite farming exploits, we DO NOT refund the node charge
+      // or durability if an error occurs during the minting process, as the item might
+      // have already been added to the database. The node remains depleted (or with reduced charges).
+      
       reply.code(500);
-      return { error: "Nectar gathering transaction failed" };
+      return { error: "Nectar gathering transaction failed. Node charge consumed to prevent exploit." };
     }
   });
 }

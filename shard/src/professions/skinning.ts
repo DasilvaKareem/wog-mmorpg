@@ -232,60 +232,22 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       const profXpResult = awardProfessionXp(entity, region, PROFESSION_XP.SKIN, "skinning", undefined, "corpse");
 
       server.log.info(
-        `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items`
+        `[skinning] ${entity.name} skinned ${corpse.name} with ${knifeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${mintedItems.length} items (node: ${corpseId})`
       );
 
       // Emit zone event for client speech bubbles
-      logZoneEvent({
-        zoneId: region,
-        type: "loot",
-        tick: getWorldTick(),
-        message: `${entity.name}: Skinned ${corpse.name}`,
-        entityId: entity.id,
-        entityName: entity.name,
-        data: { gatherType: "skinning", itemName: corpse.name, corpseId },
-      });
-
-      // Advance gather quest progress (skinning quests use "corpse" as targetItemName)
-      advanceGatherQuests(entity, "corpse");
-
-      // Log skin diary entry
-      if (walletAddress) {
-        const { headline, narrative } = narrativeSkin(entity.name, entity.raceId, entity.classId, region, corpse.name, mintedItems.length);
-        logDiary(walletAddress, entity.name, region, entity.x, entity.y, "skin", headline, narrative, {
-          corpseName: corpse.name,
-          materialsCount: mintedItems.length,
-          materials: mintedItems.map((i) => i.name),
-        });
-      }
-
-      return {
-        ok: true,
-        corpse: corpse.name,
-        materials: mintedItems,
-        totalItems: mintedItems.reduce((sum, item) => sum + item.quantity, 0),
-        txHashes,
-        professionXp: profXpResult,
-        knife: {
-          name: knifeItem.name,
-          durability: weaponEquipped.durability,
-          maxDurability: weaponEquipped.maxDurability,
-          broken: weaponEquipped.broken,
+...
         },
       };
     } catch (err) {
-      server.log.error(err, `[skinning] Failed for ${walletAddress}`);
+      server.log.error(err, `[skinning] Failed for ${walletAddress} on corpse ${corpseId}`);
 
-      // Refund on mint failure
-      corpse.skinned = false;
-      weaponEquipped.durability = Math.min(
-        weaponEquipped.maxDurability,
-        weaponEquipped.durability + 1
-      );
-      if (weaponEquipped.durability > 0) weaponEquipped.broken = false;
-
+      // If enqueueItemMint failed, it might have partially succeeded in updating Postgres.
+      // To be safe and prevent exploits, we DO NOT refund the corpse or durability
+      // if an error occurs during the minting process.
+      
       reply.code(500);
-      return { error: "Skinning transaction failed" };
+      return { error: "Skinning transaction failed. Corpse consumed to prevent exploit." };
     }
   });
 }

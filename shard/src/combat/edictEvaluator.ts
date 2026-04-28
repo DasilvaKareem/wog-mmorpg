@@ -199,9 +199,6 @@ function compare(
 ): boolean {
   // Special handling for effect-presence fields
   if (typeof value === "string" && (operator === "has" || operator === "not_has")) {
-    // "has"/"not_has" with effect type value — delegate to special check
-    // actual is "present" or "none" (simplified), but we need the real check
-    // This is handled via the field reader returning "present"/"none"
     if (operator === "has") return actual === "present";
     if (operator === "not_has") return actual === "none";
   }
@@ -217,7 +214,15 @@ function compare(
     }
   }
 
-  // String/type comparisons
+  // String/type comparisons (case-insensitive loose matching)
+  if (typeof actual === "string" && typeof value === "string") {
+    const a = actual.toLowerCase();
+    const v = value.toLowerCase();
+    if (operator === "is" || operator === "eq") {
+      return a === v || a.includes(v) || v.includes(a);
+    }
+  }
+
   if (operator === "is") return actual === value;
   if (operator === "eq") return actual === value;
 
@@ -292,11 +297,14 @@ function resolveTechniqueAction(
 ): EdictResult | null {
   if (!action.techniqueId) return null;
 
-  const tech = getTechniqueById(action.techniqueId);
+  // Case-insensitive lookup
+  const techId = action.techniqueId.toLowerCase();
+  const tech = getTechniqueById(techId);
   if (!tech) return null;
 
   // Must have learned the technique
-  if (!entity.learnedTechniques?.includes(tech.id)) return null;
+  const learnedIds = entity.learnedTechniques?.map(id => id.toLowerCase()) ?? [];
+  if (!learnedIds.includes(techId)) return null;
 
   // Check cooldown
   if (entity.cooldowns?.has(tech.id)) {

@@ -1148,6 +1148,7 @@ Zone IDs: ${availableZoneIds.join(", ")}`;
 
     const validation = validateEdicts(edicts);
     if (!validation.valid) {
+      server.log.warn(`[edicts] ${authWallet.slice(0, 8)} save rejected: ${validation.error}`);
       return reply.code(400).send({ error: validation.error });
     }
 

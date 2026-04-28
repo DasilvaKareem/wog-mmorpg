@@ -230,12 +230,21 @@ export class DesktopControls {
   private onKeyDown = (e: KeyboardEvent) => {
     if (!this.inputEnabled) return;
     if (this.landingMode) return;
+    
+    // Don't intercept movement keys if an input is focused (e.g. typing a character name)
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+
     this.keys.add(e.key.toLowerCase());
   };
 
   private onKeyUp = (e: KeyboardEvent) => {
     if (!this.inputEnabled) return;
     if (this.landingMode) return;
+
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+
     this.keys.delete(e.key.toLowerCase());
   };
 

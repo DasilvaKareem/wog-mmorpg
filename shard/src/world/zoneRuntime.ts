@@ -3374,7 +3374,11 @@ async function worldTick() {
       const defaultTicks = NODE_TYPES[entity.type];
       if (defaultTicks == null || entity.depletedAtTick == null) continue;
       const ticksSinceDepleted = zone.tick - entity.depletedAtTick;
-      if (ticksSinceDepleted < (entity.respawnTicks ?? defaultTicks)) continue;
+      const requiredTicks = entity.respawnTicks ?? defaultTicks;
+      
+      if (ticksSinceDepleted < requiredTicks) continue;
+
+      console.log(`[tick] Respawning node ${entity.id} (${entity.type}/${entity.name}) after ${ticksSinceDepleted} ticks (required: ${requiredTicks})`);
 
       entity.charges = entity.maxCharges;
       entity.depletedAtTick = undefined;

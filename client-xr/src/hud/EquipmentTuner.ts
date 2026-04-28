@@ -56,6 +56,11 @@ export class EquipmentTuner {
     document.body.appendChild(this.el);
 
     window.addEventListener("keydown", (e) => {
+      // Don't intercept hotkeys if we are in character creation or login
+      const landingActive = document.getElementById("xr-landing")?.style.display !== "none" && document.getElementById("xr-landing") !== null;
+      const charSelectActive = document.getElementById("char-select")?.style.display !== "none" && document.getElementById("char-select") !== null;
+      if (landingActive || charSelectActive) return;
+
       if (e.key === "p" || e.key === "P") {
         this.visible = !this.visible;
         this.el.style.display = this.visible ? "block" : "none";

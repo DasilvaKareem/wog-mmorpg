@@ -1412,8 +1412,15 @@ async function saveEdictsToShard(edicts: Edict[]): Promise<{ ok: boolean; error?
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
+      let errorMessage = text;
+      try {
+        const json = JSON.parse(text);
+        if (json.error) errorMessage = json.error;
+      } catch {
+        // Not JSON, use raw text
+      }
       console.warn("[edicts] save failed:", res.status, text);
-      return { ok: false, error: text || `HTTP ${res.status}` };
+      return { ok: false, error: errorMessage || `HTTP ${res.status}` };
     }
     console.log("[edicts] save ok");
     // Refresh cached copy from the server so any server-side normalization is reflected.
@@ -1663,6 +1670,7 @@ if (navigator.xr) {
 window.addEventListener("keydown", (e) => {
   if (isDisplayMode) return;
   if (landing?.isActive()) return;
+  if (charSelect?.isActive()) return;
   // Don't intercept keys while typing in agent chat or NPC dialog
   if (agentChat.isFocused()) return;
   if (npcDialog.isOpen()) {

@@ -208,7 +208,8 @@ export function registerMiningRoutes(server: FastifyInstance) {
     }
 
     // Deplete ore charge
-    oreNode.charges = (oreNode.charges ?? 0) - 1;
+    const originalCharges = oreNode.charges ?? 0;
+    oreNode.charges = originalCharges - 1;
     const chargesRemaining = oreNode.charges;
     if (oreNode.charges <= 0) {
       oreNode.depletedAtTick = getWorldTick();
@@ -226,7 +227,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
       const oreTx = await enqueueItemMint(walletAddress, oreProps.tokenId, 1n);
 
       server.log.info(
-        `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx}`
+        `[mining] ${entity.name} mined ${oreProps.label} with ${pickaxeItem.name} (${weaponEquipped.durability}/${weaponEquipped.maxDurability} dur) → ${oreTx} (charges left: ${chargesRemaining})`
       );
 
       // Award profession XP
@@ -265,7 +266,7 @@ export function registerMiningRoutes(server: FastifyInstance) {
         oreType: oreNode.oreType,
         oreName: oreProps.label,
         quantity: 1,
-        chargesRemaining,
+        chargesRemaining: Math.max(0, chargesRemaining),
         tokenId: oreProps.tokenId.toString(),
         oreTx,
         professionXp: profXpResult,
@@ -277,16 +278,15 @@ export function registerMiningRoutes(server: FastifyInstance) {
         },
       };
     } catch (err) {
-      server.log.error(err, `[mining] Failed for ${walletAddress}`);
+      server.log.error(err, `[mining] Failed for ${walletAddress} on node ${oreNodeId}`);
 
-      // Refund charge and durability on mint failure
-      oreNode.charges = (oreNode.charges ?? 0) + 1;
-      if (oreNode.charges > 0) oreNode.depletedAtTick = undefined;
-      weaponEquipped.durability = Math.min(weaponEquipped.maxDurability, weaponEquipped.durability + 1);
-      if (weaponEquipped.durability > 0) weaponEquipped.broken = false;
-
+      // If enqueueItemMint failed, it might have partially succeeded in updating Postgres.
+      // To be safe and prevent infinite farming exploits, we DO NOT refund the node charge
+      // or durability if an error occurs during the minting process, as the item might
+      // have already been added to the database. The node remains depleted (or with reduced charges).
+      
       reply.code(500);
-      return { error: "Mining transaction failed" };
+      return { error: "Mining transaction failed. Node charge consumed to prevent exploit." };
     }
   });
 }

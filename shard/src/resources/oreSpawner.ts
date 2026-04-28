@@ -10,7 +10,7 @@ interface OreSpawnDef {
   y: number;
 }
 
-const ORE_SPAWN_DEFS: OreSpawnDef[] = [
+export const ORE_SPAWN_DEFS: OreSpawnDef[] = [
   // village-square (starter zone) - coal, tin, copper, silver
   { zoneId: "village-square", oreType: "coal", x: 205, y: 115 },
   { zoneId: "village-square", oreType: "coal", x: 410, y: 141 },

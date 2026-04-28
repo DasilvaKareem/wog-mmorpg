@@ -10,7 +10,7 @@ interface FlowerSpawnDef {
   y: number;
 }
 
-const FLOWER_SPAWN_DEFS: FlowerSpawnDef[] = [
+export const FLOWER_SPAWN_DEFS: FlowerSpawnDef[] = [
   // village-square (starter zone) - common flowers, spread to avoid NPC overlap
   { zoneId: "village-square", flowerType: "meadow-lily", x: 260, y: 120 },
   { zoneId: "village-square", flowerType: "meadow-lily", x: 560, y: 120 },

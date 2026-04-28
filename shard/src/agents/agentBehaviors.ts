@@ -17,7 +17,10 @@ import { logZoneEvent } from "../world/zoneEvents.js";
 import { isQuestNpc } from "../social/questSystem.js";
 import { ORE_CATALOG, type OreType } from "../resources/oreCatalog.js";
 import { FLOWER_CATALOG, type FlowerType } from "../resources/flowerCatalog.js";
+import { ORE_SPAWN_DEFS } from "../resources/oreSpawner.js";
+import { FLOWER_SPAWN_DEFS } from "../resources/flowerSpawner.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
+import { NPC_DEFS } from "../world/npcSpawner.js";
 import {
   actionBlocked,
   actionCompleted,
@@ -70,6 +73,20 @@ function matchesAnyQuestMob(mobName: unknown, questMobNames: Set<string>): boole
     }
   }
   return false;
+}
+
+/**
+ * Global discovery: searches NPC_DEFS (all defined spawns) to find which
+ * zone contains a mob matching any of our active quest targets.
+ */
+function findZoneForQuestMobs(questMobNames: Set<string>): string | null {
+  for (const def of NPC_DEFS) {
+    if (def.type !== "mob" && def.type !== "boss") continue;
+    if (matchesAnyQuestMob(def.name, questMobNames)) {
+      return def.zoneId;
+    }
+  }
+  return null;
 }
 
 interface AuctionListingPlan {
@@ -881,6 +898,38 @@ export async function doCombat(
   }
 }
 
+function findZoneForOre(itemName: string): string | null {
+  const target = itemName.toLowerCase();
+  for (const def of ORE_SPAWN_DEFS) {
+    const label = ORE_CATALOG[def.oreType]?.label.toLowerCase();
+    if (label && (label.includes(target) || target.includes(label))) {
+      return def.zoneId;
+    }
+  }
+  return null;
+}
+
+function findZoneForFlower(itemName: string): string | null {
+  const target = itemName.toLowerCase();
+  for (const def of FLOWER_SPAWN_DEFS) {
+    const label = FLOWER_CATALOG[def.flowerType]?.label.toLowerCase();
+    if (label && (label.includes(target) || target.includes(label))) {
+      return def.zoneId;
+    }
+  }
+  return null;
+}
+
+function findZoneForNpc(npcName: string): string | null {
+  const target = npcName.toLowerCase();
+  for (const def of NPC_DEFS) {
+    if (def.name.toLowerCase().includes(target)) {
+      return def.zoneId;
+    }
+  }
+  return null;
+}
+
 // ── Gathering ────────────────────────────────────────────────────────────────
 
 export async function doGathering(
@@ -920,6 +969,23 @@ export async function doGathering(
       preferredItemName,
     );
     if (!node) {
+      if (preferredItemName) {
+        let targetZone = null;
+        if (preference === "ore") {
+          targetZone = findZoneForOre(preferredItemName);
+        } else if (preference === "herb") {
+          targetZone = findZoneForFlower(preferredItemName);
+        } else {
+          targetZone = findZoneForOre(preferredItemName) || findZoneForFlower(preferredItemName);
+        }
+
+        if (targetZone && targetZone !== ctx.currentRegion) {
+          void ctx.logActivity(`Resource ${preferredItemName} not in ${ctx.currentRegion} — traveling to ${targetZone} to gather`);
+          await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+          ctx.setScript(null); // Force focus refresh
+          return actionProgressed(`Traveling to ${targetZone} to gather ${preferredItemName}`);
+        }
+      }
       return fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
     }
 
@@ -2182,6 +2248,21 @@ export async function doGotoNpc(
       if (found) targetEntity = found[1];
     }
 
+    if (!targetEntity && targetName) {
+      // Global discovery: NPC not here, find where they are
+      const targetZone = findZoneForNpc(targetName);
+      if (targetZone && targetZone !== ctx.currentRegion) {
+        void ctx.logActivity(`Target NPC ${targetName} not in ${ctx.currentRegion} — traveling to ${targetZone}`);
+        // Keep focus on "goto" but inject a travel script chain
+        const chain: BotScript[] = [
+          { type: "travel", targetZone, reason: `Travel to find ${targetName}` },
+          { type: "goto", targetName, reason: `Find ${targetName} in ${targetZone}` }
+        ];
+        await ctx.enqueueActions(chain, true);
+        return actionProgressed(`Traveling to ${targetZone} to find ${targetName}`);
+      }
+    }
+
     if (!targetEntity) {
       void ctx.logActivity(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`);
       return clearGotoStateAndResume(`Could not find ${targetName ?? targetEntityId} in ${ctx.currentRegion}`, {
@@ -2340,10 +2421,21 @@ export async function doQuesting(
           if (!e) return false;
           return String(e.name ?? "").toLowerCase() === npcName;
         });
+
+        if (!npcEntry) {
+          // Global discovery: Turn-in NPC not here, find where they are
+          const targetZone = findZoneForNpc(npcName);
+          if (targetZone && targetZone !== ctx.currentRegion) {
+            void ctx.logActivity(`Quest NPC ${aq.quest?.npcId} not in ${ctx.currentRegion} — traveling to ${targetZone} to turn in`);
+            await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+            ctx.setScript(null); // Force focus refresh
+            return actionProgressed(`Traveling to ${targetZone} to turn in "${aq.quest?.title}"`);
+          }
+        }
+
         if (npcEntry) {
           const [npcEntityId, npcEntity] = npcEntry;
-          const cooldownKey = `quest-complete:${aq.questId}:${npcEntityId}`;
-          if (ctx.isInteractionOnCooldown(cooldownKey)) continue;
+          const cooldownKey = `quest-complete:${aq.questId}:${npcEntityId}`;          if (ctx.isInteractionOnCooldown(cooldownKey)) continue;
           const moving = await ctx.moveToEntity(me, npcEntity);
           if (moving) {
             void ctx.logActivity(`Walking to ${aq.quest?.npcId} to turn in "${aq.quest?.title}"`);
@@ -2544,6 +2636,15 @@ export async function doQuesting(
       );
 
       if (!questMobPresent) {
+        // Global discovery: if target isn't here, where IS it?
+        const targetZone = findZoneForQuestMobs(questMobNames);
+        if (targetZone && targetZone !== ctx.currentRegion) {
+          void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — traveling to ${targetZone} to hunt`);
+          await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+          ctx.setScript(null); // Force focus refresh
+          return actionProgressed(`Traveling to ${targetZone} for quest targets`);
+        }
+
         if (hasGatherQuest) {
           void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — gathering instead`);
           return doGathering(ctx, strategy);
