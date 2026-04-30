@@ -2874,10 +2874,10 @@ export const QUEST_CATALOG: Quest[] = [
     id: "emerald_fern_brew",
     title: "Antidote Brewing",
     description:
-      "Fern grinds herbs with practiced hands. 'The corruption sickness spreads through the wildlife. Brew two Healing Potions at the alchemy station — I'll distribute them to the wardens.'",
+      "Fern grinds herbs with practiced hands. 'The corruption sickness spreads through the wildlife. Brew two Minor Health Potions at the alchemy station — I'll distribute them to the wardens.'",
     npcId: "Herbalist Fern",
     prerequisiteQuestId: "emerald_fern_intro",
-    objective: { type: "craft", targetItemName: "Healing Potion", count: 2 },
+    objective: { type: "craft", targetItemName: "Minor Health Potion", count: 2 },
     rewards: { copper: 450, xp: 1100 },
   },
   {
@@ -3254,11 +3254,11 @@ export const QUEST_CATALOG: Quest[] = [
     id: "farm_alch_field_remedy",
     title: "Field Remedy",
     description:
-      "Farmhand Amos wipes sweat from his brow. 'Farming is hard work and the sun doesn't forgive. Brew 3 Health Potions — the field hands need them. An alchemist who can keep workers standing is worth their weight in gold out here.'",
+      "Farmhand Amos wipes sweat from his brow. 'Farming is hard work and the sun doesn't forgive. Brew 3 Minor Health Potions — the field hands need them. An alchemist who can keep workers standing is worth their weight in gold out here.'",
     npcId: "Farmhand Amos",
     objective: {
       type: "craft",
-      targetItemName: "Health Potion",
+      targetItemName: "Minor Health Potion",
       count: 3,
     },
     rewards: {

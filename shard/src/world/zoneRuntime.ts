@@ -508,7 +508,7 @@ let tickInterval: ReturnType<typeof setInterval> | null = null;
 let autoSaveInterval: ReturnType<typeof setInterval> | null = null;
 const TICK_MS = 250; // 4 ticks per second — tighter combat + smoother motion
 // Perf instrumentation — warn when tick body or setInterval drift exceeds budget.
-const SLOW_TICK_WARN_MS = 50;
+const SLOW_TICK_WARN_MS = 200;
 const TICK_DRIFT_WARN_MS = 300;
 const SLOW_ZONE_DETAIL_WARN_MS = 30;
 let lastTickStartAt = 0;

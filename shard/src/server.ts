@@ -101,7 +101,40 @@ import { migrateRedisToPostgres } from "./character/migrateRedisToPostgres.js";
 import { initPostgres, isPostgresConfigured, postgresQuery } from "./db/postgres.js";
 import { startAgentRuntimeReconciler } from "./services/agentRuntimeService.js";
 
-const server = Fastify({ logger: true });
+const server = Fastify({
+  disableRequestLogging: true,
+  logger: {
+    level: "info",
+  },
+});
+
+// Custom request logging to skip high-frequency polling routes
+server.addHook("onResponse", (request, reply, done) => {
+  const url = request.url || "";
+  if (
+    url === "/players/active" ||
+    url.startsWith("/zones/batch") ||
+    url === "/state" ||
+    url === "/health" ||
+    url === "/" ||
+    url === "/favicon.ico"
+  ) {
+    return done();
+  }
+  
+  // Log other requests
+  request.log.info(
+    {
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      responseTime: reply.elapsedTime,
+      remoteAddress: request.ip,
+    },
+    "request completed"
+  );
+  done();
+});
 const ADMIN_SECRET = process.env.ADMIN_SECRET?.trim() || null;
 const REQUIRE_REDIS_PERSISTENCE = !["0", "false", "no", "off"].includes(
   (process.env.REQUIRE_REDIS_PERSISTENCE ?? "true").trim().toLowerCase()

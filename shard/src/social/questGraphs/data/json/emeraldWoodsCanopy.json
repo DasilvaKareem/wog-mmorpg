@@ -291,15 +291,15 @@
             "stageId": "emerald_fern_brew",
             "questId": "emerald_fern_brew",
             "available": {
-              "promptText": "Corruption sickness is spreading through the wildlife. I need Healing Potions brewed now, before the wardens start losing good bodies to preventable rot.",
+              "promptText": "Corruption sickness is spreading through the wildlife. I need Minor Health Potions brewed now, before the wardens start losing good bodies to preventable rot.",
               "acceptLabel": "I'll brew the antidotes.",
-              "acceptedText": "Two Healing Potions. Brew them cleanly; medicine made in panic usually carries panic with it.",
+              "acceptedText": "Two Minor Health Potions. Brew them cleanly; medicine made in panic usually carries panic with it.",
               "effectType": "start_quest",
               "detailsLabel": "Why brew now instead of gathering more?",
               "detailsText": "Because at some point preservation has to become distribution. A satchel full of ingredients is not the same thing as readiness.",
               "freeformLabel": "Let me ask directly.",
               "freeformText": "Then ask. Brewing is where patience becomes accountability.",
-              "freeformPrompt": "Tell Fern what you need before brewing the Healing Potions.",
+              "freeformPrompt": "Tell Fern what you need before brewing the Minor Health Potions.",
               "freeformPlaceholder": "Example: What makes a rushed batch fail?",
               "freeformFallback": "Fern gives a small nod. \"Ask one practical thing, or get to the station.\""
             },
@@ -309,7 +309,7 @@
               "resultText": "Good. Now the wardens have what they need to survive the next push. Which means I can ask you for the one thing still blocking access entirely.",
               "resultEffectType": "complete_quest",
               "secondaryLabel": "Remind me of the work.",
-              "secondaryText": "Two Healing Potions brewed cleanly for Fern's distribution effort.",
+              "secondaryText": "Two Minor Health Potions brewed cleanly for Fern's distribution effort.",
               "declineLabel": "Later.",
               "declineText": "Medicine delayed is just an apology waiting for a body."
             },

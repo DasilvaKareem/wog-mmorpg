@@ -79,7 +79,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 15,
     copperMax: 25,
     autoDrops: [
-      { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Healing Potion
+      { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.3 }, // Health Potion
       { tokenId: 22n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Coal Ore
     ],
     skinningDrops: [
@@ -143,7 +143,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMin: 25,
     copperMax: 40,
     autoDrops: [
-      { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Healing Potion
+      { tokenId: 0n, minQuantity: 1, maxQuantity: 2, chance: 0.4 }, // Health Potion
       { tokenId: 23n, minQuantity: 1, maxQuantity: 2, chance: 0.25 }, // Tin Ore
     ],
     skinningDrops: [
@@ -662,7 +662,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 510,
     autoDrops: [
       { tokenId: 26n, minQuantity: 3, maxQuantity: 5, chance: 0.6 }, // Gold Ore
-      { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Healing Potion
+      { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.5 }, // Health Potion
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
     skinningDrops: [
@@ -721,7 +721,7 @@ export const LOOT_TABLES: Record<string, MobLootTable> = {
     copperMax: 600,
     autoDrops: [
       { tokenId: 26n, minQuantity: 2, maxQuantity: 4, chance: 0.5 }, // Gold Ore
-      { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Healing Potion
+      { tokenId: 0n, minQuantity: 2, maxQuantity: 3, chance: 0.4 }, // Health Potion
       { tokenId: 120n, minQuantity: 1, maxQuantity: 1, chance: 0.15 }, // Shadow Opal
     ],
     skinningDrops: [
