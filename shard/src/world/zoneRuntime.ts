@@ -242,6 +242,17 @@ export interface Entity {
   castingIntent?: CastingIntent;
   /** Swing timer: tick when this entity is next allowed to land a basic attack. */
   nextAttackTick?: number;
+  /** Most recent edict decision that produced the current auto-combat order. */
+  lastEdictDecision?: {
+    edictId: string;
+    edictName: string;
+    actionType: string;
+    targetId?: string;
+    targetName?: string;
+    techniqueId?: string;
+    techniqueName?: string;
+    tick: number;
+  };
   /** Optional per-entity override for base swing time (ms). Used for mobs/bosses without classId. */
   baseSwingMs?: number;
   /** Most recently committed technique for AI variety. */
@@ -567,12 +578,10 @@ function hydrateLivePlayerEntity(raw: Record<string, unknown>): Entity {
     entity.agentId = BigInt(raw.agentId);
   }
   if (raw.cooldowns && !(raw.cooldowns instanceof Map)) {
-    entity.cooldowns = new Map(
-      Object.entries(raw.cooldowns as Record<string, number>).map(([techniqueId, expiresAt]) => [
-        techniqueId,
-        Number(expiresAt) || 0,
-      ])
-    );
+    // Cooldown values are absolute tick counts. world.tick resets to 0 on every
+    // restart, so persisted values would lock all techniques until tick catches up.
+    // Drop cooldowns on rehydration — a few free casts after reconnect is fine.
+    entity.cooldowns = new Map();
   }
   return entity;
 }
@@ -3370,6 +3379,15 @@ async function worldTick() {
 
       if (edictResult.order && !edictResult.techniqueOverride) {
         entity.order = edictResult.order as unknown as typeof entity.order;
+        const target = edictResult.order.targetId ? zone.entities.get(edictResult.order.targetId) : undefined;
+        entity.lastEdictDecision = {
+          edictId: edictResult.edict.id,
+          edictName: edictResult.edict.name,
+          actionType: edictResult.edict.action.type,
+          targetId: target?.id,
+          targetName: target?.name,
+          tick: zone.tick,
+        };
         continue;
       }
 
@@ -3378,8 +3396,27 @@ async function worldTick() {
       if (edictResult.techniqueOverride) {
         const techTarget = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
         entity.order = { action: "technique", targetId: techTarget, techniqueId: edictResult.techniqueOverride.id };
+        const target = zone.entities.get(techTarget) ?? eTarget;
+        entity.lastEdictDecision = {
+          edictId: edictResult.edict.id,
+          edictName: edictResult.edict.name,
+          actionType: edictResult.edict.action.type,
+          targetId: target.id,
+          targetName: target.name,
+          techniqueId: edictResult.techniqueOverride.id,
+          techniqueName: edictResult.techniqueOverride.name,
+          tick: zone.tick,
+        };
       } else {
         entity.order = { action: "attack", targetId: eTarget.id };
+        entity.lastEdictDecision = {
+          edictId: edictResult.edict.id,
+          edictName: edictResult.edict.name,
+          actionType: edictResult.edict.action.type,
+          targetId: eTarget.id,
+          targetName: eTarget.name,
+          tick: zone.tick,
+        };
       }
     }
 

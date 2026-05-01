@@ -244,6 +244,7 @@ export class EdictEditor {
     html += `<div class="ee-presets">`;
     html += `<span class="ee-presets-label">Preset:</span>`;
     html += `<button class="ee-preset-btn" data-preset="dps">DPS</button>`;
+    html += `<button class="ee-preset-btn" data-preset="aggressive">Aggressive</button>`;
     html += `<button class="ee-preset-btn" data-preset="tank">Tank</button>`;
     html += `<button class="ee-preset-btn" data-preset="healer">Healer</button>`;
     html += `</div>`;
@@ -423,7 +424,7 @@ export class EdictEditor {
 
     const preset = target.closest<HTMLElement>("[data-preset]");
     if (preset) {
-      const name = preset.dataset.preset as "dps" | "tank" | "healer";
+      const name = preset.dataset.preset as "dps" | "tank" | "healer" | "aggressive";
       this.applyPreset(name);
       return;
     }
@@ -547,9 +548,6 @@ export class EdictEditor {
       this.updateSummary(idx);
       return;
     }
-    if (target.matches(".ee-select")) {
-      this.applySelectChange(target as HTMLSelectElement);
-    }
   }
 
   private onChange(e: Event) {
@@ -621,24 +619,78 @@ export class EdictEditor {
 
   // ── Presets ───────────────────────────────────────────────────────
 
-  private applyPreset(name: "dps" | "tank" | "healer") {
+  private applyPreset(name: "dps" | "tank" | "healer" | "aggressive") {
     const techs = this.techniques;
     const find = (pred: (t: LearnedTechnique) => boolean) => techs.find(pred);
 
     const heal = find((t) => t.type === "healing");
     const buff = find((t) => t.type === "buff");
     const debuff = find((t) => t.type === "debuff");
+    const attacks = techs.filter((t) => t.type === "attack");
 
     const edicts: Edict[] = [];
-    edicts.push({
-      id: newEdictId(),
-      name: "Flee when critical",
-      enabled: true,
-      conditions: [{ subject: "self", field: "hp_pct", operator: "lt", value: 15 }],
-      action: { type: "flee" },
-    });
 
-    if (name === "healer" && heal) {
+    if (name === "aggressive") {
+      // 1. Emergency Flee (Safety first)
+      edicts.push({
+        id: newEdictId(),
+        name: "Emergency Flee",
+        enabled: true,
+        conditions: [{ subject: "self", field: "hp_pct", operator: "lt", value: 20 }],
+        action: { type: "flee" },
+      });
+
+      // 2. Buff Maintenance (Armor, Infusion, etc.)
+      for (const t of techs.filter((t) => t.type === "buff")) {
+        edicts.push({
+          id: newEdictId(),
+          name: `Maintain ${t.name}`,
+          enabled: true,
+          conditions: [{ subject: "self", field: "active_effect", operator: "not_has", value: "buff" }],
+          action: { type: "use_technique", techniqueId: t.id },
+        });
+      }
+
+      // 3. EXPLICIT ATTACK STACK (Most reliable)
+      // We list every attack technique individually so they all get a chance to fire
+      for (const t of attacks) {
+        edicts.push({
+          id: newEdictId(),
+          name: `Unleash ${t.name}`,
+          enabled: true,
+          conditions: [{ subject: "self", field: "always", operator: "eq", value: true }],
+          action: { type: "use_technique", techniqueId: t.id },
+        });
+      }
+
+      // 4. Finisher / Best Technique Fallback
+      edicts.push({
+        id: newEdictId(),
+        name: "Mana Dump",
+        enabled: true,
+        conditions: [{ subject: "self", field: "always", operator: "eq", value: true }],
+        action: { type: "best_technique", targetPreference: "weakest" },
+      });
+
+      // 5. Basic Attack (Bottom of the barrel)
+      edicts.push({
+        id: newEdictId(),
+        name: "Basic Attack",
+        enabled: true,
+        conditions: [{ subject: "self", field: "always", operator: "eq", value: true }],
+        action: { type: "attack" },
+      });
+    } else {
+      // Default common flee for other presets
+      edicts.push({
+        id: newEdictId(),
+        name: "Flee when critical",
+        enabled: true,
+        conditions: [{ subject: "self", field: "hp_pct", operator: "lt", value: 15 }],
+        action: { type: "flee" },
+      });
+
+      if (name === "healer" && heal) {
       edicts.push({
         id: newEdictId(),
         name: "Emergency self-heal",
@@ -700,6 +752,7 @@ export class EdictEditor {
         conditions: [{ subject: "target", field: "effect_from_self", operator: "not_has", value: "debuff" }],
         action: { type: "use_technique", techniqueId: debuff.id },
       });
+    }
     }
 
     edicts.push({
