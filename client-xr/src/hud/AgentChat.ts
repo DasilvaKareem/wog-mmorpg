@@ -1,6 +1,15 @@
 import type { ZoneEvent } from "../types.js";
 import { getAuthToken } from "../auth.js";
 import { CANDIDATE_BASES, toUrl } from "../api.js";
+import { playSoundEffect } from "../sfx.js";
+
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
+}
+
 const MAX_MESSAGES = 80;
 const COLLAPSED_VISIBLE = 6;
 
@@ -52,6 +61,13 @@ const SCRIPT_LABELS: Record<string, string> = {
   travel: "Traveling",
   shop: "Shopping",
   craft: "Crafting",
+  brew: "Brewing potions",
+  cook: "Cooking",
+  skin: "Skinning",
+  enchant: "Enchanting",
+  leatherwork: "Leatherworking",
+  jewelcraft: "Jewelcrafting",
+  farm: "Farming",
   quest: "Questing",
   dungeon: "Running dungeon",
   idle: "Idling",
@@ -100,6 +116,15 @@ interface AgentStatus {
     targetName?: string | null;
     nodeType?: string | null;
   } | null;
+  activeOrder?: {
+    action: string;
+    targetId?: string | null;
+    targetName?: string | null;
+    techniqueId?: string | null;
+    techniqueName?: string | null;
+    edictName?: string | null;
+    edictAction?: string | null;
+  } | null;
   actionQueue: Array<{
     type: string;
     reason: string | null;
@@ -113,12 +138,31 @@ interface AgentStatus {
   zoneId?: string | null;
 }
 
+function humanizeOrder(order: NonNullable<AgentStatus["activeOrder"]>): string {
+  const target = order.targetName ? ` → ${order.targetName}` : "";
+  if (order.action === "technique") return `Casting ${order.techniqueName ?? order.techniqueId ?? "technique"}${target}`;
+  if (order.action === "attack") return `Auto-attacking${target}`;
+  if (order.action === "move") return order.edictAction === "flee" ? "Fleeing" : "Moving";
+  return order.action.replace(/-/g, " ");
+}
+
+function renderActivityLine(text: string): string {
+  const match = text.match(/^\[edict:\s*([^\]]+)\]\s*(.*)$/i);
+  if (!match) return `<div class="ai-recent-item">${escapeHtml(text)}</div>`;
+  return `
+    <div class="ai-recent-item edict">
+      <span class="ai-edict-chip">${escapeHtml(match[1])}</span>
+      <span>${escapeHtml(match[2] || text)}</span>
+    </div>`;
+}
+
 export class AgentChat {
   private root: HTMLDivElement;
   private tabBar: HTMLDivElement;
   private log: HTMLDivElement;
   private aiPanel: HTMLDivElement;
   private input: HTMLInputElement;
+  private micBtn: HTMLButtonElement;
   private autocompleteEl: HTMLDivElement;
   private messages: ChatEntry[] = [];
   private seenEventIds = new Set<string>();
@@ -131,6 +175,10 @@ export class AgentChat {
   private activeTab: ActiveTab = "chat";
   private aiStatus: AgentStatus | null = null;
   private aiPollTimer: ReturnType<typeof setInterval> | null = null;
+
+  // PTT / Speech Recognition
+  private recognition: any = null;
+  private isListening = false;
 
   constructor() {
     this.root = document.createElement("div");
@@ -150,6 +198,9 @@ export class AgentChat {
     this.autocompleteEl.className = "agent-chat-autocomplete";
     this.autocompleteEl.hidden = true;
 
+    const inputWrap = document.createElement("div");
+    inputWrap.className = "agent-chat-input-wrap";
+
     this.input = document.createElement("input");
     this.input.type = "text";
     this.input.className = "agent-chat-input";
@@ -157,18 +208,89 @@ export class AgentChat {
     this.input.spellcheck = false;
     this.input.autocomplete = "off";
 
+    this.micBtn = document.createElement("button");
+    this.micBtn.type = "button";
+    this.micBtn.className = "agent-chat-mic";
+    this.micBtn.innerHTML = "\u{1F399}"; // 🎙️
+    this.micBtn.title = "Push to Talk (Hold V)";
+
+    inputWrap.appendChild(this.input);
+    inputWrap.appendChild(this.micBtn);
+
     this.renderTabs();
 
     this.root.appendChild(this.tabBar);
     this.root.appendChild(this.log);
     this.root.appendChild(this.aiPanel);
     this.root.appendChild(this.autocompleteEl);
-    this.root.appendChild(this.input);
+    this.root.appendChild(inputWrap);
     document.body.appendChild(this.root);
 
+    this.initSpeechRecognition();
     this.injectStyles();
     this.bindEvents();
     this.collapse();
+  }
+
+  // ── PTT / Speech Recognition ────────────────────────────────────
+
+  private initSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      this.micBtn.style.display = "none";
+      return;
+    }
+
+    this.recognition = new SpeechRecognition();
+    this.recognition.continuous = false;
+    this.recognition.interimResults = false;
+    this.recognition.lang = "en-US";
+
+    this.recognition.onstart = () => {
+      this.isListening = true;
+      this.micBtn.classList.add("listening");
+      this.input.placeholder = "Listening...";
+      playSoundEffect("ui_button_click");
+    };
+
+    this.recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript) {
+        this.input.value = transcript;
+        void this.send();
+      }
+    };
+
+    this.recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      this.stopListening();
+      if (event.error === "not-allowed") {
+        this.push({ role: "system", text: "Microphone access denied.", time: Date.now(), color: "#ff8866" });
+      }
+    };
+
+    this.recognition.onend = () => {
+      this.stopListening();
+    };
+  }
+
+  private startListening() {
+    if (!this.recognition || this.isListening) return;
+    try {
+      this.recognition.start();
+    } catch (err) {
+      console.error("Failed to start speech recognition:", err);
+    }
+  }
+
+  private stopListening() {
+    if (!this.isListening) return;
+    this.isListening = false;
+    this.micBtn.classList.remove("listening");
+    this.input.placeholder = this.activeTab === "ai" ? "Command your agent..." : "Send a command to your agent...";
+    try {
+      this.recognition.stop();
+    } catch {}
   }
 
   // ── Tab management ───────────────────────────────────────────────
@@ -193,12 +315,24 @@ export class AgentChat {
 
   private renderTabs() {
     this.tabBar.innerHTML = "";
+    const drag = document.createElement("div");
+    drag.className = "agent-chat-drag-handle";
+    drag.setAttribute("data-drag-handle", "chat");
+    drag.title = "Drag chat panel";
+    drag.textContent = ":::";
+    this.tabBar.appendChild(drag);
     for (const [id, label] of [["chat", "Chat"], ["ai", "Bot"]] as const) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "agent-chat-tab" + (this.activeTab === id ? " active" : "");
       btn.textContent = label;
-      btn.addEventListener("click", () => this.setTab(id));
+      btn.addEventListener("pointerdown", (e) => {
+        e.stopPropagation();
+      });
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.setTab(id);
+      });
       this.tabBar.appendChild(btn);
     }
   }
@@ -286,6 +420,16 @@ export class AgentChat {
         ` : ""}
       </div>`;
 
+    const activeOrder = s.activeOrder;
+    const executingHtml = activeOrder ? `
+      <div class="ai-section">
+        <div class="ai-label">EXECUTING</div>
+        <div class="ai-exec">
+          <div class="ai-exec-title">${escapeHtml(humanizeOrder(activeOrder))}</div>
+          ${activeOrder.edictName ? `<div class="ai-exec-source">Edict: ${escapeHtml(activeOrder.edictName)}</div>` : ""}
+        </div>
+      </div>` : "";
+
     const queueHtml = `
       <div class="ai-section">
         <div class="ai-label">NEXT UP <span class="ai-count">${s.actionQueue.length}</span></div>
@@ -304,10 +448,10 @@ export class AgentChat {
     const recentHtml = s.recentActivities.length > 0 ? `
       <div class="ai-section">
         <div class="ai-label">HISTORY</div>
-        ${s.recentActivities.slice().reverse().map((a) => `<div class="ai-recent-item">${escapeHtml(a)}</div>`).join("")}
+        ${s.recentActivities.slice().reverse().map(renderActivityLine).join("")}
       </div>` : "";
 
-    this.aiPanel.innerHTML = headerHtml + activityHtml + queueHtml + recentHtml;
+    this.aiPanel.innerHTML = headerHtml + activityHtml + executingHtml + queueHtml + recentHtml;
   }
 
   setWallet(address: string | null) {
@@ -342,6 +486,7 @@ export class AgentChat {
     this.show();
     this.expanded = true;
     this.root.classList.add("expanded");
+    this.clampExpandedIntoViewport();
     this.input.focus();
     this.scrollToBottom();
     if (this.activeTab === "ai") {
@@ -350,10 +495,52 @@ export class AgentChat {
     }
   }
 
+  private clampExpandedIntoViewport() {
+    // Wait one frame so expanded height is measurable.
+    requestAnimationFrame(() => {
+      const rect = this.root.getBoundingClientRect();
+      let nextLeft = rect.left;
+      let nextTop = rect.top;
+      let changed = false;
+
+      if (rect.right > window.innerWidth - 8) {
+        nextLeft -= rect.right - (window.innerWidth - 8);
+        changed = true;
+      }
+      if (rect.left < 8) {
+        nextLeft = 8;
+        changed = true;
+      }
+      if (rect.bottom > window.innerHeight - 8) {
+        nextTop -= rect.bottom - (window.innerHeight - 8);
+        changed = true;
+      }
+      if (rect.top < 8) {
+        nextTop = 8;
+        changed = true;
+      }
+
+      if (!changed) return;
+      this.root.style.left = `${Math.round(nextLeft)}px`;
+      this.root.style.top = `${Math.round(nextTop)}px`;
+      this.root.style.right = "auto";
+      this.root.style.bottom = "auto";
+      try {
+        localStorage.setItem("wog:panel-pos:agent-chat", JSON.stringify({
+          left: Math.round(nextLeft),
+          top: Math.round(nextTop),
+        }));
+      } catch {
+        // ignore storage errors
+      }
+    });
+  }
+
   /** Collapse and blur */
   collapse() {
     this.expanded = false;
     this.root.classList.remove("expanded");
+    this.root.classList.add("chat-hidden");
     this.input.blur();
     this.input.value = "";
     this.hideAutocomplete();
@@ -378,7 +565,6 @@ export class AgentChat {
   /** Hide the chat panel entirely */
   hide() {
     this.collapse();
-    this.root.classList.add("chat-hidden");
   }
 
   /** Toggle visibility; when showing, also expand the input for typing */
@@ -593,6 +779,33 @@ export class AgentChat {
   // ── Events ────────────────────────────────────────────────────────
 
   private bindEvents() {
+    this.micBtn.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      this.startListening();
+    });
+    window.addEventListener("pointerup", () => {
+      this.stopListening();
+    });
+
+    window.addEventListener("keydown", (e) => {
+      // Global PTT shortcut (V key)
+      if (e.key.toLowerCase() === "v" && !this.isListening) {
+        // Ignore if typing in any input/textarea
+        const tag = document.activeElement?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        
+        e.preventDefault();
+        this.expand();
+        this.startListening();
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.key.toLowerCase() === "v") {
+        this.stopListening();
+      }
+    });
+
     this.input.addEventListener("keydown", (e) => {
       e.stopPropagation();
 
@@ -644,7 +857,7 @@ export class AgentChat {
   // ── Styles ────────────────────────────────────────────────────────
 
   private injectStyles() {
-    if (document.getElementById("agent-chat-styles")) return;
+    document.getElementById("agent-chat-styles")?.remove();
     const style = document.createElement("style");
     style.id = "agent-chat-styles";
     style.textContent = `
@@ -652,7 +865,8 @@ export class AgentChat {
         position: fixed;
         bottom: 12px;
         left: 12px;
-        width: 420px;
+        width: 620px;
+        max-width: calc(100vw - 24px);
         z-index: 15;
         font: 12px/1.5 'Courier New', monospace;
         transition: background 150ms ease;
@@ -696,6 +910,20 @@ export class AgentChat {
         letter-spacing: 0.14em;
         text-transform: uppercase;
         cursor: pointer;
+      }
+
+      .agent-chat-drag-handle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        flex: 0 0 28px;
+        color: rgba(239, 201, 127, 0.45);
+        font: 700 11px/1 "Courier New", monospace;
+        letter-spacing: 1px;
+        user-select: none;
+        cursor: move;
+        border-right: 1px solid rgba(239, 201, 127, 0.12);
       }
 
       .agent-chat-tab:hover { color: rgba(239, 201, 127, 0.85); }
@@ -840,12 +1068,52 @@ export class AgentChat {
         margin-top: 2px;
       }
 
+      .ai-exec {
+        padding: 6px 8px;
+        background: rgba(127, 214, 190, 0.08);
+        border-left: 2px solid #7fd6be;
+        font-size: 11px;
+      }
+
+      .ai-exec-title {
+        color: #f4ead0;
+        font-weight: bold;
+      }
+
+      .ai-exec-source {
+        color: rgba(127, 214, 190, 0.85);
+        font-size: 10px;
+        margin-top: 2px;
+      }
+
       .ai-recent-item {
         padding: 2px 8px;
         color: rgba(244, 234, 208, 0.55);
         font-size: 10px;
         border-left: 1px solid rgba(239, 201, 127, 0.15);
         margin-bottom: 1px;
+      }
+
+      .ai-recent-item.edict {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        color: rgba(244, 234, 208, 0.75);
+        border-left-color: rgba(127, 214, 190, 0.55);
+        background: rgba(127, 214, 190, 0.04);
+      }
+
+      .ai-edict-chip {
+        flex: 0 1 auto;
+        max-width: 150px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #7fd6be;
+        border: 1px solid rgba(127, 214, 190, 0.25);
+        border-radius: 4px;
+        padding: 0 4px;
+        font-size: 9px;
       }
 
       .ai-empty {
@@ -914,22 +1182,55 @@ export class AgentChat {
         font-size: 11px;
       }
 
-      .agent-chat-input {
+      .agent-chat-input-wrap {
         display: none;
         width: 100%;
-        padding: 8px 10px;
-        border: none;
         border-top: 1px solid rgba(239, 201, 127, 0.12);
         background: rgba(0, 0, 0, 0.3);
-        color: #f4ead0;
-        font: 12px/1.4 'Courier New', monospace;
-        outline: none;
         border-radius: 0 0 8px 8px;
+        align-items: center;
         box-sizing: border-box;
       }
 
-      #agent-chat.expanded .agent-chat-input {
-        display: block;
+      #agent-chat.expanded .agent-chat-input-wrap {
+        display: flex;
+      }
+
+      .agent-chat-input {
+        flex: 1;
+        padding: 8px 10px;
+        border: none;
+        background: transparent;
+        color: #f4ead0;
+        font: 12px/1.4 'Courier New', monospace;
+        outline: none;
+      }
+
+      .agent-chat-mic {
+        background: transparent;
+        border: none;
+        color: rgba(239, 201, 127, 0.5);
+        padding: 4px 10px;
+        font-size: 16px;
+        cursor: pointer;
+        transition: color 0.15s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .agent-chat-mic:hover {
+        color: #efc97f;
+      }
+
+      .agent-chat-mic.listening {
+        color: #ff5c7a;
+        animation: micPulse 1.2s infinite;
+      }
+
+      @keyframes micPulse {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.2); opacity: 0.7; }
       }
 
       .agent-chat-input::placeholder {

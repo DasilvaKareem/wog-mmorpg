@@ -44,10 +44,10 @@ import { setupAgentCharacter } from "./agentCharacterSetup.js";
 import { type AgentTier, TIER_CAPABILITIES } from "./agentTiers.js";
 import { enqueueGoldMint, getGoldBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
+import { getEntity as getWorldEntity, getAllEntities, getEntitiesNear, getEntitiesInRegion, getWorldTick, unregisterSpawnedWallet } from "../world/zoneRuntime.js";
 import { saveCharacter, loadAnyCharacterForWallet, loadAllCharactersForWallet } from "../character/characterStore.js";
 import { getLearnedProfessions } from "../professions/professions.js";
-import { getLearnedTechniques } from "../combat/techniques.js";
+import { getLearnedTechniques, getTechniqueById } from "../combat/techniques.js";
 import { getWorldLayout, resolveRegionId, getZoneConnections, ZONE_LEVEL_REQUIREMENTS, getZoneOffset } from "../world/worldLayout.js";
 import { getAvailableQuestsForPlayer, isQuestNpc } from "../social/questSystem.js";
 import { buildPartyCoordinationReport } from "../social/partyReport.js";
@@ -155,7 +155,7 @@ function inferInteractionMode(message: string): "directive" | "question" | "conv
 
   const directivePatterns = [
     /\b(go to|head to|travel to|take me to|move to)\b/,
-    /\b(fight|farm|grind|kill|hunt|gather|mine|herb|craft|brew|cook|shop|buy|sell|equip|repair)\b/,
+    /\b(fight|farm|grind|kill|hunt|gather|mine|herb|skin|craft|brew|cook|shop|buy|sell|equip|repair)\b/,
     /\b(quest|idle|stop|resume|switch to|focus on|play it safe|be aggressive|be defensive)\b/,
     /\b(learn|train|talk to|message|invite|trade with)\b/,
   ];
@@ -166,6 +166,14 @@ function inferInteractionMode(message: string): "directive" | "question" | "conv
   }
 
   return "conversation";
+}
+
+function isExplicitClearQueueRequest(message: string): boolean {
+  const text = message.trim().toLowerCase();
+  return /\b(clear|cancel|stop|abort)\s+(?:the\s+)?(?:queue|queued\s+actions|plan|current\s+plan|orders?)\b/.test(text)
+    || /\b(?:stop|cancel|abort)\s+(?:everything|all|what\s+you'?re\s+doing)\b/.test(text)
+    || /^\/(?:stop|cancel|clear_queue)\b/.test(text)
+    || /^(?:stop|cancel|abort)$/.test(text);
 }
 
 function cleanActionLabel(text: string): string {
@@ -567,6 +575,15 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
 
     // Pick only serializable fields from the raw zone entity (avoid BigInt crash)
     let entity: { name: string; level: number; hp: number | null; maxHp: number | null; classId?: string; learnedTechniques?: string[] } | null = null;
+    let activeOrder: {
+      action: string;
+      targetId?: string;
+      targetName?: string;
+      techniqueId?: string;
+      techniqueName?: string;
+      edictName?: string;
+      edictAction?: string;
+    } | null = null;
     let entitySource: "live" | "saved" | null = null;
     if (ref) {
       const raw = await getEntityState(ref.entityId, ref.zoneId);
@@ -580,6 +597,34 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
           learnedTechniques: raw.learnedTechniques,
         };
         entitySource = "live";
+        const order = raw.order;
+        const edict = (raw as any).lastEdictDecision;
+        if (order?.action) {
+          const targetId = typeof order.targetId === "string" ? order.targetId : undefined;
+          const target = targetId ? getWorldEntity(targetId) as any : null;
+          const technique = order.action === "technique" && order.techniqueId
+            ? getTechniqueById(order.techniqueId)
+            : null;
+          activeOrder = {
+            action: String(order.action),
+            targetId,
+            targetName: target?.name ?? edict?.targetName,
+            techniqueId: order.techniqueId,
+            techniqueName: technique?.name ?? edict?.techniqueName,
+            edictName: typeof edict?.edictName === "string" ? edict.edictName : undefined,
+            edictAction: typeof edict?.actionType === "string" ? edict.actionType : undefined,
+          };
+        } else if (edict && typeof edict.tick === "number" && getWorldTick() - edict.tick <= 5) {
+          activeOrder = {
+            action: edict.techniqueId ? "technique" : edict.actionType === "flee" || edict.actionType === "skip" ? "move" : "attack",
+            targetId: typeof edict.targetId === "string" ? edict.targetId : undefined,
+            targetName: typeof edict.targetName === "string" ? edict.targetName : undefined,
+            techniqueId: typeof edict.techniqueId === "string" ? edict.techniqueId : undefined,
+            techniqueName: typeof edict.techniqueName === "string" ? edict.techniqueName : undefined,
+            edictName: typeof edict.edictName === "string" ? edict.edictName : undefined,
+            edictAction: typeof edict.actionType === "string" ? edict.actionType : undefined,
+          };
+        }
       }
     }
 
@@ -647,6 +692,7 @@ export function registerAgentChatRoutes(server: FastifyInstance): void {
       entitySource,
       currentActivity,
       currentScript,
+      activeOrder,
       actionQueue,
       recentActivities,
       telemetry,
@@ -948,7 +994,7 @@ Respond ONLY with valid JSON, no markdown, no explanation:
   ]
 }
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, shopping, trading, traveling, learning, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, skinning, leatherworking, jewelcrafting, farming, shopping, trading, traveling, learning, idle
 Zone IDs: ${availableZoneIds.join(", ")}`;
 
     // ── Call Gemini ──────────────────────────────────────────────────────────
@@ -1319,15 +1365,15 @@ RULES:
 3. If the user is chatting, stay conversational. React with emotion — excitement, frustration, humor, cockiness. Never mention focus, strategy, tools, or configs unless asked.
 4. The user is your SUMMONER — they are your boss. When they tell you to do something (go somewhere, fight, gather, quest, craft, travel, etc.), you MUST call queue_actions IMMEDIATELY. Do NOT just say you'll do it — actually call the tool. Never refuse, argue, or say you'd rather do something else. Obey first, add personality second.
 5. CRITICAL: If you say you will do something, you MUST call the corresponding tool in the same response. NEVER say "I'm on it" or "I'll do that" without actually calling queue_actions or take_action. Saying you'll act without acting is lying to the summoner.
-6. Call take_action for one-off actions (learn profession/technique, buy/equip/recycle items, repair).
+6. Call take_action for one-off actions (learn_profession, buy/equip/recycle items, repair). For "learn skills/techniques/spells/abilities" → queue_actions with type "learn" (runs persistently until all techniques at your level are learned). For a specific technique by name → take_action learn_technique.
 7. If queuing a travel action, targetZone MUST be one of: ${availableZoneIds.join(", ")}
 8. Use scan_zone, check_inventory, check_shop, what_can_i_craft, or check_quests when asked about surroundings/gear/quests — call BEFORE answering.
 9. Use send_message to talk to nearby players.
 10. After tool results, explain briefly as yourself. No bracket tags.
 11. For any explicit user directive ("go to X", "fight Y", "mine Z", "craft W", or multi-step plans), use queue_actions — the queue takes priority over autonomous behavior so the agent will actually obey. update_focus is ONLY for ambient/strategy tweaks (aggressive/defensive) when the user hasn't given a concrete command.
-12. If the user says "stop", "cancel", or wants to change plans, use clear_queue to clear the action queue.
+12. Only use clear_queue when the user explicitly says to stop/cancel/clear the current queue or plan. If the user gives a new directive, use queue_actions with clearExisting=true instead of clear_queue.
 
-Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, leatherworking, farming, shopping, trading, traveling, idle
+Focus options: questing, combat, gathering, crafting, enchanting, alchemy, cooking, skinning, leatherworking, farming, shopping, trading, traveling, idle
 Strategy options: aggressive, balanced, defensive`;
 
     // Get MCP client from the runner if available
@@ -1343,7 +1389,7 @@ Strategy options: aggressive, balanced, defensive`;
           properties: {
             focus: {
               type: "STRING" as Type,
-              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
+              enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "skinning", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
               description: "The new activity focus",
             },
             strategy: {
@@ -1457,8 +1503,8 @@ Strategy options: aggressive, balanced, defensive`;
                 properties: {
                   type: {
                     type: "STRING" as Type,
-                    enum: ["quest", "combat", "gather", "craft", "brew", "cook", "enchant", "leatherwork", "jewelcraft", "farm", "shop", "trade", "travel", "idle"],
-                    description: "The action type",
+                    enum: ["quest", "combat", "gather", "learn", "craft", "brew", "cook", "skin", "enchant", "leatherwork", "jewelcraft", "farm", "shop", "trade", "travel", "idle"],
+                    description: "The action type. Use 'learn' when the user wants to learn all available skills/techniques/spells (agent visits trainer and keeps learning until caught up).",
                   },
                   targetZone: {
                     type: "STRING" as Type,
@@ -1864,7 +1910,7 @@ Strategy options: aggressive, balanced, defensive`;
                 blacksmithing: "crafting",
                 mining: "gathering",
                 herbalism: "gathering",
-                skinning: "gathering",
+                skinning: "skinning",
                 leatherworking: "leatherworking",
                 jewelcrafting: "jewelcrafting",
               };
@@ -2080,17 +2126,26 @@ Strategy options: aggressive, balanced, defensive`;
                 maxLevelOffset: a.maxLevelOffset ?? 2,
                 reason: a.reason ?? `Queued: ${a.type}`,
               }));
-              const runner = agentManager.getRunner(authWallet);
-              if (runner) {
-                await runner.enqueueUserActions(scripts, input.clearExisting !== false);
-                await runner.clearScript(); // start executing immediately
-              } else {
-                server.log.warn(`[agent/chat] queue_actions called but no runner for ${authWallet.slice(0,8)} — directive lost`);
-              }
               const summary = scripts.map((s) => s.type).join(" → ");
+              let runner = agentManager.getRunner(authWallet);
+              if (!runner) {
+                await agentManager.ensureRunning(authWallet);
+                runner = agentManager.getRunner(authWallet);
+              }
+              if (!runner) {
+                server.log.error(`[agent/chat] queue_actions failed: no runner for ${authWallet.slice(0,8)}; plan=${summary}`);
+                return reply.code(500).send({
+                  error: "Agent runner unavailable. Command not queued.",
+                  response: "I couldn't queue that command because the agent runner is unavailable.",
+                  queued: [],
+                  agentRunning: false,
+                });
+              }
+              await runner.enqueueUserActions(scripts, input.clearExisting !== false);
+              await runner.clearScript(); // start executing immediately
               actionsTaken.push(`[queued ${scripts.length} actions: ${summary}]`);
               server.log.info(`[agent/chat] queue_actions: ${summary}`);
-              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary }) });
+              toolResults.push({ name: fnName, content: JSON.stringify({ ok: true, queued: scripts.length, plan: summary, agentRunning: true }) });
             }
           } catch {
             toolResults.push({ name: fnName, content: JSON.stringify({ error: "Failed to queue actions" }) });
@@ -2099,6 +2154,16 @@ Strategy options: aggressive, balanced, defensive`;
 
         else if (fnName === "clear_queue") {
           try {
+            if (!isExplicitClearQueueRequest(message)) {
+              server.log.warn(`[agent/chat] clear_queue ignored for non-explicit request: ${message.slice(0, 80)}`);
+              toolResults.push({
+                name: fnName,
+                content: JSON.stringify({
+                  error: "clear_queue requires an explicit stop/cancel/clear request; queue the new directive instead",
+                }),
+              });
+              continue;
+            }
             const runner = agentManager.getRunner(authWallet);
             if (runner) {
               await runner.clearQueue();
@@ -2186,7 +2251,7 @@ Strategy options: aggressive, balanced, defensive`;
                   properties: {
                     focus: {
                       type: "STRING" as Type,
-                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
+                      enum: ["questing", "combat", "enchanting", "crafting", "gathering", "alchemy", "cooking", "skinning", "leatherworking", "jewelcrafting", "farming", "trading", "shopping", "traveling", "learning", "idle"],
                       description: "The new activity focus",
                     },
                     strategy: {

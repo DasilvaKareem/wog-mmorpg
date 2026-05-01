@@ -197,13 +197,14 @@ export class EdictEditor {
     this.container.addEventListener("click", (e) => this.onClick(e));
     this.container.addEventListener("change", (e) => this.onChange(e));
     this.container.addEventListener("input", (e) => this.onInput(e));
-    this.container.addEventListener("pointerdown", (e) => {
-      if ((e.target as HTMLElement).closest(".ee-select")) e.stopPropagation();
-    });
     this.render();
   }
 
   setTechniques(techs: LearnedTechnique[]) {
+    if (this.isEditorControlActive()) {
+      this.techniques = techs;
+      return;
+    }
     this.techniques = techs;
     this.render();
   }
@@ -213,6 +214,7 @@ export class EdictEditor {
     // saves; if the user is mid-edit (or a save silently failed), overwriting
     // here would erase their work.
     if (this.loaded && this.dirty) return;
+    if (this.loaded && this.isEditorControlActive()) return;
     // Track the currently-expanded edict by id so the card stays open after a
     // poll/save round-trip (otherwise the save looks like it reverted).
     const prevEditingId =
@@ -232,6 +234,11 @@ export class EdictEditor {
       this.editingIdx = null;
     }
     this.render();
+  }
+
+  private isEditorControlActive(): boolean {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && !!active.closest(".ee-wrap") && active.matches("select, input, textarea");
   }
 
   // ── Render ────────────────────────────────────────────────────────
@@ -579,8 +586,11 @@ export class EdictEditor {
       else if (role === "cond-val") cond.value = target.value;
       this.markDirty();
       this.setStatus(`Changed ${FIELD_LABELS[cond.field] ?? cond.field}. Save to apply.`, "warn", false);
-      if (structuralChange) this.render();
-      else this.updateSummary(idx);
+      if (structuralChange) {
+        requestAnimationFrame(() => this.render());
+      } else {
+        this.updateSummary(idx);
+      }
       return;
     }
 
@@ -611,8 +621,11 @@ export class EdictEditor {
       }
       this.markDirty();
       this.setStatus(`Changed action to ${ACTION_LABELS[act.type] ?? act.type}. Save to apply.`, "warn", false);
-      if (structuralChange) this.render();
-      else this.updateSummary(idx);
+      if (structuralChange) {
+        requestAnimationFrame(() => this.render());
+      } else {
+        this.updateSummary(idx);
+      }
       return;
     }
   }

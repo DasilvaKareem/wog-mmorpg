@@ -1,4 +1,5 @@
 import type { Entity, WorldLayout } from "../types.js";
+import { playSoundEffect } from "../sfx.js";
 
 const TYPE_DOT_COLORS: Record<string, string> = {
   player: "#44ddff",
@@ -111,6 +112,7 @@ export class WorldMap {
     this.scale = this.fitScale;
     this.recenter();
     this.loop();
+    playSoundEffect("ui_map_open");
   }
 
   close() {
@@ -119,6 +121,7 @@ export class WorldMap {
     this.root.style.display = "none";
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
     this.rafHandle = null;
+    playSoundEffect("ui_dialog_close");
   }
 
   update(

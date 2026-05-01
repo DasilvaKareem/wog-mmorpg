@@ -170,6 +170,7 @@ function focusToDirective(focus: AgentFocus, targetZone?: string): string {
     case "crafting":   return "Craft items at the forge. Gather materials first if needed.";
     case "alchemy":    return "Brew potions and elixirs. Gather herbs if ingredients are low.";
     case "cooking":    return "Cook food from ingredients you already own. HP regenerates passively out of combat — only cook if you have ingredients on hand.";
+    case "skinning":   return "Skin corpses for leather, pelts, and bone. Fight beasts if no corpses are available.";
     case "enchanting": return "Enchant your weapon. Brew elixirs first if you have none.";
     case "shopping":   return "Buy and equip the best gear you can afford.";
     case "traveling":  return targetZone ? `Travel to ${targetZone} as quickly as possible.` : "Explore and travel to new zones.";
@@ -199,6 +200,7 @@ function focusToScript(
     case "crafting":   return { type: "craft",   reason: "User focus: crafting" };
     case "alchemy":    return { type: "brew",    reason: "User focus: alchemy" };
     case "cooking":    return { type: "cook",    reason: "User focus: cooking" };
+    case "skinning":   return { type: "skin",    reason: "User focus: skinning" };
     case "enchanting": return { type: "enchant", reason: "User focus: enchanting" };
     case "shopping":   return { type: "shop",    reason: "User focus: shopping" };
     case "trading":    return { type: "trade",   reason: "User focus: trading" };
@@ -1821,6 +1823,7 @@ export class AgentRunner {
       case "craft":   return behaviors.doCrafting(ctx, strategy);
       case "brew":    return behaviors.doAlchemy(ctx, strategy);
       case "cook":    return behaviors.doCooking(ctx, strategy);
+      case "skin":    return behaviors.doSkinning(ctx, strategy);
       case "quest":   return behaviors.doQuesting(ctx, strategy, (l) => this.findNextZoneForLevel(l));
       case "learn": {
         const learnCooldownKey = "learn-technique";
@@ -1833,6 +1836,12 @@ export class AgentRunner {
         if (result.ok) {
           this.clearFailure(learnCooldownKey);
           return actionProgressed(result.reason);
+        }
+        // Terminal: nothing left to learn — exit immediately
+        if (result.reason.includes("already learned all") || result.reason.includes("no ") && result.reason.includes("techniques")) {
+          this.currentScript = null;
+          void this.logActivity?.(`learn complete: ${result.reason}`);
+          return actionBlocked(result.reason, { failureKey: learnCooldownKey, endpoint: "/techniques/learn", category: "strategic" });
         }
         // Back off 30s on any failure to prevent spam
         this.setInteractionCooldown(learnCooldownKey, 30_000);

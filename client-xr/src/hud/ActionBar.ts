@@ -1,3 +1,5 @@
+import { playSoundEffect } from "../sfx.js";
+
 interface ActionBarButton {
   id: string;
   icon: string;
@@ -9,6 +11,7 @@ interface ActionBarButton {
 export class ActionBar {
   private container: HTMLDivElement;
   private buttons: ActionBarButton[] = [];
+  private activeIds = new Set<string>();
 
   constructor() {
     this.container = document.createElement("div");
@@ -37,7 +40,15 @@ export class ActionBar {
     this.container.querySelectorAll(".ab-btn").forEach((el) => {
       const id = (el as HTMLElement).dataset.id;
       const btn = this.buttons.find((b) => b.id === id);
-      if (btn) el.addEventListener("click", btn.onClick);
+      if (id) {
+        el.classList.toggle("active", this.activeIds.has(id));
+      }
+      if (btn) {
+        el.addEventListener("click", () => {
+          playSoundEffect("ui_button_click");
+          btn.onClick();
+        });
+      }
     });
   }
 
@@ -61,6 +72,14 @@ export class ActionBar {
     btn.classList.remove("ab-pulse");
     void btn.offsetWidth;
     btn.classList.add("ab-pulse");
+  }
+
+  setActive(id: string, active: boolean) {
+    if (active) this.activeIds.add(id);
+    else this.activeIds.delete(id);
+    const btn = this.container.querySelector<HTMLElement>(`.ab-btn[data-id="${id}"]`);
+    if (!btn) return;
+    btn.classList.toggle("active", active);
   }
 
   private injectStyles() {
@@ -97,6 +116,11 @@ export class ActionBar {
       }
       .ab-btn:active {
         background: rgba(40, 70, 55, 0.95);
+      }
+      .ab-btn.active {
+        background: rgba(30, 74, 56, 0.95);
+        border-color: rgba(68, 255, 136, 0.92);
+        box-shadow: inset 0 0 0 1px rgba(68, 255, 136, 0.35), 0 0 0 1px rgba(68, 255, 136, 0.25);
       }
 
       .ab-icon {

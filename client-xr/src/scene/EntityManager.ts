@@ -4,6 +4,7 @@ import type { Entity, ElevationProvider, VisibleIntent } from "../types.js";
 import type { EnvironmentAssets } from "./EnvironmentAssets.js";
 import { resolveCanonicalArmorPieceId } from "./ArmorSystem.js";
 import { getGradientMap, NO_OUTLINE_LAYER } from "./ToonPipeline.js";
+import { playSoundEffect } from "../sfx.js";
 
 // ── Appearance color maps (matched to actual server values) ─────────
 
@@ -1138,6 +1139,7 @@ interface EntityObject {
   combatRing: THREE.Mesh | null;
   /** Current opacity of combatRing — lerps 0↔1 so it fades in/out cleanly */
   combatRingAlpha: number;
+  isAttacking: boolean;
 }
 
 export class EntityManager {
@@ -1324,6 +1326,8 @@ export class EntityManager {
           this.triggerDamage(existing, -hpDelta, {
             critical: meta?.critical,
             blocked: meta?.blocked,
+            dodged: meta?.dodged,
+            ranged: (meta?.damage ?? 0) > 0 && !this.isEntityWithinMeleeAnimRange(existing.entity, { x: 0, y: 0, id: "", type: "player", hp: 0, maxHp: 0 } as any), // Simple heuristic: if not in melee range, it's ranged
           });
         } else if (wasAlive && hpDelta > 0) {
           // Healed
@@ -1332,6 +1336,9 @@ export class EntityManager {
 
         // Death detection
         if (wasAlive && ent.hp <= 0 && existing.prevHp > 0) {
+          if (ent.type === "mob" || ent.type === "boss") {
+            playSoundEffect("combat_victory");
+          }
           this.triggerDeath(existing);
         }
 
@@ -1669,6 +1676,12 @@ export class EntityManager {
       && (obj.entity.order.action === "attack" || obj.entity.order.action === "technique");
 
     const target = attacking ? 1 : 0;
+
+    if (attacking && !obj.isAttacking) {
+      playSoundEffect("combat_battle_start");
+    }
+    obj.isAttacking = attacking;
+
     if (obj.combatRingAlpha === target && !obj.combatRing) return;
 
     // Lazy create only when first needed.
@@ -1955,10 +1968,27 @@ export class EntityManager {
   private triggerDamage(
     obj: EntityObject,
     amount: number,
-    opts?: { critical?: boolean; blocked?: boolean },
+    opts?: { critical?: boolean; blocked?: boolean; dodged?: boolean; ranged?: boolean },
   ) {
     const critical = !!opts?.critical;
     const blocked = !!opts?.blocked;
+    const dodged = !!opts?.dodged;
+    const ranged = !!opts?.ranged;
+
+    if (dodged) {
+      this.triggerDodge(obj);
+      playSoundEffect("combat_melee_miss");
+      return;
+    }
+
+    if (blocked) {
+      this.triggerBlock(obj);
+      playSoundEffect("combat_defend");
+    } else if (amount > 0) {
+      playSoundEffect(ranged ? "combat_ranged_hit" : "combat_melee_hit");
+    } else {
+      playSoundEffect(ranged ? "combat_ranged_miss" : "combat_melee_miss");
+    }
 
     // GLB damage: flash red on all meshes. Player GLBs are named char_*;
     // environment mob GLBs are named glb_mob.
@@ -1991,17 +2021,19 @@ export class EntityManager {
     this.flashBodyEmissive(obj, critical ? 0xffaa22 : 0xff2200, critical ? 1.1 : 0.7, critical ? 650 : 500);
 
     // Main damage number
-    this.spawnFloating(obj, String(amount), critical ? "crit" : "damage", {
-      startY: 2.0,
-    });
-
-    // "CRITICAL!" banner on big hits
-    if (critical) {
-      this.spawnFloating(obj, "CRITICAL!", "crit", {
-        startY: 2.9,
-        riseAmount: 2.2,
-        lifetime: 1.6,
+    if (amount > 0) {
+      this.spawnFloating(obj, String(amount), critical ? "crit" : "damage", {
+        startY: 2.0,
       });
+
+      // "CRITICAL!" banner on big hits
+      if (critical) {
+        this.spawnFloating(obj, "CRITICAL!", "crit", {
+          startY: 2.9,
+          riseAmount: 2.2,
+          lifetime: 1.6,
+        });
+      }
     }
 
     if (blocked) {
@@ -2038,6 +2070,7 @@ export class EntityManager {
 
   /** WoW-style "engulfed in light" level-up burst: pillar + expanding ring + body glow + banner */
   private triggerLevelUp(obj: EntityObject) {
+    playSoundEffect("ui_level_up");
     // Banner text
     this.spawnFloating(obj, "LEVEL UP!", "levelup", {
       startY: 3.0,
@@ -2609,6 +2642,7 @@ export class EntityManager {
       questIndicator: null,
       combatRing: null,
       combatRingAlpha: 0,
+      isAttacking: false,
     };
 
     if (ent.hp <= 0) {

@@ -1897,6 +1897,55 @@ function isAliveAutoCombatTarget(entity: Entity | undefined): entity is Entity {
     && !entity.leashing;
 }
 
+function applyEdictOverrideForActiveAttack(entity: Entity, target: Entity, zone: ZoneState): boolean {
+  if (entity.type !== "player") return false;
+  if (!isAliveAutoCombatTarget(target)) return false;
+
+  const cachedEdicts = entity.walletAddress ? getEdictCache(entity.walletAddress) : undefined;
+  const edicts = (cachedEdicts && cachedEdicts.length > 0)
+    ? cachedEdicts
+    : getDefaultGambits(entity.classId);
+  const edictResult = evaluateEdicts(entity, zone, edicts, target, pickTechnique);
+  if (!edictResult) return false;
+
+  if (edictResult.techniqueOverride) {
+    const eTarget = edictResult.targetOverride ?? target;
+    const techTargetId = pickTechniqueTargetIdForAutoCombat(entity, eTarget, edictResult.techniqueOverride, zone);
+    const techTarget = zone.entities.get(techTargetId);
+    if (!techTarget || techTarget.hp <= 0) return false;
+
+    entity.order = {
+      action: "technique",
+      targetId: techTargetId,
+      techniqueId: edictResult.techniqueOverride.id,
+    };
+    entity.lastEdictDecision = {
+      edictId: edictResult.edict.id,
+      edictName: edictResult.edict.name,
+      actionType: edictResult.edict.action.type,
+      targetId: techTarget.id,
+      targetName: techTarget.name,
+      techniqueId: edictResult.techniqueOverride.id,
+      techniqueName: edictResult.techniqueOverride.name,
+      tick: zone.tick,
+    };
+    return true;
+  }
+
+  if (edictResult.order && edictResult.order.action !== "attack") {
+    entity.order = edictResult.order as Order;
+    entity.lastEdictDecision = {
+      edictId: edictResult.edict.id,
+      edictName: edictResult.edict.name,
+      actionType: edictResult.edict.action.type,
+      tick: zone.tick,
+    };
+    return true;
+  }
+
+  return false;
+}
+
 function getSameZonePartyMembers(
   entity: Entity,
   zone: ZoneState,
@@ -2661,6 +2710,9 @@ async function worldTick() {
         } else {
           if (entity.type === "player" && isAliveAutoCombatTarget(target)) {
             rememberPartyAutoCombatTarget(entity.id, zone.zoneId, target.id, zone.tick);
+          }
+          if (applyEdictOverrideForActiveAttack(entity, target, zone)) {
+            continue;
           }
           if ((entity.nextAttackTick ?? 0) > zone.tick) {
             continue;

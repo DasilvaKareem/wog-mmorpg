@@ -39,6 +39,7 @@ export default defineConfig(({ mode }) => {
         "/wallet": proxyOpts,
         "/chat": proxyOpts,
         "/inbox": proxyOpts,
+        "/techniques": proxyOpts,
         "/time": proxyOpts,
       },
     },

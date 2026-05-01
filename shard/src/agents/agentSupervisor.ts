@@ -122,8 +122,8 @@ const SET_SCRIPT_DECL: FunctionDeclaration = {
     properties: {
       type: {
         type: "STRING" as Type,
-        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "quest", "learn", "goto", "idle", "dungeon", "farm"],
-        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate, 'farm' to harvest crops in farmland zones.",
+        enum: ["combat", "gather", "travel", "shop", "trade", "craft", "brew", "cook", "skin", "quest", "learn", "goto", "idle", "dungeon", "leatherwork", "jewelcraft", "farm"],
+        description: "Which behavior mode the bot should run. Use 'learn' to find a trainer and learn techniques, 'goto' to walk to a specific NPC, 'dungeon' to enter a dungeon gate, 'skin' to harvest corpses, and 'farm' to harvest crops in farmland zones.",
       },
       maxLevelOffset: {
         type: "NUMBER" as Type,
@@ -414,6 +414,7 @@ function defaultScript(event: TriggerEvent, ctx: SupervisorContext): BotScript {
         crafting:   { type: "craft", reason: `Arrived — continuing crafting` },
         alchemy:    { type: "brew", reason: `Arrived — continuing alchemy` },
         cooking:    { type: "cook", reason: `Arrived — continuing cooking` },
+        skinning:   { type: "skin", reason: `Arrived — continuing skinning` },
         enchanting: { type: "enchant", reason: `Arrived — continuing enchanting` },
         shopping:   { type: "shop", reason: `Arrived — continuing shopping` },
         trading:    { type: "trade", reason: `Arrived — continuing trading` },

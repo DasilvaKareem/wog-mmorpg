@@ -1,6 +1,7 @@
 import type { ProfessionStatusResponse, ProfessionSkillSummary } from "../types.js";
 import { LearnedTechniquesList, type LearnedTechnique } from "./LearnedTechniquesList.js";
 import { EdictEditor, type Edict } from "./EdictEditor.js";
+import { playSoundEffect } from "../sfx.js";
 
 const PROFESSIONS: { id: string; name: string; icon: string }[] = [
   { id: "mining",          name: "Mining",          icon: "\u26CF"    },
@@ -64,6 +65,7 @@ export class SkillsPanel {
     this.tabBar = document.createElement("div");
     this.tabBar.className = "sk-tabs";
     this.tabBar.innerHTML = `
+      <span class="sk-drag-handle" data-drag-handle="skills" title="Drag panel">:::</span>
       <button class="sk-tab active" data-tab="professions">Professions</button>
       <button class="sk-tab" data-tab="skills">Skills</button>
       <button class="sk-tab" data-tab="edicts">Edicts</button>
@@ -73,6 +75,7 @@ export class SkillsPanel {
       if (!btn) return;
       const tab = btn.dataset.tab as SkillsTab;
       if (tab === this.activeTab) return;
+      playSoundEffect("ui_tab_switch");
       this.activeTab = tab;
       this.tabBar.querySelectorAll(".sk-tab").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
@@ -166,22 +169,26 @@ export class SkillsPanel {
 
   toggle() {
     if (this.container.style.display === "none") {
-      this.container.style.display = "flex";
+      this.show();
     } else {
       this.hide();
     }
   }
 
-  show() { this.container.style.display = "flex"; }
+  show() {
+    if (this.container.style.display === "flex") return;
+    this.container.style.display = "flex";
+    playSoundEffect("ui_dialog_open");
+  }
 
   hide() {
+    if (this.container.style.display === "none") return;
     this.container.style.display = "none";
     this.profTooltip.style.display = "none";
+    playSoundEffect("ui_dialog_close");
   }
 
-  isVisible(): boolean {
-    return this.container.style.display !== "none";
-  }
+  isVisible(): boolean { return this.container.style.display !== "none"; }
 
   // ── Internals ─────────────────────────────────────────────────
 
@@ -282,8 +289,20 @@ export class SkillsPanel {
 
       .sk-tabs {
         display: flex;
+        align-items: center;
         border-bottom: 1px solid rgba(68, 255, 136, 0.15);
         flex-shrink: 0;
+      }
+      .sk-drag-handle {
+        width: 26px;
+        flex: 0 0 26px;
+        text-align: center;
+        color: #6b8;
+        font: bold 10px/1 monospace;
+        letter-spacing: 1px;
+        user-select: none;
+        cursor: move;
+        border-right: 1px solid rgba(68, 255, 136, 0.15);
       }
       .sk-tab {
         flex: 1;

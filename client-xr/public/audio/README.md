@@ -1,26 +1,18 @@
 Place XR background music tracks here.
 
-Zone → track mapping (in `src/main.ts` → `ZONE_BGM_TRACKS`):
+Standard naming convention for BGM: `lowercase-kebab-case.mp3`
 
-- `village-square` → `world-theme`  (default fallback)
-- `emerald-woods` → `Emerald Woods`
-- `moondancer-glade` → `007 moondancer glade`
-- `felsrock-citadel` → `008 Felsrock Citadel`
-- `lake-lumina` → `009 Lake Lumina`
+Zone → track mapping (in `src/main.ts` → `ZONE_BGM_URLS`):
 
-For each track `T`, `BgmManager` tries these URLs in order and uses the first
-that loads (parity with the `client/` hook):
+- Default (Title Screen) → `secrets-of-the-library.mp3`
+- `village-square` → `chronicles-of-the-verdant-valley.mp3`
+- `emerald-woods` → `emerald-woods.mp3`
+- `moondancer-glade` → `moondancer-glade.mp3`
+- `felsrock-citadel` → `felsrock-citadel.mp3`
+- `lake-lumina` → `lake-lumina.mp3`
+- `wild-meadow` → `wild-meadow.mp3`
 
-1. `/audio/<T>.mp3`
-2. `/audio/<T>.ogg`
-3. `/audio/bgm/<T>.mp3`
-4. `/audio/bgm/<T>.ogg`
-5. `/audio/bgm/bgm_<normalized>.ogg`
-6. `/audio/bgm/bgm_<normalized>.mp3`
-
-`<normalized>` lowercases, strips a leading numeric prefix (e.g. `007 `), and
-replaces non-alphanumerics with underscores. Example: `007 moondancer glade` →
-`moondancer_glade`, so `bgm_moondancer_glade.ogg` is accepted.
+For each track, `BgmManager` uses the direct URL resolved via `audioUrl()`.
 
 When `VITE_ASSET_BASE_URL` is set (e.g. `https://assets.wog.gg`), all paths are
-resolved against that CDN instead of `/audio`.
+resolved against that CDN instead of the local `/audio` path.

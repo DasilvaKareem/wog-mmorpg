@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { Entity } from "../types.js";
+import { playSoundEffect } from "../sfx.js";
 
 type CursorMode = "default" | "enemy" | "npc" | "player" | "interact";
 
@@ -51,6 +52,7 @@ export class GauntletCursor {
   private cssStrings = new Map<CursorMode, string>();
   private lastRayTime = 0;
   private enabled = true;
+  private uiInteractiveHover = false;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -68,6 +70,7 @@ export class GauntletCursor {
 
     // Set default gauntlet immediately
     this.applyMode("default");
+    this.ensureClickableCursorOverrideStyle();
 
     window.addEventListener("mousemove", this.onMouseMove);
   }
@@ -85,6 +88,16 @@ export class GauntletCursor {
 
   private onMouseMove = (e: MouseEvent) => {
     if (!this.enabled) return;
+    const hoveringInteractive = this.isInteractiveTarget(e.target);
+    if (hoveringInteractive) {
+      this.uiInteractiveHover = true;
+      this.applyMode("interact");
+      return;
+    }
+    if (this.uiInteractiveHover) {
+      this.uiInteractiveHover = false;
+      this.applyMode("default");
+    }
 
     // Throttle raycasts to ~15 fps (67ms)
     const now = performance.now();
@@ -109,6 +122,30 @@ export class GauntletCursor {
   private applyMode(mode: CursorMode) {
     this.currentMode = mode;
     const css = this.cssStrings.get(mode) ?? "auto";
+    document.documentElement.style.setProperty("--wog-gauntlet-cursor", css);
     document.body.style.cursor = css;
+  }
+
+  private isInteractiveTarget(target: EventTarget | null): boolean {
+    const el = target instanceof HTMLElement ? target : null;
+    if (!el) return false;
+    const interactive = el.closest("a, button, [role='button'], summary, label, [data-action], [data-clickable]");
+    if (!interactive) return false;
+    const tag = interactive.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return false;
+    if ((interactive as HTMLElement).isContentEditable) return false;
+    return true;
+  }
+
+  private ensureClickableCursorOverrideStyle() {
+    if (document.getElementById("wog-gauntlet-cursor-style")) return;
+    const style = document.createElement("style");
+    style.id = "wog-gauntlet-cursor-style";
+    style.textContent = `
+      a, button, [role="button"], summary, [data-action], [data-clickable] {
+        cursor: var(--wog-gauntlet-cursor, auto) !important;
+      }
+    `;
+    document.head.appendChild(style);
   }
 }

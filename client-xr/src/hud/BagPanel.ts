@@ -1,4 +1,5 @@
 import type { InventoryItem } from "../types.js";
+import { playSoundEffect } from "../sfx.js";
 
 const QUALITY_COLORS: Record<string, string> = {
   common: "#aaaaaa",
@@ -123,6 +124,8 @@ export class BagPanel {
       const item = this.items[idx];
       if (!item) return;
 
+      playSoundEffect("ui_button_click");
+
       const isEquippable = Boolean(item.equipSlot)
         && (item.category === "armor" || item.category === "weapon" || item.category === "tool");
       if (isEquippable) {
@@ -169,16 +172,26 @@ export class BagPanel {
 
   toggle() {
     if (this.container.style.display === "none") {
-      this.container.style.display = "flex";
-      this.render();
+      this.show();
     } else {
-      this.container.style.display = "none";
-      this.tooltipEl.style.display = "none";
+      this.hide();
     }
   }
 
-  show() { this.container.style.display = "flex"; this.render(); }
-  hide() { this.container.style.display = "none"; this.tooltipEl.style.display = "none"; }
+  show() {
+    if (this.container.style.display === "flex") return;
+    this.container.style.display = "flex";
+    this.render();
+    playSoundEffect("ui_dialog_open");
+  }
+
+  hide() {
+    if (this.container.style.display === "none") return;
+    this.container.style.display = "none";
+    this.tooltipEl.style.display = "none";
+    playSoundEffect("ui_dialog_close");
+  }
+
   isVisible(): boolean { return this.container.style.display !== "none"; }
 
   private render() {

@@ -359,6 +359,7 @@ cmd({
       craft: "crafting", crafting: "crafting", forge: "crafting",
       brew: "alchemy", alchemy: "alchemy", potion: "alchemy",
       cook: "cooking", cooking: "cooking",
+      skin: "skinning", skinning: "skinning",
       enchant: "enchanting", enchanting: "enchanting",
       shop: "shopping", shopping: "shopping", buy: "shopping",
       trade: "trading", trading: "trading", sell: "trading",
@@ -370,7 +371,7 @@ cmd({
 
     const focus = VALID_FOCUSES[focusInput];
     if (!focus) {
-      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, enchanting, shopping, trading, traveling, learning, dungeon, idle` };
+      return { response: `Unknown activity: ${focusInput}\nValid: combat, questing, gathering, crafting, alchemy, cooking, skinning, enchanting, shopping, trading, traveling, learning, dungeon, idle` };
     }
 
     const patch: Record<string, unknown> = { focus };

@@ -106,13 +106,14 @@ function audioUrl(file: string): string {
   return AUDIO_BASE + encodeURIComponent(file);
 }
 const ZONE_BGM_URLS: Record<string, string> = {
-  "emerald-woods":    audioUrl("Emerald Woods.mp3"),
-  "moondancer-glade": audioUrl("007 moondancer glade.mp3"),
-  "felsrock-citadel": audioUrl("008 Felsrock Citadel.mp3"),
-  "lake-lumina":      audioUrl("009 Lake Lumina.mp3"),
-  "wild-meadow":      audioUrl("Wild Meadow Map Bgm.mp3"),
+  "emerald-woods":    audioUrl("emerald-woods.mp3"),
+  "moondancer-glade": audioUrl("moondancer-glade.mp3"),
+  "felsrock-citadel": audioUrl("felsrock-citadel.mp3"),
+  "lake-lumina":      audioUrl("lake-lumina.mp3"),
+  "wild-meadow":      audioUrl("wild-meadow.mp3"),
+  "village-square":   audioUrl("chronicles-of-the-verdant-valley.mp3"),
 };
-const BGM_DEFAULT_URL = ZONE_BGM_URLS["emerald-woods"];
+const BGM_DEFAULT_URL = audioUrl("secrets-of-the-library.mp3");
 
 const BGM_VOLUME_KEY = "wog-music-volume";
 const BGM_DEFAULT_VOLUME = 0.35;
@@ -1054,49 +1055,242 @@ const inboxPanel = new InboxPanel({
     actionBar.setBadge("inbox", count);
   },
 });
-actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => {
-  bagPanel.toggle();
-  if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
-}});
-actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => {
-  skillsPanel.toggle();
-  if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
-}});
-actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => {
-  questPanel.toggle();
-}});
+actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
+actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
+actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
 let unreadChat = 0;
 const clearChatUnread = () => {
   if (unreadChat === 0) return;
   unreadChat = 0;
   actionBar.setBadge("chat", 0);
 };
-actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => {
-  agentChat.toggle();
-  if (agentChat.isExpanded()) clearChatUnread();
-}});
-actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => {
-  playerPanel.toggle();
-}});
-actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => {
-  inboxPanel.toggle();
-  if (inboxPanel.isVisible()) { lastInboxPollTime = 0; void pollInbox(); }
-}});
+actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => togglePanel("chat") });
+actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
+actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
     if (ent) inspector.show(ent, window.innerWidth / 2, window.innerHeight / 2);
   }
 }});
-actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => {
-  settingsPanel.toggle();
-}});
+actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
+
+type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
+type ManagedPanel = {
+  show: () => void;
+  hide: () => void;
+  isVisible: () => boolean;
+  onOpen?: () => void;
+};
+
+const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
+  bag: {
+    show: () => bagPanel.show(),
+    hide: () => bagPanel.hide(),
+    isVisible: () => bagPanel.isVisible(),
+    onOpen: () => { lastInventoryPollTime = 0; void pollInventory(); },
+  },
+  skills: {
+    show: () => skillsPanel.show(),
+    hide: () => skillsPanel.hide(),
+    isVisible: () => skillsPanel.isVisible(),
+    onOpen: () => kickSkillsPollForActiveTab(),
+  },
+  quests: {
+    show: () => questPanel.show(),
+    hide: () => questPanel.hide(),
+    isVisible: () => questPanel.isVisible(),
+  },
+  chat: {
+    show: () => agentChat.expand(),
+    hide: () => agentChat.hide(),
+    isVisible: () => agentChat.isVisible(),
+    onOpen: () => clearChatUnread(),
+  },
+  players: {
+    show: () => playerPanel.show(),
+    hide: () => playerPanel.hide(),
+    isVisible: () => playerPanel.isVisible(),
+  },
+  inbox: {
+    show: () => inboxPanel.show(),
+    hide: () => inboxPanel.hide(),
+    isVisible: () => inboxPanel.isVisible(),
+    onOpen: () => { lastInboxPollTime = 0; void pollInbox(); },
+  },
+  settings: {
+    show: () => settingsPanel.show(),
+    hide: () => settingsPanel.hide(),
+    isVisible: () => settingsPanel.isVisible(),
+  },
+};
+
+function isSinglePanelMobileMode(): boolean {
+  return window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+}
+
+function refreshActionBarActiveStates() {
+  for (const [id, panel] of Object.entries(managedPanels) as Array<[ManagedPanelId, ManagedPanel]>) {
+    actionBar.setActive(id, panel.isVisible());
+  }
+}
+
+function closeOtherPanels(except: ManagedPanelId) {
+  for (const [id, panel] of Object.entries(managedPanels) as Array<[ManagedPanelId, ManagedPanel]>) {
+    if (id === except) continue;
+    if (panel.isVisible()) panel.hide();
+  }
+}
+
+function openPanel(id: ManagedPanelId) {
+  if (isSinglePanelMobileMode()) closeOtherPanels(id);
+  const panel = managedPanels[id];
+  panel.show();
+  panel.onOpen?.();
+  refreshActionBarActiveStates();
+}
+
+function closePanel(id: ManagedPanelId) {
+  managedPanels[id].hide();
+  refreshActionBarActiveStates();
+}
+
+function togglePanel(id: ManagedPanelId) {
+  if (managedPanels[id].isVisible()) closePanel(id);
+  else openPanel(id);
+}
+
+function initDesktopPanelDragging() {
+  const isDesktop = () => !window.matchMedia("(max-width: 900px), (pointer: coarse)").matches;
+  const draggableDefs: Array<{ id: string; handleSelector?: string }> = [
+    { id: "bag-panel", handleSelector: ".bag-header" },
+    { id: "skills-panel", handleSelector: ".sk-drag-handle" },
+    { id: "quest-panel", handleSelector: ".qp-header" },
+    { id: "player-panel", handleSelector: ".pp-tabs" },
+    { id: "inbox-panel", handleSelector: ".ibx-header" },
+    { id: "settings-panel", handleSelector: ".settings-header" },
+    { id: "agent-chat", handleSelector: ".agent-chat-tabs" },
+  ];
+  for (const def of draggableDefs) {
+    const el = document.getElementById(def.id) as HTMLDivElement | null;
+    if (!el) continue;
+    const handle = (def.handleSelector ? el.querySelector(def.handleSelector) : null) as HTMLElement | null ?? el;
+    const key = `wog:panel-pos:${def.id}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        const pos = JSON.parse(saved) as { left?: number; top?: number };
+        let shouldApply = typeof pos.left === "number" && typeof pos.top === "number";
+        // Ignore obviously bad saved top-left state from the prior drag regression.
+        if (shouldApply && (pos.left as number) <= 4 && (pos.top as number) <= 4) {
+          localStorage.removeItem(key);
+          shouldApply = false;
+        }
+        if (shouldApply) {
+          const left = pos.left as number;
+          const top = pos.top as number;
+          el.style.left = `${Math.round(left)}px`;
+          el.style.top = `${Math.round(top)}px`;
+          el.style.right = "auto";
+          el.style.bottom = "auto";
+        }
+      } catch {
+        // ignore invalid localStorage payload
+      }
+    }
+
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    const clamp = (left: number, top: number) => {
+      const maxLeft = Math.max(0, window.innerWidth - el.offsetWidth);
+      const maxTop = Math.max(0, window.innerHeight - el.offsetHeight);
+      return { left: Math.min(maxLeft, Math.max(0, left)), top: Math.min(maxTop, Math.max(0, top)) };
+    };
+    const saveCurrent = () => {
+      localStorage.setItem(key, JSON.stringify({ left: el.offsetLeft, top: el.offsetTop }));
+    };
+
+    handle.style.cursor = "move";
+    handle.addEventListener("pointerdown", (ev: PointerEvent) => {
+      if (!isDesktop() || ev.pointerType === "touch") return;
+      if (def.id === "agent-chat") {
+        if ((ev.target as HTMLElement).closest("button, input, textarea, select")) return;
+      } else if ((ev.target as HTMLElement).closest("button, input, textarea, select, [data-action]")) {
+        return;
+      }
+      dragging = true;
+      offsetX = ev.clientX - el.offsetLeft;
+      offsetY = ev.clientY - el.offsetTop;
+      el.style.left = `${el.offsetLeft}px`;
+      el.style.top = `${el.offsetTop}px`;
+      el.style.right = "auto";
+      el.style.bottom = "auto";
+      handle.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    handle.addEventListener("pointermove", (ev: PointerEvent) => {
+      if (!dragging) return;
+      const next = clamp(ev.clientX - offsetX, ev.clientY - offsetY);
+      el.style.left = `${next.left}px`;
+      el.style.top = `${next.top}px`;
+    });
+    const stopDrag = (ev: PointerEvent) => {
+      if (!dragging) return;
+      dragging = false;
+      if (handle.hasPointerCapture(ev.pointerId)) handle.releasePointerCapture(ev.pointerId);
+      const next = clamp(el.offsetLeft, el.offsetTop);
+      el.style.left = `${next.left}px`;
+      el.style.top = `${next.top}px`;
+      saveCurrent();
+    };
+    handle.addEventListener("pointerup", stopDrag);
+    handle.addEventListener("pointercancel", stopDrag);
+
+    window.addEventListener("resize", () => {
+      if (!isDesktop()) return;
+      const next = clamp(el.offsetLeft, el.offsetTop);
+      el.style.left = `${next.left}px`;
+      el.style.top = `${next.top}px`;
+      saveCurrent();
+    });
+  }
+}
+
+function initPanelVisibilitySync() {
+  const observer = new MutationObserver(() => {
+    refreshActionBarActiveStates();
+  });
+  const panelIds: Record<ManagedPanelId, string> = {
+    bag: "bag-panel",
+    skills: "skills-panel",
+    quests: "quest-panel",
+    chat: "agent-chat",
+    players: "player-panel",
+    inbox: "inbox-panel",
+    settings: "settings-panel",
+  };
+  for (const panelId of Object.values(panelIds)) {
+    const el = document.getElementById(panelId);
+    if (!el) continue;
+    observer.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+  }
+}
+
+refreshActionBarActiveStates();
+initDesktopPanelDragging();
+initPanelVisibilitySync();
 
 const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
-  onShowQuests: () => questPanel.showAvailable(),
+  onShowQuests: () => {
+    openPanel("quests");
+    questPanel.showAvailable();
+    refreshActionBarActiveStates();
+  },
 });
 
 if (landing) {
@@ -1234,7 +1428,7 @@ async function pollNearbyZones() {
     void pollQuests();
     // Inventory poll (only when bag is open)
     if (bagPanel.isVisible()) void pollInventory();
-    if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
+    if (skillsPanel.isVisible()) kickSkillsPollForActiveTab(false);
     // Inbox always polls in background so the unread badge stays fresh.
     void pollInbox();
     // Friends poll in background for request badges and online status.
@@ -1316,6 +1510,8 @@ async function refreshAvailableQuestsNow() {
   }
 }
 
+let prevInventoryItemCount = -1;
+
 async function pollInventory() {
   // Agents store items under their custodial wallet; fall back to owner wallet
   // when no agent has been deployed yet (shard then resolves custodial server-side).
@@ -1330,6 +1526,10 @@ async function pollInventory() {
     fetchWalletBalance(addr),
   ]);
   if (inv) {
+    if (prevInventoryItemCount !== -1 && inv.items.length > prevInventoryItemCount) {
+      playSoundEffect("ui_item_pickup");
+    }
+    prevInventoryItemCount = inv.items.length;
     bagPanel.updateInventory(inv.items);
   }
   if (balance) {
@@ -1356,12 +1556,17 @@ async function pollLearnedTechniques() {
   const now = Date.now();
   if (now - lastLearnedTechPollTime < LEARNED_TECH_POLL_INTERVAL) return;
   lastLearnedTechPollTime = now;
-  try {
-    const res = await fetch(`${API_BASE}/techniques/learned/${ownEntityId}`);
-    if (!res.ok) return;
-    const data = await res.json() as { techniques?: LearnedTechnique[] };
-    skillsPanel.updateTechniques(data.techniques ?? []);
-  } catch { /* non-fatal */ }
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetch(toUrl(base, `/techniques/learned/${ownEntityId}`));
+      if (!res.ok) continue;
+      const data = await res.json() as { techniques?: LearnedTechnique[] };
+      skillsPanel.updateTechniques(data.techniques ?? []);
+      return;
+    } catch {
+      // Try the next candidate base.
+    }
+  }
 }
 
 async function pollEdicts() {
@@ -1450,17 +1655,19 @@ async function saveEdictsToShard(edicts: Edict[]): Promise<{ ok: boolean; error?
   }
 }
 
-function kickSkillsPollForActiveTab() {
+function kickSkillsPollForActiveTab(force = true) {
   const tab = skillsPanel.getActiveTab();
   if (tab === "professions") {
-    lastProfessionPollTime = 0;
+    if (force) lastProfessionPollTime = 0;
     void pollProfessions();
   } else if (tab === "skills") {
-    lastLearnedTechPollTime = 0;
+    if (force) lastLearnedTechPollTime = 0;
     void pollLearnedTechniques();
   } else {
-    lastLearnedTechPollTime = 0;
-    lastEdictsPollTime = 0;
+    if (force) {
+      lastLearnedTechPollTime = 0;
+      lastEdictsPollTime = 0;
+    }
     void pollLearnedTechniques();
     void pollEdicts();
   }
@@ -1514,6 +1721,7 @@ renderer.domElement.addEventListener("click", (e) => {
   const entityHits = raycaster.intersectObjects(entities.group.children, true);
   const entity = entities.getEntityAt(entityHits);
   if (entity) {
+    playSoundEffect("ui_button_click");
     inspector.show(entity, e.clientX, e.clientY);
     // Hostile click — attack and keep camera on own character
     if ((entity.type === "mob" || entity.type === "boss") && ownWalletAddress && ownEntityId) {
@@ -1712,8 +1920,7 @@ window.addEventListener("keydown", (e) => {
   }
   if (e.key === "Enter" || e.key === "t" || e.key === "T") {
     e.preventDefault();
-    agentChat.expand();
-    clearChatUnread();
+    openPanel("chat");
     return;
   }
   if (e.key === "r" || e.key === "R") {
@@ -1725,15 +1932,13 @@ window.addEventListener("keydown", (e) => {
     intentLines.cycleVisibilityMode();
   }
   if (e.key === "q" || e.key === "Q") {
-    questPanel.toggle();
+    togglePanel("quests");
   }
   if (e.key === "b" || e.key === "B") {
-    bagPanel.toggle();
-    if (bagPanel.isVisible()) { lastInventoryPollTime = 0; void pollInventory(); }
+    togglePanel("bag");
   }
   if (e.key === "p" || e.key === "P") {
-    skillsPanel.toggle();
-    if (skillsPanel.isVisible()) kickSkillsPollForActiveTab();
+    togglePanel("skills");
   }
   if (e.key === "e" || e.key === "E") {
     if (ownEntityId) {
@@ -1742,16 +1947,17 @@ window.addEventListener("keydown", (e) => {
     }
   }
   if (e.key === "u" || e.key === "U") {
-    playerPanel.toggle();
+    togglePanel("players");
   }
   if (e.key === "f" || e.key === "F") {
+    openPanel("players");
     lastFriendsPollTime = 0;
     playerPanel.showFriends();
+    refreshActionBarActiveStates();
     void pollFriends();
   }
   if (e.key === "i" || e.key === "I") {
-    inboxPanel.toggle();
-    if (inboxPanel.isVisible()) { lastInboxPollTime = 0; void pollInbox(); }
+    togglePanel("inbox");
   }
   if (e.key === "m" || e.key === "M") {
     e.preventDefault();

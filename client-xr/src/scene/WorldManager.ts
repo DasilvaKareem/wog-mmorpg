@@ -59,16 +59,24 @@ export class WorldManager implements ElevationProvider {
     this.group.name = "world";
     this.borderGroup.name = "borders";
     this.group.add(this.borderGroup);
-    // Start preloading environment + town + character + armor GLB models immediately
+    // Environment/town assets are only needed for decorative props. Let the
+    // first terrain build happen without blocking on every GLB, then rebuild
+    // loaded zones when these assets are ready.
     this.envAssetsReady = Promise.all([
       this.envAssets.preload(),
       this.envAssets.preloadTown(),
-      this.charAssets.preload(),
-      this.armorSystem.preload(),
     ]).then(() => {
-      // Rebuild any zones that were loaded before assets were ready
       this.rebuildZonesWithAssets();
     });
+
+    // Character/armor preloads are useful for later smoothness, but they are
+    // expensive on mobile and should not compete with initial world load.
+    window.setTimeout(() => {
+      void Promise.allSettled([
+        this.charAssets.preload(),
+        this.armorSystem.preload(),
+      ]);
+    }, 3_000);
   }
 
   /** Get the shared environment assets instance */
@@ -223,11 +231,7 @@ export class WorldManager implements ElevationProvider {
     if (!zone) return;
     zone.loading = true;
 
-    // Wait for both terrain data AND environment assets in parallel
-    const [data] = await Promise.all([
-      fetchTerrain(id),
-      this.envAssetsReady,
-    ]);
+    const data = await fetchTerrain(id);
     zone.loading = false;
     if (!data) return;
 

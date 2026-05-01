@@ -14,6 +14,7 @@ export type BotScriptType =
   | "craft"
   | "brew"
   | "cook"
+  | "skin"
   | "quest"
   | "learn"
   | "idle"

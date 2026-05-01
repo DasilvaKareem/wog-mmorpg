@@ -1,4 +1,5 @@
 import { CANDIDATE_BASES, toUrl } from "../api.js";
+import { playSoundEffect } from "../sfx.js";
 
 interface InboxMessage {
   id: string;
@@ -87,7 +88,11 @@ export class InboxPanel {
         const msgs: InboxMessage[] = Array.isArray(data.messages) ? data.messages : [];
         msgs.sort((a, b) => b.ts - a.ts);
         this.messages = msgs;
-        this.serverUnread = Number(data.unread ?? msgs.filter((m) => !m.readAt).length);
+        const newUnread = Number(data.unread ?? msgs.filter((m) => !m.readAt).length);
+        if (newUnread > this.serverUnread) {
+          playSoundEffect("ui_notification");
+        }
+        this.serverUnread = newUnread;
         this.apiBase = base;
         this.render();
         this.onUnreadChange(this.serverUnread);
@@ -107,15 +112,19 @@ export class InboxPanel {
   }
 
   show() {
+    if (this.container.style.display === "flex") return;
     this.container.style.display = "flex";
     void (async () => {
       await this.refresh();
       await this.markAllSeen();
     })();
+    playSoundEffect("ui_dialog_open");
   }
 
   hide() {
+    if (this.container.style.display === "none") return;
     this.container.style.display = "none";
+    playSoundEffect("ui_dialog_close");
   }
 
   isVisible(): boolean {

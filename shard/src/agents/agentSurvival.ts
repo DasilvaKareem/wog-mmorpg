@@ -218,22 +218,6 @@ export async function checkSelfAdaptation(
       return false;
     }
 
-    // Priority 2b: Periodic gathering → crafting cycle (skip if objective is active)
-    // Triggers every ~5 min of combat/questing — professions are a key leveling path
-    // for NEW characters. Established agents shouldn't get yanked out of productive
-    // questing to farm copper ore for 5 min.
-    if (
-      !isEstablished &&
-      !state.hasActiveObjective &&
-      state.ticksSinceFocusChange > 250 &&
-      (currentFocus === "questing" || currentFocus === "combat")
-    ) {
-      console.log(`[agent:${ctx.walletTag}] Self-adapt: crafting cycle — ${state.ticksSinceFocusChange} ticks in ${currentFocus}`);
-      void ctx.logActivity("Switching to gathering & crafting for profession XP");
-      await patchAgentConfig(ctx.userWallet, { focus: "gathering" });
-      return true;
-    }
-
     // Priority 3: Outleveled current zone → enqueue a progress chain.
     // Uses the action queue so the supervisor can't interrupt mid-transition.
     const currentZoneLevelReq = ZONE_LEVEL_REQUIREMENTS[ctx.currentRegion] ?? 1;

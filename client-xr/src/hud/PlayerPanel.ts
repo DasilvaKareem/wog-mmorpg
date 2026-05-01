@@ -6,6 +6,7 @@ import {
   removeFriend,
 } from "../api.js";
 import type { ActivePlayer, FriendInfo, FriendRequestInfo } from "../types.js";
+import { playSoundEffect } from "../sfx.js";
 
 type SortBy = "level" | "name" | "hp";
 type PlayerPanelTab = "lobby" | "ranks" | "friends";
@@ -61,6 +62,9 @@ export class PlayerPanel {
       const btn = (e.target as HTMLElement).closest(".pp-tab") as HTMLButtonElement;
       if (!btn) return;
       const tab = btn.dataset.tab as PlayerPanelTab;
+      if (this.activeTab !== tab) {
+        playSoundEffect("ui_tab_switch");
+      }
       this.activeTab = tab;
       this.tabBar.querySelectorAll(".pp-tab").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
@@ -79,6 +83,7 @@ export class PlayerPanel {
       btn.textContent = key.charAt(0).toUpperCase() + key.slice(1);
       btn.dataset.sort = key;
       btn.addEventListener("click", () => {
+        playSoundEffect("ui_tab_switch");
         this.sortBy = key;
         sortBar.querySelectorAll(".pp-sort-btn").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
@@ -102,15 +107,35 @@ export class PlayerPanel {
   }
 
   toggle() {
-    this.visible = !this.visible;
-    this.container.style.display = this.visible ? "flex" : "none";
-    if (this.visible && this.activeTab === "friends") void this.refreshFriends(true);
+    if (!this.visible) {
+      this.show();
+    } else {
+      this.hide();
+    }
+  }
+
+  show() {
+    if (this.visible) return;
+    this.visible = true;
+    this.container.style.display = "flex";
+    if (this.activeTab === "friends") void this.refreshFriends(true);
+    playSoundEffect("ui_dialog_open");
+  }
+
+  hide() {
+    if (!this.visible) return;
+    this.visible = false;
+    this.container.style.display = "none";
+    playSoundEffect("ui_dialog_close");
+  }
+
+  isVisible(): boolean {
+    return this.visible;
   }
 
   showFriends() {
     this.activeTab = "friends";
-    this.visible = true;
-    this.container.style.display = "flex";
+    this.show();
     this.tabBar.querySelectorAll(".pp-tab").forEach((b) => {
       b.classList.toggle("active", (b as HTMLElement).dataset.tab === "friends");
     });
@@ -502,6 +527,7 @@ export class PlayerPanel {
     this.listEl.addEventListener("click", (e) => {
       const friendAction = (e.target as HTMLElement).dataset.friendAction;
       if (friendAction) {
+        playSoundEffect("ui_button_click");
         const requestRow = (e.target as HTMLElement).closest(".pp-friend-request") as HTMLElement | null;
         if (requestRow?.dataset.requestId) {
           if (friendAction === "accept") void this.acceptFriendRequest(requestRow.dataset.requestId);
@@ -521,6 +547,7 @@ export class PlayerPanel {
 
       const row = (e.target as HTMLElement).closest(".pp-row") as HTMLElement;
       if (row?.dataset.eid) {
+        playSoundEffect("ui_button_click");
         const player = this.playersById.get(row.dataset.eid);
         if (player) this.callbacks.onPlayerClick(player);
         return;
@@ -528,6 +555,7 @@ export class PlayerPanel {
       // Zone header: toggle expand/collapse; double-click navigates
       const zone = (e.target as HTMLElement).closest(".pp-zone-header") as HTMLElement;
       if (zone?.dataset.zoneToggle) {
+        playSoundEffect("ui_button_click");
         const zoneId = zone.dataset.zoneToggle;
         if (this.expandedZones.has(zoneId)) {
           this.expandedZones.delete(zoneId);

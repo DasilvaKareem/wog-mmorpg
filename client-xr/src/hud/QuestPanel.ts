@@ -1,4 +1,5 @@
 import type { ActiveQuest, AvailableQuest, QuestLogResponse, ZoneQuestsResponse } from "../types.js";
+import { playSoundEffect } from "../sfx.js";
 
 interface QuestPanelCallbacks {
   onAcceptQuest: (questId: string, npcEntityId: string, npcName: string) => void;
@@ -49,6 +50,9 @@ export class QuestPanel {
       const btn = (e.target as HTMLElement).closest(".qp-tab") as HTMLButtonElement;
       if (!btn) return;
       const tab = btn.dataset.tab as "active" | "available";
+      if (this.activeTab !== tab) {
+        playSoundEffect("ui_tab_switch");
+      }
       this.activeTab = tab;
       this.tabBar.querySelectorAll(".qp-tab").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
@@ -80,6 +84,8 @@ export class QuestPanel {
       const questId = btn.dataset.questId ?? "";
       const npcId = btn.dataset.npcId ?? "";
 
+      playSoundEffect("ui_button_click");
+
       if (action === "accept") {
         const npcName = btn.dataset.npcName ?? "";
         this.callbacks.onAcceptQuest(questId, npcId, npcName);
@@ -109,35 +115,35 @@ export class QuestPanel {
     this.tabBar.querySelectorAll(".qp-tab").forEach((b) => {
       b.classList.toggle("active", (b as HTMLElement).dataset.tab === "available");
     });
-    this.container.style.display = "flex";
+    this.show();
     this.callbacks.onOpenAvailable?.();
-    this.render();
   }
 
   toggle() {
     if (this.container.style.display === "none") {
-      this.container.style.display = "flex";
+      this.show();
       if (this.activeTab === "available") {
         this.callbacks.onOpenAvailable?.();
       }
-      this.render();
     } else {
-      this.container.style.display = "none";
+      this.hide();
     }
   }
 
   show() {
+    if (this.container.style.display === "flex") return;
     this.container.style.display = "flex";
     this.render();
+    playSoundEffect("ui_dialog_open");
   }
 
   hide() {
+    if (this.container.style.display === "none") return;
     this.container.style.display = "none";
+    playSoundEffect("ui_dialog_close");
   }
 
-  isVisible(): boolean {
-    return this.container.style.display !== "none";
-  }
+  isVisible(): boolean { return this.container.style.display !== "none"; }
 
   private render() {
     if (this.activeTab === "active") {

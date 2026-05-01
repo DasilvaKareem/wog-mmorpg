@@ -23,6 +23,7 @@ export type AgentFocus =
   | "gathering"
   | "alchemy"
   | "cooking"
+  | "skinning"
   | "trading"
   | "shopping"
   | "traveling"

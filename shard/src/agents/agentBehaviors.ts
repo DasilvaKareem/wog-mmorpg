@@ -8,6 +8,7 @@ import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIR
 import {
   getEntity as getWorldEntity,
   getOrCreateZone,
+  getWorldTick,
   pickPartyFocusTarget,
   pickTechnique,
   pickTechniqueTargetIdForAutoCombat,
@@ -41,6 +42,17 @@ import {
   type LiquidationInventoryItem,
 } from "./agentUtils.js";
 import { type BotScript } from "../types/botScriptTypes.js";
+import {
+  QUEST_CRAFT_RECIPE_BOOKS,
+  getRecipeMaterials,
+  getRecipeOutputName,
+  type CraftProfession,
+} from "./professionBehaviors/recipeBooks.js";
+import {
+  planMaterialRecovery,
+  routeToProfessionHubForStation,
+} from "./professionBehaviors/materialRecovery.js";
+import { doSkinning as doSkinningProfession } from "./professionBehaviors/skinning.js";
 
 const PROFESSION_HUB_ZONE = "village-square";
 const PICKAXE_TOKENS: Record<number, number> = { 27: 1, 28: 2, 29: 3, 30: 4 };
@@ -84,6 +96,39 @@ function matchesAnyQuestMob(mobName: unknown, questMobNames: Set<string>): boole
     }
   }
   return false;
+}
+
+function firstMissingRecipeMaterial(
+  recipes: any[],
+  invItems: Array<{ tokenId: number; quantity: number }>,
+): { recipe: any; missing: { tokenId: number; quantity: number; name: string } } | null {
+  const haveQty = new Map<number, number>();
+  for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
+
+  let firstMissing: { recipe: any; missing: { tokenId: number; quantity: number; name: string } } | null = null;
+  for (const recipe of recipes) {
+    const missing = getRecipeMaterials(recipe).find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity);
+    if (!missing) return null;
+    firstMissing ??= { recipe, missing };
+  }
+  return firstMissing;
+}
+
+async function recoverMissingMaterial(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  profession: CraftProfession,
+  materialName: string,
+): Promise<ActionResult> {
+  void strategy;
+  const recovery = planMaterialRecovery(profession, materialName);
+  const detail = recovery.type === "gather" && recovery.targetItemName
+    ? `${recovery.targetItemName} (${recovery.preference})`
+    : materialName;
+  const reason = `Stuck on ${profession}: missing ${detail}; not auto-switching to ${recovery.type}`;
+  void ctx.logActivity(reason);
+  ctx.setScript({ type: "idle", reason });
+  return actionIdle(reason);
 }
 
 /**
@@ -230,6 +275,43 @@ function getCombatOrderTarget(me: any): any | null {
   if (!target) return null;
   if (target.id === me.id) return target;
   return target.hp > 0 ? target : null;
+}
+
+function tryUpgradeBasicAttackToTechnique(
+  ctx: AgentContext,
+  me: any,
+  activeTarget: any,
+  entities: Record<string, any>,
+): ActionResult | null {
+  if (me.order?.action !== "attack") return null;
+
+  const zone = getOrCreateZone(ctx.currentRegion);
+  const liveMe = (getWorldEntity(me.id) as any) ?? me;
+  const zoneTarget = zone.entities.get(activeTarget.id) ?? activeTarget;
+  const edicts = getEdictCache(ctx.custodialWallet)
+    ?? getEdictCache(ctx.userWallet)
+    ?? getDefaultGambits(liveMe.classId);
+  const edictResult = evaluateEdicts(liveMe, zone, edicts, zoneTarget, pickTechnique);
+  if (!edictResult?.techniqueOverride) return null;
+
+  const targetId = pickTechniqueTargetIdForAutoCombat(liveMe, edictResult.targetOverride ?? zoneTarget, edictResult.techniqueOverride, zone);
+  const commandTarget = entities[targetId] ?? getWorldEntity(targetId) ?? zoneTarget;
+  const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: edictResult.techniqueOverride.id });
+  if (!issued) return null;
+
+  const targetLabel = targetId === liveMe.id ? "self" : (commandTarget.name ?? "target");
+  liveMe.lastEdictDecision = {
+    edictId: edictResult.edict.id,
+    edictName: edictResult.edict.name,
+    actionType: edictResult.edict.action.type,
+    targetId,
+    targetName: targetLabel,
+    techniqueId: edictResult.techniqueOverride.id,
+    techniqueName: edictResult.techniqueOverride.name,
+    tick: getWorldTick(),
+  };
+  void ctx.logActivity(`[edict: ${edictResult.edict.name}] Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
+  return actionProgressed(`Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
 }
 
 function getCombatStats(entity: any): Record<string, number> {
@@ -396,6 +478,8 @@ function pickCombatTarget(
 function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: Record<string, any>): ActionResult {
   const activeTarget = getCombatOrderTarget(me);
   if (activeTarget) {
+    const upgraded = tryUpgradeBasicAttackToTechnique(ctx, me, activeTarget, entities);
+    if (upgraded) return upgraded;
     if (me.order?.action === "technique") {
       const technique = getTechniqueById(me.order.techniqueId);
       const label = technique?.name ?? "technique";
@@ -418,15 +502,55 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: R
       const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: edictResult.techniqueOverride.id });
       if (issued) {
         const targetLabel = targetId === me.id ? "self" : (commandTarget.name ?? "target");
-        void ctx.logActivity(`Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
+        const liveMe = getWorldEntity(me.id) as any;
+        if (liveMe) {
+          liveMe.lastEdictDecision = {
+            edictId: edictResult.edict.id,
+            edictName: edictResult.edict.name,
+            actionType: edictResult.edict.action.type,
+            targetId,
+            targetName: targetLabel,
+            techniqueId: edictResult.techniqueOverride.id,
+            techniqueName: edictResult.techniqueOverride.name,
+            tick: getWorldTick(),
+          };
+        }
+        void ctx.logActivity(`[edict: ${edictResult.edict.name}] Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
         return actionProgressed(`Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
       }
     } else if (edictResult.order?.action === "attack" && edictResult.order.targetId) {
       const issued = ctx.issueCommand({ action: "attack", targetId: edictResult.order.targetId });
-      if (issued) return actionProgressed(`Attacking ${edictTarget.name ?? "target"}`);
+      if (issued) {
+        const liveMe = getWorldEntity(me.id) as any;
+        if (liveMe) {
+          liveMe.lastEdictDecision = {
+            edictId: edictResult.edict.id,
+            edictName: edictResult.edict.name,
+            actionType: edictResult.edict.action.type,
+            targetId: edictResult.order.targetId,
+            targetName: edictTarget.name ?? "target",
+            tick: getWorldTick(),
+          };
+        }
+        void ctx.logActivity(`[edict: ${edictResult.edict.name}] Attacking ${edictTarget.name ?? "target"}`);
+        return actionProgressed(`Attacking ${edictTarget.name ?? "target"}`);
+      }
     } else if (edictResult.order?.action === "move" && edictResult.order.x != null && edictResult.order.y != null) {
       const issued = ctx.issueCommand({ action: "move", x: edictResult.order.x, y: edictResult.order.y });
-      if (issued) return actionProgressed(edictResult.edict.action.type === "skip" ? "Holding position" : "Repositioning");
+      if (issued) {
+        const label = edictResult.edict.action.type === "skip" ? "Holding position" : "Repositioning";
+        const liveMe = getWorldEntity(me.id) as any;
+        if (liveMe) {
+          liveMe.lastEdictDecision = {
+            edictId: edictResult.edict.id,
+            edictName: edictResult.edict.name,
+            actionType: edictResult.edict.action.type,
+            tick: getWorldTick(),
+          };
+        }
+        void ctx.logActivity(`[edict: ${edictResult.edict.name}] ${label}`);
+        return actionProgressed(label);
+      }
     } else if (edictResult.targetOverride) {
       target = edictResult.targetOverride;
     }
@@ -1124,8 +1248,10 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
 
     const lab = ctx.findNearestEntity(entities, me, (e) => e.type === "alchemy-lab");
     if (!lab) {
-      void ctx.logActivity("No alchemy lab here — gathering herbs instead");
-      return doGathering(ctx, strategy, "herb");
+      const reason = `Stuck on alchemy: no alchemy lab in ${ctx.currentRegion}; not auto-gathering`;
+      void ctx.logActivity(reason);
+      ctx.setScript({ type: "idle", reason });
+      return actionIdle(reason);
     }
 
     const [labId, labEntity] = lab;
@@ -1137,8 +1263,10 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
     const recipesRes = await ctx.api("GET", "/alchemy/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
     if (recipes.length === 0) {
-      void ctx.logActivity("No alchemy recipes available — gathering materials");
-      return doGathering(ctx, strategy, "herb");
+      const reason = "Stuck on alchemy: no recipes available; not auto-gathering";
+      void ctx.logActivity(reason);
+      ctx.setScript({ type: "idle", reason });
+      return actionIdle(reason);
     }
 
     const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
@@ -1159,8 +1287,10 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
 
     const brewable = recipes.filter(canBrew);
     if (brewable.length === 0) {
-      void ctx.logActivity("Missing ingredients for all potions — gathering herbs");
-      return doGathering(ctx, strategy, "herb");
+      const reason = "Stuck on alchemy: missing ingredients for all potions; not auto-gathering";
+      void ctx.logActivity(reason);
+      ctx.setScript({ type: "idle", reason });
+      return actionIdle(reason);
     }
 
     const moving = await ctx.moveToEntity(me, labEntity);
@@ -1195,10 +1325,10 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
       }
     }
 
-    // Inventory said we were brewable but every recipe still errored (race,
-    // cooldown, skill level, etc.) — fall back to gathering without thrashing.
-    void ctx.logActivity("Brew attempts failed — gathering herbs");
-    return doGathering(ctx, strategy, "herb");
+    const reason = `Stuck on alchemy: brew attempts failed${lastError ? ` (${lastError})` : ""}; not auto-gathering`;
+    void ctx.logActivity(reason);
+    ctx.setScript({ type: "idle", reason });
+    return actionIdle(reason);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] alchemy tick: ${reason.slice(0, 60)}`);
@@ -1213,39 +1343,6 @@ export async function doAlchemy(ctx: AgentContext, strategy: AgentStrategy): Pro
 // (3) walking to the right station (forge / tanning-rack / etc.) to craft.
 // Without this, craft quests fell through to `doGathering` and the agent
 // would mine ore forever but never actually smelt a bar.
-
-const PROFESSION_TO_STATION: Record<string, string> = {
-  blacksmithing:  "forge",
-  leatherworking: "tanning-rack",
-  enchanting:     "enchanting-altar",
-  jewelcrafting:  "jewelers-bench",
-  cooking:        "campfire",
-  alchemy:        "alchemy-lab",
-};
-
-const QUEST_CRAFT_RECIPE_BOOKS = [
-  { profession: "blacksmithing", recipesEndpoint: "/crafting/recipes", craftEndpoint: "/crafting/forge", stationField: "forgeId" },
-  { profession: "alchemy", recipesEndpoint: "/alchemy/recipes", craftEndpoint: "/alchemy/brew", stationField: "alchemyLabId" },
-] as const;
-
-function getRecipeOutputName(recipe: any): string {
-  return String(recipe.output?.name ?? recipe.name ?? "");
-}
-
-function getRecipeMaterials(recipe: any): Array<{ tokenId: number; quantity: number; name: string }> {
-  const materials = recipe.materials ?? recipe.requiredMaterials ?? [];
-  return materials.map((m: any) => ({
-    tokenId: Number(m.tokenId),
-    quantity: Number(m.quantity ?? 0),
-    name: String(m.name ?? m.itemName ?? ""),
-  }));
-}
-
-function pickGatherPreferenceForMissingMaterial(profession: string, materialName: string): GatherPreference {
-  if (profession === "alchemy") return "herb";
-  if (/ore|bar|ingot/i.test(materialName)) return "ore";
-  return "both";
-}
 
 async function doQuestSupportObjective(
   ctx: AgentContext,
@@ -1266,6 +1363,14 @@ async function doQuestSupportObjective(
   );
   if (gatherQuest) {
     const target = String(gatherQuest.quest.objective.targetItemName);
+    if (/^corpse$/i.test(target)) {
+      void ctx.logActivity("Skinning corpses for quest");
+      const skinResult = await doSkinning(ctx, strategy);
+      if (skinResult.status === "blocked" && /no skinnable corpses/i.test(skinResult.reason ?? "")) {
+        return doCombat(ctx, strategy);
+      }
+      return skinResult;
+    }
     const preference: GatherPreference = findZoneForOre(target) && !findZoneForFlower(target)
       ? "ore"
       : findZoneForFlower(target) && !findZoneForOre(target)
@@ -1288,8 +1393,9 @@ async function doCraftQuest(
 
     let match: {
       recipe: any;
-      profession: string;
+      profession: CraftProfession;
       craftEndpoint: string;
+      stationType: string;
       stationField: string;
     } | null = null;
 
@@ -1304,8 +1410,9 @@ async function doCraftQuest(
       if (recipe) {
         match = {
           recipe,
-          profession: String(recipe.requiredProfession ?? book.profession),
+          profession: book.profession,
           craftEndpoint: book.craftEndpoint,
+          stationType: book.stationType,
           stationField: book.stationField,
         };
         break;
@@ -1319,7 +1426,7 @@ async function doCraftQuest(
       return actionBlocked(reason, { failureKey: `craft:no-recipe:${targetLC}` });
     }
 
-    const { recipe, profession, craftEndpoint, stationField } = match;
+    const { recipe, profession, craftEndpoint, stationType, stationField } = match;
     const learned = await ctx.learnProfession(profession as any);
     if (!learned) {
       return actionBlocked(`Could not learn ${profession}`, {
@@ -1335,20 +1442,17 @@ async function doCraftQuest(
     const mats = getRecipeMaterials(recipe);
     const missing = mats.find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity);
     if (missing) {
-      void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName} — gathering`);
-      const pref = pickGatherPreferenceForMissingMaterial(profession, missing.name);
-      return doGathering(ctx, strategy, pref, missing.name);
+      void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName}`);
+      return recoverMissingMaterial(ctx, strategy, profession, missing.name);
     }
 
     const zs = await ctx.getZoneState();
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
-    const stationType = PROFESSION_TO_STATION[profession] ?? "forge";
     const station = ctx.findNearestEntity(entities, me, (e: any) => e.type === stationType);
     if (!station) {
-      void ctx.logActivity(`No ${stationType} in ${ctx.currentRegion} — gathering instead`);
-      return doGathering(ctx, strategy);
+      return routeToProfessionHubForStation(ctx, stationType, strategy);
     }
 
     const [stationId, stationEntity] = station;
@@ -1393,6 +1497,15 @@ async function doCraftQuest(
   }
 }
 
+export async function doSkinning(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
+  const result = await doSkinningProfession(ctx);
+  if (result.status === "blocked" && /no skinnable corpses/i.test(result.reason ?? "")) {
+    void ctx.logActivity("No corpses to skin — making some");
+    return doCombat(ctx, strategy);
+  }
+  return result;
+}
+
 // ── Cooking ──────────────────────────────────────────────────────────────────
 
 export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Promise<ActionResult> {
@@ -1400,8 +1513,10 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
     // Auto-learn cooking profession
     const learned = await ctx.learnProfession("cooking");
     if (!learned) {
-      void ctx.logActivity("Can't cook — no cooking trainer nearby");
-      return doGathering(ctx, strategy);
+      const reason = "Stuck on cooking: no cooking trainer nearby; not auto-gathering";
+      void ctx.logActivity(reason);
+      ctx.setScript({ type: "idle", reason });
+      return actionIdle(reason);
     }
 
     const zs = await ctx.getZoneState();
@@ -1410,8 +1525,7 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
 
     const campfire = ctx.findNearestEntity(entities, me, (e) => e.type === "campfire");
     if (!campfire) {
-      void ctx.logActivity("No campfire here — gathering ingredients instead");
-      return doGathering(ctx, strategy);
+      return routeToProfessionHubForStation(ctx, "campfire", strategy);
     }
 
     const [campfireId, campfireEntity] = campfire;
@@ -1420,6 +1534,13 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
 
     const recipesRes = await ctx.api("GET", "/cooking/recipes");
     const recipes = recipesRes?.recipes ?? [];
+    const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
+    const missingPlan = firstMissingRecipeMaterial(recipes, invRes?.items ?? []);
+    if (missingPlan) {
+      void ctx.logActivity(`Stuck on cooking: need ${missingPlan.missing.name}`);
+      return recoverMissingMaterial(ctx, strategy, "cooking", missingPlan.missing.name);
+    }
+
     let lastError: string | null = null;
     for (const recipe of recipes) {
       try {
@@ -1449,12 +1570,13 @@ export async function doCooking(ctx: AgentContext, strategy: AgentStrategy): Pro
       }
     }
 
-    void ctx.logActivity("Can't cook anything — missing ingredients, going to gather");
-    const gatherResult = await doGathering(ctx, strategy);
+    const stuckReason = "Stuck on cooking: no cookable recipes; not auto-gathering";
+    void ctx.logActivity(stuckReason);
+    ctx.setScript({ type: "idle", reason: stuckReason });
     return lastError ? actionBlocked(lastError, {
       failureKey: `cooking:cook:${ctx.currentRegion}`,
       endpoint: "/cooking/cook",
-    }) : gatherResult;
+    }) : actionIdle(stuckReason);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] cooking tick: ${reason.slice(0, 60)}`);
@@ -1585,12 +1707,13 @@ export async function doCrafting(ctx: AgentContext, strategy: AgentStrategy): Pr
       }
     }
 
-    void ctx.logActivity("Missing materials for all recipes — gathering ore");
-    const gatherResult = await doGathering(ctx, strategy, "ore");
+    const stuckReason = "Stuck on crafting: missing materials for all forge recipes; not auto-gathering";
+    void ctx.logActivity(stuckReason);
+    ctx.setScript({ type: "idle", reason: stuckReason });
     return lastError ? actionBlocked(lastError, {
       failureKey: `crafting:forge:${ctx.currentRegion}`,
       endpoint: "/crafting/forge",
-    }) : gatherResult;
+    }) : actionIdle(stuckReason);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] crafting tick: ${reason.slice(0, 60)}`);
@@ -1611,7 +1734,7 @@ export async function doLeatherworking(ctx: AgentContext, strategy: AgentStrateg
 
     const rack = ctx.findNearestEntity(entities, me, (e) => e.type === "tanning-rack");
     if (!rack) {
-      return fallbackToCombat(ctx, "No tanning rack in this zone", strategy);
+      return routeToProfessionHubForStation(ctx, "tanning-rack", strategy);
     }
 
     const [rackId, rackEntity] = rack;
@@ -1620,6 +1743,12 @@ export async function doLeatherworking(ctx: AgentContext, strategy: AgentStrateg
 
     const recipesRes = await ctx.api("GET", "/leatherworking/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+    const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
+    const missingPlan = firstMissingRecipeMaterial(recipes, invRes?.items ?? []);
+    if (missingPlan) {
+      void ctx.logActivity(`Stuck on leatherworking: need ${missingPlan.missing.name}`);
+      return recoverMissingMaterial(ctx, strategy, "leatherworking", missingPlan.missing.name);
+    }
 
     let lastError: string | null = null;
     for (const recipe of recipes) {
@@ -1663,12 +1792,13 @@ export async function doLeatherworking(ctx: AgentContext, strategy: AgentStrateg
       }
     }
 
-    void ctx.logActivity("Missing materials for leatherworking — skinning");
-    const gatherResult = await doGathering(ctx, strategy);
+    const stuckReason = "Stuck on leatherworking: missing materials for all recipes; not auto-skinning";
+    void ctx.logActivity(stuckReason);
+    ctx.setScript({ type: "idle", reason: stuckReason });
     return lastError ? actionBlocked(lastError, {
       failureKey: `leatherworking:craft:${ctx.currentRegion}`,
       endpoint: "/leatherworking/craft",
-    }) : gatherResult;
+    }) : actionIdle(stuckReason);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] leatherworking tick: ${reason.slice(0, 60)}`);
@@ -1689,7 +1819,7 @@ export async function doJewelcrafting(ctx: AgentContext, strategy: AgentStrategy
 
     const bench = ctx.findNearestEntity(entities, me, (e) => e.type === "jewelers-bench");
     if (!bench) {
-      return fallbackToCombat(ctx, "No jeweler's bench in this zone", strategy);
+      return routeToProfessionHubForStation(ctx, "jewelers-bench", strategy);
     }
 
     const [stationId, benchEntity] = bench;
@@ -1698,6 +1828,12 @@ export async function doJewelcrafting(ctx: AgentContext, strategy: AgentStrategy
 
     const recipesRes = await ctx.api("GET", "/jewelcrafting/recipes");
     const recipes = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+    const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
+    const missingPlan = firstMissingRecipeMaterial(recipes, invRes?.items ?? []);
+    if (missingPlan) {
+      void ctx.logActivity(`Stuck on jewelcrafting: need ${missingPlan.missing.name}`);
+      return recoverMissingMaterial(ctx, strategy, "jewelcrafting", missingPlan.missing.name);
+    }
 
     let lastError: string | null = null;
     for (const recipe of recipes) {
@@ -1741,12 +1877,13 @@ export async function doJewelcrafting(ctx: AgentContext, strategy: AgentStrategy
       }
     }
 
-    void ctx.logActivity("Missing materials for jewelcrafting — gathering ore");
-    const gatherResult = await doGathering(ctx, strategy, "ore");
+    const stuckReason = "Stuck on jewelcrafting: missing materials for all recipes; not auto-gathering";
+    void ctx.logActivity(stuckReason);
+    ctx.setScript({ type: "idle", reason: stuckReason });
     return lastError ? actionBlocked(lastError, {
       failureKey: `jewelcrafting:craft:${ctx.currentRegion}`,
       endpoint: "/jewelcrafting/craft",
-    }) : gatherResult;
+    }) : actionIdle(stuckReason);
   } catch (err: any) {
     const reason = formatAgentError(err);
     console.debug(`[agent] jewelcrafting tick: ${reason.slice(0, 60)}`);
@@ -2793,14 +2930,10 @@ async function questBlockedFallback(
     }
   }
 
-  // Option 2: Try gathering — always productive, earns profession XP
-  void ctx.logActivity(`Quest combat blocked (${reason}) — gathering while waiting`);
-  const gatherResult = await doGathering(ctx, strategy);
-  if (gatherResult.status !== "blocked") return gatherResult;
-
-  // Option 3: Try crafting with existing materials
-  void ctx.logActivity("Gathering blocked too — trying to craft");
-  return actionProgressed(`Quest combat paused: ${reason} — looking for other work`);
+  const stuckReason = `Stuck on quest combat: ${reason}; not auto-gathering`;
+  void ctx.logActivity(stuckReason);
+  ctx.setScript({ type: "idle", reason: stuckReason });
+  return actionIdle(stuckReason);
 }
 
 // ── Shared helper ────────────────────────────────────────────────────────────
@@ -2999,9 +3132,10 @@ export async function doDungeon(
               return actionProgressed(`Brewed gate essence — will forge ${rank}-Key next`);
             } catch (err: any) {
               const reason = formatAgentError(err);
-              void ctx.logActivity(`Gate essence brewing failed: ${reason} — gathering materials`);
-              // Missing materials — go gather
-              return doGathering(ctx, strategy, "both");
+              const stuckReason = `Stuck on dungeon key: gate essence brewing failed (${reason}); not auto-gathering`;
+              void ctx.logActivity(stuckReason);
+              ctx.setScript({ type: "idle", reason: stuckReason });
+              return actionIdle(stuckReason);
             }
           }
         }
