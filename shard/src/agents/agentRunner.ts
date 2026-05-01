@@ -79,6 +79,7 @@ import { handleLowHp, needsRepair, checkSelfAdaptation } from "./agentSurvival.j
 import * as behaviors from "./agentBehaviors.js";
 import { emitAgentChat, getAgentOrigin, maybeReactToChat, pickLine } from "./agentDialogue.js";
 import { sendAgentPush } from "./agentPushService.js";
+import { setEdictCache } from "../combat/edictCache.js";
 import {
   buildUtilityDecisionContext,
   chooseNextScript,
@@ -88,9 +89,11 @@ import {
 } from "./agentUtility.js";
 
 const TICK_MS = 1200;
+const GOTO_TICK_MS = 350;
 /** Safety-net: call supervisor if no trigger has fired in about 30s. */
 const MAX_STALE_TICKS = Math.ceil(30_000 / TICK_MS);
 const MOVE_REISSUE_MS = 4_000;
+const GOTO_MOVE_REISSUE_MS = 700;
 const MOVE_PROGRESS_EPSILON = 4;
 const PARTY_LEADER_FOLLOW_DISTANCE = 90;
 const PARTY_LEADER_STOP_DISTANCE = 35;
@@ -481,6 +484,11 @@ export class AgentRunner {
         reason,
       };
       this.ticksSinceLastDecision = 0;
+      const target = getWorldEntity(entityId);
+      if (zoneId === this.currentRegion && target) {
+        this.issueCommand({ action: "move", x: target.x, y: target.y });
+        this.moveToLastCommandAt = Date.now();
+      }
     });
   }
 
@@ -494,6 +502,10 @@ export class AgentRunner {
         reason: `User: move to (${Math.round(x)}, ${Math.round(y)})`,
       };
       this.ticksSinceLastDecision = 0;
+      if (zoneId === this.currentRegion) {
+        this.issueCommand({ action: "move", x, y });
+        this.moveToLastCommandAt = Date.now();
+      }
     });
   }
 
@@ -1255,32 +1267,9 @@ export class AgentRunner {
   }
 
   /**
-   * Circuit breaker: pick an alternative focus when the current script is stuck.
-   * Cycles through fallback activities, skipping the one the agent is already doing.
-   */
-  private pickCircuitBreakerFocus(stuckScriptType: string): AgentFocus | null {
-    // Map script types to their parent focus so we can skip the current one
-    const scriptToFocus: Record<string, AgentFocus> = {
-      quest: "questing", combat: "combat", gather: "gathering",
-      craft: "crafting", brew: "alchemy", cook: "cooking",
-      enchant: "enchanting", shop: "shopping", farm: "farming",
-      leatherwork: "leatherworking", jewelcraft: "jewelcrafting",
-      learn: "learning",
-    };
-    const currentFocus = scriptToFocus[stuckScriptType] ?? this.lastFocus;
-
-    // Ordered fallback rotation — diverse enough to unstick most situations
-    const fallbacks: AgentFocus[] = [
-      "gathering", "crafting", "farming", "questing", "cooking",
-      "alchemy", "shopping", "combat",
-    ];
-    return fallbacks.find((f) => f !== currentFocus) ?? null;
-  }
-
-  /**
    * When the circuit breaker fires, try the smartest unstick path first:
-   * travel to a different zone whose level/content matches the agent. Only fall
-   * back to focus rotation (gather→craft→cook) if no better zone is available.
+   * travel to a different zone whose level/content matches the agent. If no
+   * better zone is available, go idle instead of flailing on fallback actions.
    *
    * Returns true if a rescue plan was enqueued / applied.
    */
@@ -1347,22 +1336,19 @@ export class AgentRunner {
       }
     }
 
-    // Path 2: Focus rotation — try a different activity in the same zone.
-    const fallback = this.pickCircuitBreakerFocus(currentType);
-    if (fallback) {
-      console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to ${fallback}`);
-      void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to ${fallback}`);
-      this.logError("action", `Circuit breaker fired: ${currentType} → ${fallback} after ${failure.consecutive} blocks`, {
-        fromScript: currentType,
-        toFocus: fallback,
-        reason: failure.reason,
-      });
-      this.lastRescueByZone.set(zone, Date.now());
-      void patchAgentConfig(this.userWallet, { focus: fallback });
-      return true;
-    }
-
-    return false;
+    // Path 2: No better zone found — go idle instead of switching to gather/craft.
+    console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to idle`);
+    void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to idle`);
+    this.logError("action", `Circuit breaker fired: ${currentType} → idle after ${failure.consecutive} blocks`, {
+      fromScript: currentType,
+      toFocus: "idle",
+      reason: failure.reason,
+    });
+    this.lastRescueByZone.set(zone, Date.now());
+    void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
+    this.currentScript = { type: "idle", reason: `Circuit breaker: ${currentType} blocked` };
+    this.ticksOnCurrentScript = 0;
+    return true;
   }
 
   private maybeScheduleBlockedTrigger(failure: FailureMemoryEntry): void {
@@ -1637,10 +1623,11 @@ export class AgentRunner {
       && Math.abs((currentOrder.y ?? 0) - target.y) < 1;
     const stalled = this.moveToStaleCount >= 4;
 
+    const reissueMs = this.currentScript?.type === "goto" ? GOTO_MOVE_REISSUE_MS : MOVE_REISSUE_MS;
     const shouldIssueMove = targetChanged
       || !alreadyMovingToTarget
       || stalled
-      || now - this.moveToLastCommandAt >= MOVE_REISSUE_MS;
+      || now - this.moveToLastCommandAt >= reissueMs;
 
     if (shouldIssueMove) {
       if (targetChanged || now - this.moveToLastLogAt >= 5_000 || stalled) {
@@ -2410,6 +2397,10 @@ export class AgentRunner {
         this.currentCaps = TIER_CAPABILITIES[config.tier ?? "free"];
         // Refresh flags that behaviors reference via ctx each tick.
         this.ignoreWeakMobsFlag = config.ignoreWeakMobs !== false;
+        if (config.edicts) {
+          setEdictCache(this.userWallet, config.edicts);
+          if (this.custodialWallet) setEdictCache(this.custodialWallet, config.edicts);
+        }
         if (config.homeZone) this.homeZone = config.homeZone;
 
         // Session timeout
@@ -2865,7 +2856,7 @@ export class AgentRunner {
         this.persistRuntimeSnapshotEventually("loop");
       }
 
-      await sleep(TICK_MS);
+      await sleep(this.currentScript?.type === "goto" ? GOTO_TICK_MS : TICK_MS);
     }
 
     console.log(`[agent:${this.walletTag}] Loop exited`);

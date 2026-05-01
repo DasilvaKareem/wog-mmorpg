@@ -32,6 +32,8 @@ export interface EdictResult {
   targetOverride?: Entity;
 }
 
+type FieldValue = number | string | boolean | string[] | undefined;
+
 // ── Main evaluator ──────────────────────────────────────────────────
 
 export function evaluateEdicts(
@@ -146,7 +148,7 @@ function readField(
   self: Entity,
   zone: ZoneState,
   field: string,
-): number | string | boolean | undefined {
+): FieldValue {
   switch (field) {
     case "hp_pct":
       return subject ? Math.round((subject.hp / Math.max(1, subject.maxHp)) * 100) : undefined;
@@ -157,11 +159,9 @@ function readField(
     case "type":
       return subject?.type;
     case "active_effect":
-      // Returns the type string of the first active effect, or "none"
-      // Operator will be "has" or "not_has" with value = effect type
-      return hasEffectType(subject?.activeEffects, undefined) ? "present" : "none";
+      return getEffectTokens(subject?.activeEffects);
     case "effect_from_self":
-      return hasEffectFromCaster(subject?.activeEffects, self.id) ? "present" : "none";
+      return getEffectTokens(subject?.activeEffects?.filter((effect) => effect.casterId === self.id));
     case "nearby_enemies": {
       let count = 0;
       const RANGE = 70;
@@ -181,26 +181,29 @@ function readField(
   }
 }
 
-function hasEffectType(effects: ActiveEffect[] | undefined, _unused: unknown): boolean {
-  return !!effects && effects.length > 0;
-}
-
-function hasEffectFromCaster(effects: ActiveEffect[] | undefined, casterId: string): boolean {
-  if (!effects) return false;
-  return effects.some(e => e.casterId === casterId);
+function getEffectTokens(effects: ActiveEffect[] | undefined): string[] {
+  if (!effects || effects.length === 0) return [];
+  const tokens = new Set<string>();
+  for (const effect of effects) {
+    tokens.add(effect.type.toLowerCase());
+    tokens.add(effect.techniqueId.toLowerCase());
+    tokens.add(effect.name.toLowerCase());
+  }
+  return [...tokens];
 }
 
 // Special-case: for "active_effect" and "effect_from_self" fields,
 // the operator/value work differently — we check for specific effect types
 function compare(
-  actual: number | string | boolean | undefined,
+  actual: FieldValue,
   operator: string,
   value: number | string | boolean,
 ): boolean {
   // Special handling for effect-presence fields
-  if (typeof value === "string" && (operator === "has" || operator === "not_has")) {
-    if (operator === "has") return actual === "present";
-    if (operator === "not_has") return actual === "none";
+  if (Array.isArray(actual) && typeof value === "string" && (operator === "has" || operator === "not_has")) {
+    const needle = value.toLowerCase();
+    const present = actual.some((token) => token === needle || token.includes(needle) || needle.includes(token));
+    return operator === "has" ? present : !present;
   }
 
   // Numeric comparisons
@@ -242,7 +245,7 @@ function resolveAction(
 
   switch (action.type) {
     case "use_technique":
-      return resolveTechniqueAction(entity, zone, edict, action);
+      return resolveTechniqueAction(entity, zone, currentTarget, edict, action);
 
     case "best_technique":
       return resolveBestTechniqueAction(entity, zone, currentTarget, edict, action, pickBest);
@@ -292,6 +295,7 @@ function resolveBestTechniqueAction(
 function resolveTechniqueAction(
   entity: Entity,
   zone: ZoneState,
+  currentTarget: Entity | null,
   edict: Edict,
   action: EdictAction,
 ): EdictResult | null {
@@ -318,7 +322,18 @@ function resolveTechniqueAction(
     if (currentEssence < tech.essenceCost) return null; // not enough — skip to next edict
   }
 
-  return { edict, techniqueOverride: tech };
+  let target: Entity | null = currentTarget;
+  if (action.targetPreference) {
+    const pref = resolveTargetPreference(entity, zone, edict, action);
+    if (pref?.targetOverride) target = pref.targetOverride;
+  }
+
+  if (tech.targetType === "enemy" || tech.targetType === "area") {
+    if (!target) return null;
+    return { edict, techniqueOverride: tech, targetOverride: target };
+  }
+
+  return { edict, techniqueOverride: tech, targetOverride: target ?? entity };
 }
 
 function resolveTargetPreference(

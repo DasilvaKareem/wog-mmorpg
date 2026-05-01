@@ -5,11 +5,17 @@
 
 import { getAgentConfig, patchAgentConfig, type AgentFocus, type AgentStrategy } from "./agentConfigStore.js";
 import { resolveRegionId, getRegionCenter, getZoneConnections, ZONE_LEVEL_REQUIREMENTS } from "../world/worldLayout.js";
-import { getEntity as getWorldEntity, getOrCreateZone, pickPartyFocusTarget } from "../world/zoneRuntime.js";
+import {
+  getEntity as getWorldEntity,
+  getOrCreateZone,
+  pickPartyFocusTarget,
+  pickTechnique,
+  pickTechniqueTargetIdForAutoCombat,
+} from "../world/zoneRuntime.js";
 import { getPartyLeaderId, getPartyMembers, getPlayerPartyId } from "../social/partySystem.js";
 import { getItemBalance } from "../blockchain/blockchain.js";
 import { copperToGold } from "../blockchain/currency.js";
-import { getTechniqueById, type TechniqueDefinition } from "../combat/techniques.js";
+import { getTechniqueById } from "../combat/techniques.js";
 import { reputationManager, ReputationCategory } from "../economy/reputationManager.js";
 import { resolveLiveAgentIdForWallet } from "../erc8004/agentResolution.js";
 import { pickLine, emitAgentChat } from "./agentDialogue.js";
@@ -21,6 +27,9 @@ import { ORE_SPAWN_DEFS } from "../resources/oreSpawner.js";
 import { FLOWER_SPAWN_DEFS } from "../resources/flowerSpawner.js";
 import { getItemByTokenId } from "../items/itemCatalog.js";
 import { NPC_DEFS } from "../world/npcSpawner.js";
+import { evaluateEdicts } from "../combat/edictEvaluator.js";
+import { getEdictCache } from "../combat/edictCache.js";
+import { getDefaultGambits } from "../combat/defaultGambits.js";
 import {
   actionBlocked,
   actionCompleted,
@@ -41,6 +50,8 @@ const ENCHANTMENT_ELIXIR_TOKENS = new Set([55, 56, 57, 58, 59, 60, 61]);
 const AUCTION_LISTING_FEE_COPPER = 50;
 const AUCTION_RELIST_COOLDOWN_MS = 10 * 60_000;
 const MIN_AUCTION_VALUE_COPPER = 150;
+const GOTO_WAYPOINT_CLOSE_DIST = 20;
+const GOTO_NPC_CLOSE_DIST = 35;
 
 function normalizeMobName(name: unknown): string {
   return String(name ?? "")
@@ -144,47 +155,6 @@ function pickAuctionListingCandidate(items: LiquidationInventoryItem[]): Auction
     [0] ?? null;
 }
 
-function getTechniqueCooldownExpiry(entity: any, techniqueId: string): number | undefined {
-  const cooldowns = entity.cooldowns;
-  if (!cooldowns) return undefined;
-  if (cooldowns instanceof Map) return cooldowns.get(techniqueId);
-  if (typeof cooldowns === "object") {
-    const raw = (cooldowns as Record<string, unknown>)[techniqueId];
-    return typeof raw === "number" ? raw : undefined;
-  }
-  return undefined;
-}
-
-function getPartySupportMembers(entity: any, entities: Record<string, any>): any[] {
-  return getPartyMembers(entity.id)
-    .map((memberId) => entities[memberId] ?? getWorldEntity(memberId))
-    .filter((member): member is any => !!member && member.type === "player" && member.hp > 0);
-}
-
-function hasBuffFromCaster(entity: any, target: any): boolean {
-  return !!target?.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
-}
-
-function getLeaderFirstBuffTarget(entity: any, entities: Record<string, any>): any | null {
-  const members = getPartySupportMembers(entity, entities);
-  if (members.length <= 1) return null;
-
-  const leaderId = getPartyLeaderId(entity.id);
-  const leader = leaderId ? members.find((member) => member.id === leaderId) : undefined;
-  if (leader && leader.id !== entity.id && !hasBuffFromCaster(entity, leader)) return leader;
-
-  return members.find((member) => member.id !== entity.id && !hasBuffFromCaster(entity, member)) ?? null;
-}
-
-function getLowestHpAlly(entity: any, entities: Record<string, any>): any | null {
-  const members = getPartySupportMembers(entity, entities).filter((member) => member.id !== entity.id);
-  if (members.length === 0) return null;
-
-  const lowest = members.sort((a, b) => (a.hp / Math.max(1, a.maxHp)) - (b.hp / Math.max(1, b.maxHp)))[0];
-  if (!lowest) return null;
-  return (lowest.hp / Math.max(1, lowest.maxHp)) < 0.9 ? lowest : null;
-}
-
 function logPartyCoordination(
   ctx: AgentContext,
   me: any,
@@ -214,80 +184,6 @@ function logPartyCoordination(
       ...data,
     },
   });
-}
-
-function pickCombatTechnique(entity: any, target: any, zoneTick: number, entities: Record<string, any>): TechniqueDefinition | null {
-  const learned = entity.learnedTechniques ?? [];
-  if (learned.length === 0) return null;
-
-  const currentEssence = entity.essence ?? 0;
-  const usable: TechniqueDefinition[] = [];
-  for (const techniqueId of learned) {
-    const technique = getTechniqueById(techniqueId);
-    if (!technique) continue;
-    if (technique.essenceCost > currentEssence) continue;
-    const cooldownExpiry = getTechniqueCooldownExpiry(entity, technique.id);
-    if (cooldownExpiry != null && zoneTick < cooldownExpiry) continue;
-    usable.push(technique);
-  }
-  if (usable.length === 0) return null;
-
-  const hasBuff = entity.activeEffects?.some((effect: any) => effect.type === "buff" && effect.casterId === entity.id);
-  if (!hasBuff) {
-    const buff = usable.find((technique) => technique.type === "buff" && (technique.targetType === "self" || technique.targetType === "party"));
-    if (buff) return buff;
-  }
-
-  const hpRatio = entity.maxHp > 0 ? entity.hp / entity.maxHp : 1;
-  if (hpRatio < 0.4) {
-    const heal = usable.find((technique) => technique.type === "healing");
-    if (heal) return heal;
-  }
-
-  const lowestHpAlly = getLowestHpAlly(entity, entities);
-  if (lowestHpAlly) {
-    const partyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "party");
-    if (partyHeal) return partyHeal;
-
-    const allyHeal = usable.find((technique) => technique.type === "healing" && technique.targetType === "ally");
-    if (allyHeal) return allyHeal;
-  }
-
-  const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
-  if (leaderBuffTarget) {
-    const allyBuff = usable.find((technique) => technique.type === "buff" && technique.targetType === "ally");
-    if (allyBuff) return allyBuff;
-  }
-
-  const hasDebuff = target.activeEffects?.some(
-    (effect: any) => (effect.type === "debuff" || effect.type === "dot") && effect.casterId === entity.id,
-  );
-  if (!hasDebuff) {
-    const debuff = usable.find((technique) => technique.type === "debuff");
-    if (debuff) return debuff;
-  }
-
-  const attacks = usable
-    .filter((technique) => technique.type === "attack")
-    .sort((a, b) => (b.effects.damageMultiplier ?? 0) - (a.effects.damageMultiplier ?? 0));
-  if (attacks.length > 0) return attacks[0];
-
-  return null;
-}
-
-function getTechniqueTargetId(entity: any, target: any, technique: TechniqueDefinition, entities: Record<string, any>): string {
-  if (technique.targetType === "self" || technique.targetType === "party") return entity.id;
-  if (technique.targetType === "ally") {
-    const lowHpAlly = getLowestHpAlly(entity, entities);
-    if (technique.type === "healing" && lowHpAlly) return lowHpAlly.id;
-
-    const leaderBuffTarget = getLeaderFirstBuffTarget(entity, entities);
-    if (leaderBuffTarget) return leaderBuffTarget.id;
-
-    return entity.id;
-  }
-  if (technique.type === "buff" || technique.type === "healing") return entity.id;
-  return target.id;
 }
 
 function pickPartyCombatTarget(me: any, currentRegion: string): any | null {
@@ -508,48 +404,32 @@ function engageCombatTarget(ctx: AgentContext, me: any, target: any, entities: R
     return actionProgressed(`Attacking ${activeTarget.name ?? "target"}`);
   }
 
-  const zoneTick = getOrCreateZone(ctx.currentRegion).tick;
-  const technique = pickCombatTechnique(me, target, zoneTick, entities);
-  if (technique) {
-    const targetId = getTechniqueTargetId(me, target, technique, entities);
-    const commandTarget = entities[targetId] ?? getWorldEntity(targetId) ?? target;
-    const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: technique.id });
-    if (!issued) {
-      return actionBlocked(`Could not use ${technique.name}`, {
-        failureKey: `combat:technique:${technique.id}`,
-        targetId,
-        targetName: target.name ?? "target",
-      });
+  const zone = getOrCreateZone(ctx.currentRegion);
+  const zoneTarget = zone.entities.get(target.id) ?? target;
+  const edicts = getEdictCache(ctx.custodialWallet)
+    ?? getEdictCache(ctx.userWallet)
+    ?? getDefaultGambits(me.classId);
+  const edictResult = evaluateEdicts(me, zone, edicts, zoneTarget, pickTechnique);
+  if (edictResult) {
+    const edictTarget = edictResult.targetOverride ?? zoneTarget;
+    if (edictResult.techniqueOverride) {
+      const targetId = pickTechniqueTargetIdForAutoCombat(me, edictTarget, edictResult.techniqueOverride, zone);
+      const commandTarget = entities[targetId] ?? getWorldEntity(targetId) ?? edictTarget;
+      const issued = ctx.issueCommand({ action: "technique", targetId, techniqueId: edictResult.techniqueOverride.id });
+      if (issued) {
+        const targetLabel = targetId === me.id ? "self" : (commandTarget.name ?? "target");
+        void ctx.logActivity(`Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
+        return actionProgressed(`Using ${edictResult.techniqueOverride.name} on ${targetLabel}`);
+      }
+    } else if (edictResult.order?.action === "attack" && edictResult.order.targetId) {
+      const issued = ctx.issueCommand({ action: "attack", targetId: edictResult.order.targetId });
+      if (issued) return actionProgressed(`Attacking ${edictTarget.name ?? "target"}`);
+    } else if (edictResult.order?.action === "move" && edictResult.order.x != null && edictResult.order.y != null) {
+      const issued = ctx.issueCommand({ action: "move", x: edictResult.order.x, y: edictResult.order.y });
+      if (issued) return actionProgressed(edictResult.edict.action.type === "skip" ? "Holding position" : "Repositioning");
+    } else if (edictResult.targetOverride) {
+      target = edictResult.targetOverride;
     }
-    if (technique.targetType === "party") {
-      logPartyCoordination(ctx, me, "party-technique", `${me.name ?? "Party member"} uses ${technique.name} for the party`, {
-        techniqueId: technique.id,
-        techniqueName: technique.name,
-      });
-    } else if (technique.targetType === "ally" && targetId !== me.id) {
-      const allyTarget = commandTarget;
-      const leaderId = getPartyLeaderId(me.id);
-      const isLeaderTarget = targetId === leaderId;
-      const kind = technique.type === "healing"
-        ? (isLeaderTarget ? "heal-leader" : "heal-ally")
-        : (isLeaderTarget ? "buff-leader" : "buff-ally");
-      logPartyCoordination(
-        ctx,
-        me,
-        kind,
-        `${me.name ?? "Party member"} uses ${technique.name} on ${allyTarget?.name ?? "an ally"}`,
-        {
-          targetId,
-          targetName: allyTarget?.name,
-          techniqueId: technique.id,
-          techniqueName: technique.name,
-          leaderId,
-        },
-      );
-    }
-    const targetLabel = targetId === me.id ? "self" : (commandTarget.name ?? "target");
-    void ctx.logActivity(`Using ${technique.name} on ${targetLabel}`);
-    return actionProgressed(`Using ${technique.name} on ${targetLabel}`);
   }
 
   const issued = ctx.issueCommand({ action: "attack", targetId: target.id });
@@ -2175,16 +2055,15 @@ export async function doGotoNpc(
       const { me } = zs;
 
       const dist = Math.hypot(pos.x - me.x, pos.y - me.y);
-      if (dist <= 35) {
+      if (dist <= GOTO_WAYPOINT_CLOSE_DIST) {
         // Arrived — clear position, idle
         void ctx.logActivity(`Arrived at waypoint (${Math.round(pos.x)}, ${Math.round(pos.y)})`);
         return clearGotoStateAndResume("Arrived at waypoint", { completed: true, keepFocusIfNotGoto: true });
       }
 
       // Still walking — issue/reissue move command
-      const moving = await ctx.moveToEntity(me, { x: pos.x, y: pos.y, name: "waypoint" } as any);
+      const moving = await ctx.moveToEntity(me, { x: pos.x, y: pos.y, name: "waypoint" } as any, GOTO_WAYPOINT_CLOSE_DIST);
       if (moving) {
-        void ctx.logActivity(`Walking to waypoint (${Math.round(dist)} away)`);
         return actionProgressed("Walking to waypoint");
       }
 
@@ -2271,9 +2150,8 @@ export async function doGotoNpc(
       });
     }
 
-    const moving = await ctx.moveToEntity(me, targetEntity);
+    const moving = await ctx.moveToEntity(me, targetEntity, GOTO_NPC_CLOSE_DIST);
     if (moving) {
-      void ctx.logActivity(`Walking to ${targetName ?? "NPC"}`);
       return actionProgressed(`Walking to ${targetName ?? "NPC"}`);
     }
 

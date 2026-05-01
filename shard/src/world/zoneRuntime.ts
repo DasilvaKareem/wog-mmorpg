@@ -788,6 +788,18 @@ function getTechniqueWindupTicks(technique: TechniqueDefinition): number {
   return 0;
 }
 
+function canEntityUseTechniqueNow(entity: Entity, technique: TechniqueDefinition, zone: ZoneState, resolving = false): boolean {
+  if (entity.type !== "player") return true;
+  if (entity.classId !== technique.className) return false;
+  if ((entity.level ?? 0) < technique.levelRequired) return false;
+  if (!(entity.learnedTechniques ?? []).includes(technique.id)) return false;
+  if (resolving) return true;
+  if ((entity.essence ?? 0) < technique.essenceCost) return false;
+
+  const cooldownExpires = entity.cooldowns?.get(technique.id);
+  return cooldownExpires == null || zone.tick >= cooldownExpires;
+}
+
 function buildVisibleIntents(zone: ZoneState): VisibleIntent[] {
   const intents: VisibleIntent[] = [];
 
@@ -2770,6 +2782,10 @@ async function worldTick() {
         const target = getEntity(entity.order.targetId);
         const technique = getTechniqueById(entity.order.techniqueId);
         if (!target || !technique) {
+          entity.order = undefined;
+          continue;
+        }
+        if (!canEntityUseTechniqueNow(entity, technique, zone, entity.order.resolving === true)) {
           entity.order = undefined;
           continue;
         }
