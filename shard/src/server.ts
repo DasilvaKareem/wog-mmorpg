@@ -982,6 +982,7 @@ server.post<{
 
 const allowedCorsOrigins = getAllowedCorsOrigins();
 server.register(cors, {
+  methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   origin(origin, cb) {
     if (!origin || isAllowedCorsOrigin(origin, allowedCorsOrigins)) {
       cb(null, true);

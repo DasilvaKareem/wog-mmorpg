@@ -42,7 +42,7 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl } from "./api.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -1376,17 +1376,24 @@ async function pollEdicts() {
       console.warn("[edicts] load skipped: no auth token");
       return;
     }
-    const res = await fetch(`${API_BASE}/agent/edicts/${wallet}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.warn("[edicts] load failed:", res.status, text);
-      return;
+    for (const base of CANDIDATE_BASES) {
+      try {
+        const res = await fetch(toUrl(base, `/agent/edicts/${wallet}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn("[edicts] load failed:", base || "same-origin", res.status, text);
+          continue;
+        }
+        const data = await res.json() as { edicts?: Edict[] };
+        console.log("[edicts] loaded", data.edicts?.length ?? 0, "rules for", wallet);
+        skillsPanel.updateEdicts(data.edicts ?? []);
+        return;
+      } catch (err) {
+        console.warn("[edicts] load error:", base || "same-origin", err);
+      }
     }
-    const data = await res.json() as { edicts?: Edict[] };
-    console.log("[edicts] loaded", data.edicts?.length ?? 0, "rules for", wallet);
-    skillsPanel.updateEdicts(data.edicts ?? []);
   } catch (err) {
     console.warn("[edicts] load error:", err);
   }
@@ -1395,6 +1402,7 @@ async function pollEdicts() {
 async function saveEdictsToShard(edicts: Edict[]): Promise<{ ok: boolean; error?: string }> {
   const wallet = ownWalletAddress;
   if (!wallet) return { ok: false, error: "No owner wallet selected" };
+  let lastError = "Network request failed";
   try {
     const token = await getAuthToken(wallet);
     if (!token) {
@@ -1402,31 +1410,40 @@ async function saveEdictsToShard(edicts: Edict[]): Promise<{ ok: boolean; error?
       return { ok: false, error: "No auth token" };
     }
     console.log("[edicts] saving", edicts.length, "rules for", wallet, edicts);
-    const res = await fetch(`${API_BASE}/agent/edicts`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ edicts }),
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      let errorMessage = text;
+    for (const base of CANDIDATE_BASES) {
       try {
-        const json = JSON.parse(text);
-        if (json.error) errorMessage = json.error;
-      } catch {
-        // Not JSON, use raw text
+        const res = await fetch(toUrl(base, "/agent/edicts"), {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ edicts }),
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          let errorMessage = text;
+          try {
+            const json = JSON.parse(text);
+            if (json.error) errorMessage = json.error;
+          } catch {
+            // Not JSON, use raw text
+          }
+          lastError = errorMessage || `HTTP ${res.status}`;
+          console.warn("[edicts] save failed:", base || "same-origin", res.status, text);
+          continue;
+        }
+        console.log("[edicts] save ok");
+        // Refresh cached copy from the server so any server-side normalization is reflected.
+        lastEdictsPollTime = 0;
+        void pollEdicts();
+        return { ok: true };
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : String(err);
+        console.warn("[edicts] save error:", base || "same-origin", err);
       }
-      console.warn("[edicts] save failed:", res.status, text);
-      return { ok: false, error: errorMessage || `HTTP ${res.status}` };
     }
-    console.log("[edicts] save ok");
-    // Refresh cached copy from the server so any server-side normalization is reflected.
-    lastEdictsPollTime = 0;
-    void pollEdicts();
-    return { ok: true };
+    return { ok: false, error: lastError };
   } catch (err) {
     console.warn("[edicts] save error:", err);
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
