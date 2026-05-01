@@ -1212,6 +1212,30 @@ const PROFESSION_TO_STATION: Record<string, string> = {
   alchemy:        "alchemy-lab",
 };
 
+const QUEST_CRAFT_RECIPE_BOOKS = [
+  { profession: "blacksmithing", recipesEndpoint: "/crafting/recipes", craftEndpoint: "/crafting/forge", stationField: "forgeId" },
+  { profession: "alchemy", recipesEndpoint: "/alchemy/recipes", craftEndpoint: "/alchemy/brew", stationField: "alchemyLabId" },
+] as const;
+
+function getRecipeOutputName(recipe: any): string {
+  return String(recipe.output?.name ?? recipe.name ?? "");
+}
+
+function getRecipeMaterials(recipe: any): Array<{ tokenId: number; quantity: number; name: string }> {
+  const materials = recipe.materials ?? recipe.requiredMaterials ?? [];
+  return materials.map((m: any) => ({
+    tokenId: Number(m.tokenId),
+    quantity: Number(m.quantity ?? 0),
+    name: String(m.name ?? m.itemName ?? ""),
+  }));
+}
+
+function pickGatherPreferenceForMissingMaterial(profession: string, materialName: string): GatherPreference {
+  if (profession === "alchemy") return "herb";
+  if (/ore|bar|ingot/i.test(materialName)) return "ore";
+  return "both";
+}
+
 async function doCraftQuest(
   ctx: AgentContext,
   strategy: AgentStrategy,
@@ -1220,16 +1244,45 @@ async function doCraftQuest(
   try {
     const targetLC = targetItemName.toLowerCase();
 
-    const recipesRes = await ctx.api("GET", "/crafting/recipes");
-    const recipes: any[] = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
-    const recipe = recipes.find((r) => {
-      const name = String(r.output?.name ?? "").toLowerCase();
-      if (!name) return false;
-      return name === targetLC || name.includes(targetLC) || targetLC.includes(name);
-    });
-    if (!recipe) {
-      void ctx.logActivity(`No recipe produces "${targetItemName}" — gathering instead`);
-      return doGathering(ctx, strategy);
+    let match: {
+      recipe: any;
+      profession: string;
+      craftEndpoint: string;
+      stationField: string;
+    } | null = null;
+
+    for (const book of QUEST_CRAFT_RECIPE_BOOKS) {
+      const recipesRes = await ctx.api("GET", book.recipesEndpoint);
+      const recipes: any[] = Array.isArray(recipesRes) ? recipesRes : (recipesRes?.recipes ?? []);
+      const recipe = recipes.find((r) => {
+        const name = getRecipeOutputName(r).toLowerCase();
+        if (!name) return false;
+        return name === targetLC || name.includes(targetLC) || targetLC.includes(name);
+      });
+      if (recipe) {
+        match = {
+          recipe,
+          profession: String(recipe.requiredProfession ?? book.profession),
+          craftEndpoint: book.craftEndpoint,
+          stationField: book.stationField,
+        };
+        break;
+      }
+    }
+
+    if (!match) {
+      const reason = `No known recipe produces "${targetItemName}"`;
+      void ctx.logActivity(`${reason} — idling`);
+      ctx.setScript({ type: "idle", reason });
+      return actionBlocked(reason, { failureKey: `craft:no-recipe:${targetLC}` });
+    }
+
+    const { recipe, profession, craftEndpoint, stationField } = match;
+    const learned = await ctx.learnProfession(profession as any);
+    if (!learned) {
+      return actionBlocked(`Could not learn ${profession}`, {
+        failureKey: `craft:learn:${profession}:${ctx.currentRegion}`,
+      });
     }
 
     const invRes = await ctx.api("GET", `/inventory/${ctx.custodialWallet}`);
@@ -1237,17 +1290,11 @@ async function doCraftQuest(
     const haveQty = new Map<number, number>();
     for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
 
-    const mats: Array<{ tokenId: number; quantity: number; name: string }> =
-      (recipe.materials ?? []).map((m: any) => ({
-        tokenId: Number(m.tokenId),
-        quantity: Number(m.quantity ?? 0),
-        name: String(m.name ?? ""),
-      }));
+    const mats = getRecipeMaterials(recipe);
     const missing = mats.find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity);
     if (missing) {
       void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName} — gathering`);
-      // Ore is more common for smelt recipes; fall back to "both" for others.
-      const pref: GatherPreference = /ore|bar|ingot/i.test(missing.name) ? "ore" : "both";
+      const pref = pickGatherPreferenceForMissingMaterial(profession, missing.name);
       return doGathering(ctx, strategy, pref);
     }
 
@@ -1255,7 +1302,6 @@ async function doCraftQuest(
     if (!zs) return actionIdle("Zone state unavailable");
     const { entities, me } = zs;
 
-    const profession = String(recipe.requiredProfession ?? "blacksmithing");
     const stationType = PROFESSION_TO_STATION[profession] ?? "forge";
     const station = ctx.findNearestEntity(entities, me, (e: any) => e.type === stationType);
     if (!station) {
@@ -1268,11 +1314,15 @@ async function doCraftQuest(
     if (moving) return actionProgressed(`Moving to ${stationEntity.name ?? stationType}`);
 
     try {
-      await ctx.api("POST", "/crafting/forge", {
+      const result = await ctx.api("POST", craftEndpoint, {
         walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
-        entityId: ctx.entityId, forgeId: stationId, recipeId: recipe.recipeId,
+        entityId: ctx.entityId, [stationField]: stationId, recipeId: recipe.recipeId,
       });
-      const label = recipe.output?.name ?? recipe.recipeId;
+      const label = result?.crafted?.displayName
+        ?? result?.brewed?.name
+        ?? result?.crafted?.name
+        ?? getRecipeOutputName(recipe)
+        ?? recipe.recipeId;
       void ctx.logActivity(`Crafted ${label}`);
       logZoneEvent({
         zoneId: ctx.currentRegion, type: "profession", tick: 0,
@@ -1292,7 +1342,7 @@ async function doCraftQuest(
       console.debug(`[agent:${ctx.walletTag}] craft ${recipe.recipeId}: ${reason.slice(0, 60)}`);
       return actionBlocked(reason, {
         failureKey: `craft:${recipe.recipeId}:${ctx.currentRegion}`,
-        endpoint: "/crafting/forge",
+        endpoint: craftEndpoint,
       });
     }
   } catch (err: any) {
