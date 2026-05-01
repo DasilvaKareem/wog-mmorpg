@@ -475,6 +475,7 @@ function findGatherNode(
   preference: GatherPreference,
   isBlacklisted: (nodeId: string) => boolean,
   preferredItemName?: string | null,
+  requirePreferredItem = false,
 ): [string, any] | null {
   const matchesPreferredName = (name: string | undefined): boolean => {
     if (!preferredItemName) return false;
@@ -491,6 +492,7 @@ function findGatherNode(
       if (preference === "herb") return e.type === "flower-node" && alive;
       return (e.type === "ore-node" || e.type === "flower-node") && alive;
     })
+    .filter(([, e]) => !requirePreferredItem || matchesPreferredName(e.name))
     .sort(([, a], [, b]) => {
       // Prefer nodes whose name matches an active quest target (e.g., Meadow
       // Lily) so gather quests actually progress instead of grinding random
@@ -816,6 +818,7 @@ export async function doGathering(
   ctx: AgentContext,
   strategy: AgentStrategy,
   preference: GatherPreference = "both",
+  targetItemName?: string,
 ): Promise<ActionResult> {
   try {
     const zs = await ctx.getZoneState();
@@ -825,16 +828,18 @@ export async function doGathering(
     // Prefer nodes that advance an active gather quest so quest progress
     // actually ticks (e.g., Herbalism 103 wants Meadow Lily — don't harvest
     // dandelions forever when a lily patch is nearby).
-    let preferredItemName: string | null = null;
+    let preferredItemName: string | null = targetItemName ?? null;
     try {
-      const activeRes = await ctx.api("GET", `/quests/active/${ctx.entityId}`);
-      const activeQuests: any[] = activeRes?.activeQuests ?? [];
-      for (const aq of activeQuests) {
-        if (aq?.complete) continue;
-        const obj = aq?.quest?.objective;
-        if (obj?.type === "gather" && obj.targetItemName) {
-          preferredItemName = String(obj.targetItemName);
-          break;
+      if (!preferredItemName) {
+        const activeRes = await ctx.api("GET", `/quests/active/${ctx.entityId}`);
+        const activeQuests: any[] = activeRes?.activeQuests ?? [];
+        for (const aq of activeQuests) {
+          if (aq?.complete) continue;
+          const obj = aq?.quest?.objective;
+          if (obj?.type === "gather" && obj.targetItemName) {
+            preferredItemName = String(obj.targetItemName);
+            break;
+          }
         }
       }
     } catch {
@@ -847,6 +852,7 @@ export async function doGathering(
       preference,
       (id) => ctx.isGatherNodeBlacklisted(id),
       preferredItemName,
+      !!preferredItemName,
     );
     if (!node) {
       if (preferredItemName) {
@@ -865,6 +871,11 @@ export async function doGathering(
           ctx.setScript(null); // Force focus refresh
           return actionProgressed(`Traveling to ${targetZone} to gather ${preferredItemName}`);
         }
+        return actionBlocked(`No ${preferredItemName} nodes available in ${ctx.currentRegion}`, {
+          failureKey: `gather:missing-target:${ctx.currentRegion}:${preferredItemName.toLowerCase()}`,
+          targetName: preferredItemName,
+          category: "strategic",
+        });
       }
       return fallbackToCombat(ctx, "No resource nodes in this zone", strategy);
     }
@@ -1236,6 +1247,37 @@ function pickGatherPreferenceForMissingMaterial(profession: string, materialName
   return "both";
 }
 
+async function doQuestSupportObjective(
+  ctx: AgentContext,
+  strategy: AgentStrategy,
+  activeQuests: any[],
+): Promise<ActionResult | null> {
+  const craftQuest = activeQuests.find(
+    (aq: any) => !aq.complete && aq.quest?.objective?.type === "craft" && aq.quest?.objective?.targetItemName,
+  );
+  if (craftQuest) {
+    const target = String(craftQuest.quest.objective.targetItemName);
+    void ctx.logActivity(`Crafting ${target} for quest`);
+    return doCraftQuest(ctx, strategy, target);
+  }
+
+  const gatherQuest = activeQuests.find(
+    (aq: any) => !aq.complete && aq.quest?.objective?.type === "gather" && aq.quest?.objective?.targetItemName,
+  );
+  if (gatherQuest) {
+    const target = String(gatherQuest.quest.objective.targetItemName);
+    const preference: GatherPreference = findZoneForOre(target) && !findZoneForFlower(target)
+      ? "ore"
+      : findZoneForFlower(target) && !findZoneForOre(target)
+        ? "herb"
+        : "both";
+    void ctx.logActivity(`Gathering ${target} for quest`);
+    return doGathering(ctx, strategy, preference, target);
+  }
+
+  return null;
+}
+
 async function doCraftQuest(
   ctx: AgentContext,
   strategy: AgentStrategy,
@@ -1295,7 +1337,7 @@ async function doCraftQuest(
     if (missing) {
       void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName} — gathering`);
       const pref = pickGatherPreferenceForMissingMaterial(profession, missing.name);
-      return doGathering(ctx, strategy, pref);
+      return doGathering(ctx, strategy, pref, missing.name);
     }
 
     const zs = await ctx.getZoneState();
@@ -2540,8 +2582,11 @@ export async function doQuesting(
       if (liveKillQuests.length === 0) {
         // Every kill quest is flagged stuck — don't pretend to do quest combat.
         if (hasGatherQuest) {
-          void ctx.logActivity("All kill quests stuck — gathering for quest instead");
-          return doGathering(ctx, strategy);
+          const supportResult = await doQuestSupportObjective(ctx, strategy, activeQuests);
+          if (supportResult) {
+            void ctx.logActivity("All kill quests stuck — working another quest objective");
+            return supportResult;
+          }
         }
         void ctx.logActivity("All kill quests stuck — grinding mobs for XP");
         return fallbackToCombat(ctx, "All kill quests flagged stuck", strategy);
@@ -2574,8 +2619,11 @@ export async function doQuesting(
         }
 
         if (hasGatherQuest) {
-          void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — gathering instead`);
-          return doGathering(ctx, strategy);
+          const supportResult = await doQuestSupportObjective(ctx, strategy, activeQuests);
+          if (supportResult) {
+            void ctx.logActivity(`Quest mob not in ${ctx.currentRegion} — working another quest objective`);
+            return supportResult;
+          }
         }
         // Missing from current zone means "wrong zone" or "cleared", not "stuck".
         // Reroute via the fallback path so the circuit breaker can find the right zone.
@@ -2595,25 +2643,22 @@ export async function doQuesting(
           }
         }
         if (hasGatherQuest) {
-          void ctx.logActivity("Quest combat blocked — gathering for quest instead");
-          return doGathering(ctx, strategy);
+          const supportResult = await doQuestSupportObjective(ctx, strategy, activeQuests);
+          if (supportResult) {
+            void ctx.logActivity("Quest combat blocked — working another quest objective");
+            return supportResult;
+          }
         }
         return questBlockedFallback(ctx, strategy, reason, findNextZoneForLevel, me);
       }
       return combatResult;
     } else if (hasGatherQuest) {
-      // Craft quests need to actually visit the forge/station after gathering;
-      // plain doGathering would mine ore forever without ever smelting.
-      const craftQuest = activeQuests.find(
-        (aq: any) => !aq.complete && aq.quest?.objective?.type === "craft" && aq.quest?.objective?.targetItemName,
-      );
-      if (craftQuest) {
-        const target = String(craftQuest.quest.objective.targetItemName);
-        void ctx.logActivity(`Crafting ${target} for quest`);
-        return doCraftQuest(ctx, strategy, target);
-      }
-      void ctx.logActivity("Gathering resources for quest");
-      return doGathering(ctx, strategy);
+      const supportResult = await doQuestSupportObjective(ctx, strategy, activeQuests);
+      if (supportResult) return supportResult;
+      const detail = `active=${activeQuests.filter((aq: any) => !aq.complete).length} total=${activeQuests.length}`;
+      void ctx.logActivity(`No actionable gather/craft quest objectives — idling (${detail})`);
+      ctx.setScript({ type: "idle", reason: `No actionable gather/craft quest objectives (${detail})` });
+      return actionIdle(`No actionable gather/craft quest objectives (${detail})`);
     } else {
       const activeCount = activeQuests.filter((aq: any) => !aq.complete).length;
       const detail = `active=${activeCount} total=${activeQuests.length}`;
