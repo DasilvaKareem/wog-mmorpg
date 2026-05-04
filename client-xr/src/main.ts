@@ -859,6 +859,16 @@ const playerPanel = new PlayerPanel({
   onFriendLocate: (friend: FriendInfo) => {
     locateFriend(friend);
   },
+  onAddFriend: async (player) => {
+    if (!ownWalletAddress || !player.walletAddress) throw new Error("Friend request unavailable");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("You need to sign in first");
+    const fromWallet = ownCustodialWallet ?? ownWalletAddress;
+    const result = await sendFriendRequest(token, fromWallet, player.walletAddress);
+    if (!result.ok) throw new Error(result.error ?? "Failed to send friend request");
+    lastFriendsPollTime = 0;
+    return `Friend request sent to ${player.name}`;
+  },
 });
 
 function locateFriend(friend: FriendInfo) {

@@ -17,6 +17,7 @@ interface PanelCallbacks {
   getAuthToken?: () => Promise<string | null>;
   onFriendRequestCountChange?: (count: number) => void;
   onFriendLocate?: (friend: FriendInfo) => void;
+  onAddFriend?: (player: ActivePlayer) => Promise<string>;
 }
 
 /**
@@ -242,11 +243,13 @@ export class PlayerPanel {
           const lvl = player.level ?? 1;
           const hpPct = player.maxHp > 0 ? Math.round((player.hp / player.maxHp) * 100) : 100;
           const cls = player.classId ? ` [${player.classId}]` : "";
+          const addFriendButton = this.renderAddFriendButton(player);
           html += `<div class="pp-row" data-eid="${player.id}">`;
           html += `<span class="pp-icon" style="color:#44ddff">&#9679;</span>`;
-          html += `<span class="pp-name">${player.name}${cls}</span>`;
+          html += `<span class="pp-name">${esc(player.name)}${esc(cls)}</span>`;
           html += `<span class="pp-lvl">Lv${lvl}</span>`;
           html += `<span class="pp-hp" style="color:${hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44"}">${hpPct}%</span>`;
+          html += addFriendButton;
           html += `</div>`;
         }
       }
@@ -360,17 +363,51 @@ export class PlayerPanel {
       const hpPct = ent.maxHp > 0 ? Math.round((ent.hp / ent.maxHp) * 100) : 100;
       const cls = ent.classId ? ` [${ent.classId}]` : "";
       const rankColor = rank === 1 ? "#ffd700" : rank === 2 ? "#c0c0c0" : rank === 3 ? "#cd7f32" : "#888";
+      const addFriendButton = this.renderAddFriendButton(ent);
 
       html += `<div class="pp-row" data-eid="${ent.id}">`;
       html += `<span class="pp-rank" style="color:${rankColor}">#${rank}</span>`;
-      html += `<span class="pp-name">${ent.name}${cls}</span>`;
+      html += `<span class="pp-name">${esc(ent.name)}${esc(cls)}</span>`;
       html += `<span class="pp-lvl">Lv${lvl}</span>`;
       html += `<span class="pp-hp" style="color:${hpPct > 50 ? "#4c4" : hpPct > 25 ? "#cc4" : "#c44"}">${hpPct}%</span>`;
+      html += addFriendButton;
       html += `</div>`;
     }
 
     if (!html) html = `<div class="pp-empty">No players online</div>`;
     this.listEl.innerHTML = html;
+  }
+
+  private renderAddFriendButton(player: ActivePlayer): string {
+    const wallet = player.walletAddress?.toLowerCase();
+    const ownWallet = this.ownerWallet?.toLowerCase();
+    const socialWallet = this.socialWallet?.toLowerCase();
+    if (!wallet || wallet === ownWallet || wallet === socialWallet) {
+      return `<button class="pp-add-friend" title="Cannot add yourself" disabled>+</button>`;
+    }
+    const alreadyFriend = this.friends.some((friend) => friend.wallet.toLowerCase() === wallet);
+    if (alreadyFriend) {
+      return `<button class="pp-add-friend" title="Friend added" disabled>\u2713</button>`;
+    }
+    const incomingRequest = this.friendRequests.find((request) => request.fromWallet.toLowerCase() === wallet);
+    if (incomingRequest) {
+      return `<button class="pp-add-friend pp-accept-friend" data-player-action="accept-friend" data-request-id="${esc(incomingRequest.id)}" title="Accept friend request">\u2713</button>`;
+    }
+    return `<button class="pp-add-friend" data-player-action="add-friend" title="Add friend">+</button>`;
+  }
+
+  private async addFriend(playerId: string): Promise<void> {
+    const player = this.playersById.get(playerId);
+    if (!player || !this.callbacks.onAddFriend) return;
+    this.friendsStatus = "Sending friend request...";
+    this.render();
+    try {
+      this.friendsStatus = await this.callbacks.onAddFriend(player);
+      await this.refreshFriends(true);
+    } catch (err) {
+      this.friendsStatus = err instanceof Error ? err.message : "Friend request failed.";
+      this.render();
+    }
   }
 
   private injectStyles() {
@@ -467,6 +504,37 @@ export class PlayerPanel {
       .pp-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dde; }
       .pp-lvl { color: #aaa; font-size: 11px; flex-shrink: 0; }
       .pp-hp { font-size: 11px; width: 34px; text-align: right; flex-shrink: 0; }
+      .pp-add-friend {
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: 1px solid rgba(68, 255, 136, 0.2);
+        border-radius: 4px;
+        background: rgba(32, 45, 64, 0.72);
+        color: #54f28b;
+        cursor: pointer;
+        font: bold 13px/20px monospace;
+        flex-shrink: 0;
+      }
+      .pp-add-friend:hover {
+        border-color: rgba(84, 242, 139, 0.65);
+        color: #ffffff;
+        background: rgba(36, 70, 55, 0.84);
+      }
+      .pp-accept-friend {
+        border-color: rgba(255, 204, 0, 0.45);
+        color: #ffcc00;
+        box-shadow: 0 0 8px rgba(255, 204, 0, 0.16);
+      }
+      .pp-accept-friend:hover {
+        border-color: rgba(255, 204, 0, 0.75);
+        background: rgba(85, 68, 18, 0.84);
+      }
+      .pp-add-friend:disabled {
+        opacity: 0.35;
+        cursor: default;
+        color: #7a84a8;
+      }
 
       .pp-friend-section {
         padding: 7px 12px 5px;
@@ -525,6 +593,20 @@ export class PlayerPanel {
 
     // Delegate click events
     this.listEl.addEventListener("click", (e) => {
+      const playerAction = (e.target as HTMLElement).dataset.playerAction;
+      if (playerAction === "add-friend") {
+        playSoundEffect("ui_button_click");
+        const row = (e.target as HTMLElement).closest(".pp-row") as HTMLElement | null;
+        if (row?.dataset.eid) void this.addFriend(row.dataset.eid);
+        return;
+      }
+      if (playerAction === "accept-friend") {
+        playSoundEffect("ui_button_click");
+        const requestId = (e.target as HTMLElement).dataset.requestId;
+        if (requestId) void this.acceptFriendRequest(requestId);
+        return;
+      }
+
       const friendAction = (e.target as HTMLElement).dataset.friendAction;
       if (friendAction) {
         playSoundEffect("ui_button_click");

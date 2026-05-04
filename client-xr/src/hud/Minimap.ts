@@ -95,7 +95,8 @@ export class Minimap {
 
     // Server time in bottom-left of minimap
     if (this.gameTime) {
-      const hh = String(this.gameTime.hour).padStart(2, "0");
+      const hour12 = this.gameTime.hour % 12 || 12;
+      const hh = String(hour12);
       const mm = String(this.gameTime.minute).padStart(2, "0");
       const icon = PHASE_ICONS[this.gameTime.phase] ?? "";
       const label = `${icon} ${hh}:${mm}`;

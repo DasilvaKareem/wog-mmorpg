@@ -1,4 +1,4 @@
-import type { ActiveQuest, AvailableQuest, QuestLogResponse, ZoneQuestsResponse } from "../types.js";
+import type { ActiveQuest, AvailableQuest, CompletedQuest, QuestLogResponse, ZoneQuestsResponse } from "../types.js";
 import { playSoundEffect } from "../sfx.js";
 
 interface QuestPanelCallbacks {
@@ -7,6 +7,8 @@ interface QuestPanelCallbacks {
   onTalkToNpc: (npcEntityId: string, npcName: string, questTitle: string, questDesc: string, objectiveType: string) => void;
   onOpenAvailable?: () => void;
 }
+
+type QuestTab = "active" | "available" | "completed";
 
 /**
  * Side panel showing quest log (active + available quests).
@@ -17,11 +19,12 @@ export class QuestPanel {
   private tabBar: HTMLDivElement;
   private listEl: HTMLDivElement;
   private footerEl: HTMLDivElement;
-  private activeTab: "active" | "available" = "active";
+  private activeTab: QuestTab = "active";
   private callbacks: QuestPanelCallbacks;
   private isOwn = false;
 
   private activeQuests: ActiveQuest[] = [];
+  private completedQuests: CompletedQuest[] = [];
   private completedCount = 0;
   private availableQuests: AvailableQuest[] = [];
 
@@ -42,23 +45,19 @@ export class QuestPanel {
     // Tab bar
     this.tabBar = document.createElement("div");
     this.tabBar.className = "qp-tabs";
-    this.tabBar.innerHTML = `
-      <button class="qp-tab active" data-tab="active">Active</button>
-      <button class="qp-tab" data-tab="available">Available</button>
-    `;
+    this.renderTabs();
     this.tabBar.addEventListener("click", (e) => {
       const btn = (e.target as HTMLElement).closest(".qp-tab") as HTMLButtonElement;
       if (!btn) return;
-      const tab = btn.dataset.tab as "active" | "available";
+      const tab = btn.dataset.tab as QuestTab;
       if (this.activeTab !== tab) {
         playSoundEffect("ui_tab_switch");
       }
       this.activeTab = tab;
-      this.tabBar.querySelectorAll(".qp-tab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
       if (tab === "available") {
         this.callbacks.onOpenAvailable?.();
       }
+      this.renderTabs();
       this.render();
     });
     this.container.appendChild(this.tabBar);
@@ -100,21 +99,22 @@ export class QuestPanel {
 
   updateQuestLog(data: QuestLogResponse) {
     this.activeQuests = data.activeQuests;
-    this.completedCount = data.completedQuests.length;
+    this.completedQuests = data.completedQuests;
+    this.completedCount = this.completedQuests.length;
+    this.renderTabs();
     this.render();
   }
 
   updateZoneQuests(data: ZoneQuestsResponse) {
     this.availableQuests = data.quests;
+    this.renderTabs();
     if (this.activeTab === "available") this.render();
   }
 
   /** Open the panel to the Available tab (e.g. when clicking a quest-giver) */
   showAvailable() {
     this.activeTab = "available";
-    this.tabBar.querySelectorAll(".qp-tab").forEach((b) => {
-      b.classList.toggle("active", (b as HTMLElement).dataset.tab === "available");
-    });
+    this.renderTabs();
     this.show();
     this.callbacks.onOpenAvailable?.();
   }
@@ -145,11 +145,27 @@ export class QuestPanel {
 
   isVisible(): boolean { return this.container.style.display !== "none"; }
 
+  private renderTabs() {
+    const tabs: Array<{ id: QuestTab; label: string; count: number }> = [
+      { id: "active", label: "Active", count: this.activeQuests.length },
+      { id: "available", label: "Available", count: this.availableQuests.length },
+      { id: "completed", label: "Completed", count: this.completedQuests.length },
+    ];
+    this.tabBar.innerHTML = tabs.map((tab) => `
+      <button class="qp-tab${this.activeTab === tab.id ? " active" : ""}" data-tab="${tab.id}">
+        <span>${tab.label}</span>
+        <span class="qp-tab-count">${tab.count}</span>
+      </button>
+    `).join("");
+  }
+
   private render() {
     if (this.activeTab === "active") {
       this.renderActive();
-    } else {
+    } else if (this.activeTab === "available") {
       this.renderAvailable();
+    } else {
+      this.renderCompleted();
     }
   }
 
@@ -230,6 +246,30 @@ export class QuestPanel {
     this.footerEl.textContent = `${this.availableQuests.length} quest${this.availableQuests.length !== 1 ? "s" : ""} available`;
   }
 
+  private renderCompleted() {
+    if (this.completedQuests.length === 0) {
+      this.listEl.innerHTML = `<div class="qp-empty">No completed quests</div>`;
+      this.footerEl.textContent = "";
+      return;
+    }
+
+    let html = "";
+    for (const q of this.completedQuests) {
+      html += `<div class="qp-quest qp-quest-completed">`;
+      html += `<div class="qp-quest-header">`;
+      html += `<span class="qp-icon qp-complete-icon">&#10003;</span>`;
+      html += `<span class="qp-quest-title">${esc(q.title)}</span>`;
+      html += `<span class="qp-complete-label">Completed</span>`;
+      html += `</div>`;
+      html += `<div class="qp-quest-desc">${esc(q.description)}</div>`;
+      html += `<div class="qp-rewards">${q.rewards.copper}g  ${q.rewards.xp} XP</div>`;
+      html += `</div>`;
+    }
+
+    this.listEl.innerHTML = html;
+    this.footerEl.textContent = `${this.completedQuests.length} completed`;
+  }
+
   private injectStyles() {
     const style = document.createElement("style");
     style.textContent = `
@@ -265,6 +305,10 @@ export class QuestPanel {
         border-bottom: 1px solid rgba(102, 187, 255, 0.15);
       }
       .qp-tab {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
         flex: 1;
         padding: 7px 0;
         background: none;
@@ -277,6 +321,20 @@ export class QuestPanel {
       }
       .qp-tab:hover { color: #aab; }
       .qp-tab.active { color: #66bbff; border-bottom-color: #66bbff; }
+      .qp-tab-count {
+        min-width: 14px;
+        height: 14px;
+        padding: 0 4px;
+        border-radius: 999px;
+        background: rgba(102, 187, 255, 0.12);
+        color: #99aacc;
+        font-size: 9px;
+        line-height: 14px;
+      }
+      .qp-tab.active .qp-tab-count {
+        background: rgba(102, 187, 255, 0.25);
+        color: #cceeff;
+      }
 
       .qp-list {
         overflow-y: auto;
@@ -302,6 +360,15 @@ export class QuestPanel {
       .qp-quest-title { color: #dde; font-weight: bold; font-size: 12px; }
       .qp-quest-npc { color: #88aacc; font-size: 11px; margin-left: 24px; }
       .qp-quest-desc { color: #889; font-size: 11px; margin: 2px 0 4px 24px; }
+      .qp-quest-completed .qp-quest-title { color: #aee2c8; }
+      .qp-complete-icon { color: #5dff9a; }
+      .qp-complete-label {
+        margin-left: auto;
+        color: #5dff9a;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
 
       .qp-progress { margin-left: 24px; }
       .qp-progress-text { font-size: 11px; color: #99b; margin-bottom: 2px; }

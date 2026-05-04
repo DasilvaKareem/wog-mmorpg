@@ -8,6 +8,14 @@ const HERO_LOGO_SRC = `${PUBLIC_BASE}assets/logo.png`;
 const HERO_DUEL_SRC = `${PUBLIC_BASE}assets/hero-duel.png`;
 const DISCORD_INVITE_URL = "https://discord.gg/AeCAeBZema";
 
+function clientPageUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return `${window.location.protocol}//${window.location.hostname}:5173${normalizedPath}`;
+  }
+  return normalizedPath;
+}
+
 export class LandingPage {
   private root: HTMLDivElement;
   private panel: HTMLDivElement;
@@ -34,19 +42,19 @@ export class LandingPage {
         <div class="xr-landing-top-left">
           <img class="xr-landing-duel" src="${HERO_DUEL_SRC}" alt="Game icon" />
           <nav class="xr-landing-nav" aria-label="Primary">
-            <a class="active" href="#" aria-current="page">GAME<span class="caret">˅</span></a>
-            <a href="#">SHOP<span class="caret">˅</span></a>
-            <a href="${DISCORD_INVITE_URL}" target="_blank" rel="noopener noreferrer">COMMUNITY<span class="caret">˅</span></a>
-            <a href="#">CHAMPIONS</a>
+            <a class="active" href="${clientPageUrl("/")}" aria-current="page">GAME<span class="caret">˅</span></a>
+            <a href="${clientPageUrl("/marketplace")}">SHOP<span class="caret">˅</span></a>
+            <a href="${clientPageUrl("/leaderboards")}">COMMUNITY<span class="caret">˅</span></a>
+            <a href="${clientPageUrl("/champions")}">CHAMPIONS</a>
           </nav>
         </div>
       </header>
       <div class="xr-landing-legal" aria-label="Legal links">
         <a href="${DISCORD_INVITE_URL}" target="_blank" rel="noopener noreferrer">Join Discord</a>
         <span aria-hidden="true">|</span>
-        <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+        <a href="${clientPageUrl("/terms")}" target="_blank" rel="noopener noreferrer">Terms</a>
         <span aria-hidden="true">|</span>
-        <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <a href="${clientPageUrl("/privacy")}" target="_blank" rel="noopener noreferrer">Privacy</a>
       </div>
     `;
 
