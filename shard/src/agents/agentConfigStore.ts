@@ -491,7 +491,7 @@ export async function incrementDeployCount(userWallet: string): Promise<number> 
 export async function getAgentCustodialWallet(userWallet: string): Promise<string | null> {
   if (isPostgresConfigured()) {
     const addr = await getWalletRuntimeState<string>(custWalletKey(userWallet));
-    if (addr) return addr;
+    return addr ?? null;
   }
   const redis = getRedis();
   if (redis) {

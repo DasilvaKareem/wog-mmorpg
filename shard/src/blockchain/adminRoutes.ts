@@ -16,6 +16,18 @@ const STALE_SUBMITTED_MS = Math.max(
   Number.parseInt(process.env.CHAIN_INTENT_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
 );
 const GAS_RATE_WINDOW_MS = 60 * 60 * 1000;
+const LIFETIME_ATTEMPT_PAGE_SIZE = Math.max(
+  50,
+  Number.parseInt(process.env.CHAIN_ADMIN_LIFETIME_PAGE_SIZE ?? "500", 10) || 500
+);
+const LIFETIME_ATTEMPT_SCAN_CAP = Math.max(
+  500,
+  Number.parseInt(process.env.CHAIN_ADMIN_LIFETIME_SCAN_CAP ?? "10000", 10) || 10_000
+);
+const LIFETIME_PRECOMPUTE_INTERVAL_MS = Math.max(
+  30_000,
+  Number.parseInt(process.env.CHAIN_ADMIN_LIFETIME_PRECOMPUTE_MS ?? "180000", 10) || 180_000
+);
 
 function verifyAdmin(
   request: { headers: Record<string, string | string[] | undefined> },
@@ -83,6 +95,7 @@ type CachedSummary = {
 
 const SUMMARY_CACHE_MS = 120_000;
 let lifetimeGasSummaryCache: CachedSummary | null = null;
+let lifetimeGasSummaryRefreshInFlight: Promise<void> | null = null;
 
 function formatEtherFromWei(value: bigint): string {
   const whole = value / 10n ** 18n;
@@ -253,14 +266,49 @@ async function getServerWalletSummary(): Promise<ServerWalletSummary> {
   }
 }
 
-async function listAllChainTxAttempts(limit = 500): Promise<ChainTxAttemptRecord[]> {
+async function listAllChainTxAttempts(
+  limit = LIFETIME_ATTEMPT_PAGE_SIZE,
+  maxAttempts = LIFETIME_ATTEMPT_SCAN_CAP
+): Promise<ChainTxAttemptRecord[]> {
   const all: ChainTxAttemptRecord[] = [];
   for (let offset = 0; ; offset += limit) {
     const page = await listChainTxAttempts({ limit, offset });
-    all.push(...page);
+    const remaining = maxAttempts - all.length;
+    if (remaining <= 0) break;
+    all.push(...page.slice(0, remaining));
+    if (all.length >= maxAttempts) break;
     if (page.length < limit) break;
   }
   return all;
+}
+
+async function computeAndCacheLifetimeGasSummary(
+  serverWalletAddress?: string | null,
+  options?: { skipReceiptLookup?: boolean }
+): Promise<void> {
+  const attempts = await listAllChainTxAttempts();
+  const summary = summarizeGasUsage(
+    await Promise.all(attempts.map((attempt) => enrichAttemptGas(attempt, options))),
+    serverWalletAddress
+  );
+  lifetimeGasSummaryCache = {
+    expiresAt: Date.now() + SUMMARY_CACHE_MS,
+    value: summary,
+  };
+}
+
+function refreshLifetimeGasSummaryInBackground(
+  serverWalletAddress?: string | null,
+  options?: { skipReceiptLookup?: boolean }
+): void {
+  if (lifetimeGasSummaryRefreshInFlight) return;
+  lifetimeGasSummaryRefreshInFlight = computeAndCacheLifetimeGasSummary(serverWalletAddress, options)
+    .catch(() => {
+      // Keep serving stale cache if refresh fails.
+    })
+    .finally(() => {
+      lifetimeGasSummaryRefreshInFlight = null;
+    });
 }
 
 async function getLifetimeGasSummary(
@@ -271,19 +319,34 @@ async function getLifetimeGasSummary(
   if (lifetimeGasSummaryCache && lifetimeGasSummaryCache.expiresAt > now) {
     return lifetimeGasSummaryCache.value;
   }
-  const attempts = await listAllChainTxAttempts();
-  const summary = summarizeGasUsage(
-    await Promise.all(attempts.map((attempt) => enrichAttemptGas(attempt, options))),
-    serverWalletAddress
-  );
-  lifetimeGasSummaryCache = {
-    expiresAt: now + SUMMARY_CACHE_MS,
-    value: summary,
-  };
-  return summary;
+
+  // Start refresh, but do not block status responses if we have stale data.
+  refreshLifetimeGasSummaryInBackground(serverWalletAddress, options);
+  if (lifetimeGasSummaryCache) {
+    return lifetimeGasSummaryCache.value;
+  }
+
+  // First boot with no cache yet: do one synchronous compute.
+  await computeAndCacheLifetimeGasSummary(serverWalletAddress, options);
+  const cachedSummary = lifetimeGasSummaryCache as CachedSummary | null;
+  if (cachedSummary) return cachedSummary.value;
+  return summarizeGasUsage([], serverWalletAddress);
 }
 
 export function registerChainAdminRoutes(server: FastifyInstance): void {
+  // Keep the expensive lifetime summary warm in the background.
+  const warmLifetimeSummary = async () => {
+    const wallet = await getServerWalletSummary();
+    refreshLifetimeGasSummaryInBackground(wallet.address, { skipReceiptLookup: true });
+  };
+  void warmLifetimeSummary();
+  const lifetimeTimer = setInterval(() => {
+    void warmLifetimeSummary();
+  }, LIFETIME_PRECOMPUTE_INTERVAL_MS);
+  server.addHook("onClose", async () => {
+    clearInterval(lifetimeTimer);
+  });
+
   server.get("/admin/chain/dashboard", async (_request, reply) => {
     reply.type("text/html").send(`<!DOCTYPE html>
 <html lang="en">

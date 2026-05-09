@@ -8,6 +8,7 @@ import { getTxStats } from "../blockchain/blockchain.js";
 import { getRedis } from "../redis.js";
 import { getAllZones, getAllEntities } from "../world/zoneRuntime.js";
 import { agentManager } from "../agents/agentManager.js";
+import { isPostgresConfigured, postgresQuery } from "../db/postgres.js";
 import { readContract, getContract } from "thirdweb";
 import { thirdwebClient, skaleBase } from "../blockchain/chain.js";
 import { ethers } from "ethers";
@@ -104,6 +105,14 @@ async function fetchGoldSupply(): Promise<string> {
 
 async function fetchRegisteredPlayers(): Promise<number> {
   try {
+    if (isPostgresConfigured()) {
+      const { rows } = await postgresQuery<{ count: string }>(
+        `select count(*)::text as count
+           from game.wallet_runtime_state
+          where state_key like 'wallet:registered:%'`
+      );
+      return Number(rows[0]?.count ?? "0");
+    }
     const redis = getRedis();
     if (!redis) return 0;
     const keys = await redis.keys("wallet:registered:*");

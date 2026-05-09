@@ -214,6 +214,10 @@ async function resolveFallbackKey(
   characterName: string,
   exactKey: string
 ): Promise<string | null> {
+  if (isPostgresConfigured()) {
+    // Postgres is source of truth in production mode; do not keyspace-scan Redis.
+    return null;
+  }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
   const nameCandidates = buildLookupNameCandidates(characterName);
   const normalizedCandidates = new Set(nameCandidates.map(normalizeForLookup));
@@ -421,7 +425,6 @@ export async function loadAllCharactersForWallet(
   const seen = new Set<string>();
   const results: CharacterSaveData[] = [];
 
-  // Always fall through to Redis — postgres may not have migrated data yet
   const redis = getRedis();
   if (redis) {
     try {
@@ -470,7 +473,6 @@ export async function getProfessionsForWallet(walletAddress: string): Promise<st
   }
   const prefix = `character:${walletAddress.toLowerCase()}:`;
 
-  // Always check Redis — postgres may not have migrated data yet
   const redis = getRedis();
   if (redis) {
     try {

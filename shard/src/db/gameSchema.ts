@@ -263,6 +263,9 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_chain_write_intents_wallet
           on game.chain_write_intents (wallet_address, updated_at desc);
 
+        create index if not exists idx_chain_write_intents_status_updated
+          on game.chain_write_intents (status, updated_at desc);
+
         create table if not exists game.chain_tx_attempts (
           attempt_id uuid primary key,
           intent_id uuid not null references game.chain_write_intents(intent_id) on delete cascade,
@@ -285,6 +288,12 @@ export async function ensureGameSchema(): Promise<void> {
 
         create index if not exists idx_chain_tx_attempts_intent_created
           on game.chain_tx_attempts (intent_id, created_at desc);
+
+        create index if not exists idx_chain_tx_attempts_created
+          on game.chain_tx_attempts (created_at desc);
+
+        create index if not exists idx_chain_tx_attempts_status_created
+          on game.chain_tx_attempts (status, created_at desc);
 
         do $$
         begin

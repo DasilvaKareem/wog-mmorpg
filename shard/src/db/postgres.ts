@@ -80,6 +80,13 @@ export async function withPostgresClient<T>(fn: (client: PoolClient) => Promise<
   try {
     return await fn(client);
   } finally {
+    // Safety net: if a caller forgot to commit/rollback, force-close the tx
+    // before returning client to the pool to avoid "idle in transaction" leaks.
+    try {
+      await client.query("rollback");
+    } catch {
+      // Normal when no transaction is active ("there is no transaction in progress").
+    }
     client.release();
   }
 }
