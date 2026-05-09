@@ -5,6 +5,7 @@ import { enqueueGoldMint } from "../blockchain/blockchain.js";
 import { queueItemMint } from "../blockchain/chainBatcher.js";
 import { xpForLevel, MAX_LEVEL, computeStatsAtLevel } from "../character/leveling.js";
 import { saveCharacter } from "../character/characterStore.js";
+import { listCharacterSnapshotsForWallet } from "../character/characterProjectionStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
 import {
   hasCompletedQuest as hasCompletedQuestInDb,
@@ -4239,37 +4240,80 @@ export function registerQuestRoutes(server: FastifyInstance) {
         }
       }
 
+      type SnapshotQuest = { questId?: unknown; progress?: unknown };
+      const toActiveQuestRows = (active: unknown) => {
+        const activeList = Array.isArray(active) ? (active as SnapshotQuest[]) : [];
+        return activeList
+          .map((aq) => {
+            const questId = typeof aq.questId === "string" ? aq.questId : null;
+            if (!questId) return null;
+            const progress = typeof aq.progress === "number" ? aq.progress : Number(aq.progress ?? 0) || 0;
+            const quest = QUEST_CATALOG.find((q) => q.id === questId);
+            return {
+              questId,
+              title: quest?.title ?? questId,
+              description: quest?.description ?? "",
+              objective: quest?.objective ?? { type: "kill", count: 0 },
+              progress,
+              required: quest?.objective.count ?? 0,
+              complete: quest ? isQuestComplete(quest, progress) : false,
+              rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+              npcEntityId: quest ? (getNpcIdByName(quest.npcId) ?? null) : null,
+            };
+          })
+          .filter((row): row is NonNullable<typeof row> => Boolean(row));
+      };
+      const toCompletedQuestRows = (completed: unknown) => {
+        const completedIds = Array.isArray(completed) ? completed.map((q) => String(q)) : [];
+        return completedIds.map((qid) => {
+          const quest = QUEST_CATALOG.find((q) => q.id === qid);
+          return {
+            questId: qid,
+            title: quest?.title ?? qid,
+            description: quest?.description ?? "",
+            rewards: quest?.rewards ?? { copper: 0, xp: 0 },
+          };
+        });
+      };
+
       if (!player || !playerZoneId) {
+        // Offline fallback: serve persisted quest snapshot from Postgres.
+        if (isPostgresConfigured()) {
+          let snapshot: Record<string, unknown> | null = null;
+          for (const walletToFind of walletsToSearch) {
+            const snapshots = await listCharacterSnapshotsForWallet(walletToFind);
+            if (snapshots.length > 0) {
+              snapshot = snapshots[0];
+              break;
+            }
+          }
+
+          if (snapshot) {
+            const activeQuests = toActiveQuestRows(snapshot.activeQuests);
+            const completedQuests = toCompletedQuestRows(snapshot.completedQuests);
+            return {
+              entityId: null,
+              playerName: typeof snapshot.name === "string" ? snapshot.name : "Unknown",
+              classId: typeof snapshot.classId === "string" ? snapshot.classId : null,
+              origin: typeof snapshot.origin === "string" ? snapshot.origin : null,
+              storyFlags: Array.isArray(snapshot.storyFlags) ? snapshot.storyFlags.map((f) => String(f)) : [],
+              zoneId: typeof snapshot.zone === "string" ? snapshot.zone : "unknown",
+              activeQuests,
+              completedQuests,
+              activity: [],
+            };
+          }
+        }
+
         reply.code(404);
         return { error: "Player not found" };
       }
 
       // Active quests with full metadata
-      const activeQuests = (player.activeQuests ?? []).map((aq) => {
-        const quest = QUEST_CATALOG.find((q) => q.id === aq.questId);
-        return {
-          questId: aq.questId,
-          title: quest?.title ?? aq.questId,
-          description: quest?.description ?? "",
-          objective: quest?.objective ?? { type: "kill", count: 0 },
-          progress: aq.progress,
-          required: quest?.objective.count ?? 0,
-          complete: quest ? isQuestComplete(quest, aq.progress) : false,
-          rewards: quest?.rewards ?? { copper: 0, xp: 0 },
-          npcEntityId: quest ? (getNpcIdByName(quest.npcId) ?? null) : null,
-        };
-      });
+      const activeQuests = toActiveQuestRows(player.activeQuests ?? []);
 
       // Completed quests with full metadata
-      const completedQuests = (player.completedQuests ?? []).map((qid) => {
-        const quest = QUEST_CATALOG.find((q) => q.id === qid);
-        return {
-          questId: qid,
-          title: quest?.title ?? qid,
-          description: quest?.description ?? "",
-          rewards: quest?.rewards ?? { copper: 0, xp: 0 },
-        };
-      });
+      const completedQuests = toCompletedQuestRows(player.completedQuests ?? []);
 
       // Recent activity — zone events filtered by this player's entity ID
       const ACTIVITY_TYPES = new Set([
