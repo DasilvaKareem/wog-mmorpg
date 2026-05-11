@@ -50,6 +50,12 @@ export interface ChainTxAttemptRecord {
   gasPrice?: string;
   maxFeePerGas?: string;
   maxPriorityFeePerGas?: string;
+  receiptGasUsed?: string;
+  receiptEffectiveGasPrice?: string;
+  receiptFeeWei?: string;
+  receiptValueWei?: string;
+  receiptFromAddress?: string;
+  receiptBlockNumber?: number;
   createdAt: number;
   submittedAt?: number;
   confirmedAt?: number;
@@ -92,6 +98,12 @@ type ChainTxAttemptRow = {
   gas_price: string | null;
   max_fee_per_gas: string | null;
   max_priority_fee_per_gas: string | null;
+  receipt_gas_used: string | null;
+  receipt_effective_gas_price: string | null;
+  receipt_fee_wei: string | null;
+  receipt_value_wei: string | null;
+  receipt_from_address: string | null;
+  receipt_block_number: string | null;
   created_at_ms: string;
   submitted_at_ms: string | null;
   confirmed_at_ms: string | null;
@@ -208,6 +220,12 @@ function fromAttemptRow(row: ChainTxAttemptRow): ChainTxAttemptRecord {
     ...(row.gas_price ? { gasPrice: row.gas_price } : {}),
     ...(row.max_fee_per_gas ? { maxFeePerGas: row.max_fee_per_gas } : {}),
     ...(row.max_priority_fee_per_gas ? { maxPriorityFeePerGas: row.max_priority_fee_per_gas } : {}),
+    ...(row.receipt_gas_used ? { receiptGasUsed: row.receipt_gas_used } : {}),
+    ...(row.receipt_effective_gas_price ? { receiptEffectiveGasPrice: row.receipt_effective_gas_price } : {}),
+    ...(row.receipt_fee_wei ? { receiptFeeWei: row.receipt_fee_wei } : {}),
+    ...(row.receipt_value_wei ? { receiptValueWei: row.receipt_value_wei } : {}),
+    ...(row.receipt_from_address ? { receiptFromAddress: row.receipt_from_address } : {}),
+    ...(row.receipt_block_number != null ? { receiptBlockNumber: Number(row.receipt_block_number) || 0 } : {}),
     createdAt: Number(row.created_at_ms ?? "0") || 0,
     ...(row.submitted_at_ms ? { submittedAt: Number(row.submitted_at_ms) || 0 } : {}),
     ...(row.confirmed_at_ms ? { confirmedAt: Number(row.confirmed_at_ms) || 0 } : {}),
@@ -861,6 +879,12 @@ export async function updateChainTxAttempt(
           gas_price,
           max_fee_per_gas,
           max_priority_fee_per_gas,
+          receipt_gas_used,
+          receipt_effective_gas_price,
+          receipt_fee_wei,
+          receipt_value_wei,
+          receipt_from_address,
+          receipt_block_number::text as receipt_block_number,
           floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
           case when submitted_at is null then null else floor(extract(epoch from submitted_at) * 1000)::text end as submitted_at_ms,
           case when confirmed_at is null then null else floor(extract(epoch from confirmed_at) * 1000)::text end as confirmed_at_ms
@@ -899,8 +923,14 @@ export async function updateChainTxAttempt(
             gas_price = $11,
             max_fee_per_gas = $12,
             max_priority_fee_per_gas = $13,
-            submitted_at = case when $14::bigint is null then null else to_timestamp($14::double precision / 1000.0) end,
-            confirmed_at = case when $15::bigint is null then null else to_timestamp($15::double precision / 1000.0) end
+            receipt_gas_used = $14,
+            receipt_effective_gas_price = $15,
+            receipt_fee_wei = $16,
+            receipt_value_wei = $17,
+            receipt_from_address = $18,
+            receipt_block_number = $19,
+            submitted_at = case when $20::bigint is null then null else to_timestamp($20::double precision / 1000.0) end,
+            confirmed_at = case when $21::bigint is null then null else to_timestamp($21::double precision / 1000.0) end
         where attempt_id = $1
       `,
       [
@@ -917,6 +947,12 @@ export async function updateChainTxAttempt(
         updated.gasPrice ?? null,
         updated.maxFeePerGas ?? null,
         updated.maxPriorityFeePerGas ?? null,
+        updated.receiptGasUsed ?? null,
+        updated.receiptEffectiveGasPrice ?? null,
+        updated.receiptFeeWei ?? null,
+        updated.receiptValueWei ?? null,
+        updated.receiptFromAddress ?? null,
+        updated.receiptBlockNumber ?? null,
         updated.submittedAt ?? null,
         updated.confirmedAt ?? null,
       ]
@@ -1075,6 +1111,12 @@ export async function listChainTxAttempts(filters?: {
           gas_price,
           max_fee_per_gas,
           max_priority_fee_per_gas,
+          receipt_gas_used,
+          receipt_effective_gas_price,
+          receipt_fee_wei,
+          receipt_value_wei,
+          receipt_from_address,
+          receipt_block_number::text as receipt_block_number,
           floor(extract(epoch from created_at) * 1000)::text as created_at_ms,
           case when submitted_at is null then null else floor(extract(epoch from submitted_at) * 1000)::text end as submitted_at_ms,
           case when confirmed_at is null then null else floor(extract(epoch from confirmed_at) * 1000)::text end as confirmed_at_ms

@@ -281,10 +281,24 @@ export async function ensureGameSchema(): Promise<void> {
           gas_price text,
           max_fee_per_gas text,
           max_priority_fee_per_gas text,
+          receipt_gas_used text,
+          receipt_effective_gas_price text,
+          receipt_fee_wei text,
+          receipt_value_wei text,
+          receipt_from_address text,
+          receipt_block_number bigint,
           created_at timestamptz not null default now(),
           submitted_at timestamptz,
           confirmed_at timestamptz
         );
+
+        alter table game.chain_tx_attempts
+          add column if not exists receipt_gas_used text,
+          add column if not exists receipt_effective_gas_price text,
+          add column if not exists receipt_fee_wei text,
+          add column if not exists receipt_value_wei text,
+          add column if not exists receipt_from_address text,
+          add column if not exists receipt_block_number bigint;
 
         create index if not exists idx_chain_tx_attempts_intent_created
           on game.chain_tx_attempts (intent_id, created_at desc);

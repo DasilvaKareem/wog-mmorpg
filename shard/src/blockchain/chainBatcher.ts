@@ -30,6 +30,7 @@ import {
   markChainIntentSubmitted,
   updateChainTxAttempt,
   upsertAggregatedChainIntent,
+  type ChainTxAttemptRecord,
   type ChainWriteIntentRecord,
 } from "./chainIntentStore.js";
 import { isPostgresConfigured } from "../db/postgres.js";
@@ -60,6 +61,29 @@ const CHAIN_BATCHER_SUBMITTED_RECOVERY_MS = Math.max(
   30_000,
   Number.parseInt(process.env.CHAIN_BATCHER_SUBMITTED_RECOVERY_MS ?? "120000", 10) || 120_000
 );
+
+async function buildConfirmedAttemptPatch(
+  txHash: string | null | undefined
+): Promise<Partial<ChainTxAttemptRecord>> {
+  if (!txHash) {
+    return {
+      status: "confirmed",
+      confirmedAt: Date.now(),
+    };
+  }
+
+  const receipt = await getChainReceiptStatus(txHash);
+  return {
+    status: "confirmed",
+    confirmedAt: Date.now(),
+    ...(receipt.gasUsed ? { receiptGasUsed: receipt.gasUsed } : {}),
+    ...(receipt.effectiveGasPrice ? { receiptEffectiveGasPrice: receipt.effectiveGasPrice } : {}),
+    ...(receipt.feeWei ? { receiptFeeWei: receipt.feeWei } : {}),
+    ...(receipt.valueWei ? { receiptValueWei: receipt.valueWei } : {}),
+    ...(receipt.fromAddress ? { receiptFromAddress: receipt.fromAddress.toLowerCase() } : {}),
+    ...(receipt.blockNumber != null ? { receiptBlockNumber: receipt.blockNumber } : {}),
+  };
+}
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -543,10 +567,10 @@ async function flushItemIntent(intent: ChainWriteIntentRecord): Promise<void> {
       submittedAt: Date.now(),
     });
     await markChainIntentConfirmed(claimed.intentId, txHash);
-    await updateChainTxAttempt(attempt.attemptId, {
-      status: "confirmed",
-      confirmedAt: Date.now(),
-    });
+    await updateChainTxAttempt(
+      attempt.attemptId,
+      await buildConfirmedAttemptPatch(txHash)
+    );
   } catch (err) {
     await updateChainTxAttempt(attempt.attemptId, {
       status: "failed",
@@ -599,10 +623,10 @@ async function flushGoldIntent(intent: ChainWriteIntentRecord): Promise<void> {
       submittedAt: Date.now(),
     });
     await markChainIntentConfirmed(claimed.intentId, txHash);
-    await updateChainTxAttempt(attempt.attemptId, {
-      status: "confirmed",
-      confirmedAt: Date.now(),
-    });
+    await updateChainTxAttempt(
+      attempt.attemptId,
+      await buildConfirmedAttemptPatch(txHash)
+    );
     console.log(`[chainBatcher] gold flush wallet=${payload.walletAddress} amount=${payload.goldAmount}`);
   } catch (err) {
     await updateChainTxAttempt(attempt.attemptId, {

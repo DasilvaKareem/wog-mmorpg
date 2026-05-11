@@ -6,6 +6,7 @@ import { getChainReceiptStatus } from "./chainReceipt.js";
 import {
   createChainIntent,
   createChainTxAttempt,
+  type ChainTxAttemptRecord,
   formatChainError,
   markChainIntentConfirmed,
   markChainIntentFundingBlocked,
@@ -15,6 +16,29 @@ import {
   updateChainIntent,
   updateChainTxAttempt,
 } from "./chainIntentStore.js";
+
+async function buildConfirmedAttemptPatch(
+  txHash: string | null | undefined
+): Promise<Partial<ChainTxAttemptRecord>> {
+  if (!txHash) {
+    return {
+      status: "confirmed",
+      confirmedAt: Date.now(),
+    };
+  }
+
+  const receipt = await getChainReceiptStatus(txHash);
+  return {
+    status: "confirmed",
+    confirmedAt: Date.now(),
+    ...(receipt.gasUsed ? { receiptGasUsed: receipt.gasUsed } : {}),
+    ...(receipt.effectiveGasPrice ? { receiptEffectiveGasPrice: receipt.effectiveGasPrice } : {}),
+    ...(receipt.feeWei ? { receiptFeeWei: receipt.feeWei } : {}),
+    ...(receipt.valueWei ? { receiptValueWei: receipt.valueWei } : {}),
+    ...(receipt.fromAddress ? { receiptFromAddress: receipt.fromAddress.toLowerCase() } : {}),
+    ...(receipt.blockNumber != null ? { receiptBlockNumber: receipt.blockNumber } : {}),
+  };
+}
 
 export type ChainOperationStatus =
   | "queued"
@@ -611,10 +635,10 @@ export async function runTrackedChainOperation<T>(
       });
     }
     if (attempt) {
-      await updateChainTxAttempt(attempt.attemptId, {
-        status: "confirmed",
-        confirmedAt: Date.now(),
-      });
+      await updateChainTxAttempt(
+        attempt.attemptId,
+        await buildConfirmedAttemptPatch(txHash)
+      );
     }
     return result;
   } catch (err) {
@@ -699,10 +723,10 @@ export async function processTrackedChainOperation<T = unknown>(
       });
     }
     if (attempt) {
-      await updateChainTxAttempt(attempt.attemptId, {
-        status: "confirmed",
-        confirmedAt: Date.now(),
-      });
+      await updateChainTxAttempt(
+        attempt.attemptId,
+        await buildConfirmedAttemptPatch(txHash)
+      );
     }
     return result as T;
   } catch (err) {

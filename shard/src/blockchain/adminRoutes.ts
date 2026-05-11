@@ -118,6 +118,19 @@ async function enrichAttemptGas(
   options?: { skipReceiptLookup?: boolean }
 ): Promise<ChainTxAttemptRecord & { gas: AttemptGasDetails }> {
   const skipReceiptLookup = options?.skipReceiptLookup ?? false;
+  if (attempt.receiptGasUsed || attempt.receiptFeeWei || attempt.receiptEffectiveGasPrice) {
+    return {
+      ...attempt,
+      gas: {
+        gasUsed: attempt.receiptGasUsed ?? null,
+        effectiveGasPrice: attempt.receiptEffectiveGasPrice ?? null,
+        feeWei: attempt.receiptFeeWei ?? null,
+        valueWei: attempt.receiptValueWei ?? null,
+        fromAddress: attempt.receiptFromAddress ?? attempt.signerAddress ?? null,
+        feeSource: "receipt",
+      },
+    };
+  }
   if (!skipReceiptLookup && attempt.txHash) {
     try {
       const [receipt, tx] = await Promise.all([
