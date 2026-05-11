@@ -868,6 +868,16 @@ interface IdentityRegistrationProcessorResult {
   agentUri: string | null;
 }
 
+function buildWalletAgentUri(walletAddress: string): string {
+  const base = process.env.WOG_A2A_BASE_URL || "https://wog.urbantech.dev";
+  return `${base}/a2a/${walletAddress}`;
+}
+
+function buildCanonicalAgentUri(agentId: bigint | string): string {
+  const base = process.env.WOG_A2A_BASE_URL || "https://wog.urbantech.dev";
+  return `${base}/a2a/agent/${agentId.toString()}`;
+}
+
 function extractAgentIdFromIdentityReceipt(receipt: any): bigint | null {
   const registeredEvent = receipt?.logs?.find(
     (log: any) =>
@@ -968,8 +978,7 @@ async function processIdentityRegistrationPayload(
     OFFICIAL_IDENTITY_REGISTRY_ABI,
     identityWriteSigner ?? biteSigner ?? biteWallet
   );
-  const base = process.env.WOG_SHARD_URL || "https://wog.urbantech.dev";
-  const agentURI = `${base}/a2a/${payload.ownerAddress}`;
+  const agentURI = buildWalletAgentUri(payload.ownerAddress);
   const metadataEntries = [
     {
       metadataKey: "characterTokenId",
@@ -1087,6 +1096,32 @@ async function processIdentityRegistrationPayload(
       );
   };
 
+  const submitIdentityAgentUriUpdate = async (agentId: bigint): Promise<void> => {
+    const endpointUrl = buildCanonicalAgentUri(agentId);
+    const tx = await traceTx(
+      "identity-agent-uri",
+      "setAgentURI",
+      { agentId: agentId.toString(), endpointUrl },
+      "bite",
+      () =>
+        queueBiteTransaction(`identity-agent-uri:${agentId}`, async () =>
+          await waitForBiteSubmission(
+            identityWriteContract.setAgentURI(
+              agentId,
+              endpointUrl,
+              { nonce: await reserveServerNonce() ?? undefined }
+            )
+          )
+        )
+    );
+
+    void waitForBiteReceipt(tx.wait(), IDENTITY_RECEIPT_TIMEOUT_MS)
+      .then(() => console.log(`[identity] Updated A2A endpoint for agent #${agentId} → ${endpointUrl}`))
+      .catch((err) =>
+        console.warn(`[identity] Agent URI receipt failed for agent #${agentId}: ${(err as Error).message?.slice(0, 120)}`)
+      );
+  };
+
   const submitIdentityTransfer = async (agentId: bigint): Promise<void> => {
     const tx = await traceTx(
       "identity-transfer",
@@ -1122,6 +1157,12 @@ async function processIdentityRegistrationPayload(
         await submitIdentityMetadataUpdate(agentId);
       } catch (err) {
         console.warn(`[identity] Failed to submit metadata update for agent #${agentId}: ${(err as Error).message?.slice(0, 120)}`);
+      }
+
+      try {
+        await submitIdentityAgentUriUpdate(agentId);
+      } catch (err) {
+        console.warn(`[identity] Failed to submit A2A endpoint update for agent #${agentId}: ${(err as Error).message?.slice(0, 120)}`);
       }
 
       if (payload.ownerAddress.toLowerCase() !== serverAddress.toLowerCase()) {
