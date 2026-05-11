@@ -2899,37 +2899,69 @@ Strategy options: aggressive, balanced, defensive`;
   // POST /admin/agents/wakeup — bulk-reset stuck idle agents to focus=questing.
   // Free-tier circuit-breaker (agentRunner.ts:1357) pins focus=idle on repeated
   // block; without a supervisor those bots never recover. Token-gated.
+  // mode: "wakeup" only flips idle→toFocus. "revive" also enables+starts
+  // disabled agents so dormant characters re-join the live world.
   server.post<{
-    Body: { token: string; toFocus?: "questing" | "combat" | "gathering" };
+    Body: {
+      token: string;
+      toFocus?: "questing" | "combat" | "gathering";
+      mode?: "wakeup" | "revive";
+    };
   }>("/admin/agents/wakeup", async (request, reply) => {
-    const { token, toFocus = "questing" } = request.body;
+    const { token, toFocus = "questing", mode = "wakeup" } = request.body;
     const expected = process.env.ADMIN_WAKEUP_TOKEN;
     if (!expected || token !== expected) {
       return reply.code(403).send({ error: "Forbidden" });
     }
 
-    const { listEnabledAgentWallets, getAgentConfig, patchAgentConfig, clearAgentRuntimeState } =
+    const { getAgentConfig, patchAgentConfig, clearAgentRuntimeState } =
       await import("./agentConfigStore.js");
+    const { listWalletRuntimeStatesByPrefix } =
+      await import("../db/walletInfraStore.js");
 
-    const wallets = await listEnabledAgentWallets();
+    const rows = await listWalletRuntimeStatesByPrefix<any>("agent:config:");
+    const allWallets = rows.map((r: any) => r.key.replace(/^agent:config:/, "").toLowerCase());
+
     let woken = 0;
+    let revived = 0;
     let skipped = 0;
+    let failed = 0;
     const errors: string[] = [];
 
-    for (const wallet of wallets) {
+    for (const wallet of allWallets) {
       try {
         const cfg = await getAgentConfig(wallet);
-        if (!cfg || cfg.focus !== "idle") { skipped++; continue; }
-        await patchAgentConfig(wallet, { focus: toFocus, targetZone: undefined });
-        await clearAgentRuntimeState(wallet);
-        const runner = agentManager.getRunner(wallet);
-        if (runner) await runner.clearScript();
-        woken++;
+        if (!cfg) { skipped++; continue; }
+
+        if (cfg.enabled && cfg.focus === "idle") {
+          await patchAgentConfig(wallet, { focus: toFocus, targetZone: undefined });
+          await clearAgentRuntimeState(wallet);
+          const runner = agentManager.getRunner(wallet);
+          if (runner) await runner.clearScript();
+          woken++;
+        } else if (!cfg.enabled && mode === "revive") {
+          await patchAgentConfig(wallet, { enabled: true, focus: toFocus, targetZone: undefined });
+          await clearAgentRuntimeState(wallet);
+          const ok = await agentManager.ensureRunning(wallet);
+          if (ok) revived++;
+          else failed++;
+        } else {
+          skipped++;
+        }
       } catch (err: any) {
         errors.push(`${wallet.slice(0, 8)}: ${err.message?.slice(0, 80)}`);
       }
     }
 
-    return reply.send({ ok: true, total: wallets.length, woken, skipped, errors });
+    return reply.send({
+      ok: true,
+      mode,
+      total: allWallets.length,
+      woken,
+      revived,
+      skipped,
+      failed,
+      errors: errors.slice(0, 20),
+    });
   });
 }
