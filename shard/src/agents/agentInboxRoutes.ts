@@ -25,7 +25,7 @@ import {
 import { getAgentEntityRef } from "./agentConfigStore.js";
 import { getAllEntities, getEntitiesInRegion } from "../world/zoneRuntime.js";
 
-const VALID_TYPES: InboxMessageType[] = ["direct", "trade-request", "party-invite", "broadcast"];
+const VALID_TYPES: InboxMessageType[] = ["direct", "trade-request", "trade-offer", "trade-result", "party-invite", "broadcast"];
 
 export function registerAgentInboxRoutes(server: FastifyInstance): void {
 

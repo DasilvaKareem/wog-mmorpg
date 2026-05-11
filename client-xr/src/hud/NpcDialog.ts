@@ -8,7 +8,7 @@ import {
   fetchAvailableTechniques, learnTechnique,
   fetchRecipes, craftAtStation,
   fetchGuilds, createGuild,
-  fetchAuctions, bidAuction, buyoutAuction,
+  fetchAuctions, bidAuction, buyoutAuction, fetchWalletBalance,
   fetchColiseumInfo, joinPvpQueue, fetchPvpLeaderboard,
   fetchActiveBattles, fetchQueueStatus, leavePvpQueue, fetchCurrentBattle, fetchBattleDetails,
   fetchProfessionCatalog, learnProfession,
@@ -54,7 +54,11 @@ interface NpcDialogCallbacks {
   getOwnEntityId: () => string | null;
   getOwnWalletAddress: () => string | null;
   onShowQuests: () => void;
+  /** Optional channel for transient user feedback (toasts in the agent chat). */
+  notify?: (text: string, kind?: "info" | "progress" | "success" | "error") => void;
 }
+
+const AUCTION_POLL_INTERVAL_MS = 5000;
 
 export class NpcDialog {
   private overlay: HTMLDivElement;
@@ -85,6 +89,9 @@ export class NpcDialog {
   // Auctions
   private auctions: AuctionListing[] = [];
   private auctionsLoading = false;
+  private auctionPollTimer: ReturnType<typeof setInterval> | null = null;
+  /** Buttons disabled while a bid/buyout request is inflight. */
+  private auctionPendingAction = new Set<string>();
   // Arena
   private arenaInfo: ArenaInfo | null = null;
   private arenaLoading = false;
@@ -134,6 +141,8 @@ export class NpcDialog {
       this.activeTab = btn.dataset.tab;
       this.tabBar.querySelectorAll(".nd-tab").forEach((b) =>
         b.classList.toggle("active", (b as HTMLElement).dataset.tab === this.activeTab));
+      if (this.activeTab === "auctions") this.startAuctionPolling();
+      else this.stopAuctionPolling();
       this.renderContent();
     });
     this.container.appendChild(this.tabBar);
@@ -240,6 +249,7 @@ export class NpcDialog {
     this.entity = null;
     this.chatHistory = [];
     this.stopArenaPolling();
+    this.stopAuctionPolling();
   }
 
   isOpen(): boolean {
@@ -649,24 +659,29 @@ export class NpcDialog {
       void this.loadAuctions();
       return;
     }
-    if (this.auctionsLoading) { this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`; return; }
+    if (this.auctionsLoading && this.auctions.length === 0) {
+      this.contentEl.innerHTML = `<div class="nd-empty">Loading auctions...</div>`;
+      return;
+    }
     if (this.auctions.length === 0) { this.contentEl.innerHTML = `<div class="nd-empty">No active auctions</div>`; return; }
 
     let html = "";
     const hasChar = !!this.callbacks.getOwnEntityId();
     for (const a of this.auctions) {
-      const timeLeft = Math.max(0, Math.floor(a.timeRemaining / 60));
+      const timeLeft = formatAuctionTime(a.timeRemaining);
+      const pending = this.auctionPendingAction.has(a.auctionId);
+      const nextBid = (a.highBid || a.startPrice) + 1;
       html += `<div class="nd-shop-item">`;
       html += `<div class="nd-shop-item-header"><span class="nd-shop-item-name">${esc(a.itemName)}</span><span class="nd-shop-item-slot">x${a.quantity}</span></div>`;
       html += `<div class="nd-shop-item-stats">`;
       html += `Bid: ${a.highBid || a.startPrice}g`;
       if (a.buyoutPrice) html += ` · Buyout: ${a.buyoutPrice}g`;
-      html += ` · ${timeLeft}m left`;
+      html += ` · ${esc(timeLeft)} left`;
       html += `</div>`;
       if (hasChar) {
         html += `<div class="nd-shop-item-footer">`;
-        html += `<button class="nd-btn" data-action="bid" data-auction-id="${esc(a.auctionId)}">Bid</button>`;
-        if (a.buyoutPrice) html += `<button class="nd-btn" data-action="buyout" data-auction-id="${esc(a.auctionId)}">Buyout</button>`;
+        html += `<button class="nd-btn" data-action="bid" data-auction-id="${esc(a.auctionId)}"${pending ? " disabled" : ""}>${pending ? "..." : `Bid ${nextBid}g`}</button>`;
+        if (a.buyoutPrice) html += `<button class="nd-btn" data-action="buyout" data-auction-id="${esc(a.auctionId)}"${pending ? " disabled" : ""}>Buyout</button>`;
         html += `</div>`;
       }
       html += `</div>`;
@@ -676,45 +691,112 @@ export class NpcDialog {
 
   private async loadAuctions() {
     const zoneId = this.entity?.zoneId ?? "village-square";
-    const data = await fetchAuctions(zoneId);
-    this.auctionsLoading = false;
-    this.auctions = data;
-    if (this.activeTab === "auctions") this.renderAuctions();
+    try {
+      const data = await fetchAuctions(zoneId);
+      this.auctions = data;
+    } catch (err) {
+      console.warn("[npc-dialog] auction refresh failed", err);
+    } finally {
+      this.auctionsLoading = false;
+      if (this.activeTab === "auctions") this.renderAuctions();
+    }
+  }
+
+  private startAuctionPolling() {
+    if (this.auctionPollTimer) return;
+    this.auctionPollTimer = setInterval(() => {
+      if (this.activeTab !== "auctions" || !this.isOpen()) {
+        this.stopAuctionPolling();
+        return;
+      }
+      void this.loadAuctions();
+    }, AUCTION_POLL_INTERVAL_MS);
+  }
+
+  private stopAuctionPolling() {
+    if (!this.auctionPollTimer) return;
+    clearInterval(this.auctionPollTimer);
+    this.auctionPollTimer = null;
   }
 
   private async handleBid(auctionId: string) {
+    if (this.auctionPendingAction.has(auctionId)) return;
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
-    if (!token || !addr) return;
+    if (!token || !addr) {
+      this.callbacks.notify?.("Bid failed: deploy your agent first.", "error");
+      return;
+    }
     const auction = this.auctions.find(a => a.auctionId === auctionId);
     if (!auction) return;
     const bidAmount = (auction.highBid || auction.startPrice) + 1;
-    const btn = this.contentEl.querySelector(`[data-action="bid"][data-auction-id="${auctionId}"]`) as HTMLButtonElement;
-    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+
+    // Gold guard so we don't roundtrip a known-bad bid.
+    const balance = await fetchWalletBalance(addr);
+    if (balance && balance.copper < bidAmount) {
+      this.callbacks.notify?.(
+        `Bid failed: need ${bidAmount}g but have ${balance.copper}g.`,
+        "error",
+      );
+      return;
+    }
+
+    this.auctionPendingAction.add(auctionId);
+    this.renderAuctions();
+    this.callbacks.notify?.(`Bidding ${bidAmount}g on ${auction.itemName}...`, "progress");
+
     const zoneId = this.entity?.zoneId ?? "village-square";
     const result = await bidAuction(token, zoneId, { auctionId, bidderAddress: addr, bidAmount });
+    this.auctionPendingAction.delete(auctionId);
+
     if (result.ok) {
       auction.highBid = bidAmount;
-      if (btn) btn.textContent = `Bid ${bidAmount}g!`;
-      setTimeout(() => this.renderAuctions(), 1500);
+      this.callbacks.notify?.(`Bid placed: ${bidAmount}g on ${auction.itemName}.`, "success");
+      void this.loadAuctions();
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Bid"; }, 2000); }
+      this.callbacks.notify?.(`Bid failed: ${result.error ?? "unknown error"}`, "error");
+      this.renderAuctions();
     }
   }
 
   private async handleBuyout(auctionId: string) {
+    if (this.auctionPendingAction.has(auctionId)) return;
     const token = await this.callbacks.getAuthToken();
     const addr = this.callbacks.getOwnWalletAddress();
-    if (!token || !addr) return;
-    const btn = this.contentEl.querySelector(`[data-action="buyout"][data-auction-id="${auctionId}"]`) as HTMLButtonElement;
-    if (btn) { btn.textContent = "..."; btn.disabled = true; }
+    if (!token || !addr) {
+      this.callbacks.notify?.("Buyout failed: deploy your agent first.", "error");
+      return;
+    }
+    const auction = this.auctions.find(a => a.auctionId === auctionId);
+    if (!auction || !auction.buyoutPrice) return;
+
+    const balance = await fetchWalletBalance(addr);
+    if (balance && balance.copper < auction.buyoutPrice) {
+      this.callbacks.notify?.(
+        `Buyout failed: need ${auction.buyoutPrice}g but have ${balance.copper}g.`,
+        "error",
+      );
+      return;
+    }
+
+    this.auctionPendingAction.add(auctionId);
+    this.renderAuctions();
+    this.callbacks.notify?.(
+      `Buying out ${auction.itemName} for ${auction.buyoutPrice}g...`,
+      "progress",
+    );
+
     const zoneId = this.entity?.zoneId ?? "village-square";
     const result = await buyoutAuction(token, zoneId, { auctionId, buyerAddress: addr });
+    this.auctionPendingAction.delete(auctionId);
+
     if (result.ok) {
       this.auctions = this.auctions.filter(a => a.auctionId !== auctionId);
-      setTimeout(() => this.renderAuctions(), 500);
+      this.callbacks.notify?.(`Bought ${auction.itemName} for ${auction.buyoutPrice}g!`, "success");
+      this.renderAuctions();
     } else {
-      if (btn) { btn.textContent = result.error ?? "Failed"; btn.disabled = false; setTimeout(() => { btn.textContent = "Buyout"; }, 2000); }
+      this.callbacks.notify?.(`Buyout failed: ${result.error ?? "unknown error"}`, "error");
+      this.renderAuctions();
     }
   }
 
@@ -1314,4 +1396,16 @@ function hexToRgba(hex: string, alpha: number): string {
   const g = parseInt(hex.slice(3, 5), 16);
   const b = parseInt(hex.slice(5, 7), 16);
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function formatAuctionTime(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s <= 0) return "ended";
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return r > 0 ? `${m}m ${r}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm > 0 ? `${h}h ${mm}m` : `${h}h`;
 }

@@ -417,6 +417,127 @@ export async function abandonQuest(
   return postJsonWithFallback("/quests/abandon", token, { entityId, questId });
 }
 
+// ── Targeted P2P Trade ───────────────────────────────────────────
+
+export interface IncomingTradeOffer {
+  tradeId: number;
+  sellerWallet: string;
+  sellerName: string;
+  tokenId: number;
+  quantity: number;
+  askPrice: number;
+  itemName: string | null;
+  createdAtMs: number;
+  expiresAtMs: number;
+}
+
+export interface TradeStatusResponse {
+  tradeId: number;
+  seller: string;
+  buyer: string;
+  tokenId: number;
+  quantity: number;
+  status: string;
+  askPrice: number | string;
+  bidPrice: number | string;
+  matched: boolean;
+}
+
+export type OutgoingTradeStatus = "pending" | "matched" | "cancelled" | "expired";
+
+export interface OutgoingTradeListing {
+  tradeId: number;
+  sellerWallet: string;
+  sellerName: string;
+  targetBuyerWallet: string | null;
+  tokenId: number;
+  quantity: number;
+  askPrice: number;
+  itemName: string | null;
+  createdAtMs: number;
+  expiresAtMs: number;
+  cancelledAtMs: number | null;
+  matchedAtMs: number | null;
+  status: OutgoingTradeStatus;
+}
+
+export async function listTrade(
+  token: string,
+  body: {
+    sellerAddress: string;
+    tokenId: number;
+    quantity: number;
+    askPrice: number;
+    targetBuyerWallet?: string;
+    expiresAtMs?: number;
+  },
+): Promise<{ ok: boolean; tradeId?: number; expiresAtMs?: number; error?: string }> {
+  return postJsonWithFallback("/trade/list", token, body);
+}
+
+export async function acceptTradeOffer(
+  token: string,
+  body: { tradeId: number; buyerAddress: string; bidPrice: number },
+): Promise<{ ok: boolean; matched?: boolean; error?: string; reason?: string }> {
+  return postJsonWithFallback("/trade/offer", token, body);
+}
+
+export async function rejectTradeOffer(
+  token: string,
+  tradeId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/trade/reject", token, { tradeId });
+}
+
+export async function fetchIncomingTrades(
+  token: string,
+  wallet: string,
+): Promise<{ offers: IncomingTradeOffer[] } | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/trade/incoming/${wallet}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as { offers: IncomingTradeOffer[] };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return null;
+}
+
+export async function fetchTradeStatus(
+  tradeId: number,
+): Promise<TradeStatusResponse | null> {
+  return fetchJsonWithFallback<TradeStatusResponse>(`/trade/${tradeId}`);
+}
+
+export async function fetchOutgoingTrades(
+  token: string,
+  wallet: string,
+): Promise<{ offers: OutgoingTradeListing[] } | null> {
+  for (const base of CANDIDATE_BASES) {
+    try {
+      const res = await fetchWithRetry(toUrl(base, `/trade/outgoing/${wallet}`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) continue;
+      return (await res.json()) as { offers: OutgoingTradeListing[] };
+    } catch {
+      // Try next candidate base.
+    }
+  }
+  return null;
+}
+
+export async function cancelTrade(
+  token: string,
+  tradeId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/trade/cancel", token, { tradeId });
+}
+
 // ── NPC interaction endpoints ─────────────────────────────────────
 
 export async function fetchShopInventory(entityId: string): Promise<ShopResponse | null> {

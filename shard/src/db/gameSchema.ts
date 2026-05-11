@@ -477,6 +477,31 @@ export async function ensureGameSchema(): Promise<void> {
         create index if not exists idx_auction_projections_zone_status
           on game.auction_projections (zone_id, status, end_time);
 
+        create table if not exists game.trade_listings (
+          trade_id bigint primary key,
+          seller_wallet text not null,
+          seller_name text not null,
+          token_id integer not null,
+          quantity integer not null,
+          ask_price numeric not null,
+          target_buyer_wallet text,
+          item_name text,
+          created_at_ms bigint not null,
+          expires_at_ms bigint not null,
+          cancelled_at_ms bigint,
+          matched_at_ms bigint,
+          updated_at timestamptz not null default now()
+        );
+
+        create index if not exists idx_trade_listings_target_buyer
+          on game.trade_listings (target_buyer_wallet, expires_at_ms desc)
+          where target_buyer_wallet is not null
+            and cancelled_at_ms is null
+            and matched_at_ms is null;
+
+        create index if not exists idx_trade_listings_seller
+          on game.trade_listings (seller_wallet, created_at_ms desc);
+
         create table if not exists game.guilds (
           guild_id bigint primary key,
           name text not null,

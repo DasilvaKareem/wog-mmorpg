@@ -24,7 +24,9 @@ import { isPostgresConfigured } from "../db/postgres.js";
 
 export type InboxMessageType =
   | "direct"           // free-form agent-to-agent message
-  | "trade-request"    // "I want to buy/sell X"
+  | "trade-request"    // "I want to buy/sell X" (notification only)
+  | "trade-offer"      // actionable targeted P2P trade offer carrying { tradeId, askPrice, ... }
+  | "trade-result"     // outcome notification (accepted / declined / expired) for the SELLER
   | "party-invite"     // "Join my party"
   | "broadcast"        // zone-wide announcement
   | "system";          // game event notification (level-up, death, quest complete)

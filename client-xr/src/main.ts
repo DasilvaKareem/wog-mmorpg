@@ -38,11 +38,14 @@ import { SkillsPanel } from "./hud/SkillsPanel.js";
 import type { LearnedTechnique } from "./hud/LearnedTechniquesList.js";
 import type { Edict } from "./hud/EdictEditor.js";
 import { InboxPanel } from "./hud/InboxPanel.js";
+import { TradeOfferDialog } from "./hud/TradeOfferDialog.js";
+import { OutgoingTradesPanel } from "./hud/OutgoingTradesPanel.js";
 import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl, listTrade, acceptTradeOffer, rejectTradeOffer, fetchIncomingTrades, fetchTradeStatus, fetchOutgoingTrades, cancelTrade } from "./api.js";
+import type { InventoryItem } from "./types.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -382,23 +385,20 @@ const inspector = new EntityInspector({
     return `Friend request sent to ${entity.name}`;
   },
   onTrade: async (entity) => {
-    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade request unavailable");
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) throw new Error("You need to sign in first");
-    const ownName = entities.getEntity(ownEntityId ?? "")?.name ?? ownWalletAddress.slice(0, 8);
-    const result = await sendInboxMessage(token, {
-      to: entity.walletAddress,
-      type: "trade-request",
-      body: `${ownName} wants to trade with you.`,
-      data: {
-        kind: "trade-request",
-        targetEntityId: entity.id,
-        targetName: entity.name,
-        fromEntityId: ownEntityId,
-      },
-    });
-    if (!result.ok) throw new Error(result.error ?? "Failed to send trade request");
-    return `Trade request sent to ${entity.name}`;
+    if (!ownWalletAddress || !entity.walletAddress) throw new Error("Trade unavailable for that player");
+    if (!ownEntityId) throw new Error("Deploy your agent first");
+    if (entity.walletAddress.toLowerCase() === ownWalletAddress.toLowerCase()) {
+      throw new Error("You can't trade with yourself");
+    }
+    // Pull a fresh inventory snapshot before opening so the picker isn't stale.
+    lastInventoryPollTime = 0;
+    await pollInventory();
+    if (currentInventoryItems.length === 0) {
+      throw new Error("Your bag is empty — nothing to trade");
+    }
+    pendingTradeTarget = { wallet: entity.walletAddress, name: entity.name };
+    tradeOfferDialog.open(entity.name, currentInventoryItems);
+    return `Trade dialog opened for ${entity.name}`;
   },
   onDuel: async (entity) => {
     if (!ownWalletAddress || !entity.walletAddress) throw new Error("Duel request unavailable");
@@ -1102,11 +1102,153 @@ const FRIENDS_POLL_INTERVAL = 15_000;
 
 // ── Bottom-right action bar ────────────────────────────────────────
 const actionBar = new ActionBar();
+let currentInventoryItems: InventoryItem[] = [];
+let pendingTradeTarget: { wallet: string; name: string } | null = null;
+const tradeOfferDialog = new TradeOfferDialog({
+  onSubmit: async ({ tokenId, quantity, askPrice, itemName }) => {
+    if (!pendingTradeTarget) throw new Error("No trade recipient selected");
+    if (!ownWalletAddress || !ownEntityId) throw new Error("Deploy your agent first");
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) throw new Error("Auth failed — sign in again");
+    const sellerAddress = ownCustodialWallet ?? ownWalletAddress;
+
+    agentChat.addSystemMessage(
+      `Listing ${itemName} for ${askPrice}g (sealed via BITE) — sending to ${pendingTradeTarget.name}...`,
+      "progress",
+    );
+    const result = await listTrade(token, {
+      sellerAddress,
+      tokenId,
+      quantity,
+      askPrice,
+      targetBuyerWallet: pendingTradeTarget.wallet,
+    });
+    if (!result.ok) {
+      const err = result.error ?? "trade-list failed";
+      agentChat.addSystemMessage(`Trade offer failed: ${err}`, "error");
+      throw new Error(err);
+    }
+    agentChat.addSystemMessage(
+      `Offer #${result.tradeId} sent to ${pendingTradeTarget.name}.`,
+      "success",
+    );
+    pendingTradeTarget = null;
+  },
+});
+
 const inboxPanel = new InboxPanel({
   onUnreadChange: (count: number) => {
     actionBar.setBadge("inbox", count);
   },
+  onAcceptTrade: async (offer) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Accept trade: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Accept trade: auth failed — sign in again.", "error");
+      return { ok: false };
+    }
+    const buyerAddress = ownCustodialWallet ?? ownWalletAddress;
+    const itemDisplay = offer.itemName ?? `token #${offer.tokenId}`;
+    agentChat.addSystemMessage(
+      `Accepting offer from ${offer.sellerName} for ${itemDisplay} (${offer.askPrice}g) — BITE CTX can take ~30s.`,
+      "progress",
+    );
+    const result = await acceptTradeOffer(token, {
+      tradeId: offer.tradeId,
+      buyerAddress,
+      bidPrice: offer.askPrice,
+    });
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Trade failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    if (result.matched) {
+      agentChat.addSystemMessage(`Trade complete! Received ${itemDisplay}.`, "success");
+    } else {
+      agentChat.addSystemMessage(
+        `Trade submitted but did not match: ${result.reason ?? "see logs"}`,
+        "error",
+      );
+    }
+    lastInventoryPollTime = 0;
+    void pollInventory();
+    return { ok: true };
+  },
+  onDeclineTrade: async (offer) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Decline trade: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Decline trade: auth failed.", "error");
+      return { ok: false };
+    }
+    const result = await rejectTradeOffer(token, offer.tradeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Decline failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Offer from ${offer.sellerName} declined.`, "info");
+    return { ok: true };
+  },
+  onTradeResult: (data) => {
+    // A trade-result message (accepted / declined / expired) just landed — the
+    // seller's gold or inventory has likely changed. Force the next inventory
+    // poll to bypass the throttle so the UI catches the delta within ~1s.
+    lastInventoryPollTime = 0;
+    void pollInventory();
+    if (data.kind === "trade-completed") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} settled.` : "Trade settled.",
+        "success",
+      );
+    } else if (data.kind === "trade-declined") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} declined by buyer.` : "Trade declined.",
+        "info",
+      );
+    } else if (data.kind === "trade-expired") {
+      agentChat.addSystemMessage(
+        data.tradeId !== undefined ? `Trade #${data.tradeId} expired.` : "Trade expired.",
+        "info",
+      );
+    }
+  },
 });
+const outgoingTradesPanel = new OutgoingTradesPanel({
+  refresh: async () => {
+    if (!ownWalletAddress) return [];
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) return [];
+    const wallet = ownCustodialWallet ?? ownWalletAddress;
+    const res = await fetchOutgoingTrades(token, wallet);
+    return res?.offers ?? [];
+  },
+  onCancel: async (tradeId) => {
+    if (!ownWalletAddress) {
+      agentChat.addSystemMessage("Cancel failed: deploy your agent first.", "error");
+      return { ok: false };
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage("Cancel failed: auth — sign in again.", "error");
+      return { ok: false };
+    }
+    agentChat.addSystemMessage(`Cancelling trade #${tradeId}...`, "progress");
+    const result = await cancelTrade(token, tradeId);
+    if (!result.ok) {
+      agentChat.addSystemMessage(`Cancel failed: ${result.error ?? "unknown error"}`, "error");
+      return { ok: false, error: result.error };
+    }
+    agentChat.addSystemMessage(`Trade #${tradeId} cancelled.`, "info");
+    return { ok: true };
+  },
+});
+
 actionBar.addButton({ id: "bag", icon: "\u{1F392}", label: "Bag", key: "B", onClick: () => togglePanel("bag") });
 actionBar.addButton({ id: "skills", icon: "\u2692", label: "Skills", key: "P", onClick: () => togglePanel("skills") });
 actionBar.addButton({ id: "quests", icon: "\u{1F4DC}", label: "Quests", key: "Q", onClick: () => togglePanel("quests") });
@@ -1119,6 +1261,7 @@ const clearChatUnread = () => {
 actionBar.addButton({ id: "chat", icon: "\u{1F4AC}", label: "Chat", key: "T", onClick: () => togglePanel("chat") });
 actionBar.addButton({ id: "players", icon: "\u{1F465}", label: "Players", key: "U", onClick: () => togglePanel("players") });
 actionBar.addButton({ id: "inbox", icon: "\u{1F4EC}", label: "Inbox", key: "I", onClick: () => togglePanel("inbox") });
+actionBar.addButton({ id: "trades", icon: "\u{1F4B8}", label: "Trades", key: "", onClick: () => togglePanel("trades") });
 actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "E", onClick: () => {
   if (ownEntityId) {
     const ent = entities.getEntity(ownEntityId);
@@ -1127,7 +1270,7 @@ actionBar.addButton({ id: "equip", icon: "\u{1F6E1}", label: "Equipment", key: "
 }});
 actionBar.addButton({ id: "settings", icon: "\u2699", label: "Settings", key: "", onClick: () => togglePanel("settings") });
 
-type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "settings";
+type ManagedPanelId = "bag" | "skills" | "quests" | "chat" | "players" | "inbox" | "trades" | "settings";
 type ManagedPanel = {
   show: () => void;
   hide: () => void;
@@ -1169,6 +1312,11 @@ const managedPanels: Record<ManagedPanelId, ManagedPanel> = {
     hide: () => inboxPanel.hide(),
     isVisible: () => inboxPanel.isVisible(),
     onOpen: () => { lastInboxPollTime = 0; void pollInbox(); },
+  },
+  trades: {
+    show: () => outgoingTradesPanel.show(),
+    hide: () => outgoingTradesPanel.hide(),
+    isVisible: () => outgoingTradesPanel.isVisible(),
   },
   settings: {
     show: () => settingsPanel.show(),
@@ -1220,49 +1368,110 @@ function initDesktopPanelDragging() {
     { id: "quest-panel", handleSelector: ".qp-header" },
     { id: "player-panel", handleSelector: ".pp-tabs" },
     { id: "inbox-panel", handleSelector: ".ibx-header" },
+    { id: "outgoing-trades-panel", handleSelector: ".otp-header" },
     { id: "settings-panel", handleSelector: ".settings-header" },
     { id: "agent-chat", handleSelector: ".agent-chat-tabs" },
   ];
+
+  // Minimum visible area of the drag handle that must stay on-screen so the
+  // user can always grab the panel and pull it back.
+  const MIN_VISIBLE_PX = 32;
+
+  const isPanelRendered = (el: HTMLElement): boolean => {
+    // offsetParent is null for display:none, but null also for fixed-position
+    // roots whose ancestors are visible — so fall back to a size check.
+    return el.offsetWidth > 0 && el.offsetHeight > 0;
+  };
+
+  const reachable = (left: number, top: number): boolean => {
+    return (
+      left + MIN_VISIBLE_PX >= 0 &&
+      top >= 0 &&
+      left <= window.innerWidth - MIN_VISIBLE_PX &&
+      top <= window.innerHeight - MIN_VISIBLE_PX
+    );
+  };
+
+  const resetters: Array<() => void> = [];
+
   for (const def of draggableDefs) {
     const el = document.getElementById(def.id) as HTMLDivElement | null;
     if (!el) continue;
     const handle = (def.handleSelector ? el.querySelector(def.handleSelector) : null) as HTMLElement | null ?? el;
     const key = `wog:panel-pos:${def.id}`;
-    const saved = localStorage.getItem(key);
-    if (saved) {
-      try {
-        const pos = JSON.parse(saved) as { left?: number; top?: number };
-        let shouldApply = typeof pos.left === "number" && typeof pos.top === "number";
-        // Ignore obviously bad saved top-left state from the prior drag regression.
-        if (shouldApply && (pos.left as number) <= 4 && (pos.top as number) <= 4) {
-          localStorage.removeItem(key);
-          shouldApply = false;
-        }
-        if (shouldApply) {
-          const left = pos.left as number;
-          const top = pos.top as number;
-          el.style.left = `${Math.round(left)}px`;
-          el.style.top = `${Math.round(top)}px`;
-          el.style.right = "auto";
-          el.style.bottom = "auto";
-        }
-      } catch {
-        // ignore invalid localStorage payload
-      }
-    }
-
-    let dragging = false;
-    let offsetX = 0;
-    let offsetY = 0;
 
     const clamp = (left: number, top: number) => {
       const maxLeft = Math.max(0, window.innerWidth - el.offsetWidth);
       const maxTop = Math.max(0, window.innerHeight - el.offsetHeight);
       return { left: Math.min(maxLeft, Math.max(0, left)), top: Math.min(maxTop, Math.max(0, top)) };
     };
+    const applyPos = (left: number, top: number) => {
+      el.style.left = `${Math.round(left)}px`;
+      el.style.top = `${Math.round(top)}px`;
+      el.style.right = "auto";
+      el.style.bottom = "auto";
+    };
     const saveCurrent = () => {
       localStorage.setItem(key, JSON.stringify({ left: el.offsetLeft, top: el.offsetTop }));
     };
+    const clearSaved = () => {
+      localStorage.removeItem(key);
+      el.style.left = "";
+      el.style.top = "";
+      el.style.right = "";
+      el.style.bottom = "";
+    };
+    resetters.push(clearSaved);
+
+    const readSaved = (): { left: number; top: number } | null => {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      try {
+        const pos = JSON.parse(raw) as { left?: number; top?: number };
+        if (typeof pos.left !== "number" || typeof pos.top !== "number") return null;
+        if (!reachable(pos.left, pos.top)) {
+          // Saved position is unreachable in this viewport (corner, off-screen,
+          // or from a different monitor). Discard so CSS default takes over.
+          console.warn(`[panel-drag] discarding unreachable saved position for ${def.id}:`, pos);
+          localStorage.removeItem(key);
+          return null;
+        }
+        return { left: pos.left, top: pos.top };
+      } catch {
+        localStorage.removeItem(key);
+        return null;
+      }
+    };
+
+    // Try to restore position now; if the panel isn't rendered yet, we'll
+    // retry the first time it actually becomes visible. This is the key fix:
+    // applying coords from localStorage while the panel was display:none used
+    // to silently leave a stale layout that resized to (0,0) on first show.
+    let positionApplied = false;
+    const tryApplySaved = () => {
+      if (positionApplied) return;
+      const pos = readSaved();
+      if (!pos) { positionApplied = true; return; }
+      if (!isPanelRendered(el)) return; // wait for next show
+      const next = clamp(pos.left, pos.top);
+      applyPos(next.left, next.top);
+      positionApplied = true;
+    };
+    tryApplySaved();
+
+    if (!positionApplied) {
+      // Observe display/style changes; re-apply on first visibility.
+      const obs = new MutationObserver(() => {
+        if (positionApplied) { obs.disconnect(); return; }
+        tryApplySaved();
+        if (positionApplied) obs.disconnect();
+      });
+      obs.observe(el, { attributes: true, attributeFilter: ["style", "class"] });
+    }
+
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
 
     handle.style.cursor = "move";
     handle.addEventListener("pointerdown", (ev: PointerEvent) => {
@@ -1275,26 +1484,21 @@ function initDesktopPanelDragging() {
       dragging = true;
       offsetX = ev.clientX - el.offsetLeft;
       offsetY = ev.clientY - el.offsetTop;
-      el.style.left = `${el.offsetLeft}px`;
-      el.style.top = `${el.offsetTop}px`;
-      el.style.right = "auto";
-      el.style.bottom = "auto";
+      applyPos(el.offsetLeft, el.offsetTop);
       handle.setPointerCapture(ev.pointerId);
       ev.preventDefault();
     });
     handle.addEventListener("pointermove", (ev: PointerEvent) => {
       if (!dragging) return;
       const next = clamp(ev.clientX - offsetX, ev.clientY - offsetY);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
     });
     const stopDrag = (ev: PointerEvent) => {
       if (!dragging) return;
       dragging = false;
       if (handle.hasPointerCapture(ev.pointerId)) handle.releasePointerCapture(ev.pointerId);
       const next = clamp(el.offsetLeft, el.offsetTop);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
       saveCurrent();
     };
     handle.addEventListener("pointerup", stopDrag);
@@ -1302,12 +1506,21 @@ function initDesktopPanelDragging() {
 
     window.addEventListener("resize", () => {
       if (!isDesktop()) return;
+      // Don't touch hidden panels — their offsetLeft/Top are 0 and would
+      // overwrite the user's saved position with (0, 0).
+      if (!isPanelRendered(el)) return;
       const next = clamp(el.offsetLeft, el.offsetTop);
-      el.style.left = `${next.left}px`;
-      el.style.top = `${next.top}px`;
+      applyPos(next.left, next.top);
       saveCurrent();
     });
   }
+
+  // Emergency reset: from devtools, run `wogResetPanels()` to clear every
+  // saved panel position and fall back to CSS defaults.
+  (window as unknown as { wogResetPanels?: () => void }).wogResetPanels = () => {
+    for (const r of resetters) r();
+    console.log("[panel-drag] all panel positions reset to defaults");
+  };
 }
 
 function initPanelVisibilitySync() {
@@ -1321,6 +1534,7 @@ function initPanelVisibilitySync() {
     chat: "agent-chat",
     players: "player-panel",
     inbox: "inbox-panel",
+    trades: "outgoing-trades-panel",
     settings: "settings-panel",
   };
   for (const panelId of Object.values(panelIds)) {
@@ -1338,6 +1552,7 @@ const npcDialog = new NpcDialog({
   getAuthToken: async () => ownWalletAddress ? getAuthToken(ownWalletAddress) : null,
   getOwnEntityId: () => ownEntityId,
   getOwnWalletAddress: () => ownWalletAddress,
+  notify: (text, kind) => agentChat.addSystemMessage(text, kind),
   onShowQuests: () => {
     openPanel("quests");
     questPanel.showAvailable();
@@ -1582,6 +1797,7 @@ async function pollInventory() {
       playSoundEffect("ui_item_pickup");
     }
     prevInventoryItemCount = inv.items.length;
+    currentInventoryItems = inv.items;
     bagPanel.updateInventory(inv.items);
   }
   if (balance) {
