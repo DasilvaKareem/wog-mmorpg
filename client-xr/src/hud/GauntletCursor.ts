@@ -87,7 +87,8 @@ export class GauntletCursor {
   }
 
   private onMouseMove = (e: MouseEvent) => {
-    if (!this.enabled) return;
+    // UI hover swap works even when raycasting is disabled (e.g. landing page,
+    // character select) so buttons always get the "interact" cursor on hover.
     const hoveringInteractive = this.isInteractiveTarget(e.target);
     if (hoveringInteractive) {
       this.uiInteractiveHover = true;
@@ -98,6 +99,8 @@ export class GauntletCursor {
       this.uiInteractiveHover = false;
       this.applyMode("default");
     }
+
+    if (!this.enabled) return;
 
     // Throttle raycasts to ~15 fps (67ms)
     const now = performance.now();
