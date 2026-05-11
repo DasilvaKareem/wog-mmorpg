@@ -11,8 +11,6 @@
  */
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { getErc8004ChainName, getOfficialErc8004Addresses } from "../erc8004/official.js";
 import { sendInboxMessage } from "./agentInbox.js";
 import { getAllEntities } from "../world/zoneRuntime.js";
@@ -29,55 +27,9 @@ const ERC8004_MODE = OFFICIAL_ERC8004 ? "official" : "local-mock";
 const ERC8004_REGISTRY = OFFICIAL_ERC8004?.identity ?? process.env.IDENTITY_REGISTRY_ADDRESS ?? null;
 const ERC8004_TYPE = "https://eips.ethereum.org/EIPS/eip-8004#registration-v1";
 const A2A_VERSION = "0.3.0";
-const DEFAULT_CHARACTER_SPRITE_DATA_URI = (() => {
-  const candidates = [
-    resolve(process.cwd(), "../client/public/sprites/character.png"),
-    resolve(process.cwd(), "../../client/public/sprites/character.png"),
-    resolve(process.cwd(), "client/public/sprites/character.png"),
-  ];
-  for (const candidate of candidates) {
-    if (!existsSync(candidate)) continue;
-    try {
-      return `data:image/png;base64,${readFileSync(candidate).toString("base64")}`;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-})();
 
 /** Supported A2A JSON-RPC methods */
 const A2A_METHODS = ["message/send", "message/read", "agent/card"] as const;
-
-/**
- * Build an A2A Agent Card for a WoG agent.
- * Follows the Google A2A protocol spec.
- */
-function buildAgentImageDataUri(name: string, classId?: string): string {
-  if (DEFAULT_CHARACTER_SPRITE_DATA_URI) return DEFAULT_CHARACTER_SPRITE_DATA_URI;
-  const safeName = (name || "WoG Agent").trim();
-  const initials = safeName
-    .split(/[^A-Za-z0-9]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("") || "WG";
-  const subtitle = (classId || "adventurer").slice(0, 18);
-  const svg = `
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1f4d3a" />
-      <stop offset="100%" stop-color="#c08b2f" />
-    </linearGradient>
-  </defs>
-  <rect width="512" height="512" rx="48" fill="url(#bg)" />
-  <circle cx="256" cy="220" r="92" fill="rgba(255,255,255,0.18)" />
-  <text x="256" y="248" text-anchor="middle" font-family="Georgia, serif" font-size="88" font-weight="700" fill="#fff">${initials}</text>
-  <text x="256" y="392" text-anchor="middle" font-family="Georgia, serif" font-size="22" fill="#f7e6b5">${subtitle}</text>
-</svg>`.trim();
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-}
 
 function buildRegistrations(agentId?: string | null) {
   if (!agentId || !ERC8004_REGISTRY) return [];
@@ -127,7 +79,6 @@ function buildAgentCard(walletAddress: string, entity?: {
   const resolvedUrl = buildCanonicalAgentCardUrl(entity?.agentId, resolvedWallet);
   return {
     type: ERC8004_TYPE,
-    image: buildAgentImageDataUri(resolvedName, entity?.classId),
     name: entity?.name ?? `WoG Agent ${walletAddress.slice(0, 8)}`,
     description: entity
       ? `Level ${entity.level ?? 1} ${entity.classId ?? "adventurer"} in World of Geneva${entity.zoneId ? `, currently in ${entity.zoneId}` : ""}`
@@ -438,7 +389,6 @@ export function registerA2ARoutes(server: FastifyInstance): void {
     reply.header("content-type", "application/json");
     return {
       type: ERC8004_TYPE,
-      image: buildAgentImageDataUri("World of Geneva Shard", "mmorpg-shard"),
       name: "World of Geneva Shard",
       description: "On-chain MMORPG game shard. AI agents are the players — deploy one with POST /x402/deploy, then explore, fight, quest, craft, and trade via the REST API.",
       url: `${BASE_URL}/a2a`,
