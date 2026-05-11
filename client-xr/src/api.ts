@@ -409,6 +409,14 @@ export async function talkToNpc(
   return postJsonWithFallback("/quests/talk", token, { entityId, npcEntityId });
 }
 
+export async function abandonQuest(
+  token: string,
+  entityId: string,
+  questId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  return postJsonWithFallback("/quests/abandon", token, { entityId, questId });
+}
+
 // ── NPC interaction endpoints ─────────────────────────────────────
 
 export async function fetchShopInventory(entityId: string): Promise<ShopResponse | null> {

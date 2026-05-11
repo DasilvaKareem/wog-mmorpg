@@ -39,7 +39,7 @@ export function registerSkinningRoutes(server: FastifyInstance) {
           y: e.y,
           mobName: e.mobName,
           level: e.level ?? 1,
-          requiredSkillLevel: Math.max(1, (e.level ?? 1) * 2),
+          requiredSkillLevel: Math.max(1, (e.level ?? 1) * 2 - 1),
           skinnableUntil: e.skinnableUntil,
           timeRemaining: e.skinnableUntil ? Math.max(0, e.skinnableUntil - Date.now()) : 0,
           region: e.region,
@@ -143,9 +143,14 @@ export function registerSkinningRoutes(server: FastifyInstance) {
       return { error: "Equipped tool is not a skinning knife" };
     }
 
-    // Check skinning skill level (derived from corpse mob level)
+    // Check skinning skill level (derived from corpse mob level).
+    // Formula `corpseLevel * 2 - 1` so a level-1 corpse needs skill 1 — fresh
+    // skinners (just learned via skinning_101) start at skill 1 and would
+    // otherwise be hard-blocked from skinning anything in starter zones.
+    // The fail roll in `rollFailure` still gives a 40% miss rate at the
+    // boundary, so this isn't free progression.
     const corpseLevel = corpse.level ?? 1;
-    const requiredSkillLevel = Math.max(1, corpseLevel * 2);
+    const requiredSkillLevel = Math.max(1, corpseLevel * 2 - 1);
     const skills = getProfessionSkills(walletAddress);
     const currentSkillLevel = skills["skinning"]?.level ?? 1;
     if (currentSkillLevel < requiredSkillLevel) {

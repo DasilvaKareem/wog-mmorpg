@@ -25,7 +25,7 @@ export interface TierCapabilities {
 export const TIER_CAPABILITIES: Record<AgentTier, TierCapabilities> = {
   free: {
     supervisorEnabled: false,
-    sessionLimitMs: 6 * 3600_000,       // 6 hours
+    sessionLimitMs: 24 * 3600_000,      // 24 hours
     allowedZones: "all",
     retreatEnabled: false,
     techniquesEnabled: true,

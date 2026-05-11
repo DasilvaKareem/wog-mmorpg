@@ -1321,16 +1321,21 @@ export class AgentRunner {
       || failure.key.startsWith("combat:no-safe-targets")
       || failure.key.startsWith("combat:level-mismatch");
 
+    const target = failure.targetName ?? failure.targetId;
+    const detail = target ? `${target}: ${failure.reason}` : failure.reason;
+
     if (isZoneIssue) {
       const chain = buildLevelBandChain(level, this.currentRegion, allowed);
       if (chain) {
         const rescueZone = chain[0].targetZone ?? "unknown";
-        console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} stuck ${failure.consecutive}x → zone rescue ${rescueZone}`);
-        void this.logActivity(`[ZONE RESCUE] ${this.currentRegion} has no targets for Lv${level} — heading to ${rescueZone}`);
+        console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} stuck ${failure.consecutive}x on "${detail}" → zone rescue ${rescueZone}`);
+        void this.logActivity(`[ZONE RESCUE] ${this.currentRegion} has no targets for Lv${level} (${currentType} blocked on ${detail}) — heading to ${rescueZone}`);
         this.logError("action", `Zone rescue: ${currentType} → ${rescueZone} after ${failure.consecutive} blocks`, {
           fromScript: currentType,
           toZone: rescueZone,
           reason: failure.reason,
+          ...(failure.targetName ? { targetName: failure.targetName } : {}),
+          ...(failure.targetId ? { targetId: failure.targetId } : {}),
         });
         this.lastRescueByZone.set(zone, Date.now());
         await this.enqueueActions(chain, true);
@@ -1339,16 +1344,18 @@ export class AgentRunner {
     }
 
     // Path 2: No better zone found — go idle instead of switching to gather/craft.
-    console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x → switching to idle`);
-    void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x — switching to idle`);
+    console.log(`[agent:${this.walletTag}] Circuit breaker: ${currentType} blocked ${failure.consecutive}x on "${detail}" → switching to idle`);
+    void this.logActivity(`[CIRCUIT BREAKER] ${currentType} stuck ${failure.consecutive}x on ${detail} — switching to idle`);
     this.logError("action", `Circuit breaker fired: ${currentType} → idle after ${failure.consecutive} blocks`, {
       fromScript: currentType,
       toFocus: "idle",
       reason: failure.reason,
+      ...(failure.targetName ? { targetName: failure.targetName } : {}),
+      ...(failure.targetId ? { targetId: failure.targetId } : {}),
     });
     this.lastRescueByZone.set(zone, Date.now());
     void patchAgentConfig(this.userWallet, { focus: "idle", targetZone: undefined });
-    this.currentScript = { type: "idle", reason: `Circuit breaker: ${currentType} blocked` };
+    this.currentScript = { type: "idle", reason: `Circuit breaker: ${currentType} blocked on ${detail}` };
     this.ticksOnCurrentScript = 0;
     return true;
   }

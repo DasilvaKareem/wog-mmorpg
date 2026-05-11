@@ -1005,6 +1005,7 @@ import {
   buildGlbActionMap,
   getClipFromMap,
   getProceduralClip,
+  resolveTechniqueClip,
   auditGlbActionMap,
   animLogFor,
   animLogOnce,
@@ -1110,11 +1111,28 @@ interface EntityObject {
   // Rig + animation
   rig: HumanoidRigLike | null;
   mixer: THREE.AnimationMixer | null;
-  /** Cached AnimationActions, keyed by the Action that produced them. */
-  animActions: Map<Action, THREE.AnimationAction>;
+  /**
+   * Cached AnimationActions. Keyed by `Action` for the default clip and by
+   * `${Action}::${clipName}` for per-technique / per-style variants. The
+   * widened key lets the same `cast-arcane` action hold separate cached
+   * actions for `Spell1` (projectile) vs `Spell2` (area) without colliding.
+   */
+  animActions: Map<string, THREE.AnimationAction>;
   /** Pre-resolved Action → Clip map for GLB characters. Empty for procedural rigs. */
   actionMap: Map<Action, THREE.AnimationClip>;
+  /**
+   * Raw clip-name → clip map from the GLB. Empty for procedural rigs. Kept
+   * around so `resolveTechniqueClip` can pull specific variants (Spell1 vs
+   * Spell2 vs Defend) at play time.
+   */
+  glbClipMap: Map<string, THREE.AnimationClip>;
   currentAction: Action | null;
+  /**
+   * Cache key (Action or `${Action}::${clipName}`) for `currentAction`'s
+   * AnimationAction — needed so cross-fades find the right cached entry
+   * when a variant clip is in play.
+   */
+  currentAnimKey: string | null;
   /** Bones needed for old-style references (armor attach, etc.) */
   leftLeg: THREE.Mesh | null;
   rightLeg: THREE.Mesh | null;
@@ -1128,7 +1146,14 @@ interface EntityObject {
   /** When the current one-shot animation started (performance.now ms), 0 if looping */
   oneShotStart: number;
   /** Queued melee animation waiting for entity to be in visual range */
-  pendingMelee: { action: Action; targetId: string; holdOverride?: number; queuedAt: number } | null;
+  pendingMelee: {
+    action: Action;
+    targetId: string;
+    holdOverride?: number;
+    queuedAt: number;
+    techniqueId?: string;
+    animStyle?: string;
+  } | null;
   lifeState: EntityLifeState;
   lifeToken: number;
   /** Timestamp when death animation started — prevents premature respawn */
@@ -1151,8 +1176,14 @@ export class EntityManager {
   private envAssets: EnvironmentAssets | null = null;
   /** ID of the local player's entity — used to gate XP-gain floating text */
   private ownEntityId: string | null = null;
+
+  /** True if the local player is the victim or attacker — used to gate SFX so we don't hear every entity in the zone. */
+  private isLocalAudible(victimId?: string | null, attackerId?: string | null): boolean {
+    if (!this.ownEntityId) return false;
+    return this.ownEntityId === victimId || this.ownEntityId === attackerId;
+  }
   /** Combat metadata keyed by targetId, populated by preSync() from the latest events batch */
-  private pendingCombatMeta = new Map<string, { critical: boolean; blocked: boolean; dodged: boolean; damage: number }>();
+  private pendingCombatMeta = new Map<string, { critical: boolean; blocked: boolean; dodged: boolean; damage: number; sourceId?: string }>();
   private charAssets: import("./CharacterAssets.js").CharacterAssets | null = null;
   private armorSystem: import("./ArmorSystem.js").ArmorSystem | null = null;
   private avatarAssets = new AvatarAssets();
@@ -1204,12 +1235,13 @@ export class EntityManager {
       const blocked = d.blocked === true;
       const dodged = d.dodged === true;
       if (!critical && !blocked && !dodged && damage <= 0) continue;
+      const sourceId = typeof ev.entityId === "string" ? ev.entityId : undefined;
       // Keep the most significant hit per target (prefer crit, then damage magnitude)
       const existing = this.pendingCombatMeta.get(ev.targetId);
       if (!existing
         || (critical && !existing.critical)
         || damage > existing.damage) {
-        this.pendingCombatMeta.set(ev.targetId, { critical, blocked, dodged, damage });
+        this.pendingCombatMeta.set(ev.targetId, { critical, blocked, dodged, damage, sourceId });
       }
     }
   }
@@ -1328,6 +1360,7 @@ export class EntityManager {
             blocked: meta?.blocked,
             dodged: meta?.dodged,
             ranged: (meta?.damage ?? 0) > 0 && !this.isEntityWithinMeleeAnimRange(existing.entity, { x: 0, y: 0, id: "", type: "player", hp: 0, maxHp: 0 } as any), // Simple heuristic: if not in melee range, it's ranged
+            attackerId: meta?.sourceId,
           });
         } else if (wasAlive && hpDelta > 0) {
           // Healed
@@ -1336,7 +1369,7 @@ export class EntityManager {
 
         // Death detection
         if (wasAlive && ent.hp <= 0 && existing.prevHp > 0) {
-          if (ent.type === "mob" || ent.type === "boss") {
+          if ((ent.type === "mob" || ent.type === "boss") && this.isLocalAudible(id, meta?.sourceId)) {
             playSoundEffect("combat_victory");
           }
           this.triggerDeath(existing);
@@ -1677,7 +1710,8 @@ export class EntityManager {
 
     const target = attacking ? 1 : 0;
 
-    if (attacking && !obj.isAttacking) {
+    const orderTargetId = obj.entity.order && "targetId" in obj.entity.order ? obj.entity.order.targetId : undefined;
+    if (attacking && !obj.isAttacking && this.isLocalAudible(obj.entity.id, orderTargetId)) {
       playSoundEffect("combat_battle_start");
     }
     obj.isAttacking = attacking;
@@ -1757,22 +1791,51 @@ export class EntityManager {
     return getProceduralClip(action);
   }
 
+  /**
+   * Resolve a per-technique or per-animStyle clip variant from the entity's
+   * raw GLB clip map. Returns null if no variant matches (caller falls back
+   * to the default action clip). Procedural rigs always return null since
+   * their clip set is curated and small.
+   */
+  private getVariantClip(
+    obj: EntityObject,
+    action: Action,
+    techniqueId?: string,
+    animStyle?: string,
+  ): THREE.AnimationClip | null {
+    if (!obj.hasGlbModel || obj.glbClipMap.size === 0) return null;
+    return resolveTechniqueClip(obj.glbClipMap, action, techniqueId, animStyle);
+  }
+
   // ── Animation playback helpers ──────────────────────────────────────
 
   /**
    * Play an Action on an entity. `loop=true` for locomotion; `loop=false` for
    * one-shots (combat, reactions, gathers). On finish, one-shots transition
    * back to the locomotion action automatically.
+   *
+   * `clipOverride`, if provided, takes precedence over the default action map
+   * lookup — used by `playCombatAction` to substitute per-technique or
+   * per-animStyle clip variants. The cache key is widened to
+   * `${action}::${clip.name}` so variants for the same Action don't collide.
    */
-  private playAction(obj: EntityObject, action: Action, loop: boolean, onFinish?: () => void) {
+  private playAction(
+    obj: EntityObject,
+    action: Action,
+    loop: boolean,
+    onFinish?: () => void,
+    clipOverride?: THREE.AnimationClip,
+  ) {
     if (!obj.mixer) {
       if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no mixer, can't play ${action}`);
       return;
     }
 
-    let anim = obj.animActions.get(action);
+    const cacheKey = clipOverride ? `${action}::${clipOverride.name}` : action;
+
+    let anim = obj.animActions.get(cacheKey);
     if (!anim) {
-      const clip = this.getClipForAction(obj, action);
+      const clip = clipOverride ?? this.getClipForAction(obj, action);
       if (!clip) {
         if (isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name} (${obj.entity.classId ?? "?"}): no clip for ${action} hasGlb=${obj.hasGlbModel}`);
@@ -1785,13 +1848,13 @@ export class EntityManager {
         return;
       }
       anim = obj.mixer.clipAction(clip);
-      obj.animActions.set(action, anim);
+      obj.animActions.set(cacheKey, anim);
 
       // Silent binding failures are the #1 reason animations play but do nothing.
       // Only warn on the debug-scoped entity, and only for combat/one-shot actions.
       if (isAnimDebugFor(obj.entity.name) && !loop) {
         const bound = (anim as unknown as { _propertyBindings?: unknown[] })._propertyBindings?.length ?? 0;
-        animLogFor(obj.entity.name, `cache ${action}: clip=${clip.name} tracks=${clip.tracks.length} bound=${bound}`);
+        animLogFor(obj.entity.name, `cache ${cacheKey}: clip=${clip.name} tracks=${clip.tracks.length} bound=${bound}`);
         if (bound === 0 && clip.tracks.length > 0) {
           animWarn(`${obj.entity.name}: clip "${clip.name}" has ${clip.tracks.length} tracks but 0 bound to rig — bone names mismatch`);
         }
@@ -1801,7 +1864,7 @@ export class EntityManager {
     anim.loop = loop ? THREE.LoopRepeat : THREE.LoopOnce;
     anim.clampWhenFinished = !loop;
 
-    const current = obj.currentAction ? obj.animActions.get(obj.currentAction) : null;
+    const current = obj.currentAnimKey ? obj.animActions.get(obj.currentAnimKey) : null;
     if (current && current !== anim) {
       // For one-shots (combat, reactions), abandon the crossfade entirely —
       // Three.js warp=true scales the new action's timescale to match the
@@ -1830,9 +1893,10 @@ export class EntityManager {
 
     // Only log combat transitions (skip locomotion), only for debug scope.
     if (!loop && isAnimDebugFor(obj.entity.name)) {
-      animLogFor(obj.entity.name, `play ${obj.currentAction ?? "∅"} → ${action}`);
+      animLogFor(obj.entity.name, `play ${obj.currentAction ?? "∅"} → ${cacheKey}`);
     }
     obj.currentAction = action;
+    obj.currentAnimKey = cacheKey;
 
     if (loop) {
       obj.oneShotStart = 0;
@@ -1853,8 +1917,13 @@ export class EntityManager {
     mixer.addEventListener("finished", handler);
   }
 
-  private playOneShot(obj: EntityObject, action: Action, onFinish?: () => void) {
-    this.playAction(obj, action, false, onFinish);
+  private playOneShot(
+    obj: EntityObject,
+    action: Action,
+    onFinish?: () => void,
+    clipOverride?: THREE.AnimationClip,
+  ) {
+    this.playAction(obj, action, false, onFinish, clipOverride);
   }
 
   private getGlbVisualRoot(obj: EntityObject): THREE.Object3D | null {
@@ -1968,26 +2037,27 @@ export class EntityManager {
   private triggerDamage(
     obj: EntityObject,
     amount: number,
-    opts?: { critical?: boolean; blocked?: boolean; dodged?: boolean; ranged?: boolean },
+    opts?: { critical?: boolean; blocked?: boolean; dodged?: boolean; ranged?: boolean; attackerId?: string },
   ) {
     const critical = !!opts?.critical;
     const blocked = !!opts?.blocked;
     const dodged = !!opts?.dodged;
     const ranged = !!opts?.ranged;
+    const audible = this.isLocalAudible(obj.entity.id, opts?.attackerId);
 
     if (dodged) {
       this.triggerDodge(obj);
-      playSoundEffect("combat_melee_miss");
+      if (audible) playSoundEffect("combat_melee_miss");
       return;
     }
 
     if (blocked) {
       this.triggerBlock(obj);
-      playSoundEffect("combat_defend");
+      if (audible) playSoundEffect("combat_defend");
     } else if (amount > 0) {
-      playSoundEffect(ranged ? "combat_ranged_hit" : "combat_melee_hit");
+      if (audible) playSoundEffect(ranged ? "combat_ranged_hit" : "combat_melee_hit");
     } else {
-      playSoundEffect(ranged ? "combat_ranged_miss" : "combat_melee_miss");
+      if (audible) playSoundEffect(ranged ? "combat_ranged_miss" : "combat_melee_miss");
     }
 
     // GLB damage: flash red on all meshes. Player GLBs are named char_*;
@@ -2070,7 +2140,7 @@ export class EntityManager {
 
   /** WoW-style "engulfed in light" level-up burst: pillar + expanding ring + body glow + banner */
   private triggerLevelUp(obj: EntityObject) {
-    playSoundEffect("ui_level_up");
+    if (this.ownEntityId === obj.entity.id) playSoundEffect("ui_level_up");
     // Banner text
     this.spawnFloating(obj, "LEVEL UP!", "levelup", {
       startY: 3.0,
@@ -2311,6 +2381,7 @@ export class EntityManager {
 
     this.stopAnimations(obj);
     obj.currentAction = null;
+    obj.currentAnimKey = null;
 
     obj.prevTargetX = pos.x;
     obj.prevTargetZ = pos.z;
@@ -2372,7 +2443,7 @@ export class EntityManager {
           const isMelee = animStyle !== "projectile";
           animLogFor(obj.entity.name, `combat basic-attack style=${animStyle ?? "?"} → ${action}`);
           this.faceTarget(obj, ev.targetId);
-          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee);
+          this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, undefined, animStyle);
         } else if (obj && isAnimDebugFor(obj.entity.name)) {
           animWarn(`${obj.entity.name}: combat event skipped (life=${obj.lifeState} rig=${!!obj.rig} glb=${obj.hasGlbModel})`);
         }
@@ -2395,7 +2466,7 @@ export class EntityManager {
         const isMelee = animStyle === "melee";
         const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
-        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee);
+        this.playCombatAction(obj, action, undefined, ev.targetId, isMelee, techniqueId, animStyle);
       }
 
       // ── Technique windup: casting started ──
@@ -2408,7 +2479,7 @@ export class EntityManager {
         const action = resolveAction(obj.entity, "technique", techniqueId, animStyle);
         this.faceTarget(obj, ev.targetId);
         const windupTicks = ev.data?.windupTicks as number | undefined;
-        this.playCombatAction(obj, action, (windupTicks ?? 2) * 1.0, ev.targetId, isMelee);
+        this.playCombatAction(obj, action, (windupTicks ?? 2) * 1.0, ev.targetId, isMelee, techniqueId, animStyle);
       }
 
       // ── Death ──
@@ -2446,7 +2517,15 @@ export class EntityManager {
    * Play a combat Action with a hold timer based on clip duration.
    * Melee attacks queue until the entity is visually in range of the target.
    */
-  private playCombatAction(obj: EntityObject, action: Action, holdOverride?: number, targetId?: string, isMelee = true) {
+  private playCombatAction(
+    obj: EntityObject,
+    action: Action,
+    holdOverride?: number,
+    targetId?: string,
+    isMelee = true,
+    techniqueId?: string,
+    animStyle?: string,
+  ) {
     if (!(obj.rig || obj.hasGlbModel)) {
       if (isAnimDebugFor(obj.entity.name)) animWarn(`${obj.entity.name}: no rig (skipped ${action})`);
       return;
@@ -2460,7 +2539,7 @@ export class EntityManager {
         const dist = Math.sqrt(dx * dx + dz * dz);
         if (dist > MELEE_ANIM_RANGE) {
           animLogFor(obj.entity.name, `QUEUED ${action} (dist=${dist.toFixed(1)} > ${MELEE_ANIM_RANGE})`);
-          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now() };
+          obj.pendingMelee = { action, targetId, holdOverride, queuedAt: performance.now(), techniqueId, animStyle };
           return;
         }
       }
@@ -2468,23 +2547,33 @@ export class EntityManager {
 
     obj.pendingMelee = null;
 
-    const clip = this.getClipForAction(obj, action);
+    // Tier 2 (techniqueId override) → Tier 1 (animStyle variant) → default action clip.
+    // Resolved here so the hold timer matches the actual clip we're about to play.
+    const variantClip = this.getVariantClip(obj, action, techniqueId, animStyle);
+    const clip = variantClip ?? this.getClipForAction(obj, action);
     const clipDuration = clip?.duration ?? 0.6;
     obj.combatAnimHold = holdOverride ?? clipDuration;
 
-    this.playOneShot(obj, action);
+    if (variantClip && isAnimDebugFor(obj.entity.name)) {
+      animLogFor(
+        obj.entity.name,
+        `variant clip for ${action} (${techniqueId ?? "?"}, ${animStyle ?? "?"}) → ${variantClip.name}`,
+      );
+    }
+
+    this.playOneShot(obj, action, undefined, variantClip ?? undefined);
     if (obj.hasGlbModel && isMelee) obj.glbAttackTimer = 0.35;
   }
 
   /** Flush pending melee animations once entity is visually in range */
   private flushPendingMelee(obj: EntityObject) {
     if (!obj.pendingMelee) return;
-    const { action, targetId, holdOverride, queuedAt } = obj.pendingMelee;
+    const { action, targetId, holdOverride, queuedAt, techniqueId, animStyle } = obj.pendingMelee;
 
     const elapsed = performance.now() - queuedAt;
     if (elapsed > 1000) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
       return;
     }
 
@@ -2498,7 +2587,7 @@ export class EntityManager {
     const dz = targetObj.group.position.z - obj.group.position.z;
     if (Math.sqrt(dx * dx + dz * dz) <= MELEE_ANIM_RANGE) {
       obj.pendingMelee = null;
-      this.playCombatAction(obj, action, holdOverride, targetId, false);
+      this.playCombatAction(obj, action, holdOverride, targetId, false, techniqueId, animStyle);
     }
   }
 
@@ -2523,6 +2612,7 @@ export class EntityManager {
     let rig: HumanoidRigLike | null = null;
     let mixer: THREE.AnimationMixer | null = null;
     let actionMap = new Map<Action, THREE.AnimationClip>();
+    let glbClipMap = new Map<string, THREE.AnimationClip>();
     let hasGlbCharacter = false;
 
     switch (info.style) {
@@ -2532,6 +2622,7 @@ export class EntityManager {
           mixer = glbChar.mixer;
           hasGlbCharacter = true;
           actionMap = buildGlbActionMap(glbChar.clips);
+          glbClipMap = glbChar.clips;
           if (isAnimDebugFor(ent.name)) {
             animLogOnce(
               `${ent.name} GLB loaded: ${glbChar.clips.size} clips `
@@ -2629,7 +2720,8 @@ export class EntityManager {
       prevX: pos.x, prevZ: pos.z, targetYaw: 0, hpBarFg, hpBarBg, entity: ent,
       prevHp: ent.hp, prevXp: ent.xp ?? 0, bodyMesh, headMesh,
       isMoving: false, movingSmooth: 0,
-      rig, mixer, animActions: new Map(), actionMap, currentAction: null,
+      rig, mixer, animActions: new Map(), actionMap, glbClipMap, currentAction: null,
+      currentAnimKey: null,
       leftLeg, rightLeg, leftArm, rightArm,
       hasGlbModel: hasGlbCharacter || !!(group as any)._hasGlbModel,
       glbAttackTimer: 0,

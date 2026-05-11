@@ -8,12 +8,84 @@ const HERO_LOGO_SRC = `${PUBLIC_BASE}assets/logo.png`;
 const HERO_DUEL_SRC = `${PUBLIC_BASE}assets/hero-duel.png`;
 const DISCORD_INVITE_URL = "https://discord.gg/AeCAeBZema";
 
+interface NavMenuItem {
+  label: string;
+  path?: string;
+  url?: string;
+  external?: boolean;
+}
+
+interface NavMenu {
+  label: string;
+  path?: string;
+  items?: NavMenuItem[];
+}
+
+const NAV_MENUS: NavMenu[] = [
+  {
+    label: "GAME",
+    items: [
+      { label: "Overview", path: "/" },
+      { label: "Races & Classes", path: "/races" },
+      { label: "Story & Lore", path: "/story" },
+      { label: "Media", path: "/media" },
+      { label: "x402 Agent Deploy", path: "/x402" },
+      { label: "Pricing", path: "/pricing" },
+    ],
+  },
+  {
+    label: "SHOP",
+    items: [
+      { label: "NFT Marketplace", path: "/marketplace" },
+      { label: "Agent Pricing", path: "/pricing" },
+    ],
+  },
+  {
+    label: "COMMUNITY",
+    items: [
+      { label: "Leaderboards", path: "/leaderboards" },
+      { label: "Discord", url: DISCORD_INVITE_URL, external: true },
+      { label: "News & Roadmap", path: "/news" },
+    ],
+  },
+  {
+    label: "CHAMPIONS",
+    path: "/champions",
+  },
+];
+
 function clientPageUrl(path: string): string {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
-    return `${window.location.protocol}//${window.location.hostname}:5173${normalizedPath}`;
+  const hostname = window.location.hostname;
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return `${window.location.protocol}//${hostname}:5173${normalizedPath}`;
   }
-  return normalizedPath;
+  // Main client lives on the app subdomain in prod.
+  return `https://app.worldofgeneva.com${normalizedPath}`;
+}
+
+function renderNavMenuHtml(menu: NavMenu, index: number): string {
+  if (menu.path && !menu.items) {
+    const href = clientPageUrl(menu.path);
+    return `<a class="xr-landing-nav-item" data-nav-link="${index}" href="${href}">${menu.label}</a>`;
+  }
+  return `
+    <div class="xr-landing-nav-group" data-nav-group="${index}">
+      <button type="button" class="xr-landing-nav-item xr-landing-nav-trigger" data-nav-trigger="${index}" aria-haspopup="true" aria-expanded="false">
+        ${menu.label}<span class="caret">˅</span>
+      </button>
+      <div class="xr-landing-nav-menu" data-nav-menu="${index}" role="menu" hidden>
+        ${(menu.items ?? [])
+          .map((item) => {
+            const href = item.url ?? clientPageUrl(item.path ?? "/");
+            const target = item.external ? ` target="_blank" rel="noopener noreferrer"` : "";
+            const ext = item.external ? `<span class="ext">↗</span>` : "";
+            return `<a class="xr-landing-nav-menu-item" href="${href}"${target} role="menuitem">${item.label}${ext}</a>`;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
 }
 
 export class LandingPage {
@@ -30,6 +102,8 @@ export class LandingPage {
   private walletAddress: string | null = null;
   private authExpanded = false;
   private authMode: AuthMode = "signup";
+  private openNavIndex: number | null = null;
+  private onDocClick: ((event: MouseEvent) => void) | null = null;
 
   constructor(private options: LandingPageOptions) {
     this.injectStyles();
@@ -42,10 +116,7 @@ export class LandingPage {
         <div class="xr-landing-top-left">
           <img class="xr-landing-duel" src="${HERO_DUEL_SRC}" alt="Game icon" />
           <nav class="xr-landing-nav" aria-label="Primary">
-            <a class="active" href="${clientPageUrl("/")}" aria-current="page">GAME<span class="caret">˅</span></a>
-            <a href="${clientPageUrl("/marketplace")}">SHOP<span class="caret">˅</span></a>
-            <a href="${clientPageUrl("/leaderboards")}">COMMUNITY<span class="caret">˅</span></a>
-            <a href="${clientPageUrl("/champions")}">CHAMPIONS</a>
+            ${NAV_MENUS.map((menu, index) => renderNavMenuHtml(menu, index)).join("")}
           </nav>
         </div>
       </header>
@@ -101,6 +172,7 @@ export class LandingPage {
     this.authChooserEl = this.panel.querySelector("[data-auth-chooser]") as HTMLDivElement;
     this.authTitleEl = this.panel.querySelector("[data-auth-title]") as HTMLDivElement;
     this.bindEvents();
+    this.bindNavEvents();
     void this.hydrateExistingSession();
   }
 
@@ -128,10 +200,16 @@ export class LandingPage {
 
   hide() {
     this.root.style.display = "none";
+    this.closeNavMenu();
   }
 
   show() {
     this.root.style.display = "";
+  }
+
+  destroy() {
+    if (this.onDocClick) document.removeEventListener("mousedown", this.onDocClick);
+    this.onDocClick = null;
   }
 
   private bindEvents() {
@@ -162,6 +240,65 @@ export class LandingPage {
     this.panel.querySelector("[data-action='mode-login']")?.addEventListener("click", () => {
       this.authMode = "login";
       this.refreshAuthChooserUI();
+    });
+  }
+
+  private bindNavEvents() {
+    const triggers = this.root.querySelectorAll<HTMLButtonElement>("[data-nav-trigger]");
+    triggers.forEach((btn) => {
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const idx = Number(btn.dataset.navTrigger);
+        this.toggleNavMenu(Number.isFinite(idx) ? idx : null);
+      });
+    });
+
+    const closeOnNavigate = this.root.querySelectorAll<HTMLAnchorElement>("[data-nav-link], .xr-landing-nav-menu-item");
+    closeOnNavigate.forEach((a) => {
+      a.addEventListener("click", () => this.closeNavMenu());
+    });
+
+    this.onDocClick = (event: MouseEvent) => {
+      if (this.openNavIndex === null) return;
+      const target = event.target as Node | null;
+      const navEl = this.root.querySelector(".xr-landing-nav");
+      if (navEl && target && !navEl.contains(target)) this.closeNavMenu();
+    };
+    document.addEventListener("mousedown", this.onDocClick);
+  }
+
+  private toggleNavMenu(index: number | null) {
+    if (index === null) {
+      this.closeNavMenu();
+      return;
+    }
+    if (this.openNavIndex === index) {
+      this.closeNavMenu();
+      return;
+    }
+    this.openNavIndex = index;
+    this.refreshNavMenuUI();
+  }
+
+  private closeNavMenu() {
+    if (this.openNavIndex === null) return;
+    this.openNavIndex = null;
+    this.refreshNavMenuUI();
+  }
+
+  private refreshNavMenuUI() {
+    const triggers = this.root.querySelectorAll<HTMLButtonElement>("[data-nav-trigger]");
+    triggers.forEach((btn) => {
+      const idx = Number(btn.dataset.navTrigger);
+      const open = idx === this.openNavIndex;
+      btn.setAttribute("aria-expanded", String(open));
+      btn.classList.toggle("is-open", open);
+    });
+    const menus = this.root.querySelectorAll<HTMLDivElement>("[data-nav-menu]");
+    menus.forEach((menu) => {
+      const idx = Number(menu.dataset.navMenu);
+      menu.hidden = idx !== this.openNavIndex;
     });
   }
 
@@ -325,37 +462,78 @@ export class LandingPage {
         padding: 0;
       }
 
-      .xr-landing-nav a {
+      .xr-landing-nav-item {
         position: relative;
+        display: inline-flex;
+        align-items: center;
         color: #9ba9cc;
         text-decoration: none;
         font: 800 20px/1 "Courier New", monospace;
         letter-spacing: 0.02em;
         text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+      }
+
+      .xr-landing-nav-item:hover,
+      .xr-landing-nav-trigger.is-open {
+        color: #ffcc24;
       }
 
       .xr-landing-nav .caret {
         margin-left: 5px;
         color: #8a96bb;
         font-size: 14px;
+        transition: transform 160ms ease;
       }
 
-      .xr-landing-nav a.active {
+      .xr-landing-nav-trigger.is-open .caret {
         color: #ffcc24;
+        transform: rotate(180deg);
       }
 
-      .xr-landing-nav a.active .caret {
-        color: #ffcc24;
+      .xr-landing-nav-group {
+        position: relative;
+        display: inline-flex;
       }
 
-      .xr-landing-nav a.active::after {
-        content: "";
+      .xr-landing-nav-menu {
         position: absolute;
+        top: calc(100% + 12px);
         left: 0;
-        right: 4px;
-        bottom: -10px;
-        height: 4px;
-        background: #ffcc24;
+        min-width: 220px;
+        padding: 6px 0;
+        background: rgba(8, 14, 28, 0.96);
+        border: 1px solid rgba(239, 201, 127, 0.32);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.55);
+        z-index: 50;
+      }
+
+      .xr-landing-nav-menu[hidden] { display: none; }
+
+      .xr-landing-nav-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        color: #d6deff;
+        text-decoration: none;
+        font: 700 12px/1 "Courier New", monospace;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .xr-landing-nav-menu-item:hover {
+        background: rgba(239, 201, 127, 0.12);
+        color: #ffcc24;
+      }
+
+      .xr-landing-nav-menu-item .ext {
+        margin-left: auto;
+        color: #8a96bb;
+        font-size: 11px;
       }
 
       .xr-landing-legal {
@@ -682,11 +860,11 @@ export class LandingPage {
           gap: 10px;
           padding: 0;
           margin-top: 0;
-          overflow-x: auto;
           max-width: calc(100vw - 20px);
+          flex-wrap: wrap;
         }
 
-        .xr-landing-nav a {
+        .xr-landing-nav-item {
           font-size: 12px;
           white-space: nowrap;
         }
@@ -695,10 +873,8 @@ export class LandingPage {
           font-size: 11px;
         }
 
-        .xr-landing-nav a.active::after {
-          bottom: -10px;
-          left: 24px;
-          height: 3px;
+        .xr-landing-nav-menu {
+          min-width: 180px;
         }
 
         .xr-landing-panel {

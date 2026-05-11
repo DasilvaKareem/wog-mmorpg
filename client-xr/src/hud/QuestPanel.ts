@@ -5,6 +5,7 @@ interface QuestPanelCallbacks {
   onAcceptQuest: (questId: string, npcEntityId: string, npcName: string) => void;
   onCompleteQuest: (questId: string, npcEntityId: string, questTitle: string, questDesc: string, objectiveType: string) => void;
   onTalkToNpc: (npcEntityId: string, npcName: string, questTitle: string, questDesc: string, objectiveType: string) => void;
+  onAbandonQuest: (questId: string, questTitle: string) => void;
   onOpenAvailable?: () => void;
 }
 
@@ -27,6 +28,8 @@ export class QuestPanel {
   private completedQuests: CompletedQuest[] = [];
   private completedCount = 0;
   private availableQuests: AvailableQuest[] = [];
+  private expandedIds = new Set<string>();
+  private confirmAbandonId: string | null = null;
 
   constructor(callbacks: QuestPanelCallbacks) {
     this.callbacks = callbacks;
@@ -77,19 +80,45 @@ export class QuestPanel {
 
     // Delegate clicks
     this.listEl.addEventListener("click", (e) => {
-      const btn = (e.target as HTMLElement).closest("[data-action]") as HTMLElement;
-      if (!btn) return;
-      const action = btn.dataset.action;
-      const questId = btn.dataset.questId ?? "";
-      const npcId = btn.dataset.npcId ?? "";
+      const target = e.target as HTMLElement;
+      const btn = target.closest("[data-action]") as HTMLElement | null;
+      if (btn) {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const questId = btn.dataset.questId ?? "";
+        const npcId = btn.dataset.npcId ?? "";
 
-      playSoundEffect("ui_button_click");
+        playSoundEffect("ui_button_click");
 
-      if (action === "accept") {
-        const npcName = btn.dataset.npcName ?? "";
-        this.callbacks.onAcceptQuest(questId, npcId, npcName);
-      } else if (action === "complete") this.callbacks.onCompleteQuest(questId, npcId, btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", btn.dataset.objType ?? "kill");
-      else if (action === "talk") this.callbacks.onTalkToNpc(npcId, btn.dataset.npcName ?? "", btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", "talk");
+        if (action === "accept") {
+          const npcName = btn.dataset.npcName ?? "";
+          this.callbacks.onAcceptQuest(questId, npcId, npcName);
+        } else if (action === "complete") {
+          this.callbacks.onCompleteQuest(questId, npcId, btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", btn.dataset.objType ?? "kill");
+        } else if (action === "talk") {
+          this.callbacks.onTalkToNpc(npcId, btn.dataset.npcName ?? "", btn.dataset.questTitle ?? "", btn.dataset.questDesc ?? "", "talk");
+        } else if (action === "abandon-request") {
+          this.confirmAbandonId = questId;
+          this.render();
+        } else if (action === "abandon-cancel") {
+          this.confirmAbandonId = null;
+          this.render();
+        } else if (action === "abandon-confirm") {
+          this.confirmAbandonId = null;
+          this.callbacks.onAbandonQuest(questId, btn.dataset.questTitle ?? "");
+        }
+        return;
+      }
+
+      const header = target.closest("[data-expand-id]") as HTMLElement | null;
+      if (header) {
+        const id = header.dataset.expandId!;
+        if (this.expandedIds.has(id)) this.expandedIds.delete(id);
+        else this.expandedIds.add(id);
+        playSoundEffect("ui_button_click");
+        if (this.confirmAbandonId && this.confirmAbandonId !== id) this.confirmAbandonId = null;
+        this.render();
+      }
     });
   }
 
@@ -178,19 +207,24 @@ export class QuestPanel {
 
     let html = "";
     for (const q of this.activeQuests) {
+      const expandId = `active:${q.questId}`;
+      const expanded = this.expandedIds.has(expandId);
       const pct = q.required > 0 ? Math.round((q.progress / q.required) * 100) : 0;
       const icon = OBJECTIVE_ICONS[q.objective.type] ?? "?";
       const barColor = q.complete ? "#66bbff" : "#4488cc";
+      const chevron = expanded ? "\u25BC" : "\u25B6";
 
-      html += `<div class="qp-quest">`;
-      html += `<div class="qp-quest-header">`;
+      html += `<div class="qp-quest${expanded ? " qp-expanded" : ""}">`;
+      html += `<div class="qp-quest-header" data-expand-id="${esc(expandId)}">`;
+      html += `<span class="qp-chevron">${chevron}</span>`;
       html += `<span class="qp-icon">${icon}</span>`;
       html += `<span class="qp-quest-title">${esc(q.title)}</span>`;
+      if (q.complete) html += `<span class="qp-ready-pill">READY</span>`;
       html += `</div>`;
+
       html += `<div class="qp-quest-desc">${esc(q.description)}</div>`;
 
       if (q.complete) {
-        html += `<div class="qp-ready">READY TO TURN IN</div>`;
         if (this.isOwn && q.npcEntityId) {
           html += `<button class="qp-btn" data-action="complete" data-quest-id="${esc(q.questId)}" data-npc-id="${esc(q.npcEntityId)}" data-quest-title="${esc(q.title)}" data-quest-desc="${esc(q.description)}" data-obj-type="${esc(q.objective.type)}">Turn In</button>`;
         }
@@ -201,7 +235,29 @@ export class QuestPanel {
         html += `</div>`;
       }
 
-      html += `<div class="qp-rewards">${q.rewards.copper}g  ${q.rewards.xp} XP</div>`;
+      html += this.renderRewardsBlock(q.rewards, expanded);
+
+      if (expanded) {
+        html += `<div class="qp-detail-block">`;
+        html += `<div class="qp-detail-row"><span class="qp-detail-label">Objective</span><span class="qp-detail-val">${esc(formatObjective(q.objective))}</span></div>`;
+        if (q.required > 1 || q.progress > 0) {
+          html += `<div class="qp-detail-row"><span class="qp-detail-label">Progress</span><span class="qp-detail-val">${q.progress} / ${q.required}</span></div>`;
+        }
+        html += `</div>`;
+
+        if (this.isOwn) {
+          if (this.confirmAbandonId === q.questId) {
+            html += `<div class="qp-abandon-confirm">Abandon "${esc(q.title)}"? Progress will be lost.</div>`;
+            html += `<div class="qp-btn-row">`;
+            html += `<button class="qp-btn qp-btn-danger" data-action="abandon-confirm" data-quest-id="${esc(q.questId)}" data-quest-title="${esc(q.title)}">Confirm</button>`;
+            html += `<button class="qp-btn qp-btn-ghost" data-action="abandon-cancel" data-quest-id="${esc(q.questId)}">Cancel</button>`;
+            html += `</div>`;
+          } else {
+            html += `<button class="qp-btn qp-btn-ghost qp-abandon" data-action="abandon-request" data-quest-id="${esc(q.questId)}">Abandon Quest</button>`;
+          }
+        }
+      }
+
       html += `</div>`;
     }
 
@@ -218,18 +274,28 @@ export class QuestPanel {
 
     let html = "";
     for (const q of this.availableQuests) {
+      const expandId = `avail:${q.questId}`;
+      const expanded = this.expandedIds.has(expandId);
       const icon = OBJECTIVE_ICONS[q.objective.type] ?? "?";
-      const target = q.objective.targetMobName ?? q.objective.targetNpcName ?? q.objective.targetItemName ?? "";
-      const objText = `${capitalize(q.objective.type)} ${q.objective.count > 1 ? q.objective.count + " " : ""}${target}`;
+      const chevron = expanded ? "\u25BC" : "\u25B6";
 
-      html += `<div class="qp-quest">`;
-      html += `<div class="qp-quest-header">`;
+      html += `<div class="qp-quest${expanded ? " qp-expanded" : ""}">`;
+      html += `<div class="qp-quest-header" data-expand-id="${esc(expandId)}">`;
+      html += `<span class="qp-chevron">${chevron}</span>`;
       html += `<span class="qp-icon">${icon}</span>`;
       html += `<span class="qp-quest-title">${esc(q.title)}</span>`;
       html += `</div>`;
       html += `<div class="qp-quest-npc">${esc(q.npcName)}</div>`;
-      html += `<div class="qp-quest-desc">${esc(objText)}</div>`;
-      html += `<div class="qp-rewards">${q.rewards.copper}g  ${q.rewards.xp} XP</div>`;
+      html += `<div class="qp-quest-desc">${esc(q.description)}</div>`;
+
+      if (expanded) {
+        html += `<div class="qp-detail-block">`;
+        html += `<div class="qp-detail-row"><span class="qp-detail-label">Objective</span><span class="qp-detail-val">${esc(formatObjective(q.objective))}</span></div>`;
+        html += `<div class="qp-detail-row"><span class="qp-detail-label">Quest Giver</span><span class="qp-detail-val">${esc(q.npcName)}</span></div>`;
+        html += `</div>`;
+      }
+
+      html += this.renderRewardsBlock(q.rewards, expanded);
 
       if (this.isOwn) {
         if (q.objective.type === "talk") {
@@ -255,19 +321,41 @@ export class QuestPanel {
 
     let html = "";
     for (const q of this.completedQuests) {
-      html += `<div class="qp-quest qp-quest-completed">`;
-      html += `<div class="qp-quest-header">`;
+      const expandId = `done:${q.questId}`;
+      const expanded = this.expandedIds.has(expandId);
+      const chevron = expanded ? "\u25BC" : "\u25B6";
+
+      html += `<div class="qp-quest qp-quest-completed${expanded ? " qp-expanded" : ""}">`;
+      html += `<div class="qp-quest-header" data-expand-id="${esc(expandId)}">`;
+      html += `<span class="qp-chevron">${chevron}</span>`;
       html += `<span class="qp-icon qp-complete-icon">&#10003;</span>`;
       html += `<span class="qp-quest-title">${esc(q.title)}</span>`;
       html += `<span class="qp-complete-label">Completed</span>`;
       html += `</div>`;
       html += `<div class="qp-quest-desc">${esc(q.description)}</div>`;
-      html += `<div class="qp-rewards">${q.rewards.copper}g  ${q.rewards.xp} XP</div>`;
+      html += this.renderRewardsBlock(q.rewards, expanded);
       html += `</div>`;
     }
 
     this.listEl.innerHTML = html;
     this.footerEl.textContent = `${this.completedQuests.length} completed`;
+  }
+
+  private renderRewardsBlock(rewards: { copper: number; xp: number; items?: { tokenId: number; quantity: number }[] }, expanded: boolean): string {
+    if (!expanded) {
+      const summary = `${rewards.copper}g  ${rewards.xp} XP${rewards.items?.length ? `  +${rewards.items.length} item${rewards.items.length > 1 ? "s" : ""}` : ""}`;
+      return `<div class="qp-rewards">${esc(summary)}</div>`;
+    }
+    let html = `<div class="qp-rewards-block"><div class="qp-rewards-title">Rewards</div>`;
+    html += `<div class="qp-detail-row"><span class="qp-detail-label">Gold</span><span class="qp-detail-val">${rewards.copper}g</span></div>`;
+    html += `<div class="qp-detail-row"><span class="qp-detail-label">Experience</span><span class="qp-detail-val">${rewards.xp} XP</span></div>`;
+    if (rewards.items?.length) {
+      for (const it of rewards.items) {
+        html += `<div class="qp-detail-row"><span class="qp-detail-label">Item</span><span class="qp-detail-val">#${it.tokenId} ×${it.quantity}</span></div>`;
+      }
+    }
+    html += `</div>`;
+    return html;
   }
 
   private injectStyles() {
@@ -277,7 +365,7 @@ export class QuestPanel {
         position: fixed;
         top: 184px;
         right: 12px;
-        width: 280px;
+        width: 320px;
         max-height: calc(100vh - 200px);
         background: rgba(10, 16, 28, 0.92);
         border: 1px solid rgba(102, 187, 255, 0.25);
@@ -349,50 +437,111 @@ export class QuestPanel {
         border-bottom: 1px solid rgba(102, 187, 255, 0.08);
       }
       .qp-quest:last-child { border-bottom: none; }
+      .qp-quest.qp-expanded { background: rgba(102, 187, 255, 0.04); }
 
       .qp-quest-header {
         display: flex;
         align-items: center;
         gap: 6px;
         margin-bottom: 2px;
+        cursor: pointer;
+        user-select: none;
       }
+      .qp-quest-header:hover .qp-quest-title { color: #fff; }
+      .qp-chevron {
+        color: #557;
+        font-size: 9px;
+        width: 10px;
+        flex-shrink: 0;
+        transition: color 0.15s;
+      }
+      .qp-quest-header:hover .qp-chevron { color: #88aacc; }
       .qp-icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
-      .qp-quest-title { color: #dde; font-weight: bold; font-size: 12px; }
-      .qp-quest-npc { color: #88aacc; font-size: 11px; margin-left: 24px; }
-      .qp-quest-desc { color: #889; font-size: 11px; margin: 2px 0 4px 24px; }
+      .qp-quest-title {
+        color: #dde;
+        font-weight: bold;
+        font-size: 12px;
+        flex: 1;
+        min-width: 0;
+        overflow-wrap: break-word;
+      }
+      .qp-quest-npc { color: #88aacc; font-size: 11px; margin-left: 34px; }
+      .qp-quest-desc {
+        color: #99a;
+        font-size: 11px;
+        margin: 2px 0 4px 34px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        overflow-wrap: break-word;
+      }
+      .qp-expanded .qp-quest-desc { color: #bbc; }
       .qp-quest-completed .qp-quest-title { color: #aee2c8; }
       .qp-complete-icon { color: #5dff9a; }
       .qp-complete-label {
-        margin-left: auto;
         color: #5dff9a;
         font-size: 9px;
         text-transform: uppercase;
         letter-spacing: 0.08em;
+        flex-shrink: 0;
+      }
+      .qp-ready-pill {
+        background: rgba(102, 187, 255, 0.2);
+        color: #66bbff;
+        font-size: 9px;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 3px;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
       }
 
-      .qp-progress { margin-left: 24px; }
+      .qp-progress { margin-left: 34px; margin-top: 4px; }
       .qp-progress-text { font-size: 11px; color: #99b; margin-bottom: 2px; }
       .qp-bar { background: #222; border-radius: 3px; height: 5px; }
       .qp-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 
-      .qp-ready {
-        margin-left: 24px;
-        color: #66bbff;
-        font-size: 11px;
+      .qp-rewards {
+        margin-left: 34px;
+        font-size: 10px;
+        color: #aa9;
+        margin-top: 4px;
+      }
+      .qp-rewards-block {
+        margin: 6px 0 0 34px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.25);
+        border-left: 2px solid rgba(255, 200, 80, 0.4);
+        border-radius: 3px;
+      }
+      .qp-rewards-title {
+        color: #ffc850;
+        font-size: 10px;
         font-weight: bold;
-        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        margin-bottom: 3px;
       }
 
-      .qp-rewards {
-        margin-left: 24px;
-        font-size: 10px;
-        color: #997;
-        margin-top: 2px;
+      .qp-detail-block {
+        margin: 6px 0 0 34px;
+        padding: 6px 8px;
+        background: rgba(0, 0, 0, 0.25);
+        border-left: 2px solid rgba(102, 187, 255, 0.4);
+        border-radius: 3px;
       }
+      .qp-detail-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 10px;
+        padding: 1px 0;
+      }
+      .qp-detail-label { color: #778; text-transform: uppercase; letter-spacing: 0.05em; }
+      .qp-detail-val { color: #ccd; text-align: right; overflow-wrap: anywhere; }
 
       .qp-btn {
         display: block;
-        margin: 6px 0 0 24px;
+        margin: 6px 0 0 34px;
         padding: 4px 12px;
         background: rgba(102, 187, 255, 0.12);
         border: 1px solid rgba(102, 187, 255, 0.3);
@@ -403,6 +552,31 @@ export class QuestPanel {
         transition: background 0.15s;
       }
       .qp-btn:hover { background: rgba(102, 187, 255, 0.25); }
+      .qp-btn-row { display: flex; gap: 6px; margin-left: 34px; margin-top: 6px; }
+      .qp-btn-row .qp-btn { margin: 0; flex: 1; }
+      .qp-btn-ghost {
+        background: transparent;
+        border-color: rgba(150, 150, 170, 0.3);
+        color: #99a;
+      }
+      .qp-btn-ghost:hover { background: rgba(150, 150, 170, 0.12); color: #ccd; }
+      .qp-btn-danger {
+        background: rgba(220, 80, 80, 0.15);
+        border-color: rgba(220, 80, 80, 0.4);
+        color: #ff8888;
+      }
+      .qp-btn-danger:hover { background: rgba(220, 80, 80, 0.3); }
+      .qp-abandon { width: calc(100% - 34px); text-align: center; margin-top: 8px; }
+      .qp-abandon-confirm {
+        margin: 8px 0 0 34px;
+        padding: 6px 8px;
+        background: rgba(220, 80, 80, 0.1);
+        border-left: 2px solid rgba(220, 80, 80, 0.5);
+        border-radius: 3px;
+        font-size: 11px;
+        color: #ffaaaa;
+        line-height: 1.4;
+      }
 
       .qp-footer {
         padding: 6px 12px;
@@ -431,4 +605,11 @@ function esc(s: string): string {
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function formatObjective(obj: { type: string; count: number; targetMobName?: string; targetNpcName?: string; targetItemName?: string }): string {
+  const target = obj.targetMobName ?? obj.targetNpcName ?? obj.targetItemName ?? "";
+  const verb = capitalize(obj.type);
+  if (obj.count > 1) return `${verb} ${obj.count} ${target}`.trim();
+  return `${verb} ${target}`.trim();
 }

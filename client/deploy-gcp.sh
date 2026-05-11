@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Main client now lives under /app/ in the bucket; a Cloudflare Worker
+# rewrites app.worldofgeneva.com/<path> -> gs://wog-client/app/<path>.
+# Because the worker abstracts the prefix, the client itself stays at "/".
 BUCKET="gs://wog-client"
+PREFIX="app"
 CLIENT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo "==> Stamping service worker cache version..."
@@ -35,19 +39,19 @@ export { OnboardingFlow } from "./${ONBOARDING_CHUNK}";
 EOFALIAS
 fi
 
-echo "==> Uploading to $BUCKET..."
+echo "==> Uploading to $BUCKET/$PREFIX/..."
 # Upload new assets first and keep old hashed chunks around temporarily.
 # Deleting old assets immediately can break clients still holding a cached HTML shell.
-gcloud storage rsync --recursive dist/ "$BUCKET"
+gcloud storage rsync --recursive dist/ "$BUCKET/$PREFIX/"
 
 echo "==> Setting cache headers..."
 # HTML / SW / manifest — no cache (always fetch latest)
-gcloud storage objects update "$BUCKET/index.html" --cache-control="no-cache, no-store"
-gcloud storage objects update "$BUCKET/sw.js" --cache-control="no-cache, no-store"
-gcloud storage objects update "$BUCKET/manifest.json" --cache-control="no-cache, no-store"
+gcloud storage objects update "$BUCKET/$PREFIX/index.html" --cache-control="no-cache, no-store"
+gcloud storage objects update "$BUCKET/$PREFIX/sw.js" --cache-control="no-cache, no-store"
+gcloud storage objects update "$BUCKET/$PREFIX/manifest.json" --cache-control="no-cache, no-store"
 
 # Hashed assets — cache aggressively (Vite adds content hashes)
-gsutil -m setmeta -r -h "Cache-Control:public, max-age=31536000, immutable" "$BUCKET/assets/" 2>/dev/null || true
+gsutil -m setmeta -r -h "Cache-Control:public, max-age=31536000, immutable" "$BUCKET/$PREFIX/assets/" 2>/dev/null || true
 
 echo "==> Done!"
-echo "    https://storage.googleapis.com/wog-client/index.html"
+echo "    https://app.worldofgeneva.com/"

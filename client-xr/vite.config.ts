@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
   const proxyOpts = { target: apiUrl, changeOrigin: true, secure: true };
 
   return {
-    base: isProd ? "/xr/" : "./",
+    base: isProd ? "/" : "./",
     build: {
       rollupOptions: {
         input: {

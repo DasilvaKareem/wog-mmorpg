@@ -9,6 +9,9 @@ import {
   type ActionResult,
   type AgentContext,
 } from "../agentUtils.js";
+import type { BotScript } from "../../types/botScriptTypes.js";
+
+const PROFESSION_HUB_ZONE = "village-square";
 
 const SKINNING_KNIFE_TOKENS: Record<number, number> = {
   76: 1,
@@ -37,7 +40,26 @@ async function ensureSkinningKnife(ctx: AgentContext, me: any): Promise<boolean>
     .filter((item: any) => skinningKnifeTier(Number(item.tokenId)) > 0 && Number(item.balance ?? 0) > 0)
     .sort((a: any, b: any) => skinningKnifeTier(Number(b.tokenId)) - skinningKnifeTier(Number(a.tokenId)))[0];
 
-  if (!knife) return false;
+  if (!knife) {
+    // No knife anywhere — enqueue a hub detour so the agent buys one.
+    // Without this the caller loops forever on "Preparing skinning knife".
+    if (ctx.currentRegion !== PROFESSION_HUB_ZONE) {
+      const home = ctx.homeZone ?? ctx.currentRegion;
+      const chain: BotScript[] = [
+        { type: "travel", targetZone: PROFESSION_HUB_ZONE, reason: "Buy skinning knife" },
+        { type: "shop", reason: "Buy skinning knife at hub" },
+      ];
+      if (home && home !== PROFESSION_HUB_ZONE) {
+        chain.push({ type: "travel", targetZone: home, reason: `Return to ${home}` });
+        chain.push({ type: "quest", reason: `Resume skinning in ${home}` });
+      }
+      await ctx.enqueueActions(chain, true);
+      void ctx.logActivity(`No skinning knife — traveling to ${PROFESSION_HUB_ZONE} to buy one`);
+    } else {
+      void ctx.logActivity("No skinning knife — need to buy from a merchant here");
+    }
+    return false;
+  }
 
   const equippedKnife = await ctx.equipItem(Number(knife.tokenId));
   if (equippedKnife) void ctx.logActivity(`Equipped ${knife.name ?? "skinning knife"}`);

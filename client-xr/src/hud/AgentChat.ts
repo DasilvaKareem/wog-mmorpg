@@ -476,6 +476,20 @@ export class AgentChat {
     }
   }
 
+  /**
+   * Add a locally-generated system message (e.g. quest action feedback).
+   * Auto-shows the panel so the user sees the feedback without having to open it.
+   */
+  addSystemMessage(text: string, kind: "info" | "success" | "error" | "progress" = "info") {
+    const color =
+      kind === "success" ? "#5dff9a"
+      : kind === "error" ? "#ff8866"
+      : kind === "progress" ? "#66bbff"
+      : "#ccddee";
+    this.push({ role: "system", text, time: Date.now(), color });
+    this.show();
+  }
+
   /** Is the input currently focused (capturing keyboard) */
   isFocused(): boolean {
     return document.activeElement === this.input;
@@ -600,7 +614,7 @@ export class AgentChat {
         el.style.color = "#7fd6be";
       } else if (msg.role === "system") {
         el.textContent = msg.text;
-        el.style.color = "#ff8866";
+        el.style.color = msg.color || "#ff8866";
       } else {
         el.textContent = msg.text;
         el.style.color = msg.color;

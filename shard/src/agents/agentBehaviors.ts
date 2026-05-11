@@ -120,15 +120,25 @@ async function recoverMissingMaterial(
   profession: CraftProfession,
   materialName: string,
 ): Promise<ActionResult> {
-  void strategy;
   const recovery = planMaterialRecovery(profession, materialName);
-  const detail = recovery.type === "gather" && recovery.targetItemName
-    ? `${recovery.targetItemName} (${recovery.preference})`
-    : materialName;
-  const reason = `Stuck on ${profession}: missing ${detail}; not auto-switching to ${recovery.type}`;
-  void ctx.logActivity(reason);
-  ctx.setScript({ type: "idle", reason });
-  return actionIdle(reason);
+
+  switch (recovery.type) {
+    case "combat":
+      void ctx.logActivity(`Need ${recovery.targetItemName} for ${profession} — hunting for drops`);
+      return doCombat(ctx, strategy);
+    case "skin":
+      void ctx.logActivity(`Need ${recovery.targetItemName ?? materialName} for ${profession} — skinning`);
+      return doSkinning(ctx, strategy);
+    case "gather":
+      void ctx.logActivity(`Need ${recovery.targetItemName} for ${profession} — gathering ${recovery.preference}`);
+      return doGathering(ctx, strategy, recovery.preference, recovery.targetItemName);
+    case "hub": {
+      const reason = `Stuck on ${profession}: missing ${materialName} (${recovery.reason})`;
+      void ctx.logActivity(reason);
+      ctx.setScript({ type: "idle", reason });
+      return actionIdle(reason);
+    }
+  }
 }
 
 /**
@@ -1393,6 +1403,7 @@ async function doCraftQuest(
 
     let match: {
       recipe: any;
+      allRecipes: any[];
       profession: CraftProfession;
       craftEndpoint: string;
       stationType: string;
@@ -1410,6 +1421,7 @@ async function doCraftQuest(
       if (recipe) {
         match = {
           recipe,
+          allRecipes: recipes,
           profession: book.profession,
           craftEndpoint: book.craftEndpoint,
           stationType: book.stationType,
@@ -1426,7 +1438,7 @@ async function doCraftQuest(
       return actionBlocked(reason, { failureKey: `craft:no-recipe:${targetLC}` });
     }
 
-    const { recipe, profession, craftEndpoint, stationType, stationField } = match;
+    const { recipe, allRecipes, profession, craftEndpoint, stationType, stationField } = match;
     const learned = await ctx.learnProfession(profession as any);
     if (!learned) {
       return actionBlocked(`Could not learn ${profession}`, {
@@ -1439,9 +1451,24 @@ async function doCraftQuest(
     const haveQty = new Map<number, number>();
     for (const it of invItems) haveQty.set(Number(it.tokenId), Number(it.quantity ?? 0));
 
-    const mats = getRecipeMaterials(recipe);
-    const missing = mats.find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity);
-    if (missing) {
+    const hasMaterials = (r: any): boolean =>
+      getRecipeMaterials(r).every((m) => (haveQty.get(m.tokenId) ?? 0) >= m.quantity);
+
+    // Skill-grind ladder: lower-tier recipes in the same profession that we
+    // can fall back to if the target needs more skill than we have. Sorted
+    // descending by required skill so we pick the highest XP-yielding craft
+    // we can actually afford. Excludes the target itself.
+    const targetSkill = Number(recipe.requiredSkillLevel ?? 1);
+    const grindLadder = allRecipes
+      .filter((r) => r !== recipe)
+      .filter((r) => Number(r.requiredSkillLevel ?? 1) < targetSkill)
+      .filter(hasMaterials)
+      .sort(
+        (a, b) => Number(b.requiredSkillLevel ?? 1) - Number(a.requiredSkillLevel ?? 1),
+      );
+
+    if (!hasMaterials(recipe)) {
+      const missing = getRecipeMaterials(recipe).find((m) => (haveQty.get(m.tokenId) ?? 0) < m.quantity)!;
       void ctx.logActivity(`Need ${missing.quantity}x ${missing.name} for ${targetItemName}`);
       return recoverMissingMaterial(ctx, strategy, profession, missing.name);
     }
@@ -1459,17 +1486,25 @@ async function doCraftQuest(
     const moving = await ctx.moveToEntity(me, stationEntity);
     if (moving) return actionProgressed(`Moving to ${stationEntity.name ?? stationType}`);
 
-    try {
-      const result = await ctx.api("POST", craftEndpoint, {
-        walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
-        entityId: ctx.entityId, [stationField]: stationId, recipeId: recipe.recipeId,
-      });
-      const label = result?.crafted?.displayName
-        ?? result?.brewed?.name
-        ?? result?.crafted?.name
-        ?? getRecipeOutputName(recipe)
-        ?? recipe.recipeId;
-      void ctx.logActivity(`Crafted ${label}`);
+    const tryCraft = async (r: any): Promise<{ ok: true; label: string } | { ok: false; reason: string }> => {
+      try {
+        const result = await ctx.api("POST", craftEndpoint, {
+          walletAddress: ctx.custodialWallet, zoneId: ctx.currentRegion,
+          entityId: ctx.entityId, [stationField]: stationId, recipeId: r.recipeId,
+        });
+        const label = result?.crafted?.displayName
+          ?? result?.brewed?.name
+          ?? result?.crafted?.name
+          ?? getRecipeOutputName(r)
+          ?? r.recipeId;
+        return { ok: true, label };
+      } catch (err: any) {
+        return { ok: false, reason: formatAgentError(err) };
+      }
+    };
+
+    const announce = (label: string, isGrind: boolean) => {
+      void ctx.logActivity(isGrind ? `Crafted ${label} (grinding ${profession} skill for ${targetItemName})` : `Crafted ${label}`);
       logZoneEvent({
         zoneId: ctx.currentRegion, type: "profession", tick: 0,
         message: `${me.name} crafted ${label}`,
@@ -1482,15 +1517,41 @@ async function doCraftQuest(
         origin: me.origin, classId: me.classId,
         detail: label,
       });
-      return actionCompleted(`Crafted ${label}`);
-    } catch (err: any) {
-      const reason = formatAgentError(err);
-      console.debug(`[agent:${ctx.walletTag}] craft ${recipe.recipeId}: ${reason.slice(0, 60)}`);
-      return actionBlocked(reason, {
-        failureKey: `craft:${recipe.recipeId}:${ctx.currentRegion}`,
-        endpoint: craftEndpoint,
-      });
+    };
+
+    const targetAttempt = await tryCraft(recipe);
+    if (targetAttempt.ok) {
+      announce(targetAttempt.label, false);
+      return actionCompleted(`Crafted ${targetAttempt.label}`);
     }
+
+    // Skill-too-low → grind a lower-tier recipe to earn XP, then retry the
+    // target on a future tick. Without this, e.g. cooking_103 (Hearty Stew,
+    // skill 15) is impossible for a freshly-trained level-1 cook.
+    if (/skill too low/i.test(targetAttempt.reason) && grindLadder.length > 0) {
+      for (const fallback of grindLadder) {
+        const grindAttempt = await tryCraft(fallback);
+        if (grindAttempt.ok) {
+          announce(grindAttempt.label, true);
+          return actionProgressed(`Grinding ${profession} via ${grindAttempt.label} toward ${targetItemName}`);
+        }
+        if (!/skill too low/i.test(grindAttempt.reason)) {
+          // A non-skill error (cooldown, materials race, station range) — bail
+          // and let the outer loop retry next tick instead of trying every rung.
+          console.debug(`[agent:${ctx.walletTag}] grind ${fallback.recipeId}: ${grindAttempt.reason.slice(0, 60)}`);
+          return actionBlocked(grindAttempt.reason, {
+            failureKey: `craft:grind:${fallback.recipeId}:${ctx.currentRegion}`,
+            endpoint: craftEndpoint,
+          });
+        }
+      }
+    }
+
+    console.debug(`[agent:${ctx.walletTag}] craft ${recipe.recipeId}: ${targetAttempt.reason.slice(0, 60)}`);
+    return actionBlocked(targetAttempt.reason, {
+      failureKey: `craft:${recipe.recipeId}:${ctx.currentRegion}`,
+      endpoint: craftEndpoint,
+    });
   } catch (err: any) {
     const reason = formatAgentError(err);
     return actionBlocked(reason, { failureKey: `craft:error:${ctx.currentRegion}` });
@@ -2548,6 +2609,16 @@ export async function doQuesting(
             void ctx.logActivity(`Walking to ${aq.quest?.npcId} to turn in "${aq.quest?.title}"`);
             return actionProgressed(`Walking to ${aq.quest?.npcId}`);
           }
+          // Greet the NPC visibly BEFORE the API call so observers can see
+          // who the agent is turning the quest in to.
+          emitAgentChat({
+            entityId: ctx.entityId, entityName: me.name ?? "Agent",
+            zoneId: ctx.currentRegion, event: "quest_complete",
+            origin: me.origin ?? undefined, classId: me.classId ?? undefined,
+            speakerName: String(npcEntity.name ?? aq.quest?.npcId ?? "Quest Giver"),
+            detail: aq.quest?.title ?? "your quest",
+            force: true,
+          });
           try {
             const completeRes = await ctx.api("POST", "/quests/complete", {
               zoneId: ctx.currentRegion, playerId: ctx.entityId,
@@ -2588,7 +2659,8 @@ export async function doQuesting(
     );
     if (talkQuests.length > 0) {
       for (const tq of talkQuests) {
-        const targetNpcName = String(tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId ?? "").toLowerCase();
+        const targetNpcDisplay = tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId ?? "";
+        const targetNpcName = String(targetNpcDisplay).toLowerCase();
         const npcEntry = Object.entries(entities).find(([, e]: [string, any]) => {
           if (!e) return false;
           return String(e.name ?? "").toLowerCase() === targetNpcName;
@@ -2602,6 +2674,17 @@ export async function doQuesting(
             void ctx.logActivity(`Walking to ${targetNpcName} for talk quest`);
             return actionProgressed(`Walking to ${targetNpcName} for talk quest`);
           }
+          // Greet the NPC visibly BEFORE the API call so observers can see who
+          // the agent is talking to. Talk quests reuse the quest_complete event
+          // since /quests/talk auto-completes the objective.
+          emitAgentChat({
+            entityId: ctx.entityId, entityName: me.name ?? "Agent",
+            zoneId: ctx.currentRegion, event: "quest_complete",
+            origin: me.origin ?? undefined, classId: me.classId ?? undefined,
+            speakerName: npcEntity.name ?? targetNpcDisplay,
+            detail: tq.quest?.title ?? "your quest",
+            force: true,
+          });
           try {
             await ctx.api("POST", "/quests/talk", {
               zoneId: ctx.currentRegion, playerId: ctx.entityId, npcEntityId,
@@ -2620,6 +2703,32 @@ export async function doQuesting(
               endpoint: "/quests/talk",
               targetId: npcEntityId,
               targetName: tq.quest?.objective?.targetNpcName ?? tq.quest?.npcId,
+            });
+          }
+        }
+
+        // Global discovery: target NPC isn't in this zone — travel to where they live.
+        // Without this, profession intro quests (skinning_101 → Huntsman Greaves,
+        // cooking_101 → Chef Gastron) silently stall forever once the agent
+        // wanders out of village-square.
+        if (targetNpcDisplay) {
+          const targetZone = findZoneForNpc(String(targetNpcDisplay));
+          if (targetZone && targetZone !== ctx.currentRegion) {
+            const cooldownKey = `quest-talk-travel:${tq.questId}:${targetZone}`;
+            if (!ctx.isInteractionOnCooldown(cooldownKey)) {
+              ctx.setInteractionCooldown(cooldownKey, 5_000);
+              void ctx.logActivity(`Talk-quest NPC ${targetNpcDisplay} not in ${ctx.currentRegion} — traveling to ${targetZone} for "${tq.quest?.title}"`);
+              await patchAgentConfig(ctx.userWallet, { focus: "traveling", targetZone });
+              ctx.setScript(null);
+              return actionProgressed(`Traveling to ${targetZone} for talk quest "${tq.quest?.title}"`);
+            }
+            // Surface a blocked failure so the circuit breaker can fire if we
+            // can't actually get there (e.g. level gate, missing path).
+            return actionBlocked(`talk-quest target ${targetNpcDisplay} unreachable from ${ctx.currentRegion}`, {
+              failureKey: `quest-talk-stuck:${tq.questId}`,
+              endpoint: "/quests/talk",
+              targetName: String(targetNpcDisplay),
+              category: "strategic",
             });
           }
         }
@@ -2661,19 +2770,25 @@ export async function doQuesting(
                 void ctx.logActivity(`Walking to ${npcName} to accept "${q.title}"`);
                 return actionProgressed(`Walking to ${npcName}`);
               }
+              const npcDisplayName = String(npcEntity.name ?? q.npcName ?? q.npcId ?? "Quest Giver");
+              // Greet the NPC visibly BEFORE the API call so observers can
+              // see who the agent is talking to and what quest they're
+              // accepting. Forced (bypasses silence/cooldown) because this
+              // is a key UX moment.
+              emitAgentChat({
+                entityId: ctx.entityId, entityName: me.name ?? "Agent",
+                zoneId: ctx.currentRegion, event: "quest_accept",
+                origin: me.origin ?? undefined, classId: me.classId ?? undefined,
+                speakerName: npcDisplayName,
+                detail: q.title,
+                force: true,
+              });
               try {
                 await ctx.api("POST", "/quests/accept", {
                   zoneId: ctx.currentRegion, playerId: ctx.entityId,
                   questId: q.questId, npcId: npcEntityId,
                 });
                 void ctx.logActivity(`Accepted quest: "${q.title}"`);
-                // Emit in-world chat about picking up the quest
-                emitAgentChat({
-                  entityId: ctx.entityId, entityName: me.name ?? "Agent",
-                  zoneId: ctx.currentRegion, event: "quest_accept",
-                  origin: me.origin ?? undefined, classId: me.classId ?? undefined,
-                  detail: q.title,
-                });
                 return actionCompleted(`Accepted quest: ${q.title}`);
               } catch (err: any) {
                 const reason = formatAgentError(err);

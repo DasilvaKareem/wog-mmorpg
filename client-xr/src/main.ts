@@ -42,7 +42,7 @@ import { ActionBar } from "./hud/ActionBar.js";
 import { VitalsPanel } from "./hud/VitalsPanel.js";
 import { getEquipmentTuner } from "./hud/EquipmentTuner.js";
 import { AnimationLabPanel } from "./hud/AnimationLabPanel.js";
-import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl } from "./api.js";
+import { CANDIDATE_BASES, fetchActivePlayers, fetchZonesBatch, fetchZoneList, fetchWorldLayout, postCommand, fetchQuestLog, fetchZoneQuests, acceptQuest, talkToNpc, completeQuest, abandonQuest, fetchInventory, fetchProfessionStatus, sendFriendRequest, sendInboxMessage, logoutCharacter, fetchCharacters, equipItem, unequipItem, sendAgentChat, fetchWalletBalance, toUrl } from "./api.js";
 import { getAuthToken, getCachedToken, getSavedWalletAddress } from "./auth.js";
 import { ClickMarker } from "./scene/ClickMarker.js";
 import { AnimationLab } from "./scene/AnimationLab.js";
@@ -893,122 +893,164 @@ function locateFriend(friend: FriendInfo) {
   }
 }
 
+type QuestActionContext = {
+  token: string;
+  zoneId: string;
+} | null;
+
+async function prepareQuestAction(label: string): Promise<QuestActionContext> {
+  if (!ownWalletAddress || !ownEntityId) {
+    agentChat.addSystemMessage(`${label}: deploy your agent first.`, "error");
+    return null;
+  }
+  const token = await getAuthToken(ownWalletAddress);
+  if (!token) {
+    agentChat.addSystemMessage(`${label}: auth failed — sign in again.`, "error");
+    return null;
+  }
+  const ownEntity = entities.getEntity(ownEntityId);
+  const zoneId = ownEntity?.zoneId;
+  if (!zoneId) {
+    agentChat.addSystemMessage(`${label}: not in a zone yet.`, "error");
+    return null;
+  }
+  return { token, zoneId };
+}
+
+async function dispatchGotoNpc(
+  token: string,
+  body: Record<string, unknown>,
+  label: string,
+  npcLabel: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/agent/goto-npc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    if (res.ok) {
+      agentChat.addSystemMessage(`${label}: heading to ${npcLabel} — will finish on arrival.`, "progress");
+      return true;
+    }
+    const text = (await res.text()).slice(0, 140);
+    agentChat.addSystemMessage(`${label}: agent can't walk to ${npcLabel} (${res.status}) ${text}`, "error");
+    return false;
+  } catch (err) {
+    agentChat.addSystemMessage(`${label}: network error sending agent to ${npcLabel} — ${err}`, "error");
+    return false;
+  }
+}
+
 const questPanel = new QuestPanel({
   onAcceptQuest: async (questId, npcEntityId, npcName) => {
-    if (!ownWalletAddress || !ownEntityId) return;
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return;
-    const ownEntity = entities.getEntity(ownEntityId);
-    const zoneId = ownEntity?.zoneId;
-    if (!zoneId) return;
+    const label = "Accept quest";
+    const ctx = await prepareQuestAction(label);
+    if (!ctx) return;
+    const npcLabel = npcName || "quest giver";
 
-    // Try direct accept first (works if player is within 100 units of NPC)
-    const result = await acceptQuest(token, ownEntityId, questId);
+    agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
+    const result = await acceptQuest(ctx.token, ownEntityId!, questId);
     if (result.ok) {
-      console.log(`[quest] Accepted quest ${questId} from ${npcName}`);
+      agentChat.addSystemMessage(`Quest accepted from ${npcLabel}.`, "success");
       lastQuestPollTime = 0;
       void pollQuests();
       return;
     }
 
-    // If too far, send the agent to walk there
     if (result.error?.includes("Too far")) {
-      try {
-        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "accept-quest", questId }),
-        });
-        if (res.ok) {
-          console.log(`[quest] Agent heading to ${npcName} to accept quest ${questId}`);
-          lastQuestPollTime = 0;
-          void pollQuests();
-        } else {
-          console.log("[quest] goto-npc failed:", res.status, await res.text());
-        }
-      } catch (err) {
-        console.log("[quest] goto-npc error:", err);
+      const ok = await dispatchGotoNpc(
+        ctx.token,
+        { entityId: npcEntityId, zoneId: ctx.zoneId, name: npcName, action: "accept-quest", questId },
+        label,
+        npcLabel,
+      );
+      if (ok) {
+        lastQuestPollTime = 0;
+        void pollQuests();
       }
     } else {
-      console.log("[quest] Accept failed:", result.error);
+      agentChat.addSystemMessage(`${label} failed: ${result.error ?? "unknown error"}`, "error");
     }
   },
-  onCompleteQuest: async (questId, npcEntityId, questTitle, questDesc, objectiveType) => {
-    if (!ownWalletAddress || !ownEntityId) return;
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return;
-    const ownEntity = entities.getEntity(ownEntityId);
-    const zoneId = ownEntity?.zoneId;
-    if (!zoneId) return;
+  onCompleteQuest: async (questId, npcEntityId, questTitle) => {
+    const label = `Turn in "${questTitle}"`;
+    const ctx = await prepareQuestAction(label);
+    if (!ctx) return;
+    const npcLabel = "quest giver";
 
-    // Try direct complete first
-    const result = await completeQuest(token, ownEntityId, questId, npcEntityId);
+    agentChat.addSystemMessage(`${label}: contacting ${npcLabel}...`, "info");
+    const result = await completeQuest(ctx.token, ownEntityId!, questId, npcEntityId);
     if (result.ok) {
-      console.log(`[quest] Completed quest ${questId}`);
+      agentChat.addSystemMessage(`Quest complete: "${questTitle}". Rewards granted.`, "success");
       lastQuestPollTime = 0;
       void pollQuests();
       return;
     }
 
-    // If too far, send the agent to walk there
     if (result.error?.includes("Too far")) {
-      try {
-        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ entityId: npcEntityId, zoneId, action: "complete-quest", questId }),
-        });
-        if (res.ok) {
-          console.log(`[quest] Agent heading to NPC to turn in quest ${questId}`);
-          lastQuestPollTime = 0;
-          void pollQuests();
-        } else {
-          console.log("[quest] goto-npc failed:", res.status, await res.text());
-        }
-      } catch (err) {
-        console.log("[quest] goto-npc error:", err);
+      const ok = await dispatchGotoNpc(
+        ctx.token,
+        { entityId: npcEntityId, zoneId: ctx.zoneId, action: "complete-quest", questId },
+        label,
+        npcLabel,
+      );
+      if (ok) {
+        lastQuestPollTime = 0;
+        void pollQuests();
       }
     } else {
-      console.log("[quest] Complete failed:", result.error);
+      agentChat.addSystemMessage(`${label} failed: ${result.error ?? "unknown error"}`, "error");
     }
   },
-  onTalkToNpc: async (npcEntityId, npcName, questTitle, questDesc, objectiveType) => {
-    if (!ownWalletAddress || !ownEntityId) return;
-    const token = await getAuthToken(ownWalletAddress);
-    if (!token) return;
-    const ownEntity = entities.getEntity(ownEntityId);
-    const zoneId = ownEntity?.zoneId;
-    if (!zoneId) return;
+  onTalkToNpc: async (npcEntityId, npcName) => {
+    const label = "Talk quest";
+    const ctx = await prepareQuestAction(label);
+    if (!ctx) return;
+    const npcLabel = npcName || "NPC";
 
-    // Try direct talk first (if already near the NPC)
-    const result = await talkToNpc(token, ownEntityId, npcEntityId);
+    agentChat.addSystemMessage(`${label}: approaching ${npcLabel}...`, "info");
+    const result = await talkToNpc(ctx.token, ownEntityId!, npcEntityId);
     if (result.ok) {
-      console.log(`[quest] Talk quest completed with ${npcName}`);
+      agentChat.addSystemMessage(`Spoke to ${npcLabel}. Quest progressed.`, "success");
       lastQuestPollTime = 0;
       void pollQuests();
       return;
     }
 
-    // If too far, send the agent to walk there and auto-complete on arrival
     if (result.error?.includes("Too far")) {
-      try {
-        const res = await fetch(`${API_BASE}/agent/goto-npc`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ entityId: npcEntityId, zoneId, name: npcName, action: "talk-quest" }),
-        });
-        if (res.ok) {
-          console.log(`[quest] Agent heading to ${npcName || "NPC"} for talk quest`);
-          lastQuestPollTime = 0;
-          void pollQuests();
-        } else {
-          console.log("[quest] goto-npc failed:", res.status, await res.text());
-        }
-      } catch (err) {
-        console.log("[quest] goto-npc error:", err);
+      const ok = await dispatchGotoNpc(
+        ctx.token,
+        { entityId: npcEntityId, zoneId: ctx.zoneId, name: npcName, action: "talk-quest" },
+        label,
+        npcLabel,
+      );
+      if (ok) {
+        lastQuestPollTime = 0;
+        void pollQuests();
       }
     } else {
-      console.log("[quest] Talk failed:", result.error);
+      agentChat.addSystemMessage(`${label} failed: ${result.error ?? "unknown error"}`, "error");
+    }
+  },
+  onAbandonQuest: async (questId, questTitle) => {
+    const label = `Abandon "${questTitle}"`;
+    if (!ownWalletAddress || !ownEntityId) {
+      agentChat.addSystemMessage(`${label}: deploy your agent first.`, "error");
+      return;
+    }
+    const token = await getAuthToken(ownWalletAddress);
+    if (!token) {
+      agentChat.addSystemMessage(`${label}: auth failed — sign in again.`, "error");
+      return;
+    }
+    const result = await abandonQuest(token, ownEntityId, questId);
+    if (result.ok) {
+      agentChat.addSystemMessage(`Quest abandoned: "${questTitle}".`, "info");
+      lastQuestPollTime = 0;
+      void pollQuests();
+    } else {
+      agentChat.addSystemMessage(`${label} failed: ${result.error ?? "unknown error"}`, "error");
     }
   },
   onOpenAvailable: () => {

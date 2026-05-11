@@ -54,8 +54,15 @@ interface DialogueContext {
   classId?: string;
   /** Extra context (mob name, zone name, level, other player's message, etc.) */
   detail?: string;
-  /** For react_chat: the speaker's name */
+  /** Name of who the agent is addressing (NPC for quest_accept, etc.) */
   speakerName?: string;
+  /**
+   * Bypass the silence-roll and per-event cooldown. Use for player-visible
+   * narration (e.g. quest accept/turn-in greetings) so observers always see
+   * what the agent is doing — the default 30% skip + 3-min cooldown was
+   * eating most quest interactions.
+   */
+  force?: boolean;
 }
 
 // ── Rate Limiting ───────────────────────────────────────────────────────
@@ -104,9 +111,9 @@ const DIALOGUE: Record<string, string[]> = {
     "I will bring order to this place.",
   ],
   "sunforged::quest_complete": [
-    "Quest fulfilled. Who else needs a champion?",
-    "Another oath honored.",
-    "The people can rest easier tonight.",
+    "{speaker}, \"{detail}\" is done. Who else needs a champion?",
+    "{speaker}, oath honored — \"{detail}\" complete.",
+    "{speaker}, \"{detail}\" finished. The people can rest easier tonight.",
   ],
   "sunforged::quest_progress": [
     "Progress on {detail}. The oath holds.",
@@ -166,9 +173,9 @@ const DIALOGUE: Record<string, string[]> = {
     "Every zone has its secrets.",
   ],
   "veilborn::quest_complete": [
-    "Job done. Payment received.",
-    "Another contract closed.",
-    "Clean work.",
+    "{speaker}, \"{detail}\" — job done. Payment received.",
+    "{speaker}, contract closed. \"{detail}\" off the books.",
+    "{speaker}, \"{detail}\" — clean work. Pay up.",
   ],
   "veilborn::quest_progress": [
     "{detail}. Piece by piece.",
@@ -228,9 +235,9 @@ const DIALOGUE: Record<string, string[]> = {
     "I wonder what stories live here.",
   ],
   "dawnkeeper::quest_complete": [
-    "Another soul helped. That's what it's all about.",
-    "Quest complete! Who's next?",
-    "Happy to be of service.",
+    "{speaker}, \"{detail}\" done! Another soul helped — that's what it's all about.",
+    "{speaker}! \"{detail}\" complete! Who's next?",
+    "Happy to help, {speaker}! \"{detail}\" finished!",
   ],
   "dawnkeeper::quest_progress": [
     "We're getting there with {detail}!",
@@ -290,9 +297,9 @@ const DIALOGUE: Record<string, string[]> = {
     "Everything here dies or gets out of my way.",
   ],
   "ironvow::quest_complete": [
-    "Done. Where's the real challenge?",
-    "Errands. Give me a war.",
-    "Completed. Moving on.",
+    "{speaker}. \"{detail}\". Done. Where's the real challenge?",
+    "{speaker}, \"{detail}\" handled. Give me a war next.",
+    "{speaker}. \"{detail}\" completed. Moving on.",
   ],
   "ironvow::quest_progress": [
     "{detail}. Almost finished.",
@@ -378,30 +385,33 @@ const DIALOGUE: Record<string, string[]> = {
   ],
 
   // ── QUEST ACCEPT ────────────────────────────────────────────
+  // Templates use {speaker} for the NPC name and {detail} for the quest title
+  // so observers can see who the agent is talking to and what they're agreeing
+  // to. These are emitted BEFORE the /quests/accept call as a visible greeting.
   "sunforged::quest_accept": [
-    "I'll take this quest. Another oath to keep.",
-    "Consider it done. Point me to the fight.",
-    "I accept. The light will see it through.",
+    "Hail, {speaker}. I'll take \"{detail}\" — another oath to keep.",
+    "{speaker}, consider \"{detail}\" done. Point me to the fight.",
+    "{speaker}, I accept \"{detail}\". The light will see it through.",
   ],
   "veilborn::quest_accept": [
-    "I'll handle it. What's the pay?",
-    "Another job. Fine. Let's get it done.",
-    "Accepted. Don't waste my time with the details.",
+    "{speaker}, I'll handle \"{detail}\". What's the pay?",
+    "Another job, {speaker}. Fine — \"{detail}\" it is.",
+    "{speaker}, accepted. Don't waste my time with details on \"{detail}\".",
   ],
   "dawnkeeper::quest_accept": [
-    "I'd love to help! Where do I start?",
-    "Ooh, a new quest! This is going to be fun!",
-    "Of course I'll help! What do you need?",
+    "Hi {speaker}! I'd love to help with \"{detail}\" — where do I start?",
+    "Ooh, \"{detail}\" sounds fun, {speaker}! Count me in!",
+    "Of course I'll help, {speaker}! \"{detail}\" — on it!",
   ],
   "ironvow::quest_accept": [
-    "Give it here. I'll finish it before sundown.",
-    "Fine. Another errand. At least there's XP.",
-    "Accepted. Move.",
+    "{speaker}. \"{detail}\". Done before sundown.",
+    "Another errand, {speaker}. At least \"{detail}\" comes with XP.",
+    "{speaker}, accepted. \"{detail}\". Move.",
   ],
   "::quest_accept": [
-    "New quest accepted! Let's do this.",
-    "I'll take it. Time to get to work.",
-    "Quest accepted — on it.",
+    "Hey {speaker}, I'm taking \"{detail}\". Let's do this.",
+    "{speaker}, I'll take \"{detail}\" — on it.",
+    "Quest \"{detail}\" accepted from {speaker}. Heading out.",
   ],
 
   // ── NPC SHOPPING ───────────────────────────────────────────
@@ -694,10 +704,10 @@ const DIALOGUE: Record<string, string[]> = {
     "Alright, what have we got here?",
   ],
   "::quest_complete": [
-    "Quest done! That XP hit different.",
-    "Turned that one in. What's next?",
-    "Quest complete — rewards collected.",
-    "Another one in the books.",
+    "{speaker}, \"{detail}\" turned in. That XP hit different.",
+    "{speaker}, \"{detail}\" complete. What's next?",
+    "{speaker}, \"{detail}\" — rewards collected.",
+    "Another one in the books, {speaker}. \"{detail}\" done.",
   ],
   "::quest_progress": [
     "Making progress on {detail}.",
@@ -1047,12 +1057,12 @@ setInterval(() => {
  *   3. Fall back to pickLine() if LLM fails or is disabled
  */
 export function emitAgentChat(ctx: DialogueContext): boolean {
-  if (isOnCooldown(ctx.entityId, ctx.event)) return false;
+  if (!ctx.force && isOnCooldown(ctx.entityId, ctx.event)) return false;
 
   // Skip chat with a random chance to feel more natural (30% chance to stay silent)
   // Reactions bypass this — probability is already handled in maybeReactToChat()
   const isReaction = ctx.event.startsWith("react_");
-  if (!isReaction && ctx.event !== "level_up" && ctx.event !== "death" && Math.random() < 0.30) return false;
+  if (!ctx.force && !isReaction && ctx.event !== "level_up" && ctx.event !== "death" && Math.random() < 0.30) return false;
 
   let line = pickLine(ctx.origin, ctx.classId, ctx.event, ctx.entityId);
   if (!line) return false;

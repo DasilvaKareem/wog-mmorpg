@@ -296,6 +296,130 @@ const GLB_CANDIDATES: Record<Action, ClipCandidate[]> = {
   standup: [{ exact: "StandUp" }, { substring: "stand" }],
 };
 
+// ── Tier 1: animStyle → per-action clip variants ─────────────────────────────
+// Server tags every ability/combat event with `animStyle`: "melee" | "projectile"
+// | "area" | "channel". Each style picks a different clip from the SAME action's
+// available pool, so even without per-technique mapping the four styles look
+// distinct (forward thrust vs overhead AoE vs sustained channel).
+//
+// Quaternius rigs typically expose `Spell1` (forward stab/thrust) and `Spell2`
+// (overhead/AoE). We exploit that pairing.
+
+const STYLE_CLIP_CANDIDATES: Record<string, Partial<Record<Action, ClipCandidate[]>>> = {
+  projectile: {
+    "cast-arcane":    [{ exact: "Spell1" }, { substring: "bolt" }, { exact: "Staff_Attack" }],
+    "cast-holy":      [{ exact: "Spell1" }, { substring: "smite" }, { substring: "bolt" }],
+    "cast-dark":      [{ exact: "Spell1" }, { substring: "bolt" }, { substring: "shadow" }],
+    "attack-cast":    [{ exact: "Spell1" }, { exact: "Staff_Attack" }],
+    "attack-ranged":  [{ exact: "Bow_Shoot" }, { exact: "Shoot_OneHanded" }, { substring: "shoot" }],
+  },
+  area: {
+    "cast-arcane":    [{ exact: "Spell2" }, { exact: "Staff_Attack" }, { substring: "blast" }],
+    "cast-holy":      [{ exact: "Spell2" }, { substring: "nova" }, { substring: "burst" }],
+    "cast-dark":      [{ exact: "Spell2" }, { substring: "burst" }, { substring: "blast" }],
+    "attack-cast":    [{ exact: "Spell2" }, { exact: "Staff_Attack" }],
+    "attack-melee":   [{ exact: "Attack2" }, { exact: "SwordSlash" }, { substring: "spin" }, { substring: "cleave" }],
+    "attack-ranged":  [{ exact: "Bow_Shoot" }, { substring: "volley" }, { substring: "multi" }],
+  },
+  channel: {
+    "cast-arcane":    [{ exact: "Spell2" }, { exact: "Spell1" }, { substring: "channel" }, { substring: "summon" }],
+    "cast-holy":      [{ exact: "Spell2" }, { substring: "channel" }, { substring: "pray" }, { substring: "bless" }],
+    "cast-dark":      [{ exact: "Spell2" }, { substring: "channel" }, { substring: "drain" }, { substring: "siphon" }],
+    "attack-cast":    [{ exact: "Spell2" }, { substring: "channel" }],
+  },
+  melee: {
+    "attack-melee":   [{ exact: "SwordSlash" }, { exact: "Sword_Attack" }, { exact: "Attack" }, { exact: "Punch" }],
+    "technique-cleave":      [{ exact: "Attack2" }, { exact: "SwordSlash" }],
+    "technique-palm":        [{ exact: "Punch" }, { exact: "Attack" }],
+    "technique-flying-kick": [{ substring: "kick" }, { substring: "jump" }, { exact: "Attack" }],
+    "technique-spin":        [{ substring: "spin" }, { substring: "whirl" }, { exact: "Attack2" }],
+  },
+};
+
+// ── Tier 2: per-technique clip overrides ──────────────────────────────────────
+// Hero spells per class get a hand-picked clip. Falls back to Tier 1 (style),
+// then Tier 0 (default action map). Ranks are stripped, so `mage_fireball_r3`
+// uses the same entry as `mage_fireball`.
+//
+// NOTE: substring matches are forgiving across Quaternius variants ("Spell1",
+// "2H_Spell_Attack", "Spell_Attack_01" all hit "spell").
+
+const TECHNIQUE_CLIP_NAME: Record<string, ClipCandidate[]> = {
+  // ── Mage — alternate Spell1 (thrust) / Spell2 (overhead) for visual variety
+  mage_fireball:         [{ exact: "Spell1" }, { substring: "fire" }, { substring: "spell" }],
+  mage_arcane_missiles:  [{ exact: "Spell2" }, { exact: "Spell1" }, { substring: "spell" }],
+  mage_flamestrike:      [{ exact: "Spell2" }, { exact: "Staff_Attack" }, { substring: "blast" }],
+  mage_frost_nova:       [{ exact: "Spell2" }, { substring: "nova" }, { substring: "burst" }],
+  mage_slow:             [{ exact: "Spell1" }, { substring: "curse" }, { substring: "spell" }],
+  mage_frost_armor:      [{ exact: "Defend" }, { exact: "Spell1" }, { substring: "buff" }],
+  mage_mana_shield:      [{ exact: "Defend" }, { exact: "Spell2" }, { substring: "shield" }],
+  mage_spell_reflect:    [{ exact: "Defend" }, { exact: "Spell2" }],
+  mage_temporal_rewind:  [{ exact: "Spell2" }, { substring: "channel" }, { substring: "spell" }],
+  mage_starfall_barrage: [{ exact: "Spell2" }, { substring: "channel" }, { substring: "summon" }],
+  mage_spellburst:       [{ exact: "Spell2" }, { exact: "Spell1" }, { substring: "blast" }],
+
+  // ── Cleric — Spell1 for direct, Spell2 for area/heal
+  cleric_holy_light:          [{ exact: "Spell1" }, { substring: "heal" }, { substring: "bless" }],
+  cleric_smite:               [{ exact: "Spell1" }, { substring: "smite" }, { substring: "spell" }],
+  cleric_renew:               [{ exact: "Spell2" }, { substring: "heal" }, { substring: "bless" }],
+  cleric_holy_nova:           [{ exact: "Spell2" }, { substring: "nova" }, { substring: "burst" }],
+  cleric_divine_protection:   [{ exact: "Defend" }, { exact: "Spell1" }, { substring: "shield" }],
+  cleric_prayer_of_fortitude: [{ exact: "Spell2" }, { substring: "pray" }, { substring: "bless" }],
+  cleric_spirit_of_redemption:[{ exact: "Spell2" }, { substring: "channel" }, { substring: "spirit" }],
+
+  // ── Warlock — Spell2 emphasized for shadow
+  warlock_shadow_bolt:        [{ exact: "Spell1" }, { substring: "shadow" }, { substring: "bolt" }],
+  warlock_curse_of_weakness:  [{ exact: "Spell1" }, { substring: "curse" }],
+  warlock_drain_life:         [{ exact: "Spell2" }, { substring: "drain" }, { substring: "channel" }],
+  warlock_corruption:         [{ exact: "Spell2" }, { substring: "curse" }, { substring: "spell" }],
+  warlock_howl_of_terror:     [{ exact: "Spell2" }, { substring: "howl" }, { substring: "yell" }],
+  warlock_soul_shield:        [{ exact: "Defend" }, { exact: "Spell2" }, { substring: "shield" }],
+  warlock_siphon_soul:        [{ exact: "Spell2" }, { substring: "siphon" }, { substring: "drain" }],
+
+  // ── Ranger — bow specialization, Spell1 for nature buffs
+  ranger_aimed_shot:        [{ exact: "Bow_Shoot" }, { substring: "aim" }, { substring: "bow" }],
+  ranger_quick_shot:        [{ exact: "Bow_Shoot" }, { substring: "shoot" }],
+  ranger_multi_shot:        [{ exact: "Bow_Shoot" }, { substring: "volley" }, { substring: "multi" }],
+  ranger_volley:            [{ exact: "Bow_Shoot" }, { substring: "volley" }],
+  ranger_hunters_mark:      [{ exact: "Bow_Draw" }, { exact: "Bow_Shoot" }, { substring: "aim" }],
+  ranger_entangling_roots:  [{ exact: "Spell1" }, { substring: "roots" }, { substring: "spell" }],
+  ranger_natures_blessing:  [{ exact: "Spell2" }, { substring: "bless" }, { substring: "heal" }],
+
+  // ── Warrior — sword variants, Defend for shield, Victory for shouts
+  warrior_heroic_strike:       [{ exact: "SwordSlash" }, { exact: "Sword_Attack" }],
+  warrior_rending_strike:      [{ exact: "Sword_Attack2" }, { exact: "SwordSlash" }],
+  warrior_cleave:              [{ exact: "Attack2" }, { exact: "SwordSlash" }, { substring: "cleave" }],
+  warrior_shield_wall:         [{ exact: "Defend" }, { substring: "block" }],
+  warrior_battle_rage:         [{ exact: "Victory" }, { substring: "shout" }, { substring: "yell" }],
+  warrior_intimidating_shout:  [{ exact: "Victory" }, { substring: "shout" }, { substring: "roar" }],
+  warrior_rallying_cry:        [{ exact: "Victory" }, { substring: "cheer" }, { substring: "rally" }],
+
+  // ── Paladin — sword for melee, Spell1/Spell2 for holy
+  paladin_holy_smite:        [{ exact: "Sword_Attack" }, { exact: "SwordSlash" }],
+  paladin_consecration:      [{ exact: "Spell2" }, { substring: "nova" }, { substring: "ground" }],
+  paladin_judgment:          [{ exact: "Spell1" }, { substring: "smite" }],
+  paladin_lay_on_hands:      [{ exact: "Spell2" }, { substring: "heal" }, { substring: "bless" }],
+  paladin_divine_shield:     [{ exact: "Defend" }, { substring: "shield" }, { substring: "bless" }],
+  paladin_blessing_of_might: [{ exact: "Spell1" }, { substring: "bless" }],
+  paladin_aura_of_resolve:   [{ exact: "Spell2" }, { substring: "aura" }, { substring: "bless" }],
+
+  // ── Rogue — dagger variants
+  rogue_backstab:        [{ exact: "Dagger_Attack2" }, { exact: "Dagger_Attack" }, { substring: "backstab" }],
+  rogue_poison_blade:    [{ exact: "Dagger_Attack" }, { substring: "stab" }],
+  rogue_shadow_strike:   [{ exact: "Dagger_Attack2" }, { substring: "stab" }, { substring: "shadow" }],
+  rogue_smoke_bomb:      [{ exact: "Spell1" }, { substring: "throw" }, { exact: "Dagger_Attack" }],
+  rogue_blade_flurry:    [{ exact: "Dagger_Attack2" }, { substring: "flurry" }, { exact: "Attack2" }],
+
+  // ── Monk — punch / kick / spin specialization
+  monk_palm_strike:      [{ exact: "Punch" }, { substring: "palm" }, { exact: "Attack" }],
+  monk_disable:          [{ exact: "Punch" }, { substring: "palm" }],
+  monk_chi_burst:        [{ exact: "Spell2" }, { substring: "burst" }, { exact: "Spell1" }],
+  monk_flying_kick:      [{ substring: "kick" }, { substring: "jump" }, { exact: "Attack" }],
+  monk_whirlwind_kick:   [{ substring: "spin" }, { substring: "whirl" }, { exact: "Attack2" }],
+  monk_meditation:       [{ substring: "meditate" }, { exact: "SitDown" }, { exact: "Spell1" }],
+  monk_inner_focus:      [{ exact: "Spell1" }, { substring: "focus" }, { substring: "bless" }],
+};
+
 // Cross-action fallback: if a GLB has no clip for the primary action, try these
 // in order before giving up. Each action should degrade gracefully.
 const ACTION_FALLBACKS: Partial<Record<Action, Action[]>> = {
@@ -494,6 +618,66 @@ export function getProceduralClip(action: Action): THREE.AnimationClip | null {
       try { return AnimationLibrary.get(name); } catch { /* continue */ }
     }
   }
+  return null;
+}
+
+/**
+ * Resolve a per-technique or per-animStyle clip variant from raw GLB clips.
+ *
+ * Returns null if neither tier produces a different clip than the default
+ * action map would (caller should then use the default `getClipFromMap`).
+ *
+ * Tier 2 (techniqueId) takes priority over Tier 1 (animStyle). Both walk
+ * `ClipCandidate` lists exactly like `buildGlbActionMap`.
+ *
+ *   resolveTechniqueClip(glbClips, "cast-arcane", "mage_fireball", "projectile")
+ *     → first matching clip from TECHNIQUE_CLIP_NAME["mage_fireball"]
+ *
+ *   resolveTechniqueClip(glbClips, "cast-arcane", "mage_unknown", "area")
+ *     → first matching clip from STYLE_CLIP_CANDIDATES["area"]["cast-arcane"]
+ */
+export function resolveTechniqueClip(
+  glbClips: Map<string, THREE.AnimationClip>,
+  action: Action,
+  techniqueId?: string,
+  animStyle?: string,
+): THREE.AnimationClip | null {
+  const findByCandidates = (candidates: ClipCandidate[]): THREE.AnimationClip | null => {
+    for (const cand of candidates) {
+      if (cand.exact) {
+        const c = glbClips.get(cand.exact);
+        if (c) return c;
+      }
+      if (cand.substring) {
+        const needle = cand.substring.toLowerCase();
+        for (const [name, clip] of glbClips) {
+          if (name.toLowerCase().includes(needle)) return clip;
+        }
+      }
+    }
+    return null;
+  };
+
+  // Tier 2: per-technique override
+  if (techniqueId) {
+    const stripped = stripRank(techniqueId);
+    const techCandidates = TECHNIQUE_CLIP_NAME[stripped];
+    if (techCandidates) {
+      const clip = findByCandidates(techCandidates);
+      if (clip) return clip;
+    }
+  }
+
+  // Tier 1: animStyle variant for this action
+  if (animStyle) {
+    const styleMap = STYLE_CLIP_CANDIDATES[animStyle];
+    const styleCandidates = styleMap?.[action];
+    if (styleCandidates) {
+      const clip = findByCandidates(styleCandidates);
+      if (clip) return clip;
+    }
+  }
+
   return null;
 }
 

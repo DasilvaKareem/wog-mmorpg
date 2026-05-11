@@ -3887,6 +3887,59 @@ export function registerQuestRoutes(server: FastifyInstance) {
     };
   });
 
+  // POST /quests/abandon - Abandon an active quest
+  server.post<{
+    Body: { zoneId?: string; playerId?: string; entityId?: string; questId: string };
+  }>("/quests/abandon", {
+    preHandler: authenticateRequest,
+  }, async (request, reply) => {
+    const playerId = request.body.entityId || request.body.playerId;
+    const { questId } = request.body;
+    if (!playerId) {
+      reply.code(400);
+      return { error: "entityId (or playerId) is required" };
+    }
+    const player = getEntity(playerId);
+
+    if (!player || player.type !== "player") {
+      reply.code(404);
+      return { error: "Player not found" };
+    }
+
+    const authenticatedWallet = (request as any).walletAddress as string;
+    if (!(await playerWalletMatches(authenticatedWallet, player))) {
+      reply.code(403);
+      return { error: "Not authorized to abandon quests for this player" };
+    }
+
+    if (!player.activeQuests) player.activeQuests = [];
+    const activeIndex = player.activeQuests.findIndex((aq) => aq.questId === questId);
+    if (activeIndex === -1) {
+      reply.code(400);
+      return { error: "Quest not active" };
+    }
+
+    const quest = QUEST_CATALOG.find((q) => q.id === questId);
+    player.activeQuests.splice(activeIndex, 1);
+
+    console.log(`[quest] ${player.name} abandoned quest "${quest?.title ?? questId}"`);
+
+    const zoneId = request.body.zoneId ?? player.region ?? "unknown";
+    logZoneEvent({
+      zoneId, type: "quest", tick: 0,
+      message: `${player.name}: Abandoned quest "${quest?.title ?? questId}"`,
+      entityId: playerId, entityName: player.name,
+    });
+
+    if (player.walletAddress && player.name) {
+      saveCharacter(player.walletAddress, player.name, {
+        storyFlags: player.storyFlags ?? [],
+      }).catch((err) => console.error(`[persistence] Save failed after quest abandon for ${player.name}:`, err));
+    }
+
+    return { abandoned: true, questId };
+  });
+
   // GET /quests/active/:playerId - Get player's active quests
   // Also accepts entityId as alias for playerId
   const questsActiveHandler = async (request: any, reply: any) => {
