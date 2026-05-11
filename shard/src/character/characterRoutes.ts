@@ -36,6 +36,7 @@ import { getAgentCustodialWallet, getAgentEntityRef } from "../agents/agentConfi
 import { enqueueCharacterBootstrap, loadCharacterBootstrapJob, processCharacterBootstrapJob } from "./characterBootstrap.js";
 import {
   getCharacterProjectionByNormalizedNameGlobal,
+  listCharacterProjectionsForTokenIds,
   listCharacterProjectionsForWallets,
   normalizeStoredCharacterName,
   type CharacterProjectionRecord,
@@ -317,11 +318,23 @@ async function buildProjectedCharacterEntries(
   liveEntity?: LiveCharacterEntity | null,
 ): Promise<CharacterListEntry[]> {
   const wallets = [ownerWallet, custodialWallet].filter((wallet): wallet is string => Boolean(wallet));
-  const [projectedCharacters, ownerSavedCharacters, custodialSavedCharacters] = await Promise.all([
+  const [initialProjectedCharacters, ownerSavedCharacters, custodialSavedCharacters] = await Promise.all([
     listCharacterProjectionsForWallets(wallets).catch(() => []),
     loadAllCharactersForWallet(ownerWallet).catch(() => []),
     custodialWallet ? loadAllCharactersForWallet(custodialWallet).catch(() => []) : Promise.resolve([]),
   ]);
+
+  const relatedTokenIds = Array.from(
+    new Set(
+      initialProjectedCharacters
+        .map((projection) => projection.characterTokenId?.trim() ?? "")
+        .filter((tokenId) => /^\d+$/.test(tokenId))
+    )
+  );
+  const siblingProjectedCharacters = relatedTokenIds.length > 0
+    ? await listCharacterProjectionsForTokenIds(relatedTokenIds).catch(() => [])
+    : [];
+  const projectedCharacters = dedupeProjectionRows([...initialProjectedCharacters, ...siblingProjectedCharacters]);
 
   const savedByKey = new Map<string, { walletAddress: string; saved: CharacterSaveData }>();
   const rememberSaved = (walletAddress: string, saved: CharacterSaveData) => {
@@ -375,6 +388,18 @@ async function buildProjectedCharacterEntries(
   );
 
   return dedupeCharacterEntries([...projectedEntries, ...savedOnlyEntries]);
+}
+
+function dedupeProjectionRows(projections: CharacterProjectionRecord[]): CharacterProjectionRecord[] {
+  const seen = new Map<string, CharacterProjectionRecord>();
+  for (const projection of projections) {
+    const tokenId = projection.characterTokenId?.trim() ?? "";
+    const key = `${projection.walletAddress.toLowerCase()}::${normalizeCharacterKey(projection.characterName, projection.classId)}::${tokenId}`;
+    if (!seen.has(key)) {
+      seen.set(key, projection);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 async function resolveSavedCharacter(
